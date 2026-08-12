@@ -1,0 +1,1 @@
+ALTER TABLE etl_task ADD COLUMN IF NOT EXISTS download_blobs JSONB NOT NULL DEFAULT '[]'::jsonb;

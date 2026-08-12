@@ -1,0 +1,155 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  Alert, Box, Button, Chip, Divider, Drawer, FormControl, IconButton, InputLabel,
+  MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer,
+  TableHead, TableRow, TextField, Typography,
+} from "@mui/material";
+import { Add, Close, Delete, Download, PlayArrow, Save, Visibility } from "@mui/icons-material";
+import {
+  DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView,
+  deletePivotView, drillDownPivot, getPivotMetadata, getPivotViews, runPivot, savePivotView,
+  LakehouseSearchResult, searchPivotTable,
+} from "../services/api";
+
+interface Props { destinations: DestinationAnalysis[]; initialTableId?: number; showSearch?: boolean }
+
+const money = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const key = (values: unknown[]) => JSON.stringify(values);
+const formatKey = (values: unknown[]) => values.map(v => v == null || v === "" ? "(vazio)" : String(v)).join(" › ");
+
+function downloadCsv(result: PivotResult) {
+  const headers = [...result.rows, ...result.columns, ...result.measures.map(m => m.label || `${m.aggregation} ${m.column}`)];
+  const lines = [headers, ...result.cells.map(cell => [...cell.row, ...cell.column, ...cell.values])]
+    .map(row => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","));
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob); const link = document.createElement("a");
+  link.href = url; link.download = `pivot_${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
+}
+
+export default function PivotAnalysis({ destinations, initialTableId, showSearch = false }: Props) {
+  const first = initialTableId || destinations[0]?.id || 0;
+  const [tableId, setTableId] = useState(first);
+  const [meta, setMeta] = useState<PivotMetadata | null>(null);
+  const [rows, setRows] = useState<string[]>(["departamento", "projeto_nome", "cloud_origem"]);
+  const [cols, setCols] = useState<string[]>(["_billing_period"]);
+  const [measures, setMeasures] = useState<PivotMeasure[]>([{ column: "EffectiveCost", aggregation: "SUM" }]);
+  const [filters, setFilters] = useState<PivotFilter[]>([]);
+  const [field, setField] = useState("");
+  const [result, setResult] = useState<PivotResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [views, setViews] = useState<PivotView[]>([]);
+  const [viewName, setViewName] = useState("");
+  const [drill, setDrill] = useState<{ columns: string[]; rows: Record<string, unknown>[]; total: number } | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResult, setSearchResult] = useState<LakehouseSearchResult | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  const request = useMemo<PivotRequest>(() => ({ destination_table_id: tableId, rows, columns: cols, measures, filters, row_limit: 500, column_limit: 60, include_totals: true }), [tableId, rows, cols, measures, filters]);
+
+  useEffect(() => {
+    if (!tableId) return;
+    setMeta(null); setResult(null); setError("");
+    getPivotMetadata(tableId).then(next => {
+      setMeta(next);
+      const dimensions = new Set(next.dimensions);
+      setRows(current => { const valid = current.filter(item => dimensions.has(item)); return valid.length ? valid : next.recommended_dimensions.filter(item => item !== "_billing_period").slice(0, 3); });
+      setCols(current => { const valid = current.filter(item => dimensions.has(item)); return valid.length ? valid : (dimensions.has("_billing_period") ? ["_billing_period"] : []); });
+      setMeasures(current => current.filter(item => next.measures.includes(item.column)).length ? current.filter(item => next.measures.includes(item.column)) : (next.default_measure ? [{ column: next.default_measure, aggregation: "SUM" }] : []));
+    }).catch(e => setError(e.message || "Não foi possível ler o schema Gold pelo Trino"));
+    getPivotViews(tableId).then(setViews).catch(() => setViews([]));
+  }, [tableId]);
+
+  const execute = async () => {
+    if (!tableId || !measures.length) return;
+    setLoading(true); setError("");
+    try { setResult(await runPivot(request)); }
+    catch (e: unknown) { setError(e instanceof Error ? e.message : "Falha ao consultar o Trino"); }
+    finally { setLoading(false); }
+  };
+  const executeSearch = async () => {
+    if (!tableId || !searchTerm.trim()) return;
+    setSearchLoading(true); setError("");
+    try { setSearchResult(await searchPivotTable(tableId, searchTerm, 100, 0, filters)); }
+    catch (e: unknown) { setError(e instanceof Error ? e.message : "Falha ao pesquisar no Trino"); }
+    finally { setSearchLoading(false); }
+  };
+
+  const addField = (target: "rows" | "cols" | "filters") => {
+    if (!field) return;
+    if (target === "rows" && !rows.includes(field) && !cols.includes(field)) setRows([...rows, field]);
+    if (target === "cols" && !rows.includes(field) && !cols.includes(field)) setCols([...cols, field]);
+    if (target === "filters" && !filters.some(f => f.column === field)) setFilters([...filters, { column: field, values: [], operator: "IN" }]);
+  };
+  const removeField = (target: "rows" | "cols" | "filters", name: string) => {
+    if (target === "rows") setRows(rows.filter(item => item !== name));
+    if (target === "cols") setCols(cols.filter(item => item !== name));
+    if (target === "filters") setFilters(filters.filter(item => item.column !== name));
+  };
+  const saveView = async () => {
+    if (!viewName.trim()) return;
+    try { await savePivotView(viewName.trim(), request); setViews(await getPivotViews(tableId)); setViewName(""); }
+    catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível salvar a visão"); }
+  };
+  const loadView = (view: PivotView) => { setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); };
+  const openDrill = async (rowKey: unknown[], colKey: unknown[]) => {
+    const cellFilters: Record<string, unknown> = {};
+    result?.rows.forEach((name, index) => { cellFilters[name] = rowKey[index] as string; });
+    result?.columns.forEach((name, index) => { cellFilters[name] = colKey[index] as string; });
+    setDrillLoading(true);
+    try { const data = await drillDownPivot({ ...request, cell_filters: cellFilters, limit: 100, offset: 0 }); setDrill(data); }
+    catch (e: unknown) { setError(e instanceof Error ? e.message : "Falha no drill-down"); }
+    finally { setDrillLoading(false); }
+  };
+
+  const rowKeys = result?.row_keys || [];
+  const colKeys = result?.column_keys || [[]];
+  const cells = useMemo(() => new Map((result?.cells || []).map(cell => [`${key(cell.row)}|${key(cell.column)}`, cell.values])), [result]);
+  const totalFor = (axis: "rows" | "columns", values: unknown[]) => result?.totals?.[axis][key(values)] || [];
+  const fieldOptions = meta?.columns || [];
+
+  return <Box>
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    <Paper sx={{ p: 2, mb: 2 }}>
+      <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
+        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId} label="Tabela Gold" onChange={e => setTableId(Number(e.target.value))}>{destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 220 }}><InputLabel>Campo disponível</InputLabel><Select value={field} label="Campo disponível" onChange={e => setField(e.target.value)}>{fieldOptions.map(c => <MenuItem key={c.name} value={c.name}>{c.name} · {c.type}</MenuItem>)}</Select></FormControl>
+        <Button startIcon={<Add />} onClick={() => addField("rows")} disabled={!field}>Linhas</Button>
+        <Button startIcon={<Add />} onClick={() => addField("cols")} disabled={!field}>Colunas</Button>
+        <Button startIcon={<Add />} onClick={() => addField("filters")} disabled={!field}>Filtro</Button>
+        <Box flexGrow={1} />
+        <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando Trino..." : "Atualizar pivot"}</Button>
+        <Button variant="outlined" startIcon={<Download />} disabled={!result} onClick={() => result && downloadCsv(result)}>CSV</Button>
+      </Stack>
+      {showSearch && <Stack direction="row" gap={1} alignItems="center" sx={{ mt: 1.5 }}>
+        <TextField size="small" fullWidth label="Buscar texto em todas as colunas" placeholder="Ex.: marketplace" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === "Enter") executeSearch(); }} />
+        <Button variant="outlined" startIcon={<Visibility />} onClick={executeSearch} disabled={searchLoading || !searchTerm.trim()}>{searchLoading ? "Buscando..." : "Buscar"}</Button>
+      </Stack>}
+      <Divider sx={{ my: 1.5 }} />
+      <Stack direction="row" gap={1.5} flexWrap="wrap">
+        {(["rows", "cols", "filters"] as const).map(area => <Paper key={area} variant="outlined" sx={{ p: 1, minWidth: 210, flex: 1 }}><Typography variant="caption" fontWeight={700}>{area === "rows" ? "LINHAS" : area === "cols" ? "COLUNAS" : "FILTROS"}</Typography><Stack direction="row" gap={.5} flexWrap="wrap" mt={.5}>{(area === "rows" ? rows : area === "cols" ? cols : filters.map(f => f.column)).map(name => <Chip key={name} label={name} onDelete={() => removeField(area, name)} size="small" />)} {!((area === "rows" ? rows : area === "cols" ? cols : filters).length) && <Typography variant="caption" color="text.secondary">Nenhum campo</Typography>}</Stack></Paper>)}
+        <Paper variant="outlined" sx={{ p: 1, minWidth: 260, flex: 1 }}><Typography variant="caption" fontWeight={700}>VALORES</Typography>{measures.map((m, index) => <Stack key={index} direction="row" gap={.5} mt={.5}><Select size="small" value={m.column} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, column: e.target.value } : x))} sx={{ flex: 1 }}>{meta?.measures.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select><Select size="small" value={m.aggregation} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, aggregation: e.target.value as PivotMeasure["aggregation"] } : x))}>{["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"].map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}</Select><IconButton size="small" onClick={() => setMeasures(measures.filter((_, i) => i !== index))}><Delete fontSize="small" /></IconButton></Stack>)}<Button size="small" startIcon={<Add />} onClick={() => meta?.default_measure && setMeasures([...measures, { column: meta.default_measure, aggregation: "SUM" }])}>Adicionar medida</Button></Paper>
+      </Stack>
+      {filters.map(filter => <Stack key={filter.column} direction="row" gap={1} alignItems="center" sx={{ mt: 1, mr: 1, flexWrap: "wrap" }}>
+        <FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Condição</InputLabel><Select label="Condição" value={filter.operator || "IN"} onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, operator: e.target.value as PivotFilter["operator"] } : f))}><MenuItem value="IN">É igual a</MenuItem><MenuItem value="NOT_IN">Não é</MenuItem><MenuItem value="CONTAINS">Contém</MenuItem><MenuItem value="NOT_CONTAINS">Não contém</MenuItem></Select></FormControl>
+        <TextField
+          size="small"
+          label={`Valor do filtro: ${filter.column}`}
+          placeholder={filter.column.toLowerCase() === "cloud_origem" ? "azure-4p" : "Digite o valor"}
+          helperText="Use valores separados por vírgula para selecionar mais de um"
+          sx={{ minWidth: 330 }}
+          value={filter.values.join(", ")}
+          onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, values: e.target.value.split(",").map(v => v.trim()).filter(Boolean) } : f))}
+        />
+        {filter.column.toLowerCase() === "cloud_origem" && ["azure-4p", "azure-ti", "gcp-4p", "gcp-ti"].map(value => <Chip key={value} label={value} size="small" variant={filter.values.includes(value) ? "filled" : "outlined"} color={filter.values.includes(value) ? "primary" : "default"} onClick={() => setFilters(filters.map(f => f.column === filter.column ? { ...f, values: f.values.includes(value) ? f.values.filter(v => v !== value) : [...f.values, value] } : f))} />)}
+      </Stack>)}
+      <Stack direction="row" gap={1} mt={2}><TextField size="small" label="Salvar visão compartilhada" value={viewName} onChange={e => setViewName(e.target.value)} /><Button startIcon={<Save />} onClick={saveView}>Salvar</Button>{views.map(view => <Chip key={view.id} label={view.name} onClick={() => loadView(view)} onDelete={() => deletePivotView(view.id).then(() => getPivotViews(tableId).then(setViews))} />)}</Stack>
+    </Paper>
+    {result?.currency_added && <Alert severity="info" sx={{ mb: 2 }}>Currency foi adicionada às linhas para impedir a soma de moedas diferentes.</Alert>}
+    {drillLoading && <Alert severity="info" sx={{ mb: 2 }}>Carregando drill-down...</Alert>}
+    {result && <TableContainer component={Paper} sx={{ maxHeight: "60vh" }}><Table stickyHeader size="small"><TableHead><TableRow>{result.rows.map(name => <TableCell key={name}>{name}</TableCell>)}{colKeys.flatMap(col => result.measures.map(m => <TableCell key={`${key(col)}-${m.column}`}>{formatKey(col)}<br /><small>{m.label || `${m.aggregation} ${m.column}`}</small></TableCell>))}<TableCell>Total</TableCell></TableRow></TableHead><TableBody>{rowKeys.map(row => <TableRow key={key(row)}>{row.map((value, i) => <TableCell key={i}>{String(value ?? "(vazio)")}</TableCell>)}{colKeys.flatMap(col => (cells.get(`${key(row)}|${key(col)}`) || result.measures.map(() => null)).map((value, i) => <TableCell key={`${key(col)}-${i}`} onClick={() => openDrill(row, col)} sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{totalFor("rows", row).map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>)}{result.totals && <TableRow sx={{ bgcolor: "action.hover" }}>{result.rows.map((_, i) => <TableCell key={i}>{i === 0 ? "TOTAL" : ""}</TableCell>)}{colKeys.flatMap(col => totalFor("columns", col).map((value, i) => <TableCell key={`${key(col)}-${i}`}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{result.totals.grand.map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>}</TableBody></Table></TableContainer>}
+    {showSearch && searchResult && <Paper sx={{ mt: 2, p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="subtitle1">Resultados para “{searchTerm}”</Typography><Chip label={`${searchResult.total.toLocaleString("pt-BR")}${searchResult.total_is_estimate ? " exibidos (limite da busca)" : " registros encontrados"}`} size="small" /></Stack><Typography variant="caption" color="text.secondary">Pesquisa realizada em {searchResult.searched_columns?.length || 0} colunas textuais. As colunas encontradas aparecem destacadas.</Typography><TableContainer sx={{ maxHeight: "55vh", mt: 1 }}><Table stickyHeader size="small"><TableHead><TableRow>{searchResult.columns.map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead><TableBody>{searchResult.rows.map((row, index) => <TableRow key={index}>{searchResult.columns.map(column => <TableCell key={column} sx={searchResult.matched_columns[index]?.includes(column) ? { bgcolor: "#fff3cd", fontWeight: 700 } : undefined}>{String(row[column] ?? "")}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer></Paper>}
+    <Drawer anchor="right" open={!!drill} onClose={() => setDrill(null)} PaperProps={{ sx: { width: "65vw", p: 2 } }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="h6">Drill-down ({drill?.total || 0} registros)</Typography><IconButton onClick={() => setDrill(null)}><Close /></IconButton></Stack>{drill && <TableContainer><Table size="small"><TableHead><TableRow>{drill.columns.map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead><TableBody>{drill.rows.map((row, index) => <TableRow key={index}>{drill.columns.map(column => <TableCell key={column}>{String(row[column] ?? "")}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer>}</Drawer>
+  </Box>;
+}

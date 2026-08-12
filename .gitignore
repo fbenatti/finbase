@@ -1,0 +1,30 @@
+# Secrets and local environment files
+.env
+.env-*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Frontend dependencies and builds
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Local databases, Iceberg warehouse and runtime logs
+catalog.db
+data/
+worker.log
+*.log
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,119 @@
+PartitionKey;RowKey;Classificacao;Cloud;Condicoes;Ordem;Projeto
+1;0a380f3e-8f0a-4851-a4ef-14d60bb7ee7b;Azure Defender;Azure-TI;"meterCategory=azuredefender|microsoftdefenderforcloud ; subscriptionName=CORE 4P - LOCAL - 4ª PLATAFORMA - MICRO PROJETOS - PRO|EXTERNOS - BD - GIS - DEV/PRO|Microsoft Azure 01 - EA - Conectividade";10;Azure Defender
+1;a6ddfb31-11a6-4da6-ba6e-8489a9142d50;Azure Defender;Azure-4P;meterCategory=azuredefender|microsoftdefenderforcloud;10;Azure Defender
+1;resourceGroupName~trendmicro;;Azure-TI;resourceGroupName~trendmicro;10;Segurança
+110;c3fdaa97-e46e-4b3a-b27a-0a14eaf88366;;Azure-TI;subscriptionName=Sandbox-Arquitetura;110;Sandbox Arquitetura
+120;7364c007-e3a5-479b-891a-f840011bbc2a;;Azure-TI;subscriptionName=Sandbox-B2C-Beatrix;120;Sandbox-B2C-Beatrix
+130;a339422d-214b-46e3-a16b-e75538a50536;;Azure-TI;subscriptionName=Sandbox-Financas;130;Sandbox Financas
+140;142695c8-2aeb-4959-9ded-247160189071;;Azure-TI;subscriptionName=Sandbox-Infra;140;Sandbox Infra
+150;3a965b34-ee97-43b1-86a1-ad4ad14e2a31;;Azure-TI;subscriptionName=Sandbox-Integracao;150;sandbox integracao
+160;3bdd507e-ff36-4475-a737-1e1f68a33490;;Azure-TI;subscriptionName=Sandbox-OCS-BSS-Pre;160;Sandbox OCS BSS Pre
+170;8ece099e-e4f4-40bf-98c9-d81a38395643;;Azure-TI;subscriptionName=Sandbox-OSS;170;Sandbox OSS
+180;2d6ad035-a9fb-42ac-a236-240ea8fe751c;;Azure-TI;subscriptionName=Sandbox-Shared Services;180;Sandbox-Shared Services
+190;18b45c67-0f51-4c0a-84d4-dfa1e8035f8f;;Azure-TI;subscriptionName=Sandbox-Transformacao;190;Sandbox Transformacao
+2;0042f7f9-e25c-4969-9318-17c9d6e06feb;Segurança;Azure-4P;meterCategory=securitycenter|advancedthreatprotection;20;Segurança
+2;f5ade7a9-65af-437c-ac1c-b1c6e66dae20;Segurança;Azure-TI;meterCategory=securitycenter|advancedthreatprotection;20;Segurança
+200;08c60b19-4a34-4458-a105-19ba6ea0e533;;Azure-TI;subscriptionName=Sandbox-Vivo_na_Cloud;200;Sandbox-Vivo_na_Cloud
+230;30423623-18b5-4c3b-a901-e8f7663e7434;;Azure-TI;subscriptionName=AKS Sample App;230;AKS Sample App
+240;540d8005-4d6a-41d4-990f-770440d2a1ba;;Azure-TI;subscriptionName=DataLake-Intel-Security;240;Datalake
+250;1d6c703e-b654-4b6d-860a-58ae207ff9f0;;Azure-TI;subscriptionName=Hub-Integration;250;Hub-Integration
+260;9daebf82-a0fb-4a4f-93cb-0db42cbbaab7;;Azure-TI;subscriptionName~poc;260;POC
+270;f7aa2a8a-c13e-4d77-a654-3fb5f2c0e4e7;;Azure-TI;subscriptionName=Subscrição Azure - SCCM;270;Azure SCCM
+280;0008e5b1-629e-4f94-90c1-4bc2d221dcb9;;Azure-TI;subscriptionName=Terra-Connectivity;280;Terra Brasil
+290;cce0d783-11a9-4abb-a27a-5ef720316d56;;Azure-TI;subscriptionName=Security-Team;290;Security-Team
+3;0d4a0083-0105-455e-b267-5c7b6783cf62;Azure DevOps;Azure-TI;meterCategory=azuredevops;30;DevOps
+3;eb9df5aa-59f0-466d-a797-6c7b1cb8ae0c;Azure DevOps;Azure-4P;meterCategory=azuredevops;30;DevOps
+300;9491ec4f-8a53-4c45-a2b8-9d93560ef181;;Azure-TI;meterCategory=azuredevops;300;DevOps
+310;31b45de9-a7e7-4a39-8087-f8754ecc7238;;Azure-TI;meterSubCategory=MongoDB Products & Services on Azure - Only for Private Offers|MongoDB Atlas (pay-as-you-go);310;MongoDB
+320;78849cd2-ffd5-4532-ab2c-d6b82c293805;;Azure-TI;meterCategory=GitHub;320;GitHub
+320;9e16d649-a563-429b-945b-67ca57754d70;;Azure-TI;subscriptionName=Terra-Mexico-Shared-Services;320;Terra Mexico
+330;b6d8d7b5-cba1-496e-98b0-4e50a7f10d7c;;Azure-TI;subscriptionName=Terra-Shared Services;330;Terra Brasil
+4;c47726d0-7ae9-4cac-9132-28cf415a7378;Aura MongoDB;Azure-TI;resourceGroupName=sas_mongodb;40;Aura MongoDB
+4;d9968460-a998-413b-802a-9264da4af18b;Aura MongoDB;Azure-4P;resourceGroupName=sas_mongodb;40;Aura MongoDB
+5;6c0f566a-0964-457e-8ab1-05a9ee9337fc;Vivo +;Azure-TI;"subscriptionName~Aura Brain ; meterName~gpt-4|provisioned managed regional unit";50;Vivo Mais
+5;eb8cefee-aa0f-4fac-b085-61436d296224;Vivo +;Azure-4P;"subscriptionName~Aura Brain ; meterName~gpt-4|provisioned managed regional unit";50;Vivo Mais
+6;1663a969-9a08-4746-ac11-d8237df2a9c4;HaC;Azure-4P;"subscriptionName=Microsoft Azure 01 - EA - 4th Platform - PRO|Microsoft Azure 05 - EA - 4th Platform PRE ; meterSubCategory=virtual machines dv3 series|Virtual Machines Ddsv5 Series|dv3/dsv3 series|Blob Storage";60;HaC
+6;7942bc37-135e-490a-bbe3-33d200cfdc62;HaC;Azure-TI;"subscriptionName=Microsoft Azure 01 - EA - 4th Platform - PRO|Microsoft Azure 05 - EA - 4th Platform PRE ; meterSubCategory=virtual machines dv3 series|Virtual Machines Ddsv5 Series|dv3/dsv3 series|Blob Storage";60;HaC
+7;92b87bf2-efe5-4181-8ab7-6383eae9aa93;HaC;Azure-4P;"subscriptionName=Microsoft Azure 01 - EA - 4th Platform - PRO|Microsoft Azure 05 - EA - 4th Platform PRE ; resourceGroupName=baikal-br-pro-state-rg|baikal-br-pre-state-rg ; meterCategory=storage";70;HaC
+7;d73735cf-e063-4bc0-baeb-6891037a6213;HaC;Azure-TI;"subscriptionName=Microsoft Azure 01 - EA - 4th Platform - PRO|Microsoft Azure 05 - EA - 4th Platform PRE ; resourceGroupName=baikal-br-pro-state-rg|baikal-br-pre-state-rg ; meterCategory=storage";70;HaC
+8;33412486-0563-4a8f-ba4b-3825b4c44f05;Azure;Azure-4P;"TotalCostOnDemandBRL=98.38 ; subscriptionName=microsoft azure 01 - ea - conectividade";80;Azure
+8;562ba624-1235-4bf6-9fa9-5fde3c70587d;Azure;Azure-TI;"TotalCostOnDemandBRL=98.38 ; subscriptionName=microsoft azure 01 - ea - conectividade";80;Azure
+Azure;Microsoft Defender for Cloud;;Azure-TI;"meterCategory=Microsoft Defender for Cloud ; subscriptionName=CORE 4P - LOCAL - 4ª PLATAFORMA - MICRO PROJETOS - PRO|EXTERNOS - BD - GIS - DEV/PRO|Microsoft Azure 01 - EA - Conectividade";10;Azure Defender
+Azure;ResourceIdSUB;;Azure-TI;ResourceId~azurefirewall_vhub-tcn-mx-eastus2;10;Terra Mexico
+Azure;resourceGroupName~vvia;;Azure-TI;resourceGroupName~vvia;350;Vivo IA
+Azure-4P;"chargeType=Purchase ; reservationName~VM_RI";;Azure-4P;"chargeType=Purchase|Refund ; reservationName~VM_RI|VM_RI_DS1v2";15;Compra RIs
+Azure-TI;;;Azure-TI;subscriptionName=sandbox-b2c-beatrix;80;Sandbox B2C Beatrix
+Azure-TI;Terra Brasil;;Azure-TI;subscriptionName~terra-brasil;30;Terra Brasil
+Azure-TI;d2e6780d-84ad-405f-ab0d-851eb23ea4d6;;Azure-TI;"chargeType=Purchase ; reservationName~VM_RI|VM_RI_DS1v2";15;Compra RIs
+Azure-TI;resourceGroupName~pdv;;Azure-TI;resourceGroupName~pdv;350;PDV
+Azure-TI;resourceGroupName~rsps;;Azure-TI;resourceGroupName~rsps;350;Resource Portability System
+Azure-TI;resourceGroupName~srrt;;Azure-TI;resourceGroupName~srrt;350;Service and Resource - TELCO
+Azure-TI;resourceGroupName~tpaz;;Azure-TI;resourceGroupName~tpaz;350;Platcode
+Azure-TI;subscriptionName=ClodOps;;Azure-TI;subscriptionName=ClodOps;220;ClodOps
+Azure-TI;subscriptionName=Fundação Telefonica;;Azure-TI;subscriptionName=Fundação Telefonica;90;fundacao telefonica
+Azure-TI;subscriptionName=connectivity;;Azure-TI;subscriptionName=connectivity;90;Condominio
+Azure-TI;subscriptionName~Fintech;;Azure-TI;subscriptionName~Fintech;210;Fintech
+Azure-TI;subscriptionName~Teradata;;Azure-TI;subscriptionName~Teradata;60;Teradata
+Azure-TI;subscriptionName~mdivo-brasil-prd;;Azure-TI;subscriptionName~mdivo-brasil-prd;40;Terra Brasil
+Azure-TI;subscriptionName~terra-mexico;;Azure-TI;subscriptionName~terra-mexico;20;Terra Mexico
+Azure-TI;subscriptionName~terra-parceiros;;Azure-TI;subscriptionName~terra-parceiros;10;Terra Parceiros
+Azure-TIresourceGroupName~SRUS;;;Azure-TI;resourceGroupName~SRUS;300;Sirius/NFCOM
+B2C-Brasil;subscriptionName=B2C-Brasil;;Azure-TI;subscriptionName=B2C-Brasil;70;B2C Brasil
+atlasmongodb;28f65883-596e-4a73-99ca-8d42b0b52f6d;;Atlas-MongoDB;resourceGroupName~invoice|invoicing;10;MongoDB - Invoice
+atlasmongodb;5950c264-9403-4530-94c9-77460230b529;;Atlas-MongoDB;resourceGroupName~atma;10;MongoDB - ATMA
+atlasmongodb;8ab564d3-3542-47b2-8d2e-1e57f6777e79;;Atlas-MongoDB;resourceGroupName~opgw;10;MongoDB - Open Gateway
+atlasmongodb;b0a9bdc0-1026-44a0-9afd-f67db439f5e6;;Atlas-MongoDB;resourceGroupName=4p-br-est70|4p-br-pre70|AURA_MongoDB_Atlas-Preprod|proj-aura-aks-brsouth-dev;10;MongoDB - Aura Canais
+atlasmongodb;b6075116-141b-4a4e-a778-a9c58782eab6;;Atlas-MongoDB;resourceGroupName~One;10;MongoDB - OneAura
+atlasmongodb;bedcef13-6923-4c5d-9fc1-cc3bb5328263;;Atlas-MongoDB;resourceGroupName~aura-project;100;MongoDB - Aura Meu Vivo
+atlasmongodb;d20b9a12-e250-4b83-82d2-fc16076fc729;;Atlas-MongoDB;resourceGroupName~brain;10;MongoDB - Aura Brain
+atlasmongodb;d9a1a052-e428-41ab-9ee0-60a34f18e53a;;Atlas-MongoDB;resourceGroupName~push;10;MongoDB - Push
+azure4p;0315ac2c-7e88-438b-b437-06922a3fd745;;Azure-TI;resourceGroupName=rg-vvtg-brsouth-prod|rg-vvtg-brsouth-test|rg-vvtg-brsouth-dev;10;Vivo triagem
+azure4p;183f1839-ec1c-4374-9778-6fea523b8274;;Azure-4P;resourceGroupName~ai_pro-seg|trendmicro;100;Segurança
+azure4p;2d29eaab-4a50-455b-8980-ef01614688b3;;Azure-TI;resourceGroupName=ai_pro-aura-dover-move-files-function_78247fbc-2e06-4b9b-bf6b-d5b6e1af1627_managed|ai_pro-aura-move-files-env-br-pro-function_22a3bd92-cab4-42be-9d56-50345b558b83_managed;10;Aura Canais
+azure4p;51154248-f0d4-469e-b935-b7d9f40d0ad8;;Azure-4P;"chargeType=Purchase ; reservationName=OpenAIPTU_12-02-2024_11-03";20;Vivo Mais
+azure4p;5e43d932-2de0-4620-bae1-09383bd4f3a8;;Azure-4P;"pricingModel=SavingsPlan ; chargeType=Purchase|Refund";10;Compra SavingPlan
+azure4p;6adcd2ab-6bf8-4a25-97fe-fd6fb9208410;;Azure-4P;"pricingModel=SavingsPlan ; chargeType=Return";10;Compra SavingPlan - Retorno
+azureti;0d043dfd-be40-450e-ad6a-c2e781bbcc1c;;Azure-TI;resourceGroupName~SB2C;10;Datamesh - SB2C: VENDAS B2C
+azureti;0d12ec88-eb6f-4654-93f9-8546b315bc1a;;Azure-TI;"pricingModel=SavingsPlan ; chargeType=Purchase";10;Compra SavingPlan
+azureti;1ebba08a-c6a1-4769-940f-296eab5cdf85;;Azure-TI;resourceGroupName~DB2B;10;Datamesh - DB2B: CLIENTE B2B
+azureti;27bd0256-8df5-4f7b-b0f2-5cec839d1612;;Azure-TI;resourceGroupName~PCCAGENTLESSSCANRESOURCEGROUP|dig-security-rg;9;Prisma
+azureti;38a4adf9-fea6-4c6d-bf80-0e0ada2667b2;;Azure-TI;resourceGroupName~DTLG;10;Datamesh - DTLG: LOGISTICA
+azureti;3e1979a3-2d06-495d-844d-b526963f553c;;Azure-TI;"pricingModel=SavingsPlan ; chargeType=Purchase";10;Compra SavingPlan
+azureti;4c3dcc7f-a1b3-4d80-a287-d85e9b6a65ee;;Azure-TI;resourceGroupName~DTAT;10;Datamesh - DTAT: CANAIS ATENDIMENTO
+azureti;5b6e5a62-ba52-4c2f-b222-6bf6c623400e;;Azure-TI;resourceGroupName~DGCD;10;Datamesh - DGCD: GOVERNANCA CULTURA DE DADOS
+azureti;68633ed9-90e6-4385-810d-e279d9120e1a;;Azure-TI;resourceGroupName~DTCD;10;Datamesh - DTCD: CLIENTE CREDITO
+azureti;68b4d5e1-f6d9-4767-a111-1c1fa8808809;;Azure-TI;"chargeType=Purchase ; reservationName=OpenAIPTU_12-02-2024_11-03|OpenAIPTU_RI_02-07-2026_15-09";20;Vivo Mais
+azureti;768e51e2-68c8-4cac-a2de-06a793399bfd;;Azure-TI;resourceGroupName=ai_dev-split-1_cc8416a9-c46b-484c-b7ee-07b30b2bebaf_managed|ai_pro-b2b-appinsights_7bd6e0e8-9a39-44de-bfce-5f77631b1199_managed|pro-aura-b2b-mysql|PRO-AURA-B2B-STORAGE|pro-b2b-eh|pro-b2b-gw|pro-b2b-storage-rg;10;Datamesh - SB2B: VENDAS B2B
+azureti;9116f699-96bf-4270-8c6b-8440e426cb45;;Azure-TI;"chargeType=Purchase ; reservationName~VM_RI";4;Compra RIs
+azureti;97e6c9b7-3fba-4247-addf-a31cb7fb3c76;;Azure-TI;resourceGroupName~SB2C;10;Datamesh - SB2C: VENDAS B2C
+azureti;98450519-e1ba-4d5e-9d09-1452e9fa6523;;Azure-TI;"pricingModel=SavingsPlan ; chargeType=Return";10;Compra SavingPlan - Retorno
+azureti;9e010af2-1d54-4318-97c8-ce16a30a383e;;Azure-TI;resourceGroupName~DTRH|DRHP;10;Datamesh - DRHP: CORPORATIVO PESSOAS
+azureti;acf2b2bc-a10b-4f14-b387-380e867bc8cf;;Azure-TI;resourceGroupName~DTRD;10;Datamesh - DTRD: TELCO_SERVICO_RECURSO REDES
+azureti;b0cf286c-fc7c-479f-acc0-376f2ac3adc3;;Azure-TI;subscriptionName=TBRA_FABRIC;10;FABRIC
+azureti;b3714a2f-a056-4ada-abd2-bd2b6f6dbb6a;;Azure-TI;resourceGroupName=rg-azlc-chucri-eastus|rg-azlc-avd|rg-azmigrate-azlc|rg-azlc-chucri-eastus-v2|rg-azlc-aks-poc;10;Azure Local
+azureti;b9943c8b-5bf8-4f2c-a5cb-b9d17d3207a5;;Azure-TI;resourceGroupName~CB2C;10;Datamesh - CB2C: CLIENTE B2C
+azureti;be222da0-b54e-47bc-b6b2-de58cb6197f6;;Azure-TI;"chargeType=return ; reservationName~terr";12;Terra Brasil - Reserva - Retorno
+azureti;c5bfde65-9e85-4160-b738-29b45ff02a7c;;Azure-TI;resourceGroupName=rg-dbw-dtcs-cads-brsouth-001-dev|rg-dbw-dtcs-cads-brsouth-001-prod|MANAGED-RG-DBW-DTCS-CADS-BRSOUTH-001-PROD|MANAGED-RG-DBW-DTCS-CADS-BRSOUTH-001-DEV|rg-cads-brsouth-prod|rg-cads-brsouth-dev;10;Datamesh - CADS: CADASTRO
+azureti;c5e48223-54ff-4c52-8335-67b1b13a17bc;;Azure-TI;resourceGroupName~ai_pro-seg|trendmicro;100;Segurança
+azureti;cf73c2c4-f182-49d4-84b3-29410ae1209c;;Azure-TI;resourceGroupName~dtin;10;Datamesh - DTIN: CLIENTE INTERACAO
+azureti;d808fce6-2fdb-4fde-91bd-2ccd5a644051;;Azure-TI;resourceGroupName~DTCP;10;Datamesh - DTCP: CORPORATIVO COMPRAS
+azureti;d949197c-58e9-4a34-ba1a-686657e52b23;;Azure-TI;"pricingModel=SavingsPlan ; chargeType=Return";10;Compra SavingPlan - Retorno
+azureti;dd9a0033-f31f-416c-82d8-6c5a504bb8d4;;Azure-TI;"resourceGroupName=rg-aks-sec-dev|mc_rg-aks-sec-dev_aks-sec-dev_brazilsouth|mc_rg-aks-sec-brsouth-test_aks-sec-test_brazilsouth|mc_rg-aks-sec-brsouth-prod_aks-sec-prod_brazilsouth|rg-aks-sec-brsouth-prod|rg-aks-sec-brsouth-test ; resourceGroupName~rbvm";10;Jira Seg
+azureti;e2f52826-de5d-47aa-aa78-c28d47495698;;Azure-TI;resourceGroupName~DTMN;10;Datamesh - DTMN: MONETIZAÇÃO  (FINANÇAS)
+azureti;e71ff276-ba27-4b63-b61f-f1a420a6e97c;;Azure-TI;resourceGroupName=rg-supdigital-brsouth-test|rg-supdigital-brsouth-dev;10;cloud Engineering
+azureti;ec9466cb-8e52-4d83-b336-f29cc54e0f04;;Azure-TI;resourceGroupName~DTAT;10;Datamesh - DTAT: CANAIS ATENDIMENTO
+azureti;ef071114-ffea-4115-b849-5422f38a86c3;;Azure-TI;"chargeType=Purchase ; reservationName~terr";13;Terra Brasil - Reserva
+azureti;ef978556-d358-470f-b27a-c338283fd905;;Azure-TI;"chargeType=Return ; reservationName~VM_RI";4;Compra RIs - Retorno
+azureti;f1a810cb-c058-4301-9a71-74bb62362408;;Azure-TI;resourceGroupName=mc_rg-apim-prod_aks-apim-prod_brazilsouth|rg-apim-prod|mc_rg-apim-test_aks-apim-test_brazilsouth|rg-apim-test|rg-apimgbrsouth-prod|rg-apimgbrsouth-test;10;APIM
+azureti;f6cea833-d984-4be0-aed8-983a46f83c60;;Azure-TI;resourceGroupName~DTJU;10;Datamesh - DTJU: CORPORATIVO JURIDICO
+"chargeType=Purchase ; reservationName=VM_RI_SAPHANA_ID000007_BR";Azure-TI;;Azure-TI;"chargeType=Purchase ; reservationName=VM_RI_SAPHANA_ID000007_BR|AVS_RI_AV36P|AVS_RI_AV64|VM_RI_SAPHANA_ID000007_BR|VM_RI_09-05-2025_09-50|VM_RI_10-01-2025_16-12|VM_3YRI_M_64s_BrazilSouth_2026_04_10_QTD2_SAPBRPRD";3; SAPTDF - Reserva
+"chargeType=Purchase ; reservationName~AVS";Azure-TI;;Azure-TI;"chargeType=Purchase ; reservationName~AVS";11;Terra Mexico - Reserva AVS 
+"chargeType=Return ; reservationName=VM_RI_SAPHANA_ID000007_BR";Azure-TI;;Azure-TI;"chargeType=Return ; reservationName=VM_RI_SAPHANA_ID000007_BR|AVS_RI_AV36P|AVS_RI_AV64|VM_RI_SAPHANA_ID000007_BR|VM_RI_09-05-2025_09-50|VM_RI_10-01-2025_16-12|VM_3YRI_M_64s_BrazilSouth_2026_04_10_QTD2_SAPBRPRD";3;SAPTDF - Reserva - Retorno
+"chargeType=Return ; reservationName~AVS";Azure-TI;;Azure-TI;"chargeType=Return ; reservationName~AVS";10;Terra Mexico - Reserva AVS - Retorno 
+"chargeType=Return ; reservationName~VM_RI";Azure-4P;;Azure-4P;"chargeType=Return ; reservationName~VM_RI|VM_RI_DS1v2";10;Compra RIs - Retorno
+"chargeType=Return ; reservationName~VM_RI";ff4fff72-fcda-4a69-af6d-3e5203dd8273;;Azure-TI;"chargeType=Return ; reservationName~VM_RI|VM_RI_DS1v2";10;Compra RIs - Retorno
+gcp4p;c1a38f98-833c-4130-b0c9-11791c18616b;;GCP-4P;meterCategory=Cloud Domains|Invoice|SendGrid Email API;10;Conectividade GCP
+gcp4p;e14e66dd-e0be-4678-a099-0b419e35b5c3;;GCP-4P;meterCategory=Denodo Enterprise;10;Denodo
+gcpti;44107ba2-c6c3-409d-adce-a895d8c2ea46;;GCP-TI;resourceGroupName~vicky;100;Vicky
+meterCategory=sentinelti;;;Azure-TI;"meterCategory=sentinel ; subscriptionName=Shared Services";50;Sentinel - TI
+subscriptionName~Corebanking;Corebanking;;Azure-TI;subscriptionName~Corebanking;5;Corebanking
