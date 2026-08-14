@@ -80,6 +80,7 @@ services:
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog
       - ./infra/trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./infra/trino/coordinator.properties:/etc/trino/config.properties:ro
       # Keep the absolute file:// locations emitted by the local PyIceberg
       # SQL catalog readable from inside Trino.
       - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
@@ -89,6 +90,32 @@ services:
         condition: service_healthy
       nessie:
         condition: service_healthy
+    profiles:
+      - analytics
+
+  trino-worker-1:
+    image: trinodb/trino:latest
+    volumes:
+      - ./infra/trino/catalog:/etc/trino/catalog:ro
+      - ./infra/trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./infra/trino/worker.properties:/etc/trino/config.properties:ro
+      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+    depends_on:
+      - trino
+    profiles:
+      - analytics
+
+  trino-worker-2:
+    image: trinodb/trino:latest
+    volumes:
+      - ./infra/trino/catalog:/etc/trino/catalog:ro
+      - ./infra/trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./infra/trino/worker.properties:/etc/trino/config.properties:ro
+      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+    depends_on:
+      - trino
     profiles:
       - analytics
 

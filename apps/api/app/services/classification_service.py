@@ -13,6 +13,26 @@ from app.services.task_runner import _apply_classifications_sync
 
 logger = logging.getLogger(__name__)
 
+def _build_classification_sql(version, base, session) -> tuple[int, int, list[str]]:
+    """Execute classification in Trino; no detailed financial rows enter pandas."""
+    from app.services.trino_service import execute
+    from app.services.classification_sql import build_ctas
+    snap = session.get(ClassificationRulesetSnapshot, version.ruleset_snapshot_id)
+    rules = list(snap.rules_json or [])
+    async def run():
+        await execute("CREATE SCHEMA IF NOT EXISTS iceberg.classified", timeout_s=120)
+        described = await execute(f"DESCRIBE iceberg.financial_base.{base.physical_name}", timeout_s=120)
+        columns = [str(row.get("Column") or row.get("column_name") or row.get("column")) for row in described]
+        sql = build_ctas(base.physical_name, version.physical_table, columns, rules,
+                         (snap.organization_json or {}).get("departments", []), version.id, base.iceberg_snapshot_id)
+        await execute(sql, timeout_s=float(__import__('os').getenv("CLASSIFICATION_SQL_TIMEOUT_S", "1800")))
+        metrics = await execute(
+            f"SELECT count(*) AS rows, count_if(\"departamento\" IS NOT NULL AND trim(CAST(\"departamento\" AS varchar)) <> '') AS classified FROM iceberg.classified.{version.physical_table}",
+            timeout_s=300)
+        return columns, metrics[0] if metrics else {"rows": 0, "classified": 0}
+    columns, metrics = asyncio.run(run())
+    return int(metrics.get("rows") or 0), int(metrics.get("classified") or 0), columns
+
 def _hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -25,7 +45,7 @@ def _rules_snapshot(session, destination_id):
     proj_ids = {r.project_id for r in rules if r.project_id}
     depts = session.execute(select(Department)).scalars().all()
     projs = session.execute(select(Project)).scalars().all()
-    org = {"departments": [{c.name: getattr(d, c.name) for c in d.__table__.columns if c.name not in {"created_at", "updated_at"}} for d in depts if d.id in dept_ids or d.parent_id in dept_ids],
+    org = {"departments": [{c.name: getattr(d, c.name) for c in d.__table__.columns if c.name not in {"created_at", "updated_at"}} for d in depts],
            "projects": [{c.name: getattr(p, c.name) for c in p.__table__.columns if c.name not in {"created_at", "updated_at"}} for p in projs if p.id in proj_ids]}
     payload = {"rules": rule_json, "organization": org}
     existing = session.execute(select(ClassificationRulesetSnapshot).where(ClassificationRulesetSnapshot.ruleset_hash == _hash(payload))).scalar_one_or_none()
@@ -43,6 +63,17 @@ def build_classification(version_id: int) -> dict:
     dest = session.get(DestinationTable, version.destination_table_id)
     version.status = "RUNNING"; session.commit()
     try:
+        if __import__('os').getenv("CLASSIFICATION_SQL_ENABLED", "true").lower() == "true":
+            total, classified, public_columns = _build_classification_sql(version, base, session)
+            if total != int(base.row_count or 0):
+                raise RuntimeError(f"SQL classification row count mismatch: base={base.row_count}, classified={total}")
+            version.row_count = total; version.classified_rows = classified
+            version.unclassified_rows = total - classified
+            version.status = "READY"; version.metrics_json = {"rows": total, "classified_rows": classified,
+                "engine": "trino_sql", "public_columns": public_columns}
+            session.commit()
+            publish_classification(version.id, session=session)
+            return {"success": True, "version_id": version.id, "rows": total, "engine": "trino_sql"}
         rules = session.execute(select(ClassificationRule).where(
             ((ClassificationRule.destination_table_id == dest.id) | (ClassificationRule.destination_table_id.is_(None))), ClassificationRule.active == True
         ).order_by(ClassificationRule.priority, ClassificationRule.id)).scalars().all()
