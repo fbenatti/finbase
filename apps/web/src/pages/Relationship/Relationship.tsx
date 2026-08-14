@@ -769,7 +769,7 @@ export default function Relationship() {
         ) : (
           <SortableTable
             columns={relationshipColumns}
-            data={tableRels as unknown as Record<string, unknown>[]}
+            data={tableRels}
             getRowKey={(r) => (r as unknown as TableRelationship)._key}
             size="small"
             placeholder="Filtrar por datasource ou tabela destino..."

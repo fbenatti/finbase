@@ -2,10 +2,14 @@ fastapi[standard]==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
+psycopg2-binary==2.9.10
+apscheduler==3.11.0
+croniter==6.0.0
 alembic==1.14.1
 pydantic==2.10.4
 pydantic-settings==2.7.1
 python-dotenv==1.0.1
+psutil==6.1.1
 httpx==0.28.1
 azure-identity==1.19.0
 azure-storage-blob==12.24.1

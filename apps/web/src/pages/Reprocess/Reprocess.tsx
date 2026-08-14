@@ -10,7 +10,7 @@ import {
   getConnectionsForDestination, MappedConnection,
   getAvailablePeriods, AvailablePeriod,
   reprocessDest, getReprocessStatus, cancelReprocess, ReprocessStatus,
-  getRunningTasks, TaskStatus,
+  getRunningTasks, TaskStatus, getWorkerHealth, WorkerHealth, getReprocessHistory,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 
@@ -41,11 +41,18 @@ export default function Reprocess() {
   } | null>(null);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [loadingConns, setLoadingConns] = useState(false);
+  const [workerHealth, setWorkerHealth] = useState<WorkerHealth | null>(null);
+  const [history, setHistory] = useState<ReprocessStatus[]>([]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
+    getReprocessHistory().then(setHistory).catch(() => {});
+    const refreshWorker = () => getWorkerHealth().then(setWorkerHealth).catch(() => setWorkerHealth({ status: "offline", heartbeat_age_seconds: null }));
+    refreshWorker();
+    const healthTimer = setInterval(refreshWorker, 3000);
+    return () => clearInterval(healthTimer);
   }, []);
 
   // When dest table changes: load only connections with mappings, reset selections
@@ -111,6 +118,7 @@ export default function Reprocess() {
           } else if (s.status === "CANCELLED") {
             setResult({ type: "error", message: "Processamento cancelado." });
           }
+          getReprocessHistory().then(setHistory).catch(() => {});
         }
       } catch {
         if (pollRef.current) clearInterval(pollRef.current);
@@ -168,6 +176,7 @@ export default function Reprocess() {
       });
       setTaskId(res.task_id);
       pollTask(res.task_id);
+      getReprocessHistory().then(setHistory).catch(() => {});
     } catch (e: unknown) {
       setResult({
         type: "error",
@@ -208,6 +217,12 @@ export default function Reprocess() {
     <Box>
       <Typography variant="h4" sx={{ mb: 3 }}>Reprocessar Dados</Typography>
 
+      {workerHealth && workerHealth.status !== "ok" && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Worker ETL {workerHealth.status === "offline" ? "offline" : "sem heartbeat"}. O reprocessamento está bloqueado até o worker estar ativo.
+        </Alert>
+      )}
+
       <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap", alignItems: "flex-start" }}>
         {/* ── Tabela Destino ── */}
         <FormControl sx={{ minWidth: 260 }} size="small">
@@ -216,7 +231,7 @@ export default function Reprocess() {
             value={selDestId}
             label="Tabela Destino *"
             onChange={(e) => setSelDestId(e.target.value as number | "")}
-            disabled={isRunning}
+            disabled={!!isRunning}
           >
             {destTables.map((t) => (
               <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
@@ -242,7 +257,7 @@ export default function Reprocess() {
               return names.join(", ") || "Nenhuma";
             }}
             MenuProps={MenuProps}
-            disabled={!selDestId || loadingConns || isRunning}
+            disabled={!selDestId || loadingConns || !!isRunning}
           >
             {mappedConns.length === 0 && selDestId && !loadingConns && (
               <MenuItem disabled><em>Nenhuma conexao mapeada</em></MenuItem>
@@ -277,7 +292,7 @@ export default function Reprocess() {
               return `${arr.length} de ${periods.length} meses`;
             }}
             readOnly
-            disabled={periods.length === 0 || isRunning}
+            disabled={periods.length === 0 || !!isRunning}
           />
         </FormControl>
 
@@ -288,7 +303,7 @@ export default function Reprocess() {
               color="primary"
               startIcon={<Refresh />}
               onClick={doReprocess}
-              disabled={!selDestId || selConnIds.length === 0 || processing}
+            disabled={!selDestId || selConnIds.length === 0 || processing || workerHealth?.status !== "ok"}
             >
               Reprocessar
             </Button>
@@ -311,6 +326,30 @@ export default function Reprocess() {
           </Button>
         )}
       </Box>
+
+      {/* ── Seleção de meses ── */}
+      {periods.length > 0 && !isRunning && (
+        <Box sx={{ mb: 3, display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
+          <Button size="small" variant="text" onClick={selectAllPeriods} sx={{ fontSize: "0.7rem" }}>
+            Todos ({periods.length})
+          </Button>
+          <Button size="small" variant="text" onClick={clearPeriods} sx={{ fontSize: "0.7rem" }}>
+            Nenhum
+          </Button>
+          <Divider orientation="vertical" flexItem />
+          {periods.map(p => (
+            <Chip
+              key={p.period}
+              label={`${p.period} (${p.blob_count} blobs)`}
+              size="small"
+              variant={selPeriods.includes(p.period) ? "filled" : "outlined"}
+              color={selPeriods.includes(p.period) ? "primary" : "default"}
+              onClick={() => togglePeriod(p.period)}
+              sx={{ cursor: "pointer" }}
+            />
+          ))}
+        </Box>
+      )}
 
       {/* ── Progress bar ── */}
       {taskStatus && (isRunning || isQueued || taskStatus.status === "COMPLETED" || taskStatus.status === "FAILED" || taskStatus.status === "CANCELLED") && (
@@ -350,30 +389,6 @@ export default function Reprocess() {
         </Paper>
       )}
 
-      {/* ── Period chips ── */}
-      {periods.length > 0 && !isRunning && (
-        <Box sx={{ mb: 2, display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
-          <Button size="small" variant="text" onClick={selectAllPeriods} sx={{ fontSize: "0.7rem" }}>
-            Todos ({periods.length})
-          </Button>
-          <Button size="small" variant="text" onClick={clearPeriods} sx={{ fontSize: "0.7rem" }}>
-            Nenhum
-          </Button>
-          <Divider orientation="vertical" flexItem />
-          {periods.map(p => (
-            <Chip
-              key={p.period}
-              label={`${p.period} (${p.blob_count} blobs)`}
-              size="small"
-              variant={selPeriods.includes(p.period) ? "filled" : "outlined"}
-              color={selPeriods.includes(p.period) ? "primary" : "default"}
-              onClick={() => togglePeriod(p.period)}
-              sx={{ cursor: "pointer" }}
-            />
-          ))}
-        </Box>
-      )}
-
       {/* ── Context summary ── */}
       {selectedDestName && selConnIds.length > 0 && !isRunning && (
         <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: "#f5f5f5" }}>
@@ -401,6 +416,26 @@ export default function Reprocess() {
           {result.message}
         </Alert>
       )}
+
+      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+        <Typography variant="h6">Histórico de reprocessamentos</Typography>
+        {history.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Nenhum reprocessamento registrado.</Typography>}
+        {history.map(item => {
+          const failed = item.status === "FAILED" || item.status === "CANCELLED";
+          return <Box key={item.id} sx={{ mt: 1.5, p: 1.25, border: "1px solid #e0e0e0", borderRadius: 1 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              <Chip size="small" label={item.status} color={item.status === "COMPLETED" ? "success" : failed ? "error" : "info"} />
+              <Typography fontWeight={600}>Reprocessamento {item.id}</Typography>
+              <Typography variant="body2">{(item.rows_written || 0).toLocaleString()} linhas · {item.completed_batches || 0}/{item.total_batches || 0} blobs</Typography>
+              {item.table && <Chip size="small" variant="outlined" label={item.table} />}
+            </Box>
+            <Typography variant="body2" color={failed ? "error" : "text.secondary"} sx={{ mt: .5 }}>{item.error || item.phase || "Aguardando worker..."}</Typography>
+            {(item.event_log || []).slice().reverse().map((event, index) => <Typography key={`${event.at}-${index}`} variant="caption" display="block" color={event.level === "ERROR" ? "error" : "text.secondary"} sx={{ mt: .25 }}>
+              {new Date(event.at).toLocaleString("pt-BR")} · {event.message}
+            </Typography>)}
+          </Box>;
+        })}
+      </Paper>
 
       {/* ── Empty state ── */}
       {!selDestId && !isRunning && (

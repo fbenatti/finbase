@@ -23,6 +23,7 @@ catalog.db
 data/
 worker.log
 *.log
+.runtime-logs/
 
 # OS/editor files
 .DS_Store

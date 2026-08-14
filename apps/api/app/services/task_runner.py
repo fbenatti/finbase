@@ -379,7 +379,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
     When session is provided and caches are None, loads from DB (backward compat).
 
     For each rule that matches, populates:
-    - target_field (e.g., 'projeto') with match_value
+    - target_field (e.g., 'departamento') with match_value
     - department hierarchy fields: diretoria, centro_custo, ambiente, custom_fields
     """
     from app.models.rules import Department, Project
@@ -461,7 +461,10 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
 
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
     for col in ['diretoria', 'departamento', 'centro_custo', 'ambiente',
-                'custom_fields', 'subscription_rg', 'projeto_nome']:
+                'custom_fields', 'subscription_rg', 'projeto_nome',
+                'departamento_nivel_1', 'departamento_nivel_2',
+                'departamento_nivel_3', 'departamento_nivel_4',
+                'departamento_nivel_5']:
         if col not in df.columns:
             df[col] = None
 
@@ -480,7 +483,10 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
 
     # ── Apply rules ──
     for rule in class_rules:
-        if not rule.active:
+        # A classification must allocate to an organizational object.  Legacy
+        # unlinked rules are deliberately ignored rather than emitting a
+        # misleading free-text project with no department hierarchy.
+        if not rule.active or not rule.department_id:
             continue
         if rule.conditions:
             mask = _evaluate_multi_condition(df, rule.conditions, canon_cache=canon_cache)
@@ -540,6 +546,15 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                         if col_name not in df.columns:
                             df[col_name] = None
                         df.loc[effective_mask, col_name] = str(col_val)
+                # Materialize the individual hierarchy levels (root → leaf) as
+                # stable columns so roll-ups (e.g. "departamento pai") become a
+                # first-class dimension. nivel_1 = root (diretoria).
+                root_to_leaf = list(reversed(chain))
+                for i, d in enumerate(root_to_leaf, start=1):
+                    col_name = f"departamento_nivel_{i}"
+                    if col_name not in df.columns:
+                        df[col_name] = None
+                    df.loc[effective_mask, col_name] = d.name or ""
                 # custom_fields as JSON string (merged from whole chain)
                 if merged_custom_fields:
                     if 'custom_fields' not in df.columns:
@@ -1195,10 +1210,7 @@ def get_running_tasks() -> list[dict]:
     (legacy or freshly-queued), progress comes from the in-memory dict.
     """
     terminal = {"COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELLED"}
-    tasks = [
-        t for t in _inmemory_tasks.values()
-        if t.get("status", "") not in terminal
-    ]
+    tasks = []
 
     # Also fetch RUNNING and QUEUED tasks from DB for all task types
     # (QUEUED tasks are created by the API and picked up by the worker;
@@ -1214,6 +1226,14 @@ def get_running_tasks() -> list[dict]:
                 EtlTask.status.in_(["RUNNING", "QUEUED"]),
             )
         ).scalars().all()
+        # PostgreSQL is authoritative across the API and worker processes.
+        # Retain only genuinely non-persisted legacy tasks from this process;
+        # otherwise a terminal DB task can remain RUNNING forever in the API's
+        # stale in-memory dictionary.
+        tasks.extend(
+            t for t in _inmemory_tasks.values()
+            if t.get("id") is None and t.get("status", "") not in terminal
+        )
         existing_ids = {t.get("id") for t in tasks}
         for dt in db_tasks:
             entry = {

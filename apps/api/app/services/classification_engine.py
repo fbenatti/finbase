@@ -117,7 +117,6 @@ def _build_department_path(
         "department_path": "",
         "centro_custo": "",
         "ambiente": "",
-        "projeto": "",
     }
     custom_fields: dict = {}
 
@@ -145,6 +144,13 @@ def _build_department_path(
 
     # Build path
     info["department_path"] = " > ".join(d.name for d in visited if d.name)
+
+    # Materialize individual hierarchy levels (root -> leaf) as stable columns
+    # so roll-ups like "departamento pai" can be shown as a first-class
+    # dimension. department_nivel_1 is the root (diretoria), increasing toward
+    # the leaf. Levels beyond the actual depth remain empty.
+    for i, dept in enumerate(visited, start=1):
+        info[f"departamento_nivel_{i}"] = dept.name or ""
 
     # Add custom fields as flat keys
     for k, v in custom_fields.items():
@@ -203,7 +209,7 @@ async def apply_classification_rules(
     dept_map, project_map = await _load_department_tree(db)
 
     # Initialize target columns if they don't exist
-    default_targets = {"diretoria", "departamento", "centro_custo", "ambiente", "projeto"}
+    default_targets = {"diretoria", "departamento", "centro_custo", "ambiente"}
     for col in default_targets:
         if col not in df.columns:
             df[col] = ""
@@ -212,6 +218,10 @@ async def apply_classification_rules(
     classified_mask = pd.Series(False, index=df.index)
 
     for rule in rules:
+        # Keep the async path aligned with the ETL worker: a classification
+        # without a Department is not a valid organizational allocation.
+        if not rule.department_id:
+            continue
         # Determine conditions: use conditions JSONB if available, fall back to single condition
         if rule.conditions and isinstance(rule.conditions, list) and len(rule.conditions) > 0:
             match_mask = _evaluate_multi_condition(df, rule.conditions)

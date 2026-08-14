@@ -178,7 +178,10 @@ def _df_to_arrow(
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
 
         elif target in _FLOAT_TYPES:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            # A batch containing only whole values is inferred by Arrow as
+            # int64.  Gold uses a stable DOUBLE contract, so force float64
+            # even when the values happen to be integers in this one blob.
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
 
         elif target in _BOOL_TYPES:
             if df[col].dtype == bool:
@@ -359,6 +362,41 @@ def read_bronze(connection_code: str, blob_path: str | None = None,
     return table.scan(**scan_kwargs).to_pandas().reset_index(drop=True)
 
 
+def read_bronze_batches(connection_code: str, blob_path: str | None = None,
+                        billing_period: str | None = None,
+                        max_rows: int | None = None,
+                        batch_size: int = 25_000):
+    """Yield Bronze batches without materializing the complete blob in RAM."""
+    table_name = f"bronze.raw_{connection_code.replace('-', '_').replace('.', '_')}"
+    table = _get_catalog().load_table(table_name)
+    from pyiceberg.expressions import AlwaysTrue, And, EqualTo
+
+    row_filter = AlwaysTrue()
+    if blob_path:
+        row_filter = And(row_filter, EqualTo("_blob_path", blob_path))
+    if billing_period:
+        row_filter = And(row_filter, EqualTo("_billing_period", str(billing_period)))
+
+    scan = table.scan(row_filter=row_filter, limit=max_rows if max_rows is not None and max_rows >= 0 else None)
+    reader = scan.to_arrow_batch_reader()
+    emitted = 0
+    for arrow_batch in reader:
+        offset = 0
+        while offset < arrow_batch.num_rows:
+            if max_rows is not None and max_rows >= 0:
+                remaining = max_rows - emitted
+                if remaining <= 0:
+                    return
+                take = min(batch_size, remaining)
+            else:
+                take = batch_size
+            piece = arrow_batch.slice(offset, min(take, arrow_batch.num_rows - offset))
+            if piece.num_rows:
+                yield piece.to_pandas().reset_index(drop=True)
+                emitted += piece.num_rows
+            offset += piece.num_rows
+
+
 # ---------------------------------------------------------------------------
 # Silver layer — processed / normalized data
 # ---------------------------------------------------------------------------
@@ -481,7 +519,6 @@ FACT_SCHEMA = Schema(
     NestedField(32, "frequency", StringType(), required=False),
     NestedField(33, "charge_type", StringType(), required=False),
     NestedField(34, "data_consumo", StringType(), required=False),
-    NestedField(35, "projeto", StringType(), required=False),
     NestedField(36, "responsavel", StringType(), required=False),
     NestedField(37, "origem", StringType(), required=False),
 )
@@ -495,14 +532,14 @@ def write_gold(df: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 # Destination tables — dynamic Iceberg tables in the gold namespace
 # ---------------------------------------------------------------------------
-def read_destination(physical_name: str) -> pd.DataFrame:
+def read_destination(physical_name: str, namespace: str = "gold") -> pd.DataFrame:
     """Read all data from an existing Iceberg destination table.
 
     Loads the gold.{physical_name} table and returns its contents as a pandas
     DataFrame. Returns an empty DataFrame if the table does not exist.
     """
     safe_name = physical_name.replace("-", "_").replace(".", "_")
-    tid = _table_id("gold", safe_name)
+    tid = _table_id(namespace, safe_name)
     cat = _get_catalog()
 
     # Check if table exists first — avoids blowing up the caller
@@ -515,6 +552,34 @@ def read_destination(physical_name: str) -> pd.DataFrame:
     except Exception:
         logger.info(f"Unable to list tables in namespace {tid[0]} — returning empty DataFrame")
         return pd.DataFrame()
+
+
+def read_destination_batches(physical_name: str, excluded_periods: set[str] | None = None,
+                             excluded_connection_ids: set[int] | None = None,
+                             batch_size: int = 25_000, namespace: str = "gold"):
+    """Yield destination rows in bounded batches, optionally pruning partitions."""
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    tid = _table_id(namespace, safe_name)
+    cat = _get_catalog()
+    try:
+        table = cat.load_table(tid)
+    except Exception:
+        return
+    from pyiceberg.expressions import AlwaysTrue, And, Not, In
+    row_filter = AlwaysTrue()
+    # Preserve every row except the exact intersection selected for
+    # reprocessing: NOT(period IN selected AND connection IN selected).
+    # Using NOT(period) AND NOT(connection) incorrectly deletes all other
+    # periods belonging to a selected connection.
+    if excluded_periods and excluded_connection_ids:
+        selected_rows = And(
+            In("_billing_period", tuple(str(x) for x in excluded_periods)),
+            In("source_connection_id", tuple(excluded_connection_ids)),
+        )
+        row_filter = And(row_filter, Not(selected_rows))
+    for arrow_batch in table.scan(row_filter=row_filter).to_arrow_batch_reader():
+        if arrow_batch.num_rows:
+            yield arrow_batch.to_pandas().reset_index(drop=True)
 
     try:
         table = cat.load_table(tid)
@@ -530,6 +595,7 @@ def write_destination_staged(
     *,
     partition_col: str = "_billing_period",
     column_types: Optional[dict[str, str]] = None,
+    namespace: str = "gold",
 ) -> str:
     """Write a destination DataFrame to a temporary Iceberg table (staged).
 
@@ -543,16 +609,20 @@ def write_destination_staged(
     Returns: temp table safe_name (for later swap).
     """
     import time
-    _ensure_namespace("gold")
+    _ensure_namespace(namespace)
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     ts = int(time.time())
     temp_safe_name = f"{safe_name}_stg_{ts}"
-    tid = _table_id("gold", temp_safe_name)
+    tid = _table_id(namespace, temp_safe_name)
 
     if df.empty:
         return temp_safe_name
 
     df = df.copy()
+    # Every row written to a destination Gold is historical realized data.
+    # Forecast projections are published separately in *_planning.
+    if "tipo" not in df.columns:
+        df["tipo"] = "realizado"
     if partition_col not in df.columns:
         df[partition_col] = "unknown"
 
@@ -597,7 +667,7 @@ def write_destination_staged(
     return temp_safe_name
 
 
-def swap_staged_table(physical_name: str, temp_safe_name: str) -> int:
+def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold") -> int:
     """Atomically swap staged temp table → main table.
 
     1. Drop original gold.{physical_name} table via catalog (if exists)
@@ -608,8 +678,8 @@ def swap_staged_table(physical_name: str, temp_safe_name: str) -> int:
     Returns: number of rows in the new table, or -1 if counting fails.
     """
     safe_name = physical_name.replace("-", "_").replace(".", "_")
-    main_tid = _table_id("gold", safe_name)
-    temp_tid = _table_id("gold", temp_safe_name)
+    main_tid = _table_id(namespace, safe_name)
+    temp_tid = _table_id(namespace, temp_safe_name)
     cat = _get_catalog()
 
     # 1. Drop original main table via catalog
@@ -634,10 +704,10 @@ def swap_staged_table(physical_name: str, temp_safe_name: str) -> int:
         return -1
 
 
-def cleanup_staged_table(temp_safe_name: str) -> None:
+def cleanup_staged_table(temp_safe_name: str, namespace: str = "gold") -> None:
     """Remove a staged temp table (rollback on failure)."""
     try:
-        tid = _table_id("gold", temp_safe_name)
+        tid = _table_id(namespace, temp_safe_name)
         _force_delete_table(tid, temp_safe_name)
         logger.info("Cleaned up staged table gold.%s", temp_safe_name)
     except Exception as e:
@@ -650,6 +720,7 @@ def append_to_staged(
     *,
     partition_col: str = "_billing_period",
     column_types: Optional[dict[str, str]] = None,
+    namespace: str = "gold",
 ) -> None:
     """Append data to an existing staged temp table."""
     if df.empty:
@@ -661,7 +732,7 @@ def append_to_staged(
 
     arrow_table = _df_to_arrow(df, column_types=column_types)
     cat = _get_catalog()
-    tid = _table_id("gold", temp_safe_name)
+    tid = _table_id(namespace, temp_safe_name)
 
     try:
         tbl = cat.load_table(tid)
@@ -818,3 +889,55 @@ def list_tables(namespace: str) -> list[str]:
                 for tup in _get_catalog().list_tables(namespace)]
     except Exception:
         return []
+
+
+def write_forecast_result(table_name: str, df: pd.DataFrame) -> int:
+    """Replace a forecast result table in the dedicated forecast namespace."""
+    if df.empty:
+        return 0
+    namespace = "forecast"
+    _ensure_namespace(namespace)
+    safe_name = table_name.replace("-", "_").replace(".", "_")
+    tid = (namespace, safe_name)
+    arrow_table = _df_to_arrow(df, column_types={"forecast_value": "DOUBLE"})
+    cat = _get_catalog()
+    try:
+        cat.drop_table(tid)
+    except Exception:
+        pass
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+    schema = pyarrow_to_schema(arrow_table.schema)
+    table = cat.create_table(tid, schema=schema)
+    table.append(arrow_table)
+    logger.info("Published %d forecast rows to %s.%s", len(df), namespace, safe_name)
+    return len(df)
+
+
+def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: str | None = None) -> str:
+    """Publish the compact monthly planning table in Gold.
+
+    This is intentionally separate from the detailed Gold fact table. It only
+    contains configured series dimensions, month, type and forecast measures.
+    ``value_column`` names the forecast measure (e.g. the configured measure
+    column) in the published table; when empty it falls back to ``value``.
+    """
+    if df.empty:
+        return f"{physical_name}_planning"
+    _ensure_namespace("gold")
+    safe_name = physical_name.replace("-", "_").replace(".", "_") + "_planning"
+    keep = [c for c in df.columns if c not in {"selected_method", "fallback_level", "history_points", "backtest_wape"}]
+    planning = df[keep].copy()
+    measure_name = value_column or "value"
+    planning = planning.rename(columns={"forecast_month": "period", "forecast_value": measure_name})
+    arrow_table = _df_to_arrow(planning, column_types={measure_name: "DOUBLE"})
+    tid = ("gold", safe_name)
+    cat = _get_catalog()
+    try:
+        cat.drop_table(tid)
+    except Exception:
+        pass
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+    table = cat.create_table(tid, schema=pyarrow_to_schema(arrow_table.schema))
+    table.append(arrow_table)
+    logger.info("Published %d planning rows to gold.%s", len(planning), safe_name)
+    return safe_name

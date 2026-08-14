@@ -15,11 +15,64 @@ from app.services.task_runner import get_task_status as _get_task_status, cancel
 import httpx
 from httpx import DigestAuth
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from croniter import croniter
 
 router = APIRouter(prefix="/etl", tags=["etl"])
+
+
+async def _reconcile_dead_worker_tasks(db: AsyncSession, reason: str) -> int:
+    """Close persisted tasks when the worker is definitely no longer alive.
+
+    The API cannot resume a Python worker stack safely. Leaving these rows in
+    QUEUED/RUNNING makes the UI show a permanent lock and blocks a new run.
+    This only changes control metadata; it never touches Bronze/Silver/Gold.
+    """
+    from app.models.etl_task import EtlTask
+    from sqlalchemy import func as sa_func
+    from app.services.task_runner import _inmemory_tasks
+
+    result = await db.execute(
+        select(EtlTask).where(EtlTask.status.in_(["QUEUED", "RUNNING"]))
+    )
+    rows = result.scalars().all()
+    if not rows:
+        return 0
+    for row in rows:
+        row.status = "FAILED"
+        row.phase = reason[:200]
+        row.current_blob = reason[:500]
+        row.finished_at = sa_func.now()
+        existing = row.result_json if isinstance(row.result_json, dict) else {}
+        row.result_json = {**existing, "error": reason}
+        _inmemory_tasks.pop(row.id, None)
+    await db.commit()
+    return len(rows)
+
+
+@router.get("/worker-health")
+async def worker_health(db: AsyncSession = Depends(get_db)):
+    """Report worker liveness without mutating task state.
+
+    A health-page refresh must never fail queued/running work. Orphan cleanup
+    belongs to worker startup, where process ownership is known.
+    """
+    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
+    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
+    try:
+        pid = int(open(pid_file).read().strip())
+        os.kill(pid, 0)
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        return {"status": "offline", "heartbeat_age_seconds": None, "worker_pid": None, "orphaned_tasks_cleared": 0}
+    try:
+        age = max(0, __import__("time").time() - os.path.getmtime(heartbeat))
+        status = "ok" if age <= 15 else "stale"
+        return {"status": status, "heartbeat_age_seconds": round(age, 1), "worker_pid": pid, "orphaned_tasks_cleared": 0}
+    except FileNotFoundError:
+        return {"status": "stale", "heartbeat_age_seconds": None, "worker_pid": pid, "orphaned_tasks_cleared": 0}
 
 
 @router.post("/connections/{connection_id}/scan", response_model=BlobScanResult)
@@ -332,9 +385,33 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
 # Destination table reprocessing (standalone, async with progress)
 # ═══════════════════════════════════════════════════════════════════════
 
-_dest_reprocess_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dest-reprocess")
+_dest_reprocess_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dest-reprocess")
 _dest_task_counter = 0
 # NOTE: reprocess tasks are registered into task_runner._inmemory_tasks for global visibility
+
+def _append_reprocess_log(task_id: int, message: str, *, level: str = "INFO", details: dict | None = None) -> None:
+    """Persist compact lifecycle events for the Reprocess history screen.
+
+    Batch progress remains in ``phase``; persisting every batch would bloat
+    PostgreSQL for large source files.  This log is intentionally limited to
+    meaningful state transitions and capped to the newest 80 entries.
+    """
+    from datetime import datetime, timezone
+    from app.database import SyncSession
+    from app.models.etl_task import EtlTask
+    try:
+        session = SyncSession()
+        task = session.get(EtlTask, task_id)
+        if task:
+            result = dict(task.result_json or {})
+            events = list(result.get("event_log") or [])
+            events.append({"at": datetime.now(timezone.utc).isoformat(), "level": level, "message": message, "details": details or {}})
+            result["event_log"] = events[-80:]
+            task.result_json = result
+            session.commit()
+        session.close()
+    except Exception:
+        pass
 
 
 
@@ -409,7 +486,9 @@ def _process_blob_for_reprocess(
     hierarchy_cache: dict,
     output_cols: set[str],
     task_id: int,
+    clone_engine=None,
     source_frame: "pd.DataFrame | None" = None,
+    batch_callback=None,
 ) -> "pd.DataFrame | None":
     """Process a single blob in a thread — reads from DB, applies rules/mappings/classifications.
 
@@ -431,9 +510,7 @@ def _process_blob_for_reprocess(
     try:
         # Reprocess must start from immutable Bronze, never from the removed
         # legacy SQL normalized_cost_line table.
-        source = source_frame if source_frame is not None else iceberg.read_bronze(connection_code, billing_period=billing_period)
-        if source_frame is not None:
-            source = source[source["_billing_period"].astype(str) == str(billing_period)].copy()
+        source = source_frame if source_frame is not None else None
         # The caller identifies the blob by metadata id; resolve its path once.
         from app.models.ingested_blob import IngestedBlob
         meta = session.get(IngestedBlob, blob_id)
@@ -445,22 +522,20 @@ def _process_blob_for_reprocess(
             # IngestedBlob.row_count is the canonical input contract. Bronze
             # may contain historical append duplicates; never let those rows
             # inflate a reprocess beyond the validated CSV count.
-            source = iceberg.read_bronze(
-                connection_code,
-                blob_path=meta.blob_path,
+            source = iceberg.read_bronze_batches(
+                connection_code, blob_path=meta.blob_path,
                 billing_period=billing_period,
                 max_rows=meta.row_count or 0,
+                batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
             )
-            if len(source) != (meta.row_count or 0):
-                raise RuntimeError(
-                    f"Contagem Bronze divergente para {meta.blob_path}: "
-                    f"esperado {meta.row_count}, encontrado {len(source)}"
-                )
+        elif source is not None:
+            source = source[source["_billing_period"].astype(str) == str(billing_period)].copy()
 
         chunks: list[pd.DataFrame] = []
         rows_in_blob = 0
-        for start in range(0, len(source), 50000):
-            chunk = source.iloc[start:start + 50000].copy()
+        source_batches = (source.iloc[start:start + 50000].copy()
+                         for start in range(0, len(source), 50000)) if isinstance(source, pd.DataFrame) else source
+        for chunk in source_batches:
             if _check_cancelled(task_id):
                 return None
 
@@ -476,6 +551,38 @@ def _process_blob_for_reprocess(
             target["cloud_origem"] = connection_code
             target["source_connection_id"] = connection_id
             target["_billing_period"] = str(billing_period)
+            # Gold facts are historical realized data. Keeping this explicit
+            # on every mapped batch prevents downstream Forecast from having
+            # to infer a null type after a future schema evolution.
+            target["tipo"] = "realizado"
+
+            # Synthetic Return rows are created on the destination contract,
+            # before financial business rules and classifications.
+            clone_count = 0
+            if clone_engine is not None:
+                target, clone_count = clone_engine.apply(target, str(billing_period))
+
+            # Compatibility calculation used by the imported attribution CSV.
+            # It is intentionally evaluated after cloning: reservation Usage
+            # uses the resolved On-Demand cost and its synthetic Return keeps
+            # the equal negative value.  This is a destination calculation,
+            # not a provider-header dependency.
+            if "TotalCostOnDemandBRL" in dest_col_names:
+                direct_cost = pd.to_numeric(target.get("BilledCost"), errors="coerce")
+                quantity = pd.to_numeric(target.get("ConsumedQuantity"), errors="coerce")
+                unit_price = pd.to_numeric(target.get("source_unit_price"), errors="coerce")
+                exchange = pd.to_numeric(target.get("source_exchange_rate"), errors="coerce")
+                calculated = unit_price * quantity * exchange.fillna(1)
+                # The historical rule uses billed cost for contractual events;
+                # for usage it uses unit price × quantity × exchange rate.
+                # If the provider did not supply a usable unit price (common
+                # for a reservation), use the clone-resolved billed value.
+                charge = target.get("ChargeCategory", pd.Series("", index=target.index)).astype(str).str.lower()
+                contractual = charge.isin({"purchase", "refund", "roundingadjustment"})
+                target["TotalCostOnDemandBRL"] = calculated.where(
+                    calculated.notna() & calculated.ne(0) & ~contractual,
+                    direct_cost,
+                )
 
             # Phase 2: Rules operate on the mapped destination contract.
             for r in brules:
@@ -493,13 +600,16 @@ def _process_blob_for_reprocess(
             if target.empty:
                 continue
 
-            chunks.append(target)
             rows_in_blob += len(target)
+            if batch_callback is not None:
+                batch_callback(target, len(chunk))
+            else:
+                chunks.append(target)
             # Persist heartbeat/progress while a large blob is being processed.
             # Previously the UI stayed on the same blob until the whole future
             # completed, which looked like a deadlock for 300k+ row files.
             progress_text = (
-                f"blob {billing_period}: {rows_in_blob:,} linhas processadas"
+                f"blob {billing_period}: {rows_in_blob:,} linhas processadas ({clone_count:,} Returns no batch)"
             )
             status = _inmemory_tasks.get(task_id)
             if status is not None:
@@ -512,10 +622,9 @@ def _process_blob_for_reprocess(
             """), {"phase": progress_text, "task_id": task_id})
             session.commit()
 
-        if not chunks:
+        if not chunks and batch_callback is None:
             return None
-
-        return pd.concat(chunks, ignore_index=True)
+        return pd.concat(chunks, ignore_index=True) if batch_callback is None else None
     finally:
         # Libera o Bronze filtrado e os chunks usados para compor este blob;
         # o DataFrame retornado continua vivo somente até ser escrito no
@@ -547,6 +656,7 @@ def _reprocess_destination_sync(
     from app.models.ingested_blob import IngestedBlob
     from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
     from app.models.rules import BusinessRule, ClassificationRule, Department, Project
+    from app.models.clone_rule import CloneRule, ClonePricePendencies
     from app.models.etl_task import EtlTask
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
@@ -554,6 +664,7 @@ def _reprocess_destination_sync(
 
     status = _inmemory_tasks.get(task_id, {})
     status["status"] = "RUNNING"
+    _append_reprocess_log(task_id, "Worker iniciou o reprocessamento")
     
     def _sync_db():
         """Write current status to EtlTask DB row so it survives API reloads."""
@@ -567,7 +678,13 @@ def _reprocess_destination_sync(
                 row.rows_destination = status.get("rows_destination", row.rows_destination)
                 row.current_blob = status.get("current_blob", row.current_blob)
                 row.phase = status.get("current_blob", row.phase)
-                row.result_json = {"table": status.get("table", ""), "rows_written": status.get("rows_destination", 0)}
+                previous = dict(row.result_json or {})
+                row.result_json = {
+                    **previous,
+                    "table": status.get("table", ""),
+                    "rows_written": status.get("rows_destination", 0),
+                    "error": status.get("error", ""),
+                }
                 if status.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
                     row.finished_at = func.now()
                 db2.commit()
@@ -614,6 +731,11 @@ def _reprocess_destination_sync(
                 all_blobs.append((row[0], cid, row[1]))
 
         total_blobs = len(all_blobs)
+        expected_rows_by_blob = {
+            blob_id: (session.get(IngestedBlob, blob_id).row_count or 0)
+            for blob_id, _, _ in all_blobs
+            if session.get(IngestedBlob, blob_id) is not None
+        }
         expected_input_rows = sum(
             (session.get(IngestedBlob, blob_id).row_count or 0)
             for blob_id, _, _ in all_blobs
@@ -623,6 +745,7 @@ def _reprocess_destination_sync(
         status["processed_blobs"] = 0
         status["rows_destination"] = 0
         _sync_db()
+        _append_reprocess_log(task_id, f"Inventário concluído: {total_blobs} blobs e {expected_input_rows:,} linhas de entrada", details={"blobs": total_blobs, "input_rows": expected_input_rows})
 
         # ── Pre-load connections, rules, and hierarchy for ALL connections BEFORE the thread pool ──
         # ORM objects are loaded in the main session and become detached after session.close().
@@ -630,13 +753,35 @@ def _reprocess_destination_sync(
         # worker threads can safely read them without any DB interaction.
         conn_map: dict[int, SourceConnection] = {}
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, proj_cache, hierarchy_cache)
+        clone_engines: dict[int, object] = {}
         unique_cids = set(cid for _, cid, _ in all_blobs)
-        output_cols = {'projeto', 'departamento', 'diretoria', 'centro_custo',
+        output_cols = {'departamento', 'diretoria', 'centro_custo',
                        'ambiente', 'custom_fields', 'subscription_rg', 'projeto_nome',
+                       'departamento_nivel_1', 'departamento_nivel_2',
+                       'departamento_nivel_3', 'departamento_nivel_4',
+                       'departamento_nivel_5',
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
                        'VL_CUSTO_FINAL_BRL'}
-        internal_cols_all = {"cloud_origem", "source_connection_id"}
+        # These columns are part of the Gold technical contract even when a
+        # batch generates no synthetic rows.  Without a stable contract the
+        # first no-clone batch created a narrower staging schema and the next
+        # clone-enabled batch failed with ``Mismatch in fields``.
+        internal_col_types = {
+            "source_record_id": "TEXT",
+            "clone_source_record_id": "TEXT",
+            "is_synthetic": "BOOLEAN",
+            "clone_rule_id": "BIGINT",
+            "clone_rule_version": "BIGINT",
+            "ondemand_reference_price": "DOUBLE",
+            "ondemand_reference_period": "TEXT",
+            "cloud_origem": "TEXT",
+            "source_connection_id": "BIGINT",
+            "_billing_period": "TEXT",
+            "tipo": "TEXT",
+        }
+        internal_cols_all = list(internal_col_types)
+        dest_col_types.update(internal_col_types)
 
         for cid in unique_cids:
             conn = session.get(SourceConnection, cid)
@@ -652,13 +797,9 @@ def _reprocess_destination_sync(
                 ).order_by(BusinessRule.priority)
             ).scalars().all()
 
-            # Load classification rules (this connection + global rules)
-            _crules = session.execute(
-                select(ClassificationRule).where(
-                    or_(ClassificationRule.connection_id == cid, ClassificationRule.connection_id.is_(None)),
-                    ClassificationRule.active == True,
-                ).order_by(ClassificationRule.priority)
-            ).scalars().all()
+            # Classification is a separate, versioned materialization. The
+            # financial base must not depend on organizational rules.
+            _crules = []
 
             # Business rules may create arbitrary destination columns (for
             # example ``realizado``). Keep those columns in the final Gold
@@ -734,6 +875,14 @@ def _reprocess_destination_sync(
                     _hierarchy_cache[did] = (dept, visited[-1], visited)
 
             conn_rules[cid] = (_brules, _crules, _dept_cache, _proj_cache, _hierarchy_cache)
+            clone_rules = session.execute(select(CloneRule).where(
+                CloneRule.destination_table_id == destination_table_id,
+                CloneRule.active == True,
+                or_(CloneRule.connection_id == cid, CloneRule.connection_id.is_(None)),
+            ).order_by(CloneRule.priority)).scalars().all()
+            if clone_rules:
+                from app.services.clone_engine import CloneEngine
+                clone_engines[cid] = CloneEngine(clone_rules, destination_table_id)
 
         # Close main session NOW — all ORM objects are detached but attributes remain accessible
         session.close()
@@ -741,18 +890,35 @@ def _reprocess_destination_sync(
         status["phase"] = "Processando batches"
         status["current_blob"] = "Aguardando primeiro batch"
         _sync_db()
+        _append_reprocess_log(task_id, "Processamento em batches iniciado")
 
         # Processa no máximo três blobs em memória. O código anterior guardava
         # os 28 DataFrames e depois fazia um pd.concat de toda a massa, o que
         # duplicava milhões de linhas em RAM e travava antes da escrita final.
         ordered_dest_cols = [r[0] for r in dest_col_meta]
+        stable_stage_cols = list(ordered_dest_cols)
+        stable_stage_cols.extend(
+            c for c in sorted(output_cols)
+            if c not in stable_stage_cols
+        )
+        stable_stage_cols.extend(
+            c for c in internal_cols_all
+            if c not in stable_stage_cols
+        )
+
         def _prepare_for_stage(frame: pd.DataFrame) -> pd.DataFrame:
-            keep_cols = [c for c in ordered_dest_cols if c in frame.columns]
-            keep_cols.extend(c for c in output_cols if c in frame.columns and c not in keep_cols)
-            keep_cols.extend(c for c in internal_cols_all if c in frame.columns and c not in keep_cols)
-            if "_billing_period" in frame.columns and "_billing_period" not in keep_cols:
-                keep_cols.append("_billing_period")
-            return frame[keep_cols].where(pd.notna(frame[keep_cols]), None)
+            prepared = frame.copy()
+            for column in stable_stage_cols:
+                if column not in prepared.columns:
+                    if column == "tipo":
+                        prepared[column] = "realizado"
+                    elif column == "is_synthetic":
+                        prepared[column] = False
+                    else:
+                        prepared[column] = None
+            return prepared[stable_stage_cols].where(
+                pd.notna(prepared[stable_stage_cols]), None
+            )
 
         temp_name: str | None = None
         staged_rows = 0
@@ -765,11 +931,11 @@ def _reprocess_destination_sync(
                 chunk = prepared.iloc[start:start + 100_000]
                 if temp_name is None:
                     temp_name = iceberg.write_destination_staged(
-                        phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
+                        phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types, namespace="financial_base",
                     )
                 else:
                     iceberg.append_to_staged(
-                        temp_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
+                        temp_name, chunk, partition_col="_billing_period", column_types=dest_col_types, namespace="financial_base",
                     )
                 staged_rows += len(chunk)
             del prepared
@@ -778,102 +944,105 @@ def _reprocess_destination_sync(
         # temporary table. Full rebuilds never read the old Gold table.
         if billing_periods and connection_ids and not replace_existing:
             try:
-                existing_df = iceberg.read_destination(phys_name)
-                keep_mask = ~(
-                    existing_df["_billing_period"].isin(billing_periods)
-                    & existing_df["source_connection_id"].isin(connection_ids)
-                )
-                existing_df = existing_df[keep_mask]
-                if not existing_df.empty:
-                    _stage_frame(existing_df)
-                del existing_df
+                for existing_batch in iceberg.read_destination_batches(
+                    phys_name, set(billing_periods), set(connection_ids),
+                    batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")), namespace="financial_base",
+                ):
+                    _stage_frame(existing_batch)
+                    del existing_batch
             except Exception as merge_err:
                 if "NoSuchTableException" not in type(merge_err).__name__ and "does not exist" not in str(merge_err).lower():
                     raise RuntimeError(f"Falha ao preservar dados existentes: {merge_err}") from merge_err
 
-        # ── Phase 1: process in parallel; stage each finished blob immediately ──
+        # ── Phase 1: process one blob and one batch at a time ──
         total_rows_processed = 0
         errors: list[str] = []
-        progress_lock = Lock()
         processed = 0
+        import psutil
+        memory_limit = int(os.getenv("REPROCESS_MEMORY_LIMIT_MB", "4096")) * 1024 * 1024
 
-        # Configurable: increase for more I/O parallelism (each thread = 1 DB connection)
-        max_workers = 3
+        def _memory_exceeded() -> bool:
+            return psutil.Process(os.getpid()).memory_info().rss >= memory_limit
 
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="reprocess-blob") as executor:
-            future_map: dict = {}
-            for blob_id, cid, bperiod in all_blobs:
+        for blob_id, cid, bperiod in all_blobs:
+            if _check_cancelled(task_id):
+                status["status"] = "CANCELLED"
+                return {"success": False, "error": "Cancelado", "rows_written": 0}
+            if _memory_exceeded():
+                raise RuntimeError(
+                    f"Limite de memoria do worker excedido antes do blob {blob_id} "
+                    f"({memory_limit // (1024 * 1024)} MB); Gold anterior preservada"
+                )
+            try:
                 if cid not in conn_rules:
-                    with progress_lock:
-                        processed += 1
-                        status["processed_blobs"] = processed
-                        _sync_db()
+                    processed += 1
+                    status["processed_blobs"] = processed
+                    _sync_db()
                     continue
-
                 brules, crules, dept_cache, proj_cache, hierarchy_cache = conn_rules[cid]
                 cmapps = [m for m in all_mappings if m.source_connection_id == cid]
                 if not cmapps:
-                    with progress_lock:
-                        processed += 1
-                        status["processed_blobs"] = processed
-                        _sync_db()
+                    processed += 1
+                    status["processed_blobs"] = processed
+                    _sync_db()
                     continue
-
                 conn = conn_map[cid]
-                future = executor.submit(
-                    _process_blob_for_reprocess,
+
+                blob_input_rows = 0
+                blob_output_rows = 0
+
+                def _write_batch(frame, source_rows):
+                    nonlocal total_rows_processed
+                    nonlocal blob_input_rows, blob_output_rows
+                    _stage_frame(frame)
+                    blob_input_rows += source_rows
+                    blob_output_rows += len(frame)
+                    total_rows_processed += len(frame)
+                    status["rows_destination"] = total_rows_processed
+                    status["current_blob"] = (
+                        f"batch: blob {processed + 1}/{total_blobs}, {bperiod}, "
+                        f"{total_rows_processed:,} linhas processadas"
+                    )
+                    _sync_db()
+
+                _process_blob_for_reprocess(
                     blob_id, cid, conn.code, bperiod,
                     brules, crules, cmapps, dest_col_names,
                     dept_cache, proj_cache, hierarchy_cache,
                     output_cols, task_id,
-                    None,
+                    clone_engine=clone_engines.get(cid), batch_callback=_write_batch,
                 )
-                future_map[future] = (blob_id, cid, bperiod)
-
-            for future in as_completed(future_map):
-                blob_id, cid, bperiod = future_map[future]
-
-                if _check_cancelled(task_id):
-                    status["status"] = "CANCELLED"
-                    # Cancel any futures that haven't started yet
-                    for f in future_map:
-                        f.cancel()
-                    return {"success": False, "error": "Cancelado", "rows_written": 0}
-
-                try:
-                    df_result = future.result()
-
-                    with progress_lock:
-                        processed += 1
-                        if df_result is not None and not df_result.empty:
-                            total_rows_processed += len(df_result)
-                            status["current_blob"] = (
-                                f"gravando staging: blob {processed}/{total_blobs} "
-                                f"({total_rows_processed} linhas processadas)"
-                            )
-                            _sync_db()
-                            _stage_frame(df_result)
-                            del df_result
-                        status["processed_blobs"] = processed
-                        status["rows_destination"] = total_rows_processed
-                        status["current_blob"] = f"blob {processed}/{total_blobs}: {bperiod} ({total_rows_processed} linhas acumuladas)"
-                        _sync_db()
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    with progress_lock:
-                        processed += 1
-                        error_msg = f"Blob {blob_id} ({bperiod}): {e}"
-                        errors.append(error_msg)
-                        status["processed_blobs"] = processed
-                        status["current_blob"] = error_msg
-                        _sync_db()
+                expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
+                if blob_input_rows != expected_blob_rows or blob_output_rows < expected_blob_rows:
+                    raise RuntimeError(
+                        f"Contagem divergente no blob {blob_id} ({bperiod}): "
+                        f"esperado {expected_blob_rows}, lido {blob_input_rows}, "
+                        f"escrito {blob_output_rows}"
+                    )
+                processed += 1
+                status["processed_blobs"] = processed
+                status["current_blob"] = f"blob {processed}/{total_blobs}: {bperiod} ({total_rows_processed:,} linhas acumuladas)"
+                _sync_db()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                error_msg = f"Blob {blob_id} ({bperiod}): {e}"
+                errors.append(error_msg)
+                # A partial staging table must never continue after a blob
+                # failure. It would hide missing rows behind a later total.
+                status["status"] = "FAILED"
+                status["error"] = error_msg
+                status["current_blob"] = error_msg
+                _sync_db()
+                if temp_name:
+                    iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
+                return {"success": False, "error": error_msg, "rows_written": total_rows_processed}
 
         if errors:
             status.setdefault("errors", []).extend(errors)
         if total_rows_processed == 0:
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name)
+                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
             if errors:
                 status["status"] = "FAILED"
                 status["error"] = errors[0]
@@ -884,7 +1053,7 @@ def _reprocess_destination_sync(
             status["current_blob"] = "Nenhum dado processado"
             return {"success": True, "rows_written": 0, "table": dest_info.name}
 
-        if total_rows_processed != expected_input_rows:
+        if total_rows_processed < expected_input_rows:
             msg = (
                 f"Contagem de entrada/saída divergente: entrada {expected_input_rows:,}, "
                 f"saída {total_rows_processed:,}. Reprocessamento abortado; destino anterior preservado."
@@ -894,26 +1063,57 @@ def _reprocess_destination_sync(
             status["current_blob"] = msg
             status.setdefault("errors", []).append(msg)
             _sync_db()
+            _append_reprocess_log(task_id, msg, level="ERROR", details={"input_rows": expected_input_rows, "output_rows": total_rows_processed})
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name)
+                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
             return {"success": False, "error": msg, "rows_written": 0}
 
+        # Price gaps do not invalidate a reprocess; they remain auditable.
+        for engine in clone_engines.values():
+            for pending in engine.pendencies:
+                session.add(ClonePricePendencies(**pending))
+        session.commit()
         try:
             status["current_blob"] = f"substituindo tabela MODELO FOCUS (swap atomico)..."
             _sync_db()
+            _append_reprocess_log(task_id, "Validação concluída; iniciando swap atômico da Gold")
 
-            total_written = iceberg.swap_staged_table(phys_name, temp_name)
+            total_written = iceberg.swap_staged_table(phys_name, temp_name, namespace="financial_base")
+            from app.models.classification import FinancialBaseVersion
+            old_base = session.query(FinancialBaseVersion).filter(
+                FinancialBaseVersion.destination_table_id == destination_table_id,
+                FinancialBaseVersion.status == "ACTIVE",
+            ).first()
+            if old_base:
+                old_base.status = "SUPERSEDED"
+            base = FinancialBaseVersion(destination_table_id=destination_table_id,
+                physical_name=phys_name, row_count=total_written, status="ACTIVE",
+                source_task_id=task_id, periods=billing_periods or [], connection_ids=connection_ids or [])
+            try:
+                base.iceberg_snapshot_id = str(iceberg.get_catalog().load_table(("financial_base", phys_name)).current_snapshot().snapshot_id)
+            except Exception:
+                pass
+            session.add(base); session.commit()
+            # Finish financial publication first; expensive classification is
+            # independently queued and can never block ingestion.
+            from app.services.classification_service import create_version
+            cv_id = create_version(destination_table_id, "FULL", task_id)
+            session.add(EtlTask(task_type="classification_build", status="QUEUED",
+                destination_table_id=destination_table_id,
+                result_json={"classification_version_id": cv_id, "financial_base_version_id": base.id}, errors=[]))
+            session.commit()
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
             _sync_db()
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name)
+                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
             raise stage_err
 
         status["status"] = "COMPLETED"
         status["rows_destination"] = total_written
         status["current_blob"] = f"Concluido: {total_written} linhas, {len(all_blobs)} blobs processados"
         _sync_db()
+        _append_reprocess_log(task_id, "Reprocessamento concluído e Gold publicada", details={"rows_written": total_written, "blobs_processed": len(all_blobs), "table": dest_info.name})
         return {"success": True, "rows_written": total_written, "table": dest_info.name}
 
     except Exception as e:
@@ -921,13 +1121,14 @@ def _reprocess_destination_sync(
         status["status"] = "FAILED"; status["error"] = str(e); status["current_blob"] = f"Erro: {e}"
         traceback.print_exc()
         _sync_db()
+        _append_reprocess_log(task_id, f"Falha no reprocessamento: {e}", level="ERROR")
         return {"success": False, "error": str(e), "rows_written": 0}
     finally:
         # Keep the previous Gold table intact whenever staging did not reach
         # the atomic swap, and release worker-held pandas objects promptly.
         try:
             if locals().get("temp_name") and status.get("status") != "COMPLETED":
-                iceberg.cleanup_staged_table(temp_name)
+                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
         except Exception:
             pass
         try:
@@ -946,6 +1147,17 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     """Create a reprocess task in QUEUED status. A separate worker process picks it up."""
     from app.models.etl_task import EtlTask
     from sqlalchemy import insert
+
+    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
+    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
+    try:
+        worker_pid = int(open(pid_file).read().strip())
+        os.kill(worker_pid, 0)
+        worker_age = __import__("time").time() - os.path.getmtime(heartbeat)
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        worker_age = 999
+    if worker_age > 15:
+        raise HTTPException(status_code=503, detail="Worker ETL indisponível; a tarefa não foi criada")
 
     active = await db.execute(
         select(EtlTask.id).where(
@@ -968,7 +1180,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             destination_table_id=body.destination_table_id,
             connection_ids=body.connection_ids,
             billing_periods=body.billing_periods,
-            result_json={"replace_existing": body.replace_existing},
+            result_json={"replace_existing": body.replace_existing, "event_log": [{"at": datetime.now(timezone.utc).isoformat(), "level": "INFO", "message": "Reprocessamento colocado na fila", "details": {"connection_ids": body.connection_ids, "billing_periods": body.billing_periods, "replace_existing": body.replace_existing}}]},
             total_blobs=0,
             processed_blobs=0,
             rows_raw=0,
@@ -983,33 +1195,57 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     return {"task_id": task_id, "message": "Reprocess queued — worker will pick it up"}
 
 
+@router.get("/reprocess-history")
+async def get_reprocess_history(limit: int = 30):
+    """Return completed and active reprocess runs with their persisted log."""
+    from app.database import SyncSession
+    from app.models.etl_task import EtlTask
+    session = SyncSession()
+    try:
+        rows = session.execute(
+            select(EtlTask).where(EtlTask.task_type == "reprocess")
+            .order_by(EtlTask.started_at.desc()).limit(max(1, min(limit, 100)))
+        ).scalars().all()
+        return [{
+            "id": row.id, "status": row.status, "destination_table_id": row.destination_table_id,
+            "connection_ids": row.connection_ids or [], "billing_periods": row.billing_periods or [],
+            "total_blobs": row.total_blobs, "processed_blobs": row.processed_blobs,
+            "rows_written": row.rows_destination, "phase": row.phase or row.current_blob or "",
+            "table": (row.result_json or {}).get("table", ""), "error": (row.result_json or {}).get("error", ""),
+            "errors": row.errors or [], "event_log": (row.result_json or {}).get("event_log", []),
+            "started_at": row.started_at, "finished_at": row.finished_at,
+        } for row in rows]
+    finally:
+        session.close()
+
+
 @router.get("/reprocess-status/{task_id}")
 async def get_reprocess_status(task_id: int):
-    """Get the status of a reprocess task (in-memory, with DB fallback)."""
+    """Get persisted worker status, using memory only for legacy tasks."""
     from app.services.task_runner import _inmemory_tasks
-    status = _inmemory_tasks.get(task_id)
+    status = None
+    try:
+        from app.database import SyncSession
+        from app.models.etl_task import EtlTask
+        db = SyncSession()
+        row = db.get(EtlTask, task_id)
+        db.close()
+        if row:
+            status = {
+                "id": row.id,
+                "status": row.status,
+                "current_blob": row.current_blob or row.phase or "",
+                "total_blobs": row.total_blobs,
+                "processed_blobs": row.processed_blobs,
+                "rows_destination": row.rows_destination,
+                "table": (row.result_json or {}).get("table", ""),
+                "connection_ids": row.connection_ids or [],
+                "error": (row.result_json or {}).get("error", "") or (row.phase if row.status == "FAILED" else ""),
+            }
+    except Exception:
+        pass
     if not status:
-        # Fallback to DB (task may have survived an API reload)
-        try:
-            from app.database import SyncSession
-            from app.models.etl_task import EtlTask
-            db = SyncSession()
-            row = db.get(EtlTask, task_id)
-            db.close()
-            if row:
-                status = {
-                    "id": row.id,
-                    "status": row.status,
-                    "current_blob": row.current_blob or row.phase or "",
-                    "total_blobs": row.total_blobs,
-                    "processed_blobs": row.processed_blobs,
-                    "rows_destination": row.rows_destination,
-                    "table": (row.result_json or {}).get("table", ""),
-                    "connection_ids": row.connection_ids or [],
-                    "error": "",
-                }
-        except Exception:
-            pass
+        status = _inmemory_tasks.get(task_id)
     if not status:
         raise HTTPException(status_code=404, detail="Task not found")
     tb = status.get("total_blobs", 0)
@@ -1053,6 +1289,7 @@ async def cancel_reprocess(task_id: int):
             row.finished_at = sa_func.now()
             db.commit()
             db.close()
+            _append_reprocess_log(task_id, "Cancelado pelo usuário", level="WARNING")
             return {"message": "Cancel signal sent", "task_id": task_id}
         db.close()
     except Exception:

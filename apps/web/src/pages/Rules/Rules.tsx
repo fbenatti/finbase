@@ -226,7 +226,8 @@ export default function Rules() {
   });
   const updateCondition = (i: number, key: keyof CondRow, val: string) => {
     const updated = [...form.conditions];
-    updated[i][key] = val;
+    if (key === "logic") updated[i][key] = val === "OR" ? "OR" : "AND";
+    else updated[i][key] = val;
     setForm({ ...form, conditions: updated });
   };
 

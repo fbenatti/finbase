@@ -42,7 +42,7 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
     { label: "Custo por período", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
     { label: "Custo por região", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
     { label: "Custo por origem e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
-    { label: "Departamento / projeto / origem por mês", sql: 'SELECT "departamento", "projeto_nome", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "departamento", "projeto_nome", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
+    { label: "Departamento / origem por mês", sql: 'SELECT "departamento", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "departamento", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
   ],
 };
 

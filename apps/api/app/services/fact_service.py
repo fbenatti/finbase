@@ -46,9 +46,13 @@ JSON_TO_FACT_MAP = {
     "ModeloAI": "modelo_ai",
     "department_name": "department_name",
     "department_path": "department_path",
-    "projeto": "projeto",
     "centro_custo": "centro_custo",
     "ambiente": "ambiente",
+    "departamento_nivel_1": "departamento_nivel_1",
+    "departamento_nivel_2": "departamento_nivel_2",
+    "departamento_nivel_3": "departamento_nivel_3",
+    "departamento_nivel_4": "departamento_nivel_4",
+    "departamento_nivel_5": "departamento_nivel_5",
     "DiretorResp": "diretor_resp",
 }
 

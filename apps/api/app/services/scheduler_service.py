@@ -52,9 +52,15 @@ def _run_etl_job(connection_id: int, schedule_id: int, schedule_name: str) -> No
         # Run the ETL synchronously
         _run_etl_sync(task_id, connection_id, None, None)
 
+        session.refresh(task)
+
         # ── Auto-reprocess destination tables ──
         if sched and sched.destination_reprocess:
             _auto_reprocess_destinations(connection_id, session)
+            forecast_config_id = (sched.config_json or {}).get("forecast_config_id") if sched else None
+            run_forecast_after = bool((sched.config_json or {}).get("forecast_after_ingestion")) if sched else False
+            if run_forecast_after and forecast_config_id and (task.rows_raw or 0) > 0:
+                _queue_forecast_run(int(forecast_config_id), task.id, session)
 
     except Exception as e:
         logger.error("Scheduled ETL [%s] failed: %s", schedule_name, e)
@@ -112,6 +118,28 @@ def _auto_reprocess_destinations(connection_id: int, sync_session=None) -> int:
     finally:
         if close_session and session:
             session.close()
+
+
+def _queue_forecast_run(config_id: int, source_task_id: int, session) -> int | None:
+    """Queue a forecast only after a scheduled ETL ingested rows."""
+    from app.models.forecast import ForecastConfig, ForecastRun
+    from app.models.etl_task import EtlTask
+    from sqlalchemy import select
+    config = session.get(ForecastConfig, config_id)
+    if not config or not config.active:
+        return None
+    active = session.execute(select(ForecastRun.id).where(ForecastRun.forecast_config_id == config_id, ForecastRun.status.in_(["QUEUED", "RUNNING"]))).scalar_one_or_none()
+    if active:
+        logger.info("Forecast %s already active; scheduled trigger skipped", active)
+        return active
+    run = ForecastRun(forecast_config_id=config_id, config_version=config.version, trigger_type="POST_INGESTION", source_etl_task_id=source_task_id, cutoff_date=datetime.now(timezone.utc).date().isoformat())
+    session.add(run)
+    session.flush()
+    task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id, result_json={"forecast_run_id": run.id, "source_etl_task_id": source_task_id}, errors=[])
+    session.add(task)
+    session.commit()
+    logger.info("Queued forecast run %d after ETL task %d", run.id, source_task_id)
+    return run.id
 
 
 def _register_schedule(scheduler: AsyncIOScheduler, schedule_row, sync_session) -> bool:

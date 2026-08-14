@@ -59,6 +59,7 @@ export default function Extraction() {
   const [schedForm, setSchedForm] = useState({
     name: "", connection_id: 0, cron_expression: "0 3 * * *",
     timezone: "America/Sao_Paulo", destination_reprocess: true, active: true,
+    forecast_after_ingestion: false, forecast_config_id: "",
   });
   const [schedRunning, setSchedRunning] = useState<Set<number>>(new Set());
 
@@ -157,22 +158,23 @@ export default function Extraction() {
   // ── Schedule handlers ──
   const openNewSched = () => {
     setSchedEditing(null);
-    setSchedForm({ name: "", connection_id: connId as number || 0, cron_expression: "0 3 * * *", timezone: "America/Sao_Paulo", destination_reprocess: true, active: true });
+    setSchedForm({ name: "", connection_id: connId as number || 0, cron_expression: "0 3 * * *", timezone: "America/Sao_Paulo", destination_reprocess: true, active: true, forecast_after_ingestion: false, forecast_config_id: "" });
     setSchedDialogOpen(true);
   };
 
   const openEditSched = (s: ScheduledTask) => {
     setSchedEditing(s);
-    setSchedForm({ name: s.name, connection_id: s.connection_id, cron_expression: s.cron_expression, timezone: s.timezone, destination_reprocess: s.destination_reprocess, active: s.active });
+    const cfg = s.config_json || {};
+    setSchedForm({ name: s.name, connection_id: s.connection_id, cron_expression: s.cron_expression, timezone: s.timezone, destination_reprocess: s.destination_reprocess, active: s.active, forecast_after_ingestion: Boolean(cfg.forecast_after_ingestion), forecast_config_id: String(cfg.forecast_config_id || "") });
     setSchedDialogOpen(true);
   };
 
   const saveSched = async () => {
     try {
       if (schedEditing) {
-        await updateSchedule(schedEditing.id, schedForm);
+        await updateSchedule(schedEditing.id, { ...schedForm, config_json: { forecast_after_ingestion: schedForm.forecast_after_ingestion, forecast_config_id: schedForm.forecast_config_id ? Number(schedForm.forecast_config_id) : null } });
       } else {
-        await createSchedule(schedForm);
+        await createSchedule({ ...schedForm, config_json: { forecast_after_ingestion: schedForm.forecast_after_ingestion, forecast_config_id: schedForm.forecast_config_id ? Number(schedForm.forecast_config_id) : null } });
       }
       setSchedDialogOpen(false);
       loadSchedules();
@@ -926,6 +928,14 @@ export default function Extraction() {
                 onChange={e => setSchedForm({ ...schedForm, destination_reprocess: e.target.checked })} />}
               label="Auto-reprocessar tabela destino apos extracao"
             />
+            <FormControlLabel
+              control={<Switch checked={schedForm.forecast_after_ingestion}
+                onChange={e => setSchedForm({ ...schedForm, forecast_after_ingestion: e.target.checked })} />}
+              label="Executar Forecast após ingestão e reprocessamento"
+            />
+            {schedForm.forecast_after_ingestion && <TextField label="ID da configuração Forecast" type="number" value={schedForm.forecast_config_id}
+              onChange={e => setSchedForm({ ...schedForm, forecast_config_id: e.target.value })}
+              helperText="Crie a configuração no menu Forecast e informe o ID exibido." />}
             <FormControlLabel
               control={<Switch checked={schedForm.active}
                 onChange={e => setSchedForm({ ...schedForm, active: e.target.checked })} />}

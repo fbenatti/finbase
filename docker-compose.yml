@@ -28,6 +28,7 @@ services:
       - "8000:8000"
     volumes:
       - ./apps/api/app:/app/app
+      - ./projetos_download.csv:/app/projetos_download.csv:ro
     depends_on:
       postgres:
         condition: service_healthy

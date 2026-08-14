@@ -8,7 +8,7 @@ class EtlTask(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     connection_id = Column(Integer, ForeignKey("source_connection.id"), nullable=True)  # nullable for reprocess tasks
     destination_table_id = Column(Integer, ForeignKey("destination_table.id"), nullable=True)  # reprocess target
-    task_type = Column(String(20), nullable=False, default="extraction")  # 'extraction' or 'reprocess'
+    task_type = Column(String(40), nullable=False, default="extraction")
     # COMPLETED_WITH_ERRORS is longer than the old VARCHAR(20) limit.
     status = Column(String(40), nullable=False, default="RUNNING")
     total_blobs = Column(Integer, nullable=False, default=0)

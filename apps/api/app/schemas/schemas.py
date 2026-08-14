@@ -250,7 +250,10 @@ class ClassificationConditionItem(BaseModel):
 class ClassificationRuleCreate(BaseModel):
     connection_id: int | None = None
     destination_table_id: int | None = None
-    department_id: int | None = None
+    # A classification is an allocation to an organizational object.  Rules
+    # without a department can populate a free-text project but cannot provide
+    # a reliable hierarchy in Gold, so they are not a valid new rule.
+    department_id: int
     project_id: int | None = None
     name: str
     source_field: str
@@ -311,6 +314,26 @@ class CsvImportResult(BaseModel):
     departments_created: int
     projects_created: int
     classification_rules_created: int
+    errors: list[str] = []
+
+
+class AzureProjectRulesImportRequest(BaseModel):
+    """Location of the project export, as seen by the API process."""
+    projetos_path: str = "/app/projetos_download.csv"
+
+
+class AzureProjectRulesImportResult(BaseModel):
+    source_rows: int
+    unique_rules: int
+    previous_import_rules_removed: int = 0
+    classification_rules_created: int
+    subscription_rules_created: int = 0
+    resource_group_rules_created: int = 0
+    skipped_no_department: int
+    skipped_ambiguous_department: int
+    skipped_existing: int
+    skipped_no_source_match: int = 0
+    skipped_redundant_resource_group: int = 0
     errors: list[str] = []
 
 

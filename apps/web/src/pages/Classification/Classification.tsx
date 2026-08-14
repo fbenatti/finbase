@@ -9,6 +9,7 @@ import { Add, Edit, Delete } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule,
+  importAzureProjectRules,
   getDepartments, Department,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
@@ -19,7 +20,7 @@ import SortableTable from "../../components/SortableTable";
 interface CondEntry { field: string; operator: string; values: string; logic: string }
 
 const emptyForm = {
-  name: "", target_field: "projeto",
+  name: "", target_field: "departamento",
   department_id: null as number | null,
   conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] as CondEntry[],
   priority: 0, active: true,
@@ -32,6 +33,8 @@ export default function Classification() {
   const [selectedDestId, setSelectedDestId] = useState<number | "">("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [importingAzure, setImportingAzure] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -92,6 +95,10 @@ export default function Classification() {
   };
 
   const save = async () => {
+    if (!form.department_id) {
+      setError("Selecione o departamento responsável pela classificação.");
+      return;
+    }
     const destId = selectedDestId === "" ? null : selectedDestId as number;
 
     const body: Record<string, unknown> = {
@@ -99,7 +106,7 @@ export default function Classification() {
       destination_table_id: destId,
       department_id: form.department_id,
       name: form.name,
-      target_field: "projeto",
+      target_field: "departamento",
       priority: form.priority, active: form.active,
       pattern_type: "multi_condition",
       match_value: form.department_id
@@ -138,6 +145,24 @@ export default function Classification() {
     }
   };
 
+  const importAzureRules = async () => {
+    try {
+      setImportingAzure(true);
+      setError("");
+      const result = await importAzureProjectRules();
+      setSuccess(
+        `Importação Azure concluída: ${result.classification_rules_created} criadas, ` +
+        `${result.skipped_existing} já existentes, ${result.skipped_no_department} sem departamento e ` +
+        `${result.skipped_ambiguous_department} ambíguas.`,
+      );
+      load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Falha ao importar regras Azure");
+    } finally {
+      setImportingAzure(false);
+    }
+  };
+
   const addCondition = () => setForm({
     ...form, conditions: [...form.conditions, { field: "", operator: "=", values: "", logic: "AND" }],
   });
@@ -156,13 +181,18 @@ export default function Classification() {
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
         <Typography variant="h4">Regras de Classificação</Typography>
-        <Button
-          variant="contained" startIcon={<Add />}
-          onClick={openNew}
-          disabled={!selectedDestId}
-        >
-          Nova
-        </Button>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Button variant="outlined" onClick={importAzureRules} disabled={importingAzure}>
+            {importingAzure ? "Importando Azure..." : "Importar Azure CSV"}
+          </Button>
+          <Button
+            variant="contained" startIcon={<Add />}
+            onClick={openNew}
+            disabled={!selectedDestId}
+          >
+            Nova
+          </Button>
+        </Box>
       </Box>
 
       {/* ── Primary: Tabela Destino (mandatory) ── */}
@@ -192,6 +222,7 @@ export default function Classification() {
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
 
       {!selectedDestId ? (
         <Alert severity="info" sx={{ mb: 2 }}>

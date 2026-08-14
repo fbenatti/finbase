@@ -1,14 +1,16 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Box, Typography, Button, Paper, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
-  Alert, CircularProgress, Tooltip, Divider, List, ListItemButton,
+  Alert, CircularProgress, Tooltip, Divider, List, ListItemButton, Menu,
   ListItemIcon, ListItemText, Collapse, Grid,
 } from "@mui/material";
 import {
   Add, Edit, Delete, ExpandMore, ExpandLess,
   Business, AccountTree, UploadFile, CloudDownload,
+  AccountBalance,
 } from "@mui/icons-material";
 import {
   getDepartments, createDepartment, updateDepartment, deleteDepartment,
@@ -32,6 +34,7 @@ const emptyProjForm = {
 };
 
 export default function Departments() {
+  const navigate = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +57,7 @@ export default function Departments() {
 
   // Import
   const [importing, setImporting] = useState(false);
+  const [financialMenu, setFinancialMenu] = useState<HTMLElement | null>(null);
 
   const load = async () => {
     try {
@@ -247,6 +251,9 @@ export default function Departments() {
           <Tooltip title="Adicionar projeto">
             <IconButton size="small" onClick={() => openNewProj(dept.id)}><AccountTree fontSize="small" /></IconButton>
           </Tooltip>
+          <Tooltip title="Cadastro financeiro deste departamento">
+            <IconButton size="small" onClick={() => navigate(`/departments/financial?department_id=${dept.id}`)}><AccountBalance fontSize="small" /></IconButton>
+          </Tooltip>
           <IconButton size="small" onClick={() => openEditDept(dept)}><Edit fontSize="small" /></IconButton>
           <IconButton size="small" onClick={() => removeDept(dept.id)} color="error"><Delete fontSize="small" /></IconButton>
         </Paper>
@@ -288,6 +295,15 @@ export default function Departments() {
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 1 }}>
+          <Button variant="outlined" startIcon={<AccountBalance />} onClick={(e) => setFinancialMenu(e.currentTarget)}>
+            Cadastro financeiro
+          </Button>
+          <Menu anchorEl={financialMenu} open={Boolean(financialMenu)} onClose={() => setFinancialMenu(null)}>
+            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=orcamento"); }}>Importar orçamento</MenuItem>
+            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=forecast-manual"); }}>Importar forecast manual</MenuItem>
+            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=saldo-contratual"); }}>Importar saldo contratual</MenuItem>
+            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial"); }}>Download modelo e editar cadastro</MenuItem>
+          </Menu>
           <Button variant="outlined" startIcon={importing ? <CircularProgress size={18} /> : <UploadFile />}
             onClick={handleImport} disabled={importing}>
             {importing ? "Importando..." : "Importar CSV"}

@@ -132,7 +132,7 @@ export default function PipelineBuilder() {
       // Enriched output column set — these always live in zone 4 (rightmost)
       // ──────────────────────────────────────────────────────────────────
       const enrichedCols = new Set<string>([
-        "projeto", "diretoria", "departamento", "centro_custo", "ambiente",
+        "diretoria", "departamento", "centro_custo", "ambiente",
         "CostBRL", "Tax_Base", "Tax_Marketplace", "VL_CUSTO_FINAL_BRL",
         "Diretoria", "ModeloAI", "custom_fields",
       ]);
@@ -166,9 +166,6 @@ export default function PipelineBuilder() {
       const usedFocusCols = new Set<string>([
         ...mappedDestCols, ...classifiedFields, ...ruledFields,
       ]);
-
-      // projeto is always an enriched output, never a FOCUS input column.
-      usedFocusCols.delete("projeto");
 
       // ──────────────────────────────────────────────────────────────────
       // ZONE 2: FOCUS — destination table columns that are referenced
@@ -380,7 +377,7 @@ export default function PipelineBuilder() {
         newEdges.push(newEdge(`e-${gId}-in`, `foc-${focusCol}`, gId, "#4caf50"));
 
         // Output edges: to enriched columns
-        for (const enrichedCol of ["projeto", "diretoria", "departamento", "centro_custo", "ambiente"]) {
+        for (const enrichedCol of ["diretoria", "departamento", "centro_custo", "ambiente"]) {
           if (enrichedCols.has(enrichedCol)) {
             newEdges.push(newEdge(`e-${gId}-to-${enrichedCol}`, gId, `enr-${enrichedCol}`, "#4caf50", "4 2"));
           }
