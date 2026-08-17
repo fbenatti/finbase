@@ -11,9 +11,11 @@ from __future__ import annotations
 import io
 import logging
 import re
+import warnings
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
@@ -36,48 +38,102 @@ _CSV_CANDIDATES = [
 _ALLOWED_TYPES = {"TEXT", "INTEGER", "DOUBLE", "BOOLEAN", "DATE"}
 
 
-def parse_csv_bytes(raw_bytes: bytes) -> pd.DataFrame:
-    """Parse raw CSV bytes using the same heuristic as AzureExtractor."""
-    encodings = ["utf-8-sig", "utf-8", "utf-16", "latin-1"]
+def _try_read_csv(
+    raw_bytes: bytes,
+    enc: str,
+    sep: str,
+    dec: str,
+    thou: str | None,
+    skiprows: list[int] | int | None = None,
+) -> pd.DataFrame | None:
+    try:
+        kwargs: dict[str, Any] = {
+            "encoding": enc,
+            "sep": sep,
+            "low_memory": False,
+            "on_bad_lines": "skip",
+        }
+        if dec:
+            kwargs["decimal"] = dec
+        if thou:
+            kwargs["thousands"] = thou
+        if skiprows is not None:
+            kwargs["skiprows"] = skiprows
+        return pd.read_csv(io.BytesIO(raw_bytes), **kwargs)
+    except (UnicodeDecodeError, UnicodeError, pd.errors.ParserError, ValueError):
+        return None
 
-    def _try_read(enc: str, sep: str, dec: str, thou: str | None) -> pd.DataFrame | None:
-        try:
-            kwargs: dict[str, Any] = {"encoding": enc, "sep": sep, "low_memory": False}
-            if dec:
-                kwargs["decimal"] = dec
-            if thou:
-                kwargs["thousands"] = thou
-            return pd.read_csv(io.BytesIO(raw_bytes), **kwargs)
-        except (UnicodeDecodeError, UnicodeError, pd.errors.ParserError):
-            return None
+
+def _find_header_row(raw_bytes: bytes, enc: str, sep: str) -> int | None:
+    """Find the first data row that looks like a FOCUS/CSV header.
+
+    Some providers (e.g. IBM Cloud) prefix the real data with metadata rows.
+    We scan the first lines and return the index of the first line whose number
+    of fields matches the maximum field count seen in the file.
+    """
+    try:
+        text = raw_bytes.decode(enc)
+    except (UnicodeDecodeError, UnicodeError):
+        return None
+
+    lines = text.splitlines()
+    if not lines:
+        return None
+
+    counts = []
+    quoted = False
+    for line in lines:
+        # Very fast CSV field count respecting quoted commas.
+        n_fields = 1
+        for ch in line:
+            if ch == '"':
+                quoted = not quoted
+            elif ch == sep and not quoted:
+                n_fields += 1
+        counts.append(n_fields)
+
+    if not counts:
+        return None
+
+    max_fields = max(counts)
+    # Header must be within the first 10 rows and have the max number of fields.
+    for idx, count in enumerate(counts[:10]):
+        if count == max_fields and max_fields >= 2:
+            return idx
+    return None
+
+
+def parse_csv_bytes(raw_bytes: bytes) -> pd.DataFrame:
+    """Parse raw CSV bytes with robust encoding/separator/header detection."""
+    encodings = ["utf-8-sig", "utf-8", "utf-16", "latin-1"]
 
     best_df: pd.DataFrame | None = None
     best_cols = 0
+    best_skiprows: list[int] | int | None = None
+
     for enc in encodings:
         for sep, dec, thou in _CSV_CANDIDATES:
-            df = _try_read(enc, sep, dec, thou)
+            # Try without skipping rows first.
+            df = _try_read_csv(raw_bytes, enc, sep, dec, thou)
             if df is not None and len(df.columns) > best_cols:
                 best_df = df
                 best_cols = len(df.columns)
+                best_skiprows = None
 
-    if best_df is not None:
-        df = best_df
-    else:
-        try:
-            import chardet
-            detected = chardet.detect(raw_bytes)
-            if detected and detected.get("encoding"):
-                for sep, dec, thou in _CSV_CANDIDATES:
-                    df = _try_read(detected["encoding"], sep, dec, thou)
-                    if df is not None and len(df.columns) > best_cols:
-                        best_df = df
-                        best_cols = len(df.columns)
-            df = best_df
-        except ImportError:
-            df = None
+            # Try skipping leading metadata rows (common for IBM FOCUS exports).
+            header_idx = _find_header_row(raw_bytes, enc, sep)
+            if header_idx is not None and header_idx > 0:
+                skip = list(range(header_idx))
+                df = _try_read_csv(raw_bytes, enc, sep, dec, thou, skiprows=skip)
+                if df is not None and len(df.columns) > best_cols:
+                    best_df = df
+                    best_cols = len(df.columns)
+                    best_skiprows = skip
 
-    if df is None:
+    if best_df is None:
         raise ValueError("Failed to decode CSV with any known encoding/separator")
+
+    df = best_df
 
     if len(df.columns) < 2:
         raise ValueError("CSV was parsed as a single column; delimiter detection failed")
@@ -88,6 +144,9 @@ def parse_csv_bytes(raw_bytes: bytes) -> pd.DataFrame:
 
     # Strip BOM from column names if present.
     df.columns = [str(c).lstrip("\ufeff") for c in df.columns]
+
+    # Drop fully empty rows that sometimes appear after metadata sections.
+    df = df.dropna(how="all").reset_index(drop=True)
 
     return df
 
@@ -108,7 +167,16 @@ def _is_date_series(series: pd.Series) -> bool:
     if series.dtype.kind == "M":
         return True
     try:
-        converted = pd.to_datetime(series, errors="coerce", dayfirst=True)
+        # If the majority of values parse as numbers, prefer numeric types over
+        # date. This avoids mis-classifying numeric columns such as Cost/Quantity
+        # as dates just because they can be coerced.
+        numeric = pd.to_numeric(series, errors="coerce")
+        if numeric.notna().sum() / max(len(series), 1) >= 0.5:
+            return False
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            converted = pd.to_datetime(series, errors="coerce", dayfirst=True)
         non_null = converted.notna().sum()
         total = len(series)
         return total > 0 and non_null / total >= 0.5
@@ -156,6 +224,23 @@ def infer_column_types(df: pd.DataFrame) -> dict[str, str]:
     return types
 
 
+def _serialize_value(val: Any) -> Any:
+    """Convert pandas/numpy scalars to plain Python JSON-serializable values."""
+    if val is None or pd.isna(val):
+        return None
+    if isinstance(val, (pd.Timestamp, datetime)):
+        return val.isoformat()
+    if isinstance(val, np.integer):
+        return int(val)
+    if isinstance(val, np.floating):
+        if np.isnan(val):
+            return None
+        return float(val)
+    if isinstance(val, np.bool_):
+        return bool(val)
+    return val
+
+
 def build_preview(df: pd.DataFrame, max_rows: int = 10) -> dict[str, Any]:
     """Build a JSON-serializable preview payload.
 
@@ -163,28 +248,16 @@ def build_preview(df: pd.DataFrame, max_rows: int = 10) -> dict[str, Any]:
     data rows so the UI can render the grid before ingestion.
     """
     inferred = infer_column_types(df)
-    rows = df.head(max_rows).where(pd.notna(df.head(max_rows)), None)
-    # Convert to serializable primitives.
+    head = df.head(max_rows)
     records = []
-    for _, row in rows.iterrows():
-        record: dict[str, Any] = {}
-        for col in df.columns:
-            val = row[col]
-            if pd.isna(val):
-                val = None
-            elif isinstance(val, (pd.Timestamp, datetime)):
-                val = val.isoformat()
-            record[col] = val
+    for _, row in head.iterrows():
+        record: dict[str, Any] = {col: _serialize_value(row[col]) for col in df.columns}
         records.append(record)
 
     columns = []
     for col in df.columns:
         sample = df[col].dropna().head(5).tolist()
-        sample_serializable = []
-        for v in sample:
-            if isinstance(v, (pd.Timestamp, datetime)):
-                v = v.isoformat()
-            sample_serializable.append(v)
+        sample_serializable = [_serialize_value(v) for v in sample]
         columns.append({
             "name": col,
             "inferred_type": inferred.get(col, "TEXT"),

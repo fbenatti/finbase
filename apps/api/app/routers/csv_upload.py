@@ -84,6 +84,67 @@ async def preview_csv(
         raise HTTPException(status_code=500, detail=f"Falha ao processar CSV: {exc}") from exc
 
 
+def _parse_column_types(column_types_json: str | None) -> dict[str, str] | None:
+    if not column_types_json:
+        return None
+    import json
+    try:
+        payload = json.loads(column_types_json)
+        if isinstance(payload, list):
+            return {item["name"]: item["data_type"] for item in payload}
+        if isinstance(payload, dict):
+            return payload
+        return None
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise HTTPException(status_code=400, detail="column_types_json inválido")
+
+
+def _ingest_one(
+    connection_id: int,
+    filename: str,
+    raw: bytes,
+    billing_period: str | None,
+    user_types: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Synchronous ingestion of a single parsed CSV into Bronze."""
+    df = parse_csv_bytes(raw)
+
+    from app.database import SyncSession
+    session = SyncSession()
+    try:
+        sync_conn = session.get(SourceConnection, connection_id)
+        if sync_conn is None:
+            raise HTTPException(status_code=404, detail="Conexão não encontrada")
+        result = load_csv_to_bronze(
+            session=session,
+            connection=sync_conn,
+            df=df,
+            filename=filename,
+            billing_period=billing_period,
+            column_types=user_types,
+        )
+        session.commit()
+        return result
+    except Exception as exc:
+        session.rollback()
+        raise exc
+    finally:
+        session.close()
+
+
+async def _validate_connection(connection_id: int, db: AsyncSession) -> SourceConnection:
+    conn = await db.get(SourceConnection, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conexão não encontrada")
+    allowed_connectors = {"manual_csv", "azure_blob", "gcp_bigquery"}
+    if conn.connector_type not in allowed_connectors:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload manual não permitido para connector_type={conn.connector_type}",
+        )
+    return conn
+
+
 @router.post("/ingest", response_model=CsvIngestResponse)
 async def ingest_csv(
     file: UploadFile = File(...),
@@ -92,63 +153,18 @@ async def ingest_csv(
     column_types_json: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """Load a CSV into the Bronze layer after user confirmation.
-
-    The file is re-parsed on ingestion so the user-adjusted types can be
-    validated and stored as metadata.
-    """
+    """Load a single CSV into the Bronze layer after user confirmation."""
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Somente arquivos CSV são suportados")
 
-    conn = await db.get(SourceConnection, connection_id)
-    if not conn:
-        raise HTTPException(status_code=404, detail="Conexão não encontrada")
-
-    allowed_connectors = {"manual_csv", "azure_blob", "gcp_bigquery"}
-    if conn.connector_type not in allowed_connectors:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload manual não permitido para connector_type={conn.connector_type}",
-        )
+    await _validate_connection(connection_id, db)
+    user_types = _parse_column_types(column_types_json)
 
     try:
         raw = await file.read()
         if not raw:
             raise HTTPException(status_code=400, detail="Arquivo vazio")
-        df = parse_csv_bytes(raw)
-
-        user_types: dict[str, str] | None = None
-        if column_types_json:
-            import json
-            try:
-                payload = json.loads(column_types_json)
-                if isinstance(payload, list):
-                    user_types = {item["name"]: item["data_type"] for item in payload}
-                elif isinstance(payload, dict):
-                    user_types = payload
-            except (json.JSONDecodeError, KeyError, TypeError):
-                raise HTTPException(status_code=400, detail="column_types_json inválido")
-
-        from app.database import SyncSession
-        session = SyncSession()
-        try:
-            result = load_csv_to_bronze(
-                session=session,
-                connection=conn,
-                df=df,
-                filename=file.filename,
-                billing_period=billing_period,
-                column_types=user_types,
-            )
-            session.commit()
-            # Refresh async ORM object from sync session changes.
-            await db.refresh(conn)
-        except Exception as exc:
-            session.rollback()
-            raise exc
-        finally:
-            session.close()
-
+        result = _ingest_one(connection_id, file.filename or "upload.csv", raw, billing_period, user_types)
         return CsvIngestResponse(**result)
     except HTTPException:
         raise
@@ -157,6 +173,53 @@ async def ingest_csv(
     except Exception as exc:
         logger.exception("CSV ingestion failed")
         raise HTTPException(status_code=500, detail=f"Falha ao ingerir CSV: {exc}") from exc
+
+
+@router.post("/ingest-batch", response_model=list[CsvIngestResponse])
+async def ingest_csv_batch(
+    files: list[UploadFile] = File(...),
+    connection_id: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Load multiple CSVs into Bronze, deriving the period from each filename.
+
+    The billing period is extracted from a YYYY-MM or YYYYMM token in the
+    filename (e.g. ``focus-2026-01.csv`` -> 202601). Types are auto-inferred.
+    """
+    await _validate_connection(connection_id, db)
+
+    results: list[CsvIngestResponse] = []
+    errors: list[dict[str, str]] = []
+
+    for f in files:
+        name = f.filename or "upload.csv"
+        if not name.lower().endswith(".csv"):
+            errors.append({"filename": name, "error": "Somente arquivos CSV são suportados"})
+            continue
+
+        raw = await f.read()
+        if not raw:
+            errors.append({"filename": name, "error": "Arquivo vazio"})
+            continue
+
+        try:
+            result = _ingest_one(connection_id, name, raw, None, None)
+            results.append(CsvIngestResponse(**result))
+        except HTTPException as exc:
+            errors.append({"filename": name, "error": str(exc.detail)})
+        except ValueError as exc:
+            errors.append({"filename": name, "error": str(exc)})
+        except Exception as exc:
+            logger.exception("Batch CSV ingestion failed for %s", name)
+            errors.append({"filename": name, "error": f"Falha ao ingerir: {exc}"})
+
+    if not results and errors:
+        raise HTTPException(
+            status_code=422,
+            detail={"errors": errors},
+        )
+
+    return results
 
 
 @router.get("/connections", response_model=list[dict[str, Any]])

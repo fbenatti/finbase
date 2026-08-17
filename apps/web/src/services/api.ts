@@ -388,6 +388,54 @@ export async function deleteClassification(id: number): Promise<void> {
   await api.delete(`/classifications/${id}`);
 }
 
+// Azure Tag Policy
+export interface AzureTenant {
+  connection_id: number;
+  code: string;
+  name: string;
+  tenant_id: string;
+}
+
+export interface AzureTenantPolicy {
+  tenant_id: string | null;
+  connection_code: string;
+  connection_name: string;
+  rule_count: number;
+  layers: Record<string, unknown>;
+}
+
+export interface AzureTagPolicyExport {
+  tenants: AzureTenantPolicy[];
+  deployment_script: string;
+}
+
+export async function getAzureTenants(): Promise<AzureTenant[]> {
+  const { data } = await api.get("/azure-tag-policy/tenants");
+  return data;
+}
+
+export async function exportAzureTagPolicy(
+  connectionId?: number,
+  fmt: "json" | "script" | "both" = "both",
+): Promise<AzureTagPolicyExport> {
+  const params: Record<string, string | number> = { fmt };
+  if (connectionId !== undefined) params.connection_id = connectionId;
+  const { data } = await api.get("/azure-tag-policy/export", { params });
+  return data;
+}
+
+export function downloadText(filename: string, content: string, mime = "application/json"): void {
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // Departments
 export async function getDepartments(flat?: boolean, parentId?: number): Promise<Department[]> {
   const params: Record<string, string | number | boolean> = {};
@@ -1086,7 +1134,7 @@ export async function previewCsv(file: File): Promise<CsvPreview> {
   const formData = new FormData();
   formData.append("file", file);
   const { data } = await api.post("/csv-upload/preview", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+    headers: { "Content-Type": undefined },
   });
   return data;
 }
@@ -1098,12 +1146,22 @@ export async function ingestCsv(file: File, connectionId: number, billingPeriod:
   formData.append("billing_period", billingPeriod);
   formData.append("column_types_json", JSON.stringify(columnTypes));
   const { data } = await api.post("/csv-upload/ingest", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+    headers: { "Content-Type": undefined },
   });
   return data;
 }
 
 export async function getCsvUploadHistory(connectionId: number): Promise<IngestedBlob[]> {
   const { data } = await api.get(`/csv-upload/history/${connectionId}`);
+  return data;
+}
+
+export async function ingestCsvBatch(files: File[], connectionId: number): Promise<CsvIngestResult[]> {
+  const formData = new FormData();
+  files.forEach((f) => formData.append("files", f));
+  formData.append("connection_id", String(connectionId));
+  const { data } = await api.post("/csv-upload/ingest-batch", formData, {
+    headers: { "Content-Type": undefined },
+  });
   return data;
 }

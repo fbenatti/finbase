@@ -42,6 +42,7 @@ import {
   Timeline as TimelineIcon,
   AccountBalance as AccountBalanceIcon,
   Savings as SavingsIcon,
+  CloudUpload as CloudUploadIcon,
 } from "@mui/icons-material";
 import {
   getRunningTasks, cancelEtl, getConnections,

@@ -92,6 +92,19 @@ def recreate_business_rules(session) -> None:
             "conditions": None,
             "config_json": {},
         },
+        # Generic fallback: any provider without a specific tax/adjustment rule
+        # still gets ``realizado = BilledCost``. Keeps a new CSV source (IBM,
+        # AWS, OCI, etc.) working with zero code/seed changes.
+        {
+            "name": "Realizado padrão (qualquer nuvem, sem imposto)",
+            "rule_type": "EXPRESSION",
+            "target_column": "realizado",
+            "cloud_scope": None,
+            "priority": 60,
+            "expression": "BilledCost",
+            "conditions": None,
+            "config_json": {},
+        },
     ]
     for rule in rules:
         session.execute(text("""

@@ -5,17 +5,19 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel, Chip, Alert, CircularProgress,
 } from "@mui/material";
-import { Add, Edit, Delete, Visibility, Cable } from "@mui/icons-material";
+import { Add, Edit, Delete, Visibility, Cable, CloudUpload } from "@mui/icons-material";
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, testConnection, SourceConnection,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
+import ManualCsvUploadDialog from "./ManualCsvUploadDialog";
 
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage" },
   { value: "gcp_bigquery", label: "GCP BigQuery" },
   { value: "mongodb_atlas", label: "MongoDB Atlas" },
+  { value: "manual_csv", label: "Upload manual de CSV" },
 ];
 
 const emptyForm = {
@@ -36,6 +38,7 @@ export default function Connections() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SourceConnection | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
 
   const load = async () => {
     try {
@@ -251,32 +254,38 @@ export default function Connections() {
                 <IconButton onClick={() => openEdit(conn)} title="Editar credenciais">
                   <Edit />
                 </IconButton>
-                <IconButton
-                  onClick={async () => {
-                    setTestingId(conn.id);
-                    setTestMsgs(prev => ({ ...prev, [conn.id]: { ok: false, severity: "error" as const, msg: "" } }));
-                    try {
-                      const r = await testConnection(conn.id);
-                      const isOk = r.status === "OK";
-                      const isPending = r.status === "PENDING";
-                      setTestMsgs(prev => ({
-                        ...prev,
-                        [conn.id]: {
-                          ok: isOk || isPending,
-                          severity: isOk ? "success" : isPending ? "warning" : "error",
-                          msg: isOk ? `OK: ${r.message}` : isPending ? `Aguardando: ${r.message}` : `Erro: ${r.message}`,
-                        },
-                      }));
-                    } catch (e: any) {
-                      setTestMsgs(prev => ({ ...prev, [conn.id]: { ok: false, severity: "error", msg: `Erro: ${e.message}` } }));
-                    }
-                    setTestingId(null);
-                  }}
-                  disabled={testingId === conn.id}
-                  title="Testar Conexao"
-                >
-                  <Cable color={testingId === conn.id ? "disabled" : "action"} />
-                </IconButton>
+                {conn.connector_type === "manual_csv" ? (
+                  <IconButton onClick={() => setUploadConn(conn)} title="Upload CSV" color="primary">
+                    <CloudUpload />
+                  </IconButton>
+                ) : (
+                  <IconButton
+                    onClick={async () => {
+                      setTestingId(conn.id);
+                      setTestMsgs(prev => ({ ...prev, [conn.id]: { ok: false, severity: "error" as const, msg: "" } }));
+                      try {
+                        const r = await testConnection(conn.id);
+                        const isOk = r.status === "OK";
+                        const isPending = r.status === "PENDING";
+                        setTestMsgs(prev => ({
+                          ...prev,
+                          [conn.id]: {
+                            ok: isOk || isPending,
+                            severity: isOk ? "success" : isPending ? "warning" : "error",
+                            msg: isOk ? `OK: ${r.message}` : isPending ? `Aguardando: ${r.message}` : `Erro: ${r.message}`,
+                          },
+                        }));
+                      } catch (e: any) {
+                        setTestMsgs(prev => ({ ...prev, [conn.id]: { ok: false, severity: "error", msg: `Erro: ${e.message}` } }));
+                      }
+                      setTestingId(null);
+                    }}
+                    disabled={testingId === conn.id}
+                    title="Testar Conexao"
+                  >
+                    <Cable color={testingId === conn.id ? "disabled" : "action"} />
+                  </IconButton>
+                )}
                 <IconButton onClick={() => remove(conn.id)} color="error" title="Remover">
                   <Delete />
                 </IconButton>
@@ -378,6 +387,15 @@ export default function Connections() {
           <Button onClick={save} variant="contained">Salvar</Button>
         </DialogActions>
       </Dialog>
+
+      {uploadConn && (
+        <ManualCsvUploadDialog
+          open={!!uploadConn}
+          onClose={() => setUploadConn(null)}
+          connectionId={uploadConn.id}
+          connectionName={uploadConn.name}
+        />
+      )}
     </Box>
   );
 }

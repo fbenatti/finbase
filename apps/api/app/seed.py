@@ -17,6 +17,7 @@ def _build_connections():
             "name": "Azure 4P Cost Management",
             "connector_type": "azure_blob",
             "cloud_name": "Azure-4P",
+            "cloud_scope": "azure",
             "config_json": {
                 "tenant_id": settings.azure_4p_tenant_id,
                 "client_id": settings.azure_4p_client_id,
@@ -37,6 +38,7 @@ def _build_connections():
             "name": "Azure TI Cost Management",
             "connector_type": "azure_blob",
             "cloud_name": "Azure-TI",
+            "cloud_scope": "azure",
             "config_json": {
                 "tenant_id": settings.azure_ti_tenant_id,
                 "client_id": settings.azure_ti_client_id,
@@ -57,6 +59,7 @@ def _build_connections():
             "name": "GCP 4P Billing Export",
             "connector_type": "gcp_bigquery",
             "cloud_name": "GCP-4P",
+            "cloud_scope": "gcp",
             "config_json": {
                 "project_id": settings.gcp_4p_project_id,
                 "dataset_id": settings.gcp_4p_dataset_id,
@@ -73,6 +76,7 @@ def _build_connections():
             "name": "GCP TI Billing Export",
             "connector_type": "gcp_bigquery",
             "cloud_name": "GCP-TI",
+            "cloud_scope": "gcp",
             "config_json": {
                 "project_id": settings.gcp_ti_project_id,
                 "dataset_id": settings.gcp_ti_dataset_id,
@@ -89,6 +93,7 @@ def _build_connections():
             "name": "MongoDB Atlas Pro",
             "connector_type": "mongodb_atlas",
             "cloud_name": "Atlas-MongoDB",
+            "cloud_scope": "atlas",
             "config_json": {
                 "base_url": settings.atlas_base_url,
                 "contract_type": "pro",
@@ -106,6 +111,7 @@ def _build_connections():
             "name": "MongoDB Atlas Enterprise",
             "connector_type": "mongodb_atlas",
             "cloud_name": "Atlas-MongoDB",
+            "cloud_scope": "atlas",
             "config_json": {
                 "base_url": settings.atlas_base_url,
                 "contract_type": "enterprise",
@@ -122,6 +128,7 @@ def _build_connections():
         "name": "Upload manual de CSV",
         "connector_type": "manual_csv",
         "cloud_name": None,
+        "cloud_scope": None,
         "config_json": {},
         "blob_prefixes": ["manual"],
     })

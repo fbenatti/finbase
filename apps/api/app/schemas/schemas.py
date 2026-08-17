@@ -8,12 +8,17 @@ class SourceConnectionCreate(BaseModel):
     name: str
     connector_type: str
     cloud_name: str | None = None
+    cloud_scope: str | None = None
     config_json: dict[str, Any] = {}
     blob_prefixes: list[str] = []
+
+    model_config = {"extra": "allow"}
 
 
 class SourceConnectionUpdate(BaseModel):
     name: str | None = None
+    cloud_name: str | None = None
+    cloud_scope: str | None = None
     config_json: dict[str, Any] | None = None
     blob_prefixes: list[str] | None = None
 
@@ -24,6 +29,7 @@ class SourceConnectionOut(BaseModel):
     name: str
     connector_type: str
     cloud_name: str | None
+    cloud_scope: str | None
     config_json: dict[str, Any]
     blob_prefixes: list[str]
     created_at: datetime
@@ -523,3 +529,44 @@ class ScheduledTaskOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---- Azure Tag Policy ----
+
+class AzureTenantOut(BaseModel):
+    connection_id: int
+    code: str
+    name: str
+    tenant_id: str
+
+
+class AzurePolicyInheritance(BaseModel):
+    name: str
+    policyDefinitionId: str
+    parameters: dict[str, Any]
+    note: str = ""
+
+
+class AzurePolicyResourceGroup(BaseModel):
+    tags: dict[str, str]
+    names: list[str]
+    rule_names: list[str] = []
+
+
+class AzurePolicyPattern(BaseModel):
+    tags: dict[str, str]
+    condition: dict[str, Any]
+    rule_names: list[str] = []
+
+
+class AzureTenantPolicyOut(BaseModel):
+    tenant_id: str | None = None
+    connection_code: str
+    connection_name: str
+    rule_count: int
+    layers: dict[str, Any]
+
+
+class AzureTagPolicyExport(BaseModel):
+    tenants: list[AzureTenantPolicyOut]
+    deployment_script: str = ""

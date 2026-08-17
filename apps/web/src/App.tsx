@@ -20,8 +20,6 @@ import ExpectedView from "./pages/Dashboards/ExpectedView";
 import FinancialTypes from "./pages/FinancialTypes/FinancialTypes";
 import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
-import CsvUpload from "./pages/CsvUpload/CsvUpload";
-
 function App() {
   return (
     <Routes>

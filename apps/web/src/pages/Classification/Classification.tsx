@@ -3,15 +3,17 @@ import {
   Box, Typography, Button, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
-  Alert, CircularProgress, Divider, Autocomplete,
+  Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab,
 } from "@mui/material";
-import { Add, Edit, Delete } from "@mui/icons-material";
+import { Add, Edit, Delete, Download } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule,
   getDepartments, Department,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
+  getAzureTenants, exportAzureTagPolicy, downloadText,
+  AzureTenant, AzureTenantPolicy,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
@@ -26,6 +28,21 @@ const emptyForm = {
 };
 
 export default function Classification() {
+  const [tab, setTab] = useState(0);
+
+  return (
+    <Box>
+      <Typography variant="h4" sx={{ mb: 1 }}>Regras de Classificação</Typography>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
+        <Tab label="Regras" />
+        <Tab label="Criação de Tags" />
+      </Tabs>
+      {tab === 0 ? <RulesTab /> : <TagsTab />}
+    </Box>
+  );
+}
+
+function RulesTab() {
   const [rules, setRules] = useState<ClassificationRule[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [destTables, setDestTables] = useState<DestinationTable[]>([]);
@@ -159,8 +176,7 @@ export default function Classification() {
 
   return (
     <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-        <Typography variant="h4">Regras de Classificação</Typography>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 3 }}>
         <Box sx={{ display: "flex", gap: 1 }}>
           <Button
             variant="contained" startIcon={<Add />}
@@ -350,6 +366,118 @@ export default function Classification() {
           </Button>
         </DialogActions>
       </Dialog>
+    </Box>
+  );
+}
+
+function TagsTab() {
+  const [tenants, setTenants] = useState<AzureTenant[]>([]);
+  const [selectedTenant, setSelectedTenant] = useState<number | "">("");
+  const [rows, setRows] = useState<AzureTenantPolicy[]>([]);
+  const [script, setScript] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    getAzureTenants().then(setTenants).catch(() => setTenants([]));
+  }, []);
+
+  const generate = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      setSuccess("");
+      const connId = selectedTenant === "" ? undefined : selectedTenant as number;
+      const result = await exportAzureTagPolicy(connId, "both");
+      setRows(result.tenants);
+      setScript(result.deployment_script);
+      setSuccess(`Políticas geradas para ${result.tenants.length} tenant(s).`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Falha ao gerar");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadAll = () => {
+    const timestamp = new Date().toISOString().slice(0, 10);
+    rows.forEach((t) => {
+      downloadText(
+        `azure-tag-policy-${t.connection_code}-${timestamp}.json`,
+        JSON.stringify(t, null, 2),
+      );
+    });
+    if (script) {
+      downloadText(`azure-tag-policy-deploy-${timestamp}.sh`, script, "text/x-shellscript");
+    }
+  };
+
+  return (
+    <Box>
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
+
+      <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap", alignItems: "center" }}>
+        <FormControl sx={{ minWidth: 280 }} size="small">
+          <InputLabel>Tenant Azure *</InputLabel>
+          <Select
+            value={selectedTenant}
+            label="Tenant Azure *"
+            onChange={(e) => setSelectedTenant(e.target.value as number | "")}
+          >
+            <MenuItem value="">Todos os tenants</MenuItem>
+            {tenants.map((t) => (
+              <MenuItem key={t.connection_id} value={t.connection_id}>
+                {t.name} ({t.code})
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <Button variant="contained" onClick={generate} disabled={loading}>
+          {loading ? "Gerando..." : "Gerar políticas"}
+        </Button>
+        <Button variant="outlined" startIcon={<Download />} onClick={downloadAll}
+          disabled={rows.length === 0}>
+          Baixar arquivos
+        </Button>
+      </Box>
+
+      {rows.length === 0 && !loading ? (
+        <Alert severity="info">
+          Selecione um tenant e clique em "Gerar políticas" para gerar os arquivos de
+          Azure Policy (JSON + script de deploy) a partir das regras de classificação.
+        </Alert>
+      ) : (
+        rows.map((t) => (
+          <Box key={t.connection_code} sx={{ mb: 3, p: 2, border: "1px solid #e0e0e0", borderRadius: 2 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              {t.connection_name} <Chip size="small" label={`${t.rule_count} regras`} sx={{ ml: 1 }} />
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+              Tenant ID: {t.tenant_id} · Cod: {t.connection_code}
+            </Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              <LayerSummary label="Herança de RG"
+                count={Array.isArray(t.layers?.inheritance) ? (t.layers.inheritance as unknown[]).length : 0} />
+              <LayerSummary label="Resource Groups (agrupados)"
+                count={Array.isArray(t.layers?.resource_groups) ? (t.layers.resource_groups as unknown[]).length : 0} />
+              <LayerSummary label="Padrões (nome/SKU/região)"
+                count={Array.isArray(t.layers?.patterns) ? (t.layers.patterns as unknown[]).length : 0} />
+            </Box>
+          </Box>
+        ))
+      )}
+    </Box>
+  );
+}
+
+function LayerSummary({ label, count }: { label: string; count: number }) {
+  return (
+    <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.25 }}>
+      <Typography variant="body2" color="text.secondary">{label}</Typography>
+      <Typography variant="body2" fontWeight={600}>{count}</Typography>
     </Box>
   );
 }

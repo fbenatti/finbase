@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, savings
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -86,8 +86,27 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",
             "CREATE INDEX IF NOT EXISTS ix_classification_rule_cloud_scope ON classification_rule (cloud_scope)",
+            "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
+            "CREATE INDEX IF NOT EXISTS ix_source_connection_cloud_scope ON source_connection (cloud_scope)",
         ):
             await conn.execute(text(statement))
+        # Backfill the canonical provider slug for legacy rows that only have a
+        # free-text cloud_name, so rule matching keeps working without a
+        # re-import. Unknown/free-text names are left NULL (match only the
+        # generic unscoped rules).
+        await conn.execute(text("""
+            UPDATE source_connection
+            SET cloud_scope = CASE
+                WHEN lower(cloud_name) LIKE 'azure%' THEN 'azure'
+                WHEN lower(cloud_name) LIKE 'gcp%' THEN 'gcp'
+                WHEN lower(cloud_name) LIKE 'ibm%' THEN 'ibm'
+                WHEN lower(cloud_name) LIKE 'aws%' THEN 'aws'
+                WHEN lower(cloud_name) LIKE 'oci%' OR lower(cloud_name) LIKE 'oracle%' THEN 'oci'
+                WHEN lower(cloud_name) LIKE '%atlas%' OR lower(cloud_name) LIKE '%mongodb%' THEN 'atlas'
+                ELSE cloud_scope
+            END
+            WHERE cloud_scope IS NULL
+        """))
 
     async with async_session() as db:
         await seed(db)
@@ -130,6 +149,7 @@ app.include_router(forecast.router)
 app.include_router(clone_rules.router)
 app.include_router(planning.router)
 app.include_router(savings.router)
+app.include_router(azure_tag_policy.router)
 
 
 @app.get("/health")

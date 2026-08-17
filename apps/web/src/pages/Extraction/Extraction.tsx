@@ -5,7 +5,7 @@ import {
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   FormControlLabel, Switch, IconButton,
 } from "@mui/material";
-import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit } from "@mui/icons-material";
+import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload } from "@mui/icons-material";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
   resetSourceForReimport,
@@ -20,6 +20,7 @@ import {
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
+import ManualCsvUploadDialog from "../Connections/ManualCsvUploadDialog";
 
 const STATUS_COLORS: Record<string, "success" | "warning" | "error" | "info" | "default"> = {
   NEW: "success", CHANGED: "warning", UNCHANGED: "default", SKIPPED: "default",
@@ -63,17 +64,32 @@ export default function Extraction() {
     forecast_after_ingestion: false, forecast_config_id: "",
   });
   const [schedRunning, setSchedRunning] = useState<Set<number>>(new Set());
+  const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Connections eligible for extraction/monitoring (cloud scan + manual CSV upload).
+  const extractableConnectorTypes = useMemo(
+    () => new Set([...SCANNABLE_CONNECTOR_TYPES, "manual_csv"]),
+    [],
+  );
+  const extractableConnections = useMemo(
+    () => connections.filter((c) => extractableConnectorTypes.has(c.connector_type)),
+    [connections, extractableConnectorTypes],
+  );
+  const isManualCsvSelected = useMemo(
+    () => !!uploadConn || extractableConnections.some((c) => c.id === connId && c.connector_type === "manual_csv"),
+    [extractableConnections, connId, uploadConn],
+  );
 
   useEffect(() => {
     getConnections().then((list) => {
       setConnections(list);
-      const scannable = list.filter((c) => SCANNABLE_CONNECTOR_TYPES.has(c.connector_type));
-      if (scannable.length === 1) setConnId(scannable[0].id);
+      const extractable = list.filter((c) => extractableConnectorTypes.has(c.connector_type));
+      if (extractable.length === 1) setConnId(extractable[0].id);
     }).catch((e) => setError(formatApiError(e, "Falha ao carregar conexoes")));
     loadSchedules();
-  }, []);
+  }, [extractableConnectorTypes]);
 
   const loadSchedules = () => {
     getSchedules().then(setSchedules).catch(() => {});
@@ -377,11 +393,6 @@ export default function Extraction() {
   const isRunning = task?.status === "RUNNING";
   const isCancelling = task?.status === "CANCELLING";
   const isActive = isRunning || isQueued || isCancelling;
-  const scannableConnections = useMemo(
-    () => connections.filter((c) => SCANNABLE_CONNECTOR_TYPES.has(c.connector_type)),
-    [connections],
-  );
-
   const visibleSelectedCount = scanResult
     ? Array.from(selectedPaths).filter(path => filteredScanItems.some(item => item.blob_path === path)).length
     : selectedPaths.size;
@@ -404,27 +415,43 @@ export default function Extraction() {
         <FormControl sx={{ minWidth: 280 }}>
           <InputLabel>Conexao</InputLabel>
           <Select value={connId} label="Conexao" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
-            {scannableConnections.map((c) => (
+            {extractableConnections.map((c) => (
               <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
             ))}
           </Select>
         </FormControl>
-        {connections.length > 0 && scannableConnections.length === 0 && (
-          <Alert severity="warning">Nenhuma conexao Azure/GCP disponivel para extracao.</Alert>
+        {connections.length > 0 && extractableConnections.length === 0 && (
+          <Alert severity="warning">Nenhuma conexao disponivel para extracao.</Alert>
         )}
 
-        <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
-          {scanning ? "Escaneando..." : "Escanear"}
-        </Button>
-        <Button variant="contained" startIcon={<PlayArrow />} onClick={doRun}
-          disabled={isActive || !connId || !!task?.status?.includes("CANCELLING")}
-          color={hasSelection ? "success" : "primary"}>
-          {hasSelection ? `Importar ${visibleSelectedCount} selecionados` : "Importar Todos"}
-        </Button>
-        <Button variant="outlined" color="warning" startIcon={<DeleteForever />} onClick={doResetSource}
-          disabled={isActive || !connId}>
-          Reprocessar origem limpa
-        </Button>
+        {isManualCsvSelected ? (
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<CloudUpload />}
+            onClick={() => {
+              const conn = extractableConnections.find((c) => c.id === connId);
+              if (conn) setUploadConn(conn);
+            }}
+          >
+            Upload CSV
+          </Button>
+        ) : (
+          <>
+            <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
+              {scanning ? "Escaneando..." : "Escanear"}
+            </Button>
+            <Button variant="contained" startIcon={<PlayArrow />} onClick={doRun}
+              disabled={isActive || !connId || !!task?.status?.includes("CANCELLING")}
+              color={hasSelection ? "success" : "primary"}>
+              {hasSelection ? `Importar ${visibleSelectedCount} selecionados` : "Importar Todos"}
+            </Button>
+            <Button variant="outlined" color="warning" startIcon={<DeleteForever />} onClick={doResetSource}
+              disabled={isActive || !connId}>
+              Reprocessar origem limpa
+            </Button>
+          </>
+        )}
         {isActive && (
           <Button
             variant="outlined"
@@ -1014,6 +1041,16 @@ export default function Extraction() {
             />
         </Box>
       )}
+
+      {uploadConn && (
+        <ManualCsvUploadDialog
+          open={!!uploadConn}
+          onClose={() => setUploadConn(null)}
+          connectionId={uploadConn.id}
+          connectionName={uploadConn.name}
+        />
+      )}
     </Box>
   );
 }
+

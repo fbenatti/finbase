@@ -628,10 +628,18 @@ def _process_blob_for_reprocess(
             # the equal negative value.  This is a destination calculation,
             # not a provider-header dependency.
             if "TotalCostOnDemandBRL" in dest_col_names:
-                direct_cost = pd.to_numeric(target.get("BilledCost"), errors="coerce")
-                quantity = pd.to_numeric(target.get("ConsumedQuantity"), errors="coerce")
-                unit_price = pd.to_numeric(target.get("source_unit_price"), errors="coerce")
-                exchange = pd.to_numeric(target.get("source_exchange_rate"), errors="coerce")
+                # Defensive helper: never let pd.to_numeric(None) collapse to a
+                # scalar numpy.float64, which would break vectorized ops below.
+                def _num(col: str) -> pd.Series:
+                    return pd.to_numeric(
+                        target[col] if col in target.columns else pd.Series([None] * len(target), index=target.index),
+                        errors="coerce",
+                    )
+
+                direct_cost = _num("BilledCost")
+                quantity = _num("ConsumedQuantity")
+                unit_price = _num("source_unit_price")
+                exchange = _num("source_exchange_rate")
                 calculated = unit_price * quantity * exchange.fillna(1)
                 # The historical rule uses billed cost for contractual events;
                 # for usage it uses unit price × quantity × exchange rate.
@@ -882,7 +890,7 @@ def _reprocess_destination_sync(
                         BusinessRule.active == True,
                     ).order_by(BusinessRule.priority)
                 ).scalars().all()
-                if rule_matches_cloud(rule.cloud_scope, conn.cloud_name)
+                if rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
             ]
 
             _crules = [
@@ -892,7 +900,7 @@ def _reprocess_destination_sync(
                         ClassificationRule.active == True,
                     ).order_by(ClassificationRule.priority, ClassificationRule.id)
                 ).scalars().all()
-                if rule_matches_cloud(rule.cloud_scope, conn.cloud_name)
+                if rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
             ]
 
             # Business rules may create arbitrary destination columns (for
