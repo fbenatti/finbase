@@ -9,7 +9,6 @@ import { Add, Edit, Delete } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule,
-  importAzureProjectRules,
   getDepartments, Department,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
@@ -34,7 +33,6 @@ export default function Classification() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [importingAzure, setImportingAzure] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -145,24 +143,6 @@ export default function Classification() {
     }
   };
 
-  const importAzureRules = async () => {
-    try {
-      setImportingAzure(true);
-      setError("");
-      const result = await importAzureProjectRules();
-      setSuccess(
-        `Importação Azure concluída: ${result.classification_rules_created} criadas, ` +
-        `${result.skipped_existing} já existentes, ${result.skipped_no_department} sem departamento e ` +
-        `${result.skipped_ambiguous_department} ambíguas.`,
-      );
-      load();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao importar regras Azure");
-    } finally {
-      setImportingAzure(false);
-    }
-  };
-
   const addCondition = () => setForm({
     ...form, conditions: [...form.conditions, { field: "", operator: "=", values: "", logic: "AND" }],
   });
@@ -182,9 +162,6 @@ export default function Classification() {
       <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
         <Typography variant="h4">Regras de Classificação</Typography>
         <Box sx={{ display: "flex", gap: 1 }}>
-          <Button variant="outlined" onClick={importAzureRules} disabled={importingAzure}>
-            {importingAzure ? "Importando Azure..." : "Importar Azure CSV"}
-          </Button>
           <Button
             variant="contained" startIcon={<Add />}
             onClick={openNew}

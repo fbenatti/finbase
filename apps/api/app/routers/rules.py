@@ -1,23 +1,20 @@
 import csv
 import logging
-import re
-import unicodedata
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from app.database import get_db
-from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, Department, Project
-from app.models.destination import DestinationColumn, DestinationTable, SourceDestinationMapping
-from app.services.trino_service import execute as trino_execute
+from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, Department, Project, OrganizationMoveAudit
+from app.models.planning import PlanningEntry
+from app.models.destination import DestinationColumn, SourceDestinationMapping
 from app.schemas.schemas import (
     EtlMappingCreate, EtlMappingUpdate, EtlMappingOut,
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleOut,
     ClassificationRuleCreate, ClassificationRuleUpdate, ClassificationRuleOut,
     DepartmentCreate, DepartmentUpdate, DepartmentOut,
     ProjectCreate, ProjectUpdate, ProjectOut,
-    AzureProjectRulesImportRequest, AzureProjectRulesImportResult,
     CsvImportRequest, CsvImportResult,
 )
 
@@ -25,6 +22,72 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["rules"])
 
+MAX_DEPARTMENT_LEVELS = 7
+
+
+def _department_path(department_id: int, departments: dict[int, Department]) -> list[str]:
+    path: list[str] = []
+    current = departments.get(department_id)
+    seen: set[int] = set()
+    while current and current.id not in seen:
+        seen.add(current.id)
+        path.append(current.name)
+        current = departments.get(current.parent_id) if current.parent_id else None
+    return list(reversed(path))
+
+
+def _subtree_ids(root_id: int, departments: dict[int, Department]) -> set[int]:
+    children: dict[int, list[int]] = {}
+    for department in departments.values():
+        if department.parent_id is not None:
+            children.setdefault(department.parent_id, []).append(department.id)
+    ids, pending = set(), [root_id]
+    while pending:
+        current = pending.pop()
+        if current in ids:
+            continue
+        ids.add(current)
+        pending.extend(children.get(current, []))
+    return ids
+
+
+async def _refresh_planning_paths(db: AsyncSession, departments: dict[int, Department], department_ids: set[int]) -> int:
+    if not department_ids:
+        return 0
+    entries = (await db.execute(select(PlanningEntry).where(PlanningEntry.department_id.in_(department_ids)))).scalars().all()
+    for entry in entries:
+        entry.department_levels = _department_path(entry.department_id, departments) if entry.department_id else []
+    return len(entries)
+
+
+async def _move_department(
+    db: AsyncSession, department: Department, new_parent_id: int | None, departments: dict[int, Department],
+) -> int:
+    if new_parent_id == department.id:
+        raise HTTPException(status_code=422, detail="Um departamento não pode ser pai de si mesmo")
+    if new_parent_id is not None:
+        parent = departments.get(new_parent_id)
+        if not parent or not parent.active:
+            raise HTTPException(status_code=422, detail="O novo departamento pai deve existir e estar ativo")
+        if new_parent_id in _subtree_ids(department.id, departments):
+            raise HTTPException(status_code=422, detail="A movimentação criaria um ciclo na hierarquia")
+        if len(_department_path(new_parent_id, departments)) + 1 > MAX_DEPARTMENT_LEVELS:
+            raise HTTPException(status_code=422, detail="A hierarquia suporta no máximo 7 níveis")
+    old_parent_id = department.parent_id
+    old_path = _department_path(department.id, departments)
+    impacted_ids = _subtree_ids(department.id, departments)
+    department.parent_id = new_parent_id
+    new_path = _department_path(department.id, departments)
+    for department_id in impacted_ids:
+        if len(_department_path(department_id, departments)) > MAX_DEPARTMENT_LEVELS:
+            department.parent_id = old_parent_id
+            raise HTTPException(status_code=422, detail="A movimentação deixaria um descendente acima do nível 7")
+    entries_updated = await _refresh_planning_paths(db, departments, impacted_ids)
+    db.add(OrganizationMoveAudit(
+        department_id=department.id, old_parent_id=old_parent_id, new_parent_id=new_parent_id,
+        old_path=old_path, new_path=new_path, planning_entries_updated=entries_updated,
+    ))
+    return entries_updated
 
 def _rule_output_type(rule_type: str, expression: str | None, conditions: list | None) -> str:
     """Business-rule outputs are always numeric calculation fields."""
@@ -389,6 +452,12 @@ async def list_departments(
 
 @router.post("/departments/", response_model=DepartmentOut, status_code=201)
 async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(get_db)):
+    if data.parent_id is not None:
+        departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
+        if data.parent_id not in departments or not departments[data.parent_id].active:
+            raise HTTPException(status_code=422, detail="O departamento pai deve existir e estar ativo")
+        if len(_department_path(data.parent_id, departments)) >= MAX_DEPARTMENT_LEVELS:
+            raise HTTPException(status_code=422, detail="A hierarquia suporta no máximo 7 níveis")
     dept = Department(**data.model_dump())
     db.add(dept)
     await db.commit()
@@ -398,16 +467,74 @@ async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(g
 
 @router.put("/departments/{dept_id}", response_model=DepartmentOut)
 async def update_department(dept_id: int, data: DepartmentUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Department).where(Department.id == dept_id))
-    dept = result.scalar_one_or_none()
+    departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
+    dept = departments.get(dept_id)
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
     update_data = data.model_dump(exclude_unset=True)
+    if "parent_id" in update_data and update_data["parent_id"] != dept.parent_id:
+        await _move_department(db, dept, update_data.pop("parent_id"), departments)
     for k, v in update_data.items():
         setattr(dept, k, v)
     await db.commit()
     await db.refresh(dept)
     return DepartmentOut.model_validate(dept)
+
+
+@router.post("/departments/bootstrap-cloud-organization")
+async def bootstrap_cloud_organization(db: AsyncSession = Depends(get_db)):
+    """Create the standard cloud hierarchy and stage current roots under Showback/Azure.
+
+    This deliberately does not trigger ETL reprocessing.  Existing department IDs,
+    classification rules and planning values are preserved.
+    """
+    departments = list((await db.execute(select(Department))).scalars().all())
+    by_id = {department.id: department for department in departments}
+
+    def child(parent_id: int | None, name: str) -> Department:
+        existing = next((department for department in by_id.values() if department.parent_id == parent_id and department.name == name), None)
+        if existing:
+            return existing
+        department = Department(parent_id=parent_id, name=name, active=True)
+        db.add(department)
+        departments.append(department)
+        return department
+
+    consumption = child(None, "Consumo Cloud")
+    await db.flush()
+    by_id = {department.id: department for department in departments}
+    showback = child(consumption.id, "Showback")
+    chargeback = child(consumption.id, "Chargeback")
+    await db.flush()
+    providers = ("Azure", "GCP", "AWS", "OCI", "IBM")
+    for branch in (showback, chargeback):
+        for provider in providers:
+            child(branch.id, provider)
+    await db.flush()
+    by_id = {department.id: department for department in departments}
+    showback_azure = next(department for department in by_id.values() if department.parent_id == showback.id and department.name == "Azure")
+
+    protected_ids = {consumption.id, showback.id, chargeback.id}
+    protected_ids.update(department.id for department in by_id.values() if department.parent_id in {showback.id, chargeback.id})
+    roots_to_move = [department for department in by_id.values() if department.parent_id is None and department.id not in protected_ids]
+    moved: list[dict[str, object]] = []
+    for department in roots_to_move:
+        old_path = _department_path(department.id, by_id)
+        department.parent_id = showback_azure.id
+        moved.append({"id": department.id, "name": department.name, "old_path": old_path, "new_path": _department_path(department.id, by_id)})
+    planning_entries_updated = await _refresh_planning_paths(db, by_id, set(by_id)) if moved else 0
+    for item in moved:
+        db.add(OrganizationMoveAudit(
+            department_id=int(item["id"]), old_parent_id=None, new_parent_id=showback_azure.id,
+            old_path=item["old_path"], new_path=item["new_path"], planning_entries_updated=0,
+        ))
+    await db.commit()
+    return {
+        "message": "Organograma preparado; nenhum reprocessamento foi executado.",
+        "moved_directories": moved,
+        "planning_entries_updated": planning_entries_updated,
+        "reprocess_required": True,
+    }
 
 
 @router.delete("/departments/{dept_id}", status_code=204)
@@ -526,323 +653,29 @@ CLOUD_TO_CONNECTION: dict[str, int] = {
     "Atlas-MongoDB": 5,
 }
 
-AZURE_PROJECT_RULE_CONFIG: dict[str, tuple[int, int]] = {
-    "Azure-TI": (2, 1000),
-    "Azure-4P": (1, 2000),
-}
-
-# Legacy businessRules_download.csv refers to provider column names.  Gold
-# rules execute after the source→destination mapping, so their conditions must
-# always target the destination/F.O.C.U.S. contract (or an explicit technical
-# preservation column when FOCUS has no equivalent).
-_FOCUS_CONDITION_OVERRIDES = {
-    "resourcegroupname": "source_resource_group_name",
-    "totalcostondemandbrl": "TotalCostOnDemandBRL",
-    # Semantic fallback for providers not yet mapped. The destination mapping
-    # still takes precedence, so a future destination model can provide its
-    # own contract without changing this importer.
-    "subscriptionname": "SubAccountName",
-    "chargetype": "ChargeCategory",
-    "metercategory": "PricingCategory",
-    "reservationname": "CommitmentDiscountName",
-    "pricingmodel": "CommitmentDiscountType",
-    "metersubcategory": "ServiceSubcategory",
-    "metername": "SkuMeter",
-    "resourceid": "ResourceId",
-}
-
 
 def _adapt_conditions_to_destination(
     conditions: list[dict],
-    source_to_destination: dict[str, str],
+    relationship_map: dict[str, str],
 ) -> list[dict]:
-    """Translate CSV source fields to the mapped Gold schema.
-
-    The database mapping remains the source of truth.  Overrides only cover
-    explicit preservation/calculation fields which do not exist in FOCUS.
-    """
-    adapted: list[dict] = []
-    for original in conditions:
-        condition = dict(original)
-        source = str(condition.get("field") or "")
-        key = source.lower()
-        condition["field"] = (
-            _FOCUS_CONDITION_OVERRIDES.get(key)
-            or source_to_destination.get(key)
-            or source
-        )
-        adapted.append(condition)
-    return adapted
-
-
-def _azure_project_rule_signature(
-    connection_id: int | None,
-    destination_table_id: int | None,
-    target_field: str,
-    match_value: str,
-    source_field: str,
-    conditions: list[dict] | None,
-) -> tuple:
-    """Stable identity for project-export classification rules.
-
-    The rule name is deliberately excluded: names are presentation text and can
-    be shortened for the database, while the condition is the actual rule.
-    """
-    def _canon_identity(value: object) -> str:
-        return re.sub(
-            r"[^a-z0-9]", "",
-            unicodedata.normalize("NFKD", str(value or ""))
-            .encode("ascii", "ignore").decode().lower(),
-        )
-
-    normalized_conditions = tuple(
-        (
-            str(condition.get("field", "")).lower(),
-            str(condition.get("operator", "")),
-            tuple(_canon_identity(value) for value in condition.get("values", [])),
-            str(condition.get("logic", "AND")),
-        )
-        for condition in (conditions or [])
-    )
-    return (
-        connection_id, destination_table_id, target_field.lower(),
-        _canon_identity(match_value), source_field.lower(), normalized_conditions,
-    )
-
-
-@router.post(
-    "/classifications/import-azure-projects",
-    response_model=AzureProjectRulesImportResult,
-    status_code=201,
-)
-async def import_azure_project_classification_rules(
-    data: AzureProjectRulesImportRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """Rebuild Azure-TI and Azure-4P rules using both Bronze sources as evidence.
-
-    The CSV is the allocation source; Bronze only proves that a candidate value
-    is currently usable. Subscriptions are selected first, then resource groups
-    already covered by one of those subscriptions are intentionally omitted.
-    """
-    projects_path = Path(data.projetos_path)
-    if not projects_path.is_file():
-        raise HTTPException(status_code=404, detail=f"File not found: {data.projetos_path}")
-
-    focus = (await db.execute(
-        select(DestinationTable).where(
-            func.upper(DestinationTable.name) == "MODELO FOCUS",
-            DestinationTable.active == True,
-        ).limit(1)
-    )).scalars().first()
-    if focus is None:
-        raise HTTPException(status_code=422, detail="Active destination table 'Modelo FOCUS' was not found")
-
-    with projects_path.open("r", encoding="utf-8", newline="") as csv_file:
-        reader = csv.DictReader(csv_file, delimiter=";")
-        rows = [
-            row for row in reader
-            if row.get("Cloud", "").strip() in AZURE_PROJECT_RULE_CONFIG
-        ]
-
-    result = AzureProjectRulesImportResult(
-        source_rows=len(rows), unique_rules=0, classification_rules_created=0,
-        skipped_no_department=0, skipped_ambiguous_department=0,
-        skipped_existing=0,
-    )
-
-    def _canon(value: object) -> str:
-        return re.sub(
-            r"[^a-z0-9]", "",
-            unicodedata.normalize("NFKD", str(value or ""))
-            .encode("ascii", "ignore").decode().lower(),
-        )
-
-    # The export can carry repeated rows. Keep its first occurrence because a
-    # canonical duplicate would have exactly the same classification behavior.
-    unique_rows: list[dict[str, str]] = []
-    seen_source_rules: set[tuple[str, str, str]] = set()
-    for row in rows:
-        cloud = row.get("Cloud", "").strip()
-        project_name = row.get("Projeto", "").strip()
-        subscription_rg = row.get("SubscriptionRG", "").strip()
-        if not project_name or not subscription_rg:
-            result.errors.append(f"{cloud}: skipped row with empty Projeto or SubscriptionRG")
-            result.skipped_no_source_match += 1
-            continue
-        source_key = (cloud, project_name, _canon(subscription_rg))
-        if source_key in seen_source_rules:
-            continue
-        seen_source_rules.add(source_key)
-        unique_rows.append({"cloud": cloud, "project_name": project_name, "value": subscription_rg, "canon": source_key[2]})
-    result.unique_rules = len(unique_rows)
-
-    # Validate candidates against the union of the two raw Azure sources. Do
-    # this before touching the existing import, so a Bronze failure is safe.
-    subscriptions: set[str] = set()
-    resource_groups: set[str] = set()
-    subscription_resource_groups: set[tuple[str, str]] = set()
-    for bronze_table in ("raw_azure_ti", "raw_azure_4p"):
-        subscription_rows = await trino_execute(
-            f"SELECT DISTINCT subscriptionname AS value FROM iceberg.bronze.{bronze_table} "
-            "WHERE subscriptionname IS NOT NULL"
-        )
-        rg_rows = await trino_execute(
-            f"SELECT DISTINCT resourcegroupname AS value FROM iceberg.bronze.{bronze_table} "
-            "WHERE resourcegroupname IS NOT NULL"
-        )
-        pair_rows = await trino_execute(
-            f"SELECT DISTINCT subscriptionname, resourcegroupname FROM iceberg.bronze.{bronze_table} "
-            "WHERE subscriptionname IS NOT NULL AND resourcegroupname IS NOT NULL"
-        )
-        subscriptions.update(_canon(row["value"]) for row in subscription_rows)
-        resource_groups.update(_canon(row["value"]) for row in rg_rows)
-        subscription_resource_groups.update(
-            (_canon(row["subscriptionname"]), _canon(row["resourcegroupname"]))
-            for row in pair_rows
-        )
-
-    active_department_ids = set((await db.execute(
-        select(Department.id).where(Department.active == True)
-    )).scalars().all())
-    projects = (await db.execute(
-        select(Project).where(Project.cloud.in_(list(AZURE_PROJECT_RULE_CONFIG)))
-    )).scalars().all()
-    project_departments: dict[tuple[str, str], set[int]] = {}
-    for project in projects:
-        if project.department_id in active_department_ids:
-            project_departments.setdefault((project.cloud or "", project.projeto_name), set()).add(project.department_id)
-
-    departments = (await db.execute(
-        select(Department).where(
-            Department.active == True,
-            Department.parent_id != None,
-            Department.cloud_filter.in_(list(AZURE_PROJECT_RULE_CONFIG)),
-        )
-    )).scalars().all()
-    direct_departments: dict[tuple[str, str], set[int]] = {}
-    for department in departments:
-        direct_departments.setdefault((department.cloud_filter or "", department.name), set()).add(department.id)
-
-    # Remove exactly the prior assistant import: it was the only batch using
-    # these two connection/priority combinations and generated condition fields.
-    prior_import_rules = (await db.execute(
-        select(ClassificationRule).where(
-            ClassificationRule.destination_table_id == focus.id,
-            ClassificationRule.target_field == "departamento",
-            ClassificationRule.pattern_type == "multi_condition",
-            ClassificationRule.source_field.in_(["SubAccountName", "source_resource_group_name"]),
-            (
-                ((ClassificationRule.connection_id == 2) & (ClassificationRule.priority == 1000))
-                | ((ClassificationRule.connection_id == 1) & (ClassificationRule.priority == 2000))
-            ),
-        )
-    )).scalars().all()
-    for rule in prior_import_rules:
-        await db.delete(rule)
-    result.previous_import_rules_removed = len(prior_import_rules)
-
-    existing_rules = (await db.execute(
-        select(ClassificationRule).where(
-            ClassificationRule.destination_table_id == focus.id,
-        )
-    )).scalars().all()
-    existing_signatures = {
-        _azure_project_rule_signature(
-            rule.connection_id, rule.destination_table_id, rule.target_field,
-            rule.match_value, rule.source_field, rule.conditions,
-        )
-        for rule in existing_rules
+    """Translate legacy source field names to destination column names."""
+    identity_fields = {
+        "pricingmodel", "chargetype", "resourcegroupname", "metercategory",
+        "metersubcategory", "subscriptionname", "reservationname", "metername",
+        "resourceid", "subaccountname", "pricingcategory", "chargecategory",
+        "servicesubcategory", "source_resource_group_name",
     }
-
-    # Resolve department eligibility once per cloud/project pair. Bronze is
-    # shared evidence only; connection and priority follow the CSV cloud.
-    department_by_project: dict[tuple[str, str], int] = {}
-    skipped_projects: set[tuple[str, str]] = set()
-    ambiguous_projects: set[tuple[str, str]] = set()
-    for cloud, project_name in {(row["cloud"], row["project_name"]) for row in unique_rows}:
-        project_key = (cloud, project_name)
-        candidate_department_ids = project_departments.get(project_key, set())
-        if not candidate_department_ids:
-            candidate_department_ids = direct_departments.get(project_key, set())
-
-        if len(candidate_department_ids) == 0:
-            skipped_projects.add(project_key)
-            result.errors.append(f"{cloud} / {project_name}: active department not found")
-        if len(candidate_department_ids) > 1:
-            skipped_projects.add(project_key)
-            ambiguous_projects.add(project_key)
-            result.errors.append(f"{cloud} / {project_name}: more than one active department matches")
-        if len(candidate_department_ids) == 1:
-            department_by_project[project_key] = next(iter(candidate_department_ids))
-
-    def _add_rule(cloud: str, project_name: str, value: str, source_field: str) -> bool:
-        connection_id, priority = AZURE_PROJECT_RULE_CONFIG[cloud]
-        project_key = (cloud, project_name)
-        conditions = [{"field": source_field, "operator": "=", "values": [value], "logic": "AND"}]
-        signature = _azure_project_rule_signature(
-            connection_id, focus.id, "departamento", project_name, source_field, conditions,
-        )
-        if signature in existing_signatures:
-            result.skipped_existing += 1
-            return False
-        db.add(ClassificationRule(
-            connection_id=connection_id,
-            destination_table_id=focus.id,
-            department_id=department_by_project[project_key],
-            name=f"{cloud} | {project_name} | {value}"[:200],
-            source_field=source_field,
-            pattern=f"{source_field}={value}"[:500],
-            pattern_type="multi_condition",
-            match_value=project_name[:200],
-            target_field="departamento",
-            conditions=conditions,
-            priority=priority,
-            active=True,
-        ))
-        existing_signatures.add(signature)
-        result.classification_rules_created += 1
-        return True
-
-    # First pass: subscriptions always take precedence over RG candidates.
-    selected_subscriptions: dict[tuple[str, str], set[str]] = {}
-    for row in unique_rows:
-        cloud = row["cloud"]
-        project_name = row["project_name"]
-        project_key = (cloud, project_name)
-        if project_key in skipped_projects:
-            if project_key in ambiguous_projects:
-                result.skipped_ambiguous_department += 1
-            else:
-                result.skipped_no_department += 1
-            continue
-        if row["canon"] not in subscriptions:
-            if row["canon"] not in resource_groups:
-                result.skipped_no_source_match += 1
-            continue
-        selected_subscriptions.setdefault(project_key, set()).add(row["canon"])
-        if _add_rule(cloud, project_name, row["value"], "SubAccountName"):
-            result.subscription_rules_created += 1
-
-    # Second pass: an RG under any approved subscription for this project is
-    # already classified by the subscription rule and must not be duplicated.
-    for row in unique_rows:
-        cloud = row["cloud"]
-        project_name = row["project_name"]
-        project_key = (cloud, project_name)
-        if project_key in skipped_projects or row["canon"] not in resource_groups:
-            continue
-        if any(
-            (subscription, row["canon"]) in subscription_resource_groups
-            for subscription in selected_subscriptions.get(project_key, set())
-        ):
-            result.skipped_redundant_resource_group += 1
-            continue
-        if _add_rule(cloud, project_name, row["value"], "source_resource_group_name"):
-            result.resource_group_rules_created += 1
-
-    await db.commit()
-    return result
+    adapted: list[dict] = []
+    for condition in conditions:
+        field = str(condition.get("field", "")).strip()
+        dest_field = relationship_map.get(field.lower(), field)
+        if dest_field == field and field.lower() in identity_fields:
+            dest_field = field
+        adapted.append({
+            **condition,
+            "field": dest_field,
+        })
+    return adapted
 
 
 @router.post("/departments/import", response_model=CsvImportResult, status_code=201)
@@ -890,23 +723,27 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
             reader = csv.DictReader(f, delimiter=";")
             rows = list(reader)
 
-        # 1a. Create root departments (Diretorias) — one per unique name
-        seen_roots: dict[str, int] = {}
+        # 1a. Create root departments (Diretorias)
+        seen_roots: dict[tuple[str, ...], int] = {}
         for row in rows:
             dn = row.get("Diretoria", "").strip()
+            cloud_name = row.get("Cloud", "").strip()
             if not dn:
                 continue
-            if dn in seen_roots:
+            root_key = (cloud_name, dn) if cloud_name in (data.cloud_root_map or {}) else (dn,)
+            if root_key in seen_roots:
                 continue
 
-            dept = await _find_dept(dn, parent_id=None)
+            parent_id = (data.cloud_root_map or {}).get(cloud_name) if cloud_name else None
+            dept = await _find_dept(dn, parent_id=parent_id)
             if dept:
-                seen_roots[dn] = dept.id
+                seen_roots[root_key] = dept.id
             else:
                 new_root = Department(
+                    parent_id=parent_id,
                     name=dn,
                     centro_custo=row.get("CentrodeCusto", "").strip() or None,
-                    cloud_filter=row.get("Cloud", "").strip() or None,
+                    cloud_filter=cloud_name or None,
                     ambiente=row.get("Origem", "").strip() or None,
                     custom_fields={
                         "tipo": "Diretoria",
@@ -919,14 +756,13 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 )
                 db.add(new_root)
                 await db.flush()
-                seen_roots[dn] = new_root.id
+                seen_roots[root_key] = new_root.id
                 result.departments_created += 1
 
-            cloud_name = row.get("Cloud", "").strip()
             if cloud_name:
                 directory_roots_by_cloud.setdefault(cloud_name, [])
-                if seen_roots[dn] not in directory_roots_by_cloud[cloud_name]:
-                    directory_roots_by_cloud[cloud_name].append(seen_roots[dn])
+                if seen_roots[root_key] not in directory_roots_by_cloud[cloud_name]:
+                    directory_roots_by_cloud[cloud_name].append(seen_roots[root_key])
 
         direttoria_map = seen_roots
 
@@ -935,10 +771,13 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
         for row in rows:
             dn = row.get("Diretoria", "").strip()
             pn = row.get("Projeto", "").strip()
+            cloud = row.get("Cloud", "").strip()
             if not dn or not pn or pn.upper() == "NA":
                 continue
 
-            parent_id = direttoria_map.get(dn)
+            parent_id = direttoria_map.get(
+                (cloud, dn) if cloud in (data.cloud_root_map or {}) else (dn,)
+            )
             if parent_id is None:
                 continue
 
@@ -1058,6 +897,8 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 continue
 
             connection_id = CLOUD_TO_CONNECTION.get(cloud)
+            from app.services.cloud_scope import connection_cloud_scope
+            cloud_scope = connection_cloud_scope(cloud) if cloud else None
             parsed_conditions = _adapt_conditions_to_destination(
                 parsed_conditions,
                 relationship_by_connection.get(connection_id, {}),
@@ -1159,6 +1000,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     target_field="departamento",
                     conditions=parsed_conditions,
                     priority=priority,
+                    cloud_scope=cloud_scope,
                     active=True,
                 ))
                 await db.flush()

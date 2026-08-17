@@ -66,12 +66,35 @@ class CloneEngine:
         meter, price, model = roles.get("meter_id"), roles.get("unit_price"), roles.get("pricing_model")
         on_demand = str(roles.get("on_demand_value", "OnDemand")).lower()
         if not all(x in frame for x in (meter, price, model)): return
-        candidates = frame[frame[model].astype(str).str.lower().eq(on_demand)]
-        for _, row in candidates.iterrows():
-            val = pd.to_numeric(row[price], errors="coerce")
-            key = (str(row.get("cloud_origem", "")).lower(), str(row[meter]))
-            if pd.notna(val) and float(val) > 0 and (key not in self.prices or period >= self.prices[key][0]):
-                self.prices[key] = (period, float(val))
+        candidates = frame.loc[frame[model].astype(str).str.lower().eq(on_demand), [meter, price]].copy()
+        if candidates.empty:
+            return
+        candidates[price] = pd.to_numeric(candidates[price], errors="coerce")
+        candidates = candidates[candidates[price].gt(0)]
+        if candidates.empty:
+            return
+        clouds = frame.loc[candidates.index, "cloud_origem"].astype(str).str.lower() if "cloud_origem" in frame else ""
+        candidates["_clone_key"] = list(zip(clouds, candidates[meter].astype(str))) if isinstance(clouds, pd.Series) else [("", value) for value in candidates[meter].astype(str)]
+        # ``last`` preserves the old same-period winner while reducing a
+        # potentially millions-of-rows scan to one update per meter.
+        for key, value in candidates.groupby("_clone_key", sort=False)[price].last().items():
+            if key not in self.prices or period >= self.prices[key][0]:
+                self.prices[key] = (period, float(value))
+
+    @staticmethod
+    def _apply_changes_frame(frame: pd.DataFrame, changes: dict[str, Any], historical_cost: pd.Series) -> pd.DataFrame:
+        """Vector equivalent of ``_apply_changes`` for all eligible rows."""
+        result = frame.copy()
+        for field, definition in (changes or {}).items():
+            operation = str(definition.get("operation", "SET")).upper() if isinstance(definition, dict) else "SET"
+            value = definition.get("value") if isinstance(definition, dict) else definition
+            if operation == "SET": result[field] = value
+            elif operation == "ZERO": result[field] = 0
+            elif operation == "NEGATE": result[field] = -pd.to_numeric(result.get(field), errors="coerce").fillna(0)
+            elif operation == "ABS": result[field] = pd.to_numeric(result.get(field), errors="coerce").fillna(0).abs()
+            elif operation == "COPY_COLUMN" and value: result[field] = result.get(str(value))
+            elif operation == "HISTORICAL_ON_DEMAND_COST": result[field] = historical_cost
+        return result
 
     def apply(self, frame: pd.DataFrame, period: str) -> tuple[pd.DataFrame, int]:
         if frame.empty: return frame, 0
@@ -88,39 +111,48 @@ class CloneEngine:
             if billed in frame: scope &= pd.to_numeric(frame[billed], errors="coerce").fillna(0).eq(0)
             eligible = frame.loc[scope].copy()
             if eligible.empty: continue
-            clones: list[dict[str, Any]] = []
-            for index, row in eligible.iterrows():
-                key = (str(row.get("cloud_origem", "")).lower(), str(row[meter]))
-                reference = self.prices.get(key)
-                if not reference:
-                    self.pendencies.append({"clone_rule_id": rule.id, "destination_table_id": self.destination_table_id, "connection_id": row.get("source_connection_id"), "provider": row.get("cloud_origem"), "meter_id": str(row[meter]), "billing_period": period, "source_record_id": str(row.get("source_record_id", index)), "reason": "Preço On-Demand anterior não encontrado"})
-                    continue
-                _, price = reference
-                quantity = abs(float(pd.to_numeric(row[qty], errors="coerce") or 0))
-                exchange = float(pd.to_numeric(row.get(rate, 1), errors="coerce") or 1) if rate else 1.0
-                amount = abs(price * quantity * exchange)
-                if amount == 0: continue
-                original = _apply_changes(row.to_dict(), rule.original_changes or {}, historical_cost=amount)
-                original[billed] = amount
-                if effective in frame: original[effective] = amount
-                original["is_synthetic"] = False
-                original["tipo"] = "realizado"
-                original["source_record_id"] = str(row.get("source_record_id", index))
-                for field, value in original.items():
-                    if field not in frame.columns:
-                        frame[field] = None
-                    frame.loc[index, field] = value
-
-                clone = _apply_changes(original, rule.clone_changes or {}, historical_cost=amount)
-                clone[billed] = -amount
-                if effective in frame: clone[effective] = -amount
-                clone["is_synthetic"] = True
-                clone["tipo"] = "realizado"
-                clone["clone_source_record_id"] = str(row.get("source_record_id", index))
-                clone["clone_rule_id"] = rule.id
-                clone["clone_rule_version"] = rule.version
-                clone["ondemand_reference_price"] = price
-                clone["ondemand_reference_period"] = reference[0]
-                clones.append(clone)
-            if clones: generated.append(pd.DataFrame(clones))
+            clouds = eligible.get("cloud_origem", pd.Series("", index=eligible.index)).astype(str).str.lower()
+            keys = list(zip(clouds, eligible[meter].astype(str)))
+            references = pd.Series(keys, index=eligible.index).map(self.prices)
+            missing = references.isna()
+            if missing.any():
+                pending = eligible.loc[missing].copy()
+                source_ids = pending.get("source_record_id", pd.Series(pending.index, index=pending.index)).astype(str)
+                pending_records = pd.DataFrame({
+                    "connection_id": pending.get("source_connection_id"),
+                    "provider": pending.get("cloud_origem"),
+                    "meter_id": pending[meter].astype(str),
+                    "source_record_id": source_ids,
+                }).to_dict("records")
+                self.pendencies.extend({
+                    "clone_rule_id": rule.id, "destination_table_id": self.destination_table_id,
+                    "billing_period": period, "reason": "Preço On-Demand anterior não encontrado", **record,
+                } for record in pending_records)
+            eligible = eligible.loc[~missing].copy()
+            references = references.loc[~missing]
+            if eligible.empty: continue
+            prices = references.map(lambda value: value[1]).astype(float)
+            reference_periods = references.map(lambda value: value[0])
+            quantity = pd.to_numeric(eligible[qty], errors="coerce").fillna(0).abs()
+            exchange = pd.to_numeric(eligible[rate], errors="coerce").fillna(1) if rate and rate in eligible else 1.0
+            amounts = (prices * quantity * exchange).abs()
+            eligible = eligible.loc[amounts.gt(0)].copy()
+            amounts = amounts.loc[eligible.index]; prices = prices.loc[eligible.index]; reference_periods = reference_periods.loc[eligible.index]
+            if eligible.empty: continue
+            originals = self._apply_changes_frame(eligible, rule.original_changes or {}, amounts)
+            originals[billed] = amounts
+            if effective in frame: originals[effective] = amounts
+            originals["is_synthetic"] = False; originals["tipo"] = "realizado"
+            originals["source_record_id"] = eligible.get("source_record_id", pd.Series(eligible.index, index=eligible.index)).astype(str)
+            for field in originals.columns:
+                if field not in frame.columns: frame[field] = None
+                frame.loc[originals.index, field] = originals[field]
+            clones = self._apply_changes_frame(originals, rule.clone_changes or {}, amounts)
+            clones[billed] = -amounts
+            if effective in frame: clones[effective] = -amounts
+            clones["is_synthetic"] = True; clones["tipo"] = "realizado"
+            clones["clone_source_record_id"] = originals["source_record_id"]
+            clones["clone_rule_id"] = rule.id; clones["clone_rule_version"] = rule.version
+            clones["ondemand_reference_price"] = prices; clones["ondemand_reference_period"] = reference_periods
+            generated.append(clones)
         return (pd.concat([frame, *generated], ignore_index=True) if generated else frame), sum(len(x) for x in generated)

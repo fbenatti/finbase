@@ -56,7 +56,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   // the user opens Pivot before that request completes, initialise as soon as
   // the table list arrives instead of leaving the screen on table ID zero.
   useEffect(() => {
-    if (!tableId && destinations.length) setTableId(initialTableId || destinations[0].id);
+    if (!tableId && destinations.length) {
+      const selectedId = initialTableId || destinations[0].id;
+      setTableId(selectedId);
+      setSourceIds([selectedId]);
+    }
   }, [tableId, destinations, initialTableId]);
 
   useEffect(() => {
@@ -115,10 +119,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   };
   const saveView = async () => {
     if (!viewName.trim()) return;
-    try { await savePivotView(viewName.trim(), { ...request, source_ids: sourceIds } as PivotRequest & { perspective_config?: unknown }); setViews(await getPivotViews()); setViewName(""); }
+    const validSourceIds = sourceIds.filter(id => id !== 0);
+    try { await savePivotView(viewName.trim(), { ...request, source_ids: validSourceIds.length ? validSourceIds : [tableId] } as PivotRequest & { perspective_config?: unknown }); setViews(await getPivotViews()); setViewName(""); }
     catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível salvar a visão"); }
   };
-  const loadView = (view: PivotView) => { setTableId(view.destination_table_id); setSourceIds((view.config as PivotView["config"] & { source_ids?: number[] }).source_ids || [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); };
+  const loadView = (view: PivotView) => { setTableId(view.destination_table_id); const sourceIds = (view.config as PivotView["config"] & { source_ids?: number[] }).source_ids?.filter(id => id !== 0) || []; setSourceIds(sourceIds.length ? sourceIds : [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); };
   const openDrill = async (rowKey: unknown[], colKey: unknown[]) => {
     const cellFilters: Record<string, unknown> = {};
     result?.rows.forEach((name, index) => { cellFilters[name] = rowKey[index] as string; });

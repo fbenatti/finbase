@@ -48,6 +48,17 @@ WORKER_LOCK = Path(os.getenv("OPENFINOPS_WORKER_LOCK", "/tmp/openfinops-worker.l
 running = True
 
 
+def _format_task_error(exc: Exception) -> str:
+    """Keep persisted worker errors readable when httpx raises empty messages."""
+    message = str(exc).strip()
+    if message:
+        return message
+    name = type(exc).__name__
+    if name in {"ReadError", "ConnectError", "RemoteProtocolError"}:
+        return f"{name}: conexão com Trino foi fechada (coordinator reiniciando ou sob carga)"
+    return name
+
+
 def _heartbeat_process(parent_pid: int):
     """Update liveness outside the worker GIL and stop with the parent."""
     # ``spawn`` imports this module and would otherwise inherit/register the
@@ -110,7 +121,7 @@ def main():
             task = session.execute(
                 select(EtlTask).where(
                     EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "classification_build"]),
+                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast"]),
                 )
                 .order_by(EtlTask.id)
                 .limit(1)
@@ -119,22 +130,7 @@ def main():
             if task:
                 task_id = task.id
 
-                if task.task_type == "classification_build":
-                    task_id = task.id
-                    version_id = (task.result_json or {}).get("classification_version_id")
-                    task.status = "RUNNING"; session.commit(); session.close()
-                    try:
-                        from app.services.classification_service import build_classification
-                        build_classification(int(version_id))
-                        s2 = SyncSession(); t2 = s2.get(EtlTask, task_id)
-                        if t2: t2.status = "COMPLETED"; t2.phase = "Classificação publicada"; t2.finished_at = datetime.now(timezone.utc)
-                        s2.commit(); s2.close()
-                    except Exception as exc:
-                        s2 = SyncSession(); t2 = s2.get(EtlTask, task_id)
-                        if t2: t2.status = "FAILED"; t2.errors = [str(exc)]; t2.finished_at = datetime.now(timezone.utc)
-                        s2.commit(); s2.close()
-
-                elif task.task_type == "forecast":
+                if task.task_type == "forecast":
                     config_id = task.destination_table_id
                     run_id = (task.result_json or {}).get("forecast_run_id")
                     task.status = "RUNNING"
@@ -142,7 +138,6 @@ def main():
                     session.close()
                     try:
                         from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastRun
-                        from app.models.classification import ClassificationVersion
                         from app.models.destination import DestinationTable
                         from app.services.forecast_service import fetch_metadata, validate_config, run_forecast
                         from types import SimpleNamespace
@@ -156,6 +151,17 @@ def main():
                         business_rules = s.query(ForecastBusinessRule).filter(ForecastBusinessRule.forecast_config_id == config_id, ForecastBusinessRule.active == True).all() if config else []
                         if not config or not run or not dest:
                             raise RuntimeError("Configuração de forecast inválida")
+                        # Cancellation can race with the worker claiming the
+                        # queue row. Re-check the run after loading both rows
+                        # and never execute a cancelled forecast.
+                        if run.status == "CANCELLED" or (task_row and task_row.status == "CANCELLED"):
+                            if task_row:
+                                task_row.status = "CANCELLED"
+                                task_row.phase = "Cancelado pelo usuário"
+                                task_row.finished_at = run.finished_at or datetime.now(timezone.utc)
+                            s.commit()
+                            s.close()
+                            continue
                         # Keep the run status aligned with the task as soon as
                         # the worker claims it; the UI must not show QUEUED
                         # while the forecast is already executing.
@@ -172,12 +178,7 @@ def main():
                             task_row.phase = "Agregando histórico no Trino"
                         s.commit()
                         config.destination_physical_name = dest.physical_name
-                        if run.classification_version_id:
-                            cv = s.get(ClassificationVersion, run.classification_version_id)
-                            if cv and cv.status == "ACTIVE":
-                                config.destination_physical_name = cv.physical_table
-                                config.source_namespace = "classified"
-                                metadata = asyncio.run(fetch_metadata(cv.physical_table, "classified"))
+                        config.source_namespace = "gold"
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
                         result = asyncio.run(run_forecast(
                             config, adjustments, date.fromisoformat(run.cutoff_date),
@@ -185,10 +186,14 @@ def main():
                         ))
                         run.status = "COMPLETED"
                         run.phase = "Forecast publicado"
+                        run.finished_at = datetime.now(timezone.utc)
                         run.rows_written = result["rows"]
                         run.total_series = result["series"]
                         run.processed_series = result["series"]
                         run.result_table = result["table"]
+                        # Persist the data-driven cutoff used by the engine,
+                        # rather than the day on which the job was queued.
+                        run.cutoff_date = result["effective_cutoff"]
                         run.selected_models = result["methods"]
                         run.error_metrics = {}
                         if task_row:
@@ -204,10 +209,16 @@ def main():
                         s = SyncSession()
                         run = s.get(ForecastRun, run_id)
                         task_row = s.get(EtlTask, task_id)
+                        error_message = _format_task_error(exc)
                         if run:
-                            run.status = "FAILED"; run.phase = f"Falha no forecast: {str(exc)[:160]}"; run.error = str(exc); run.finished_at = datetime.now(timezone.utc)
+                            run.status = "FAILED"
+                            run.phase = f"Falha no forecast: {error_message[:160]}"
+                            run.error = error_message[:2000]
+                            run.finished_at = datetime.now(timezone.utc)
                         if task_row:
-                            task_row.status = "FAILED"; task_row.phase = f"Erro: {exc}"; task_row.finished_at = datetime.now(timezone.utc)
+                            task_row.status = "FAILED"
+                            task_row.phase = f"Erro: {error_message[:160]}"
+                            task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
                 elif task.task_type == "reprocess":
@@ -257,6 +268,7 @@ def main():
                             conn_ids,
                             periods,
                             replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
+                            publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
                         )
                         print(f"Task {task_id} completed: {result}")
 

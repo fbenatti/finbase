@@ -53,6 +53,7 @@ class BlobScanItem(BaseModel):
     blob_prefix: str
     last_modified: datetime
     content_length: int | None
+    row_count: int | None = None
     status: str  # NEW | CHANGED | UNCHANGED
     billing_period: str | None = None
 
@@ -198,6 +199,7 @@ class BusinessRuleCreate(BaseModel):
     priority: int = 0
     valid_from: str | None = None
     valid_until: str | None = None
+    cloud_scope: str | None = None
     active: bool = True
 
 
@@ -214,6 +216,7 @@ class BusinessRuleUpdate(BaseModel):
     priority: int | None = None
     valid_from: str | None = None
     valid_until: str | None = None
+    cloud_scope: str | None = None
     active: bool | None = None
 
 
@@ -231,6 +234,7 @@ class BusinessRuleOut(BaseModel):
     priority: int
     valid_from: str | None
     valid_until: str | None
+    cloud_scope: str | None = None
     active: bool
     created_at: datetime
     updated_at: datetime
@@ -263,6 +267,7 @@ class ClassificationRuleCreate(BaseModel):
     target_field: str
     conditions: list[dict[str, Any]] | None = None
     priority: int = 0
+    cloud_scope: str | None = None
     active: bool = True
 
 
@@ -278,6 +283,7 @@ class ClassificationRuleUpdate(BaseModel):
     project_id: int | None = None
     destination_table_id: int | None = None
     priority: int | None = None
+    cloud_scope: str | None = None
     active: bool | None = None
 
 
@@ -295,6 +301,7 @@ class ClassificationRuleOut(BaseModel):
     target_field: str
     conditions: list[dict[str, Any]] | None = None
     priority: int
+    cloud_scope: str | None = None
     active: bool
     created_at: datetime
     updated_at: datetime
@@ -305,35 +312,16 @@ class ClassificationRuleOut(BaseModel):
 # ---- CSV Import ----
 
 class CsvImportRequest(BaseModel):
-    diretorias_path: str = "/Users/fernandohenriquebenatti/Documents/FinOps Vivo/NovoReport/finopsNew/diretorias_download.csv"
-    projetos_path: str = "/Users/fernandohenriquebenatti/Documents/FinOps Vivo/NovoReport/finopsNew/projetos_download.csv"
-    business_rules_path: str = "/Users/fernandohenriquebenatti/Documents/FinOps Vivo/NovoReport/finopsNew/businessRules_download.csv"
+    diretorias_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/diretorias_download.csv"
+    projetos_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/projetos_download.csv"
+    business_rules_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/businessRules_download.csv"
+    cloud_root_map: dict[str, int] | None = None
 
 
 class CsvImportResult(BaseModel):
     departments_created: int
     projects_created: int
     classification_rules_created: int
-    errors: list[str] = []
-
-
-class AzureProjectRulesImportRequest(BaseModel):
-    """Location of the project export, as seen by the API process."""
-    projetos_path: str = "/app/projetos_download.csv"
-
-
-class AzureProjectRulesImportResult(BaseModel):
-    source_rows: int
-    unique_rules: int
-    previous_import_rules_removed: int = 0
-    classification_rules_created: int
-    subscription_rules_created: int = 0
-    resource_group_rules_created: int = 0
-    skipped_no_department: int
-    skipped_ambiguous_department: int
-    skipped_existing: int
-    skipped_no_source_match: int = 0
-    skipped_redundant_resource_group: int = 0
     errors: list[str] = []
 
 

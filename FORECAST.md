@@ -59,10 +59,10 @@ Quando o nome da tabela ou do nome físico contém `FOCUS`, o sistema pode suger
 cloud_origem
 departamento
 servicename
-pricingcategory
 subaccountname
-resourcename
 ```
+
+`ServiceName` is the FOCUS service column for Azure (`consumedService`) and GCP (`service.description`). `ResourceName` / `PricingCategory` are optional and much finer (Azure product vs GCP SKU/instance); they should not be the default forecast grain.
 
 Para outros destinos Gold, nenhuma dimensão é pré-selecionada. Todas as dimensões reais ficam disponíveis para escolha.
 
@@ -121,12 +121,18 @@ As dimensões definem a chave da série. Quanto mais granular a configuração, 
 
 ## Cutoff e mês corrente
 
-Com `cutoff_days = 2`, se hoje é dia 12:
+O cutoff é calculado a partir da maior data válida presente na coluna de consumo
+configurada (`ChargePeriodStart` no FOCUS). A data de execução do job e o campo
+`x_DatasetInstanceLastUpdated` não são usados como data da coleta. Com
+`cutoff_days = 2`, se o último valor recebido é do dia 12:
 
 ```text
 01 a 10 -> realizado
 11 até o fim do mês -> forecast
 ```
+
+Assim, o dia da última coleta e o dia anterior são desconsiderados do realizado
+e das janelas usadas para calcular a média do forecast.
 
 O realizado é somado até o cutoff. A média diária selecionada é multiplicada pelos dias restantes:
 

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, classification
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, savings
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         from app.models.source_connection import SourceConnection  # noqa: F401
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
-        from app.models.rules import EtlMapping, BusinessRule, ClassificationRule  # noqa: F401
+        from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, OrganizationMoveAudit  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping  # noqa: F401
@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun  # noqa: F401
         from app.models.planning import FinancialType, PlanningVersion, PlanningEntry  # noqa: F401
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
-        from app.models.classification import FinancialBaseVersion, ClassificationRulesetSnapshot, ClassificationVersion, ClassificationPublication, ClassificationArtifactBinding  # noqa: F401
+        from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
@@ -37,11 +37,17 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS destination_physical_name VARCHAR(200)",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS source_snapshot_id VARCHAR(100)",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS classification_version_id INTEGER",
-            "ALTER TABLE classification_version ADD COLUMN IF NOT EXISTS source_task_id INTEGER",
-            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS classification_version_id INTEGER",
             "ALTER TABLE forecast_run ALTER COLUMN forecast_config_id DROP NOT NULL",
         ):
             await conn.execute(text(statement))
+        await conn.execute(text("""
+            DO $$ BEGIN
+              IF to_regclass('fact_cost') IS NOT NULL THEN
+                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS departamento_nivel_6 VARCHAR(200);
+                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS departamento_nivel_7 VARCHAR(200);
+              END IF;
+            END $$
+        """))
         await conn.execute(text("""
             DO $$ DECLARE fk_name text; BEGIN
               SELECT conname INTO fk_name FROM pg_constraint
@@ -75,6 +81,13 @@ async def lifespan(app: FastAPI):
             FROM forecast_config cfg JOIN destination_table dest ON dest.id = cfg.destination_table_id
             WHERE run.forecast_config_id = cfg.id AND (run.config_snapshot::jsonb = '{}'::jsonb OR run.config_snapshot IS NULL);
         """))
+        for statement in (
+            "ALTER TABLE business_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
+            "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
+            "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",
+            "CREATE INDEX IF NOT EXISTS ix_classification_rule_cloud_scope ON classification_rule (cloud_scope)",
+        ):
+            await conn.execute(text(statement))
 
     async with async_session() as db:
         await seed(db)
@@ -106,6 +119,7 @@ app.add_middleware(
 )
 
 app.include_router(connections.router)
+app.include_router(csv_upload.router)
 app.include_router(etl.router)
 app.include_router(rules.router)
 app.include_router(periods.router)
@@ -115,7 +129,7 @@ app.include_router(schema.router)
 app.include_router(forecast.router)
 app.include_router(clone_rules.router)
 app.include_router(planning.router)
-app.include_router(classification.router)
+app.include_router(savings.router)
 
 
 @app.get("/health")

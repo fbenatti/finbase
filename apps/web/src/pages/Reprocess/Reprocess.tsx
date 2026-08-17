@@ -98,24 +98,28 @@ export default function Reprocess() {
   }, [selConnIds]);
 
   // Poll task status — finds running reprocess tasks globally
-  const pollTask = useCallback((tid: number) => {
+  const pollTask = useCallback((taskIds: number[]) => {
     pollRef.current = setInterval(async () => {
       try {
-        const s = await getReprocessStatus(tid);
+        const statuses = await Promise.all(taskIds.map(getReprocessStatus));
+        const active = statuses.find(s => ["QUEUED", "RUNNING"].includes(s.status));
+        const s = active || statuses[statuses.length - 1];
         setTaskStatus(s);
-        if (["COMPLETED", "FAILED", "CANCELLED"].includes(s.status)) {
+        if (!active) {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setProcessing(false);
           setCancelling(false);
-          if (s.status === "COMPLETED") {
+          const failed = statuses.find(item => item.status === "FAILED");
+          const cancelled = statuses.find(item => item.status === "CANCELLED");
+          if (!failed && !cancelled) {
             setResult({
               type: "success",
-              message: `${s.rows_written.toLocaleString()} linhas escritas em ${s.table}`,
+              message: `${statuses.reduce((total, item) => total + item.rows_written, 0).toLocaleString()} linhas publicadas em ${statuses.length} fonte(s)/mês(es)`,
             });
-          } else if (s.status === "FAILED") {
-            setResult({ type: "error", message: s.error || "Falha ao reprocessar" });
-          } else if (s.status === "CANCELLED") {
+          } else if (failed) {
+            setResult({ type: "error", message: failed.error || "Falha ao reprocessar" });
+          } else {
             setResult({ type: "error", message: "Processamento cancelado." });
           }
           getReprocessHistory().then(setHistory).catch(() => {});
@@ -125,7 +129,7 @@ export default function Reprocess() {
         pollRef.current = null;
         setProcessing(false);
       }
-    }, 1500);
+    }, taskIds.length > 4 ? 4000 : 2000);
   }, []);
 
   // On mount + when dest table changes: recover running tasks from global queue
@@ -144,7 +148,7 @@ export default function Reprocess() {
           setTaskId(reprocessTask.id);
           setProcessing(true);
           setResult(null);
-          pollTask(reprocessTask.id);
+          pollTask([reprocessTask.id]);
         }
       } catch { /* ignore */ }
     };
@@ -175,7 +179,7 @@ export default function Reprocess() {
         replace_existing: replaceExisting,
       });
       setTaskId(res.task_id);
-      pollTask(res.task_id);
+      pollTask(res.task_ids || [res.task_id]);
       getReprocessHistory().then(setHistory).catch(() => {});
     } catch (e: unknown) {
       setResult({

@@ -26,6 +26,45 @@ def _lit(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def gold_date_expr(date_col: str, period_col: str | None = None) -> str:
+    """Parse Gold charge dates across Azure slash formats and GCP ISO-8601 timestamps.
+
+    GCP ChargePeriodStart is stored as varchar ``YYYY-MM-DDTHH:MM:SS+00:00``.
+    ``TRY_CAST AS DATE`` and ``date_parse(..., '%Y-%m-%d')`` both fail on that
+    shape, which previously dropped every GCP series from the forecast.
+    """
+    if period_col and date_col == period_col:
+        return f"TRY_CAST(date_parse(CAST({_q(period_col)} AS VARCHAR) || '01', '%Y%m%d') AS DATE)"
+    raw_date = f"CAST({_q(date_col)} AS VARCHAR)"
+    # Do not use TRY_CAST for slash-delimited strings: Trino accepts them
+    # using a locale-dependent parser before we can validate the billing
+    # period. Limit it strictly to ISO dates and ISO-8601 timestamps.
+    iso_date = (
+        f"CASE WHEN regexp_like({raw_date}, '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}') "
+        f"THEN COALESCE("
+        f"TRY_CAST({_q(date_col)} AS DATE), "
+        f"TRY(date_parse({raw_date}, '%Y-%m-%d')), "
+        f"TRY(CAST(from_iso8601_timestamp({raw_date}) AS DATE)), "
+        f"TRY(date_parse(substr({raw_date}, 1, 10), '%Y-%m-%d'))"
+        f") END"
+    )
+    mdy_date = f"TRY(date_parse({raw_date}, '%m/%d/%Y'))"
+    dmy_date = f"TRY(date_parse({raw_date}, '%d/%m/%Y'))"
+    if not period_col:
+        return f"COALESCE({iso_date}, {mdy_date}, {dmy_date})"
+    # Azure Cost Management uses MM/DD/YYYY. Treat that as the primary
+    # non-ISO format, and when a billing period exists use it to resolve
+    # ambiguous day/month values deterministically. For example,
+    # ``08/01/2026`` in billing period 202608 is 1 Aug, never 8 Jan.
+    period_number = f"TRY_CAST(CAST({_q(period_col)} AS VARCHAR) AS INTEGER)"
+    return (
+        f"COALESCE({iso_date}, "
+        f"CASE WHEN year({mdy_date}) * 100 + month({mdy_date}) = {period_number} THEN {mdy_date} END, "
+        f"CASE WHEN year({dmy_date}) * 100 + month({dmy_date}) = {period_number} THEN {dmy_date} END, "
+        f"{mdy_date}, {dmy_date})"
+    )
+
+
 async def fetch_metadata(table_name: str, namespace: str = "gold") -> dict[str, Any]:
     schema_rows = await trino_execute(f"DESCRIBE iceberg.{namespace}.{table_name}")
     columns = []
@@ -80,50 +119,61 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     date_col = config.date_column
     measure = config.measure_column
     period = config.period_column
-    # The run date is not necessarily the last available cost date.  Cutoff
-    # D-n is part of the forecast contract: with D-2, only data through two
-    # calendar days before execution is realized and the remaining days are
-    # projected.
-    effective_cutoff = cutoff - timedelta(days=max(0, int(getattr(config, "cutoff_days", 0) or 0)))
-    if period and date_col == period:
-        date_expr = f"TRY_CAST(date_parse(CAST({_q(period)} AS VARCHAR) || '01', '%Y%m%d') AS DATE)"
-    else:
-        # Azure Cost Management uses MM/DD/YYYY.  Treat that as the primary
-        # non-ISO format, and when a billing period exists use it to resolve
-        # ambiguous day/month values deterministically.  For example,
-        # ``08/01/2026`` in billing period 202608 is 1 Aug, never 8 Jan.
-        raw_date = f"CAST({_q(date_col)} AS VARCHAR)"
-        # Do not use TRY_CAST for slash-delimited strings: Trino accepts them
-        # using a locale-dependent parser before we can validate the billing
-        # period. Limit it strictly to ISO dates.
-        iso_date = (
-            f"CASE WHEN regexp_like({raw_date}, '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}') "
-            f"THEN COALESCE(TRY_CAST({_q(date_col)} AS DATE), TRY(date_parse({raw_date}, '%Y-%m-%d'))) END"
-        )
-        mdy_date = f"TRY(date_parse({raw_date}, '%m/%d/%Y'))"
-        dmy_date = f"TRY(date_parse({raw_date}, '%d/%m/%Y'))"
-        if period:
-            period_number = f"TRY_CAST(CAST({_q(period)} AS VARCHAR) AS INTEGER)"
-            date_expr = (
-                f"COALESCE({iso_date}, "
-                f"CASE WHEN year({mdy_date}) * 100 + month({mdy_date}) = {period_number} THEN {mdy_date} END, "
-                f"CASE WHEN year({dmy_date}) * 100 + month({dmy_date}) = {period_number} THEN {dmy_date} END, "
-                f"{mdy_date}, {dmy_date})"
-            )
-        else:
-            date_expr = f"COALESCE({iso_date}, {mdy_date}, {dmy_date})"
+    date_expr = gold_date_expr(date_col, period)
     select_dims = ", ".join(_q(x) for x in dims)
     group = (select_dims + ", ") if select_dims else ""
     # Historical Gold rows produced before ``tipo`` was introduced are still
     # realized facts.  Include NULL for backward compatibility; every new
     # reprocess writes the explicit value below, while forecast/planning rows
     # live in a separate table and are never read here.
-    type_clause = (
-        f" WHERE ({_q(config.type_column)} = 'realizado' OR {_q(config.type_column)} IS NULL)"
-        if getattr(config, "has_type_column", False) else ""
+    type_filter = (
+        f"({_q(config.type_column)} = 'realizado' OR {_q(config.type_column)} IS NULL)"
+        if getattr(config, "has_type_column", False) else "TRUE"
     )
-    sql = f"SELECT {group}{date_expr} AS forecast_day, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM iceberg.{namespace}.{table}{type_clause} GROUP BY {select_dims + ', ' if select_dims else ''}{date_expr} ORDER BY forecast_day"
-    records = await trino_execute(sql, timeout_s=300)
+    source = f"iceberg.{namespace}.{table}"
+    # Determine the as-of date before the expensive dimensional aggregation.
+    # The previous query aggregated every Gold period and only discarded late
+    # days in Pandas, which made a 18M-row table unstable in Trino.
+    latest_period_filter = (
+        f" AND CAST({_q(period)} AS VARCHAR) = (SELECT MAX(CAST({_q(period)} AS VARCHAR)) FROM {source} WHERE {type_filter})"
+        if period else ""
+    )
+    latest_sql = f"SELECT MAX({date_expr}) AS collected_through FROM {source} WHERE {type_filter}{latest_period_filter}"
+    latest_records = await trino_execute(latest_sql, timeout_s=120)
+    latest_value = latest_records[0].get("collected_through") if latest_records else None
+    collected_timestamp = pd.to_datetime(latest_value, errors="coerce")
+    if pd.isna(collected_timestamp):
+        raise ValueError("Não foi possível identificar a última data válida na Gold")
+    collected_through = collected_timestamp.date()
+    excluded_days = max(0, int(getattr(config, "cutoff_days", 2) or 0))
+    effective_cutoff = collected_through - timedelta(days=excluded_days)
+    # The longest model uses 28 days and AUTO_BACKTEST reserves seven days for
+    # validation. Keep the current month in full when it starts earlier.
+    max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
+    history_start = min(
+        effective_cutoff.replace(day=1),
+        effective_cutoff - timedelta(days=max_window + 7),
+    )
+    date_filter = f"{date_expr} BETWEEN DATE {_lit(history_start.isoformat())} AND DATE {_lit(effective_cutoff.isoformat())}"
+    select_sql = f"SELECT {group}{date_expr} AS forecast_day, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+    group_sql = f" GROUP BY {select_dims + ', ' if select_dims else ''}{date_expr} ORDER BY forecast_day"
+    if period:
+        # A wide Gold can contain millions of records per billing month.  Do
+        # not make Trino hold two or more months of a high-cardinality GROUP BY
+        # at once: aggregate one partition at a time and combine the already
+        # small daily aggregates here.
+        period_cursor = history_start.replace(day=1)
+        period_values: list[str] = []
+        while period_cursor <= effective_cutoff:
+            period_values.append(period_cursor.strftime("%Y%m"))
+            period_cursor = (period_cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+        records: list[dict[str, Any]] = []
+        for billing_period in period_values:
+            sql = f"{select_sql} WHERE {type_filter} AND CAST({_q(period)} AS VARCHAR) = {_lit(billing_period)} AND {date_filter}{group_sql}"
+            records.extend(await trino_execute(sql, timeout_s=300))
+    else:
+        sql = f"{select_sql} WHERE {type_filter} AND {date_filter}{group_sql}"
+        records = await trino_execute(sql, timeout_s=300)
     frame = pd.DataFrame(records)
     if frame.empty:
         raise ValueError("A Gold não possui dados realizados para a configuração")
@@ -280,4 +330,4 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     result_table = result_table or f"result_{config.id}_{int(cutoff.strftime('%Y%m%d'))}"
     iceberg.write_forecast_result(result_table, output)
     planning_table = iceberg.write_forecast_planning(table, output, value_column=measure)
-    return {"rows": len(output), "table": result_table, "planning_table": planning_table, "methods": methods, "series": len(output.groupby(key_cols)) if key_cols else 1, "business_rules": applied_rules, "effective_cutoff": effective_cutoff.isoformat()}
+    return {"rows": len(output), "table": result_table, "planning_table": planning_table, "methods": methods, "series": len(output.groupby(key_cols)) if key_cols else 1, "business_rules": applied_rules, "collected_through": collected_through.isoformat(), "effective_cutoff": effective_cutoff.isoformat()}

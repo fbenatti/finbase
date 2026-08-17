@@ -40,6 +40,8 @@ import {
   ShowChart as ForecastIcon,
   Dashboard as DashboardIcon,
   Timeline as TimelineIcon,
+  AccountBalance as AccountBalanceIcon,
+  Savings as SavingsIcon,
 } from "@mui/icons-material";
 import {
   getRunningTasks, cancelEtl, getConnections,
@@ -70,7 +72,9 @@ const menuGroups = [
     background: "#f5f3ff",
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
+      { path: "/savings", label: "Ações de saving", icon: <SavingsIcon /> },
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
+      { path: "/budgets", label: "Orçamentos", icon: <AccountBalanceIcon /> },
       { path: "/financial-types", label: "Tipificações financeiras", icon: <TimelineIcon /> },
       { path: "/rules", label: "Ajuste de taxas e impostos (Regras)", icon: <RuleIcon /> },
       { path: "/classifications", label: "Classificação", icon: <CategoryIcon /> },

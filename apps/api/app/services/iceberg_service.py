@@ -131,6 +131,27 @@ def _table_id(namespace: str, table: str) -> tuple:
     return (namespace, table.replace("-", "_").replace(".", "_"))
 
 
+def _table_short_name(table_ref) -> str:
+    """Normalize catalog list_tables / load_table identifiers to bare table name."""
+    if isinstance(table_ref, tuple) and len(table_ref) > 1:
+        return str(table_ref[1])
+    if isinstance(table_ref, str):
+        return table_ref.split(".")[-1]
+    return str(table_ref)
+
+
+def _namespace_has_table(cat: Catalog, namespace: str, short_name: str) -> bool:
+    try:
+        return any(_table_short_name(t) == short_name for t in cat.list_tables(namespace))
+    except Exception:
+        return False
+
+
+def _bronze_table_id(connection_code: str) -> tuple[str, str]:
+    safe = connection_code.replace("-", "_").replace(".", "_")
+    return ("bronze", f"raw_{safe}")
+
+
 def _df_to_arrow(
     df: pd.DataFrame,
     column_types: Optional[dict[str, str]] = None,
@@ -262,7 +283,8 @@ def write_bronze(
     if df.empty:
         return 0
 
-    table_name = f"bronze.raw_{connection_code.replace('-', '_').replace('.', '_')}"
+    table_id = _bronze_table_id(connection_code)
+    table_name = f"{table_id[0]}.{table_id[1]}"
     _ensure_namespace("bronze")
 
     # Add metadata columns
@@ -283,21 +305,6 @@ def write_bronze(
     cat = _get_catalog()
     rows = len(df)
 
-    try:
-        tbl = cat.load_table(table_name)
-        # Quick append when schema matches
-        tbl.append(arrow_table)
-        logger.info("Appended %d rows to %s", rows, table_name)
-        return rows
-    except Exception as exc:
-        # Never replace an existing raw table after a schema mismatch: doing so
-        # silently discards previously ingested source data. A fresh table is
-        # created only when the catalog confirms it does not exist.
-        if any((t[0] if isinstance(t, tuple) else t) == table_name for t in cat.list_tables("bronze")):
-            logger.error("Bronze append failed for %s: %s", table_name, exc)
-            raise
-
-    # Partition by billing_period
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     iceberg_schema = pyarrow_to_schema(arrow_table.schema)
     billing_field_id = iceberg_schema.highest_field_id + 1
@@ -310,11 +317,48 @@ def write_bronze(
         )
     )
 
-    tbl = cat.create_table(
-        table_name,
-        schema=iceberg_schema,
-        partition_spec=partition_spec,
-    )
+    tbl = None
+    try:
+        tbl = cat.load_table(table_id)
+    except Exception:
+        pass
+
+    if tbl is not None:
+        try:
+            tbl.append(arrow_table)
+            logger.info("Appended %d rows to %s", rows, table_name)
+            return rows
+        except Exception as exc:
+            # Source exports can add columns over time. Evolve the existing
+            # table instead of attempting create_table and hitting "already exists".
+            try:
+                with tbl.update_schema() as schema_update:
+                    schema_update.union_by_name(iceberg_schema)
+                tbl = cat.load_table(table_id)
+                tbl.append(arrow_table)
+                logger.info("Appended %d rows to %s after schema evolution", rows, table_name)
+                return rows
+            except Exception as append_exc:
+                logger.error("Bronze append failed for %s: %s", table_name, append_exc)
+                raise append_exc from exc
+
+    try:
+        tbl = cat.create_table(table_id, schema=iceberg_schema, partition_spec=partition_spec)
+    except Exception as create_exc:
+        # Parallel workers can race on the first month for a connection.
+        if _namespace_has_table(cat, table_id[0], table_id[1]) or "already exists" in str(create_exc).lower():
+            tbl = cat.load_table(table_id)
+            try:
+                tbl.append(arrow_table)
+            except Exception as append_exc:
+                with tbl.update_schema() as schema_update:
+                    schema_update.union_by_name(iceberg_schema)
+                tbl = cat.load_table(table_id)
+                tbl.append(arrow_table)
+            logger.info("Appended %d rows to existing %s after create race", rows, table_name)
+            return rows
+        raise
+
     tbl.append(arrow_table)
     logger.info("Created %s with %d rows (partitioned by billing_period)", table_name, rows)
     return rows
@@ -326,15 +370,45 @@ def reset_bronze(connection_code: str) -> bool:
     This is intentionally separate from normal ingestion: append remains the
     safe default, while a user-requested source rebuild gets a clean snapshot.
     """
-    table_name = f"bronze.raw_{connection_code.replace('-', '_').replace('.', '_')}"
+    table_id = _bronze_table_id(connection_code)
+    table_name = f"{table_id[0]}.{table_id[1]}"
     cat = _get_catalog()
     try:
-        cat.drop_table(table_name)
+        cat.drop_table(table_id)
         logger.warning("Reset Bronze table %s", table_name)
         return True
     except Exception as exc:
         logger.info("Bronze table %s was not reset: %s", table_name, exc)
         return False
+
+
+def delete_bronze_slice(
+    connection_code: str,
+    *,
+    blob_path: str | None = None,
+    billing_period: str | None = None,
+) -> None:
+    """Delete prior Bronze rows for one blob/month so re-ingest stays idempotent."""
+    if not blob_path and not billing_period:
+        return
+    table_id = _bronze_table_id(connection_code)
+    from pyiceberg.expressions import AlwaysTrue, And, EqualTo
+
+    try:
+        table = _get_catalog().load_table(table_id)
+    except Exception:
+        return
+
+    row_filter = AlwaysTrue()
+    if blob_path:
+        row_filter = And(row_filter, EqualTo("_blob_path", blob_path))
+    if billing_period:
+        row_filter = And(row_filter, EqualTo("_billing_period", str(billing_period)))
+    table.delete(row_filter)
+    logger.info(
+        "Deleted Bronze slice from %s.%s (blob_path=%s, billing_period=%s)",
+        table_id[0], table_id[1], blob_path, billing_period,
+    )
 
 
 def read_bronze(connection_code: str, blob_path: str | None = None,
@@ -346,8 +420,9 @@ def read_bronze(connection_code: str, blob_path: str | None = None,
     the whole Bronze table and filtering afterwards makes each blob batch
     deserialize millions of unrelated rows and appears to freeze the worker.
     """
-    table_name = f"bronze.raw_{connection_code.replace('-', '_').replace('.', '_')}"
-    table = _get_catalog().load_table(table_name)
+    table_id = _bronze_table_id(connection_code)
+    table_name = f"{table_id[0]}.{table_id[1]}"
+    table = _get_catalog().load_table(table_id)
     from pyiceberg.expressions import AlwaysTrue, And, EqualTo
 
     row_filter = AlwaysTrue()
@@ -367,8 +442,9 @@ def read_bronze_batches(connection_code: str, blob_path: str | None = None,
                         max_rows: int | None = None,
                         batch_size: int = 25_000):
     """Yield Bronze batches without materializing the complete blob in RAM."""
-    table_name = f"bronze.raw_{connection_code.replace('-', '_').replace('.', '_')}"
-    table = _get_catalog().load_table(table_name)
+    table_id = _bronze_table_id(connection_code)
+    table_name = f"{table_id[0]}.{table_id[1]}"
+    table = _get_catalog().load_table(table_id)
     from pyiceberg.expressions import AlwaysTrue, And, EqualTo
 
     row_filter = AlwaysTrue()
@@ -510,7 +586,6 @@ FACT_SCHEMA = Schema(
     NestedField(23, "tax_base", DoubleType(), required=False),
     NestedField(24, "tax_marketplace", DoubleType(), required=False),
     NestedField(25, "final_cost_brl", DoubleType(), required=False),
-    NestedField(26, "diretoria", StringType(), required=False),
     NestedField(27, "modelo_ai", StringType(), required=False),
     NestedField(28, "cloud_name", StringType(), required=False),
     NestedField(29, "centro_custo", StringType(), required=False),
@@ -611,7 +686,10 @@ def write_destination_staged(
     import time
     _ensure_namespace(namespace)
     safe_name = physical_name.replace("-", "_").replace(".", "_")
-    ts = int(time.time())
+    # Consecutive source/month publications can start within the same second.
+    # A second-resolution name could collide with a table just renamed from a
+    # prior staging location and delete its metadata during cleanup.
+    ts = time.time_ns()
     temp_safe_name = f"{safe_name}_stg_{ts}"
     tid = _table_id(namespace, temp_safe_name)
 
@@ -667,7 +745,8 @@ def write_destination_staged(
     return temp_safe_name
 
 
-def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold") -> int:
+def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold",
+                      known_row_count: int | None = None) -> int:
     """Atomically swap staged temp table → main table.
 
     1. Drop original gold.{physical_name} table via catalog (if exists)
@@ -682,6 +761,16 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
     temp_tid = _table_id(namespace, temp_safe_name)
     cat = _get_catalog()
 
+    # A temporary compatibility view can remain after a pipeline migration.
+    # It is safe to remove only here, after the replacement staging table is
+    # complete and validated by the caller.
+    if namespace == "gold":
+        try:
+            from app.services.trino_service import execute_sync
+            execute_sync(f'DROP VIEW IF EXISTS iceberg.gold."{safe_name}"', timeout_s=30)
+        except Exception as exc:
+            logger.info("Gold object is not a Trino view (or Trino unavailable): %s", exc)
+
     # 1. Drop original main table via catalog
     _force_delete_table(main_tid, safe_name)
 
@@ -693,7 +782,14 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
         logger.error("Catalog rename_table failed: %s", e)
         raise
 
-    # 3. Load and count rows
+    # 3. Never re-read a multi-million-row table just to obtain a number we
+    # already know from the writer.  The former scan().to_arrow() was an
+    # unnecessary full materialization after every successful publication.
+    if known_row_count is not None:
+        logger.info("Swapped %s → %s.%s (%d rows supplied by writer)", temp_safe_name, namespace, safe_name, known_row_count)
+        return int(known_row_count)
+
+    # Backward-compatible fallback for callers that genuinely do not know it.
     try:
         tbl = cat.load_table(main_tid)
         rows = len(tbl.scan().to_arrow())
@@ -712,6 +808,74 @@ def cleanup_staged_table(temp_safe_name: str, namespace: str = "gold") -> None:
         logger.info("Cleaned up staged table gold.%s", temp_safe_name)
     except Exception as e:
         logger.warning("Cleanup staged table failed: %s", e)
+
+
+def publish_staged_partition(
+    physical_name: str,
+    temp_safe_name: str,
+    *,
+    billing_period: str,
+    connection_id: int,
+    namespace: str = "gold",
+) -> int:
+    """Atomically replace one source/month slice with files from staging.
+
+    The staging table is built and validated before this function is called.
+    Its Parquet files are adopted in the same Iceberg transaction that removes
+    the prior ``(_billing_period, source_connection_id)`` slice, so readers
+    see either the prior month/source or the new one, never a partial batch.
+    """
+    from pyiceberg.expressions import And, EqualTo
+
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    cat = _get_catalog()
+    target_id = _table_id(namespace, safe_name)
+    staging_id = _table_id(namespace, temp_safe_name)
+    staged = cat.load_table(staging_id)
+    staged_tasks = list(staged.scan().plan_files())
+    row_count = sum(task.file.record_count for task in staged_tasks)
+
+    try:
+        target = cat.load_table(target_id)
+    except Exception as exc:
+        from pyiceberg.exceptions import NoSuchTableError
+        if not isinstance(exc, NoSuchTableError):
+            raise
+        # First published slice: keeping the staging table itself is the
+        # cheapest atomic publication and preserves its partition spec.
+        cat.rename_table(staging_id, target_id)
+        return int(row_count)
+
+    # A partial reprocess publishes one connection/month at a time.  The
+    # staging table can legitimately contain newly materialized organizational
+    # dimensions (for example departamento_nivel_6 and _7) while the existing
+    # Gold table still has the prior schema.  Evolve the target by name before
+    # appending Arrow batches; otherwise PyArrow rejects the new fields and the
+    # atomic publication fails after all processing has completed.
+    with target.update_schema() as schema_update:
+        schema_update.union_by_name(staged.schema())
+    target = cat.load_table(target_id)
+
+    overwrite_filter = And(
+        EqualTo("_billing_period", str(billing_period)),
+        EqualTo("source_connection_id", int(connection_id)),
+    )
+    tx = target.transaction()
+    tx.delete(overwrite_filter)
+    # ``add_files`` only accepts external Parquet without Iceberg field IDs.
+    # Staging is produced by PyIceberg and therefore contains those IDs; write
+    # each bounded Arrow batch natively into this transaction instead.  This
+    # keeps publication atomic without materializing a whole month in memory.
+    for batch in staged.scan().to_arrow_batch_reader():
+        if batch.num_rows:
+            import pyarrow as pa
+            tx.append(pa.Table.from_batches([batch]))
+    tx.commit_transaction()
+    # The native write above created new target files, so staging can be safely
+    # removed with all of its now-unreferenced files.
+    _force_delete_table(staging_id, temp_safe_name)
+    logger.info("Published %d rows for %s/%s into %s.%s", row_count, connection_id, billing_period, namespace, safe_name)
+    return int(row_count)
 
 
 def append_to_staged(

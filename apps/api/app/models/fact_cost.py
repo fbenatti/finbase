@@ -56,6 +56,8 @@ class FactCost(Base):
     departamento_nivel_3 = Column(String(200), nullable=True)
     departamento_nivel_4 = Column(String(200), nullable=True)
     departamento_nivel_5 = Column(String(200), nullable=True)
+    departamento_nivel_6 = Column(String(200), nullable=True)
+    departamento_nivel_7 = Column(String(200), nullable=True)
     modelo_ai = Column(String(100), nullable=True)
 
     # Tags e campos extras (datasource-specific)

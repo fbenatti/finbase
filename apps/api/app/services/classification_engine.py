@@ -179,7 +179,6 @@ async def _load_department_tree(db: AsyncSession) -> tuple[dict[int, Department]
 async def apply_classification_rules(
     df: pd.DataFrame,
     db: AsyncSession,
-    connection_id: int | None = None,
 ) -> pd.DataFrame:
     """Apply classification rules with multi-condition support and department inheritance.
 
@@ -194,11 +193,6 @@ async def apply_classification_rules(
         .where(CR.active == True)
         .order_by(CR.priority)
     )
-    if connection_id is not None:
-        from sqlalchemy import or_
-        stmt = stmt.where(
-            or_(CR.connection_id == connection_id, CR.connection_id == None)
-        )
     result = await db.execute(stmt)
     rules = list(result.scalars().all())
 
@@ -209,7 +203,7 @@ async def apply_classification_rules(
     dept_map, project_map = await _load_department_tree(db)
 
     # Initialize target columns if they don't exist
-    default_targets = {"diretoria", "departamento", "centro_custo", "ambiente"}
+    default_targets = {"departamento", "centro_custo", "ambiente"}
     for col in default_targets:
         if col not in df.columns:
             df[col] = ""
@@ -235,7 +229,7 @@ async def apply_classification_rules(
             continue
 
         # Apply classification value
-        target_field = rule.target_field or rule.match_value or "diretoria"
+        target_field = rule.target_field or rule.match_value or "departamento"
         if target_field not in df.columns:
             df[target_field] = ""
 

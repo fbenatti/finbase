@@ -57,6 +57,9 @@ def _run_etl_job(connection_id: int, schedule_id: int, schedule_name: str) -> No
         # ── Auto-reprocess destination tables ──
         if sched and sched.destination_reprocess:
             _auto_reprocess_destinations(connection_id, session)
+            # Gold was just refreshed; update any active savings immediately.
+            from app.services.saving_service import refresh_actions
+            refresh_actions(session)
             forecast_config_id = (sched.config_json or {}).get("forecast_config_id") if sched else None
             run_forecast_after = bool((sched.config_json or {}).get("forecast_after_ingestion")) if sched else False
             if run_forecast_after and forecast_config_id and (task.rows_raw or 0) > 0:
@@ -208,9 +211,23 @@ async def start_scheduler():
                 count += 1
 
         _scheduler.start()
+        # Daily saving refresh is intentionally independent of ETL schedules: actions
+        # that start today must progress even when a source has no new blob.
+        _scheduler.add_job(_refresh_savings_job, "cron", hour=2, minute=15, id="savings_daily", replace_existing=True)
         logger.info("Scheduler started with %d active schedules", count)
     except Exception as e:
         logger.error("Failed to start scheduler: %s", e)
+    finally:
+        session.close()
+
+
+def _refresh_savings_job() -> None:
+    session = _get_sync_session()
+    try:
+        from app.services.saving_service import refresh_actions
+        refresh_actions(session)
+    except Exception as exc:
+        logger.error("Daily saving refresh failed: %s", exc)
     finally:
         session.close()
 

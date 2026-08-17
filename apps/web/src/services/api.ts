@@ -5,6 +5,22 @@ const api = axios.create({
   timeout: 120000,
 });
 
+/** Connector types that support blob/month scan in Extracao & Monitoramento. */
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery"]);
+
+export function formatApiError(error: unknown, fallback = "Request failed"): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail.map((item) => (typeof item === "object" && item && "msg" in item ? String(item.msg) : JSON.stringify(item))).join("; ");
+    }
+    return error.message;
+  }
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 export interface SourceConnection {
   id: number;
   code: string;
@@ -22,6 +38,7 @@ export interface BlobScanItem {
   blob_prefix: string;
   last_modified: string;
   content_length: number | null;
+  row_count?: number | null;
   status: string;
   billing_period: string | null;
 }
@@ -262,7 +279,7 @@ export async function reprocessDest(body: {
   connection_ids: number[];
   billing_periods?: string[];
   replace_existing?: boolean;
-}): Promise<{ task_id: number; message: string }> {
+}): Promise<{ task_id: number; task_ids?: number[]; queue_group?: string; message: string }> {
   const { data } = await api.post("/etl/reprocess", body);
   return data;
 }
@@ -371,23 +388,6 @@ export async function deleteClassification(id: number): Promise<void> {
   await api.delete(`/classifications/${id}`);
 }
 
-export interface AzureProjectRulesImportResult {
-  source_rows: number;
-  unique_rules: number;
-  classification_rules_created: number;
-  skipped_no_department: number;
-  skipped_ambiguous_department: number;
-  skipped_existing: number;
-  errors: string[];
-}
-
-export async function importAzureProjectRules(
-  projetos_path?: string,
-): Promise<AzureProjectRulesImportResult> {
-  const { data } = await api.post("/classifications/import-azure-projects", projetos_path ? { projetos_path } : {});
-  return data;
-}
-
 // Departments
 export async function getDepartments(flat?: boolean, parentId?: number): Promise<Department[]> {
   const params: Record<string, string | number | boolean> = {};
@@ -409,6 +409,17 @@ export async function updateDepartment(id: number, body: Partial<Department>): P
 
 export async function deleteDepartment(id: number): Promise<void> {
   await api.delete(`/departments/${id}`);
+}
+
+export interface CloudOrganizationBootstrapResult {
+  message: string;
+  moved_directories: Array<{ id: number; name: string; old_path: string[]; new_path: string[] }>;
+  planning_entries_updated: number;
+  reprocess_required: boolean;
+}
+export async function bootstrapCloudOrganization(): Promise<CloudOrganizationBootstrapResult> {
+  const { data } = await api.post("/departments/bootstrap-cloud-organization");
+  return data;
 }
 
 // Projects
@@ -615,6 +626,21 @@ export async function getDestinationSchema(tableId: number): Promise<{
   return data;
 }
 
+// ── Savings actions ──
+export type SavingStatus = "EM_FILA" | "EM_ANALISE" | "FINALIZADA" | "ERRO" | "CANCELADA";
+export interface SavingFilter { column: string; operator: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS"; values: Array<string | number> }
+export interface SavingAction { id: number; name: string; description?: string | null; category?: string | null; owner?: string | null; destination_table_id: number; date_column: string; cost_column: string; currency_column?: string | null; filters: SavingFilter[]; start_date: string; duration_days: number; baseline_monthly: number; projected_monthly: number; status: SavingStatus; outcome?: string | null; final_realized?: number | null; final_projected?: number | null; error_message?: string | null; completed_at?: string | null; }
+export interface SavingMeasurement { id: number; action_id: number; measured_date: string; actual_cost: number; baseline_value: number; projected_saving: number; realized_saving: number }
+export interface SavingsDashboard { historic: Record<string, number>; year: Record<string, number>; monthly: Array<{month:string;projected:number;realized:number}>; status: Record<string,number>; top_savings: SavingAction[]; top_growth: SavingAction[] }
+export async function getSavingActions(): Promise<SavingAction[]> { return (await api.get("/savings/actions")).data; }
+export async function createSavingAction(body: Omit<SavingAction, "id"|"status"|"outcome"|"final_realized"|"final_projected"|"error_message"|"completed_at">): Promise<SavingAction> { return (await api.post("/savings/actions", body)).data; }
+export async function updateSavingAction(id:number, body: Record<string, unknown>): Promise<SavingAction> { return (await api.put(`/savings/actions/${id}`, body)).data; }
+export async function cancelSavingAction(id:number): Promise<SavingAction> { return (await api.post(`/savings/actions/${id}/cancel`)).data; }
+export async function refreshSavingAction(id:number): Promise<SavingAction> { return (await api.post(`/savings/actions/${id}/refresh`)).data; }
+export async function getSavingMeasurements(id:number): Promise<SavingMeasurement[]> { return (await api.get(`/savings/actions/${id}/measurements`)).data; }
+export async function getSavingsDashboard(year?:number): Promise<SavingsDashboard> { return (await api.get("/savings/dashboard", {params:{year}})).data; }
+export async function getSavingsMetadata(tableId:number): Promise<{columns:Array<{name:string;type:string}>}> { return (await api.get(`/savings/metadata/${tableId}`)).data; }
+
 export interface ForecastMetadata { destination_table_id: number; destination_table: string; suggestion_profile?: string | null; columns: { name: string; type: string; numeric: boolean; temporal: boolean }[]; measures: string[]; date_columns: string[]; period_columns: string[]; dimensions: string[]; recommended_dimensions: string[]; default_measure: string | null; default_date: string | null; default_period: string | null; }
 export interface ForecastConfig { id: number; name: string; destination_table_id: number; measure_column: string; currency_column: string | null; date_column: string; period_column: string | null; type_column: string | null; dimensions: string[]; cutoff_days: number; horizon_months: number; growth_rate: number; model_mode: string; enabled_windows: number[]; version: number; active: boolean; }
 export interface ForecastRun { id: number; forecast_config_id: number; status: string; phase: string | null; rows_written: number; total_series?: number; processed_series?: number; result_table: string | null; error: string | null; started_at?: string; finished_at?: string | null; }
@@ -642,7 +668,7 @@ export async function deleteForecastBusinessRule(id: number): Promise<void> { aw
 // Financial planning / type catalog
 export interface FinancialType { id: number; code: string; name: string; active: boolean; created_at: string; updated_at: string; }
 export interface PlanningVersion { id: number; financial_type_id: number; year: number; version: number; is_current: boolean; source: string; source_filename?: string | null; created_at: string; }
-export interface PlanningRow { entity_type: "department" | "project"; department_id: number; project_id?: number | null; department_levels: string[]; project_name?: string | null; values: number[]; }
+export interface PlanningRow { entity_type: "department"; department_id: number; department_levels: string[]; values: number[]; }
 export interface PlanningGrid { type: FinancialType; version: PlanningVersion | null; rows: PlanningRow[]; }
 export async function getFinancialTypes(): Promise<FinancialType[]> { return (await api.get("/planning/types")).data; }
 export async function createFinancialType(body: Pick<FinancialType, "code" | "name" | "active">): Promise<FinancialType> { return (await api.post("/planning/types", body)).data; }
@@ -653,6 +679,7 @@ export async function getPlanningVersions(type: string, year: number): Promise<P
 export async function restorePlanningVersion(type: string, year: number, id: number): Promise<{ version: PlanningVersion }> { return (await api.post(`/planning/${type}/${year}/versions/${id}/restore`)).data; }
 export async function importPlanningExcel(type: string, year: number, file: File): Promise<{ version: PlanningVersion; rows: number }> { const data = new FormData(); data.append("file", file); return (await api.post(`/planning/${type}/${year}/import`, data)).data; }
 export async function downloadPlanningTemplate(year: number): Promise<Blob> { return (await api.get("/planning/template", { params: { year }, responseType: "blob" })).data; }
+export async function downloadSimulatedBudget(year: number, basePeriod = `${year}01`, detailed = false, detailColumn?: string, cloud?: string): Promise<Blob> { return (await api.get(`/planning/orcamento/${year}/simulado`, { params: { base_period: basePeriod, detailed, detail_column: detailColumn, cloud: cloud || undefined }, responseType: "blob" })).data; }
 
 export interface CloneRule { id: number; destination_table_id: number; connection_id?: number | null; name: string; description?: string | null; provider?: string | null; conditions: { field: string; op: string; value?: string | number | string[] }[]; roles: Record<string, string>; original_changes: Record<string, unknown>; clone_changes: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; priority: number; active: boolean; version: number; }
 export async function getCloneRules(destinationTableId?: number): Promise<CloneRule[]> { return (await api.get("/clone-rules", { params: destinationTableId ? { destination_table_id: destinationTableId } : {} })).data; }
@@ -977,8 +1004,9 @@ export async function deleteDashboard(id: number): Promise<void> { await api.del
 export async function createDashboardWidget(dashboardId: number, body: { dashboard_id: number; pivot_view_id?: number | null; title: string; chart_type: ChartType; config?: Record<string, unknown>; position?: Record<string, unknown> }): Promise<DashboardWidget> { return (await api.post(`/analysis/dashboards/${dashboardId}/widgets`, body)).data; }
 export async function deleteDashboardWidget(dashboardId: number, widgetId: number): Promise<void> { await api.delete(`/analysis/dashboards/${dashboardId}/widgets/${widgetId}`); }
 export async function queryDashboardWidget(body: { pivot_view_id: number; chart_type: ChartType; config?: Record<string, unknown>; global_filters?: Record<string, unknown>; source_ids?: number[] }): Promise<WidgetChartResult> { return (await api.post("/analysis/dashboard-widgets/query", body)).data; }
-export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; expected_value: number; cumulative_value: number; }
-export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL"): Promise<{ director: string; rows: ExpectedViewRow[] }> { return (await api.post("/analysis/expected-view", { director })).data; }
+export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
+export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; }
+export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal): Promise<{ director: string; department_id?: number; rows: ExpectedViewRow[]; drivers: ExpectedViewDriver[] }> { return (await api.post("/analysis/expected-view", { director, year, department_id: departmentId }, { timeout: 120000, signal })).data; }
 
 // ── Scheduled Tasks ──
 
@@ -1040,5 +1068,42 @@ export interface MappedConnection {
 
 export async function getConnectionsForDestination(destTableId: number): Promise<MappedConnection[]> {
   const { data } = await api.get(`/etl/connections-for-dest/${destTableId}`);
+  return data;
+}
+
+// ── Manual CSV Upload (Bronze) ──
+export interface CsvUploadConnection { id: number; code: string; name: string; connector_type: string; cloud_name: string | null; }
+export interface CsvColumnPreview { name: string; inferred_type: string; sample_values: unknown[]; null_count: number; total_count: number; }
+export interface CsvPreview { row_count: number; column_count: number; columns: CsvColumnPreview[]; sample_rows: Record<string, unknown>[]; suggested_billing_period: string | null; }
+export interface CsvIngestResult { row_count: number; billing_period: string; blob_path: string; table_name: string; column_types: Record<string, string>; }
+
+export async function getCsvUploadConnections(): Promise<CsvUploadConnection[]> {
+  const { data } = await api.get("/csv-upload/connections");
+  return data;
+}
+
+export async function previewCsv(file: File): Promise<CsvPreview> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post("/csv-upload/preview", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function ingestCsv(file: File, connectionId: number, billingPeriod: string, columnTypes: Array<{ name: string; data_type: string }>): Promise<CsvIngestResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("connection_id", String(connectionId));
+  formData.append("billing_period", billingPeriod);
+  formData.append("column_types_json", JSON.stringify(columnTypes));
+  const { data } = await api.post("/csv-upload/ingest", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function getCsvUploadHistory(connectionId: number): Promise<IngestedBlob[]> {
+  const { data } = await api.get(`/csv-upload/history/${connectionId}`);
   return data;
 }

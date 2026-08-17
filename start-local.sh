@@ -48,6 +48,56 @@ ensure_infra() {
 
 ensure_infra
 
+# Kill leftover uvicorn/worker from a previous session so bind/lock don't fail.
+# The previous process can still answer /health, which makes wait_for_backend
+# succeed — then this script's child exits and the watchdog treats it as a crash.
+kill_pids() {
+  local pids="$1"
+  [[ -z "$pids" ]] && return 0
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  sleep 1
+  local still=""
+  local pid
+  for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      still="$still $pid"
+    fi
+  done
+  if [[ -n "$still" ]]; then
+    # shellcheck disable=SC2086
+    kill -9 $still 2>/dev/null || true
+    sleep 0.3
+  fi
+}
+
+listeners_on_port() {
+  lsof -t -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null || true
+}
+
+free_stale_backend() {
+  local api_pids worker_pids
+  api_pids="$(listeners_on_port 8001)"
+  if [[ -n "$api_pids" ]]; then
+    echo "Liberando porta 8001 (PIDs: $(echo "$api_pids" | tr '\n' ' '))"
+    kill_pids "$api_pids"
+  fi
+  worker_pids="$(pgrep -f "$ROOT_DIR/.venv/bin/python -u worker.py" 2>/dev/null || true)"
+  if [[ -z "$worker_pids" ]]; then
+    worker_pids="$(pgrep -f "$ROOT_DIR/apps/api/worker.py" 2>/dev/null || true)"
+  fi
+  if [[ -n "$worker_pids" ]]; then
+    echo "Encerrando worker legado (PIDs: $(echo "$worker_pids" | tr '\n' ' '))"
+    kill_pids "$worker_pids"
+  fi
+  if [[ -n "$(listeners_on_port 8001)" ]]; then
+    echo "ERRO: porta 8001 ainda ocupada após tentar liberar." >&2
+    exit 1
+  fi
+}
+
+free_stale_backend
+
 backend_ready() {
   local api_health worker_health
   api_health="$(curl -fsS --max-time 3 "$API_URL/health" 2>/dev/null || true)"

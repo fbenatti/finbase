@@ -24,6 +24,7 @@ from app.models.ingested_blob import IngestedBlob
 from app.models.rules import EtlMapping, BusinessRule, ClassificationRule
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
 from app.services.azure_extractor import AzureExtractor, derive_billing_period
+from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
 from app.services.expression_engine import evaluate_expression, evaluate_conditional
 from app.services import iceberg_service as iceberg
 
@@ -219,14 +220,12 @@ def _process_blob_sync(
         rules = session.execute(
             select(BusinessRule).where(
                 BusinessRule.destination_table_id == destination_id,
-                or_(BusinessRule.connection_id == conn.id, BusinessRule.connection_id.is_(None)),
                 BusinessRule.active == True,
             ).order_by(BusinessRule.priority)
         ).scalars().all()
         class_rules = session.execute(
             select(ClassificationRule).where(
                 ClassificationRule.destination_table_id == destination_id,
-                or_(ClassificationRule.connection_id == conn.id, ClassificationRule.connection_id.is_(None)),
                 ClassificationRule.active == True,
             ).order_by(ClassificationRule.priority)
         ).scalars().all()
@@ -380,7 +379,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
 
     For each rule that matches, populates:
     - target_field (e.g., 'departamento') with match_value
-    - department hierarchy fields: diretoria, centro_custo, ambiente, custom_fields
+    - department hierarchy fields: centro_custo, ambiente, custom_fields
     """
     from app.models.rules import Department, Project
     from app.services.classification_engine import _evaluate_multi_condition
@@ -394,30 +393,12 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         proj_map = {}
 
         if dept_ids_needed and session:
-            depts = session.execute(
-                select(Department).where(Department.id.in_(dept_ids_needed))
-            ).scalars().all()
+            # Classification materializes the complete organizational path.
+            # A cache containing only leaves and direct parents silently
+            # truncates deeper trees, so keep the full (small) department tree
+            # available while walking from a rule leaf to the root.
+            depts = session.execute(select(Department)).scalars().all()
             dept_map = {d.id: d for d in depts}
-            # Also load parents (walk up the tree)
-            parent_ids = set()
-            for d in depts:
-                current = d.parent_id
-                depth = 0
-                while current and depth < 5:
-                    parent_ids.add(current)
-                    if current in dept_map:
-                        current = dept_map[current].parent_id
-                    else:
-                        break
-                    depth += 1
-            if parent_ids:
-                missing_parents = parent_ids - set(dept_map.keys())
-                if missing_parents:
-                    parents = session.execute(
-                        select(Department).where(Department.id.in_(missing_parents))
-                    ).scalars().all()
-                    for p in parents:
-                        dept_map[p.id] = p
 
         if proj_ids_needed and session:
             projs = session.execute(
@@ -446,7 +427,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         visited = [dept]
         current_id = dept.parent_id
         depth = 0
-        while current_id and depth < 5:
+        while current_id and depth < 7:
             parent = dept_map.get(current_id)
             if parent:
                 visited.append(parent)
@@ -460,11 +441,12 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         return result
 
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
-    for col in ['diretoria', 'departamento', 'centro_custo', 'ambiente',
-                'custom_fields', 'subscription_rg', 'projeto_nome',
+    for col in ['departamento', 'centro_custo', 'ambiente',
+                'custom_fields', 'subscription_rg',
                 'departamento_nivel_1', 'departamento_nivel_2',
                 'departamento_nivel_3', 'departamento_nivel_4',
-                'departamento_nivel_5']:
+                'departamento_nivel_5', 'departamento_nivel_6',
+                'departamento_nivel_7']:
         if col not in df.columns:
             df[col] = None
 
@@ -537,7 +519,6 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                         ambiente_val = d.ambiente
 
                 for col_name, col_val in [
-                    ('diretoria', root.name if root else None),
                     ('departamento', leaf.name),
                     ('centro_custo', centro_custo_val),
                     ('ambiente', ambiente_val),
@@ -568,10 +549,119 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                 if 'subscription_rg' not in df.columns:
                     df['subscription_rg'] = None
                 df.loc[effective_mask, 'subscription_rg'] = proj.subscription_rg or ''
-                if proj.projeto_name:
-                    if 'projeto_nome' not in df.columns:
-                        df['projeto_nome'] = None
-                    df.loc[effective_mask, 'projeto_nome'] = proj.projeto_name
+
+
+def _apply_department_hierarchy_to_mask(
+    df: pd.DataFrame,
+    effective_mask: pd.Series,
+    dept_id: int,
+    proj_id: int | None,
+    dept_map: dict,
+    proj_map: dict,
+    hierarchy_cache: dict,
+) -> None:
+    def get_hierarchy(dept_id: int):
+        if dept_id in hierarchy_cache:
+            return hierarchy_cache[dept_id]
+        dept = dept_map.get(dept_id)
+        if not dept:
+            hierarchy_cache[dept_id] = (None, None, [])
+            return (None, None, [])
+        visited = [dept]
+        current_id = dept.parent_id
+        depth = 0
+        while current_id and depth < 7:
+            parent = dept_map.get(current_id)
+            if parent:
+                visited.append(parent)
+                current_id = parent.parent_id
+            else:
+                break
+            depth += 1
+        root = visited[-1] if visited else dept
+        result = (dept, root, visited)
+        hierarchy_cache[dept_id] = result
+        return result
+
+    leaf, _, chain = get_hierarchy(dept_id)
+    if not leaf:
+        return
+    merged_custom_fields: dict = {}
+    centro_custo_val: str | None = None
+    ambiente_val: str | None = None
+    for d in reversed(chain):
+        if d.custom_fields and isinstance(d.custom_fields, dict):
+            merged_custom_fields.update(d.custom_fields)
+        if centro_custo_val is None and d.centro_custo:
+            centro_custo_val = d.centro_custo
+        if ambiente_val is None and d.ambiente:
+            ambiente_val = d.ambiente
+    for col_name, col_val in [
+        ('departamento', leaf.name),
+        ('centro_custo', centro_custo_val),
+        ('ambiente', ambiente_val),
+    ]:
+        if col_val is not None:
+            if col_name not in df.columns:
+                df[col_name] = None
+            df.loc[effective_mask, col_name] = str(col_val)
+    root_to_leaf = list(reversed(chain))
+    for i, d in enumerate(root_to_leaf, start=1):
+        col_name = f"departamento_nivel_{i}"
+        if col_name not in df.columns:
+            df[col_name] = None
+        df.loc[effective_mask, col_name] = d.name or ""
+    if merged_custom_fields:
+        if 'custom_fields' not in df.columns:
+            df['custom_fields'] = None
+        import json
+        df.loc[effective_mask, 'custom_fields'] = json.dumps(merged_custom_fields, default=str, ensure_ascii=False)
+    if proj_id:
+        proj = proj_map.get(proj_id)
+        if proj:
+            if 'subscription_rg' not in df.columns:
+                df['subscription_rg'] = None
+            df.loc[effective_mask, 'subscription_rg'] = proj.subscription_rg or ''
+
+
+def _apply_project_subscription_lookup(
+    df: pd.DataFrame,
+    connection_cloud: str | None,
+    dept_map: dict,
+    proj_map: dict,
+    hierarchy_cache: dict,
+    project_rows: list | None = None,
+) -> None:
+    """Fallback classification: map source_resource_group_name to project.subscription_rg."""
+    from app.services.classification_engine import _canon
+
+    if 'source_resource_group_name' not in df.columns or 'departamento' not in df.columns:
+        return
+    unfilled = df['departamento'].isna() | (df['departamento'].astype(str).str.strip() == '')
+    if not unfilled.any():
+        return
+
+    lookup: dict[str, object] = {}
+    for proj in project_rows or proj_map.values():
+        if connection_cloud and getattr(proj, "cloud", None) and proj.cloud != connection_cloud:
+            continue
+        key = _canon(getattr(proj, "subscription_rg", None))
+        if key and key not in lookup:
+            lookup[key] = proj
+
+    if not lookup:
+        return
+
+    canon_rg = df['source_resource_group_name'].fillna("").astype(str).map(_canon)
+    for idx in df.index[unfilled]:
+        proj = lookup.get(canon_rg.loc[idx])
+        if not proj:
+            continue
+        mask = pd.Series(False, index=df.index)
+        mask.loc[idx] = True
+        _apply_department_hierarchy_to_mask(
+            df, mask, proj.department_id, proj.id, dept_map, proj_map, hierarchy_cache,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -695,9 +785,110 @@ def _write_to_destination_tables_sync(
     return total_written
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  Worker wrapper for parallel blob downloads
-# ═══════════════════════════════════════════════════════════════════════
+def _process_gcp_month_sync(
+    session: Session,
+    extractor: GcpBigQueryExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified: datetime,
+    content_length: Optional[int],
+    task_id: Optional[int] = None,
+) -> tuple[int, int, int, list[str]]:
+    """Ingest one BigQuery invoice month into Bronze."""
+    errors: list[str] = []
+    conn = extractor.connection
+    try:
+        table_name, invoice_month = extractor.parse_blob_path(blob_path)
+    except ValueError as exc:
+        return 0, 0, 0, [str(exc)]
+
+    _persist_download_progress(
+        task_id,
+        current_blob=blob_path,
+        current_blob_size=content_length or 0,
+        download_bytes=0,
+        phase=f"BigQuery: {table_name} {invoice_month}",
+    )
+    _persist_download_blob(task_id, blob_path, "QUERYING", 0, content_length or 0)
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    try:
+        iceberg.delete_bronze_slice(conn.code, blob_path=blob_path, billing_period=invoice_month)
+        rows_written, ingest_errors = extractor.ingest_month(table_name, invoice_month, blob_path)
+        errors.extend(ingest_errors)
+    except Exception as exc:
+        errors.append(f"GCP ingest failed for {blob_path}: {exc}")
+        return 0, 0, 0, errors
+
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=invoice_month,
+        last_modified=last_modified,
+        etag="",
+        content_length=rows_written,
+        row_count=rows_written,
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", rows_written, rows_written)
+    _persist_download_progress(task_id, phase="Carga Bronze concluída; origem sem transformação")
+    return rows_written, 0, 0, errors
+
+
+def _process_gcp_month_sync_worker(
+    task_id: int,
+    item,
+    extractor: GcpBigQueryExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_gcp_month_sync(
+            session,
+            extractor,
+            item.blob_path,
+            item.blob_prefix,
+            item.last_modified,
+            item.content_length,
+            task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1,
+                download_bytes=0,
+                current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
 
 def _process_blob_sync_worker(
     task_id: int,
@@ -801,7 +992,7 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type != "azure_blob":
+        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -809,10 +1000,17 @@ def _run_etl_sync(
             status["status"] = "FAILED"
             return
 
-        extractor = AzureExtractor(conn)
+        if conn.connector_type == "azure_blob":
+            extractor = AzureExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_blob_sync_worker
+        else:
+            extractor = GcpBigQueryExtractor(conn)
+            scan_result = extractor._scan_sync(session)
+            scan_items = scan_result.items
+            worker_fn = _process_gcp_month_sync_worker
 
-        # Scan (uses sync Azure SDK — already non-blocking in thread)
-        scan_items = extractor._scan_sync(session)
+        # Scan (uses sync SDK — already non-blocking in thread)
 
         to_process = [item for item in scan_items if item.status in ("NEW", "CHANGED")]
         if selected_blobs:
@@ -827,7 +1025,10 @@ def _run_etl_sync(
         result.processed_blobs = 0
         status["total_blobs"] = len(to_process)
         status["processed_blobs"] = 0
-        total_dl = sum(getattr(item, "content_length", 0) or 0 for item in to_process)
+        total_dl = sum(
+            (getattr(item, "content_length", 0) or getattr(item, "row_count", 0) or 0)
+            for item in to_process
+        )
         status["total_download_bytes"] = total_dl
         status["downloaded_bytes_total"] = 0
         status["active_downloads"] = 0
@@ -839,7 +1040,12 @@ def _run_etl_sync(
         result.download_bytes = 0
         result.current_blob_size = 0
         result.download_blobs = [
-            {"blob_path": item.blob_path, "size": item.content_length or 0, "downloaded": 0, "status": "QUEUED"}
+            {
+                "blob_path": item.blob_path,
+                "size": (item.content_length or getattr(item, "row_count", 0) or 0),
+                "downloaded": 0,
+                "status": "QUEUED",
+            }
             for item in to_process
         ]
         status["download_blobs"] = result.download_blobs
@@ -858,7 +1064,7 @@ def _run_etl_sync(
                 if _check_cancelled(task_id):
                     break
                 future = dl_executor.submit(
-                    _process_blob_sync_worker,
+                    worker_fn,
                     task_id, item, extractor,
                 )
                 futures[future] = i
@@ -903,7 +1109,9 @@ def _run_etl_sync(
                         status["rows_normalized"] = result.rows_normalized
                         status["rows_destination"] = status.get("rows_destination", 0) + dest
                         status["current_blob"] = item.blob_path
-                        status["downloaded_bytes_total"] += (item.content_length or 0)
+                        status["downloaded_bytes_total"] += (
+                            item.content_length or getattr(item, "row_count", 0) or 0
+                        )
                         for e in errs:
                             result.errors.append(e)
                             status.setdefault("errors", []).append(e)

@@ -16,6 +16,7 @@ import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   ScheduledTask,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
+  SCANNABLE_CONNECTOR_TYPES, formatApiError,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
@@ -66,7 +67,11 @@ export default function Extraction() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    getConnections().then(setConnections).catch((e) => setError(e.message));
+    getConnections().then((list) => {
+      setConnections(list);
+      const scannable = list.filter((c) => SCANNABLE_CONNECTOR_TYPES.has(c.connector_type));
+      if (scannable.length === 1) setConnId(scannable[0].id);
+    }).catch((e) => setError(formatApiError(e, "Falha ao carregar conexoes")));
     loadSchedules();
   }, []);
 
@@ -96,7 +101,7 @@ export default function Extraction() {
     if (!connId) return;
     setScanning(true); setError(""); setTask(null); setSelectedPaths(new Set()); setBlobFilter("");
     try { setScanResult(await scanBlobs(connId as number)); }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : "Scan failed"); }
+    catch (e: unknown) { setError(formatApiError(e, "Falha ao escanear")); }
     finally { setScanning(false); }
   };
 
@@ -372,6 +377,11 @@ export default function Extraction() {
   const isRunning = task?.status === "RUNNING";
   const isCancelling = task?.status === "CANCELLING";
   const isActive = isRunning || isQueued || isCancelling;
+  const scannableConnections = useMemo(
+    () => connections.filter((c) => SCANNABLE_CONNECTOR_TYPES.has(c.connector_type)),
+    [connections],
+  );
+
   const visibleSelectedCount = scanResult
     ? Array.from(selectedPaths).filter(path => filteredScanItems.some(item => item.blob_path === path)).length
     : selectedPaths.size;
@@ -394,11 +404,14 @@ export default function Extraction() {
         <FormControl sx={{ minWidth: 280 }}>
           <InputLabel>Conexao</InputLabel>
           <Select value={connId} label="Conexao" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
-            {connections.map((c) => (
+            {scannableConnections.map((c) => (
               <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
             ))}
           </Select>
         </FormControl>
+        {connections.length > 0 && scannableConnections.length === 0 && (
+          <Alert severity="warning">Nenhuma conexao Azure/GCP disponivel para extracao.</Alert>
+        )}
 
         <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
           {scanning ? "Escaneando..." : "Escanear"}
@@ -716,8 +729,12 @@ export default function Extraction() {
                 render: (item: BlobScanItem) => new Date(item.last_modified).toLocaleDateString(),
               },
               {
-                key: "content_length", label: "Tamanho", width: 90,
-                render: (item: BlobScanItem) => formatFileSize(item.content_length || 0),
+                key: "content_length", label: "Linhas / Tamanho", width: 110,
+                render: (item: BlobScanItem) => (
+                  item.row_count != null
+                    ? item.row_count.toLocaleString()
+                    : formatFileSize(item.content_length || 0)
+                ),
               },
               {
                 key: "_skip", label: "", width: 48, sortable: false,

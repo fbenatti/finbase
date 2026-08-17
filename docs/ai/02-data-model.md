@@ -30,8 +30,8 @@ Duas camadas distintas:
 | Tabela | Descrição |
 |---|---|
 | `etl_mapping` | Mapeamento legado por conexão (`source_column → target_column`, transform_type) |
-| `business_rule` | Regra de negócio: `target_column`, `rule_type` (EXPRESSION, CONDITIONAL, PTAX_BRL, TAX_BASE, TAX_MARKETPLACE, MARKUP), `config_json`, `conditions` (JSON), `expression`, `priority`, vigência `valid_from`/`valid_until` (YYYYMM), escopo por `connection_id` e/ou `destination_table_id` |
-| `classification_rule` | Regra de classificação: `source_field`, `pattern`, `pattern_type` (regex/contains/exact/multi_condition), `conditions` (JSON multi-condição), `match_value`, `target_field`, `department_id`, `project_id`, `priority`. Índices por (department, priority) e (destination, priority) |
+| `business_rule` | Regra de negócio: `target_column`, `rule_type` (EXPRESSION, CONDITIONAL, PTAX_BRL, TAX_BASE, TAX_MARKETPLACE, MARKUP), `config_json`, `conditions` (JSON), `expression`, `priority`, vigência `valid_from`/`valid_until` (YYYYMM), escopo por `cloud_scope` (`azure`, `gcp`, `atlas`, nulo = todas) e/ou `destination_table_id` |
+| `classification_rule` | Regra de classificação: `source_field`, `pattern`, `pattern_type` (regex/contains/exact/multi_condition), `conditions` (JSON multi-condição), `match_value`, `target_field`, `department_id`, `project_id`, `priority`, `cloud_scope`. Índices por (department, priority) e (destination, priority) |
 | `department` | Árvore hierárquica (até 5 níveis): `parent_id`, `name`, `centro_custo`, `ambiente`, `cloud_filter`, `custom_fields` (JSON) |
 | `project` | Projeto de um departamento: `projeto_name`, `cloud`, `subscription_rg` (mapeamento subscription/resource-group) |
 
@@ -65,7 +65,7 @@ Duas camadas distintas:
 
 | Namespace | Tabela | Conteúdo |
 |---|---|---|
-| `bronze` | `raw_{connection_code}` | Dados brutos por conexão, append imutável |
+| `bronze` | `raw_{connection_code}` | Dados brutos por conexão (Azure CSV ou GCP BigQuery `SELECT *`), append imutável |
 | `silver` | `{source}_{destination}` | Resultado do mapeamento origem→destino |
 | `gold` | `{destination_table.physical_name}` | Tabela final analítica. Colunas especiais adicionadas pelo pipeline: `tipo` ('realizado'), `is_synthetic`, `source_record_id`, e para clones: `clone_source_record_id`, `clone_rule_id`, `clone_rule_version`, `ondemand_reference_price`, `ondemand_reference_period`. Período em `_billing_period` (YYYYMM) |
 | `forecast` | `result_run_{run_id}` | Snapshot imutável do resultado de uma run |
@@ -91,7 +91,16 @@ backtest_wape    double | null
 `VL_CUSTO_FINAL_BRL→final_cost_brl`, `Diretoria→diretoria`). Chaves não mapeadas vão
 para o JSONB `extra`; `Tags` vai para `tags`.
 
-## 2.4 Migrações
+## 2.5 Mapeamento GCP → MODELO FOCUS
+
+O seed `apps/api/seed_gcp_focus_mappings.py` aplica o mapeamento oficial Google/FOCUS
+para as conexões `gcp-4p` e `gcp-ti`, cobrindo os 50 campos folha do export
+`gcp_billing_export_resource_v1_*`. Campos canônicos FOCUS usam transforms
+(`JSON_PATH`, `JSON_SUM`, `VALUE_MAP`, `MONTH_START/END`, `CONST`); campos sem
+coluna FOCUS vão para colunas provider-specific `x_*` (26 colunas adicionais).
+A chave de classificação legada é `source_resource_group_name` ← `project.name`.
+
+## 2.6 Migrações
 
 Não há Alembic funcional em produção — `main.py` aplica `create_all` + um pequeno
 conjunto de `ALTER TABLE ... IF NOT EXISTS` idempotentes no lifespan (colunas de

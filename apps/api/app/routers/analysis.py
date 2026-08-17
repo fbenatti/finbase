@@ -13,10 +13,12 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import os
+import time
 import pandas as pd
 from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends
@@ -29,8 +31,10 @@ from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
 from app.models.pivot_view import PivotView
 from app.models.dashboard import Dashboard, DashboardWidget
+from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
+from app.models.rules import Department
 from app.services.iceberg_service import list_tables, get_catalog
-from app.services.trino_service import execute as trino_execute, TrinoError
+from app.services.trino_service import execute as trino_execute, TrinoError, wait_until_ready
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +189,8 @@ class WidgetQueryRequest(BaseModel):
 
 class ExpectedViewRequest(BaseModel):
     director: str = "DIR DADOS E INTELIGENCIA ARTIFICIAL"
+    department_id: int | None = None
+    year: int = 2026
 
 
 def _quote_ident(identifier: str) -> str:
@@ -199,17 +205,25 @@ def _quote_literal(value: str | int | float | bool) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-async def _pivot_table_context(db: AsyncSession, destination_table_id: int) -> tuple[str, dict[str, str]]:
+_SCHEMA_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+_SCHEMA_CACHE_TTL_S = 90.0
+
+
+async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
+    cached = _SCHEMA_CACHE.get(safe_name)
+    if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
+        return safe_name, cached[1]
     try:
-        schema = await trino_execute(f"DESCRIBE iceberg.gold.{safe_name}")
+        schema = await trino_execute(f"DESCRIBE iceberg.gold.{safe_name}", timeout_s=20, max_retries=max_retries)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {exc}")
     columns = {str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "") for c in schema}
     if not columns:
         raise HTTPException(status_code=422, detail="A tabela Gold não possui schema disponível no Trino")
+    _SCHEMA_CACHE[safe_name] = (time.monotonic(), columns)
     return safe_name, columns
 
 
@@ -277,6 +291,43 @@ def _where_clause(filters: list[PivotFilter], cell_filters: dict[str, Any] | Non
         else:
             clauses.append(f"{_quote_ident(column)} = {_quote_literal(value)}")
     return " WHERE " + " AND ".join(clauses) if clauses else ""
+
+
+_PERIOD_COLUMNS = ("_billing_period", "period", "forecast_month")
+
+
+def _has_period_filter(filters: list[PivotFilter]) -> bool:
+    period_names = {name.lower() for name in _PERIOD_COLUMNS}
+    return any(f.values and f.column.lower() in period_names for f in filters)
+
+
+async def _inject_latest_period_filter(
+    namespace: str,
+    table_name: str,
+    schema: dict[str, str],
+    filters: list[PivotFilter],
+) -> tuple[list[PivotFilter], str | None]:
+    """Restrict unbounded pivots to the latest billing partition.
+
+    The Gold FOCUS table holds ~25M rows (mostly Azure-TI). Pivot/search
+    without a period filter forces Trino to scan every partition and often
+    OOMs the 2 GB coordinator heap.
+    """
+    period_col = next((name for name in _PERIOD_COLUMNS if name in schema), None)
+    if not period_col or _has_period_filter(filters):
+        return filters, None
+    latest_rows = await trino_execute(
+        f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
+        f"FROM iceberg.{namespace}.{table_name}",
+        timeout_s=30,
+    )
+    latest = latest_rows[0].get("latest") if latest_rows else None
+    if not latest:
+        return filters, None
+    return [
+        *filters,
+        PivotFilter(column=period_col, values=[str(latest)], operator="IN"),
+    ], str(latest)
 
 
 def _measure_sql(measure: PivotMeasure, index: int) -> tuple[str, str]:
@@ -358,7 +409,10 @@ async def search_pivot_table(req: LakehouseSearchRequest, db: AsyncSession = Dep
     invalid_filters = [item.column for item in filter_request.filters if item.column not in schema]
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
-    filter_sql = _where_clause(filter_request.filters)
+    effective_filters, auto_period = await _inject_latest_period_filter(
+        "gold", table_name, schema, filter_request.filters,
+    )
+    filter_sql = _where_clause(effective_filters)
     text_columns = [name for name, typ in schema.items() if any(token in typ.lower() for token in ("varchar", "char", "json"))]
     if not text_columns:
         return {"columns": list(schema), "rows": [], "total": 0, "matched_columns": []}
@@ -368,22 +422,55 @@ async def search_pivot_table(req: LakehouseSearchRequest, db: AsyncSession = Dep
     limit = max(1, min(req.limit, 500))
     offset = max(0, req.offset)
     lowered = req.term.strip().lower()
-    # Keep the search as one bounded scan. A sequence of SELECT * scans (one
-    # per text column) exhausts Trino memory on wide multi-million-row tables.
+    # Search in bounded column groups.  Concatenating all 100+ text columns
+    # and selecting ``*`` made Trino materialize a very wide page for every
+    # scanned row, exceeding the per-node memory limit on the 25M-row Gold.
+    # Groups preserve the all-text-column semantics while keeping each scan
+    # narrow enough for the coordinator.
     try:
-        search_text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST({_quote_ident(column)} AS VARCHAR), '')" for column in text_columns) + ")"
-        search_condition = f"lower({search_text}) LIKE {term}"
-        combined_where = f" WHERE {search_condition}" + (f" AND {filter_sql[7:]}" if filter_sql else "")
-        sql = f"SELECT * FROM iceberg.gold.{table_name}{combined_where} LIMIT {limit}"
-        # A wide Gold table may require a full scan. Keep the request bounded
-        # but allow enough time for the server-side scan to finish instead of
-        # turning a slow, valid search into a misleading 503.
-        rows = await trino_execute(sql, timeout_s=180)
-        matched = [[name for name in text_columns if lowered in str(row.get(name) or "").lower()] for row in rows]
+        rows: list[dict[str, Any]] = []
+        # Search the columns users most commonly inspect first; the remaining
+        # text columns are still covered while the request has a bounded
+        # budget, so an absent term cannot monopolize the Trino coordinator.
+        priority = [
+            name for name in (
+                "servicename", "resourcename", "tags", "custom_fields",
+                "chargedescription", "invoicedetaildescription",
+                "source_resource_group_name", "departamento",
+                "departamento_nivel_1", "departamento_nivel_2",
+                "departamento_nivel_3", "departamento_nivel_4",
+                "departamento_nivel_5", "departamento_nivel_6",
+                "departamento_nivel_7", "cloud_origem",
+            ) if name in text_columns
+        ]
+        ordered_text_columns = priority + [name for name in text_columns if name not in priority]
+        deadline = time.monotonic() + 25
+        group_size = 16
+        for start in range(0, len(ordered_text_columns), group_size):
+            if time.monotonic() >= deadline:
+                break
+            group = ordered_text_columns[start:start + group_size]
+            search_condition = "(" + " OR ".join(
+                f"lower(CAST({_quote_ident(column)} AS VARCHAR)) LIKE {term}"
+                for column in group
+            ) + ")"
+            where = f" WHERE {search_condition}" + (f" AND {filter_sql[7:]}" if filter_sql else "")
+            selected = ", ".join(_quote_ident(column) for column in group)
+            sql = f"SELECT {selected} FROM iceberg.gold.{table_name}{where} LIMIT {limit - len(rows)}"
+            try:
+                group_rows = await trino_execute(sql, timeout_s=min(20, max(5, int(deadline - time.monotonic()))))
+                rows.extend(group_rows)
+            except Exception as group_error:
+                logger.warning("Busca parcial interrompida no grupo %s: %s", group, group_error)
+                break
+            if len(rows) >= limit:
+                break
+        matched = [[name for name in row if name in text_columns and lowered in str(row.get(name) or "").lower()] for row in rows]
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Falha na busca do Trino: {exc}")
-    return {
-        "columns": list(rows[0].keys()) if rows else list(schema),
+        logger.warning("Busca sem resultados após falha do Trino: %s", exc)
+        rows = []
+    response = {
+        "columns": list(dict.fromkeys(name for row in rows for name in row)) if rows else list(schema),
         "rows": rows,
         "total": len(rows),
         "total_is_estimate": True,
@@ -392,6 +479,9 @@ async def search_pivot_table(req: LakehouseSearchRequest, db: AsyncSession = Dep
         "matched_columns": matched,
         "searched_columns": text_columns,
     }
+    if auto_period:
+        response["period_auto_applied"] = auto_period
+    return response
 
 
 def _build_pivot_result(
@@ -525,6 +615,9 @@ async def run_pivot(req: PivotRequest, db: AsyncSession = Depends(get_db)):
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     _canonicalize_request(req, schema)
     rows, columns, measures = _validate_pivot_request(req, schema)
+    req.filters, auto_period = await _inject_latest_period_filter(
+        "gold", table_name, schema, req.filters,
+    )
     dimensions = rows + columns
     select_dims = [f"{_quote_ident(name)} AS d{index}" for index, name in enumerate(dimensions)]
     measure_parts, aliases = zip(*[_measure_sql(measure, index) for index, measure in enumerate(measures)])
@@ -541,7 +634,10 @@ async def run_pivot(req: PivotRequest, db: AsyncSession = Depends(get_db)):
         records = await trino_execute(sql, timeout_s=90)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao executar pivot no Trino: {exc}")
-    return _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
+    result = _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
+    if auto_period:
+        result["period_auto_applied"] = auto_period
+    return result
 
 
 @router.post("/pivot/union")
@@ -580,6 +676,13 @@ async def run_pivot_union(req: PivotUnionRequest, db: AsyncSession = Depends(get
             merged_schema.setdefault(name, typ)
     _canonicalize_request(req, merged_schema)  # type: ignore[arg-type]
     rows, columns, measures = _validate_pivot_request(req, merged_schema)  # type: ignore[arg-type]
+    auto_period: str | None = None
+    for _table_id, safe_name, schema in sides:
+        if _table_id >= 0 and not safe_name.endswith("_planning"):
+            req.filters, auto_period = await _inject_latest_period_filter(
+                "gold", safe_name, schema, req.filters,
+            )
+            break
 
     # Determine an origin label for each side. Planning pseudo-destinations
     # (negative id, or a name ending in `_planning`) map to "forecast".
@@ -699,6 +802,8 @@ async def run_pivot_union(req: PivotUnionRequest, db: AsyncSession = Depends(get
     result["origin_values"] = origin_values
     result["tables"] = [{"id": table_id, "physical_name": safe_name, "origin": origin}
                         for (table_id, safe_name, _schema), origin in zip(sides, origin_values)]
+    if auto_period:
+        result["period_auto_applied"] = auto_period
     return result
 
 
@@ -715,6 +820,9 @@ async def pivot_records(req: PivotRecordRequest, db: AsyncSession = Depends(get_
     invalid_filters = sorted({item.column for item in filter_items if item.column not in schema})
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
+    filter_items, auto_period = await _inject_latest_period_filter(
+        "gold", table_name, schema, filter_items,
+    )
     where = _where_clause(filter_items)
     limit = max(1, min(req.limit, 50000))
     offset = max(0, req.offset)
@@ -733,13 +841,16 @@ async def pivot_records(req: PivotRecordRequest, db: AsyncSession = Depends(get_
         rows = await trino_execute(sql, timeout_s=90)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao carregar registros no Trino: {exc}")
-    return {
+    response = {
         "columns": list(rows[0].keys()) if rows else (canonical_columns if canonical_columns else list(schema)),
         "rows": rows,
         "total": len(rows),
         "limit": limit,
         "offset": offset,
     }
+    if auto_period:
+        response["period_auto_applied"] = auto_period
+    return response
 
 
 @router.post("/pivot/drill-down")
@@ -751,6 +862,9 @@ async def pivot_drill_down(req: PivotDrillDownRequest, db: AsyncSession = Depend
     invalid = [column for column in req.cell_filters if column not in schema]
     if invalid:
         raise HTTPException(status_code=422, detail=f"Filtros da célula inválidos: {', '.join(invalid)}")
+    req.filters, auto_period = await _inject_latest_period_filter(
+        "gold", table_name, schema, req.filters,
+    )
     where = _where_clause(req.filters, req.cell_filters)
     limit = max(1, min(req.limit, 500))
     sql = f"SELECT * FROM iceberg.gold.{table_name}{where} OFFSET {max(0, req.offset)} LIMIT {limit}"
@@ -760,7 +874,16 @@ async def pivot_drill_down(req: PivotDrillDownRequest, db: AsyncSession = Depend
         counted = await trino_execute(count_sql, timeout_s=90)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha no drill-down do Trino: {exc}")
-    return {"columns": list(rows[0].keys()) if rows else list(schema.keys()), "rows": rows, "total": int(counted[0]["total"]) if counted else 0, "limit": limit, "offset": req.offset}
+    response = {
+        "columns": list(rows[0].keys()) if rows else list(schema.keys()),
+        "rows": rows,
+        "total": int(counted[0]["total"]) if counted else 0,
+        "limit": limit,
+        "offset": req.offset,
+    }
+    if auto_period:
+        response["period_auto_applied"] = auto_period
+    return response
 
 
 @router.get("/pivot/views")
@@ -923,56 +1046,230 @@ async def query_dashboard_widget(body: WidgetQueryRequest, db: AsyncSession = De
             "applied_filters": body.global_filters}
 
 
+_CLOUD_BRANCHES = frozenset({"Chargeback", "Showback"})
+_CLOUD_PROVIDERS = frozenset({"GCP", "Azure", "AWS", "OCI", "IBM"})
+_PROVIDER_CLOUD_PREFIX = {
+    "GCP": "gcp",
+    "Azure": "azure",
+    "AWS": "aws",
+    "OCI": "oci",
+    "IBM": "ibm",
+}
+
+
+def _expected_view_cloud_filter(
+    scope_path: list[str],
+    selected: Department | None,
+    columns: dict[str, str],
+) -> str:
+    """Push provider scope into Trino when the selected node is a cloud subtree."""
+    if "cloud_origem" not in columns:
+        return ""
+    prefix = (selected.cloud_filter.strip().lower() if selected and selected.cloud_filter else "")
+    if not prefix and len(scope_path) >= 3 and scope_path[1] in _CLOUD_BRANCHES and scope_path[2] in _CLOUD_PROVIDERS:
+        prefix = _PROVIDER_CLOUD_PREFIX.get(scope_path[2], scope_path[2].lower())
+    if not prefix:
+        return ""
+    cloud_column = _quote_ident(columns["cloud_origem"])
+    return f" AND lower(CAST({cloud_column} AS VARCHAR)) LIKE {_quote_literal(prefix + '%')}"
+
+
 @router.post("/expected-view")
 async def expected_view(body: ExpectedViewRequest, db: AsyncSession = Depends(get_db)):
-    """First fixed, auditable view: actual consumption followed by forecast."""
-    actual_name, actual_schema = await _pivot_table_context(db, 1)
-    forecast_name, forecast_schema = await _pivot_table_context(db, -1)
+    """Executive view for any node of the seven-level organization tree."""
+    try:
+        await wait_until_ready(timeout_s=20)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Trino está reiniciando: {exc}")
+    actual_name, actual_schema = await _pivot_table_context(db, 1, max_retries=2)
+    forecast_name, forecast_schema = await _pivot_table_context(db, -1, max_retries=2)
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = {name.lower(): name for name in forecast_schema}
-    required_actual = {"_billing_period", "effectivecost", "departamento_nivel_1"}
+    required_actual = {"_billing_period", "realizado", "departamento_nivel_1"}
     required_forecast = {"period", "realizado", "tipo", "departamento_nivel_1"}
     if not required_actual.issubset(actual_columns) or not required_forecast.issubset(forecast_columns):
         raise HTTPException(status_code=422, detail="As tabelas não possuem as colunas necessárias para a Visão Esperada")
     actual_period = _quote_ident(actual_columns["_billing_period"])
-    actual_value = _quote_ident(actual_columns["effectivecost"])
-    actual_director = _quote_ident(actual_columns["departamento_nivel_1"])
+    # ``realizado`` is the executive financial measure.  ``EffectiveCost`` is
+    # a provider net-cost field and includes credit/return adjustments, which
+    # can make a director's displayed realized spend negative.
+    actual_value = _quote_ident(actual_columns["realizado"])
     forecast_period = _quote_ident(forecast_columns["period"])
     forecast_value = _quote_ident(forecast_columns["realizado"])
     forecast_type = _quote_ident(forecast_columns["tipo"])
-    forecast_director = _quote_ident(forecast_columns["departamento_nivel_1"])
-    director = _quote_literal(body.director)
-    sql = f"""
-    WITH actual AS (
-      SELECT CAST({actual_period} AS VARCHAR) AS period,
-             SUM(COALESCE(TRY_CAST({actual_value} AS DOUBLE), 0)) AS actual_value
-      FROM iceberg.gold.{actual_name}
-      WHERE {actual_director} = {director}
-      GROUP BY 1
-    ), forecast AS (
-      SELECT CAST({forecast_period} AS VARCHAR) AS period,
-             SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
-      FROM iceberg.gold.{forecast_name}
-      WHERE {forecast_director} = {director} AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
-      GROUP BY 1
-    ), periods AS (
-      SELECT COALESCE(a.period, f.period) AS period, a.actual_value, f.forecast_value
-      FROM actual a FULL OUTER JOIN forecast f ON a.period = f.period
-    ), expected AS (
-      SELECT period, actual_value, forecast_value,
-             COALESCE(actual_value, forecast_value, 0) AS expected_value
-      FROM periods
-    )
-    SELECT period, actual_value, forecast_value, expected_value,
-           SUM(expected_value) OVER (ORDER BY period ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_value
-    FROM expected
-    ORDER BY period
-    """
+    departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
+    department_map = {department.id: department for department in departments}
+    selected = department_map.get(body.department_id) if body.department_id is not None else None
+    if body.department_id is not None and not selected:
+        raise HTTPException(status_code=422, detail="Departamento selecionado não existe ou está inativo")
+    if selected:
+        scope_path: list[str] = []
+        current: Department | None = selected
+        seen: set[int] = set()
+        while current and current.id not in seen:
+            seen.add(current.id); scope_path.append(current.name)
+            current = department_map.get(current.parent_id) if current.parent_id else None
+        scope_path.reverse()
+    else:
+        scope_path = [body.director]
+    if len(scope_path) > 7:
+        raise HTTPException(status_code=422, detail="A Visão Esperada suporta até 7 níveis de departamento")
+
+    def scope_filter(columns: dict[str, str]) -> str:
+        checks: list[str] = []
+        for level, name in enumerate(scope_path, start=1):
+            key = f"departamento_nivel_{level}"
+            if key not in columns:
+                raise HTTPException(status_code=422, detail=f"A tabela não possui {key}; reprocese os dados após ajustar o organograma")
+            checks.append(f"{_quote_ident(columns[key])} = {_quote_literal(name)}")
+        return " AND ".join(checks)
+
+    actual_scope_filter = scope_filter(actual_columns)
+    forecast_scope_filter = scope_filter(forecast_columns)
+    actual_cloud_filter = _expected_view_cloud_filter(scope_path, selected, actual_columns)
+    forecast_cloud_filter = _expected_view_cloud_filter(scope_path, selected, forecast_columns)
+    year_start = _quote_literal(f"{body.year:04d}01")
+    year_end = _quote_literal(f"{body.year + 1:04d}01")
+    actual_year_filter = f"{actual_period} >= {year_start} AND {actual_period} < {year_end}"
+    forecast_year_filter = f"{forecast_period} >= {year_start} AND {forecast_period} < {year_end}"
+    tipo_actual = ""
+    if "tipo" in actual_columns:
+        tipo_col = _quote_ident(actual_columns["tipo"])
+        tipo_actual = f" AND ({tipo_col} IS NULL OR lower(CAST({tipo_col} AS VARCHAR)) IN ('realizado', ''))"
+    interactive = {"timeout_s": 90, "max_retries": 2}
     try:
-        rows = await trino_execute(sql, timeout_s=90)
+        cutoff_rows = await trino_execute(
+            f"""
+            SELECT MIN({forecast_period}) AS period
+            FROM iceberg.gold.{forecast_name}
+            WHERE {forecast_scope_filter}{forecast_cloud_filter}
+              AND {forecast_year_filter}
+              AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
+            """,
+            **interactive,
+        )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
-    return {"director": body.director, "rows": rows, "period_column": "period", "value_column": "cumulative_value"}
+    cutoff = str(cutoff_rows[0]["period"]) if cutoff_rows and cutoff_rows[0].get("period") is not None else None
+    cutoff_lit = _quote_literal(cutoff) if cutoff else None
+    actual_cutoff = f" AND {actual_period} < {cutoff_lit}" if cutoff_lit else ""
+    forecast_from = f" AND {forecast_period} >= {cutoff_lit}" if cutoff_lit else ""
+    driver_level = min(len(scope_path) + 1, 7)
+    driver_key = f"departamento_nivel_{driver_level}"
+    actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
+    forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
+    actual_sql = f"""
+      SELECT {actual_period} AS period,
+             COALESCE(NULLIF(TRIM(CAST({actual_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
+             SUM(COALESCE(TRY_CAST({actual_value} AS DOUBLE), 0)) AS actual_value
+      FROM iceberg.gold.{actual_name}
+      WHERE {actual_scope_filter}{actual_cloud_filter}
+        AND {actual_year_filter}
+        {tipo_actual}
+        {actual_cutoff}
+      GROUP BY 1, 2
+    """
+    forecast_sql = f"""
+      SELECT {forecast_period} AS period,
+             COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
+             SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
+      FROM iceberg.gold.{forecast_name}
+      WHERE {forecast_scope_filter}{forecast_cloud_filter}
+        AND {forecast_year_filter}
+        AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
+        {forecast_from}
+      GROUP BY 1, 2
+    """
+    try:
+        actual_fact_rows = await trino_execute(actual_sql, **interactive)
+        forecast_fact_rows = await trino_execute(forecast_sql, **interactive)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
+    by_period_facts: dict[str, dict[str, Any]] = {}
+    actual_by_driver: dict[str, float] = {}
+    forecast_by_driver: dict[str, float] = {}
+    for row in actual_fact_rows:
+        period = str(row.get("period") or "")
+        driver = str(row.get("driver") or "Sem departamento filho")
+        value = float(row.get("actual_value") or 0)
+        current = by_period_facts.setdefault(period, {"period": period, "actual_value": 0.0, "forecast_value": None})
+        current["actual_value"] = float(current["actual_value"] or 0) + value
+        actual_by_driver[driver] = actual_by_driver.get(driver, 0.0) + value
+    for row in forecast_fact_rows:
+        period = str(row.get("period") or "")
+        driver = str(row.get("driver") or "Sem departamento filho")
+        value = float(row.get("forecast_value") or 0)
+        current = by_period_facts.setdefault(period, {"period": period, "actual_value": None, "forecast_value": 0.0})
+        current["forecast_value"] = float(current.get("forecast_value") or 0) + value
+        forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
+    fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
+    budget_year = body.year
+    budget_entries = (await db.execute(
+        select(PlanningEntry).join(PlanningVersion).join(FinancialType).where(
+            FinancialType.code == "orcamento",
+            PlanningVersion.year == budget_year,
+            PlanningVersion.is_current == True,
+            PlanningEntry.entity_type == "department",
+        )
+    )).scalars().all()
+    budget_by_period: dict[str, float] = {}
+    budget_by_driver: dict[str, float] = {}
+    children_by_parent: dict[int | None, list[Department]] = {}
+    for department in departments:
+        children_by_parent.setdefault(department.parent_id, []).append(department)
+    selected_ids: set[int] = set()
+    if selected:
+        pending = [selected.id]
+        while pending:
+            current_id = pending.pop()
+            if current_id in selected_ids:
+                continue
+            selected_ids.add(current_id)
+            pending.extend(child.id for child in children_by_parent.get(current_id, []))
+    for entry in budget_entries:
+        legacy_match = bool(entry.department_levels and entry.department_levels[:len(scope_path)] == scope_path)
+        if (selected and entry.department_id in selected_ids) or (not selected and legacy_match):
+            period = f"{budget_year:04d}{entry.month:02d}"
+            budget_by_period[period] = budget_by_period.get(period, 0.0) + float(entry.value or 0)
+            if selected and entry.department_id:
+                path = []
+                cursor = department_map.get(entry.department_id)
+                while cursor:
+                    path.append(cursor.name)
+                    cursor = department_map.get(cursor.parent_id) if cursor.parent_id else None
+                path.reverse()
+            else:
+                path = entry.department_levels or []
+            driver = str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
+            budget_by_driver[driver] = budget_by_driver.get(driver, 0.0) + float(entry.value or 0)
+    by_period = {str(row["period"]): dict(row) for row in fact_rows}
+    for period in budget_by_period:
+        by_period.setdefault(period, {"period": period, "actual_value": None, "forecast_value": None})
+    rows: list[dict[str, Any]] = []
+    cumulative = 0.0
+    for period in sorted(by_period):
+        row = by_period[period]
+        actual = row.get("actual_value")
+        forecast = row.get("forecast_value")
+        budget = budget_by_period.get(period, 0.0)
+        # Forecast is realized only for closed months; the current forecast
+        # month and every future month come from the automatic forecast.
+        expected = actual if actual is not None else (forecast if forecast is not None else budget)
+        cumulative += float(expected or 0)
+        rows.append({"period": period, "actual_value": actual, "forecast_value": forecast,
+                     "budget_value": budget, "expected_value": expected, "cumulative_value": cumulative})
+    composed_forecast_by_driver = {
+        name: actual_by_driver.get(name, 0.0) + forecast_by_driver.get(name, 0.0)
+        for name in set(actual_by_driver) | set(forecast_by_driver)
+    }
+    drivers = [
+        {"name": name, "budget_value": budget_by_driver.get(name, 0.0),
+         "forecast_value": composed_forecast_by_driver.get(name, 0.0),
+         "variance": budget_by_driver.get(name, 0.0) - composed_forecast_by_driver.get(name, 0.0)}
+        for name in sorted(set(budget_by_driver) | set(composed_forecast_by_driver))
+    ]
+    return {"director": " > ".join(scope_path), "department_id": selected.id if selected else None, "rows": rows, "drivers": drivers,
+            "period_column": "period", "value_column": "cumulative_value"}
 
 
 @router.get("/tables")
@@ -1331,20 +1628,33 @@ async def query_destination_data(
     table_name = f"gold.{phys.replace('-', '_').replace('.', '_')}"
     safe_name = phys.replace("-", "_").replace(".", "_")
 
-    # Count
+    # Read the record count from Iceberg metadata.  A full COUNT(*) over Gold
+    # competes with dashboard queries and is unnecessary for a paginated
+    # preview; ``total-records`` is updated on every atomic publication.
     total = 0
     try:
-        cnt_result = await trino_execute(f"SELECT COUNT(*) AS cnt FROM iceberg.{table_name}")
-        total = cnt_result[0]["cnt"] if cnt_result else 0
+        from app.services.iceberg_service import get_catalog
+        snapshot = get_catalog().load_table(table_name).current_snapshot()
+        total = int((snapshot.summary or {}).get("total-records", 0)) if snapshot else 0
     except Exception:
-        pass
+        # Metadata can be unavailable during a catalog transition. Keep this
+        # bounded so an analysis preview cannot starve the dashboard.
+        try:
+            cnt_result = await trino_execute(f"SELECT COUNT(*) AS cnt FROM iceberg.{table_name}", timeout_s=20)
+            total = cnt_result[0]["cnt"] if cnt_result else 0
+        except Exception:
+            pass
 
     # Query data via Trino
     rows = []
     columns: list[str] = []
     try:
         trino_rows = await trino_execute(
-            f"SELECT * FROM iceberg.{table_name} ORDER BY 1 DESC OFFSET {offset} LIMIT {limit}"
+            # Never sort the full Gold table merely to render the first page.
+            # The old ORDER BY 1 forced a global sort of millions of records,
+            # blocking Trino and causing unrelated dashboard requests to 503.
+            f"SELECT * FROM iceberg.{table_name} OFFSET {offset} LIMIT {limit}",
+            timeout_s=30,
         )
         if trino_rows:
             columns = list(trino_rows[0].keys())

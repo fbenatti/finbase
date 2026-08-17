@@ -116,6 +116,16 @@ def _build_connections():
             "blob_prefixes": [],
         })
 
+    # Manual CSV upload source — always available for local CSV loads into Bronze
+    conns.append({
+        "code": "manual-csv",
+        "name": "Upload manual de CSV",
+        "connector_type": "manual_csv",
+        "cloud_name": None,
+        "config_json": {},
+        "blob_prefixes": ["manual"],
+    })
+
     return conns
 
 

@@ -19,6 +19,8 @@ import Dashboards from "./pages/Dashboards/Dashboards";
 import ExpectedView from "./pages/Dashboards/ExpectedView";
 import FinancialTypes from "./pages/FinancialTypes/FinancialTypes";
 import Planning from "./pages/Planning/Planning";
+import Savings from "./pages/Savings/Savings";
+import CsvUpload from "./pages/CsvUpload/CsvUpload";
 
 function App() {
   return (
@@ -29,6 +31,7 @@ function App() {
         <Route path="explorer/:connectionId" element={<Explorer />} />
         <Route path="departments" element={<Departments />} />
         <Route path="departments/financial" element={<Planning />} />
+        <Route path="budgets" element={<Planning budgetMode />} />
         <Route path="financial-types" element={<FinancialTypes />} />
         <Route path="destinations" element={<Destinations />} />
         <Route path="relationship" element={<Relationship />} />
@@ -43,6 +46,7 @@ function App() {
         <Route path="pipeline" element={<PipelineBuilder />} />
         <Route path="reprocess" element={<Reprocess />} />
         <Route path="forecast" element={<Forecast />} />
+        <Route path="savings" element={<Savings />} />
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
         <Route path="dashboards" element={<Dashboards />} />
       </Route>

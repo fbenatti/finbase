@@ -1,0 +1,27 @@
+-- Provider-specific FOCUS columns for GCP detailed export mapping
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_CostType" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_Credits" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_CurrencyConversionRate" DOUBLE PRECISION;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_ExportTime" TIMESTAMPTZ;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_Labels" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_Location" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_Project" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_ProjectLabels" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_ServiceId" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_SystemLabels" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_Tags" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_SubscriptionInstanceId" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_PriceEffectivePriceDefault" NUMERIC;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_PriceListPriceConsumptionModel" NUMERIC;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_CostAtEffectivePriceDefault" NUMERIC;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_CostAtListConsumptionModel" NUMERIC;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_ConsumptionModelId" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_ConsumptionModelDescription" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_TransactionType" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_InvoicePublisherType" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_InvoiceMonth" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_AdjustmentInfo" JSONB;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_UsageAmountInPricingUnits" NUMERIC;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_UsagePricingUnit" TEXT;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_PriceTierStartAmount" NUMERIC;
+ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "x_LocationCountry" TEXT;

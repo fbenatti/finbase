@@ -16,6 +16,7 @@ import httpx
 from httpx import DigestAuth
 import asyncio
 import os
+from uuid import uuid4
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -83,11 +84,14 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    if conn.connector_type != "azure_blob":
-        raise HTTPException(status_code=400, detail="Scan only supported for azure_blob connections")
-
-    extractor = AzureExtractor(conn)
-    return await extractor.scan(db)
+    if conn.connector_type == "azure_blob":
+        extractor = AzureExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "gcp_bigquery":
+        from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
+        extractor = GcpBigQueryExtractor(conn)
+        return await extractor.scan(db)
+    raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
 @router.get("/blobs/", response_model=list[IngestedBlobOut])
@@ -160,11 +164,11 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type != "azure_blob":
+    if conn.connector_type not in ("azure_blob", "gcp_bigquery"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
-            "message": f"ETL para {conn.connector_type} sera implementado na Fase 5. Azure Blob ja disponivel."
+            "message": f"ETL para {conn.connector_type} ainda nao disponivel."
         }
 
     from app.models.etl_task import EtlTask
@@ -336,10 +340,12 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
             return {"status": "FAILED", "message": str(e)[:500]}
 
     if conn.connector_type == "gcp_bigquery":
-        return {
-            "status": "PENDING",
-            "message": f"GCP BigQuery ({config.get('project_id','?')}.{config.get('dataset_id','?')}) sera implementado na Fase 5. Estrutura de conexao OK.",
-        }
+        try:
+            from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
+            result = GcpBigQueryExtractor(conn).test_connection()
+            return result
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
 
     if conn.connector_type == "mongodb_atlas":
         public_key = config.get("public_key", "")
@@ -388,6 +394,59 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
 _dest_reprocess_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dest-reprocess")
 _dest_task_counter = 0
 # NOTE: reprocess tasks are registered into task_runner._inmemory_tasks for global visibility
+
+
+def _azure_blob_run_id(blob_path: str) -> str:
+    """Group Azure Cost Management part files under the same export execution."""
+    parts = str(blob_path or "").split("/")
+    return parts[3] if len(parts) > 3 else str(blob_path)
+
+
+def _select_reprocess_blobs(
+    candidates: list[tuple[int, str, str, object]],
+    *,
+    connector_type: str,
+    preferred_table: str | None = None,
+) -> list[tuple[int, str, str]]:
+    """Choose Bronze blobs to reprocess for one connection.
+
+    Azure keeps only the latest export execution per billing month because
+    stale executions duplicate the same financial rows.  GCP BigQuery keeps
+    distinct export tables (current vs legacy) as separate blob paths; the
+    monthly dedup must not collapse them into the most recently ingested
+    table, or Gold loses the detailed resource export.
+    """
+    if connector_type == "gcp_bigquery":
+        by_period: dict[str, list[tuple[int, str, str, object]]] = {}
+        for blob_id, period, path, modified in candidates:
+            by_period.setdefault(str(period), []).append((blob_id, period, path, modified))
+        selected: list[tuple[int, str, str]] = []
+        for period, blobs in by_period.items():
+            if preferred_table:
+                preferred = [b for b in blobs if preferred_table in str(b[2])]
+                if preferred:
+                    blob_id, period, path, _ = max(preferred, key=lambda b: b[3])
+                    selected.append((blob_id, period, path))
+                    continue
+            blob_id, period, path, _ = max(blobs, key=lambda b: b[3])
+            selected.append((blob_id, period, path))
+        return selected
+
+    if connector_type == "azure_blob":
+        latest_run: dict[str, tuple[str, object]] = {}
+        for _, period, path, modified in candidates:
+            run_id = _azure_blob_run_id(path)
+            current = latest_run.get(str(period))
+            if current is None or modified > current[1]:
+                latest_run[str(period)] = (run_id, modified)
+        selected = []
+        for blob_id, period, path, _ in candidates:
+            run_id = _azure_blob_run_id(path)
+            if latest_run.get(str(period), (None, None))[0] == run_id:
+                selected.append((blob_id, period, path))
+        return selected
+
+    return [(blob_id, period, path) for blob_id, period, path, _ in candidates]
 
 def _append_reprocess_log(task_id: int, message: str, *, level: str = "INFO", details: dict | None = None) -> None:
     """Persist compact lifecycle events for the Reprocess history screen.
@@ -489,6 +548,8 @@ def _process_blob_for_reprocess(
     clone_engine=None,
     source_frame: "pd.DataFrame | None" = None,
     batch_callback=None,
+    connection_cloud_name: str | None = None,
+    project_rows: list | None = None,
 ) -> "pd.DataFrame | None":
     """Process a single blob in a thread — reads from DB, applies rules/mappings/classifications.
 
@@ -503,8 +564,10 @@ def _process_blob_for_reprocess(
     from app.services import iceberg_service as iceberg
     from app.services.task_runner import (
         _apply_business_rule_sync, _apply_classifications_sync,
+        _apply_project_subscription_lookup,
         _check_cancelled, _inmemory_tasks,
     )
+    from app.services.mapping_transforms import apply_mappings
 
     session = SyncSession()
     try:
@@ -542,10 +605,7 @@ def _process_blob_for_reprocess(
             df_chunk = chunk.drop(columns=[c for c in ["_billing_period", "_blob_path", "_ingested_at"] if c in chunk.columns])
 
             # Phase 1: Map source columns → destination columns (Silver)
-            target = pd.DataFrame()
-            for m in cmapps:
-                if m.source_column in df_chunk.columns:
-                    target[m.destination_column] = df_chunk[m.source_column]
+            target = apply_mappings(df_chunk, cmapps)
 
             # Preserve provenance and only destination-named fields.
             target["cloud_origem"] = connection_code
@@ -596,6 +656,14 @@ def _process_blob_for_reprocess(
                     proj_map=proj_cache,
                     hierarchy_cache=hierarchy_cache,
                 )
+            _apply_project_subscription_lookup(
+                target,
+                connection_cloud_name,
+                dept_cache,
+                proj_cache,
+                hierarchy_cache,
+                project_rows=project_rows,
+            )
 
             if target.empty:
                 continue
@@ -648,6 +716,7 @@ def _reprocess_destination_sync(
     connection_ids: list[int],
     billing_periods: list[str],
     replace_existing: bool = False,
+    publish_by_partition: bool = False,
 ) -> dict:
     """Read normalized data blob-by-blob via raw JSON → pandas → Iceberg. Granular progress."""
     import pandas as pd, json
@@ -661,6 +730,7 @@ def _reprocess_destination_sync(
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
     from app.services.task_runner import _inmemory_tasks, _check_cancelled
+    from app.services.cloud_scope import rule_matches_cloud
 
     status = _inmemory_tasks.get(task_id, {})
     status["status"] = "RUNNING"
@@ -720,15 +790,30 @@ def _reprocess_destination_sync(
         dest_col_names = {r[0] for r in dest_col_meta}
         dest_col_types: dict[str, str] = {r[0]: (r[1] or "TEXT") for r in dest_col_meta}
 
-        # Gather all blob IDs upfront for progress tracking
+        # Gather Bronze blobs per connection. Azure deduplicates stale export
+        # executions; GCP keeps the configured current BigQuery table.
         all_blobs: list[tuple[int, int, str]] = []  # (blob_id, connection_id, billing_period)
         for cid in connection_ids:
-            q = select(IngestedBlob.id, IngestedBlob.billing_period).where(IngestedBlob.connection_id == cid)
+            conn = session.get(SourceConnection, cid)
+            connector_type = conn.connector_type if conn else ""
+            preferred_table = None
+            if conn and connector_type == "gcp_bigquery":
+                preferred_table = (conn.config_json or {}).get("table_name")
+
+            q = select(
+                IngestedBlob.id, IngestedBlob.billing_period,
+                IngestedBlob.blob_path, IngestedBlob.last_modified,
+            ).where(IngestedBlob.connection_id == cid)
             if billing_periods:
                 q = q.where(IngestedBlob.billing_period.in_(billing_periods))
             q = q.order_by(IngestedBlob.billing_period)
-            for row in session.execute(q).all():
-                all_blobs.append((row[0], cid, row[1]))
+            candidates = session.execute(q).all()
+            for blob_id, period, path in _select_reprocess_blobs(
+                candidates,
+                connector_type=connector_type,
+                preferred_table=preferred_table,
+            ):
+                all_blobs.append((blob_id, cid, period))
 
         total_blobs = len(all_blobs)
         expected_rows_by_blob = {
@@ -755,11 +840,12 @@ def _reprocess_destination_sync(
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, proj_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
         unique_cids = set(cid for _, cid, _ in all_blobs)
-        output_cols = {'departamento', 'diretoria', 'centro_custo',
-                       'ambiente', 'custom_fields', 'subscription_rg', 'projeto_nome',
+        output_cols = {'departamento', 'centro_custo',
+                       'ambiente', 'custom_fields', 'subscription_rg',
                        'departamento_nivel_1', 'departamento_nivel_2',
                        'departamento_nivel_3', 'departamento_nivel_4',
-                       'departamento_nivel_5',
+                       'departamento_nivel_5', 'departamento_nivel_6',
+                       'departamento_nivel_7',
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
                        'VL_CUSTO_FINAL_BRL'}
@@ -789,17 +875,25 @@ def _reprocess_destination_sync(
                 continue
             conn_map[cid] = conn
 
-            # Load business rules (this connection + global rules)
-            _brules = session.execute(
-                select(BusinessRule).where(
-                    or_(BusinessRule.connection_id == cid, BusinessRule.connection_id.is_(None)),
-                    BusinessRule.active == True,
-                ).order_by(BusinessRule.priority)
-            ).scalars().all()
+            # Load business rules scoped to this connection's cloud provider.
+            _brules = [
+                rule for rule in session.execute(
+                    select(BusinessRule).where(
+                        BusinessRule.active == True,
+                    ).order_by(BusinessRule.priority)
+                ).scalars().all()
+                if rule_matches_cloud(rule.cloud_scope, conn.cloud_name)
+            ]
 
-            # Classification is a separate, versioned materialization. The
-            # financial base must not depend on organizational rules.
-            _crules = []
+            _crules = [
+                rule for rule in session.execute(
+                    select(ClassificationRule).where(
+                        ClassificationRule.destination_table_id == destination_table_id,
+                        ClassificationRule.active == True,
+                    ).order_by(ClassificationRule.priority, ClassificationRule.id)
+                ).scalars().all()
+                if rule_matches_cloud(rule.cloud_scope, conn.cloud_name)
+            ]
 
             # Business rules may create arbitrary destination columns (for
             # example ``realizado``). Keep those columns in the final Gold
@@ -812,50 +906,22 @@ def _reprocess_destination_sync(
                     if isinstance(condition, dict) and condition.get("then_field"):
                         output_cols.add(condition["then_field"])
             for rule in _crules:
-                if rule.target_field:
+                if rule.target_field and rule.target_field not in {"diretoria", "projeto_nome"}:
                     output_cols.add(rule.target_field)
 
-            # Pre-load department/project hierarchy
             _dept_cache: dict = {}
             _proj_cache: dict = {}
             _hierarchy_cache: dict = {}
+            _project_rows: list = []
+            depts = session.execute(select(Department)).scalars().all()
+            _dept_cache = {d.id: d for d in depts}
+            _project_rows = session.execute(
+                select(Project).where(Project.active == True)
+            ).scalars().all()
+            _proj_cache = {p.id: p for p in _project_rows}
+
             if _crules:
                 dept_ids_needed = {r.department_id for r in _crules if r.department_id}
-                proj_ids_needed = {r.project_id for r in _crules if r.project_id}
-
-                if dept_ids_needed:
-                    depts = session.execute(
-                        select(Department).where(Department.id.in_(dept_ids_needed))
-                    ).scalars().all()
-                    _dept_cache = {d.id: d for d in depts}
-                    # Also load parent departments (walk up the tree)
-                    parent_ids = set()
-                    for d in depts:
-                        cur = d.parent_id
-                        depth = 0
-                        while cur and depth < 5:
-                            parent_ids.add(cur)
-                            if cur in _dept_cache:
-                                cur = _dept_cache[cur].parent_id
-                            else:
-                                break
-                            depth += 1
-                    if parent_ids:
-                        missing = parent_ids - set(_dept_cache.keys())
-                        if missing:
-                            parents = session.execute(
-                                select(Department).where(Department.id.in_(missing))
-                            ).scalars().all()
-                            for p in parents:
-                                _dept_cache[p.id] = p
-
-                if proj_ids_needed:
-                    projs = session.execute(
-                        select(Project).where(Project.id.in_(proj_ids_needed))
-                    ).scalars().all()
-                    _proj_cache = {p.id: p for p in projs}
-
-                # Pre-build hierarchy cache: dept_id → (leaf_dept, root_dept, chain_from_leaf_to_root)
                 for did in dept_ids_needed:
                     dept = _dept_cache.get(did)
                     if not dept:
@@ -864,7 +930,7 @@ def _reprocess_destination_sync(
                     visited = [dept]
                     cur = dept.parent_id
                     depth = 0
-                    while cur and depth < 5:
+                    while cur and depth < 7:
                         parent = _dept_cache.get(cur)
                         if parent:
                             visited.append(parent)
@@ -874,7 +940,10 @@ def _reprocess_destination_sync(
                         depth += 1
                     _hierarchy_cache[did] = (dept, visited[-1], visited)
 
-            conn_rules[cid] = (_brules, _crules, _dept_cache, _proj_cache, _hierarchy_cache)
+            conn_rules[cid] = (
+                _brules, _crules, _dept_cache, _proj_cache, _hierarchy_cache,
+                conn.cloud_name, _project_rows,
+            )
             clone_rules = session.execute(select(CloneRule).where(
                 CloneRule.destination_table_id == destination_table_id,
                 CloneRule.active == True,
@@ -907,7 +976,7 @@ def _reprocess_destination_sync(
         )
 
         def _prepare_for_stage(frame: pd.DataFrame) -> pd.DataFrame:
-            prepared = frame.copy()
+            prepared = frame.drop(columns=["diretoria", "projeto_nome"], errors="ignore").copy()
             for column in stable_stage_cols:
                 if column not in prepared.columns:
                     if column == "tipo":
@@ -931,22 +1000,22 @@ def _reprocess_destination_sync(
                 chunk = prepared.iloc[start:start + 100_000]
                 if temp_name is None:
                     temp_name = iceberg.write_destination_staged(
-                        phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types, namespace="financial_base",
+                        phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
                     )
                 else:
                     iceberg.append_to_staged(
-                        temp_name, chunk, partition_col="_billing_period", column_types=dest_col_types, namespace="financial_base",
+                        temp_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
                     )
                 staged_rows += len(chunk)
             del prepared
 
         # For partial reprocesses, preserve unaffected rows in the same
-        # temporary table. Full rebuilds never read the old Gold table.
-        if billing_periods and connection_ids and not replace_existing:
+        # temporary Gold table. Full rebuilds never read the old Gold table.
+        if billing_periods and connection_ids and not replace_existing and not publish_by_partition:
             try:
                 for existing_batch in iceberg.read_destination_batches(
                     phys_name, set(billing_periods), set(connection_ids),
-                    batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")), namespace="financial_base",
+                    batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
                 ):
                     _stage_frame(existing_batch)
                     del existing_batch
@@ -979,7 +1048,7 @@ def _reprocess_destination_sync(
                     status["processed_blobs"] = processed
                     _sync_db()
                     continue
-                brules, crules, dept_cache, proj_cache, hierarchy_cache = conn_rules[cid]
+                brules, crules, dept_cache, proj_cache, hierarchy_cache, conn_cloud, project_rows = conn_rules[cid]
                 cmapps = [m for m in all_mappings if m.source_connection_id == cid]
                 if not cmapps:
                     processed += 1
@@ -1011,6 +1080,8 @@ def _reprocess_destination_sync(
                     dept_cache, proj_cache, hierarchy_cache,
                     output_cols, task_id,
                     clone_engine=clone_engines.get(cid), batch_callback=_write_batch,
+                    connection_cloud_name=conn_cloud,
+                    project_rows=project_rows,
                 )
                 expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
                 if blob_input_rows != expected_blob_rows or blob_output_rows < expected_blob_rows:
@@ -1035,14 +1106,14 @@ def _reprocess_destination_sync(
                 status["current_blob"] = error_msg
                 _sync_db()
                 if temp_name:
-                    iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
+                    iceberg.cleanup_staged_table(temp_name)
                 return {"success": False, "error": error_msg, "rows_written": total_rows_processed}
 
         if errors:
             status.setdefault("errors", []).extend(errors)
         if total_rows_processed == 0:
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
+                iceberg.cleanup_staged_table(temp_name)
             if errors:
                 status["status"] = "FAILED"
                 status["error"] = errors[0]
@@ -1065,7 +1136,7 @@ def _reprocess_destination_sync(
             _sync_db()
             _append_reprocess_log(task_id, msg, level="ERROR", details={"input_rows": expected_input_rows, "output_rows": total_rows_processed})
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
+                iceberg.cleanup_staged_table(temp_name)
             return {"success": False, "error": msg, "rows_written": 0}
 
         # Price gaps do not invalidate a reprocess; they remain auditable.
@@ -1078,35 +1149,23 @@ def _reprocess_destination_sync(
             _sync_db()
             _append_reprocess_log(task_id, "Validação concluída; iniciando swap atômico da Gold")
 
-            total_written = iceberg.swap_staged_table(phys_name, temp_name, namespace="financial_base")
-            from app.models.classification import FinancialBaseVersion
-            old_base = session.query(FinancialBaseVersion).filter(
-                FinancialBaseVersion.destination_table_id == destination_table_id,
-                FinancialBaseVersion.status == "ACTIVE",
-            ).first()
-            if old_base:
-                old_base.status = "SUPERSEDED"
-            base = FinancialBaseVersion(destination_table_id=destination_table_id,
-                physical_name=phys_name, row_count=total_written, status="ACTIVE",
-                source_task_id=task_id, periods=billing_periods or [], connection_ids=connection_ids or [])
-            try:
-                base.iceberg_snapshot_id = str(iceberg.get_catalog().load_table(("financial_base", phys_name)).current_snapshot().snapshot_id)
-            except Exception:
-                pass
-            session.add(base); session.commit()
-            # Finish financial publication first; expensive classification is
-            # independently queued and can never block ingestion.
-            from app.services.classification_service import create_version
-            cv_id = create_version(destination_table_id, "FULL", task_id)
-            session.add(EtlTask(task_type="classification_build", status="QUEUED",
-                destination_table_id=destination_table_id,
-                result_json={"classification_version_id": cv_id, "financial_base_version_id": base.id}, errors=[]))
-            session.commit()
+            if publish_by_partition:
+                if len(set(connection_ids)) != 1 or len(set(billing_periods)) != 1:
+                    raise RuntimeError("Publicação por partição exige exatamente uma fonte e um mês")
+                total_written = iceberg.publish_staged_partition(
+                    phys_name, temp_name,
+                    billing_period=str(billing_periods[0]),
+                    connection_id=int(connection_ids[0]),
+                )
+            else:
+                total_written = iceberg.swap_staged_table(
+                    phys_name, temp_name, known_row_count=total_rows_processed,
+                )
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
             _sync_db()
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
+                iceberg.cleanup_staged_table(temp_name)
             raise stage_err
 
         status["status"] = "COMPLETED"
@@ -1128,7 +1187,7 @@ def _reprocess_destination_sync(
         # the atomic swap, and release worker-held pandas objects promptly.
         try:
             if locals().get("temp_name") and status.get("status") != "COMPLETED":
-                iceberg.cleanup_staged_table(temp_name, namespace="financial_base")
+                iceberg.cleanup_staged_table(temp_name)
         except Exception:
             pass
         try:
@@ -1144,7 +1203,7 @@ def _reprocess_destination_sync(
 
 @router.post("/reprocess")
 async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depends(get_db)):
-    """Create a reprocess task in QUEUED status. A separate worker process picks it up."""
+    """Queue one atomic Gold publication per source and billing month."""
     from app.models.etl_task import EtlTask
     from sqlalchemy import insert
 
@@ -1173,26 +1232,50 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             detail=f"Já existe um reprocessamento ativo para esta tabela (task {active_id})",
         )
 
-    result = await db.execute(
-        insert(EtlTask).values(
-            task_type="reprocess",
-            status="QUEUED",
-            destination_table_id=body.destination_table_id,
-            connection_ids=body.connection_ids,
-            billing_periods=body.billing_periods,
-            result_json={"replace_existing": body.replace_existing, "event_log": [{"at": datetime.now(timezone.utc).isoformat(), "level": "INFO", "message": "Reprocessamento colocado na fila", "details": {"connection_ids": body.connection_ids, "billing_periods": body.billing_periods, "replace_existing": body.replace_existing}}]},
-            total_blobs=0,
-            processed_blobs=0,
-            rows_raw=0,
-            rows_normalized=0,
-            rows_destination=0,
-            errors=[],
-        ).returning(EtlTask.id)
+    available_stmt = select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
+        IngestedBlob.connection_id.in_(body.connection_ids)
     )
-    task_id = result.scalar_one()
+    if body.billing_periods:
+        available_stmt = available_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
+    available = {(int(connection_id), str(period)) for connection_id, period in (await db.execute(available_stmt)).all()
+                 if connection_id is not None and period}
+    ordered_pairs = [
+        (connection_id, period)
+        for period in sorted({period for _, period in available})
+        for connection_id in body.connection_ids
+        if (connection_id, period) in available
+    ]
+    if not ordered_pairs:
+        raise HTTPException(status_code=422, detail="Nenhum blob Bronze encontrado para as fontes e meses selecionados")
+
+    queue_group = str(uuid4())
+    task_ids: list[int] = []
+    for position, (connection_id, period) in enumerate(ordered_pairs, start=1):
+        details = {
+            "connection_ids": [connection_id], "billing_periods": [period],
+            "publish_by_partition": True, "queue_group": queue_group,
+            "queue_position": position, "queue_total": len(ordered_pairs),
+        }
+        result = await db.execute(
+            insert(EtlTask).values(
+                task_type="reprocess", status="QUEUED", destination_table_id=body.destination_table_id,
+                connection_ids=[connection_id], billing_periods=[period],
+                # Each child replaces only its own source/month. ``replace_existing``
+                # must never erase the other queued months.
+                result_json={"replace_existing": False, **details, "event_log": [{
+                    "at": datetime.now(timezone.utc).isoformat(), "level": "INFO",
+                    "message": f"Fila {position}/{len(ordered_pairs)}: fonte {connection_id}, mês {period}",
+                    "details": details,
+                }]},
+                total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
+                rows_destination=0, errors=[],
+            ).returning(EtlTask.id)
+        )
+        task_ids.append(result.scalar_one())
     await db.commit()
 
-    return {"task_id": task_id, "message": "Reprocess queued — worker will pick it up"}
+    return {"task_id": task_ids[0], "task_ids": task_ids, "queue_group": queue_group,
+            "message": f"{len(task_ids)} publicação(ões) fonte+mês enfileiradas"}
 
 
 @router.get("/reprocess-history")

@@ -11,10 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.destination import DestinationTable
 from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun
-from app.models.classification import ClassificationVersion
-from app.models.classification import ClassificationArtifactBinding
 from app.models.etl_task import EtlTask
-from app.services.forecast_service import fetch_metadata, validate_config
+from app.services.forecast_service import fetch_metadata, gold_date_expr, validate_config
 from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -233,7 +231,9 @@ def _apply_destination_suggestions(dest: DestinationTable, metadata: dict[str, A
         metadata["suggestion_profile"] = None
         return metadata
     available = {c["name"].lower(): c["name"] for c in metadata.get("columns", [])}
-    focus_order = ("cloud_origem", "departamento", "servicename", "pricingcategory", "subaccountname", "resourcename")
+    # ServiceName is the FOCUS service grain used by Azure (consumedService) and GCP (service.description).
+    # Do not suggest ResourceName/PricingCategory by default: GCP instance/SKU values explode the series.
+    focus_order = ("cloud_origem", "departamento", "servicename", "subaccountname")
     metadata["recommended_dimensions"] = [available[name] for name in focus_order if name in available]
     metadata["suggestion_profile"] = "FOCUS"
     return metadata
@@ -389,26 +389,25 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", db: AsyncSess
     destination = await db.get(DestinationTable, config.destination_table_id)
     if not destination or not destination.active:
         raise HTTPException(404, "Tabela Gold da configuração não encontrada")
-    active_classification = (await db.execute(select(ClassificationVersion).where(
-        ClassificationVersion.destination_table_id == destination.id,
-        ClassificationVersion.status == "ACTIVE"
-    ).order_by(ClassificationVersion.version.desc()))).scalars().first()
+    # Do not create an execution that is guaranteed to fail a few seconds
+    # later. The old heartbeat-only check considered the worker healthy while
+    # the Trino coordinator was down, producing zero-row failed Forecasts.
+    try:
+        safe_name = destination.physical_name.replace('"', '""')
+        await trino_execute(f'SELECT 1 FROM iceberg.gold."{safe_name}" LIMIT 1', timeout_s=15)
+        await fetch_metadata(destination.physical_name, "gold")
+    except Exception as exc:
+        raise HTTPException(503, f"Trino ou a Gold FOCUS estão indisponíveis: {exc}")
     snapshot = _config_snapshot(config, destination)
     source_name, source_namespace = destination.physical_name, "gold"
-    if active_classification:
-        source_name, source_namespace = active_classification.physical_table, "classified"
-        snapshot.update(classification_version_id=active_classification.id,
-                        destination_physical_name=source_name, source_namespace=source_namespace)
+    snapshot.update(destination_physical_name=source_name, source_namespace=source_namespace)
     row = ForecastRun(
         forecast_config_id=config_id, config_version=config.version, trigger_type=trigger_type,
         cutoff_date=date.today().isoformat(), config_snapshot=snapshot,
         destination_table_id_snapshot=destination.id, destination_physical_name=source_name,
-        classification_version_id=active_classification.id if active_classification else None,
+        classification_version_id=None,
     )
     db.add(row); await db.flush()
-    db.add(ClassificationArtifactBinding(artifact_type="forecast_run", artifact_id=str(row.id),
-        classification_version_id=row.classification_version_id,
-        binding_mode="EXPLICIT" if row.classification_version_id else "UNKNOWN"))
     task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id, result_json={"forecast_run_id": row.id}, errors=[])
     db.add(task); await db.commit(); await db.refresh(row)
     return {"run_id": row.id, "task_id": task.id, "status": row.status}
@@ -458,10 +457,7 @@ async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession
     measure, date_col = snapshot["measure_column"], snapshot["date_column"]
     period_col = snapshot.get("period_column")
     actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    # Gold dates are heterogeneous across providers.  This covers ISO and the
-    # Azure MM/DD/YYYY format used by the existing forecast engine.
-    raw_date = f"CAST({_qi(date_col)} AS VARCHAR)"
-    date_expr = f"COALESCE(TRY_CAST({_qi(date_col)} AS DATE), TRY(date_parse({raw_date}, '%m/%d/%Y')), TRY(date_parse({raw_date}, '%d/%m/%Y')))"
+    date_expr = gold_date_expr(date_col, period_col)
     actual_dims = ", ".join(_qi(field) for field in series_dims)
     actual_group = (actual_dims + ", ") if actual_dims else ""
     type_col = snapshot.get("type_column")
@@ -520,7 +516,26 @@ async def get_run(run_id: int, db: AsyncSession = Depends(get_db)):
 async def cancel_run(run_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastRun, run_id)
     if not row: raise HTTPException(404, "Execução não encontrada")
-    if row.status in {"QUEUED", "RUNNING"}: row.status = "CANCELLED"; row.phase = "Cancelado pelo usuário"; await db.commit()
+    if row.status in {"QUEUED", "RUNNING"}:
+        row.status = "CANCELLED"
+        row.phase = "Cancelado pelo usuário"
+        row.finished_at = datetime.now().astimezone()
+        # The worker owns a persisted ETL task for each forecast run. Keep the
+        # two state machines aligned so a queued task cannot be picked up after
+        # the user has cancelled its run.
+        task_result = await db.execute(
+            select(EtlTask).where(
+                EtlTask.task_type == "forecast",
+                EtlTask.result_json["forecast_run_id"].as_integer() == run_id,
+                EtlTask.status.in_(["QUEUED", "RUNNING"]),
+            )
+        )
+        task = task_result.scalar_one_or_none()
+        if task:
+            task.status = "CANCELLED"
+            task.phase = "Cancelado pelo usuário"
+            task.finished_at = row.finished_at
+        await db.commit()
     return {"run_id": run_id, "status": row.status}
 
 @router.get("/runs/{run_id}/results")

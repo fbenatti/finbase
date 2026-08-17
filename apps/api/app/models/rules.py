@@ -21,7 +21,7 @@ class EtlMapping(Base):
 
 
 class Department(Base):
-    """Hierarchical department tree (Diretoria -> Departamento -> Sub-departamento... up to 5 levels)."""
+    """Hierarchical department tree materialized in seven reporting levels."""
     __tablename__ = "department"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -34,6 +34,20 @@ class Department(Base):
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OrganizationMoveAudit(Base):
+    """Auditable record of organizational moves and their budget-path refresh."""
+    __tablename__ = "organization_move_audit"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    department_id = Column(Integer, ForeignKey("department.id"), nullable=False, index=True)
+    old_parent_id = Column(Integer, nullable=True)
+    new_parent_id = Column(Integer, nullable=True)
+    old_path = Column(JSON, nullable=False, default=list)
+    new_path = Column(JSON, nullable=False, default=list)
+    planning_entries_updated = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Project(Base):
@@ -66,6 +80,7 @@ class BusinessRule(Base):
     priority = Column(Integer, nullable=False, default=0)
     valid_from = Column(String(6), nullable=True)
     valid_until = Column(String(6), nullable=True)
+    cloud_scope = Column(String(50), nullable=True, index=True)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -87,6 +102,7 @@ class ClassificationRule(Base):
     target_field = Column(String(200), nullable=False)
     conditions = Column(JSON, nullable=True)
     priority = Column(Integer, nullable=False, default=0)
+    cloud_scope = Column(String(50), nullable=True, index=True)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

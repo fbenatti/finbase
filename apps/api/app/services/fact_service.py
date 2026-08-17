@@ -53,6 +53,8 @@ JSON_TO_FACT_MAP = {
     "departamento_nivel_3": "departamento_nivel_3",
     "departamento_nivel_4": "departamento_nivel_4",
     "departamento_nivel_5": "departamento_nivel_5",
+    "departamento_nivel_6": "departamento_nivel_6",
+    "departamento_nivel_7": "departamento_nivel_7",
     "DiretorResp": "diretor_resp",
 }
 

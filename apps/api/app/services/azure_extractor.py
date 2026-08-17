@@ -293,7 +293,6 @@ class AzureExtractor:
             select(BusinessRule)
             .where(
                 BusinessRule.active == True,
-                (BusinessRule.connection_id == self.connection.id) | (BusinessRule.connection_id == None),
             )
             .order_by(BusinessRule.priority)
         )
@@ -348,7 +347,6 @@ class AzureExtractor:
         await apply_classification_rules(
             df=df,
             db=db,
-            connection_id=self.connection.id,
         )
 
     async def _process_blob(
