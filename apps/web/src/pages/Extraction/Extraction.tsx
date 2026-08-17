@@ -5,11 +5,11 @@ import {
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   FormControlLabel, Switch, IconButton,
 } from "@mui/material";
-import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload } from "@mui/icons-material";
+import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart } from "@mui/icons-material";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
   resetSourceForReimport,
-  deleteIngestedBlob, deleteAllIngestedBlobs,
+  deleteIngestedBlob, deleteAllIngestedBlobs, downloadIngestedBlob,
   getSkippedBlobs, skipBlob as apiSkipBlob, unskipBlob as apiUnskipBlob,
   clearSkippedBlobs,
   processDestinationTables,
@@ -52,6 +52,7 @@ export default function Extraction() {
   const [skippingPaths, setSkippingPaths] = useState<Set<string>>(new Set());
   const [processingDest, setProcessingDest] = useState(false);
   const [destProcessResult, setDestProcessResult] = useState<string>("");
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const skippedPaths = new Set(skippedBlobs.map(s => s.blob_path));
 
   // ── Schedules state ──
@@ -354,6 +355,19 @@ export default function Extraction() {
       if (status !== 404) setError(e instanceof Error ? e.message : "Delete failed");
     }
   };
+
+  const handleDownloadBlob = async (blobId: number, format: "csv" | "xlsx") => {
+    const key = `${blobId}-${format}`;
+    setDownloadingId(key);
+    try {
+      await downloadIngestedBlob(blobId, format);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Falha ao baixar arquivo");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
 
   const doDeleteAll = async () => {
     if (!connId) return;
@@ -1026,15 +1040,43 @@ export default function Extraction() {
                   render: (b: IngestedBlob) => new Date(b.ingested_at).toLocaleString(),
                 },
                 {
-                  key: "_actions", label: "", width: 60, sortable: false,
+                  key: "_actions", label: "Ações", width: 130, sortable: false,
                   render: (b: IngestedBlob) => (
-                    <button
-                      onClick={() => doDeleteBlob(b.id)}
-                      title="Remover dataset"
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#d32f2f", padding: 4 }}
-                    >
-                      <Delete sx={{ fontSize: 18 }} />
-                    </button>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      <Tooltip title="Download CSV (Origem)">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            disabled={downloadingId === `${b.id}-csv`}
+                            onClick={() => handleDownloadBlob(b.id, "csv")}
+                          >
+                            {downloadingId === `${b.id}-csv` ? <CircularProgress size={16} /> : <Download sx={{ fontSize: 18 }} />}
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Download Excel (XLSX)">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="success"
+                            disabled={downloadingId === `${b.id}-xlsx`}
+                            onClick={() => handleDownloadBlob(b.id, "xlsx")}
+                          >
+                            {downloadingId === `${b.id}-xlsx` ? <CircularProgress size={16} /> : <TableChart sx={{ fontSize: 18 }} />}
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Remover dataset">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => doDeleteBlob(b.id)}
+                        >
+                          <Delete sx={{ fontSize: 18 }} />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
                   ),
                 },
               ]}

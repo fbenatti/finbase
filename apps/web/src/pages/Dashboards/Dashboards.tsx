@@ -6,6 +6,7 @@ import {
 } from "@mui/material";
 import { Add, Delete, Refresh } from "@mui/icons-material";
 import PivotAnalysis from "../../components/PivotAnalysis";
+import EmptyState from "../../components/EmptyState";
 import {
   ChartType, DashboardWidget, DestinationAnalysis, PivotView, SavedDashboard,
   createDashboard, createDashboardWidget, deleteDashboardWidget, getAnalysisDestinations,
@@ -60,6 +61,40 @@ export default function Dashboards() {
   const [tab, setTab] = useState("pivot");
   const [destinations, setDestinations] = useState<DestinationAnalysis[]>([]);
   const [views, setViews] = useState<PivotView[]>([]);
-  useEffect(() => { getAnalysisDestinations().then(setDestinations).catch(() => {}); getPivotViews().then(setViews).catch(() => {}); }, []);
-  return <Box><Typography variant="h4" fontWeight={700}>Dashboards</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Monte pivots e transforme visões salvas em painéis gráficos reutilizáveis.</Typography><Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2 }}><Tab value="pivot" label="Pivot" /><Tab value="visual" label="Visualizações" /></Tabs>{tab === "pivot" && <PivotAnalysis destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS")?.id} showSearch />}{tab === "visual" && <Visualizations views={views} />}</Box>;
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      getAnalysisDestinations().then(setDestinations),
+      getPivotViews().then(setViews),
+    ]).finally(() => setLoading(false));
+  }, []);
+
+  const initialTableId = useMemo(() => {
+    return destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS")?.id || destinations[0]?.id;
+  }, [destinations]);
+
+  return (
+    <Box>
+      <Typography variant="h4" fontWeight={700}>Dashboards</Typography>
+      <Typography color="text.secondary" sx={{ mb: 2 }}>
+        Monte pivots e transforme visões salvas em painéis gráficos reutilizáveis.
+      </Typography>
+      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2 }}>
+        <Tab value="pivot" label="Pivot" />
+        <Tab value="visual" label="Visualizações" />
+      </Tabs>
+      {tab === "pivot" && (
+        loading ? (
+          <Typography color="text.secondary" sx={{ p: 2 }}>Carregando tabelas Gold...</Typography>
+        ) : destinations.length > 0 ? (
+          <PivotAnalysis destinations={destinations} initialTableId={initialTableId} showSearch />
+        ) : (
+          <EmptyState message="Nenhuma tabela Gold ativa disponível para análise pivot." />
+        )
+      )}
+      {tab === "visual" && <Visualizations views={views} />}
+    </Box>
+  );
 }
+

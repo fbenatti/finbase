@@ -14,14 +14,24 @@ import EmptyState from "../../components/EmptyState";
 import ManualCsvUploadDialog from "./ManualCsvUploadDialog";
 
 const CONNECTOR_TYPES = [
-  { value: "azure_blob", label: "Azure Blob Storage" },
-  { value: "gcp_bigquery", label: "GCP BigQuery" },
-  { value: "mongodb_atlas", label: "MongoDB Atlas" },
-  { value: "manual_csv", label: "Upload manual de CSV" },
+  { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
+  { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
+  { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
+  { value: "manual_csv", label: "Upload manual de CSV", scope: "" },
+];
+
+const CLOUD_SCOPES = [
+  { value: "azure", label: "Azure" },
+  { value: "gcp", label: "GCP" },
+  { value: "ibm", label: "IBM Cloud" },
+  { value: "aws", label: "AWS" },
+  { value: "oci", label: "Oracle Cloud (OCI)" },
+  { value: "atlas", label: "MongoDB Atlas" },
+  { value: "other", label: "Outra / Desconhecida" },
 ];
 
 const emptyForm = {
-  code: "", name: "", connector_type: "azure_blob", cloud_name: "",
+  code: "", name: "", connector_type: "azure_blob", cloud_name: "", cloud_scope: "azure",
   tenant_id: "", client_id: "", client_secret: "",
   storage_account: "", container_name: "", blob_prefixes: "",
   gcp_token: "", table_name: "",
@@ -55,7 +65,7 @@ export default function Connections() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ ...emptyForm, connector_type: "azure_blob" });
+    setForm({ ...emptyForm, connector_type: "azure_blob", cloud_scope: "azure" });
     setDialogOpen(true);
   };
 
@@ -68,6 +78,7 @@ export default function Connections() {
         code: conn.code, name: conn.name,
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "azure",
         tenant_id: cfg.tenant_id || "",
         client_id: cfg.client_id || "",
         client_secret: cfg.client_secret || "",
@@ -81,6 +92,7 @@ export default function Connections() {
         code: conn.code, name: conn.name,
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "gcp",
         tenant_id: cfg.project_id || "",
         client_id: cfg.dataset_id || "",
         gcp_token: cfg.token_json || cfg.token_path || "",
@@ -92,6 +104,7 @@ export default function Connections() {
         code: conn.code, name: conn.name,
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "atlas",
         tenant_id: cfg.base_url || "",
         client_id: cfg.public_key || cfg.contract_id || "",
       client_secret: cfg.private_key || "",
@@ -104,6 +117,7 @@ export default function Connections() {
         code: conn.code, name: conn.name,
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "",
       });
     }
     setDialogOpen(true);
@@ -136,6 +150,7 @@ export default function Connections() {
       code: form.code, name: form.name,
       connector_type: form.connector_type,
       cloud_name: form.cloud_name || null,
+      cloud_scope: form.cloud_scope === "other" ? null : (form.cloud_scope || null),
       config_json: configJson,
       blob_prefixes: prefixes,
     };
@@ -313,13 +328,24 @@ export default function Connections() {
             <FormControl fullWidth>
               <InputLabel>Connector Type</InputLabel>
               <Select value={form.connector_type} label="Connector Type"
-                onChange={(e) => setForm({ ...form, connector_type: e.target.value })}>
+                onChange={(e) => {
+                  const type = e.target.value;
+                  const scope = CONNECTOR_TYPES.find(t => t.value === type)?.scope || "";
+                  setForm({ ...form, connector_type: type, cloud_scope: scope });
+                }}>
                 {CONNECTOR_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
               </Select>
             </FormControl>
             <TextField label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
             <TextField label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <TextField label="Cloud Name" value={form.cloud_name} onChange={(e) => setForm({ ...form, cloud_name: e.target.value })} />
+            <FormControl fullWidth>
+              <InputLabel>Provedor (escopo de regras)</InputLabel>
+              <Select value={form.cloud_scope || "other"} label="Provedor (escopo de regras)"
+                onChange={(e) => setForm({ ...form, cloud_scope: e.target.value })}>
+                {CLOUD_SCOPES.map((s) => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
+              </Select>
+            </FormControl>
 
             {form.connector_type === "azure_blob" && (
               <>

@@ -5,7 +5,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
   Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab,
 } from "@mui/material";
-import { Add, Edit, Delete, Download } from "@mui/icons-material";
+import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule,
@@ -370,6 +370,70 @@ function RulesTab() {
   );
 }
 
+// ── Syntax Highlighting Helpers (Light Theme) ──
+
+function highlightJsonHtml(jsonStr: string): string {
+  const entityMap: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+  };
+  const safe = jsonStr.replace(/[&<>]/g, (s) => entityMap[s] || s);
+
+  return safe.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let clsColor = "#098658"; // number -> green
+      let fontWeight = "normal";
+
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) {
+          clsColor = "#0451a5"; // key -> dark blue
+          fontWeight = "600";
+        } else {
+          clsColor = "#a31515"; // string -> red/wine
+        }
+      } else if (/true|false/.test(match)) {
+        clsColor = "#0000ff"; // boolean -> blue
+        fontWeight = "600";
+      } else if (/null/.test(match)) {
+        clsColor = "#800080"; // null -> purple
+        fontWeight = "600";
+      }
+      return `<span style="color: ${clsColor}; font-weight: ${fontWeight};">${match}</span>`;
+    }
+  );
+}
+
+function highlightBashHtml(bashStr: string): string {
+  const entityMap: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+  };
+  const safe = bashStr.replace(/[&<>]/g, (s) => entityMap[s] || s);
+
+  const lines = safe.split("\n");
+  const highlightedLines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#")) {
+      return `<span style="color: #008000; font-style: italic;">${line}</span>`;
+    }
+    let res = line;
+    // Highlight variables: $VAR or ${VAR}
+    res = res.replace(/(\$\{?[a-zA-Z0-9_]+\}?)/g, '<span style="color: #e36209; font-weight: 600;">$1</span>');
+    // Highlight az and common shell commands
+    res = res.replace(/\b(az\s+policy\s+[a-z]+|az\s+[a-z]+|set\s+-[a-z]+|echo|cat|mktemp)\b/g, '<span style="color: #005cc5; font-weight: 600;">$1</span>');
+    // Highlight flags --foo
+    res = res.replace(/(--[a-zA-Z0-9-]+)/g, '<span style="color: #6f42c1; font-weight: 600;">$1</span>');
+    // Highlight strings
+    res = res.replace(/(".*?"|'.*?')/g, '<span style="color: #032f62;">$1</span>');
+    return res;
+  });
+
+  return highlightedLines.join("\n");
+}
+
 function TagsTab() {
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
@@ -378,6 +442,10 @@ function TagsTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [viewTab, setViewTab] = useState<"script" | "json">("script");
+  const [selectedJsonTenantIndex, setSelectedJsonTenantIndex] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     getAzureTenants().then(setTenants).catch(() => setTenants([]));
@@ -388,16 +456,24 @@ function TagsTab() {
       setLoading(true);
       setError("");
       setSuccess("");
-      const connId = selectedTenant === "" ? undefined : selectedTenant as number;
+      const connId = selectedTenant === "" ? undefined : (selectedTenant as number);
       const result = await exportAzureTagPolicy(connId, "both");
       setRows(result.tenants);
       setScript(result.deployment_script);
-      setSuccess(`Políticas geradas para ${result.tenants.length} tenant(s).`);
+      setSelectedJsonTenantIndex(0);
+      setIsEditing(false);
+      setSuccess(`Políticas geradas com sucesso para ${result.tenants.length} tenant(s).`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao gerar");
+      setError(e instanceof Error ? e.message : "Falha ao gerar políticas");
     } finally {
       setLoading(false);
     }
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 2500);
   };
 
   const downloadAll = () => {
@@ -412,6 +488,24 @@ function TagsTab() {
       downloadText(`azure-tag-policy-deploy-${timestamp}.sh`, script, "text/x-shellscript");
     }
   };
+
+  const downloadCurrentJson = () => {
+    const current = rows[selectedJsonTenantIndex];
+    if (!current) return;
+    const timestamp = new Date().toISOString().slice(0, 10);
+    downloadText(
+      `azure-tag-policy-${current.connection_code}-${timestamp}.json`,
+      JSON.stringify(current, null, 2),
+    );
+  };
+
+  const downloadCurrentScript = () => {
+    if (!script) return;
+    const timestamp = new Date().toISOString().slice(0, 10);
+    downloadText(`azure-tag-policy-deploy-${timestamp}.sh`, script, "text/x-shellscript");
+  };
+
+  const currentJsonString = JSON.stringify(rows[selectedJsonTenantIndex] || {}, null, 2);
 
   return (
     <Box>
@@ -438,36 +532,202 @@ function TagsTab() {
         <Button variant="contained" onClick={generate} disabled={loading}>
           {loading ? "Gerando..." : "Gerar políticas"}
         </Button>
-        <Button variant="outlined" startIcon={<Download />} onClick={downloadAll}
-          disabled={rows.length === 0}>
-          Baixar arquivos
+        <Button
+          variant="outlined"
+          startIcon={<Download />}
+          onClick={downloadAll}
+          disabled={rows.length === 0}
+        >
+          Baixar todos os arquivos
         </Button>
       </Box>
 
       {rows.length === 0 && !loading ? (
         <Alert severity="info">
-          Selecione um tenant e clique em "Gerar políticas" para gerar os arquivos de
-          Azure Policy (JSON + script de deploy) a partir das regras de classificação.
+          Selecione um tenant e clique em <strong>"Gerar políticas"</strong> para inspecionar o script Bash e os JSONs de Azure Policy antes de realizar o download ou implantação.
         </Alert>
       ) : (
-        rows.map((t) => (
-          <Box key={t.connection_code} sx={{ mb: 3, p: 2, border: "1px solid #e0e0e0", borderRadius: 2 }}>
-            <Typography variant="subtitle1" fontWeight={700}>
-              {t.connection_name} <Chip size="small" label={`${t.rule_count} regras`} sx={{ ml: 1 }} />
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-              Tenant ID: {t.tenant_id} · Cod: {t.connection_code}
-            </Typography>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-              <LayerSummary label="Herança de RG"
-                count={Array.isArray(t.layers?.inheritance) ? (t.layers.inheritance as unknown[]).length : 0} />
-              <LayerSummary label="Resource Groups (agrupados)"
-                count={Array.isArray(t.layers?.resource_groups) ? (t.layers.resource_groups as unknown[]).length : 0} />
-              <LayerSummary label="Padrões (nome/SKU/região)"
-                count={Array.isArray(t.layers?.patterns) ? (t.layers.patterns as unknown[]).length : 0} />
+        <Box>
+          {/* Tenant Summary Cards */}
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(auto-fit, minmax(320px, 1fr))" }, gap: 2, mb: 3 }}>
+            {rows.map((t) => (
+              <Box key={t.connection_code} sx={{ p: 2, border: "1px solid #e0e0e0", borderRadius: 2, bgcolor: "#ffffff", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                <Typography variant="subtitle1" fontWeight={700}>
+                  {t.connection_name} <Chip size="small" color="primary" label={`${t.rule_count} regras`} sx={{ ml: 1 }} />
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+                  Tenant ID: {t.tenant_id} · Cod: {t.connection_code}
+                </Typography>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                  <LayerSummary
+                    label="Herança de RG (Built-in)"
+                    count={Array.isArray(t.layers?.inheritance) ? (t.layers.inheritance as unknown[]).length : 0}
+                  />
+                  <LayerSummary
+                    label="Resource Groups Exatos (agrupados)"
+                    count={Array.isArray(t.layers?.resource_groups) ? (t.layers.resource_groups as unknown[]).length : 0}
+                  />
+                  <LayerSummary
+                    label="Resource Groups por Padrão (~)"
+                    count={Array.isArray(t.layers?.rg_patterns) ? (t.layers.rg_patterns as unknown[]).length : 0}
+                  />
+                  <LayerSummary
+                    label="Recursos Individuais / SKUs / Tipos"
+                    count={Array.isArray(t.layers?.patterns) ? (t.layers.patterns as unknown[]).length : 0}
+                  />
+                </Box>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Text Output Viewer with Sub-tabs & Syntax Highlighting */}
+          <Box sx={{ border: "1px solid #d0d7de", borderRadius: 2, overflow: "hidden", bgcolor: "#ffffff", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e1e4e8", px: 2, pt: 1, bgcolor: "#f6f8fa", flexWrap: "wrap", gap: 1 }}>
+              <Tabs
+                value={viewTab}
+                onChange={(_, v) => setViewTab(v)}
+                sx={{ minHeight: 44 }}
+              >
+                <Tab
+                  value="script"
+                  icon={<Terminal fontSize="small" />}
+                  iconPosition="start"
+                  label="Script de Deploy (.sh)"
+                  sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }}
+                />
+                <Tab
+                  value="json"
+                  icon={<Code fontSize="small" />}
+                  iconPosition="start"
+                  label="Políticas JSON (.json)"
+                  sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }}
+                />
+              </Tabs>
+
+              <Box sx={{ display: "flex", gap: 1, pb: 1, alignItems: "center" }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
+                      checked={isEditing}
+                      onChange={(e) => setIsEditing(e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="body2" sx={{ fontWeight: 500 }}>Modo Edição</Typography>}
+                  sx={{ mr: 1 }}
+                />
+
+                {viewTab === "script" ? (
+                  <>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={copied === "script" ? <Check color="success" /> : <ContentCopy />}
+                      onClick={() => copyToClipboard(script, "script")}
+                      disabled={!script}
+                    >
+                      {copied === "script" ? "Copiado!" : "Copiar Script"}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<Download />}
+                      onClick={downloadCurrentScript}
+                      disabled={!script}
+                    >
+                      Baixar Script
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {rows.length > 1 && (
+                      <FormControl size="small" sx={{ minWidth: 200 }}>
+                        <Select
+                          value={selectedJsonTenantIndex}
+                          onChange={(e) => setSelectedJsonTenantIndex(Number(e.target.value))}
+                        >
+                          {rows.map((r, idx) => (
+                            <MenuItem key={r.connection_code} value={idx}>
+                              {r.connection_name} ({r.connection_code})
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={copied === "json" ? <Check color="success" /> : <ContentCopy />}
+                      onClick={() => copyToClipboard(currentJsonString, "json")}
+                      disabled={rows.length === 0}
+                    >
+                      {copied === "json" ? "Copiado!" : "Copiar JSON"}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<Download />}
+                      onClick={downloadCurrentJson}
+                      disabled={rows.length === 0}
+                    >
+                      Baixar JSON
+                    </Button>
+                  </>
+                )}
+              </Box>
+            </Box>
+
+            {/* Code Box: White Background with Syntax Highlighting or Editable TextArea */}
+            <Box sx={{ p: 2.5, bgcolor: "#ffffff", minHeight: 360, maxHeight: 600, overflowY: "auto" }}>
+              {isEditing ? (
+                <TextField
+                  multiline
+                  fullWidth
+                  minRows={14}
+                  maxRows={26}
+                  value={viewTab === "script" ? script : currentJsonString}
+                  onChange={(e) => {
+                    if (viewTab === "script") setScript(e.target.value);
+                  }}
+                  variant="outlined"
+                  InputProps={{
+                    sx: {
+                      fontFamily: 'Consolas, "Fira Code", Monaco, "Courier New", Courier, monospace',
+                      fontSize: "0.875rem",
+                      color: "#24292e",
+                      bgcolor: "#ffffff",
+                      lineHeight: 1.6,
+                    },
+                  }}
+                />
+              ) : (
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    p: 2,
+                    bgcolor: "#fafbfc",
+                    border: "1px solid #e1e4e8",
+                    borderRadius: 1.5,
+                    fontFamily: 'Consolas, "Fira Code", Monaco, "Courier New", Courier, monospace',
+                    fontSize: "0.875rem",
+                    lineHeight: 1.6,
+                    color: "#24292e",
+                    overflowX: "auto",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      viewTab === "script"
+                        ? highlightBashHtml(script || "# Nenhum script gerado.")
+                        : highlightJsonHtml(currentJsonString || "{}"),
+                  }}
+                />
+              )}
             </Box>
           </Box>
-        ))
+        </Box>
       )}
     </Box>
   );

@@ -159,7 +159,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Paper sx={{ p: 2, mb: 2 }}>
       <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
-        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{destinations.filter(d => d.id > 0).map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{destinations.filter(d => d.id > 0).map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</Select></FormControl>
         <Box sx={{ display: "flex", alignItems: "center", gap: .5, flexWrap: "wrap" }}>
           <Typography variant="caption" color="text.secondary">Origem:</Typography>
           {destinations.filter(d => d.id === tableId || d.id === -Math.abs(tableId)).map(d => <Chip key={d.id} label={d.id < 0 ? "Forecast" : "Realizado"} color={sourceIds.includes(d.id) ? "primary" : "default"} variant={sourceIds.includes(d.id) ? "filled" : "outlined"} onClick={() => setSourceIds(current => current.includes(d.id) ? (current.length > 1 ? current.filter(id => id !== d.id) : current) : [...current, d.id])} />)}

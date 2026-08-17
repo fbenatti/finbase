@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, delete as sa_delete, or_
 from app.database import get_db
@@ -16,6 +17,8 @@ import httpx
 from httpx import DigestAuth
 import asyncio
 import os
+import re
+import pandas as pd
 from uuid import uuid4
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
@@ -132,6 +135,69 @@ async def delete_ingested_blob(blob_id: int, db: AsyncSession = Depends(get_db))
 
     await db.execute(text("DELETE FROM ingested_blob WHERE id = :blob_id"), {"blob_id": blob_id})
     await db.commit()
+
+
+@router.get("/blobs/{blob_id}/download")
+async def download_ingested_blob(
+    blob_id: int,
+    format: Literal["csv", "xlsx"] = Query("csv"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download raw Bronze layer data for an ingested blob as CSV or XLSX."""
+    from fastapi.responses import StreamingResponse
+    from app.services.iceberg_service import read_bronze
+    import io
+
+    result = await db.execute(
+        select(IngestedBlob, SourceConnection.code, SourceConnection.name)
+        .join(SourceConnection, SourceConnection.id == IngestedBlob.connection_id)
+        .where(IngestedBlob.id == blob_id)
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Ingested blob not found")
+
+    blob, conn_code, conn_name = row
+
+    try:
+        loop = asyncio.get_running_loop()
+        df = await loop.run_in_executor(
+            None,
+            lambda: read_bronze(
+                conn_code,
+                blob_path=blob.blob_path,
+                billing_period=blob.billing_period,
+            )
+        )
+    except Exception as e:
+        logger.exception("Failed to read bronze data for blob %d: %s", blob_id, e)
+        raise HTTPException(status_code=500, detail=f"Erro ao ler camada Bronze: {e}")
+
+    if df.empty:
+        raise HTTPException(status_code=404, detail="Nenhum dado encontrado na camada Bronze para este blob")
+
+    safe_code = re.sub(r'[^a-zA-Z0-9_\-]', '_', conn_code or 'origem')
+    period = blob.billing_period or 'period'
+    filename = f"origem_{safe_code}_{period}.{format}"
+
+    if format == "xlsx":
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Bronze_Origem")
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    else:
+        csv_bytes = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        return StreamingResponse(
+            io.BytesIO(csv_bytes),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+
 
 
 @router.delete("/blobs/", status_code=204)

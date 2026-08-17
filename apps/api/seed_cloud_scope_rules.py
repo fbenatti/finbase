@@ -95,12 +95,16 @@ def recreate_business_rules(session) -> None:
         # Generic fallback: any provider without a specific tax/adjustment rule
         # still gets ``realizado = BilledCost``. Keeps a new CSV source (IBM,
         # AWS, OCI, etc.) working with zero code/seed changes.
+        #
+        # Lowest priority on purpose: it runs FIRST and specific provider rules
+        # applied later (higher priority) overwrite it for clouds that need a
+        # tax/adjustment factor.
         {
             "name": "Realizado padrão (qualquer nuvem, sem imposto)",
             "rule_type": "EXPRESSION",
             "target_column": "realizado",
             "cloud_scope": None,
-            "priority": 60,
+            "priority": 5,
             "expression": "BilledCost",
             "conditions": None,
             "config_json": {},

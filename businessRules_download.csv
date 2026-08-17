@@ -117,3 +117,5 @@ gcp4p;e14e66dd-e0be-4678-a099-0b419e35b5c3;;GCP-4P;meterCategory=Denodo Enterpri
 gcpti;44107ba2-c6c3-409d-adce-a895d8c2ea46;;GCP-TI;resourceGroupName~vicky;100;Vicky
 meterCategory=sentinelti;;;Azure-TI;"meterCategory=sentinel ; subscriptionName=Shared Services";50;Sentinel - TI
 subscriptionName~Corebanking;Corebanking;;Azure-TI;subscriptionName~Corebanking;5;Corebanking
+gcpttech;aa18d8b0-d347-4d4a-9716-c0665632c80f;DEPARTAMENTAIS;GCP-TTech;resourceGroupName~dpt|departament;20;DEPARTAMENTAIS
+gcpttech;3d1e1ac8-97c1-40f5-b420-8b933f9667d5;SEM PROJETO DEFINIDO;GCP-TTech;resourceGroupName~ti-|vivo-ti;100;SEM PROJETO DEFINIDO

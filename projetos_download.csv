@@ -3490,3 +3490,48 @@ gcp4p;e5de5c36-8bdc-47c1-b77e-c40bbe9e29a8;GCP-4P;Amazonia Datalake Casa Intelig
 gcp4p;e63e89cf-ebac-48ab-aee2-473b020d4c0f;GCP-4P;Amazonia Energiav;pro-amazonia-energiav
 gcp4p;ed4e5349-fcd5-479e-b855-1b823764ab7f;GCP-4P;Conectividade GCP;pro-ia-precificador
 gcp4p;fac734ef-87b3-455e-8ebb-926114f3cead;GCP-4P;Denodo;pro-cloud-denodo
+gcpttech;13052a1b-29e9-4ae8-8d53-9eb074031bec;GCP-TTech;SEM PROJETO DEFINIDO;seguranca-patrimonial-385514
+gcpttech;2001072e-49cb-4369-a7a8-aa69c26d575a;GCP-TTech;DEPARTAMENTAIS;vivo-ti-networkspoke-dpt
+gcpttech;2931dcef-6e47-47c3-aa6d-bd096a59943b;GCP-TTech;Vicky;vivo-ti-vicky-hml
+gcpttech;2894b9a7-4a98-409f-95a8-ab9f46536bed;GCP-TTech;Vicky;vivo-ti-vicky-dev
+gcpttech;56c4e9c8-baa5-4b72-b9ce-044ec98b7c9e;GCP-TTech;DEPARTAMENTAIS;vivo-ti-prj-dpt
+gcpttech;03f10fac-74ba-411b-ae01-3c64a0735e28;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-networkspoke-shd
+gcpttech;6df6d5d0-5497-473b-aee9-10444c2c85b0;GCP-TTech;Vicky;vivo-ti-vicky-prd
+gcpttech;e323976f-2b3d-4038-9ba4-c89feb6da847;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-network-hub
+gcpttech;5a93e4f7-4581-440d-8a0e-87810a049ad0;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-rpa-prd
+gcpttech;fea39762-c12f-4e10-aefb-f8729719fd01;GCP-TTech;SEM PROJETO DEFINIDO;vivo-activity
+gcpttech;86eb6f83-eca8-41af-abdb-4d0e2b3d20c1;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-networkspoke-hml
+gcpttech;bf18e2bc-ae6e-432b-88a5-696cc3cbeebd;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-billing
+gcpttech;ac6ead20-7e29-47e0-9a1a-664f2de9f16c;GCP-TTech;SEM PROJETO DEFINIDO;telefonica-gemini-enterprise
+gcpttech;fe1100dc-6173-4f90-b683-d999fb46c383;GCP-TTech;SEM PROJETO DEFINIDO;mse-digital
+gcpttech;6b53dd22-b22e-4974-9d92-85f111e5d99c;GCP-TTech;SEM PROJETO DEFINIDO;ti-networking-hub-brtl
+gcpttech;5cea0134-bbf5-400a-b169-4998508e2250;GCP-TTech;SEM PROJETO DEFINIDO;ti-tecnologia-iac-08a4
+gcpttech;3b648eac-10a4-45d6-ae5f-ee7bae877d46;GCP-TTech;SEM PROJETO DEFINIDO;ti-audit-logs-brtl
+gcpttech;37b66323-d048-4b70-8876-1f3d6f8f0c79;GCP-TTech;SEM PROJETO DEFINIDO;ti-networking-shd-brtl
+gcpttech;e611cdd5-d7aa-406f-b702-2742952fe856;GCP-TTech;SEM PROJETO DEFINIDO;ti-golden-images-brtl
+gcpttech;f25a1828-b0df-4dac-b69c-301786fd7ffa;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-network-shd-brtl
+gcpttech;1635e125-5d1f-42d7-9a37-a85faa6a1a72;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-dev-brtl
+gcpttech;55f1af81-8951-4360-9ba1-38b1fa762358;GCP-TTech;SEM PROJETO DEFINIDO;ti-networking-dev-brtl
+gcpttech;a45e99a8-7988-4f52-b0b9-2ef03c67ad95;GCP-TTech;SEM PROJETO DEFINIDO;ti-monitoring-dev-brtl
+gcpttech;de2a8525-9b1b-4706-95a3-2c57bd8cbbb7;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-network-dev-brtl
+gcpttech;c7231628-c42c-4423-9d12-95cd3678f71c;GCP-TTech;SEM PROJETO DEFINIDO;ti-billing-brtl
+gcpttech;601dad50-317a-44db-9a8d-a3f6e52e8aec;GCP-TTech;SEM PROJETO DEFINIDO;poc-nspic
+gcpttech;f8bd7ae0-2ce9-4bd6-be60-e737bd0c0ddd;GCP-TTech;SEM PROJETO DEFINIDO;ti-monitoring-prd-brtl
+gcpttech;0a1ce831-c78e-41e0-89a3-04d24c076b3b;GCP-TTech;SEM PROJETO DEFINIDO;ti-networking-prd-brtl
+gcpttech;e15ddd40-c7b9-4c67-9ac6-e0b4cdbbe8be;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-network-hml-brtl
+gcpttech;a0b17a64-58af-47ff-8d2e-47a660057d4b;GCP-TTech;SEM PROJETO DEFINIDO;vivo-b2b-b2c-rcs-prd
+gcpttech;bc82c947-b25d-4b1f-99fa-b236171442c5;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-networkspoke-prd
+gcpttech;b6b3e8e4-32b3-4b5c-9715-0410d64ae716;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-networkspoke-dev
+gcpttech;8a83c498-0d74-4ed5-9f71-3bed7cf79daf;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-rpa-dev
+gcpttech;9273a863-64a6-4b18-8cbb-2a9c92b3c84e;GCP-TTech;SEM PROJETO DEFINIDO;planejamento-transporte
+gcpttech;2722c874-7079-406b-9b12-981ad79f23a4;GCP-TTech;SEM PROJETO DEFINIDO;ti-monitoring-hml-brtl
+gcpttech;adcfb90f-1123-4f88-97c3-815cc89c25a0;GCP-TTech;SEM PROJETO DEFINIDO;ti-networking-hml-brtl
+gcpttech;7bf84f55-47ee-4bb7-8750-0564487870eb;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-monitoramento-hml
+gcpttech;eaa2fce4-9e88-4686-807f-2a62602b6a9a;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-terraform-prd
+gcpttech;3266ecde-ba8c-41d7-aea1-ae79c341b38c;GCP-TTech;SEM PROJETO DEFINIDO;ti-monitoring-shd-brtl
+gcpttech;d0c3acc7-d1b6-453f-904d-3b50c968807b;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-prd-brtl
+gcpttech;cb364abc-9a84-49c8-b6fe-9741998c271f;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-shd-brtl
+gcpttech;7c4dd820-3fcd-47db-9b27-b8aae80f3093;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-monitoramento-dev
+gcpttech;99804b9d-7c0f-406f-a98a-dec6464b6330;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-hml-brtl
+gcpttech;d9b1a415-ee3e-4265-9b14-09528cad108c;GCP-TTech;SEM PROJETO DEFINIDO;vivo-ti-monitoramento-prd
+gcpttech;cc1496a6-504b-438a-86e0-2ed150a87b1a;GCP-TTech;SEM PROJETO DEFINIDO;ti-logging-network-prd-brtl

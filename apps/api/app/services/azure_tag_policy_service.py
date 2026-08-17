@@ -3,18 +3,16 @@ Azure Tag Policy Service — generate Azure Policy definitions (and deployment
 scripts) from the current classification business rules.
 
 The classification rules reference FOCUS (Gold) columns such as `ResourceId`,
-`resourceGroupName`, `subscriptionName`, `ResourceName`, `ResourceType` and
-`RegionName`. An Azure Policy, however, evaluates ARM aliases/fields such as
-`name`, `location` and `Microsoft.Compute/virtualMachines/sku.name`.
+`resourceGroupName`, `source_resource_group_name`, `subscriptionName`,
+`SubAccountName`, `ResourceName`, `ResourceType`, `SkuMeter`, and `RegionName`.
+An Azure Policy evaluates ARM aliases/fields such as `name`, `type`, `location`
+and `Microsoft.Compute/virtualMachines/sku.name`.
 
-This module performs the *reverse mapping* (FOCUS -> Azure alias) using the
-`SourceDestinationMapping` relationships plus a static alias table fallback, then
-emits compact policies grouped in three layers so the result stays well under
-Azure Policy limits:
-
+This module performs reverse mapping and semantic classification (FOCUS -> Azure ARM),
+emitting compact policies grouped into:
   1. Resource-group inheritance (built-in "Inherit a tag from the resource group").
-  2. Name / SKU / region wildcard patterns (like/contains/equals).
-  3. Explicit resource-group lists grouped by unique tag combination.
+  2. Resource Group tag policies (exact lists grouped by identical tag sets + wildcard patterns).
+  3. Individual resource patterns (name / SKU / VM size family / region / subscription).
 
 Policies are grouped per Azure tenant (each `azure-*` source connection).
 """
@@ -22,7 +20,9 @@ Policies are grouped per Azure tenant (each `azure-*` source connection).
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,31 +30,85 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.rules import ClassificationRule, Department, Project
 from app.models.destination import SourceDestinationMapping
 from app.models.source_connection import SourceConnection
-from app.services.cloud_scope import connection_cloud_scope, resolve_connection_scope
+from app.services.cloud_scope import resolve_connection_scope
 
-# Static FOCUS -> Azure ARM alias fallback, used when no SourceDestinationMapping
-# exists for a given field. Keys are normalized lowercase (no separators).
-FOCUS_TO_ALIAS: dict[str, str] = {
-    "resourcename": "name",
-    "resourcegroupname": "name",
-    "subscriptionname": "subscriptionId",
-    "resourcetype": "type",
-    "regionname": "location",
-    "resourcelocation": "location",
-    "regionid": "location",
-    "resourceid": "id",
+logger = logging.getLogger("openfinops.azure_tag_policy")
+
+# Semantic field scopes
+SCOPE_RG = "RESOURCE_GROUP"
+SCOPE_RESOURCE = "RESOURCE_NAME"
+SCOPE_SUBSCRIPTION = "SUBSCRIPTION"
+SCOPE_TYPE = "RESOURCE_TYPE"
+SCOPE_SKU = "SKU"
+SCOPE_LOCATION = "LOCATION"
+SCOPE_UNKNOWN = "UNKNOWN"
+
+# Map normalized field names to their semantic scope and default ARM field/alias
+SEMANTIC_FIELD_MAP: dict[str, tuple[str, str]] = {
+    # Resource Group
+    "sourceresourcegroupname": (SCOPE_RG, "name"),
+    "resourcegroupname": (SCOPE_RG, "name"),
+    "resourcegroup": (SCOPE_RG, "name"),
+    "resource_group_name": (SCOPE_RG, "name"),
+    "resource_group": (SCOPE_RG, "name"),
+
+    # Individual Resource
+    "resourcename": (SCOPE_RESOURCE, "name"),
+    "resource_name": (SCOPE_RESOURCE, "name"),
+    "resourceid": (SCOPE_RESOURCE, "name"),
+    "id": (SCOPE_RESOURCE, "name"),
+
+    # Subscription
+    "subaccountname": (SCOPE_SUBSCRIPTION, "subscriptionId"),
+    "subscriptionname": (SCOPE_SUBSCRIPTION, "subscriptionId"),
+    "subaccountid": (SCOPE_SUBSCRIPTION, "subscriptionId"),
+    "subscriptionid": (SCOPE_SUBSCRIPTION, "subscriptionId"),
+
+    # Resource Type
+    "resourcetype": (SCOPE_TYPE, "type"),
+    "resource_type": (SCOPE_TYPE, "type"),
+    "servicename": (SCOPE_TYPE, "type"),
+    "servicecategory": (SCOPE_TYPE, "type"),
+
+    # SKU / Pricing / VM Family
+    "sku": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
+    "skumeter": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
+    "skuid": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
+    "servicesubcategory": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
+    "pricingcategory": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
+    "chargecategory": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
+
+    # Location
+    "regionname": (SCOPE_LOCATION, "location"),
+    "regionid": (SCOPE_LOCATION, "location"),
+    "resourcelocation": (SCOPE_LOCATION, "location"),
+    "location": (SCOPE_LOCATION, "location"),
 }
 
-# SKU-family reverse mapping for common VM size families.
-SKU_FAMILY_PREFIXES = ("standard_", "basic_")
-
-TAG_CONTRIBUTOR_ROLE = "4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
-CONTRIBUTOR_ROLE = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+TAG_CONTRIBUTOR_ROLE = "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
+CONTRIBUTOR_ROLE = "/providers/microsoft.authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c"
 INHERIT_TAG_POLICY_DEFINITION_ID = "/providers/Microsoft.Authorization/policyDefinitions/cd3aa116-8754-49c9-a813-ad46512ece54"
 
-# Tags we materialize from the department tree.
-TAG_KEYS = ["departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3",
-            "departamento_nivel_4", "departamento_nivel_5", "centro_custo", "ambiente"]
+# Standard department hierarchy and organizational tags
+TAG_KEYS = [
+    "departamento_nivel_1",
+    "departamento_nivel_2",
+    "departamento_nivel_3",
+    "departamento_nivel_4",
+    "departamento_nivel_5",
+    "centro_custo",
+    "ambiente",
+]
+
+
+def format_wildcard(v: str) -> str:
+    """Ensure a search term is properly formatted for Azure Policy 'like' operator."""
+    s = v.strip()
+    if not s:
+        return "*"
+    if "*" in s or "?" in s:
+        return s
+    return f"*{s}*"
 
 
 class AzureTagPolicyService:
@@ -99,8 +153,7 @@ class AzureTagPolicyService:
         )
         mapping: dict[str, str] = {}
         for m in result.scalars().all():
-            # First mapping wins for a destination column (same rule as importers).
-            mapping.setdefault(m.destination_column.lower(), m.source_column)
+            mapping.setdefault(m.destination_column.lower().replace("_", ""), m.source_column)
         return mapping
 
     async def _load_classification_rules(self, connection_id: int) -> list[ClassificationRule]:
@@ -113,20 +166,18 @@ class AzureTagPolicyService:
             .order_by(ClassificationRule.priority)
         )
         rules = list(result.scalars().all())
-        # Keep Azure rules: those explicitly scoped to azure, or global rules
-        # that belong to this Azure connection.
         filtered = []
         for rule in rules:
             scope = rule.cloud_scope
-            if scope and scope != "azure":
+            if scope and scope.lower() != "azure":
                 continue
             filtered.append(rule)
         return filtered
 
     # ── Hierarchy resolution ─────────────────────────────────────────────
 
-    def _hierarchy(self, dept: Department, dept_map: dict[int, Department]) -> dict:
-        """Walk root->leaf and materialize departamento_nivel_* + centro_custo."""
+    def _hierarchy(self, dept: Department, dept_map: dict[int, Department]) -> dict[str, str]:
+        """Walk root->leaf and materialize departamento_nivel_* + centro_custo + ambiente."""
         chain: list[Department] = []
         cur: Department | None = dept
         seen: set[int] = set()
@@ -138,7 +189,8 @@ class AzureTagPolicyService:
 
         tags: dict[str, str] = {}
         for i, d in enumerate(chain[:5], start=1):
-            tags[f"departamento_nivel_{i}"] = d.name or ""
+            if d.name:
+                tags[f"departamento_nivel_{i}"] = d.name
 
         centro = next((d.centro_custo for d in reversed(chain) if d.centro_custo), None)
         ambiente = next((d.ambiente for d in reversed(chain) if d.ambiente), None)
@@ -148,169 +200,270 @@ class AzureTagPolicyService:
             tags["ambiente"] = ambiente
         return tags
 
-    def _resolve_tags(self, rule: ClassificationRule, dept_map: dict[int, Department]) -> dict:
+    def _resolve_tags(self, rule: ClassificationRule, dept_map: dict[int, Department]) -> dict[str, str]:
         dept = dept_map.get(rule.department_id)
         if not dept:
             return {}
         return self._hierarchy(dept, dept_map)
 
-    # ── Reverse mapping (FOCUS field -> Azure alias) ─────────────────────
+    # ── Semantic field resolution ────────────────────────────────────────
 
-    def _reverse_field(self, field: str, reverse_map: dict[str, str]) -> str:
-        """Translate a FOCUS field name to the Azure ARM alias."""
-        key = field.lower().strip()
-        if key in reverse_map:
-            return reverse_map[key]
-        if key in FOCUS_TO_ALIAS:
-            return FOCUS_TO_ALIAS[key]
-        # Already looks like an ARM field/alias: keep it.
-        return field
+    def _classify_field(self, raw_field: str, reverse_map: dict[str, str]) -> tuple[str, str]:
+        """
+        Identify the semantic scope and ARM alias for a classification condition field.
+        Returns: (scope, arm_field)
+        """
+        norm = raw_field.lower().replace("_", "").replace("-", "").strip()
+        # Check reverse mapping if available
+        if norm in reverse_map:
+            mapped = reverse_map[norm]
+            mapped_norm = mapped.lower().replace("_", "").replace("-", "").strip()
+            if mapped_norm in SEMANTIC_FIELD_MAP:
+                return SEMANTIC_FIELD_MAP[mapped_norm]
+
+        if norm in SEMANTIC_FIELD_MAP:
+            return SEMANTIC_FIELD_MAP[norm]
+
+        # Fallback heuristics
+        if "group" in norm or "rg" in norm:
+            return (SCOPE_RG, "name")
+        if "sub" in norm or "account" in norm:
+            return (SCOPE_SUBSCRIPTION, "subscriptionId")
+        if "location" in norm or "region" in norm:
+            return (SCOPE_LOCATION, "location")
+        if "sku" in norm or "meter" in norm:
+            return (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name")
+        if "type" in norm:
+            return (SCOPE_TYPE, "type")
+
+        return (SCOPE_RESOURCE, "name")
 
     # ── Policy emission ──────────────────────────────────────────────────
 
-    def _build_policy(
+    def _inheritance_policies(self) -> list[dict]:
+        """Return the built-in inheritance policy assignments for all 7 organizational tags."""
+        policies = []
+        for key in TAG_KEYS:
+            policies.append({
+                "name": f"Inherit {key} from resource group",
+                "tag_name": key,
+                "policyDefinitionId": INHERIT_TAG_POLICY_DEFINITION_ID,
+                "parameters": {"tagName": {"value": key}},
+                "note": "Aplica a tag automaticamente em todos os recursos filhos dentro do Resource Group.",
+            })
+        return policies
+
+    def _build_rg_condition(self, operator: str, values: list[str]) -> dict | None:
+        """Build ARM if-condition for Resource Groups."""
+        if not values:
+            return None
+
+        rg_type_cond = {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+
+        if operator == "~":
+            if len(values) == 1:
+                name_cond = {"field": "name", "like": format_wildcard(values[0])}
+            else:
+                name_cond = {"anyOf": [{"field": "name", "like": format_wildcard(v)} for v in values]}
+        else:
+            # Exact match (=)
+            if len(values) == 1:
+                name_cond = {"field": "name", "equals": values[0]}
+            else:
+                name_cond = {"field": "name", "in": values}
+
+        return {"allOf": [rg_type_cond, name_cond]}
+
+    def _build_resource_condition(
         self,
-        display_name: str,
-        description: str,
-        if_condition: dict,
-        operations: list[dict],
+        conditions: list[dict],
+        reverse_map: dict[str, str]
+    ) -> dict | None:
+        """Build ARM if-condition for individual resources, types, SKUs or locations."""
+        all_of: list[dict] = []
+
+        has_resource_scope = False
+
+        for cond in conditions:
+            field_name = cond.get("field", "")
+            operator = cond.get("operator", "=")
+            values = cond.get("values") or []
+            if not values:
+                continue
+
+            scope, arm_field = self._classify_field(field_name, reverse_map)
+
+            if scope == SCOPE_RESOURCE:
+                has_resource_scope = True
+                if operator == "~":
+                    if len(values) == 1:
+                        all_of.append({"field": arm_field, "like": format_wildcard(values[0])})
+                    else:
+                        all_of.append({"anyOf": [{"field": arm_field, "like": format_wildcard(v)} for v in values]})
+                else:
+                    if len(values) == 1:
+                        all_of.append({"field": arm_field, "equals": values[0]})
+                    else:
+                        all_of.append({"field": arm_field, "in": values})
+
+            elif scope == SCOPE_SKU:
+                if operator == "~" or any(not v.startswith("Microsoft.") for v in values):
+                    if len(values) == 1:
+                        all_of.append({"field": arm_field, "like": format_wildcard(values[0])})
+                    else:
+                        all_of.append({"anyOf": [{"field": arm_field, "like": format_wildcard(v)} for v in values]})
+                else:
+                    if len(values) == 1:
+                        all_of.append({"field": arm_field, "equals": values[0]})
+                    else:
+                        all_of.append({"field": arm_field, "in": values})
+
+            elif scope == SCOPE_TYPE:
+                if len(values) == 1:
+                    all_of.append({"field": "type", "equals": values[0]})
+                else:
+                    all_of.append({"field": "type", "in": values})
+
+            elif scope == SCOPE_LOCATION:
+                if len(values) == 1:
+                    all_of.append({"field": "location", "equals": values[0]})
+                else:
+                    all_of.append({"field": "location", "in": values})
+
+            elif scope == SCOPE_SUBSCRIPTION:
+                # Subscription-level filtering
+                if operator == "~":
+                    if len(values) == 1:
+                        all_of.append({"field": "subscriptionId", "like": format_wildcard(values[0])})
+                    else:
+                        all_of.append({"anyOf": [{"field": "subscriptionId", "like": format_wildcard(v)} for v in values]})
+                else:
+                    if len(values) == 1:
+                        all_of.append({"field": "subscriptionId", "equals": values[0]})
+                    else:
+                        all_of.append({"field": "subscriptionId", "in": values})
+
+        if not all_of:
+            return None
+
+        # If matching by resource name, ensure we don't accidentally match resource groups
+        if has_resource_scope:
+            all_of.insert(0, {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"})
+
+        return {"allOf": all_of} if len(all_of) > 1 else all_of[0]
+
+    def _build_policies(
+        self,
+        rules: list[ClassificationRule],
+        dept_map: dict[int, Department],
+        reverse_map: dict[str, str],
     ) -> dict:
-        return {
-            "mode": "Indexed",
-            "displayName": display_name,
-            "description": description,
-            "policyRule": {
-                "if": if_condition,
-                "then": {
-                    "effect": "modify",
-                    "details": {
-                        "roleDefinitionIds": [CONTRIBUTOR_ROLE, TAG_CONTRIBUTOR_ROLE],
-                        "operations": operations,
-                    },
-                },
-            },
-        }
-
-    @staticmethod
-    def _tag_operations(tags: dict[str, str]) -> list[dict]:
-        return [
-            {"operation": "addOrReplace", "field": f"tags['{k}']", "value": v}
-            for k, v in tags.items() if v
-        ]
-
-    def _build_policies(self, rules: list[ClassificationRule], dept_map: dict[int, Department],
-                        reverse_map: dict[str, str]) -> dict:
-        """Emit the three layers of policies."""
+        """Emit the layers of Azure Tag policies."""
         inherit = self._inheritance_policies()
-        rg_groups: dict[str, dict] = {}
-        pattern_groups: dict[str, dict] = {}
+
+        # Group exact RG rules by unique tag set: tag_sig -> {tags, names: set(), rule_names: set()}
+        rg_exact_groups: dict[str, dict] = {}
+
+        # RG wildcard pattern policies
+        rg_pattern_groups: dict[str, dict] = {}
+
+        # Resource / SKU / Location pattern policies
+        resource_pattern_groups: dict[str, dict] = {}
 
         for rule in rules:
             tags = self._resolve_tags(rule, dept_map)
             if not tags:
                 continue
 
-            # Layer 3: explicit resource groups (grouped by unique tag set)
-            parent = self._grouping_condition(rule, reverse_map)
-
             tag_sig = json.dumps(tags, sort_keys=True, ensure_ascii=False)
-            if parent is not None:
-                bucket = rg_groups.setdefault(tag_sig, {
-                    "tags": tags, "names": [], "rule_names": [],
-                })
-                if parent not in bucket["names"]:
-                    bucket["names"].append(parent)
-                if rule.name not in bucket["rule_names"]:
-                    bucket["rule_names"].append(rule.name)
+            conditions = rule.conditions or []
+
+            # Check if this rule applies to Resource Groups
+            is_rg_rule = any(
+                self._classify_field(c.get("field", ""), reverse_map)[0] == SCOPE_RG
+                for c in conditions
+            )
+
+            if is_rg_rule:
+                for c in conditions:
+                    scope, _ = self._classify_field(c.get("field", ""), reverse_map)
+                    if scope != SCOPE_RG:
+                        continue
+                    operator = c.get("operator", "=")
+                    values = [str(v).strip() for v in (c.get("values") or []) if str(v).strip()]
+                    if not values:
+                        continue
+
+                    if operator == "=":
+                        # Group exact RGs by tag signature
+                        bucket = rg_exact_groups.setdefault(tag_sig, {
+                            "tags": tags,
+                            "names": [],
+                            "rule_names": [],
+                        })
+                        for val in values:
+                            if val not in bucket["names"]:
+                                bucket["names"].append(val)
+                        if rule.name not in bucket["rule_names"]:
+                            bucket["rule_names"].append(rule.name)
+                    else:
+                        # Wildcard / nomenclature RG rule
+                        cond = self._build_rg_condition(operator, values)
+                        if cond:
+                            cond_sig = json.dumps(cond, sort_keys=True, ensure_ascii=False)
+                            key = f"{tag_sig}|{cond_sig}"
+                            bucket = rg_pattern_groups.setdefault(key, {
+                                "tags": tags,
+                                "condition": cond,
+                                "patterns": values,
+                                "rule_names": [],
+                            })
+                            if rule.name not in bucket["rule_names"]:
+                                bucket["rule_names"].append(rule.name)
             else:
-                cond = self._condition_for_rule(rule, reverse_map)
-                if cond is not None:
+                # Individual resource / SKU / location / subscription rule
+                cond = self._build_resource_condition(conditions, reverse_map)
+                if cond:
                     cond_sig = json.dumps(cond, sort_keys=True, ensure_ascii=False)
-                    bucket = pattern_groups.setdefault(tag_sig + "|" + cond_sig, {
-                        "tags": tags, "condition": cond, "rule_names": [],
+                    key = f"{tag_sig}|{cond_sig}"
+                    bucket = resource_pattern_groups.setdefault(key, {
+                        "tags": tags,
+                        "condition": cond,
+                        "rule_names": [],
                     })
                     if rule.name not in bucket["rule_names"]:
                         bucket["rule_names"].append(rule.name)
 
+        # Convert exact RG groups into formatted policies
+        rg_exact_list = []
+        for grp in rg_exact_groups.values():
+            rg_names = grp["names"]
+            if not rg_names:
+                continue
+            cond = {
+                "allOf": [
+                    {"field": "type", "equals": "Microsoft.Resources/resourceGroups"},
+                    {"field": "name", "in": rg_names} if len(rg_names) > 1 else {"field": "name", "equals": rg_names[0]},
+                ]
+            }
+            rg_exact_list.append({
+                "tags": grp["tags"],
+                "names": rg_names,
+                "rule_names": grp["rule_names"],
+                "condition": cond,
+            })
+
         return {
             "inheritance": inherit,
-            "resource_groups": list(rg_groups.values()),
-            "patterns": list(pattern_groups.values()),
+            "resource_groups": rg_exact_list,
+            "rg_patterns": list(rg_pattern_groups.values()),
+            "patterns": list(resource_pattern_groups.values()),
         }
-
-    @staticmethod
-    def _inheritance_policies() -> list[dict]:
-        policies = []
-        for key in TAG_KEYS:
-            policies.append({
-                "name": f"Inherit {key} from resource group",
-                "policyDefinitionId": INHERIT_TAG_POLICY_DEFINITION_ID,
-                "parameters": {"tagName": {"value": key}},
-                "note": "Uses the built-in 'Inherit a tag from the resource group' policy.",
-            })
-        return policies
-
-    def _grouping_condition(self, rule: ClassificationRule, reverse_map: dict[str, str]) -> str | None:
-        """Return a resource-group name when the rule matches resourceGroupName/SubscriptionName."""
-        conditions = rule.conditions or []
-        for cond in conditions:
-            field = self._reverse_field(cond.get("field", ""), reverse_map)
-            # resourceGroupName -> Azure 'name' grouping (and subscription-level
-            # rules likewise map to the RG name for grouping purposes).
-            if field in ("name", "resourceGroupName") and cond.get("operator") in ("=", "~"):
-                values = cond.get("values") or []
-                if values:
-                    return values[0]
-        return None
-
-    def _condition_for_rule(self, rule: ClassificationRule, reverse_map: dict[str, str]) -> dict | None:
-        """Translate a rule's conditions into an Azure Policy if-condition."""
-        conditions = rule.conditions or []
-        all_of: list[dict] = []
-        for cond in conditions:
-            field = self._reverse_field(cond.get("field", ""), reverse_map)
-            operator = cond.get("operator", "=")
-            values = cond.get("values") or []
-            if not values:
-                continue
-            if field in ("name", "fullName"):
-                # Name patterns: contains -> contains, exact -> equals, wildcard -> like
-                if operator == "~":
-                    for v in values:
-                        all_of.append({"field": "name", "contains": v})
-                else:
-                    if len(values) == 1:
-                        all_of.append({"field": "name", "equals": values[0]})
-                    else:
-                        all_of.append({"field": "name", "in": values})
-            elif field in ("location",):
-                if len(values) == 1:
-                    all_of.append({"field": "location", "equals": values[0]})
-                else:
-                    all_of.append({"field": "location", "in": values})
-            elif field in ("type",):
-                if len(values) == 1:
-                    all_of.append({"field": "type", "equals": values[0]})
-                else:
-                    all_of.append({"field": "type", "in": values})
-            elif field.startswith("Microsoft.") or "." in field:
-                # Alias (e.g. Microsoft.Compute/virtualMachines/sku.name): like for family
-                if operator == "~" or any(v.endswith("*") for v in values):
-                    for v in values:
-                        all_of.append({"field": field, "like": v if v.endswith("*") else f"{v}*"})
-                else:
-                    if len(values) == 1:
-                        all_of.append({"field": field, "equals": values[0]})
-                    else:
-                        all_of.append({"field": field, "in": values})
-        if not all_of:
-            return None
-        return {"allOf": all_of} if len(all_of) > 1 else all_of[0]
 
     # ── Public API ───────────────────────────────────────────────────────
 
     async def generate_tenant_policy(self, connection_id: int) -> dict | None:
-        """Generate policy documents for a single Azure tenant (connection)."""
+        """Generate complete Azure Tag Policy documents for a single Azure tenant."""
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or resolve_connection_scope(conn.cloud_scope, conn.cloud_name) != "azure":
             return None
@@ -331,5 +484,5 @@ class AzureTagPolicyService:
 
 
 def slugify(value: str) -> str:
-    out = "".join(c if c.isalnum() else "-" for c in value.lower()).strip("-")
+    out = "".join(c if c.isalnum() else "-" for c in str(value).lower()).strip("-")
     return out or "policy"

@@ -27,6 +27,7 @@ export interface SourceConnection {
   name: string;
   connector_type: string;
   cloud_name: string | null;
+  cloud_scope: string | null;
   config_json: Record<string, unknown>;
   blob_prefixes: string[];
   created_at: string;
@@ -197,6 +198,33 @@ export async function getIngestedBlobs(connectionId?: number): Promise<IngestedB
   const { data } = await api.get("/etl/blobs/", { params });
   return data;
 }
+
+export async function downloadIngestedBlob(blobId: number, format: "csv" | "xlsx" = "csv"): Promise<void> {
+  const response = await api.get(`/etl/blobs/${blobId}/download`, {
+    params: { format },
+    responseType: "blob",
+  });
+  const disposition = response.headers["content-disposition"] || "";
+  let filename = `origem-${blobId}.${format}`;
+  const match = disposition.match(/filename=["']?([^"';]+)["']?/i);
+  if (match && match[1]) {
+    filename = match[1];
+  }
+  const blob = new Blob([response.data], {
+    type: format === "xlsx"
+      ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      : "text/csv;charset=utf-8;",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
+
 
 export async function runEtl(body: { connection_id: number; selected_blobs?: string[]; force_periods?: string[] }): Promise<{ task_id: number; status: string; message?: string }> {
   const { data } = await api.post("/etl/run", body);
