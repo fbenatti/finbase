@@ -108,9 +108,27 @@ def main():
         # A process restart cannot resume a Python stack safely. Make stale
         # RUNNING rows visible as failures instead of leaving them hanging.
         stale = startup.execute(select(EtlTask).where(EtlTask.status == "RUNNING")).scalars().all()
+        stale_forecast_run_ids: set[int] = set()
         for row in stale:
             row.status = "FAILED"
             row.phase = "Worker reiniciado; tarefa RUNNING anterior foi encerrada"
+            row.finished_at = datetime.now(timezone.utc)
+            if row.task_type == "forecast":
+                run_id = (row.result_json or {}).get("forecast_run_id")
+                if isinstance(run_id, int):
+                    stale_forecast_run_ids.add(run_id)
+        if stale_forecast_run_ids:
+            stale_runs = startup.execute(
+                select(ForecastRun).where(
+                    ForecastRun.id.in_(stale_forecast_run_ids),
+                    ForecastRun.status.in_(["QUEUED", "RUNNING"]),
+                )
+            ).scalars().all()
+            for run in stale_runs:
+                run.status = "FAILED"
+                run.phase = "Worker reiniciado; execução anterior foi encerrada"
+                run.error = "Worker reiniciado durante a execução do forecast"
+                run.finished_at = datetime.now(timezone.utc)
         startup.commit()
     finally:
         startup.close()
@@ -179,6 +197,7 @@ def main():
                         s.commit()
                         config.destination_physical_name = dest.physical_name
                         config.source_namespace = "gold"
+                        config.gold_metadata = metadata
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
                         result = asyncio.run(run_forecast(
                             config, adjustments, date.fromisoformat(run.cutoff_date),

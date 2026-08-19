@@ -66,6 +66,40 @@ def _resolve_path(data: Any, path: str) -> Any:
     return current
 
 
+def split_source_ref(df: pd.DataFrame, source_column: str) -> tuple[str | None, str]:
+    """Resolve a source reference to a Bronze column and optional nested JSON path.
+
+    Examples:
+      ``project`` -> (``project``, ````)
+      ``project.name`` -> (``project``, ``name``)
+      ``unknown.field`` -> (``None``, ````) when no prefix matches a column
+    """
+    if source_column in df.columns:
+        return source_column, ""
+
+    if "." not in source_column:
+        return None, ""
+
+    parts = source_column.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        candidate = ".".join(parts[:end])
+        if candidate in df.columns:
+            return candidate, ".".join(parts[end:])
+    return None, ""
+
+
+def resolve_json_path(
+    transform_config: dict[str, Any] | None,
+    implicit_path: str = "",
+) -> str:
+    """Combine implicit dotted suffix from ``source_column`` and ``transform_config.path``."""
+    config = transform_config or {}
+    explicit_path = str(config.get("path") or "").strip()
+    if implicit_path and explicit_path:
+        return f"{implicit_path}.{explicit_path}"
+    return explicit_path or implicit_path
+
+
 def _json_path(series: pd.Series, path: str) -> pd.Series:
     return series.map(lambda v: _resolve_path(_parse_json(v), path))
 
@@ -146,24 +180,30 @@ def apply_mapping_transform(
 ) -> pd.Series:
     config = transform_config or {}
     transform_type = (transform_type or "RENAME").upper()
+    empty = pd.Series([None] * len(df), index=df.index)
+    root_column, implicit_path = split_source_ref(df, source_column)
 
     if transform_type == "RENAME":
-        if source_column not in df.columns:
-            return pd.Series([None] * len(df), index=df.index)
-        return df[source_column]
+        if root_column is None:
+            return empty
+        if implicit_path:
+            return _json_path(df[root_column], implicit_path)
+        return df[root_column]
 
     if transform_type == "CONST":
         return pd.Series([config.get("value")] * len(df), index=df.index)
 
     if transform_type == "JSON_PATH":
-        if source_column not in df.columns:
-            return pd.Series([None] * len(df), index=df.index)
-        return _json_path(df[source_column], config.get("path", ""))
+        if root_column is None:
+            return empty
+        path = resolve_json_path(config, implicit_path)
+        return _json_path(df[root_column], path)
 
     if transform_type == "JSON_SUM":
-        if source_column not in df.columns:
-            return pd.Series([None] * len(df), index=df.index)
-        return _json_sum(df[source_column], config.get("path", ""))
+        if root_column is None:
+            return empty
+        path = resolve_json_path(config, implicit_path)
+        return _json_sum(df[root_column], path)
 
     if transform_type == "CONCAT":
         parts = config.get("parts") or []
@@ -171,26 +211,69 @@ def apply_mapping_transform(
         return df.apply(lambda row: _concat_parts(row, parts, sep), axis=1)
 
     if transform_type == "VALUE_MAP":
-        if source_column not in df.columns:
+        if root_column is None:
             return pd.Series([config.get("default")] * len(df), index=df.index)
+        series = (
+            _json_path(df[root_column], implicit_path)
+            if implicit_path
+            else df[root_column]
+        )
         mapping = config.get("map") or {}
         default = config.get("default")
-        return df[source_column].astype(str).map(lambda v: mapping.get(v, default))
+        return series.astype(str).map(lambda v: mapping.get(v, default))
 
     if transform_type == "MONTH_START":
-        if source_column not in df.columns:
-            return pd.Series([None] * len(df), index=df.index)
-        return _month_bounds(df[source_column], end=False)
+        if root_column is None:
+            return empty
+        series = (
+            _json_path(df[root_column], implicit_path)
+            if implicit_path
+            else df[root_column]
+        )
+        return _month_bounds(series, end=False)
 
     if transform_type == "MONTH_END":
-        if source_column not in df.columns:
-            return pd.Series([None] * len(df), index=df.index)
-        return _month_bounds(df[source_column], end=True)
+        if root_column is None:
+            return empty
+        series = (
+            _json_path(df[root_column], implicit_path)
+            if implicit_path
+            else df[root_column]
+        )
+        return _month_bounds(series, end=True)
+
+    if transform_type == "CONDITIONAL":
+        when_column = config.get("when_column") or source_column
+        when_root, when_implicit = split_source_ref(df, when_column)
+        when_path = resolve_json_path({"path": config.get("when_path")}, when_implicit)
+        when_values = [str(v) for v in (config.get("when_values") or [])]
+        when_op = str(config.get("when_op", "in")).lower()
+        if when_root is None:
+            return empty
+        when_series = (
+            _json_path(df[when_root], when_path)
+            if when_path
+            else df[when_root]
+        )
+        if when_op in {"in", "eq", "equals", "is"}:
+            mask = when_series.astype(str).isin(when_values)
+        elif when_op in {"not_empty", "present"}:
+            mask = when_series.notna() & (when_series.astype(str).str.strip() != "")
+        else:
+            mask = when_series.astype(str).isin(when_values)
+        then_source = config.get("then_source", source_column)
+        then_type = str(config.get("then_type", "RENAME")).upper()
+        then_config = config.get("then_config") or {}
+        then_values = apply_mapping_transform(df, then_source, then_type, then_config)
+        return then_values.where(mask, None)
 
     if transform_type == "EXPR":
         expr = config.get("expression", source_column)
-        if source_column in df.columns:
-            local = {source_column: df[source_column]}
+        if root_column is not None:
+            if implicit_path:
+                local = {source_column: _json_path(df[root_column], implicit_path)}
+            else:
+                local = {source_column: df[root_column]}
         else:
             local = {}
         try:
@@ -208,9 +291,11 @@ def apply_mapping_transform(
         except Exception:
             return pd.Series([None] * len(df), index=df.index)
 
-    if source_column in df.columns:
-        return df[source_column]
-    return pd.Series([None] * len(df), index=df.index)
+    if root_column is not None:
+        if implicit_path:
+            return _json_path(df[root_column], implicit_path)
+        return df[root_column]
+    return empty
 
 
 def apply_mappings(df: pd.DataFrame, mappings: list) -> pd.DataFrame:

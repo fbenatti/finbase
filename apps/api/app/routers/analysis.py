@@ -14,6 +14,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -21,7 +22,7 @@ import os
 import time
 import pandas as pd
 from typing import Any, Literal
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import select, func, text, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,11 +35,49 @@ from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
 from app.services.iceberg_service import list_tables, get_catalog
-from app.services.trino_service import execute as trino_execute, TrinoError, wait_until_ready
+from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+
+
+class _ClientCancelScope:
+    """Cancel Trino work when the browser disconnects or aborts the HTTP request."""
+
+    def __init__(self, request: Request, *, timeout_s: float = 90, max_retries: int = 2):
+        self.request = request
+        self.timeout_s = timeout_s
+        self.max_retries = max_retries
+        self.cancelled = asyncio.Event()
+        self._watcher: asyncio.Task | None = None
+
+    async def __aenter__(self) -> _ClientCancelScope:
+        self._watcher = asyncio.create_task(_watch_disconnect(self.request, self.cancelled))
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        self.cancelled.set()
+        if self._watcher:
+            self._watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._watcher
+
+    @property
+    def trino_kwargs(self) -> dict[str, Any]:
+        return {"timeout_s": self.timeout_s, "max_retries": self.max_retries, "cancel_event": self.cancelled}
+
+
+async def _watch_disconnect(request: Request, cancelled: asyncio.Event) -> None:
+    while not cancelled.is_set():
+        if await request.is_disconnected():
+            cancelled.set()
+            return
+        await asyncio.sleep(0.05)
+
+
+def _cancelled_http() -> HTTPException:
+    return HTTPException(status_code=499, detail="Consulta cancelada")
 
 
 async def _analysis_physical_name(db: AsyncSession, table_id: int) -> str | None:
@@ -207,6 +246,17 @@ def _quote_literal(value: str | int | float | bool) -> str:
 
 _SCHEMA_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _SCHEMA_CACHE_TTL_S = 90.0
+_SCHEMA_LOCK = asyncio.Lock()
+_SCHEMA_INFLIGHT: dict[str, asyncio.Task] = {}
+
+
+async def _describe_gold_schema(safe_name: str, max_retries: int | None) -> dict[str, str]:
+    schema = await trino_execute(f"DESCRIBE iceberg.gold.{safe_name}", timeout_s=20, max_retries=max_retries)
+    columns = {str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "") for c in schema}
+    if not columns:
+        raise HTTPException(status_code=422, detail="A tabela Gold não possui schema disponível no Trino")
+    _SCHEMA_CACHE[safe_name] = (time.monotonic(), columns)
+    return columns
 
 
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
@@ -216,15 +266,23 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
     cached = _SCHEMA_CACHE.get(safe_name)
     if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
         return safe_name, cached[1]
+    async with _SCHEMA_LOCK:
+        cached = _SCHEMA_CACHE.get(safe_name)
+        if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
+            return safe_name, cached[1]
+        task = _SCHEMA_INFLIGHT.get(safe_name)
+        if task is None or task.done():
+            task = asyncio.create_task(_describe_gold_schema(safe_name, max_retries))
+            _SCHEMA_INFLIGHT[safe_name] = task
     try:
-        schema = await trino_execute(f"DESCRIBE iceberg.gold.{safe_name}", timeout_s=20, max_retries=max_retries)
+        return safe_name, await task
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {exc}")
-    columns = {str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "") for c in schema}
-    if not columns:
-        raise HTTPException(status_code=422, detail="A tabela Gold não possui schema disponível no Trino")
-    _SCHEMA_CACHE[safe_name] = (time.monotonic(), columns)
-    return safe_name, columns
+    finally:
+        if _SCHEMA_INFLIGHT.get(safe_name) is task and task.done():
+            _SCHEMA_INFLIGHT.pop(safe_name, None)
 
 
 def _validate_pivot_request(req: PivotRequest, schema: dict[str, str]) -> tuple[list[str], list[str], list[PivotMeasure]]:
@@ -306,6 +364,7 @@ async def _inject_latest_period_filter(
     table_name: str,
     schema: dict[str, str],
     filters: list[PivotFilter],
+    trino_kwargs: dict[str, Any] | None = None,
 ) -> tuple[list[PivotFilter], str | None]:
     """Restrict unbounded pivots to the latest billing partition.
 
@@ -319,7 +378,7 @@ async def _inject_latest_period_filter(
     latest_rows = await trino_execute(
         f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
         f"FROM iceberg.{namespace}.{table_name}",
-        timeout_s=30,
+        **({"timeout_s": 30, **trino_kwargs} if trino_kwargs else {"timeout_s": 30}),
     )
     latest = latest_rows[0].get("latest") if latest_rows else None
     if not latest:
@@ -399,10 +458,22 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
 
 
 @router.post("/pivot/search")
-async def search_pivot_table(req: LakehouseSearchRequest, db: AsyncSession = Depends(get_db)):
+async def search_pivot_table(req: LakehouseSearchRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Search a term across every textual column of a Gold table in Trino."""
     if not req.term.strip():
         raise HTTPException(status_code=422, detail="Informe um texto para pesquisar")
+    async with _ClientCancelScope(request, timeout_s=25) as scope:
+        try:
+            return await _search_pivot_table_core(req, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
+async def _search_pivot_table_core(
+    req: LakehouseSearchRequest,
+    db: AsyncSession,
+    trino_kwargs: dict[str, Any],
+) -> dict[str, Any]:
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     filter_request = PivotRequest(destination_table_id=req.destination_table_id, filters=req.filters)
     _canonicalize_request(filter_request, schema)
@@ -410,7 +481,7 @@ async def search_pivot_table(req: LakehouseSearchRequest, db: AsyncSession = Dep
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
     effective_filters, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, filter_request.filters,
+        "gold", table_name, schema, filter_request.filters, trino_kwargs=trino_kwargs,
     )
     filter_sql = _where_clause(effective_filters)
     text_columns = [name for name, typ in schema.items() if any(token in typ.lower() for token in ("varchar", "char", "json"))]
@@ -458,14 +529,21 @@ async def search_pivot_table(req: LakehouseSearchRequest, db: AsyncSession = Dep
             selected = ", ".join(_quote_ident(column) for column in group)
             sql = f"SELECT {selected} FROM iceberg.gold.{table_name}{where} LIMIT {limit - len(rows)}"
             try:
-                group_rows = await trino_execute(sql, timeout_s=min(20, max(5, int(deadline - time.monotonic()))))
+                group_rows = await trino_execute(
+                    sql,
+                    **({"timeout_s": min(20, max(5, int(deadline - time.monotonic()))), **trino_kwargs}),
+                )
                 rows.extend(group_rows)
+            except TrinoCancelled:
+                raise
             except Exception as group_error:
                 logger.warning("Busca parcial interrompida no grupo %s: %s", group, group_error)
                 break
             if len(rows) >= limit:
                 break
         matched = [[name for name in row if name in text_columns and lowered in str(row.get(name) or "").lower()] for row in rows]
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         logger.warning("Busca sem resultados após falha do Trino: %s", exc)
         rows = []
@@ -610,13 +688,21 @@ def _order_keys(
 
 
 @router.post("/pivot")
-async def run_pivot(req: PivotRequest, db: AsyncSession = Depends(get_db)):
+async def run_pivot(req: PivotRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Aggregate a Gold destination table in Trino; no raw data is sent to the browser."""
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await _run_pivot_core(req, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
+async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     _canonicalize_request(req, schema)
     rows, columns, measures = _validate_pivot_request(req, schema)
     req.filters, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, req.filters,
+        "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
     )
     dimensions = rows + columns
     select_dims = [f"{_quote_ident(name)} AS d{index}" for index, name in enumerate(dimensions)]
@@ -631,7 +717,9 @@ async def run_pivot(req: PivotRequest, db: AsyncSession = Depends(get_db)):
     limit = max(1, min(req.row_limit * max(1, req.column_limit), 30000))
     sql = f"SELECT {', '.join([*select_dims, *measure_parts])} FROM iceberg.gold.{table_name}{where}{group_by}{order_by} LIMIT {limit}"
     try:
-        records = await trino_execute(sql, timeout_s=90)
+        records = await trino_execute(sql, **trino_kwargs)
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao executar pivot no Trino: {exc}")
     result = _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
@@ -641,7 +729,15 @@ async def run_pivot(req: PivotRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/pivot/union")
-async def run_pivot_union(req: PivotUnionRequest, db: AsyncSession = Depends(get_db)):
+async def run_pivot_union(req: PivotUnionRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    async with _ClientCancelScope(request, timeout_s=120) as scope:
+        try:
+            return await _run_pivot_union_core(req, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
+async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Union two (or N) Gold destinations/pseudo-destinations into one pivot.
 
     Each table is resolved via ``_analysis_physical_name`` (negative ids are
@@ -680,7 +776,7 @@ async def run_pivot_union(req: PivotUnionRequest, db: AsyncSession = Depends(get
     for _table_id, safe_name, schema in sides:
         if _table_id >= 0 and not safe_name.endswith("_planning"):
             req.filters, auto_period = await _inject_latest_period_filter(
-                "gold", safe_name, schema, req.filters,
+                "gold", safe_name, schema, req.filters, trino_kwargs=trino_kwargs,
             )
             break
 
@@ -793,7 +889,9 @@ async def run_pivot_union(req: PivotUnionRequest, db: AsyncSession = Depends(get
     )
 
     try:
-        records = await trino_execute(sql, timeout_s=120)
+        records = await trino_execute(sql, **trino_kwargs)
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao executar união no Trino: {exc}")
 
@@ -808,7 +906,15 @@ async def run_pivot_union(req: PivotUnionRequest, db: AsyncSession = Depends(get
 
 
 @router.post("/pivot/records")
-async def pivot_records(req: PivotRecordRequest, db: AsyncSession = Depends(get_db)):
+async def pivot_records(req: PivotRecordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await _pivot_records_core(req, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
+async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Return raw (non-aggregated) Gold records for the browser to feed Perspective."""
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     by_lower = {name.lower(): name for name in schema}
@@ -821,7 +927,7 @@ async def pivot_records(req: PivotRecordRequest, db: AsyncSession = Depends(get_
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
     filter_items, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, filter_items,
+        "gold", table_name, schema, filter_items, trino_kwargs=trino_kwargs,
     )
     where = _where_clause(filter_items)
     limit = max(1, min(req.limit, 50000))
@@ -838,7 +944,9 @@ async def pivot_records(req: PivotRecordRequest, db: AsyncSession = Depends(get_
     order_by = f" ORDER BY {_quote_ident(order_candidates[0])} DESC" if order_candidates else ""
     sql = f"SELECT {select_expr} FROM iceberg.gold.{table_name}{where}{order_by} OFFSET {offset} LIMIT {limit}"
     try:
-        rows = await trino_execute(sql, timeout_s=90)
+        rows = await trino_execute(sql, **trino_kwargs)
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao carregar registros no Trino: {exc}")
     response = {
@@ -854,7 +962,15 @@ async def pivot_records(req: PivotRecordRequest, db: AsyncSession = Depends(get_
 
 
 @router.post("/pivot/drill-down")
-async def pivot_drill_down(req: PivotDrillDownRequest, db: AsyncSession = Depends(get_db)):
+async def pivot_drill_down(req: PivotDrillDownRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await _pivot_drill_down_core(req, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
+async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     _canonicalize_request(req, schema)
     req.cell_filters = {next((name for name in schema if name.lower() == column.lower()), column): value for column, value in req.cell_filters.items()}
@@ -863,15 +979,17 @@ async def pivot_drill_down(req: PivotDrillDownRequest, db: AsyncSession = Depend
     if invalid:
         raise HTTPException(status_code=422, detail=f"Filtros da célula inválidos: {', '.join(invalid)}")
     req.filters, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, req.filters,
+        "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
     )
     where = _where_clause(req.filters, req.cell_filters)
     limit = max(1, min(req.limit, 500))
     sql = f"SELECT * FROM iceberg.gold.{table_name}{where} OFFSET {max(0, req.offset)} LIMIT {limit}"
     count_sql = f"SELECT COUNT(*) AS total FROM iceberg.gold.{table_name}{where}"
     try:
-        rows = await trino_execute(sql, timeout_s=90)
-        counted = await trino_execute(count_sql, timeout_s=90)
+        rows = await trino_execute(sql, **trino_kwargs)
+        counted = await trino_execute(count_sql, **trino_kwargs)
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha no drill-down do Trino: {exc}")
     response = {
@@ -1007,27 +1125,31 @@ async def delete_dashboard_widget(dashboard_id: int, widget_id: int, db: AsyncSe
 
 
 @router.post("/dashboard-widgets/query")
-async def query_dashboard_widget(body: WidgetQueryRequest, db: AsyncSession = Depends(get_db)):
+async def query_dashboard_widget(body: WidgetQueryRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     view = await db.get(PivotView, body.pivot_view_id)
     if not view:
         raise HTTPException(status_code=404, detail="Visão pivot não encontrada")
     config = dict(view.config_json or {})
     config.update({k: v for k, v in body.config.items() if k in {"rows", "columns", "measures", "filters", "row_limit", "column_limit"}})
-    request = PivotRequest.model_validate({"destination_table_id": view.destination_table_id, **config})
+    pivot_request = PivotRequest.model_validate({"destination_table_id": view.destination_table_id, **config})
     for column, value in body.global_filters.items():
         values = value if isinstance(value, list) else [value]
-        request.filters.append(PivotFilter(column=column, values=values, operator="IN"))
+        pivot_request.filters.append(PivotFilter(column=column, values=values, operator="IN"))
     source_ids = body.source_ids or config.get("source_ids") or [view.destination_table_id]
-    if len(source_ids) > 1:
-        rows = list(request.rows)
-        if "origem" not in rows and "origem" not in request.columns:
-            rows.append("origem")
-        result = await run_pivot_union(PivotUnionRequest(
-            destination_table_ids=source_ids, rows=rows, columns=request.columns,
-            measures=request.measures, filters=request.filters, row_limit=request.row_limit,
-            column_limit=request.column_limit, include_totals=True), db)
-    else:
-        result = await run_pivot(request, db)
+    async with _ClientCancelScope(http_request, timeout_s=120) as scope:
+        try:
+            if len(source_ids) > 1:
+                rows = list(pivot_request.rows)
+                if "origem" not in rows and "origem" not in pivot_request.columns:
+                    rows.append("origem")
+                result = await _run_pivot_union_core(PivotUnionRequest(
+                    destination_table_ids=source_ids, rows=rows, columns=pivot_request.columns,
+                    measures=pivot_request.measures, filters=pivot_request.filters, row_limit=pivot_request.row_limit,
+                    column_limit=pivot_request.column_limit, include_totals=True), db, scope.trino_kwargs)
+            else:
+                result = await _run_pivot_core(pivot_request, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
 
     period_names = {"_billing_period", "period", "forecast_month"}
     all_dimensions = result["rows"] + result["columns"]
@@ -1075,8 +1197,20 @@ def _expected_view_cloud_filter(
 
 
 @router.post("/expected-view")
-async def expected_view(body: ExpectedViewRequest, db: AsyncSession = Depends(get_db)):
+async def expected_view(body: ExpectedViewRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Executive view for any node of the seven-level organization tree."""
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await _expected_view_core(body, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
+async def _expected_view_core(
+    body: ExpectedViewRequest,
+    db: AsyncSession,
+    interactive: dict[str, Any],
+) -> dict[str, Any]:
     try:
         await wait_until_ready(timeout_s=20)
     except Exception as exc:
@@ -1136,7 +1270,6 @@ async def expected_view(body: ExpectedViewRequest, db: AsyncSession = Depends(ge
     if "tipo" in actual_columns:
         tipo_col = _quote_ident(actual_columns["tipo"])
         tipo_actual = f" AND ({tipo_col} IS NULL OR lower(CAST({tipo_col} AS VARCHAR)) IN ('realizado', ''))"
-    interactive = {"timeout_s": 90, "max_retries": 2}
     try:
         cutoff_rows = await trino_execute(
             f"""
@@ -1148,6 +1281,8 @@ async def expected_view(body: ExpectedViewRequest, db: AsyncSession = Depends(ge
             """,
             **interactive,
         )
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
     cutoff = str(cutoff_rows[0]["period"]) if cutoff_rows and cutoff_rows[0].get("period") is not None else None
@@ -1183,6 +1318,8 @@ async def expected_view(body: ExpectedViewRequest, db: AsyncSession = Depends(ge
     try:
         actual_fact_rows = await trino_execute(actual_sql, **interactive)
         forecast_fact_rows = await trino_execute(forecast_sql, **interactive)
+    except TrinoCancelled:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
     by_period_facts: dict[str, dict[str, Any]] = {}
@@ -1286,7 +1423,7 @@ async def get_tables():
 
 
 @router.post("/query", response_model=QueryResponse)
-async def run_query(req: QueryRequest):
+async def run_query(req: QueryRequest, request: Request):
     """
     Execute a SQL query against Trino + Iceberg.
 
@@ -1294,24 +1431,27 @@ async def run_query(req: QueryRequest):
       SELECT * FROM iceberg.bronze.raw_azure_4p WHERE _billing_period = '202504' LIMIT 10
       SELECT SUM("BilledCost") AS total_billed FROM iceberg.gold.dest_modelo_focus WHERE "_billing_period" = '202504'
     """
-    try:
-        rows = await trino_execute(req.sql, catalog=req.catalog)
-    except TrinoError as e:
-        # Gold may still be in the local PyIceberg catalog while Trino is
-        # connected to Nessie/MinIO. Support the standard destination
-        # aggregations through the same local Iceberg table until the data
-        # catalog migration is complete.
-        rows = _run_local_gold_query(req.sql)
-        if rows is None:
-            raise HTTPException(status_code=502, detail=str(e))
-    except ConnectionError as e:
-        raise HTTPException(status_code=503, detail=f"Trino unavailable: {e}")
-    except Exception as e:
-        logger.exception("Trino query failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with _ClientCancelScope(request) as scope:
+        try:
+            rows = await trino_execute(req.sql, catalog=req.catalog, **scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+        except TrinoError as e:
+            # Gold may still be in the local PyIceberg catalog while Trino is
+            # connected to Nessie/MinIO. Support the standard destination
+            # aggregations through the same local Iceberg table until the data
+            # catalog migration is complete.
+            rows = _run_local_gold_query(req.sql)
+            if rows is None:
+                raise HTTPException(status_code=502, detail=str(e))
+        except ConnectionError as e:
+            raise HTTPException(status_code=503, detail=f"Trino unavailable: {e}")
+        except Exception as e:
+            logger.exception("Trino query failed")
+            raise HTTPException(status_code=500, detail=str(e))
 
-    columns = list(rows[0].keys()) if rows else []
-    return QueryResponse(columns=columns, rows=rows, row_count=len(rows))
+        columns = list(rows[0].keys()) if rows else []
+        return QueryResponse(columns=columns, rows=rows, row_count=len(rows))
 
 
 def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:

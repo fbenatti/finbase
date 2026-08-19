@@ -98,7 +98,8 @@ para as conexões `gcp-4p` e `gcp-ti`, cobrindo os 50 campos folha do export
 `gcp_billing_export_resource_v1_*`. Campos canônicos FOCUS usam transforms
 (`JSON_PATH`, `JSON_SUM`, `VALUE_MAP`, `MONTH_START/END`, `CONST`); campos sem
 coluna FOCUS vão para colunas provider-specific `x_*` (26 colunas adicionais).
-A chave de classificação legada é `source_resource_group_name` ← `project.name`.
+A chave de classificação GCP é `SubAccountId` ← `project.id` (via `JSON_PATH`).
+Azure continua usando `source_resource_group_name` ← `resourceGroupName`.
 
 ## 2.6 Migrações
 

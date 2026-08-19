@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
@@ -47,6 +47,7 @@ import {
 import {
   getRunningTasks, cancelEtl, getConnections,
   TaskStatus, SourceConnection, cancelReprocess,
+  cancelPendingAnalysisRequests,
 } from "../services/api";
 
 const DRAWER_WIDTH = 280;
@@ -106,6 +107,7 @@ export default function Layout() {
   const [runningTasks, setRunningTasks] = useState<TaskStatus[]>([]);
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(true);
+  const skipRouteCancelRef = useRef(true);
 
   useEffect(() => {
     getConnections().then(setConnections).catch(() => {});
@@ -122,6 +124,14 @@ export default function Layout() {
     const interval = setInterval(pollTasks, 3000);
     return () => clearInterval(interval);
   }, [pollTasks]);
+
+  useEffect(() => {
+    if (skipRouteCancelRef.current) {
+      skipRouteCancelRef.current = false;
+      return;
+    }
+    cancelPendingAnalysisRequests();
+  }, [location.pathname]);
 
   const doCancelTask = async (taskId: number, e: React.MouseEvent) => {
     e.stopPropagation();

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Literal
+from typing import Literal, Any
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, delete as sa_delete, or_
 from app.database import get_db
@@ -94,6 +95,10 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
         extractor = GcpBigQueryExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "oci":
+        from app.services.oci_extractor import OciExtractor
+        extractor = OciExtractor(conn)
+        return await extractor.scan(db)
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
@@ -125,14 +130,35 @@ async def clear_skipped_blobs(
 
 @router.delete("/blobs/{blob_id}", status_code=204)
 async def delete_ingested_blob(blob_id: int, db: AsyncSession = Depends(get_db)):
-    """Remove ingestion metadata; financial rows live in Iceberg/Parquet."""
-    result = await db.execute(select(IngestedBlob).where(IngestedBlob.id == blob_id))
-    blob = result.scalar_one_or_none()
-    if not blob:
-        # The UI can retry a delete after the metadata was already removed.
-        # Treat it as success so deletion remains idempotent.
+    """Remove ingestion metadata and physical Bronze rows from Iceberg."""
+    from app.services.iceberg_service import delete_bronze_slice
+
+    result = await db.execute(
+        select(IngestedBlob, SourceConnection.code)
+        .join(SourceConnection, SourceConnection.id == IngestedBlob.connection_id)
+        .where(IngestedBlob.id == blob_id)
+    )
+    row = result.first()
+    if not row:
         return
 
+    blob, conn_code = row
+
+    # 1. Remover dados físicos da camada Bronze no Apache Iceberg
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: delete_bronze_slice(
+                conn_code,
+                blob_path=blob.blob_path,
+                billing_period=blob.billing_period,
+            )
+        )
+    except Exception as exc:
+        logger.warning("Falha ao remover slice Bronze para blob %d: %s", blob_id, exc)
+
+    # 2. Remover metadados do PostgreSQL
     await db.execute(text("DELETE FROM ingested_blob WHERE id = :blob_id"), {"blob_id": blob_id})
     await db.commit()
 
@@ -199,21 +225,42 @@ async def download_ingested_blob(
         )
 
 
-
 @router.delete("/blobs/", status_code=204)
 async def delete_all_ingested_blobs(
     connection_id: int = Query(..., description="Connection ID to clear all data for"),
     billing_period: str | None = Query(None, description="Optional: only clear a specific period"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove ingestion metadata (optionally filtered by period)."""
+    """Remove ingestion metadata and Bronze rows (optionally filtered by period)."""
+    from app.services.iceberg_service import delete_bronze_slice, reset_bronze
+
+    conn_res = await db.execute(select(SourceConnection).where(SourceConnection.id == connection_id))
+    conn = conn_res.scalar_one_or_none()
+
+    # 1. Remover dados físicos da camada Bronze no Apache Iceberg
+    if conn:
+        try:
+            loop = asyncio.get_running_loop()
+            if billing_period:
+                await loop.run_in_executor(
+                    None,
+                    lambda: delete_bronze_slice(conn.code, billing_period=billing_period)
+                )
+            else:
+                await loop.run_in_executor(
+                    None,
+                    lambda: reset_bronze(conn.code)
+                )
+        except Exception as exc:
+            logger.warning("Falha ao remover Bronze para conexao %d: %s", connection_id, exc)
+
+    # 2. Remover metadados do PostgreSQL
     where = "WHERE ib.connection_id = :connection_id"
     params: dict = {"connection_id": connection_id}
     if billing_period:
         where += " AND ib.billing_period = :billing_period"
         params["billing_period"] = billing_period
 
-    # Delete the ingested blobs
     await db.execute(text(f"""
         DELETE FROM ingested_blob {where}
     """), params)
@@ -230,7 +277,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type not in ("azure_blob", "gcp_bigquery"):
+    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -447,6 +494,14 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 
+    if conn.connector_type == "oci":
+        try:
+            from app.services.oci_extractor import OciExtractor
+            result = OciExtractor(conn).test_connection()
+            return result
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
     return {
         "status": "NOT_IMPLEMENTED",
         "message": f"Test not implemented for {conn.connector_type}",
@@ -630,7 +685,6 @@ def _process_blob_for_reprocess(
     from app.services import iceberg_service as iceberg
     from app.services.task_runner import (
         _apply_business_rule_sync, _apply_classifications_sync,
-        _apply_project_subscription_lookup,
         _check_cancelled, _inmemory_tasks,
     )
     from app.services.mapping_transforms import apply_mappings
@@ -730,14 +784,6 @@ def _process_blob_for_reprocess(
                     proj_map=proj_cache,
                     hierarchy_cache=hierarchy_cache,
                 )
-            _apply_project_subscription_lookup(
-                target,
-                connection_cloud_name,
-                dept_cache,
-                proj_cache,
-                hierarchy_cache,
-                project_rows=project_rows,
-            )
 
             if target.empty:
                 continue
@@ -866,7 +912,7 @@ def _reprocess_destination_sync(
 
         # Gather Bronze blobs per connection. Azure deduplicates stale export
         # executions; GCP keeps the configured current BigQuery table.
-        all_blobs: list[tuple[int, int, str]] = []  # (blob_id, connection_id, billing_period)
+        all_blobs: list[tuple[int, int, str, str]] = []  # (blob_id, connection_id, billing_period, blob_path)
         for cid in connection_ids:
             conn = session.get(SourceConnection, cid)
             connector_type = conn.connector_type if conn else ""
@@ -887,17 +933,17 @@ def _reprocess_destination_sync(
                 connector_type=connector_type,
                 preferred_table=preferred_table,
             ):
-                all_blobs.append((blob_id, cid, period))
+                all_blobs.append((blob_id, cid, period, path))
 
         total_blobs = len(all_blobs)
         expected_rows_by_blob = {
             blob_id: (session.get(IngestedBlob, blob_id).row_count or 0)
-            for blob_id, _, _ in all_blobs
+            for blob_id, _, _, _ in all_blobs
             if session.get(IngestedBlob, blob_id) is not None
         }
         expected_input_rows = sum(
             (session.get(IngestedBlob, blob_id).row_count or 0)
-            for blob_id, _, _ in all_blobs
+            for blob_id, _, _, _ in all_blobs
             if session.get(IngestedBlob, blob_id) is not None
         )
         status["total_blobs"] = total_blobs
@@ -913,7 +959,7 @@ def _reprocess_destination_sync(
         conn_map: dict[int, SourceConnection] = {}
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, proj_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
-        unique_cids = set(cid for _, cid, _ in all_blobs)
+        unique_cids = set(cid for _, cid, _, _ in all_blobs)
         output_cols = {'departamento', 'centro_custo',
                        'ambiente', 'custom_fields', 'subscription_rg',
                        'departamento_nivel_1', 'departamento_nivel_2',
@@ -1107,7 +1153,11 @@ def _reprocess_destination_sync(
         def _memory_exceeded() -> bool:
             return psutil.Process(os.getpid()).memory_info().rss >= memory_limit
 
-        for blob_id, cid, bperiod in all_blobs:
+        from app.services.csv_upload_service import is_current_billing_period, should_skip_gold_realizado
+
+        skipped_gold_blobs = 0
+        skipped_input_rows = 0
+        for blob_id, cid, bperiod, blob_path in all_blobs:
             if _check_cancelled(task_id):
                 status["status"] = "CANCELLED"
                 return {"success": False, "error": "Cancelado", "rows_written": 0}
@@ -1130,6 +1180,36 @@ def _reprocess_destination_sync(
                     _sync_db()
                     continue
                 conn = conn_map[cid]
+
+                skip_sample = None
+                if is_current_billing_period(bperiod):
+                    try:
+                        skip_sample = iceberg.read_bronze(
+                            conn.code,
+                            blob_path=blob_path,
+                            billing_period=bperiod,
+                            max_rows=min(expected_rows_by_blob.get(blob_id, 5000), 5000),
+                        )
+                    except Exception:
+                        skip_sample = None
+                skip_gold, skip_message = should_skip_gold_realizado(
+                    bperiod,
+                    connection_config=conn.config_json or {},
+                    df=skip_sample,
+                )
+                if skip_gold:
+                    skipped_gold_blobs += 1
+                    skipped_input_rows += expected_rows_by_blob.get(blob_id, 0)
+                    note = skip_message or (
+                        f"Blob {blob_id} ({bperiod}): granularidade mensal no mês corrente — "
+                        "publicação Gold realizado ignorada"
+                    )
+                    _append_reprocess_log(task_id, note, details={"blob_id": blob_id, "billing_period": bperiod})
+                    status["current_blob"] = note
+                    processed += 1
+                    status["processed_blobs"] = processed
+                    _sync_db()
+                    continue
 
                 blob_input_rows = 0
                 blob_output_rows = 0
@@ -1158,10 +1238,14 @@ def _reprocess_destination_sync(
                     project_rows=project_rows,
                 )
                 expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
-                if blob_input_rows != expected_blob_rows or blob_output_rows < expected_blob_rows:
+                if blob_input_rows == 0:
+                    raise RuntimeError(
+                        f"Nenhuma linha encontrada no Bronze para o blob {blob_id} ({bperiod})"
+                    )
+                if blob_output_rows < blob_input_rows:
                     raise RuntimeError(
                         f"Contagem divergente no blob {blob_id} ({bperiod}): "
-                        f"esperado {expected_blob_rows}, lido {blob_input_rows}, "
+                        f"esperado pelo menos {blob_input_rows}, lido {blob_input_rows}, "
                         f"escrito {blob_output_rows}"
                     )
                 processed += 1
@@ -1198,9 +1282,10 @@ def _reprocess_destination_sync(
             status["current_blob"] = "Nenhum dado processado"
             return {"success": True, "rows_written": 0, "table": dest_info.name}
 
-        if total_rows_processed < expected_input_rows:
+        expected_output_rows = max(0, expected_input_rows - skipped_input_rows)
+        if total_rows_processed < expected_output_rows:
             msg = (
-                f"Contagem de entrada/saída divergente: entrada {expected_input_rows:,}, "
+                f"Contagem de entrada/saída divergente: entrada {expected_output_rows:,}, "
                 f"saída {total_rows_processed:,}. Reprocessamento abortado; destino anterior preservado."
             )
             status["status"] = "FAILED"
@@ -1650,3 +1735,241 @@ async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db))
 
     task_id = await scheduler_service.run_etl_and_reprocess(sched.connection_id)
     return {"task_id": task_id, "connection_id": sched.connection_id, "schedule_name": sched.name}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Extraction History & Server-Side Bronze DataGrid
+# ═══════════════════════════════════════════════════════════════════════
+
+class ExtractionHistoryQueryIn(BaseModel):
+    offset: int = 0
+    limit: int = 100
+    search: str = ""
+    filters: dict[str, Any] = {}
+    sort_field: str | None = None
+    sort_direction: str = "asc"
+
+
+def _qi_trino(identifier: str) -> str:
+    """Escape Trino identifier safely."""
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
+
+
+@router.get("/history")
+async def get_extraction_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    connection_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista o histórico de execuções de extração (ETL tasks)."""
+    from app.models.etl_task import EtlTask
+    query = (
+        select(
+            EtlTask,
+            SourceConnection.code.label("connection_code"),
+            SourceConnection.name.label("connection_name"),
+            SourceConnection.connector_type.label("connector_type"),
+        )
+        .outerjoin(SourceConnection, SourceConnection.id == EtlTask.connection_id)
+        .where(EtlTask.task_type == "extraction")
+    )
+    if connection_id:
+        query = query.where(EtlTask.connection_id == connection_id)
+
+    query = query.order_by(EtlTask.id.desc()).offset(offset).limit(limit)
+    rows = (await db.execute(query)).all()
+
+    result = []
+    for task_row, conn_code, conn_name, connector_type in rows:
+        result.append({
+            "id": task_row.id,
+            "status": task_row.status,
+            "connection_id": task_row.connection_id,
+            "connection_code": conn_code,
+            "connection_name": conn_name,
+            "connector_type": connector_type,
+            "total_blobs": task_row.total_blobs,
+            "processed_blobs": task_row.processed_blobs,
+            "rows_raw": task_row.rows_raw,
+            "rows_normalized": task_row.rows_normalized,
+            "rows_destination": task_row.rows_destination,
+            "phase": task_row.phase,
+            "errors": task_row.errors or [],
+            "started_at": task_row.started_at,
+            "finished_at": task_row.finished_at,
+            "billing_periods": task_row.billing_periods or [],
+            "result_json": task_row.result_json,
+        })
+    return result
+
+
+@router.get("/history/{task_id}/metadata")
+async def get_extraction_history_metadata(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Retorna metadados e colunas da tabela Bronze para visualização da tarefa."""
+    from app.models.etl_task import EtlTask
+    from app.services import trino_service as trino
+
+    task = await db.get(EtlTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+
+    conn = await db.get(SourceConnection, task.connection_id) if task.connection_id else None
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conexão associada não encontrada")
+
+    safe_code = conn.code.replace("-", "_").replace(".", "_")
+    table_name = f"raw_{safe_code}"
+
+    # Obter colunas via Trino
+    try:
+        cols_raw = await trino.execute(f"DESCRIBE iceberg.bronze.{_qi_trino(table_name)}")
+        columns = [r["Column"] for r in cols_raw if r.get("Column")]
+    except Exception as exc:
+        logger.warning("Falha ao descrever tabela Bronze %s no Trino: %s", table_name, exc)
+        columns = []
+
+    # Obter contagem total de linhas
+    total_count = task.rows_raw or 0
+    try:
+        count_res = await trino.execute(f"SELECT COUNT(*) AS total FROM iceberg.bronze.{_qi_trino(table_name)}")
+        if count_res and "total" in count_res[0]:
+            total_count = int(count_res[0]["total"])
+    except Exception:
+        pass
+
+    return {
+        "task_id": task.id,
+        "connection_id": conn.id,
+        "connection_code": conn.code,
+        "connection_name": conn.name,
+        "connector_type": conn.connector_type,
+        "table_name": f"iceberg.bronze.{table_name}",
+        "columns": columns,
+        "total_rows": total_count,
+        "status": task.status,
+        "started_at": task.started_at,
+        "finished_at": task.finished_at,
+        "phase": task.phase,
+    }
+
+
+@router.post("/history/{task_id}/query")
+async def query_extraction_history_data(
+    task_id: int,
+    body: ExtractionHistoryQueryIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Consulta paginada com filtros e busca server-side via Trino para o DataGrid da tarefa."""
+    from app.models.etl_task import EtlTask
+    from app.services import trino_service as trino
+
+    task = await db.get(EtlTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+
+    conn = await db.get(SourceConnection, task.connection_id) if task.connection_id else None
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conexão associada não encontrada")
+
+    safe_code = conn.code.replace("-", "_").replace(".", "_")
+    table_name = f"raw_{safe_code}"
+
+    # Descrever tabela para saber colunas válidas
+    try:
+        cols_raw = await trino.execute(f"DESCRIBE iceberg.bronze.{_qi_trino(table_name)}")
+        valid_cols = {r["Column"] for r in cols_raw if r.get("Column")}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao acessar tabela Bronze no Trino: {exc}")
+
+    where_clauses = []
+
+    # 1. Filtro global de texto
+    if body.search and body.search.strip():
+        search_term = body.search.strip().replace("'", "''")
+        # Aplicar busca em até 10 colunas textuais principais
+        search_candidates = [c for c in valid_cols if not c.startswith("_")][:10]
+        if search_candidates:
+            search_parts = [f"LOWER(CAST({_qi_trino(c)} AS VARCHAR)) LIKE '%{search_term.lower()}%'" for c in search_candidates]
+            where_clauses.append(f"({' OR '.join(search_parts)})")
+
+    # 2. Filtros de coluna do DataGrid
+    if body.filters:
+        for field, filter_def in body.filters.items():
+            if field not in valid_cols:
+                continue
+            if isinstance(filter_def, dict):
+                op = filter_def.get("operator", "equals")
+                val = filter_def.get("value")
+            else:
+                op = "equals"
+                val = filter_def
+
+            if val is None or val == "":
+                continue
+
+            escaped_col = _qi_trino(field)
+            if op == "equals":
+                val_escaped = str(val).replace("'", "''")
+                where_clauses.append(f"CAST({escaped_col} AS VARCHAR) = '{val_escaped}'")
+            elif op == "notEquals":
+                val_escaped = str(val).replace("'", "''")
+                where_clauses.append(f"(CAST({escaped_col} AS VARCHAR) != '{val_escaped}' OR {escaped_col} IS NULL)")
+            elif op == "contains":
+                val_escaped = str(val).replace("'", "''").lower()
+                where_clauses.append(f"LOWER(CAST({escaped_col} AS VARCHAR)) LIKE '%{val_escaped}%'")
+            elif op == "isAnyOf" and isinstance(val, (list, tuple)):
+                items = []
+                for v in val:
+                    if v:
+                        v_str = str(v).replace("'", "''")
+                        items.append(f"'{v_str}'")
+                if items:
+                    items_str = ", ".join(items)
+                    where_clauses.append(f"CAST({escaped_col} AS VARCHAR) IN ({items_str})")
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    # Ordenação
+    order_sql = ""
+    if body.sort_field and body.sort_field in valid_cols:
+        direction = "DESC" if body.sort_direction.lower() == "desc" else "ASC"
+        order_sql = f" ORDER BY {_qi_trino(body.sort_field)} {direction}"
+    elif "_ingested_at" in valid_cols:
+        order_sql = " ORDER BY _ingested_at DESC"
+    elif "_billing_period" in valid_cols:
+        order_sql = " ORDER BY _billing_period DESC"
+
+    # Query de registros
+    limit = max(1, min(body.limit, 500))
+    offset = max(0, body.offset)
+    sql_data = f"SELECT * FROM iceberg.bronze.{_qi_trino(table_name)}{where_sql}{order_sql} OFFSET {offset} LIMIT {limit}"
+
+    # Query de contagem total
+    sql_count = f"SELECT COUNT(*) AS total FROM iceberg.bronze.{_qi_trino(table_name)}{where_sql}"
+
+    try:
+        records = await trino.execute(sql_data, timeout_s=60)
+        count_res = await trino.execute(sql_count, timeout_s=60)
+        total_rows = int(count_res[0]["total"]) if count_res and "total" in count_res[0] else len(records)
+    except Exception as exc:
+        logger.error("Erro ao executar query Bronze no Trino: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Erro ao consultar Trino: {exc}")
+
+    columns_list = list(valid_cols)
+    # Ordenar colunas colocando as principais no início
+    priority_order = ["_billing_period", "_blob_path", "product/service", "cost/myCost", "usage/billedQuantity", "lineItem/intervalUsageStart"]
+    columns_list.sort(key=lambda c: priority_order.index(c) if c in priority_order else 999)
+
+    return {
+        "task_id": task_id,
+        "connection_code": conn.code,
+        "connection_name": conn.name,
+        "table_name": f"iceberg.bronze.{table_name}",
+        "columns": columns_list,
+        "records": records,
+        "total_records": total_rows,
+        "offset": offset,
+        "limit": limit,
+    }

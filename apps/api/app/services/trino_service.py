@@ -12,6 +12,7 @@ import logging
 import os
 import time
 import asyncio
+import contextlib
 from typing import Any
 from urllib.parse import urljoin
 
@@ -44,6 +45,10 @@ _RETRYABLE_MARKERS = (
 
 class TrinoError(Exception):
     """Raised when a Trino statement fails."""
+
+
+class TrinoCancelled(TrinoError):
+    """Raised when the caller aborts a running Trino statement."""
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -83,6 +88,7 @@ async def execute(
     catalog: str | None = None,
     timeout_s: float = 60.0,
     max_retries: int | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> list[dict[str, Any]]:
     """
     Execute a SQL statement against Trino and return rows as list of dicts.
@@ -100,7 +106,9 @@ async def execute(
             if wait_for_coordinator:
                 remaining = max(5.0, TRINO_READY_WAIT_S - 5.0 * attempt)
                 await wait_until_ready(timeout_s=remaining)
-            return await _execute_once(sql, catalog, timeout_s)
+            return await _execute_once(sql, catalog, timeout_s, cancel_event)
+        except TrinoCancelled:
+            raise
         except Exception as exc:
             if not _is_retryable(exc):
                 raise
@@ -119,10 +127,55 @@ async def execute(
     ) from last_error
 
 
+async def _cancel_trino(client: httpx.AsyncClient, uri: str | None, headers: dict[str, str]) -> None:
+    if not uri:
+        return
+    try:
+        await client.delete(uri, headers=headers)
+    except Exception:
+        logger.debug("Failed to cancel Trino query at %s", uri, exc_info=True)
+
+
+async def _request_with_cancel(
+    client: httpx.AsyncClient,
+    method: str,
+    uri: str,
+    headers: dict[str, str],
+    cancel_event: asyncio.Event | None,
+    cancel_uri: str | None,
+    *,
+    content: str | None = None,
+) -> httpx.Response:
+    """Run an httpx request but abort promptly when cancel_event is set."""
+    if cancel_event and cancel_event.is_set():
+        await _cancel_trino(client, cancel_uri or uri, headers)
+        raise TrinoCancelled("Trino query cancelled")
+
+    request_coro = client.post(uri, headers=headers, content=content) if method == "POST" else client.get(uri, headers=headers)
+    fetch = asyncio.create_task(request_coro)
+    cancel_wait = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+    try:
+        if cancel_wait:
+            done, _ = await asyncio.wait({fetch, cancel_wait}, return_when=asyncio.FIRST_COMPLETED)
+            if cancel_wait in done and cancel_event and cancel_event.is_set():
+                fetch.cancel()
+                with contextlib.suppress(asyncio.CancelledError, httpx.HTTPError):
+                    await fetch
+                await _cancel_trino(client, cancel_uri or uri, headers)
+                raise TrinoCancelled("Trino query cancelled")
+        return await fetch
+    finally:
+        if cancel_wait and not cancel_wait.done():
+            cancel_wait.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_wait
+
+
 async def _execute_once(
     sql: str,
     catalog: str | None = None,
     timeout_s: float = 60.0,
+    cancel_event: asyncio.Event | None = None,
 ) -> list[dict[str, Any]]:
     effective_catalog = catalog or TRINO_CATALOG
     headers = {
@@ -132,9 +185,13 @@ async def _execute_once(
     }
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s)) as client:
+        if cancel_event and cancel_event.is_set():
+            raise TrinoCancelled("Trino query cancelled")
         # 1 — Submit statement
         submit_url = urljoin(TRINO_URL, "/v1/statement")
-        resp = await client.post(submit_url, headers=headers, content=sql)
+        resp = await _request_with_cancel(
+            client, "POST", submit_url, headers, cancel_event, submit_url, content=sql,
+        )
         if resp.status_code in (502, 503) and "QUEUED" not in resp.text:
             raise TrinoError(f"Trino error {resp.status_code}: coordinator ocupado ou reiniciando")
         if resp.status_code == 503 and "QUEUED" in resp.text:
@@ -148,18 +205,23 @@ async def _execute_once(
         except json.JSONDecodeError as exc:
             raise TrinoError(f"Trino error {resp.status_code}: resposta inválida do coordinator") from exc
         next_uri = data.get("nextUri")
+        cancel_uri = data.get("partialCancelUri") or next_uri
         columns = [c["name"] for c in data.get("columns", [])]
         rows: list[list[Any]] = data.get("data", []) or []
 
         # 2 — Follow nextUri until finished
         deadline = time.monotonic() + timeout_s
         while next_uri:
+            if cancel_event and cancel_event.is_set():
+                await _cancel_trino(client, cancel_uri or next_uri, headers)
+                raise TrinoCancelled("Trino query cancelled")
             if time.monotonic() > deadline:
-                # Cancel the query
-                await client.delete(next_uri, headers=headers)
+                await _cancel_trino(client, cancel_uri or next_uri, headers)
                 raise TrinoError("Trino query timed out")
 
-            resp = await client.get(next_uri, headers=headers)
+            resp = await _request_with_cancel(
+                client, "GET", next_uri, headers, cancel_event, cancel_uri or next_uri,
+            )
             if resp.status_code in (502, 503, 429):
                 raise TrinoError(f"Trino error {resp.status_code}: coordinator ocupado ou reiniciando")
             if resp.status_code != 200:
@@ -172,6 +234,7 @@ async def _execute_once(
             if page.get("error"):
                 _raise_trino_error(resp)
             next_uri = page.get("nextUri")
+            cancel_uri = page.get("partialCancelUri") or next_uri or cancel_uri
             # Trino may return columns only after a queued query starts
             # running. Preserve the schema from the first page that provides
             # it instead of assuming it is present in the initial response.

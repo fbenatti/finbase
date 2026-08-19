@@ -26,7 +26,9 @@ export default function ExpectedView() {
   const [cumulative, setCumulative] = useState(true);
   const [reloadNonce, setReloadNonce] = useState(0);
   useEffect(() => {
+    let cancelled = false;
     getDepartments().then((departments: Department[]) => {
+      if (cancelled) return;
       const flat = flattenDepartments(departments).filter(department => department.active);
       setDepartmentOptions(flat);
       setOrganization(departments);
@@ -38,7 +40,8 @@ export default function ExpectedView() {
       }
     }).catch(() => {
       // The current director remains usable if the hierarchy is temporarily unavailable.
-    }).finally(() => setOrganizationLoaded(true));
+    }).finally(() => { if (!cancelled) setOrganizationLoaded(true); });
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
     // Wait for the tree before querying.  Previously the page sent one broad
@@ -49,12 +52,13 @@ export default function ExpectedView() {
     setLoading(true);
     setError("");
     const selectedId = departmentOptions.find(department => department.path === director)?.id;
-    getExpectedView(director, periodFilter === "all" || periodFilter === "current" ? new Date().getFullYear() : Number(periodFilter), departmentId ?? selectedId, controller.signal).then(result => { setRows(result.rows); setDrivers(result.drivers); }).catch(e => {
+    const year = periodFilter === "all" || periodFilter === "current" ? new Date().getFullYear() : Number(periodFilter);
+    getExpectedView(director, year, departmentId ?? selectedId, controller.signal).then(result => { setRows(result.rows); setDrivers(result.drivers); }).catch(e => {
       if ((e as { code?: string }).code === "ERR_CANCELED" || controller.signal.aborted) return;
       setError(formatApiError(e, "Não foi possível carregar a Visão Esperada"));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [director, departmentId, departmentOptions, organizationLoaded, periodFilter, reloadNonce]);
+  }, [director, departmentId, organizationLoaded, periodFilter, reloadNonce]);
   const years = [...new Set(rows.map(row => row.period.slice(0, 4)))].sort();
   const filteredRows = periodFilter === "all" ? rows : periodFilter === "current" ? rows.filter(row => row.period.startsWith(String(new Date().getFullYear()))) : rows.filter(row => row.period.startsWith(periodFilter));
   const toDate = (period: string) => period.length === 6 ? `${period.slice(0, 4)}-${period.slice(4, 6)}-01` : period;

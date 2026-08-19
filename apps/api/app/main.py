@@ -32,12 +32,19 @@ async def lifespan(app: FastAPI):
         # asyncpg executes prepared statements and rejects multi-command SQL,
         # so each migration operation must be sent independently.
         for statement in (
+            "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS charge_end_column VARCHAR(200)",
+            "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS connection_allocation_rules JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS config_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS destination_table_id_snapshot INTEGER",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS destination_physical_name VARCHAR(200)",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS source_snapshot_id VARCHAR(100)",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS classification_version_id INTEGER",
             "ALTER TABLE forecast_run ALTER COLUMN forecast_config_id DROP NOT NULL",
+            "ALTER TABLE forecast_business_rule ADD COLUMN IF NOT EXISTS identification_clauses JSONB NOT NULL DEFAULT '[]'::jsonb",
+            'ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "MarketplaceProductName" TEXT',
+            'ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "MarketplaceOfferUnit" TEXT',
+            'ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "MarketplaceBillingModel" TEXT',
         ):
             await conn.execute(text(statement))
         await conn.execute(text("""
@@ -110,13 +117,15 @@ async def lifespan(app: FastAPI):
 
     async with async_session() as db:
         await seed(db)
-        from app.routers.forecast import ensure_default_config, ensure_focus_forecast_rules
+        from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules
         await ensure_default_config(db)
-        await ensure_focus_forecast_rules(db)
+        await ensure_provider_forecast_rules(db)
         from app.routers.planning import ensure_default_financial_types
         await ensure_default_financial_types(db)
         from app.routers.clone_rules import ensure_focus_templates
         await ensure_focus_templates(db)
+        from seed_marketplace_focus import ensure_marketplace_focus
+        ensure_marketplace_focus()
 
     # Start the ETL scheduler
     await scheduler_service.start_scheduler()

@@ -206,80 +206,96 @@ def main():
         logger.info(f"Processamento de Projetos concluído: {projects_created} criados, {projects_updated} atualizados.")
 
         # 5. Criar / Atualizar Regras de Classificação na tabela `classification_rule`
+        DEST_FIELD = "SubAccountId"
+        cur.execute("SELECT id FROM destination_table WHERE upper(name) = 'MODELO FOCUS' LIMIT 1")
+        focus_row = cur.fetchone()
+        focus_table_id = focus_row[0] if focus_row else 1
+
         rules_to_insert = [
             {
                 "name": "GCP-TTech | Vicky",
                 "cloud_scope": "gcp",
-                "connection_id": 8, # gcp-ttech
+                "connection_id": 8,
                 "department_id": dept_vicky_id,
-                "source_field": "resourceGroupName",
-                "pattern": "resourceGroupName~vicky",
-                "pattern_type": "multi_condition",
                 "match_value": "Vicky",
-                "target_field": "departamento",
                 "priority": 10,
-                "conditions": [{"field": "resourceGroupName", "op": "~", "value": "vicky"}]
+                "conditions": [{"field": DEST_FIELD, "operator": "~", "values": ["vicky"], "logic": "AND"}],
             },
             {
                 "name": "GCP-TTech | DEPARTAMENTAIS",
                 "cloud_scope": "gcp",
-                "connection_id": 8, # gcp-ttech
+                "connection_id": 8,
                 "department_id": dept_dpt_id,
-                "source_field": "resourceGroupName",
-                "pattern": "resourceGroupName~dpt|departament",
-                "pattern_type": "multi_condition",
                 "match_value": "DEPARTAMENTAIS",
-                "target_field": "departamento",
                 "priority": 20,
-                "conditions": [{"field": "resourceGroupName", "op": "~", "value": "dpt|departament"}]
+                "conditions": [{"field": DEST_FIELD, "operator": "~", "values": ["dpt", "departament"], "logic": "AND"}],
             },
             {
                 "name": "GCP-TTech | TI Padrão",
                 "cloud_scope": "gcp",
-                "connection_id": 8, # gcp-ttech
+                "connection_id": 8,
                 "department_id": dept_ti_id,
-                "source_field": "resourceGroupName",
-                "pattern": "resourceGroupName~ti-|vivo-ti",
-                "pattern_type": "multi_condition",
                 "match_value": "SEM PROJETO DEFINIDO",
-                "target_field": "departamento",
                 "priority": 100,
-                "conditions": [{"field": "resourceGroupName", "op": "~", "value": "ti-|vivo-ti"}]
-            }
+                "conditions": [{"field": DEST_FIELD, "operator": "~", "values": ["ti-", "vivo-ti"], "logic": "AND"}],
+            },
         ]
 
         for rule in rules_to_insert:
-            cur.execute("""
-                SELECT id FROM classification_rule 
+            conditions = rule["conditions"]
+            pattern = " ; ".join(
+                f'{c["field"]}{c["operator"]}{"|".join(c["values"])}'
+                for c in conditions
+            )[:500]
+            cur.execute(
+                """
+                SELECT id FROM classification_rule
                 WHERE name = %s AND cloud_scope = 'gcp'
-            """, (rule["name"],))
+                """,
+                (rule["name"],),
+            )
             existing_rule = cur.fetchone()
-            
+
             if existing_rule:
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE classification_rule
-                    SET department_id = %s, pattern = %s, pattern_type = %s, 
-                        match_value = %s, conditions = %s, priority = %s, active = true, updated_at = NOW()
+                    SET department_id = %s, destination_table_id = %s,
+                        source_field = %s, pattern = %s, pattern_type = %s,
+                        match_value = %s, conditions = %s, priority = %s,
+                        active = true, updated_at = NOW()
                     WHERE id = %s
-                """, (
-                    rule["department_id"], rule["pattern"], rule["pattern_type"],
-                    rule["match_value"], json.dumps(rule["conditions"]), rule["priority"], existing_rule[0]
-                ))
-                logger.info(f"Regra de classificação atualizada: '{rule['name']}' (ID: {existing_rule[0]})")
+                    """,
+                    (
+                        rule["department_id"], focus_table_id,
+                        DEST_FIELD, pattern, "multi_condition",
+                        rule["match_value"], json.dumps(conditions), rule["priority"],
+                        existing_rule[0],
+                    ),
+                )
+                logger.info("Regra de classificação atualizada: '%s' (ID: %s)", rule["name"], existing_rule[0])
             else:
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO classification_rule (
-                        name, cloud_scope, connection_id, department_id, source_field,
-                        pattern, pattern_type, match_value, target_field, priority, conditions, active, created_at, updated_at
+                        name, cloud_scope, connection_id, destination_table_id,
+                        department_id, source_field, pattern, pattern_type,
+                        match_value, target_field, priority, conditions,
+                        active, created_at, updated_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, NOW(), NOW()
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, 'departamento', %s, %s,
+                        true, NOW(), NOW()
                     )
-                """, (
-                    rule["name"], rule["cloud_scope"], rule["connection_id"], rule["department_id"],
-                    rule["source_field"], rule["pattern"], rule["pattern_type"], rule["match_value"],
-                    rule["target_field"], rule["priority"], json.dumps(rule["conditions"])
-                ))
-                logger.info(f"Regra de classificação criada: '{rule['name']}'")
+                    """,
+                    (
+                        rule["name"], rule["cloud_scope"], rule["connection_id"], focus_table_id,
+                        rule["department_id"], DEST_FIELD, pattern, "multi_condition",
+                        rule["match_value"], rule["priority"], json.dumps(conditions),
+                    ),
+                )
+                logger.info("Regra de classificação criada: '%s'", rule["name"])
 
         conn.commit()
         logger.info("=== Todas as alterações foram confirmadas no banco com sucesso! ===")

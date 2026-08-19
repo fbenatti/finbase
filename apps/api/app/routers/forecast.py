@@ -17,6 +17,12 @@ from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
+class ConnectionAllocationRuleIn(BaseModel):
+    connection_id: int | None = None
+    connection_code: str | None = None
+    period_allocation: Literal["charge_interval"] = "charge_interval"
+    charge_end_column: str | None = None
+
 class ConfigIn(BaseModel):
     name: str = "Forecast padrão FinOps"
     description: str | None = None
@@ -36,6 +42,9 @@ class ConfigIn(BaseModel):
     minimum_daily_points: int = 7
     minimum_monthly_points: int = 3
     null_dimension_label: str = "Não classificado"
+    period_allocation: Literal["none", "charge_interval"] = "none"
+    charge_end_column: str | None = None
+    connection_allocation_rules: list[ConnectionAllocationRuleIn] = []
     active: bool = True
 
 class AdjustmentIn(BaseModel):
@@ -49,10 +58,15 @@ class AdjustmentIn(BaseModel):
     priority: int = 0
     active: bool = True
 
+class IdentificationClauseIn(BaseModel):
+    column: str
+    values: list[str] = []
+
 class BusinessRuleIn(BaseModel):
     name: str
-    identification_column: str
+    identification_column: str = ""
     identification_values: list[str] = []
+    identification_clauses: list[IdentificationClauseIn] = []
     charge_type: str = "Usage"
     behavior: str = "RECURRING_MONTHLY"
     reference_column: str | None = None
@@ -171,6 +185,8 @@ def _config_snapshot(config: ForecastConfig, destination: DestinationTable) -> d
         "period_column": config.period_column, "type_column": config.type_column,
         "dimensions": list(config.dimensions or []), "currency_column": config.currency_column,
         "cutoff_days": config.cutoff_days, "horizon_months": config.horizon_months,
+        "period_allocation": config.period_allocation, "charge_end_column": config.charge_end_column,
+        "connection_allocation_rules": list(config.connection_allocation_rules or []),
     }
 
 async def ensure_default_config(db: AsyncSession) -> None:
@@ -196,27 +212,145 @@ async def ensure_default_config(db: AsyncSession) -> None:
         period_column=metadata.get("default_period"),
         type_column="tipo",
         dimensions=metadata.get("recommended_dimensions", []),
+        period_allocation=metadata.get("default_period_allocation", "none"),
+        charge_end_column=metadata.get("default_charge_end_column"),
+        connection_allocation_rules=[],
     )
     db.add(row)
     await db.commit()
 
 async def ensure_focus_forecast_rules(db: AsyncSession) -> None:
-    """Install editable Forecast templates once for existing/new FOCUS configs."""
-    configs=(await db.execute(select(ForecastConfig))).scalars().all()
+    """Backward-compatible alias for provider rule seeding."""
+    await ensure_provider_forecast_rules(db)
+
+
+PROVIDER_RULE_PACKS: dict[str, list[dict[str, Any]]] = {
+    "azure_gcp": [
+        {
+            "name": "Purchase recorrente Savings Plan",
+            "identification_column": "chargecategory",
+            "identification_values": ["Purchase"],
+            "charge_type": "Purchase",
+            "behavior": "RECURRING_MONTHLY",
+            "reference_column": "commitmentdiscountid",
+            "priority": 10,
+            "scope": {},
+        },
+        {
+            "name": "Return simulado",
+            "identification_column": "chargecategory",
+            "identification_values": ["Return"],
+            "charge_type": "Return",
+            "behavior": "RECURRING_MONTHLY",
+            "reference_column": "commitmentdiscountid",
+            "priority": 11,
+            "scope": {},
+        },
+        {
+            "name": "Refund cancela compromisso",
+            "identification_column": "chargecategory",
+            "identification_values": ["Refund"],
+            "charge_type": "Refund",
+            "behavior": "CANCEL_ON_REFUND",
+            "reference_column": "commitmentdiscountid",
+            "priority": 12,
+            "scope": {},
+            "cancel_on_refund": True,
+        },
+    ],
+    "oci": [
+        {
+            "name": "OCI Refund cancela compromisso",
+            "identification_column": "chargecategory",
+            "identification_values": ["Refund"],
+            "charge_type": "Refund",
+            "behavior": "CANCEL_ON_REFUND",
+            "reference_column": "commitmentdiscountid",
+            "priority": 15,
+            "scope": {"cloud_origem": "oci-prod"},
+            "cancel_on_refund": True,
+        },
+    ],
+    "marketplace": [
+        {
+            "name": "Marketplace ONESHOT zera forecast",
+            "identification_clauses": [{"column": "marketplacebillingmodel", "values": ["ONESHOT"]}],
+            "charge_type": "Purchase",
+            "behavior": "REPLACE_VALUE",
+            "replacement_value": 0.0,
+            "priority": 5,
+            "scope": {},
+        },
+        {
+            "name": "Marketplace RECURRING mensal",
+            "identification_clauses": [{"column": "marketplacebillingmodel", "values": ["RECURRING"]}],
+            "charge_type": "Purchase",
+            "behavior": "RECURRING_MONTHLY",
+            "priority": 6,
+            "scope": {},
+        },
+    ],
+}
+
+
+async def ensure_provider_forecast_rules(
+    db: AsyncSession,
+    *,
+    config_id: int | None = None,
+    providers: list[str] | None = None,
+) -> dict[str, int]:
+    """Install editable provider rule templates for FOCUS forecast configs."""
+    selected = providers or list(PROVIDER_RULE_PACKS)
+    configs = []
+    if config_id is not None:
+        row = await db.get(ForecastConfig, config_id)
+        if row:
+            configs = [row]
+    else:
+        configs = (await db.execute(select(ForecastConfig))).scalars().all()
+    created = 0
     for config in configs:
-        dest=await db.get(DestinationTable, config.destination_table_id)
-        if not dest or "focus" not in f"{dest.name} {dest.physical_name}".lower(): continue
-        templates=[
-            ("Usage variável", "chargecategory", ["Usage"], "Usage", "RECURRING_MONTHLY"),
-            ("Return simulado", "chargecategory", ["Return"], "Return", "RECURRING_MONTHLY"),
-            ("Purchase recorrente Savings Plan", "chargecategory", ["Purchase"], "Purchase", "RECURRING_MONTHLY"),
-            ("Refund cancela compromisso", "chargecategory", ["Refund"], "Refund", "CANCEL_ON_REFUND"),
-        ]
-        for name, field, values, charge, behavior in templates:
-            exists=(await db.execute(select(ForecastBusinessRule.id).where(ForecastBusinessRule.forecast_config_id==config.id, ForecastBusinessRule.name==name))).scalar_one_or_none()
-            if not exists:
-                db.add(ForecastBusinessRule(forecast_config_id=config.id,name=name,identification_column=field,identification_values=values,charge_type=charge,behavior=behavior,reference_column="commitmentdiscountid",value_column=config.measure_column,start_period="202001",scope={},priority=10))
+        dest = await db.get(DestinationTable, config.destination_table_id)
+        if not dest or "focus" not in f"{dest.name} {dest.physical_name}".lower():
+            continue
+        all_templates: list[dict[str, Any]] = []
+        for provider in selected:
+            all_templates.extend(PROVIDER_RULE_PACKS.get(provider, []))
+        for template in all_templates:
+            exists = (
+                await db.execute(
+                    select(ForecastBusinessRule.id).where(
+                        ForecastBusinessRule.forecast_config_id == config.id,
+                        ForecastBusinessRule.name == template["name"],
+                    )
+                )
+            ).scalar_one_or_none()
+            if exists is not None:
+                continue
+            db.add(
+                ForecastBusinessRule(
+                    forecast_config_id=config.id,
+                    name=template["name"],
+                    identification_column=template.get("identification_column", ""),
+                    identification_values=list(template.get("identification_values", [])),
+                    identification_clauses=list(template.get("identification_clauses", [])),
+                    charge_type=template["charge_type"],
+                    behavior=template["behavior"],
+                    reference_column=template.get("reference_column"),
+                    reference_values=template.get("reference_values", []),
+                    value_column=config.measure_column,
+                    start_period=template.get("start_period", "202001"),
+                    end_period=template.get("end_period"),
+                    growth_rate=float(template.get("growth_rate", 0) or 0),
+                    replacement_value=template.get("replacement_value"),
+                    cancel_on_refund=bool(template.get("cancel_on_refund", False)),
+                    scope=dict(template.get("scope") or {}),
+                    priority=int(template.get("priority", 10)),
+                )
+            )
+            created += 1
     await db.commit()
+    return {"created": created}
 
 async def _dest_metadata(db, table_id):
     dest = await db.get(DestinationTable, table_id)
@@ -236,6 +370,11 @@ def _apply_destination_suggestions(dest: DestinationTable, metadata: dict[str, A
     focus_order = ("cloud_origem", "departamento", "servicename", "subaccountname")
     metadata["recommended_dimensions"] = [available[name] for name in focus_order if name in available]
     metadata["suggestion_profile"] = "FOCUS"
+    if "chargeperiodend" in available:
+        metadata["default_charge_end_column"] = available["chargeperiodend"]
+    else:
+        metadata["default_charge_end_column"] = None
+    metadata["default_period_allocation"] = "none"
     return metadata
 
 @router.get("/metadata/{destination_table_id}")
@@ -255,7 +394,7 @@ async def create_config(body: ConfigIn, db: AsyncSession = Depends(get_db)):
     row = ForecastConfig(**body.model_dump()); db.add(row); await db.commit(); await db.refresh(row)
     # A FOCUS configuration is usable out of the box: the editable business
     # rule templates are created with it instead of waiting for an API restart.
-    await ensure_focus_forecast_rules(db)
+    await ensure_provider_forecast_rules(db, config_id=row.id)
     return _out(row)
 
 @router.put("/configs/{config_id}")
@@ -297,7 +436,12 @@ async def validate(config_id: int, db: AsyncSession = Depends(get_db)):
     fields = {c["name"] for c in meta["columns"]}
     rules = (await db.execute(select(ForecastBusinessRule).where(ForecastBusinessRule.forecast_config_id == config_id, ForecastBusinessRule.active == True))).scalars().all()
     for rule in rules:
-        if rule.identification_column not in fields: errors.append(f"Regra '{rule.name}': coluna de identificação inválida: {rule.identification_column}")
+        for clause in rule.identification_clauses or []:
+            column = clause.get("column") if isinstance(clause, dict) else None
+            if column and column not in fields:
+                errors.append(f"Regra '{rule.name}': coluna de identificação inválida: {column}")
+        if rule.identification_column and rule.identification_column not in fields:
+            errors.append(f"Regra '{rule.name}': coluna de identificação inválida: {rule.identification_column}")
         if rule.reference_column and rule.reference_column not in fields: errors.append(f"Regra '{rule.name}': coluna de referência inválida: {rule.reference_column}")
         if rule.value_column and rule.value_column not in fields: errors.append(f"Regra '{rule.name}': coluna de valor inválida: {rule.value_column}")
         if not rule.start_period or len(rule.start_period) != 6: errors.append(f"Regra '{rule.name}': período inicial deve ser YYYYMM")
@@ -306,6 +450,7 @@ async def validate(config_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/configs/{config_id}/business-rules")
 async def list_business_rules(config_id: int, db: AsyncSession = Depends(get_db)):
     if not await db.get(ForecastConfig, config_id): raise HTTPException(404, "Configuração não encontrada")
+    await ensure_provider_forecast_rules(db, config_id=config_id)
     rows = (await db.execute(select(ForecastBusinessRule).where(ForecastBusinessRule.forecast_config_id == config_id).order_by(ForecastBusinessRule.priority, ForecastBusinessRule.id))).scalars().all()
     return [_out(r) for r in rows]
 
@@ -314,9 +459,20 @@ async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncS
     if not config: raise HTTPException(404, "Configuração não encontrada")
     dest, meta = await _dest_metadata(db, config.destination_table_id)
     fields = {c["name"] for c in meta["columns"]}
+    for clause in body.identification_clauses or []:
+        if clause.column and clause.column not in fields:
+            raise HTTPException(422, f"Coluna de identificação não existe na Gold: {clause.column}")
     for field, label in ((body.identification_column, "identificação"), (body.reference_column, "referência"), (body.value_column, "valor")):
         if field and field not in fields: raise HTTPException(422, f"Coluna de {label} não existe na Gold: {field}")
-    allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE"}
+    has_identity = bool(body.identification_clauses) or bool(body.identification_values) or bool(body.scope)
+    if body.behavior == "CHARGE_INTERVAL":
+        if not body.reference_column:
+            raise HTTPException(422, "CHARGE_INTERVAL exige coluna de fim do período (reference_column)")
+        if not has_identity:
+            raise HTTPException(422, "CHARGE_INTERVAL exige identificação ou escopo (ex.: cloud_origem=ibm-ti)")
+    elif not has_identity:
+        raise HTTPException(422, "Informe identification_clauses, identification_values ou escopo")
+    allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL"}
     if body.behavior not in allowed: raise HTTPException(422, "Comportamento de forecast inválido")
     if len(body.start_period) != 6 or not body.start_period.isdigit(): raise HTTPException(422, "start_period deve estar em YYYYMM")
     if body.end_period and (len(body.end_period) != 6 or not body.end_period.isdigit()): raise HTTPException(422, "end_period deve estar em YYYYMM")

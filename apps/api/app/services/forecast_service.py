@@ -18,6 +18,239 @@ from app.services import iceberg_service as iceberg
 logger = logging.getLogger(__name__)
 
 
+def _series_key(key_values: dict[str, Any], key_cols: list[str]) -> tuple[tuple[str, Any], ...]:
+    return tuple((col, key_values.get(col)) for col in key_cols)
+
+
+def _build_series_context(daily: pd.Series, effective_cutoff: date) -> dict[str, Any]:
+    """Summarize realized history per month for business-rule replication."""
+    monthly = daily.groupby(daily.index.to_period("M")).sum()
+    monthly_realized: dict[str, float] = {}
+    for period, total in monthly.items():
+        monthly_realized[f"{period.year:04d}{period.month:02d}"] = float(total)
+    current_period = pd.Timestamp(effective_cutoff).to_period("M")
+    previous_period = current_period - 1
+    current_key = f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}"
+    last_closed_month_total = 0.0
+    cursor = previous_period
+    min_period = monthly.index.min() if len(monthly) else cursor
+    while cursor >= min_period:
+        total = float(monthly.get(cursor, 0.0))
+        if total != 0.0:
+            last_closed_month_total = total
+            break
+        cursor = cursor - 1
+    current_month_realized = float(monthly.get(current_period, 0.0))
+    return {
+        "monthly_realized": monthly_realized,
+        "last_closed_month_total": last_closed_month_total,
+        "current_month_realized": current_month_realized,
+        "current_key": current_key,
+    }
+
+
+def _month_offset(base_yyyymm: str, target_yyyymm: str) -> int:
+    base_year, base_month = int(base_yyyymm[:4]), int(base_yyyymm[4:6])
+    target_year, target_month = int(target_yyyymm[:4]), int(target_yyyymm[4:6])
+    return (target_year - base_year) * 12 + (target_month - base_month)
+
+
+def _replicated_month_value(
+    *,
+    behavior: str,
+    forecast_month: str,
+    current_month_key: str,
+    last_closed_month_total: float,
+    current_month_realized: float,
+    growth_rate: float,
+) -> float | None:
+    if last_closed_month_total <= 0:
+        return None
+    offset = _month_offset(current_month_key, forecast_month)
+    if behavior == "REPEAT_NEXT_MONTH":
+        if offset != 1:
+            return None
+        return last_closed_month_total * ((1.0 + growth_rate) ** 1)
+    if behavior in {"RECURRING_MONTHLY", "RECURRING_UNTIL_END"}:
+        # Do not book the lumpy closed-month amount again in the open month:
+        # daily-mean math on a 1-day purchase would explode, and adding the
+        # last closed total on top of in-progress usage double-counts. Future
+        # months replicate last_closed_month_total.
+        if forecast_month == current_month_key:
+            return 0.0
+        if offset <= 0:
+            return None
+        return last_closed_month_total * ((1.0 + growth_rate) ** offset)
+    return None
+
+
+def _rule_identity_mask(
+    output: pd.DataFrame,
+    rule: Any,
+    output_by_lower: dict[str, str],
+) -> tuple[pd.Series | None, bool, str | None]:
+    """Build identity mask from identification_clauses (OR) or legacy column+values."""
+    clauses = list(getattr(rule, "identification_clauses", None) or [])
+    if clauses:
+        clause_masks: list[pd.Series] = []
+        for clause in clauses:
+            if not isinstance(clause, dict):
+                continue
+            column = str(clause.get("column") or "")
+            values = list(clause.get("values") or [])
+            if not column or not values:
+                continue
+            identity_field = output_by_lower.get(column.lower())
+            if identity_field is None:
+                return None, False, column
+            clause_masks.append(output[identity_field].astype(str).isin([str(value) for value in values]))
+        if not clause_masks:
+            return None, False, None
+        combined = clause_masks[0]
+        for item in clause_masks[1:]:
+            combined |= item
+        return combined, True, None
+
+    identification_column = str(getattr(rule, "identification_column", "") or "")
+    identification_values = list(getattr(rule, "identification_values", None) or [])
+    if identification_values:
+        identity_field = output_by_lower.get(identification_column.lower())
+        if identity_field is None:
+            return None, False, identification_column
+        return (
+            output[identity_field].astype(str).isin([str(value) for value in identification_values]),
+            True,
+            None,
+        )
+    return None, False, None
+
+
+def _apply_forecast_business_rules(
+    output: pd.DataFrame,
+    business_rules: list[Any],
+    series_context: dict[tuple[tuple[str, Any], ...], dict[str, Any]],
+    key_cols: list[str],
+    effective_cutoff: date,
+) -> list[str]:
+    applied_rules: list[str] = []
+    current_month_key = f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}"
+    output_by_lower = {str(column).lower(): column for column in output.columns}
+
+    for rule in sorted(business_rules or [], key=lambda item: item.priority):
+        if not getattr(rule, "active", True):
+            continue
+        mask = output["tipo"].eq("forecast")
+        identity_mask, has_identity_filter, missing_field = _rule_identity_mask(output, rule, output_by_lower)
+        if missing_field:
+            applied_rules.append(f"{rule.name} (não aplicada: campo fora das dimensões)")
+            continue
+        if identity_mask is not None:
+            mask &= identity_mask
+            has_identity_filter = True
+        for column, value in (rule.scope or {}).items():
+            scope_field = output_by_lower.get(str(column).lower())
+            if scope_field is None:
+                raise ValueError(f"Regra '{rule.name}' usa escopo fora das dimensões da série: {column}")
+            mask &= output[scope_field].astype(str).eq(str(value))
+            has_identity_filter = True
+        if not has_identity_filter:
+            applied_rules.append(f"{rule.name} (não aplicada: sem identificação/escopo)")
+            continue
+        if rule.start_period:
+            mask &= output["forecast_month"] >= rule.start_period
+        if rule.end_period:
+            mask &= output["forecast_month"] <= rule.end_period
+
+        behavior = str(getattr(rule, "behavior", "") or "")
+        if behavior == "CHARGE_INTERVAL":
+            continue
+        if behavior == "CANCEL_ON_REFUND" or (
+            str(getattr(rule, "charge_type", "") or "").lower() == "refund" and getattr(rule, "cancel_on_refund", False)
+        ):
+            output.loc[mask, "forecast_value"] = 0.0
+            applied_rules.append(rule.name)
+            continue
+
+        if behavior == "REPLACE_VALUE":
+            if rule.replacement_value is not None:
+                output.loc[mask, "forecast_value"] = float(rule.replacement_value)
+            if rule.growth_rate:
+                periods = pd.to_numeric(output.loc[mask, "forecast_month"].str[-2:], errors="coerce").fillna(1)
+                output.loc[mask, "forecast_value"] *= (1.0 + float(rule.growth_rate)) ** (periods - periods.min())
+            applied_rules.append(rule.name)
+            continue
+
+        if behavior in {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END"}:
+            growth_rate = float(getattr(rule, "growth_rate", 0) or 0)
+            for idx in output.index[mask]:
+                row = output.loc[idx]
+                key = _series_key({col: row.get(col) for col in key_cols}, key_cols)
+                ctx = series_context.get(key)
+                if not ctx:
+                    continue
+                replicated = _replicated_month_value(
+                    behavior=behavior,
+                    forecast_month=str(row["forecast_month"]),
+                    current_month_key=current_month_key,
+                    last_closed_month_total=float(ctx["last_closed_month_total"]),
+                    current_month_realized=float(ctx["current_month_realized"]),
+                    growth_rate=growth_rate,
+                )
+                if replicated is not None:
+                    output.at[idx, "forecast_value"] = replicated
+            applied_rules.append(rule.name)
+            continue
+
+        applied_rules.append(f"{rule.name} (não aplicada: comportamento desconhecido)")
+
+    return applied_rules
+
+
+def _billing_period_end_expr(period_col: str) -> str:
+    return f"last_day_of_month(date_parse(CAST({_q(period_col)} AS VARCHAR) || '01', '%Y%m%d'))"
+
+
+def _expand_charge_interval(frame: pd.DataFrame, dims: list[str]) -> pd.DataFrame:
+    """Spread charge totals evenly across [charge_start, charge_end] per row."""
+    if frame.empty:
+        return pd.DataFrame(columns=[*dims, "forecast_day", "value"])
+    working = frame.copy()
+    working["charge_start"] = pd.to_datetime(working["charge_start"], errors="coerce")
+    working["charge_end"] = pd.to_datetime(working["charge_end"], errors="coerce")
+    working["value"] = pd.to_numeric(working["value"], errors="coerce").fillna(0.0)
+    rows: list[dict[str, Any]] = []
+    for _, row in working.iterrows():
+        start = row["charge_start"]
+        if pd.isna(start):
+            continue
+        end = row["charge_end"] if pd.notna(row["charge_end"]) else start
+        if end < start:
+            end = start
+        days = pd.date_range(start.normalize(), end.normalize(), freq="D")
+        if len(days) == 0:
+            days = pd.DatetimeIndex([start.normalize()])
+        share = float(row["value"]) / len(days)
+        base = {col: row[col] for col in dims}
+        for day in days:
+            rows.append({**base, "forecast_day": day, "value": share})
+    if not rows:
+        return pd.DataFrame(columns=[*dims, "forecast_day", "value"])
+    expanded = pd.DataFrame(rows)
+    group_cols = [*dims, "forecast_day"]
+    return expanded.groupby(group_cols, dropna=False, as_index=False)["value"].sum()
+
+
+def _charge_interval_end_expr(date_expr: str, charge_end_col: str | None, period: str | None) -> str:
+    if charge_end_col:
+        end_expr = gold_date_expr(charge_end_col, period)
+    else:
+        end_expr = "NULL"
+    if period:
+        period_end = _billing_period_end_expr(period)
+        return f"COALESCE({end_expr}, {period_end}, {date_expr})"
+    return f"COALESCE({end_expr}, {date_expr})"
+
+
 def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
@@ -76,7 +309,7 @@ async def fetch_metadata(table_name: str, namespace: str = "gold") -> dict[str, 
     names = {c["name"].lower(): c["name"] for c in columns}
     numeric = [c["name"] for c in columns if c["numeric"]]
     dates = [c["name"] for c in columns if c["temporal"]]
-    date_priority = {"date": 0, "chargedate": 1, "chargeperiodstart": 2, "billingperiodstart": 3, "usage_date": 4}
+    date_priority = {"date": 0, "chargedate": 1, "chargeperiodstart": 2, "billingperiodstart": 3, "usage_date": 4, "chargeperiodend": 5, "billingperiodend": 6}
     date_like = sorted([c["name"] for c in columns if c["name"].lower() in date_priority], key=lambda x: date_priority[x.lower()])
     if date_like:
         dates = date_like + [x for x in dates if x not in date_like]
@@ -91,6 +324,244 @@ async def fetch_metadata(table_name: str, namespace: str = "gold") -> dict[str, 
     # The UI exposes every discovered dimension and the user chooses the set.
     recommended = []
     return {"columns": columns, "measures": numeric, "date_columns": dates, "period_columns": [period] if period else [], "dimensions": dimensions, "recommended_dimensions": recommended, "default_measure": default_measure, "default_date": date_column, "default_period": period}
+
+
+def _resolve_connection_columns(metadata: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    """Return (cloud_origem, source_connection_id) column names when present in Gold."""
+    if not metadata:
+        return None, None
+    names = {c["name"].lower(): c["name"] for c in metadata.get("columns", [])}
+    return names.get("cloud_origem"), names.get("source_connection_id")
+
+
+def _merge_allocation_rules(*rule_lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for rules in rule_lists:
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            key = (
+                rule.get("connection_id"),
+                rule.get("connection_code"),
+                rule.get("charge_end_column"),
+                rule.get("period_allocation"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(rule)
+    return merged
+
+
+def _allocation_rules_from_business_rules(
+    business_rules: list[Any],
+    cloud_col: str | None,
+    id_col: str | None,
+    config: Any,
+) -> list[dict[str, Any]]:
+    """Translate CHARGE_INTERVAL business rules into per-connection fetch rules."""
+    rules: list[dict[str, Any]] = []
+    for rule in sorted(business_rules or [], key=lambda item: item.priority):
+        if not getattr(rule, "active", True):
+            continue
+        if str(getattr(rule, "behavior", "") or "") != "CHARGE_INTERVAL":
+            continue
+        meta = getattr(config, "gold_metadata", None) or {}
+        names = {c["name"].lower(): c["name"] for c in meta.get("columns", [])}
+        charge_end = getattr(rule, "reference_column", None) or getattr(config, "charge_end_column", None)
+        if charge_end:
+            charge_end = names.get(str(charge_end).lower(), charge_end)
+        else:
+            charge_end = names.get("chargeperiodend") or "ChargePeriodEnd"
+        targets: list[tuple[str | None, int | None]] = []
+        identification_column = str(getattr(rule, "identification_column", "") or "")
+        identification_values = list(getattr(rule, "identification_values", None) or [])
+        if identification_column and identification_values:
+            column_lower = identification_column.lower()
+            if cloud_col and column_lower == cloud_col.lower():
+                targets.extend((str(value), None) for value in identification_values)
+            elif id_col and column_lower == id_col.lower():
+                targets.extend((None, int(value)) for value in identification_values)
+        for column, value in (getattr(rule, "scope", None) or {}).items():
+            column_lower = str(column).lower()
+            if cloud_col and column_lower == cloud_col.lower():
+                targets.append((str(value), None))
+            elif id_col and column_lower == id_col.lower():
+                targets.append((None, int(value)))
+        for conn_code, conn_id in targets:
+            rules.append(
+                {
+                    "connection_code": conn_code,
+                    "connection_id": conn_id,
+                    "period_allocation": "charge_interval",
+                    "charge_end_column": charge_end,
+                    "_from_business_rule": getattr(rule, "name", ""),
+                }
+            )
+    return rules
+
+
+def _normalize_allocation_rules(config: Any) -> list[dict[str, Any]]:
+    """Return explicit per-connection rules, or a legacy global charge_interval rule."""
+    rules = list(getattr(config, "connection_allocation_rules", None) or [])
+    if rules:
+        return [rule for rule in rules if isinstance(rule, dict)]
+    if getattr(config, "period_allocation", "none") == "charge_interval":
+        return [{
+            "period_allocation": "charge_interval",
+            "charge_end_column": getattr(config, "charge_end_column", None),
+            "_global": True,
+        }]
+    return []
+
+
+def _connection_rule_filter(
+    rules: list[dict[str, Any]],
+    cloud_col: str | None,
+    id_col: str | None,
+    *,
+    negate: bool = False,
+) -> str | None:
+    """Build a Trino WHERE fragment matching configured connections."""
+    if not rules or all(rule.get("_global") for rule in rules):
+        return None
+    clauses: list[str] = []
+    for rule in rules:
+        parts: list[str] = []
+        code = rule.get("connection_code")
+        conn_id = rule.get("connection_id")
+        if code and cloud_col:
+            parts.append(f"CAST({_q(cloud_col)} AS VARCHAR) = {_lit(code)}")
+        if conn_id is not None and id_col:
+            parts.append(f"TRY_CAST({_q(id_col)} AS BIGINT) = {int(conn_id)}")
+        if parts:
+            clauses.append("(" + " OR ".join(parts) + ")")
+    if not clauses:
+        return None
+    joined = " OR ".join(clauses)
+    return f"NOT ({joined})" if negate else f"({joined})"
+
+
+def _series_matches_charge_interval(
+    key_values: dict[str, Any],
+    rules: list[dict[str, Any]],
+    cloud_col: str | None,
+    id_col: str | None,
+) -> bool:
+    if not rules:
+        return False
+    if any(rule.get("_global") for rule in rules):
+        return True
+    for rule in rules:
+        if rule.get("period_allocation", "charge_interval") != "charge_interval":
+            continue
+        code = rule.get("connection_code")
+        conn_id = rule.get("connection_id")
+        if code and cloud_col and str(key_values.get(cloud_col) or "") == str(code):
+            return True
+        if conn_id is not None and id_col:
+            raw = key_values.get(id_col)
+            if raw is not None and str(raw) == str(conn_id):
+                return True
+    return False
+
+
+def _rule_charge_end_column(rule: dict[str, Any], config: Any) -> str | None:
+    return rule.get("charge_end_column") or getattr(config, "charge_end_column", None)
+
+
+def validate_connection_allocation_rules(
+    rules: list[Any],
+    metadata: dict[str, Any],
+    period_col: str | None,
+) -> list[str]:
+    names = {c["name"] for c in metadata["columns"]}
+    cloud_col, id_col = _resolve_connection_columns(metadata)
+    errors: list[str] = []
+    for index, raw in enumerate(rules or []):
+        if not isinstance(raw, dict):
+            errors.append(f"Regra de conexão #{index + 1} inválida")
+            continue
+        if raw.get("period_allocation", "charge_interval") != "charge_interval":
+            errors.append(f"Regra de conexão #{index + 1}: alocação não suportada")
+            continue
+        if not raw.get("connection_code") and raw.get("connection_id") is None:
+            errors.append(f"Regra de conexão #{index + 1}: informe connection_code ou connection_id")
+        if raw.get("connection_code") and not cloud_col:
+            errors.append(f"Regra de conexão #{index + 1}: Gold não possui cloud_origem")
+        if raw.get("connection_id") is not None and not id_col:
+            errors.append(f"Regra de conexão #{index + 1}: Gold não possui source_connection_id")
+        charge_end = raw.get("charge_end_column")
+        if charge_end and charge_end not in names:
+            errors.append(f"Regra de conexão #{index + 1}: coluna de fim inválida: {charge_end}")
+        if not charge_end and not period_col:
+            errors.append(f"Regra de conexão #{index + 1}: charge_interval exige charge_end_column ou period_column")
+    return errors
+
+
+def _billing_period_values(history_start: date, effective_cutoff: date, minimum_months: int) -> list[str]:
+    """Months to load when Gold is partitioned by billing period.
+
+    Invoice-style sources (IBM FOCUS) stamp the whole month on day 1.  A
+    narrow ``history_start`` anchored on the GCP daily cutoff excludes those
+    rows even when the billing-period partition is included in the loop.
+    """
+    period_cursor = history_start.replace(day=1)
+    extended = effective_cutoff.replace(day=1)
+    for _ in range(max(0, minimum_months - 1)):
+        extended = (extended.replace(day=1) - timedelta(days=1)).replace(day=1)
+    if extended < period_cursor:
+        period_cursor = extended
+    period_values: list[str] = []
+    while period_cursor <= effective_cutoff.replace(day=1):
+        period_values.append(period_cursor.strftime("%Y%m"))
+        period_cursor = (period_cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return period_values
+
+
+async def _fetch_period_records(
+    *,
+    source: str,
+    type_filter: str,
+    period: str | None,
+    history_start: date,
+    effective_cutoff: date,
+    dims: list[str],
+    measure: str,
+    date_expr: str,
+    mode: str,
+    charge_end_col: str | None,
+    period_col: str | None,
+    connection_filter: str | None,
+    minimum_monthly_points: int = 3,
+) -> list[dict[str, Any]]:
+    select_dims = ", ".join(_q(x) for x in dims)
+    group_prefix = (select_dims + ", ") if select_dims else ""
+    date_filter = f"{date_expr} BETWEEN DATE {_lit(history_start.isoformat())} AND DATE {_lit(effective_cutoff.isoformat())}"
+    if mode == "interval":
+        end_expr = _charge_interval_end_expr(date_expr, charge_end_col, period_col)
+        select_sql = f"SELECT {group_prefix}{date_expr} AS charge_start, {end_expr} AS charge_end, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+        group_sql = f" GROUP BY {group_prefix}{date_expr}, {end_expr} ORDER BY charge_start"
+    else:
+        select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+        group_sql = f" GROUP BY {group_prefix}{date_expr} ORDER BY forecast_day"
+    extra = f" AND {connection_filter}" if connection_filter else ""
+    records: list[dict[str, Any]] = []
+    if period_col:
+        period_values = _billing_period_values(history_start, effective_cutoff, minimum_monthly_points)
+        for billing_period in period_values:
+            # Partition already scopes the invoice month; do not also filter
+            # ChargePeriodStart or July 1 IBM rows disappear from the window.
+            sql = (
+                f"{select_sql} WHERE {type_filter} AND CAST({_q(period_col)} AS VARCHAR) = {_lit(billing_period)}"
+                f"{extra}{group_sql}"
+            )
+            records.extend(await trino_execute(sql, timeout_s=300))
+    else:
+        sql = f"{select_sql} WHERE {type_filter} AND {date_filter}{extra}{group_sql}"
+        records = await trino_execute(sql, timeout_s=300)
+    return records
 
 
 def validate_config(config: Any, metadata: dict[str, Any]) -> list[str]:
@@ -109,6 +580,18 @@ def validate_config(config: Any, metadata: dict[str, Any]) -> list[str]:
         errors.append("As janelas permitidas são 7, 14 e 28 dias")
     if config.model_mode not in {"AUTO_BACKTEST", "WEIGHTED", "MEAN_7", "MEAN_14", "MEAN_28"}:
         errors.append("Estratégia matemática inválida")
+    allocation = getattr(config, "period_allocation", "none") or "none"
+    if allocation not in {"none", "charge_interval"}:
+        errors.append("Alocação de período inválida")
+    explicit_rules = list(getattr(config, "connection_allocation_rules", None) or [])
+    if explicit_rules:
+        errors.extend(validate_connection_allocation_rules(explicit_rules, metadata, config.period_column))
+    elif allocation == "charge_interval":
+        charge_end = getattr(config, "charge_end_column", None)
+        if charge_end and charge_end not in names:
+            errors.append(f"Coluna de fim de cobrança inválida: {charge_end}")
+        if not charge_end and not config.period_column:
+            errors.append("charge_interval exige charge_end_column ou period_column para fallback")
     return errors
 
 
@@ -120,8 +603,6 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     measure = config.measure_column
     period = config.period_column
     date_expr = gold_date_expr(date_col, period)
-    select_dims = ", ".join(_q(x) for x in dims)
-    group = (select_dims + ", ") if select_dims else ""
     # Historical Gold rows produced before ``tipo`` was introduced are still
     # realized facts.  Include NULL for backward compatibility; every new
     # reprocess writes the explicit value below, while forecast/planning rows
@@ -132,8 +613,6 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     )
     source = f"iceberg.{namespace}.{table}"
     # Determine the as-of date before the expensive dimensional aggregation.
-    # The previous query aggregated every Gold period and only discarded late
-    # days in Pandas, which made a 18M-row table unstable in Trino.
     latest_period_filter = (
         f" AND CAST({_q(period)} AS VARCHAR) = (SELECT MAX(CAST({_q(period)} AS VARCHAR)) FROM {source} WHERE {type_filter})"
         if period else ""
@@ -154,62 +633,119 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         effective_cutoff.replace(day=1),
         effective_cutoff - timedelta(days=max_window + 7),
     )
-    date_filter = f"{date_expr} BETWEEN DATE {_lit(history_start.isoformat())} AND DATE {_lit(effective_cutoff.isoformat())}"
-    select_sql = f"SELECT {group}{date_expr} AS forecast_day, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
-    group_sql = f" GROUP BY {select_dims + ', ' if select_dims else ''}{date_expr} ORDER BY forecast_day"
-    if period:
-        # A wide Gold can contain millions of records per billing month.  Do
-        # not make Trino hold two or more months of a high-cardinality GROUP BY
-        # at once: aggregate one partition at a time and combine the already
-        # small daily aggregates here.
-        period_cursor = history_start.replace(day=1)
-        period_values: list[str] = []
-        while period_cursor <= effective_cutoff:
-            period_values.append(period_cursor.strftime("%Y%m"))
-            period_cursor = (period_cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
-        records: list[dict[str, Any]] = []
-        for billing_period in period_values:
-            sql = f"{select_sql} WHERE {type_filter} AND CAST({_q(period)} AS VARCHAR) = {_lit(billing_period)} AND {date_filter}{group_sql}"
-            records.extend(await trino_execute(sql, timeout_s=300))
+    minimum_monthly = max(1, int(getattr(config, "minimum_monthly_points", 3) or 3))
+    metadata = getattr(config, "gold_metadata", None) or {}
+    cloud_col, id_col = _resolve_connection_columns(metadata)
+    query_dims = list(dims)
+    for extra_col in (cloud_col, id_col):
+        if extra_col and extra_col not in query_dims:
+            query_dims.append(extra_col)
+    allocation_rules = _merge_allocation_rules(
+        _normalize_allocation_rules(config),
+        _allocation_rules_from_business_rules(business_rules, cloud_col, id_col, config),
+    )
+    interval_rule_names = [
+        str(rule.get("_from_business_rule"))
+        for rule in allocation_rules
+        if rule.get("_from_business_rule")
+    ]
+    per_connection = allocation_rules and not any(rule.get("_global") for rule in allocation_rules)
+    global_interval = allocation_rules and any(rule.get("_global") for rule in allocation_rules)
+    frames: list[pd.DataFrame] = []
+    if global_interval:
+        charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
+        records = await _fetch_period_records(
+            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            mode="interval", charge_end_col=charge_end_col, period_col=period, connection_filter=None,
+            minimum_monthly_points=minimum_monthly,
+        )
+        interval_frame = pd.DataFrame(records)
+        if not interval_frame.empty:
+            interval_frame = _expand_charge_interval(interval_frame, query_dims)
+            frames.append(interval_frame)
+    elif per_connection:
+        daily_filter = _connection_rule_filter(allocation_rules, cloud_col, id_col, negate=True)
+        daily_records = await _fetch_period_records(
+            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            mode="daily", charge_end_col=None, period_col=period, connection_filter=daily_filter,
+            minimum_monthly_points=minimum_monthly,
+        )
+        daily_frame = pd.DataFrame(daily_records)
+        if not daily_frame.empty:
+            frames.append(daily_frame)
+        interval_filter = _connection_rule_filter(allocation_rules, cloud_col, id_col, negate=False)
+        if interval_filter:
+            charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
+            interval_records = await _fetch_period_records(
+                source=source, type_filter=type_filter, period=period, history_start=history_start,
+                effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+                mode="interval", charge_end_col=charge_end_col, period_col=period, connection_filter=interval_filter,
+                minimum_monthly_points=minimum_monthly,
+            )
+            interval_frame = pd.DataFrame(interval_records)
+            if not interval_frame.empty:
+                interval_frame = _expand_charge_interval(interval_frame, query_dims)
+                frames.append(interval_frame)
     else:
-        sql = f"{select_sql} WHERE {type_filter} AND {date_filter}{group_sql}"
-        records = await trino_execute(sql, timeout_s=300)
-    frame = pd.DataFrame(records)
-    if frame.empty:
+        daily_records = await _fetch_period_records(
+            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            mode="daily", charge_end_col=None, period_col=period, connection_filter=None,
+            minimum_monthly_points=minimum_monthly,
+        )
+        daily_frame = pd.DataFrame(daily_records)
+        if not daily_frame.empty:
+            frames.append(daily_frame)
+    if not frames:
         raise ValueError("A Gold não possui dados realizados para a configuração")
+    frame = pd.concat(frames, ignore_index=True)
     frame["forecast_day"] = pd.to_datetime(frame["forecast_day"], errors="coerce")
     frame["value"] = pd.to_numeric(frame["value"], errors="coerce").fillna(0.0)
     frame = frame.dropna(subset=["forecast_day"])
     if frame.empty:
         raise ValueError("Nenhuma data válida foi encontrada na Gold")
-    key_cols = dims
+    key_cols = list(dims)
+    if per_connection:
+        for col in (cloud_col, id_col):
+            if col and col not in key_cols:
+                key_cols.append(col)
     results: list[dict[str, Any]] = []
     methods: dict[str, str] = {}
+    series_context: dict[tuple[tuple[str, Any], ...], dict[str, Any]] = {}
     for key, group_frame in frame.groupby(key_cols, dropna=False) if key_cols else [((), frame)]:
         if not isinstance(key, tuple): key = (key,)
         key_values = {col: (None if pd.isna(value) else value) for col, value in zip(key_cols, key)}
         history = group_frame.set_index("forecast_day")["value"].sort_index()
-        history = history[history.index.date <= effective_cutoff]
-        if history.empty: continue
-        # Align every series to the same as-of calendar.  Without this,
-        # ``tail(28)`` for a sparse series ended at its last historical
-        # purchase instead of the current cutoff, turning a one-off purchase
-        # into a large daily baseline.  Missing days are genuine zero
-        # consumption for the mathematical Usage forecast.
+        if history.empty:
+            continue
+        series_last_date = history.index.max().date()
+        series_cutoff = min(effective_cutoff, series_last_date)
+        history = history[history.index.date <= series_cutoff]
+        if history.empty:
+            continue
+        interval_series = _series_matches_charge_interval(key_values, allocation_rules, cloud_col, id_col)
+        # Invoice-interval series that did not appear in the current month have
+        # already ended; projecting them alongside the current invoice double-counts.
+        if interval_series and series_last_date < effective_cutoff.replace(day=1):
+            continue
         daily = history.resample("D").sum()
         daily = daily.reindex(
-            pd.date_range(daily.index.min(), pd.Timestamp(effective_cutoff), freq="D"),
+            pd.date_range(daily.index.min(), pd.Timestamp(series_cutoff), freq="D"),
             fill_value=0.0,
         )
+        series_context[_series_key(key_values, key_cols)] = _build_series_context(daily, effective_cutoff)
+        enabled_windows = [int(w) for w in config.enabled_windows or [7, 14, 28]]
         candidates = []
-        for window in [int(w) for w in config.enabled_windows or [7, 14, 28]]:
+        for window in enabled_windows:
             sample = daily.tail(window)
             if len(sample) >= min(window, int(config.minimum_daily_points or 7)):
                 candidates.append((f"MEAN_{window}D", float(sample.mean())))
         if not candidates:
             candidates = [("MEAN_AVAILABLE", float(daily.tail(7).mean()))]
-        recent_window = min([int(w) for w in config.enabled_windows or [7, 14, 28]])
-        extended_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
+        recent_window = min(enabled_windows)
+        extended_window = max(enabled_windows)
         if len(daily) >= max(recent_window, int(config.minimum_daily_points or 7)):
             recent_mean = float(daily.tail(recent_window).mean())
             extended_mean = float(daily.tail(extended_window).mean())
@@ -254,14 +790,21 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
                 method, baseline = selected
             else:
                 method, baseline = candidates[0]
+        if series_last_date < effective_cutoff.replace(day=1):
+            # A lump that ended in a prior month must not be treated as a
+            # daily run-rate for the open month (one purchase day × 30).
+            method, baseline = "ENDED_SERIES", 0.0
         methods[method] = methods.get(method, 0) + 1
         # Realized part of current month, followed by forecast remainder.
-        current = effective_cutoff.replace(day=1)
         last_day = calendar.monthrange(effective_cutoff.year, effective_cutoff.month)[1]
         realized_value = float(history[history.index.to_period("M") == pd.Timestamp(effective_cutoff).to_period("M")].sum())
         remaining_days = last_day - effective_cutoff.day
-        if remaining_days > 0:
-            results.append({**key_values, "forecast_month": f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}", "tipo": "forecast", "forecast_value": baseline * remaining_days, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
+        # Invoice-interval series already hold the full month on a daily grid.
+        # Project the whole month so the forecast column matches the invoice,
+        # not only the days after cutoff.
+        current_forecast_days = last_day if interval_series else remaining_days
+        if current_forecast_days > 0:
+            results.append({**key_values, "forecast_month": f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}", "tipo": "forecast", "forecast_value": baseline * current_forecast_days, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
         results.append({**key_values, "forecast_month": f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}", "tipo": "realizado", "forecast_value": realized_value, "selected_method": "REALIZADO", "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
         for month_offset in range(1, int(config.horizon_months) + 1):
             month = effective_cutoff.month - 1 + month_offset
@@ -271,49 +814,14 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
             results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
     output = pd.DataFrame(results)
     if output.empty: raise ValueError("Nenhuma série pôde ser projetada")
-    applied_rules = []
-    # Rules are metadata-driven. Scope fields are deliberately limited to
-    # discovered series dimensions; no provider-specific column is assumed.
-    for rule in sorted(business_rules or [], key=lambda item: item.priority):
-        mask = output["tipo"].eq("forecast")
-        # A rule must identify a series.  Earlier versions ignored
-        # identification_column/values when that field was not one of the
-        # configured dimensions; a Refund rule with no scope consequently
-        # cancelled the entire forecast.  Never promote such a rule to a
-        # global action silently.
-        identification_column = str(getattr(rule, "identification_column", "") or "")
-        identification_values = list(getattr(rule, "identification_values", None) or [])
-        output_by_lower = {str(column).lower(): column for column in output.columns}
-        identity_field = output_by_lower.get(identification_column.lower())
-        has_identity_filter = False
-        if identification_values:
-            if identity_field is None:
-                applied_rules.append(f"{rule.name} (não aplicada: campo fora das dimensões)")
-                continue
-            mask &= output[identity_field].astype(str).isin([str(value) for value in identification_values])
-            has_identity_filter = True
-        for column, value in (rule.scope or {}).items():
-            scope_field = output_by_lower.get(str(column).lower())
-            if scope_field is None:
-                raise ValueError(f"Regra '{rule.name}' usa escopo fora das dimensões da série: {column}")
-            mask &= output[scope_field].astype(str).eq(str(value))
-            has_identity_filter = True
-        if not has_identity_filter:
-            applied_rules.append(f"{rule.name} (não aplicada: sem identificação/escopo)")
-            continue
-        if rule.start_period:
-            mask &= output["forecast_month"] >= rule.start_period
-        if rule.end_period:
-            mask &= output["forecast_month"] <= rule.end_period
-        if rule.behavior == "CANCEL_ON_REFUND" or (rule.charge_type.lower() == "refund" and rule.cancel_on_refund):
-            output.loc[mask, "forecast_value"] = 0.0
-        elif rule.behavior in {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "REPLACE_VALUE"}:
-            if rule.replacement_value is not None:
-                output.loc[mask, "forecast_value"] = float(rule.replacement_value)
-            if rule.growth_rate:
-                periods = pd.to_numeric(output.loc[mask, "forecast_month"].str[-2:], errors="coerce").fillna(1)
-                output.loc[mask, "forecast_value"] *= (1.0 + float(rule.growth_rate)) ** (periods - periods.min())
-        applied_rules.append(rule.name)
+    applied_rules = _apply_forecast_business_rules(
+        output,
+        business_rules or [],
+        series_context,
+        key_cols,
+        effective_cutoff,
+    )
+    applied_rules = [*interval_rule_names, *applied_rules]
     for adjustment in sorted(adjustments, key=lambda a: a.priority):
         mask = pd.Series(True, index=output.index)
         for column, value in (adjustment.filters or {}).items():

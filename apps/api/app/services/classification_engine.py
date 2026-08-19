@@ -11,6 +11,7 @@ Supports:
   removes non-alphanumeric chars — same behavior as finopsNew
 """
 
+import json
 import logging
 import re
 import unicodedata
@@ -20,6 +21,27 @@ from sqlalchemy import select
 from app.models.rules import ClassificationRule, Department, Project
 
 logger = logging.getLogger(__name__)
+
+# Legacy Azure/provider field names → FOCUS destination columns.
+LEGACY_FIELD_MAP: dict[str, str] = {
+    "resourcegroupname": "source_resource_group_name",
+    "projectid": "SubAccountId",
+    "projectname": "SubAccountName",
+    "subscriptionname": "SubAccountName",
+    "subaccountname": "SubAccountName",
+    "subaccountid": "SubAccountId",
+    "projectid": "SubAccountId",
+    "projectname": "SubAccountName",
+    "metercategory": "ServiceName",
+    "metersubcategory": "ServiceSubcategory",
+    "metername": "ChargeDescription",
+    "chargecategory": "ChargeCategory",
+    "pricingcategory": "PricingCategory",
+    "pricingmodel": "PricingModel",
+    "chargetype": "ChargeType",
+    "resourceid": "ResourceId",
+    "reservationname": "CommitmentDiscountName",
+}
 
 
 def _canon(txt) -> str:
@@ -52,7 +74,7 @@ def _evaluate_multi_condition(df: pd.DataFrame, conditions: list[dict],
     Returns a boolean mask of matching rows.
     """
     if not conditions:
-        return pd.Series(True, index=df.index)
+        return pd.Series(False, index=df.index)
 
     masks: list[pd.Series] = []
 
@@ -73,6 +95,9 @@ def _evaluate_multi_condition(df: pd.DataFrame, conditions: list[dict],
         # OR between values (same as finopsNew: any(canon(v) in canon(row) for v in vals))
         value_masks: list[pd.Series] = []
         for val in values:
+            if str(val).strip() == ".*":
+                value_masks.append(pd.Series(True, index=df.index))
+                continue
             val_canon = _canon(val)
             if not val_canon:
                 continue
@@ -104,6 +129,164 @@ def _evaluate_multi_condition(df: pd.DataFrame, conditions: list[dict],
         combined = combined & m
 
     return combined
+
+
+def map_legacy_field(field: str) -> str:
+    """Map legacy provider field names to FOCUS destination column names."""
+    key = str(field or "").strip()
+    if not key:
+        return key
+    mapped = LEGACY_FIELD_MAP.get(key.lower())
+    return mapped if mapped else key
+
+
+def _normalize_condition_entry(raw: dict) -> dict | None:
+    """Normalize a single condition dict to canonical operator/values schema."""
+    if not isinstance(raw, dict):
+        return None
+    field = map_legacy_field(str(raw.get("field", "")).strip())
+    if not field:
+        return None
+    operator = str(raw.get("operator") or raw.get("op") or "=").strip()
+    values = raw.get("values")
+    if values is None:
+        legacy_val = raw.get("value")
+        if legacy_val is None:
+            values_list: list[str] = []
+        elif isinstance(legacy_val, list):
+            values_list = [str(v).strip() for v in legacy_val if str(v).strip()]
+        else:
+            values_list = [v.strip() for v in str(legacy_val).split("|") if v.strip()]
+    elif isinstance(values, list):
+        values_list = [str(v).strip() for v in values if str(v).strip()]
+    else:
+        values_list = [v.strip() for v in str(values).split("|") if v.strip()]
+    if not values_list:
+        return None
+    return {
+        "field": field,
+        "operator": operator,
+        "values": values_list,
+        "logic": str(raw.get("logic") or "AND"),
+    }
+
+
+def _parse_json_array_pattern(pattern: str) -> list[str]:
+    """Parse pattern like '["vivo-ti-vicky-hml"]' into value list."""
+    text = str(pattern or "").strip()
+    if not text.startswith("["):
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(v).strip() for v in parsed if str(v).strip()]
+    except json.JSONDecodeError:
+        pass
+    return []
+
+
+def normalize_rule_conditions(rule) -> list[dict]:
+    """Return canonical conditions for a ClassificationRule.
+
+    Priority:
+    1. Valid entries in rule.conditions JSONB (including legacy op/value keys)
+    2. pattern_type multi_condition → parse pattern string
+    3. pattern as JSON array + source_field
+    4. regex catch-all pattern='.*' on source_field
+    5. exact/contains/regex on source_field + pattern
+
+  Empty/unparseable rules return [] (match nothing).
+    """
+    normalized: list[dict] = []
+    if rule.conditions and isinstance(rule.conditions, list):
+        for raw in rule.conditions:
+            entry = _normalize_condition_entry(raw)
+            if entry:
+                normalized.append(entry)
+    if normalized:
+        return normalized
+
+    pattern = str(getattr(rule, "pattern", "") or "").strip()
+    source_field = map_legacy_field(str(getattr(rule, "source_field", "") or "").strip())
+    pattern_type = str(getattr(rule, "pattern_type", "") or "").strip().lower()
+
+    if pattern_type == "multi_condition" and pattern:
+        for entry in _parse_pattern_to_conditions(pattern):
+            mapped = _normalize_condition_entry(entry)
+            if mapped:
+                normalized.append(mapped)
+        if normalized:
+            return normalized
+
+    json_values = _parse_json_array_pattern(pattern)
+    if json_values and source_field:
+        return [{
+            "field": source_field,
+            "operator": "=",
+            "values": json_values,
+            "logic": "AND",
+        }]
+
+    if pattern_type == "regex" and pattern and source_field:
+        if pattern == ".*":
+            # Explicit catch-all: match any non-empty value in the field.
+            return [{
+                "field": source_field,
+                "operator": "~",
+                "values": [".*"],
+                "logic": "AND",
+            }]
+        return [{
+            "field": source_field,
+            "operator": "~",
+            "values": [pattern],
+            "logic": "AND",
+        }]
+
+    if pattern_type == "contains" and pattern and source_field:
+        return [{
+            "field": source_field,
+            "operator": "~",
+            "values": [pattern],
+            "logic": "AND",
+        }]
+
+    if pattern_type == "exact" and source_field:
+        # Legacy exact rules stored project id in pattern JSON but match_value as dept name.
+        if json_values:
+            return [{
+                "field": source_field,
+                "operator": "=",
+                "values": json_values,
+                "logic": "AND",
+            }]
+        if pattern:
+            return [{
+                "field": source_field,
+                "operator": "=",
+                "values": [pattern],
+                "logic": "AND",
+            }]
+
+    if pattern and source_field and "=" in pattern and "~" not in pattern:
+        for entry in _parse_pattern_to_conditions(pattern.replace(";", " ; ")):
+            mapped = _normalize_condition_entry(entry)
+            if mapped:
+                normalized.append(mapped)
+
+    return normalized
+
+
+def evaluate_rule_conditions(
+    df: pd.DataFrame,
+    rule,
+    canon_cache: dict[str, pd.Series] | None = None,
+) -> pd.Series:
+    """Evaluate a rule's normalized conditions against a DataFrame."""
+    conditions = normalize_rule_conditions(rule)
+    if not conditions:
+        return pd.Series(False, index=df.index)
+    return _evaluate_multi_condition(df, conditions, canon_cache=canon_cache)
 
 
 def _build_department_path(
@@ -216,12 +399,7 @@ async def apply_classification_rules(
         # without a Department is not a valid organizational allocation.
         if not rule.department_id:
             continue
-        # Determine conditions: use conditions JSONB if available, fall back to single condition
-        if rule.conditions and isinstance(rule.conditions, list) and len(rule.conditions) > 0:
-            match_mask = _evaluate_multi_condition(df, rule.conditions)
-        else:
-            # Fallback to old single-condition logic
-            match_mask = _evaluate_single_condition(df, rule)
+        match_mask = evaluate_rule_conditions(df, rule)
 
         # Only apply to rows not yet classified
         applicable_mask = match_mask & ~classified_mask
@@ -246,27 +424,6 @@ async def apply_classification_rules(
         classified_mask = classified_mask | applicable_mask
 
     return df
-
-
-def _evaluate_single_condition(df: pd.DataFrame, rule) -> pd.Series:
-    """Evaluate the old single-condition format (source_field + pattern + pattern_type)."""
-    col = rule.source_field
-    if col not in df.columns:
-        return pd.Series(False, index=df.index)
-
-    if rule.pattern_type == "multi_condition":
-        # Parse the pattern string as conditions
-        conditions = _parse_pattern_to_conditions(rule.pattern)
-        if conditions:
-            return _evaluate_multi_condition(df, conditions)
-        else:
-            return pd.Series(False, index=df.index)
-    elif rule.pattern_type == "regex":
-        return df[col].astype(str).str.contains(rule.pattern, regex=True, na=False)
-    elif rule.pattern_type == "contains":
-        return df[col].astype(str).str.contains(rule.pattern, regex=False, na=False)
-    else:
-        return df[col].astype(str) == rule.pattern
 
 
 def _parse_pattern_to_conditions(pattern: str) -> list[dict]:

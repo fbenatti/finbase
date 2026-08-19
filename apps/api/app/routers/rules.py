@@ -9,6 +9,8 @@ from app.database import get_db
 from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, Department, Project, OrganizationMoveAudit
 from app.models.planning import PlanningEntry
 from app.models.destination import DestinationColumn, SourceDestinationMapping
+from app.services.classification_engine import map_legacy_field, normalize_rule_conditions
+from app.services.cloud_scope import connection_cloud_scope
 from app.schemas.schemas import (
     EtlMappingCreate, EtlMappingUpdate, EtlMappingOut,
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleOut,
@@ -328,6 +330,55 @@ async def delete_business_rule(rule_id: int, db: AsyncSession = Depends(get_db))
 
 # ---- ClassificationRule ----
 
+def _sync_rule_pattern_fields(data: dict) -> dict:
+    """Mirror conditions into legacy source_field/pattern for backward compatibility."""
+    conditions = data.get("conditions")
+    if not conditions or not isinstance(conditions, list):
+        return data
+    normalized = []
+    for raw in conditions:
+        field = map_legacy_field(str(raw.get("field", "")).strip())
+        operator = str(raw.get("operator") or raw.get("op") or "=").strip()
+        values = raw.get("values")
+        if values is None and raw.get("value") is not None:
+            values = [v.strip() for v in str(raw.get("value")).split("|") if v.strip()]
+        elif isinstance(values, list):
+            values = [str(v).strip() for v in values if str(v).strip()]
+        else:
+            values = []
+        if field and values:
+            normalized.append({
+                "field": field,
+                "operator": operator,
+                "values": values,
+                "logic": str(raw.get("logic") or "AND"),
+            })
+    if not normalized:
+        return data
+    data = {**data, "conditions": normalized}
+    data["source_field"] = normalized[0]["field"]
+    data["pattern_type"] = "multi_condition"
+    data["pattern"] = " ; ".join(
+        f'{c["field"]}{c.get("operator", "=")}{"|".join(c.get("values", []))}'
+        for c in normalized
+    )[:500]
+    return data
+
+
+def _classification_rule_out(rule: ClassificationRule) -> ClassificationRuleOut:
+    out = ClassificationRuleOut.model_validate(rule)
+    normalized = normalize_rule_conditions(rule)
+    if normalized:
+        return out.model_copy(update={"conditions": normalized})
+    return out
+
+
+async def _default_focus_table_id(db: AsyncSession) -> int | None:
+    return (await db.execute(
+        text("SELECT id FROM destination_table WHERE upper(name) = 'MODELO FOCUS' LIMIT 1")
+    )).scalar()
+
+
 @router.get("/classifications/", response_model=list[ClassificationRuleOut])
 async def list_classifications(
     connection_id: int | None = Query(None, description="Filter by connection/datasource"),
@@ -349,7 +400,7 @@ async def list_classifications(
     if department_id is not None:
         stmt = stmt.where(ClassificationRule.department_id == department_id)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return [_classification_rule_out(r) for r in result.scalars().all()]
 
 
 @router.post("/classifications/", response_model=ClassificationRuleOut, status_code=201)
@@ -362,11 +413,16 @@ async def create_classification(data: ClassificationRuleCreate, db: AsyncSession
     )).scalars().first()
     if department is None:
         raise HTTPException(status_code=422, detail="An active department is required for a classification rule")
-    rule = ClassificationRule(**data.model_dump())
+    payload = _sync_rule_pattern_fields(data.model_dump())
+    if payload.get("destination_table_id") is None:
+        focus_id = await _default_focus_table_id(db)
+        if focus_id is not None:
+            payload["destination_table_id"] = focus_id
+    rule = ClassificationRule(**payload)
     db.add(rule)
     await db.commit()
     await db.refresh(rule)
-    return rule
+    return _classification_rule_out(rule)
 
 
 @router.put("/classifications/{rule_id}", response_model=ClassificationRuleOut)
@@ -379,7 +435,7 @@ async def update_classification(
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Classification rule not found")
-    update_data = data.model_dump(exclude_unset=True)
+    update_data = _sync_rule_pattern_fields(data.model_dump(exclude_unset=True))
     for k, v in update_data.items():
         setattr(rule, k, v)
     if rule.active and not rule.department_id:
@@ -395,7 +451,7 @@ async def update_classification(
             raise HTTPException(status_code=422, detail="Classification rule department was not found or is inactive")
     await db.commit()
     await db.refresh(rule)
-    return rule
+    return _classification_rule_out(rule)
 
 
 @router.delete("/classifications/{rule_id}", status_code=204)
@@ -662,7 +718,7 @@ def _adapt_conditions_to_destination(
     identity_fields = {
         "pricingmodel", "chargetype", "resourcegroupname", "metercategory",
         "metersubcategory", "subscriptionname", "reservationname", "metername",
-        "resourceid", "subaccountname", "pricingcategory", "chargecategory",
+        "resourceid", "subaccountname", "subaccountid", "pricingcategory", "chargecategory",
         "servicesubcategory", "source_resource_group_name",
     }
     adapted: list[dict] = []
@@ -682,6 +738,7 @@ def _adapt_conditions_to_destination(
 async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get_db)):
     """Import departments, projects, and business rules from finopsNew CSV files."""
     result = CsvImportResult(departments_created=0, projects_created=0, classification_rules_created=0)
+    focus_table_id = await _default_focus_table_id(db)
 
     # Load the current relationship contract once.  A classification rule is
     # evaluated on Gold, never on the original provider header.
@@ -897,7 +954,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 continue
 
             connection_id = CLOUD_TO_CONNECTION.get(cloud)
-            from app.services.cloud_scope import connection_cloud_scope
             cloud_scope = connection_cloud_scope(cloud) if cloud else None
             parsed_conditions = _adapt_conditions_to_destination(
                 parsed_conditions,
@@ -990,6 +1046,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
             if existing_r.scalars().first() is None:
                 db.add(ClassificationRule(
                     connection_id=connection_id,
+                    destination_table_id=focus_table_id,
                     department_id=dept_id,
                     project_id=proj_id,
                     name=rule_name,
@@ -1036,7 +1093,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 if usage_exists.scalars().first() is None:
                     db.add(ClassificationRule(
                         connection_id=connection_id,
-                        destination_table_id=None,
+                        destination_table_id=focus_table_id,
                         department_id=dept_id,
                         project_id=proj_id,
                         name=usage_name,

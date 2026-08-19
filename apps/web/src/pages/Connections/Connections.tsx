@@ -16,6 +16,7 @@ import ManualCsvUploadDialog from "./ManualCsvUploadDialog";
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
   { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
+  { value: "oci", label: "Oracle Cloud (OCI)", scope: "oci" },
   { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
   { value: "manual_csv", label: "Upload manual de CSV", scope: "" },
 ];
@@ -36,6 +37,7 @@ const emptyForm = {
   storage_account: "", container_name: "", blob_prefixes: "",
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "",
+  oci_region: "sa-saopaulo-1", oci_fingerprint: "", oci_private_key: "",
 };
 
 export default function Connections() {
@@ -98,6 +100,20 @@ export default function Connections() {
         gcp_token: cfg.token_json || cfg.token_path || "",
         table_name: cfg.table_name || "",
       });
+    } else if (conn.connector_type === "oci") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "oci",
+        tenant_id: cfg.tenancy_ocid || cfg.tenancy || "",
+        client_id: cfg.user_ocid || cfg.user || "",
+        oci_fingerprint: cfg.fingerprint || "",
+        oci_region: cfg.region || "sa-saopaulo-1",
+        oci_private_key: cfg.private_key || cfg.key_content || "",
+        blob_prefixes: (conn.blob_prefixes || []).join("\n"),
+      });
     } else if (conn.connector_type === "mongodb_atlas") {
       setForm({
         ...emptyForm,
@@ -107,10 +123,10 @@ export default function Connections() {
         cloud_scope: conn.cloud_scope || "atlas",
         tenant_id: cfg.base_url || "",
         client_id: cfg.public_key || cfg.contract_id || "",
-      client_secret: cfg.private_key || "",
-      mongo_group_id: cfg.group_id || "",
-      mongo_contract_type: cfg.contract_type || "",
-    });
+        client_secret: cfg.private_key || "",
+        mongo_group_id: cfg.group_id || "",
+        mongo_contract_type: cfg.contract_type || "",
+      });
     } else {
       setForm({
         ...emptyForm,
@@ -136,6 +152,12 @@ export default function Connections() {
       if (form.client_id) configJson.dataset_id = form.client_id;
       if (form.gcp_token) configJson.token_json = form.gcp_token;
       if (form.table_name) configJson.table_name = form.table_name;
+    } else if (form.connector_type === "oci") {
+      if (form.tenant_id) configJson.tenancy_ocid = form.tenant_id;
+      if (form.client_id) configJson.user_ocid = form.client_id;
+      if (form.oci_fingerprint) configJson.fingerprint = form.oci_fingerprint;
+      if (form.oci_region) configJson.region = form.oci_region;
+      if (form.oci_private_key) configJson.private_key = form.oci_private_key;
     } else if (form.connector_type === "mongodb_atlas") {
       if (form.tenant_id) configJson.base_url = form.tenant_id;
       if (form.client_id) configJson.public_key = form.client_id;
@@ -239,6 +261,28 @@ export default function Connections() {
                     <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                       <Typography variant="caption" color="text.secondary">Token:</Typography>
                       <Typography variant="caption">{(cfg.token_json || cfg.token_path || "").slice(0, 30)}...</Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {conn.connector_type === "oci" && (
+                  <Box sx={{ mt: 1, p: 1.5, bgcolor: "grey.50", borderRadius: 1, fontSize: "0.8rem" }}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">Tenancy:</Typography>
+                      <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{(cfg.tenancy_ocid || cfg.tenancy || "").slice(0, 18)}...</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">Region:</Typography>
+                      <Typography variant="caption">{cfg.region || "sa-saopaulo-1"}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">Fingerprint:</Typography>
+                      <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{cfg.fingerprint ? `${cfg.fingerprint.slice(0, 14)}...` : "-"}</Typography>
+                    </Box>
+                    <Box sx={{ mt: 1, pt: 0.5, borderTop: "1px dashed #ccc" }}>
+                      <Typography variant="caption" sx={{ color: "info.main", fontSize: "0.7rem", display: "block" }}>
+                        ℹ️ Dados agregados e consolidados por dia e recurso (granularidade horária condensada para otimização FinOps).
+                      </Typography>
                     </Box>
                   </Box>
                 )}
@@ -386,6 +430,35 @@ export default function Connections() {
                   value={form.gcp_token}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
                   helperText="Cole o conteudo completo do JSON da service account" />
+              </>
+            )}
+
+            {form.connector_type === "oci" && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>Oracle Cloud (OCI) Config</Typography>
+                <TextField label="Tenancy OCID" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
+                  helperText="OCID da Tenancy (ex: ocid1.tenancy.oc1..aaaa...)" />
+                <TextField label="User OCID" value={form.client_id}
+                  onChange={(e) => setForm({ ...form, client_id: e.target.value })}
+                  helperText="OCID do usuário OCI (ex: ocid1.user.oc1..aaaa...)" />
+                <TextField label="Fingerprint" value={form.oci_fingerprint}
+                  onChange={(e) => setForm({ ...form, oci_fingerprint: e.target.value })}
+                  helperText="Fingerprint da API Key cadastrada na OCI" />
+                <TextField label="Região" value={form.oci_region}
+                  onChange={(e) => setForm({ ...form, oci_region: e.target.value })}
+                  helperText="Região principal da OCI (ex: sa-saopaulo-1, sa-vinhedo-1, us-ashburn-1)" />
+                <TextField label="Private Key PEM" multiline rows={5}
+                  value={form.oci_private_key}
+                  onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
+                  helperText="Cole o conteudo completo da chave privada (.pem)" />
+                <TextField label="Blob Prefixes (um por linha)" multiline rows={2}
+                  value={form.blob_prefixes}
+                  onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
+                  helperText="Padrão: reports/cost-csv (relatórios de custo financeiro)" />
+                <Alert severity="info" sx={{ mt: 1, fontSize: "0.8rem" }}>
+                  <strong>Consolidação Diária OCI:</strong> Os dados são automaticamente agrupados por dia, recurso e tags durante a ingestão para otimização de performance, preservando 100% dos valores financeiros em R$ e dimensões.
+                </Alert>
               </>
             )}
 

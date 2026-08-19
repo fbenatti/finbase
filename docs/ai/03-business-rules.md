@@ -57,16 +57,20 @@ meterCategory=azuredefender|microsoftdefenderforcloud ; subscriptionName~Sandbox
 - `|` — OR entre valores do mesmo campo
 - `;` — AND entre campos diferentes
 
-Formato moderno: `conditions` JSONB `[{field, operator, values, logic}]`.
-Fallback legado: `source_field` + `pattern` + `pattern_type` (regex/contains/exact/multi_condition,
-onde `multi_condition` faz parse da string acima por `_parse_pattern_to_conditions`).
+Formato canônico: `conditions` JSONB `[{field, operator, values, logic}]` em colunas **destino** (FOCUS/Gold).
+
+`normalize_rule_conditions()` deriva condições de registros legados (`source_field` + `pattern` + `pattern_type`) apenas para leitura/migração. Regras sem condição utilizável **não casam nenhuma linha**.
+
+Campos legados como `resourceGroupName` são mapeados para `source_resource_group_name` na normalização (Azure).
+Regras GCP devem casar em `SubAccountId` (project id); aliases legados `projectId`/`projectName` normalizam para `SubAccountId`/`SubAccountName`.
 
 ### Semântica de aplicação (`apply_classification_rules` / `_apply_classifications_sync`)
 
-1. Regras ativas ordenadas por `priority`, filtradas por conexão (ou globais, `connection_id NULL`).
+1. Regras ativas ordenadas por `priority`, filtradas por `destination_table_id` e `cloud_scope`.
 2. **Regra sem `department_id` é ignorada** — classificação sem departamento não é alocação organizacional válida.
-3. First-match-wins por linha (`classified_mask`): primeira regra que casa classifica; as demais não tocam a linha.
+3. First-match-wins por linha: primeira regra que casa classifica; as demais não tocam linhas já preenchidas.
 4. Ao casar: preenche `target_field` com `match_value` e herda os campos do departamento.
+5. **Não há fallback em runtime** via `project.subscription_rg` — toda alocação deve existir como `ClassificationRule` editável na UI.
 
 ### Herança hierárquica de departamentos (`_build_department_path`)
 

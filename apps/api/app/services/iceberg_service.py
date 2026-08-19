@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 import pyarrow as pa
@@ -58,9 +58,6 @@ _LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", os.path.join(
 )))
 _LOCAL_WAREHOUSE.mkdir(parents=True, exist_ok=True)
 
-# Catalog type detection
-_USE_FALLBACK = os.getenv("ICEBERG_CATALOG_TYPE", "").lower() == "sql"
-
 _catalog: Optional[Catalog] = None
 _catalog_type: str = ""
 _initialized_namespaces: set[str] = set()
@@ -92,25 +89,29 @@ def _create_sql_catalog() -> Catalog:
 
 
 def _get_catalog() -> Catalog:
-    """Lazy-load the Iceberg catalog (Nessie or SQL fallback)."""
+    """Lazy-load the Iceberg catalog.
+
+    Local Trino reads the PostgreSQL JDBC catalog + filesystem warehouse.
+    Prefer that unless ICEBERG_CATALOG_TYPE=nessie, otherwise writes disappear
+    from Trino while a stale SQL table (like raw_oci_prod) stays unreadable.
+    """
     global _catalog, _catalog_type
     if _catalog is not None:
         return _catalog
 
-    if _USE_FALLBACK:
-        _catalog = _create_sql_catalog()
-        _catalog_type = "sql"
+    requested = os.getenv("ICEBERG_CATALOG_TYPE", "sql").lower()
+    if requested == "nessie":
+        _catalog = _try_nessie()
+        if _catalog is None:
+            _catalog = _create_sql_catalog()
+            _catalog_type = "sql"
+        else:
+            _catalog_type = "nessie"
+            logger.info("Connected to Nessie catalog")
         return _catalog
 
-    # Try Nessie first, fall back to SQL
-    _catalog = _try_nessie()
-    if _catalog is None:
-        _catalog = _create_sql_catalog()
-        _catalog_type = "sql"
-    else:
-        _catalog_type = "nessie"
-        logger.info("Connected to Nessie catalog")
-
+    _catalog = _create_sql_catalog()
+    _catalog_type = "sql"
     return _catalog
 
 
@@ -147,6 +148,35 @@ def _namespace_has_table(cat: Catalog, namespace: str, short_name: str) -> bool:
         return False
 
 
+def _fold_case_insensitive_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse columns that differ only by case.
+
+    Trino Iceberg treats identifiers as case-insensitive. OCI cost CSVs can
+    ship both ``tags/environment`` and ``tags/Environment``, which makes
+    ``SELECT *`` fail with GENERIC_INTERNAL_ERROR / duplicate map keys.
+    """
+    groups: dict[str, list[Any]] = {}
+    for column in df.columns:
+        groups.setdefault(str(column).lower(), []).append(column)
+    if all(len(names) == 1 for names in groups.values()):
+        return df
+    folded = pd.DataFrame(index=df.index)
+    for names in groups.values():
+        keep = names[0]
+        series = df[keep]
+        for extra in names[1:]:
+            extra_series = df[extra]
+            blank = series.isna() | (series.astype(str).str.strip() == "") | (series.astype(str) == "nan")
+            series = series.where(~blank, extra_series)
+        folded[keep] = series
+    return folded
+
+
+def _schema_has_case_collisions(schema: Any) -> bool:
+    names = [str(field.name) for field in schema.fields]
+    return len(names) != len({name.lower() for name in names})
+
+
 def _bronze_table_id(connection_code: str) -> tuple[str, str]:
     safe = connection_code.replace("-", "_").replace(".", "_")
     return ("bronze", f"raw_{safe}")
@@ -155,8 +185,10 @@ def _bronze_table_id(connection_code: str) -> tuple[str, str]:
 def _df_to_arrow(
     df: pd.DataFrame,
     column_types: Optional[dict[str, str]] = None,
+    target_schema: Optional[Any] = None,
 ) -> pa.Table:
-    """Convert a pandas DataFrame to a PyArrow Table, coercing columns to match
+    """
+    Convert a pandas DataFrame to a PyArrow Table, safely coercing columns to
     expected types.
 
     Args:
@@ -166,9 +198,10 @@ def _df_to_arrow(
                       When provided, columns are coerced to match before conversion.
                       When omitted, all object columns are forced to string to avoid
                       PyArrow inference failures on mixed-type columns.
+        target_schema: Optional Iceberg schema to map PARQUET:field_id by column name.
 
     Returns:
-        PyArrow Table with all columns typed consistently.
+        PyArrow Table with all columns typed consistently and mapped field IDs.
     """
     import pyarrow as pa_lib
     import numpy as np
@@ -250,11 +283,20 @@ def _df_to_arrow(
         cols = [arrow_table.column(j).cast(new_schema.field(j).type) for j in range(len(new_fields))]
         arrow_table = pa_lib.table(dict(zip([f.name for f in new_fields], cols)))
 
-    # Ensure every field has a deterministic PARQUET:field_id metadata (1-based)
+    # Ensure every field has a deterministic PARQUET:field_id metadata mapped by name
     final_fields = []
     for idx in range(len(arrow_table.schema)):
         f = arrow_table.schema.field(idx)
-        fid = str(idx + 1)  # 1-based IDs
+        fid = None
+        if target_schema is not None:
+            try:
+                iceberg_field = target_schema.find_field(f.name)
+                if iceberg_field:
+                    fid = str(iceberg_field.field_id)
+            except Exception:
+                pass
+        if not fid:
+            fid = str(idx + 1)
         meta = dict(f.metadata or {})
         meta[b"PARQUET:field_id"] = fid.encode()
         final_fields.append(pa_lib.field(f.name, f.type, nullable=f.nullable, metadata=meta))
@@ -287,8 +329,7 @@ def write_bronze(
     table_name = f"{table_id[0]}.{table_id[1]}"
     _ensure_namespace("bronze")
 
-    # Add metadata columns
-    df = df.copy()
+    df = _fold_case_insensitive_columns(df.copy())
     df["_billing_period"] = billing_period
     df["_blob_path"] = blob_path
     df["_ingested_at"] = pd.Timestamp.utcnow().isoformat()
@@ -323,8 +364,14 @@ def write_bronze(
     except Exception:
         pass
 
+    if tbl is not None and _schema_has_case_collisions(tbl.schema()):
+        logger.warning("Dropping %s: Iceberg schema has case-colliding columns that Trino cannot read", table_name)
+        cat.drop_table(table_id)
+        tbl = None
+
     if tbl is not None:
         try:
+            arrow_table = _df_to_arrow(df, column_types=bronze_types, target_schema=tbl.schema())
             tbl.append(arrow_table)
             logger.info("Appended %d rows to %s", rows, table_name)
             return rows
@@ -335,6 +382,7 @@ def write_bronze(
                 with tbl.update_schema() as schema_update:
                     schema_update.union_by_name(iceberg_schema)
                 tbl = cat.load_table(table_id)
+                arrow_table = _df_to_arrow(df, column_types=bronze_types, target_schema=tbl.schema())
                 tbl.append(arrow_table)
                 logger.info("Appended %d rows to %s after schema evolution", rows, table_name)
                 return rows
@@ -369,17 +417,29 @@ def reset_bronze(connection_code: str) -> bool:
 
     This is intentionally separate from normal ingestion: append remains the
     safe default, while a user-requested source rebuild gets a clean snapshot.
+    Also removes leftover warehouse files so Trino cannot keep serving a
+    cached/broken schema after the catalog row is gone.
     """
+    import shutil
+
     table_id = _bronze_table_id(connection_code)
     table_name = f"{table_id[0]}.{table_id[1]}"
     cat = _get_catalog()
+    dropped = False
     try:
         cat.drop_table(table_id)
         logger.warning("Reset Bronze table %s", table_name)
-        return True
+        dropped = True
     except Exception as exc:
-        logger.info("Bronze table %s was not reset: %s", table_name, exc)
-        return False
+        logger.info("Bronze table %s was not in the catalog: %s", table_name, exc)
+    short = table_id[1]
+    for namespace_pattern in ("bronze", "bronze.db"):
+        candidate = _LOCAL_WAREHOUSE / namespace_pattern / short
+        if candidate.is_dir():
+            shutil.rmtree(candidate, ignore_errors=True)
+            logger.warning("Deleted leftover Bronze warehouse dir %s", candidate)
+            dropped = True
+    return dropped
 
 
 def delete_bronze_slice(

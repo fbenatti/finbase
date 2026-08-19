@@ -25,6 +25,7 @@ from app.models.rules import EtlMapping, BusinessRule, ClassificationRule
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
 from app.services.azure_extractor import AzureExtractor, derive_billing_period
 from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
+from app.services.oci_extractor import OciExtractor, derive_billing_period_oci
 from app.services.expression_engine import evaluate_expression, evaluate_conditional
 from app.services import iceberg_service as iceberg
 
@@ -382,7 +383,11 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
     - department hierarchy fields: centro_custo, ambiente, custom_fields
     """
     from app.models.rules import Department, Project
-    from app.services.classification_engine import _evaluate_multi_condition
+    from app.services.classification_engine import (
+        _canon,
+        evaluate_rule_conditions,
+        normalize_rule_conditions,
+    )
 
     # ── Load department/project caches from DB only if not pre-loaded ──
     if dept_map is None and proj_map is None and hierarchy_cache is None:
@@ -451,15 +456,13 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
             df[col] = None
 
     # ── Pre-compute _canon columns for all unique fields referenced by rules ──
-    from app.services.classification_engine import _canon
     canon_cache: dict[str, pd.Series] = {}
     unique_fields = set()
     for rule in class_rules:
-        if rule.conditions and isinstance(rule.conditions, list):
-            for cond in rule.conditions:
-                fld = cond.get("field", "")
-                if fld and fld in df.columns:
-                    unique_fields.add(fld)
+        for cond in normalize_rule_conditions(rule):
+            fld = cond.get("field", "")
+            if fld and fld in df.columns:
+                unique_fields.add(fld)
     for fld in unique_fields:
         canon_cache[fld] = df[fld].fillna("").astype(str).map(_canon)
 
@@ -470,20 +473,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         # misleading free-text project with no department hierarchy.
         if not rule.active or not rule.department_id:
             continue
-        if rule.conditions:
-            mask = _evaluate_multi_condition(df, rule.conditions, canon_cache=canon_cache)
-        else:
-            source = rule.source_field
-            if source not in df.columns:
-                continue
-            col = df[source].astype(str)
-            val = str(rule.match_value)
-            if rule.pattern_type == "contains":
-                mask = col.str.contains(rule.pattern, case=False, na=False)
-            elif rule.pattern_type == "exact":
-                mask = col == val
-            else:
-                mask = col.str.contains(str(rule.pattern), case=False, na=False)
+        mask = evaluate_rule_conditions(df, rule, canon_cache=canon_cache)
         if mask is None or not mask.any():
             continue
 
@@ -549,119 +539,6 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                 if 'subscription_rg' not in df.columns:
                     df['subscription_rg'] = None
                 df.loc[effective_mask, 'subscription_rg'] = proj.subscription_rg or ''
-
-
-def _apply_department_hierarchy_to_mask(
-    df: pd.DataFrame,
-    effective_mask: pd.Series,
-    dept_id: int,
-    proj_id: int | None,
-    dept_map: dict,
-    proj_map: dict,
-    hierarchy_cache: dict,
-) -> None:
-    def get_hierarchy(dept_id: int):
-        if dept_id in hierarchy_cache:
-            return hierarchy_cache[dept_id]
-        dept = dept_map.get(dept_id)
-        if not dept:
-            hierarchy_cache[dept_id] = (None, None, [])
-            return (None, None, [])
-        visited = [dept]
-        current_id = dept.parent_id
-        depth = 0
-        while current_id and depth < 7:
-            parent = dept_map.get(current_id)
-            if parent:
-                visited.append(parent)
-                current_id = parent.parent_id
-            else:
-                break
-            depth += 1
-        root = visited[-1] if visited else dept
-        result = (dept, root, visited)
-        hierarchy_cache[dept_id] = result
-        return result
-
-    leaf, _, chain = get_hierarchy(dept_id)
-    if not leaf:
-        return
-    merged_custom_fields: dict = {}
-    centro_custo_val: str | None = None
-    ambiente_val: str | None = None
-    for d in reversed(chain):
-        if d.custom_fields and isinstance(d.custom_fields, dict):
-            merged_custom_fields.update(d.custom_fields)
-        if centro_custo_val is None and d.centro_custo:
-            centro_custo_val = d.centro_custo
-        if ambiente_val is None and d.ambiente:
-            ambiente_val = d.ambiente
-    for col_name, col_val in [
-        ('departamento', leaf.name),
-        ('centro_custo', centro_custo_val),
-        ('ambiente', ambiente_val),
-    ]:
-        if col_val is not None:
-            if col_name not in df.columns:
-                df[col_name] = None
-            df.loc[effective_mask, col_name] = str(col_val)
-    root_to_leaf = list(reversed(chain))
-    for i, d in enumerate(root_to_leaf, start=1):
-        col_name = f"departamento_nivel_{i}"
-        if col_name not in df.columns:
-            df[col_name] = None
-        df.loc[effective_mask, col_name] = d.name or ""
-    if merged_custom_fields:
-        if 'custom_fields' not in df.columns:
-            df['custom_fields'] = None
-        import json
-        df.loc[effective_mask, 'custom_fields'] = json.dumps(merged_custom_fields, default=str, ensure_ascii=False)
-    if proj_id:
-        proj = proj_map.get(proj_id)
-        if proj:
-            if 'subscription_rg' not in df.columns:
-                df['subscription_rg'] = None
-            df.loc[effective_mask, 'subscription_rg'] = proj.subscription_rg or ''
-
-
-def _apply_project_subscription_lookup(
-    df: pd.DataFrame,
-    connection_cloud: str | None,
-    dept_map: dict,
-    proj_map: dict,
-    hierarchy_cache: dict,
-    project_rows: list | None = None,
-) -> None:
-    """Fallback classification: map source_resource_group_name to project.subscription_rg."""
-    from app.services.classification_engine import _canon
-
-    if 'source_resource_group_name' not in df.columns or 'departamento' not in df.columns:
-        return
-    unfilled = df['departamento'].isna() | (df['departamento'].astype(str).str.strip() == '')
-    if not unfilled.any():
-        return
-
-    lookup: dict[str, object] = {}
-    for proj in project_rows or proj_map.values():
-        if connection_cloud and getattr(proj, "cloud", None) and proj.cloud != connection_cloud:
-            continue
-        key = _canon(getattr(proj, "subscription_rg", None))
-        if key and key not in lookup:
-            lookup[key] = proj
-
-    if not lookup:
-        return
-
-    canon_rg = df['source_resource_group_name'].fillna("").astype(str).map(_canon)
-    for idx in df.index[unfilled]:
-        proj = lookup.get(canon_rg.loc[idx])
-        if not proj:
-            continue
-        mask = pd.Series(False, index=df.index)
-        mask.loc[idx] = True
-        _apply_department_hierarchy_to_mask(
-            df, mask, proj.department_id, proj.id, dept_map, proj_map, hierarchy_cache,
-        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -847,6 +724,189 @@ def _process_gcp_month_sync(
     return rows_written, 0, 0, errors
 
 
+def _process_oci_blob_sync(
+    session: Session,
+    extractor: OciExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified: datetime,
+    content_length: Optional[int],
+    task_id: Optional[int] = None,
+) -> tuple[int, int, int, list[str]]:
+    """Download, parse e carga consolidada do mês OCI em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+    tenancy_ocid = conn.config_json.get("tenancy_ocid") or conn.config_json.get("tenancy")
+    namespace = conn.config_json.get("namespace", "bling")
+    client = extractor._get_object_storage_client()
+
+    # Identificar se é um período agregado (ex: reports/cost-csv#period=202608)
+    if "#period=" in blob_path:
+        billing_period = blob_path.split("#period=")[-1][:6]
+        prefix = blob_path.split("#period=")[0]
+    else:
+        billing_period = derive_billing_period_oci(blob_path, last_modified)
+        prefix = blob_prefix
+
+    try:
+        if "#period=" in blob_path:
+            # Obter todos os arquivos do mês
+            objects_in_period = extractor.get_objects_for_period(billing_period, prefix)
+            if not objects_in_period:
+                # Se não filtrou por data, tentar listar com prefixo
+                objects_in_period = [obj for obj in extractor._list_all_raw_objects(prefix)
+                                     if derive_billing_period_oci(obj.name, obj.time_created) == billing_period]
+        else:
+            # Arquivo individual
+            objects_in_period = [type("Obj", (), {"name": blob_path, "size": content_length or 0, "time_created": last_modified})()]
+
+        total_files = len(objects_in_period)
+        total_bytes_expected = sum(getattr(obj, "size", 0) or 0 for obj in objects_in_period)
+
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=total_bytes_expected,
+            download_bytes=0,
+            phase=f"Download OCI ({billing_period}): 0/{total_files} arquivos",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, total_bytes_expected)
+
+        dfs: list[pd.DataFrame] = []
+        cumulative_bytes = 0
+
+        for idx, obj in enumerate(objects_in_period, 1):
+            if _check_cancelled(task_id):
+                return 0, 0, 0, ["Cancelled"]
+
+            obj_name = obj.name
+            response = client.get_object(
+                namespace_name=namespace,
+                bucket_name=tenancy_ocid,
+                object_name=obj_name,
+            )
+            raw_bytes = response.data.content
+            dl_bytes = len(raw_bytes)
+            cumulative_bytes += dl_bytes
+
+            _persist_download_delta(
+                task_id, dl_bytes, download_bytes=cumulative_bytes,
+                current_blob=blob_path,
+                phase=f"Download OCI ({billing_period}): {idx}/{total_files} arquivos ({dl_bytes // 1024} KB)"
+            )
+
+            df_part = extractor._parse_csv_bytes(raw_bytes, obj_name)
+            if not df_part.empty:
+                # Agregação parcial imediata por arquivo para economizar memória (reduz de 15k para ~500 linhas)
+                df_part_agg = OciExtractor.aggregate_df_daily(df_part)
+                dfs.append(df_part_agg)
+
+        if not dfs:
+            logger.warning("Nenhum dado encontrado para o período OCI %s", billing_period)
+            return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
+
+        _persist_download_blob(task_id, blob_path, "PARSING", cumulative_bytes, total_bytes_expected or cumulative_bytes)
+        _persist_download_progress(task_id, phase=f"Consolidando {len(dfs)} arquivos de {billing_period}...")
+
+        full_df = pd.concat(dfs, ignore_index=True)
+        # Agregação diária final do mês
+        full_df = OciExtractor.aggregate_df_daily(full_df)
+        raw_df_bronze = full_df.copy()
+    except Exception as e:
+        logger.error("Falha ao processar período OCI %s: %s", blob_path, e)
+        errors.append(f"Failed to process OCI period {blob_path}: {e}")
+        return 0, 0, 0, errors
+    finally:
+        if task_id:
+            _persist_download_blob(task_id, blob_path, "DOWNLOADED", content_length or 0, content_length or 0)
+            _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando consolidado OCI ({len(full_df)} linhas diárias)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=billing_period,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag=f"{len(objects_in_period)}_{cumulative_bytes}",
+        content_length=cumulative_bytes,
+        row_count=len(full_df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    # Iceberg Bronze
+    if not raw_df_bronze.empty and billing_period:
+        _persist_download_blob(task_id, blob_path, "BRONZE", cumulative_bytes, cumulative_bytes)
+        try:
+            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+        except Exception as exc:
+            logger.error("Bronze write failed for OCI (%s): %s", blob_path, exc)
+            session.delete(ingested)
+            session.flush()
+            return len(full_df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze OCI ({billing_period}) concluída com {len(full_df)} linhas")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", cumulative_bytes, cumulative_bytes)
+    return len(full_df), 0, 0, []
+
+
+def _process_oci_blob_sync_worker(
+    task_id: int,
+    item,
+    extractor: OciExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_oci_blob_sync(
+            session,
+            extractor,
+            item.blob_path,
+            item.blob_prefix,
+            item.last_modified,
+            item.content_length,
+            task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1,
+                download_bytes=0,
+                current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
 def _process_gcp_month_sync_worker(
     task_id: int,
     item,
@@ -992,7 +1052,7 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery"):
+        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -1004,6 +1064,10 @@ def _run_etl_sync(
             extractor = AzureExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_blob_sync_worker
+        elif conn.connector_type == "oci":
+            extractor = OciExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_oci_blob_sync_worker
         else:
             extractor = GcpBigQueryExtractor(conn)
             scan_result = extractor._scan_sync(session)
@@ -1012,10 +1076,12 @@ def _run_etl_sync(
 
         # Scan (uses sync SDK — already non-blocking in thread)
 
-        to_process = [item for item in scan_items if item.status in ("NEW", "CHANGED")]
         if selected_blobs:
             selected_set = set(selected_blobs)
-            to_process = [item for item in to_process if item.blob_path in selected_set]
+            to_process = [item for item in scan_items if item.blob_path in selected_set]
+        else:
+            to_process = [item for item in scan_items if item.status in ("NEW", "CHANGED")]
+
         if force_periods:
             force_set = set(force_periods)
             extra = [item for item in scan_items if item.billing_period in force_set and item not in to_process]
@@ -1055,10 +1121,11 @@ def _run_etl_sync(
         total = len(to_process)
         completed = 0
 
-        # Keep the concurrency deliberately small: two large CSVs can saturate
-        # memory because each download is assembled before pandas parses it.
-        # Remaining files are explicitly QUEUED until a worker slot is free.
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="blob-dl") as dl_executor:
+        # Para OCI e GCP BigQuery (cargas de meses consolidados), usar 1 worker por vez para evitar
+        # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
+        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery") else 2
+
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="blob-dl") as dl_executor:
             futures = {}
             for i, item in enumerate(to_process):
                 if _check_cancelled(task_id):

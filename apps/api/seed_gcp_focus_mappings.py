@@ -35,7 +35,6 @@ MAPPINGS: list[dict] = [
     {"source_column": "billing_account_id", "destination_column": "BillingAccountName", "transform_type": "CONST", "transform_config": {"value": "__CLOUD_NAME__"}},
     {"source_column": "project", "destination_column": "SubAccountId", "transform_type": "JSON_PATH", "transform_config": {"path": "id"}},
     {"source_column": "project", "destination_column": "SubAccountName", "transform_type": "JSON_PATH", "transform_config": {"path": "name"}},
-    {"source_column": "project", "destination_column": "source_resource_group_name", "transform_type": "JSON_PATH", "transform_config": {"path": "name"}},
     {"source_column": "cost", "destination_column": "BilledCost", "transform_type": "EXPR", "transform_config": {"expression": "cost + credits_sum"}},
     {"source_column": "cost", "destination_column": "EffectiveCost", "transform_type": "EXPR", "transform_config": {"expression": "cost + credits_sum"}},
     {"source_column": "cost", "destination_column": "ContractedCost", "transform_type": "RENAME"},
@@ -108,6 +107,8 @@ MAPPINGS: list[dict] = [
     {"source_column": "invoice", "destination_column": "InvoiceId", "transform_type": "JSON_PATH", "transform_config": {"path": "month"}},
     {"source_column": "adjustment_info", "destination_column": "x_AdjustmentInfo", "transform_type": "RENAME"},
     {"source_column": "cost", "destination_column": "PricingCurrencyEffectiveCost", "transform_type": "EXPR", "transform_config": {"expression": "cost + credits_sum"}},
+    {"source_column": "sku", "destination_column": "MarketplaceProductName", "transform_type": "CONDITIONAL", "transform_config": {"when_column": "invoice", "when_path": "publisher_type", "when_values": ["THIRD_PARTY_RESELLER"], "then_type": "JSON_PATH", "then_config": {"path": "description"}}},
+    {"source_column": "invoice", "destination_column": "MarketplaceBillingModel", "transform_type": "CONDITIONAL", "transform_config": {"when_column": "invoice", "when_path": "publisher_type", "when_values": ["THIRD_PARTY_RESELLER"], "then_type": "CONST", "then_config": {"value": "RECURRING"}}},
 ]
 
 X_COLUMNS = [
@@ -121,6 +122,7 @@ X_COLUMNS = [
     ("x_TransactionType", "TEXT"), ("x_InvoicePublisherType", "TEXT"), ("x_InvoiceMonth", "TEXT"),
     ("x_AdjustmentInfo", "JSONB"), ("x_UsageAmountInPricingUnits", "NUMERIC"),
     ("x_UsagePricingUnit", "TEXT"), ("x_PriceTierStartAmount", "NUMERIC"), ("x_LocationCountry", "TEXT"),
+    ("MarketplaceProductName", "TEXT"), ("MarketplaceOfferUnit", "TEXT"), ("MarketplaceBillingModel", "TEXT"),
 ]
 
 
@@ -201,11 +203,24 @@ def assert_leaf_coverage() -> None:
         raise RuntimeError(f"GCP leaf fields without mapping: {sorted(missing)}")
 
 
+def remove_legacy_gcp_classification_mapping(session) -> None:
+    """Drop Azure-era project.name → source_resource_group_name mapping on GCP connections."""
+    for conn_id in GCP_CONNECTIONS:
+        session.execute(text("""
+            DELETE FROM source_destination_mapping
+            WHERE source_connection_id = :cid
+              AND destination_table_id = :did
+              AND destination_column = 'source_resource_group_name'
+              AND source_column = 'project'
+        """), {"cid": conn_id, "did": DEST_TABLE_ID})
+
+
 def main() -> None:
     assert_leaf_coverage()
     session = SyncSession()
     try:
         ensure_destination_columns(session)
+        remove_legacy_gcp_classification_mapping(session)
         seed_mappings(session)
         session.commit()
         print("GCP FOCUS mappings seeded successfully.")

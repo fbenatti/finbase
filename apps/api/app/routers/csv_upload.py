@@ -17,6 +17,7 @@ from app.services.csv_upload_service import (
     build_preview,
     load_csv_to_bronze,
     parse_csv_bytes,
+    _derive_billing_period,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,10 @@ class CsvPreviewResponse(BaseModel):
     columns: list[dict[str, Any]]
     sample_rows: list[dict[str, Any]]
     suggested_billing_period: str | None
+    monthly_grain: bool = False
+    current_month: bool = False
+    warning_message: str | None = None
+    skip_gold_realizado: bool = False
 
 
 class CsvIngestRequest(BaseModel):
@@ -49,6 +54,10 @@ class CsvIngestResponse(BaseModel):
     blob_path: str
     table_name: str
     column_types: dict[str, str]
+    monthly_grain: bool = False
+    current_month: bool = False
+    warning_message: str | None = None
+    skip_gold_realizado: bool = False
 
 
 @router.post("/preview", response_model=CsvPreviewResponse)
@@ -64,11 +73,8 @@ async def preview_csv(
         if not raw:
             raise HTTPException(status_code=400, detail="Arquivo vazio")
         df = parse_csv_bytes(raw)
-        preview = build_preview(df)
-
-        # Re-derive billing period for the UI default.
-        from app.services.csv_upload_service import _derive_billing_period
         suggested = _derive_billing_period(file.filename, df)
+        preview = build_preview(df, billing_period=suggested)
 
         return CsvPreviewResponse(
             row_count=preview["row_count"],
@@ -76,6 +82,10 @@ async def preview_csv(
             columns=preview["columns"],
             sample_rows=preview["sample_rows"],
             suggested_billing_period=suggested,
+            monthly_grain=preview.get("monthly_grain", False),
+            current_month=preview.get("current_month", False),
+            warning_message=preview.get("warning_message"),
+            skip_gold_realizado=preview.get("skip_gold_realizado", False),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, TableCell, Paper, Chip, LinearProgress,
   Alert, Select, MenuItem, FormControl, InputLabel, Checkbox,
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  FormControlLabel, Switch, IconButton,
+  FormControlLabel, Switch, IconButton, Tabs, Tab, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
-import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart } from "@mui/icons-material";
+import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility, History as HistoryIcon } from "@mui/icons-material";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
   resetSourceForReimport,
@@ -14,6 +15,7 @@ import {
   clearSkippedBlobs,
   processDestinationTables,
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
+  getExtractionHistory, ExtractionHistoryItem,
   ScheduledTask,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
   SCANNABLE_CONNECTOR_TYPES, formatApiError,
@@ -38,6 +40,13 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function Extraction() {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") || "extraction";
+  const setTab = (newTab: string) => {
+    setParams({ tab: newTab });
+  };
+
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connId, setConnId] = useState<number | "">("");
   const [scanResult, setScanResult] = useState<BlobScanResult | null>(null);
@@ -55,6 +64,10 @@ export default function Extraction() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const skippedPaths = new Set(skippedBlobs.map(s => s.blob_path));
 
+  // ── Extraction History state ──
+  const [historyList, setHistoryList] = useState<ExtractionHistoryItem[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   // ── Schedules state ──
   const [schedules, setSchedules] = useState<ScheduledTask[]>([]);
   const [schedDialogOpen, setSchedDialogOpen] = useState(false);
@@ -68,6 +81,24 @@ export default function Extraction() {
   const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setLoadingHistory(true);
+      const data = await getExtractionHistory();
+      setHistoryList(data);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "history") {
+      void loadHistory();
+    }
+  }, [tab, loadHistory]);
 
   // Connections eligible for extraction/monitoring (cloud scan + manual CSV upload).
   const extractableConnectorTypes = useMemo(
@@ -423,17 +454,24 @@ export default function Extraction() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 3 }}>Extracao & Monitoramento</Typography>
+      <Typography variant="h4" sx={{ mb: 2 }}>Extração & Monitoramento</Typography>
 
-      <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <FormControl sx={{ minWidth: 280 }}>
-          <InputLabel>Conexao</InputLabel>
-          <Select value={connId} label="Conexao" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
-            {extractableConnections.map((c) => (
-              <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+      <Tabs value={tab} onChange={(_, val) => setTab(val)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
+        <Tab label="Extração & Agendamentos" value="extraction" />
+        <Tab label="Histórico de Execuções" value="history" icon={<HistoryIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
+      </Tabs>
+
+      {tab === "extraction" && (
+        <>
+          <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <FormControl sx={{ minWidth: 280 }}>
+              <InputLabel>Conexao</InputLabel>
+              <Select value={connId} label="Conexao" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
+                {extractableConnections.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
         {connections.length > 0 && extractableConnections.length === 0 && (
           <Alert severity="warning">Nenhuma conexao disponivel para extracao.</Alert>
         )}
@@ -498,6 +536,12 @@ export default function Extraction() {
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{sourceResetMessage}</Alert>}
+
+      {extractableConnections.find(c => c.id === connId)?.connector_type === "oci" && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <strong>Consolidação Inteligente OCI:</strong> Os dados da Oracle Cloud são agrupados e consolidados por dia e recurso para garantir alta performance e tabelas otimizadas, preservando 100% dos valores financeiros, quantidades e tags de negócio.
+        </Alert>
+      )}
 
       {scanning && (
         <Box sx={{ display: "flex", alignItems: "center", gap: 2, my: 4, p: 3, bgcolor: "#f5f5f5", borderRadius: 2 }}>
@@ -1091,6 +1135,107 @@ export default function Extraction() {
           connectionId={uploadConn.id}
           connectionName={uploadConn.name}
         />
+      )}
+        </>
+      )}
+
+      {tab === "history" && (
+        <Box>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+            <Box>
+              <Typography variant="h6" fontWeight={600}>Histórico de Execuções</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Acompanhe o status e abra os dados reais importados na camada Bronze do Apache Iceberg
+              </Typography>
+            </Box>
+            <Button
+              variant="outlined"
+              startIcon={loadingHistory ? <CircularProgress size={18} /> : <Refresh />}
+              onClick={() => void loadHistory()}
+              disabled={loadingHistory}
+            >
+              Atualizar Histórico
+            </Button>
+          </Stack>
+
+          {loadingHistory && historyList.length === 0 ? (
+            <Stack alignItems="center" py={8}>
+              <CircularProgress />
+              <Typography mt={2} color="text.secondary">Carregando histórico de extrações...</Typography>
+            </Stack>
+          ) : historyList.length === 0 ? (
+            <EmptyState message="Nenhuma execução de extração registrada até o momento." />
+          ) : (
+            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+              <Table size="small">
+                <TableHead sx={{ bgcolor: "grey.100" }}>
+                  <TableRow>
+                    <TableCell><strong>ID</strong></TableCell>
+                    <TableCell><strong>Status</strong></TableCell>
+                    <TableCell><strong>Conexão</strong></TableCell>
+                    <TableCell><strong>Período(s)</strong></TableCell>
+                    <TableCell align="right"><strong>Blobs</strong></TableCell>
+                    <TableCell align="right"><strong>Linhas Raw</strong></TableCell>
+                    <TableCell><strong>Iniciado em</strong></TableCell>
+                    <TableCell><strong>Finalizado em</strong></TableCell>
+                    <TableCell align="center"><strong>Ações</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {historyList.map((item) => {
+                    const statusColor = STATUS_COLORS[item.status] || "default";
+                    const isFinished = ["COMPLETED", "COMPLETED_WITH_ERRORS"].includes(item.status);
+                    return (
+                      <TableRow key={item.id} hover>
+                        <TableCell sx={{ fontFamily: "monospace", fontWeight: 700 }}>#{item.id}</TableCell>
+                        <TableCell>
+                          <Chip label={item.status} size="small" color={statusColor} />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={600}>
+                            {item.connection_name || "—"}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.connection_code} ({item.connector_type})
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          {item.billing_periods && item.billing_periods.length > 0
+                            ? item.billing_periods.join(", ")
+                            : (item.result_json?.billing_periods as string[])?.join(", ") || "—"}
+                        </TableCell>
+                        <TableCell align="right">
+                          {item.processed_blobs} / {item.total_blobs || "?"}
+                        </TableCell>
+                        <TableCell align="right">
+                          <strong>{(item.rows_raw || 0).toLocaleString()}</strong>
+                        </TableCell>
+                        <TableCell>
+                          {item.started_at ? new Date(item.started_at).toLocaleString("pt-BR") : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {item.finished_at ? new Date(item.finished_at).toLocaleString("pt-BR") : (item.phase || "Em andamento")}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="primary"
+                            startIcon={<Visibility sx={{ fontSize: 16 }} />}
+                            onClick={() => navigate(`/extraction/history/${item.id}`)}
+                            disabled={!isFinished && (item.rows_raw || 0) === 0}
+                          >
+                            Abrir Dados
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Box>
       )}
     </Box>
   );

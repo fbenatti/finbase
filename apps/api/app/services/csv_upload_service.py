@@ -8,11 +8,12 @@ resulting table follows the same Bronze contract as Azure/GCP extractions:
 
 from __future__ import annotations
 
+import calendar
 import io
 import logging
 import re
 import warnings
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -36,6 +37,114 @@ _CSV_CANDIDATES = [
 ]
 
 _ALLOWED_TYPES = {"TEXT", "INTEGER", "DOUBLE", "BOOLEAN", "DATE"}
+
+_DATE_START_COLUMNS = (
+    "ChargePeriodStart",
+    "ChargeDate",
+    "Date",
+    "usage_date",
+    "BillingPeriodStart",
+)
+_DATE_END_COLUMNS = (
+    "ChargePeriodEnd",
+    "BillingPeriodEnd",
+)
+
+_CURRENT_MONTH_MONTHLY_WARNING = (
+    "Este CSV tem granularidade mensal (fatura) para o mês corrente. "
+    "Os dados serão armazenados no Bronze, mas não serão publicados como realizado "
+    "na Gold nem usados no Forecast até o fechamento do mês."
+)
+
+_MAX_DISTINCT_CHARGE_DATES = 3
+
+
+def is_current_billing_period(period: str) -> bool:
+    """Return True when ``period`` (YYYYMM) is the current calendar month."""
+    if not re.fullmatch(r"\d{6}", period):
+        return False
+    now = datetime.now()
+    return period == f"{now.year}{now.month:02d}"
+
+
+def _find_column(df: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
+    lower_map = {str(col).lower(): col for col in df.columns}
+    for candidate in candidates:
+        match = lower_map.get(candidate.lower())
+        if match is not None:
+            return str(match)
+    return None
+
+
+def _parse_date_series(series: pd.Series) -> pd.Series:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return pd.to_datetime(series, errors="coerce", utc=True)
+
+
+def detect_monthly_grain(df: pd.DataFrame, billing_period: str) -> bool:
+    """Detect invoice-style monthly CSVs versus daily cost detail.
+
+    Provider-agnostic heuristics:
+    - Few distinct charge dates (FOCUS monthly exports often have one).
+    - ChargePeriodStart/End span the billing month, or all rows share the
+      same period boundaries (IBM FOCUS pattern).
+    """
+    if df.empty or not re.fullmatch(r"\d{6}", billing_period):
+        return False
+
+    year = int(billing_period[:4])
+    month = int(billing_period[4:6])
+    month_start = date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+
+    start_col = _find_column(df, _DATE_START_COLUMNS)
+    if start_col is None:
+        return False
+
+    starts = _parse_date_series(df[start_col]).dt.date
+    valid_starts = starts.dropna()
+    if valid_starts.empty:
+        return False
+
+    distinct_dates = int(valid_starts.nunique())
+    if distinct_dates > _MAX_DISTINCT_CHARGE_DATES:
+        return False
+
+    end_col = _find_column(df, _DATE_END_COLUMNS)
+    if end_col:
+        ends = _parse_date_series(df[end_col]).dt.date.dropna()
+        if not ends.empty:
+            same_start = valid_starts.nunique() == 1
+            same_end = ends.nunique() == 1
+            if same_start and same_end:
+                start_value = valid_starts.iloc[0]
+                end_value = ends.iloc[0]
+                if start_value == month_start and end_value == month_end:
+                    return True
+                if start_value == end_value == month_start:
+                    return True
+            if valid_starts.min() <= month_start and ends.max() >= month_end:
+                return True
+
+    if distinct_dates == 1 and valid_starts.iloc[0] == month_start:
+        return True
+
+    return False
+
+
+def analyze_csv_grain(df: pd.DataFrame, billing_period: str) -> dict[str, Any]:
+    """Summarize monthly grain and whether Gold/Forecast should ignore the period."""
+    monthly_grain = detect_monthly_grain(df, billing_period)
+    current_month = is_current_billing_period(billing_period)
+    skip_gold = monthly_grain and current_month
+    warning_message = _CURRENT_MONTH_MONTHLY_WARNING if skip_gold else None
+    return {
+        "monthly_grain": monthly_grain,
+        "current_month": current_month,
+        "warning_message": warning_message,
+        "skip_gold_realizado": skip_gold,
+    }
 
 
 def _try_read_csv(
@@ -241,7 +350,11 @@ def _serialize_value(val: Any) -> Any:
     return val
 
 
-def build_preview(df: pd.DataFrame, max_rows: int = 10) -> dict[str, Any]:
+def build_preview(
+    df: pd.DataFrame,
+    max_rows: int = 10,
+    billing_period: str | None = None,
+) -> dict[str, Any]:
     """Build a JSON-serializable preview payload.
 
     Returns columns with inferred type, sample values, null count, and a few
@@ -266,12 +379,45 @@ def build_preview(df: pd.DataFrame, max_rows: int = 10) -> dict[str, Any]:
             "total_count": len(df),
         })
 
-    return {
+    payload = {
         "row_count": len(df),
         "column_count": len(df.columns),
         "columns": columns,
         "sample_rows": records,
     }
+    if billing_period and re.fullmatch(r"\d{6}", billing_period):
+        payload.update(analyze_csv_grain(df, billing_period))
+    else:
+        payload.update({
+            "monthly_grain": False,
+            "current_month": False,
+            "warning_message": None,
+            "skip_gold_realizado": False,
+        })
+    return payload
+
+
+def should_skip_gold_realizado(
+    billing_period: str,
+    connection_config: dict | None = None,
+    df: pd.DataFrame | None = None,
+) -> tuple[bool, str | None]:
+    """Decide whether a billing period must stay out of Gold ``tipo=realizado``."""
+    if not is_current_billing_period(billing_period):
+        return False, None
+
+    config = connection_config or {}
+    manual_meta = (config.get("manual_csv_metadata") or {}).get(billing_period) or {}
+    if manual_meta.get("skip_gold_realizado"):
+        return True, _CURRENT_MONTH_MONTHLY_WARNING
+    if manual_meta.get("monthly_grain") is False:
+        return False, None
+
+    if df is not None and not df.empty:
+        grain = analyze_csv_grain(df, billing_period)
+        return bool(grain["skip_gold_realizado"]), grain.get("warning_message")
+
+    return False, None
 
 
 def _sanitize_filename(name: str) -> str:
@@ -331,6 +477,7 @@ def load_csv_to_bronze(
     # snapshot) but coerce the preview/suggested schema metadata. The override
     # is kept in the IngestedBlob metadata so downstream reprocess can use it.
     user_types = {k: v for k, v in (column_types or {}).items() if v in _ALLOWED_TYPES}
+    grain = analyze_csv_grain(df, period)
 
     # Remove legacy application-level columns if the user accidentally uploaded
     # an enriched report instead of a raw source.
@@ -384,6 +531,8 @@ def load_csv_to_bronze(
         "row_count": rows,
         "column_types": user_types,
         "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "monthly_grain": grain["monthly_grain"],
+        "skip_gold_realizado": grain["skip_gold_realizado"],
     }
     config["manual_csv_metadata"] = manual_meta
     connection.config_json = config
@@ -394,4 +543,5 @@ def load_csv_to_bronze(
         "blob_path": blob_path,
         "table_name": f"bronze.raw_{connection.code}",
         "column_types": user_types,
+        **grain,
     }

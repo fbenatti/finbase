@@ -66,6 +66,13 @@ subaccountname
 
 Para outros destinos Gold, nenhuma dimensão é pré-selecionada. Todas as dimensões reais ficam disponíveis para escolha.
 
+Quando o destino FOCUS possui `ChargePeriodEnd`, a UI sugere essa coluna como fim
+do intervalo de rateio. O forecast permanece **único**; cada conexão pode optar
+por rateio (`charge_interval`) ou série diária padrão (`none`).
+
+Configurações legadas com `period_allocation = charge_interval` global continuam
+funcionando até serem editadas e migradas para regras por conexão.
+
 O usuário pode selecionar, remover, selecionar todas ou limpar todas as dimensões. Também pode criar uma série sem dimensões.
 
 ## Configuração
@@ -92,9 +99,42 @@ recent_weight
 minimum_daily_points
 minimum_monthly_points
 null_dimension_label
+period_allocation          # legado; preferir connection_allocation_rules
+charge_end_column          # legado; default sugerido para regras por conexão
+connection_allocation_rules
 active
 version
 ```
+
+`connection_allocation_rules` — lista JSON na mesma linha de `forecast_config`:
+
+```text
+[
+  {
+    "connection_code": "ibm-ti",
+    "connection_id": 5,
+    "period_allocation": "charge_interval",
+    "charge_end_column": "ChargePeriodEnd"
+  }
+]
+```
+
+- **Padrão para todas as conexões:** `none` (série diária; `MONTHLY_LUMP` se fatura mensal).
+- **Conexões listadas:** `charge_interval` com `charge_end_column` (default FOCUS: `ChargePeriodEnd`).
+- O motor identifica a conexão via `cloud_origem` e/ou `source_connection_id` na Gold.
+- Demais conexões (ex.: GCP diário) não entram na lista e mantêm agregação diária.
+
+`period_allocation` (legado):
+
+```text
+none             -> usa a série diária agregada como está (padrão)
+charge_interval  -> rateio global (fallback se connection_allocation_rules vazio)
+```
+
+Quando uma regra usa `charge_interval`, informe `charge_end_column`
+(ex.: `ChargePeriodEnd` no FOCUS) ou use o fallback para o último dia de
+`_billing_period`. O motor gera uma série diária sintética e aplica os
+métodos 7/14/28 ou `AUTO_BACKTEST` sobre ela.
 
 Defaults:
 
@@ -142,6 +182,33 @@ estimativa_do_mês = realizado_acumulado + forecast_restante
 ```
 
 Não deve existir sobreposição entre realizado e forecast.
+
+## Granularidade mensal (CSV/fatura)
+
+Alguns provedores (ex.: IBM FOCUS) entregam o mês corrente como fatura
+agregada — uma única data de cobrança ou intervalo Start→End cobrindo o mês,
+sem detalhe diário.
+
+Regras:
+
+```text
+Mês corrente + granularidade mensal -> Bronze OK; Gold realizado bloqueado; Forecast ignora o período
+Mês fechado + granularidade mensal -> realizado normal na Gold
+CSV diário (Azure/GCP) -> fluxo existente inalterado
+```
+
+No upload manual, preview e ingest retornam `monthly_grain`, `current_month`
+e `warning_message` quando o mês corrente não pode alimentar realizado/forecast.
+
+No motor de Forecast, cada série usa o próprio cutoff (última data observada
+da série), sem zero-fill até a data global de outra origem. Séries com totais
+mensais no dia 1 usam baseline `MONTHLY_LUMP` (média das taxas diárias de meses
+fechados), evitando MEAN_7 ≈ 0 por zero-fill entre meses.
+
+Com regras por conexão (`charge_interval` só para IBM, etc.), totais mensais são
+rateados uniformemente entre `date_column` e `charge_end_column` (ou o último dia
+do período de faturamento) **apenas nas séries daquela conexão**, antes do
+backtest. GCP/Azure diários permanecem na agregação diária normal.
 
 ## Meses futuros
 

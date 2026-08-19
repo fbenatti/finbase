@@ -70,7 +70,7 @@ Funções relevantes: `apps/api/app/services/iceberg_service.py`
   3. Aplica **CloneEngine** (`clone_engine.py`) — linhas sintéticas de estorno.
   4. Aplica **Business Rules** (`_apply_business_rule_sync`) — EXPRESSION, CONDITIONAL,
      PTAX_BRL, TAX_BASE, TAX_MARKETPLACE, MARKUP — com vigência `valid_from/until`.
-  5. Aplica **Classificações** (`_apply_classifications_sync`) com hierarquia de departamentos.
+  5. Aplica **Classificações** (`_apply_classifications_sync`) com hierarquia de departamentos — somente via `classification_rule.conditions` (sem lookup chumbado de projeto).
   6. Escreve em staging Iceberg (`write_destination_staged` / `append_to_staged`) e faz
      swap atômico ao final (`swap_staged_table`), com guarda de memória
      (`_memory_exceeded`) e gravação em lotes.

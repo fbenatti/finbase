@@ -8,6 +8,7 @@ import Classification from "./pages/Classification/Classification";
 import Departments from "./pages/Departments/Departments";
 import Destinations from "./pages/Destinations/Destinations";
 import Extraction from "./pages/Extraction/Extraction";
+import ExtractionHistory from "./pages/Extraction/ExtractionHistory";
 import Analysis from "./pages/Analysis/Analysis";
 import PipelineBuilder from "./pages/Pipeline/PipelineBuilder";
 import Relationship from "./pages/Relationship/Relationship";
@@ -46,6 +47,7 @@ function App() {
         <Route path="forecast" element={<Forecast />} />
         <Route path="savings" element={<Savings />} />
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
+        <Route path="extraction/history/:taskId" element={<ExtractionHistory />} />
         <Route path="dashboards" element={<Dashboards />} />
       </Route>
     </Routes>

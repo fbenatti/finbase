@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Box, Typography, Button, Paper, Chip, IconButton,
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
-  Tooltip,
+  Tooltip, Collapse,
 } from "@mui/material";
 import {
   Delete, Save, Refresh, ArrowForward,
-  Undo, DragIndicator,
+  Undo, DragIndicator, ExpandMore, ChevronRight,
 } from "@mui/icons-material";
 import {
   getConnections, SourceConnection, discoverSchema, ColumnInfo,
@@ -21,6 +21,74 @@ interface MappingState {
   savedId: number;
   sourceColumn: string;
   destColumn: string;
+  transformType?: string;
+}
+
+function displaySourceColumn(mapping: Pick<SourceDestinationMapping, "source_column" | "transform_type" | "transform_config">): string {
+  if (mapping.transform_type === "JSON_PATH" && mapping.transform_config?.path) {
+    return `${mapping.source_column}.${String(mapping.transform_config.path)}`;
+  }
+  return mapping.source_column;
+}
+
+function buildMappingPayload(sourceColumn: string, destColumn: string): Partial<SourceDestinationMapping> {
+  const dotIndex = sourceColumn.indexOf(".");
+  if (dotIndex > 0) {
+    return {
+      source_column: sourceColumn.slice(0, dotIndex),
+      destination_column: destColumn,
+      transform_type: "JSON_PATH",
+      transform_config: { path: sourceColumn.slice(dotIndex + 1) },
+      priority: 0,
+      active: true,
+    };
+  }
+  return {
+    source_column: sourceColumn,
+    destination_column: destColumn,
+    transform_type: "RENAME",
+    priority: 0,
+    active: true,
+  };
+}
+
+function nestedPathLabel(fullName: string, parent: string): string {
+  if (fullName === parent) return parent;
+  if (fullName.startsWith(`${parent}.`)) return fullName.slice(parent.length + 1);
+  if (fullName.startsWith(`${parent}[`)) return fullName.slice(parent.length);
+  return fullName;
+}
+
+function groupSourceColumns(cols: ColumnInfo[]) {
+  const topLevel = cols.filter((c) => !c.nested);
+  const nested = cols.filter((c) => c.nested);
+  const childrenByParent = new Map<string, ColumnInfo[]>();
+
+  for (const col of nested) {
+    const parent = col.parent || col.name.split(".")[0];
+    const list = childrenByParent.get(parent) || [];
+    list.push(col);
+    childrenByParent.set(parent, list);
+  }
+
+  const flatCols: ColumnInfo[] = [];
+  const jsonGroups: { parent: ColumnInfo; children: ColumnInfo[] }[] = [];
+
+  for (const col of topLevel) {
+    const children = childrenByParent.get(col.name) || [];
+    if (children.length > 0) {
+      jsonGroups.push({
+        parent: col,
+        children: [...children].sort((a, b) => a.name.localeCompare(b.name)),
+      });
+    } else {
+      flatCols.push(col);
+    }
+  }
+
+  flatCols.sort((a, b) => a.name.localeCompare(b.name));
+  jsonGroups.sort((a, b) => a.parent.name.localeCompare(b.parent.name));
+  return { flatCols, jsonGroups };
 }
 
 export default function Relationship() {
@@ -44,6 +112,7 @@ export default function Relationship() {
   // Drag state
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOverDest, setDragOverDest] = useState<string | null>(null);
+  const [collapsedJsonGroups, setCollapsedJsonGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     getConnections().then(setConnections).catch(() => {});
@@ -74,17 +143,39 @@ export default function Relationship() {
       setSourceCols(srcCols);
       setDestCols(destSchema.columns);
 
-      setMappings(saved.map((m: SourceDestinationMapping) => ({
+      const restoredMappings = saved.map((m: SourceDestinationMapping) => ({
         savedId: m.id,
-        sourceColumn: m.source_column,
+        sourceColumn: displaySourceColumn(m),
         destColumn: m.destination_column,
-      })));
+        transformType: m.transform_type,
+      }));
+      setMappings(restoredMappings);
+
+      const { jsonGroups } = groupSourceColumns(srcCols);
+      const mappedNames = new Set(restoredMappings.map((m) => m.sourceColumn));
+      const collapsed = new Set<string>();
+      for (const group of jsonGroups) {
+        const hasMapped = mappedNames.has(group.parent.name)
+          || group.children.some((c) => mappedNames.has(c.name));
+        if (!hasMapped) collapsed.add(group.parent.name);
+      }
+      setCollapsedJsonGroups(collapsed);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally { setLoading(false); }
   }, [selectedConnId, selectedDestId]);
 
   useEffect(() => { if (selectedConnId && selectedDestId) loadAll(); }, [selectedConnId, selectedDestId, loadAll]);
+
+  const expandJsonGroup = (columnName: string) => {
+    const parent = columnName.includes(".") ? columnName.split(".")[0] : columnName;
+    setCollapsedJsonGroups((prev) => {
+      if (!prev.has(parent)) return prev;
+      const next = new Set(prev);
+      next.delete(parent);
+      return next;
+    });
+  };
 
   // Build lookup: destColumn → { sourceColumn, savedId }
   const mappingByDest = new Map<string, MappingState>();
@@ -138,6 +229,7 @@ export default function Relationship() {
     }
 
     setMappings(updated);
+    expandJsonGroup(dragging);
     setSuccess(`"${dragging}" → "${destColumn}"`);
   };
 
@@ -352,11 +444,7 @@ export default function Relationship() {
         await createSourceDestMapping({
           source_connection_id: connId,
           destination_table_id: destId,
-          source_column: m.sourceColumn,
-          destination_column: m.destColumn,
-          transform_type: "RENAME",
-          priority: 0,
-          active: true,
+          ...buildMappingPayload(m.sourceColumn, m.destColumn),
         } as Partial<SourceDestinationMapping>);
         created++;
       }
@@ -402,7 +490,11 @@ export default function Relationship() {
         source_connection_id: srcId,
         destination_table_id: dstId,
         column_count: maps.length,
-        columns: maps.map(m => m.source_column + " → " + m.destination_column).join(", "),
+        columns: maps.map(m => {
+          const src = displaySourceColumn(m);
+          const suffix = m.transform_type && m.transform_type !== "RENAME" ? ` [${m.transform_type}]` : "";
+          return `${src} → ${m.destination_column}${suffix}`;
+        }).join(", "),
         mappingIds: maps.map(m => m.id),
       };
     });
@@ -505,6 +597,91 @@ export default function Relationship() {
     },
   ];
 
+  const sortedSourceCols = [...sourceCols].sort((a, b) => {
+    if (!!a.nested !== !!b.nested) return a.nested ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+  const { flatCols, jsonGroups } = groupSourceColumns(sourceCols);
+
+  const toggleJsonGroup = (parentName: string) => {
+    setCollapsedJsonGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentName)) next.delete(parentName);
+      else next.add(parentName);
+      return next;
+    });
+  };
+
+  const renderSourceColumn = (
+    col: ColumnInfo,
+    opts?: { nested?: boolean; parent?: string; subtitle?: string },
+  ) => {
+    const isMapped = mappedSources.has(col.name);
+    const nested = opts?.nested ?? false;
+    const parent = opts?.parent;
+    const pathLabel = parent ? nestedPathLabel(col.name, parent) : col.name;
+
+    return (
+      <Box
+        key={col.name}
+        draggable
+        onDragStart={() => handleDragStart(col.name)}
+        onDragEnd={handleDragEnd}
+        sx={{
+          display: "flex", alignItems: "center", gap: 0.5,
+          px: 1, py: 0.7, mb: 0.4, borderRadius: 1,
+          pl: nested ? 2.5 : 1,
+          cursor: "grab",
+          bgcolor: isMapped ? "#e8f5e9" : dragging === col.name ? "#e3f2fd" : nested ? "#fafafa" : "#fff",
+          border: isMapped ? "1px solid #a5d6a7" : "1px solid #e0e0e0",
+          opacity: dragging === col.name ? 0.7 : 1,
+          userSelect: "none",
+          transition: "all 0.15s",
+          "&:hover": { borderColor: "#90caf9", bgcolor: "#f5f9ff" },
+        }}
+      >
+        {isMapped ? (
+          <Box sx={{ width: 20, display: "flex", justifyContent: "center" }}>
+            <Typography variant="caption" color="success.main">✓</Typography>
+          </Box>
+        ) : (
+          <DragIndicator sx={{ fontSize: 16, color: "#bbb" }} />
+        )}
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              fontFamily: "monospace", fontSize: "0.78rem",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {nested && parent ? (
+              <>
+                <Box component="span" sx={{ color: "text.secondary" }}>{parent}.</Box>
+                <Box component="span" sx={{ color: "text.primary", fontWeight: 500 }}>{pathLabel}</Box>
+              </>
+            ) : col.name}
+          </Typography>
+          {opts?.subtitle && (
+            <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.62rem" }}>
+              {opts.subtitle}
+            </Typography>
+          )}
+        </Box>
+        {nested && (
+          <Chip label="path" size="small" variant="outlined" sx={{ height: 18, fontSize: "0.58rem" }} />
+        )}
+        {isMapped && (
+          <Tooltip title="Arraste para re-mapear para outra coluna">
+            <Typography variant="caption" sx={{ fontSize: "0.6rem", color: "#4caf50", flexShrink: 0 }}>
+              →{mappings.find((m) => m.sourceColumn === col.name)?.destColumn || ""}
+            </Typography>
+          </Tooltip>
+        )}
+      </Box>
+    );
+  };
+
   return (
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
@@ -585,7 +762,7 @@ export default function Relationship() {
           {/* Left: Source columns */}
           <Paper
             sx={{
-              width: 280, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
+              width: 340, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
               p: 1, bgcolor: "#f8f9fa", border: "2px dashed #dee2e6",
               borderRadius: 2,
             }}
@@ -593,53 +770,62 @@ export default function Relationship() {
             <Typography variant="subtitle2" sx={{ mb: 1, px: 1, color: "text.secondary" }}>
               Colunas da Fonte ({connName})
             </Typography>
-            {sourceCols.map((col) => {
-              const isMapped = mappedSources.has(col.name);
+
+            {flatCols.map((col) => renderSourceColumn(col))}
+
+            {jsonGroups.map(({ parent, children }) => {
+              const collapsed = collapsedJsonGroups.has(parent.name);
+              const mappedCount = [
+                parent.name,
+                ...children.map((c) => c.name),
+              ].filter((name) => mappedSources.has(name)).length;
+
               return (
-                <Box
-                  key={col.name}
-                  draggable
-                  onDragStart={() => handleDragStart(col.name)}
-                  onDragEnd={handleDragEnd}
-                  sx={{
-                    display: "flex", alignItems: "center", gap: 0.5,
-                    px: 1, py: 0.7, mb: 0.4, borderRadius: 1,
-                    cursor: "grab",
-                    bgcolor: isMapped ? "#e8f5e9" : dragging === col.name ? "#e3f2fd" : "#fff",
-                    border: isMapped ? "1px solid #a5d6a7" : "1px solid #e0e0e0",
-                    opacity: dragging === col.name ? 0.7 : 1,
-                    userSelect: "none",
-                    transition: "all 0.15s",
-                    "&:hover": { borderColor: "#90caf9", bgcolor: "#f5f9ff" },
-                  }}
-                >
-                  {isMapped ? (
-                    <Box sx={{ width: 20, display: "flex", justifyContent: "center" }}>
-                      <Typography variant="caption" color="success.main">✓</Typography>
-                    </Box>
-                  ) : (
-                    <DragIndicator sx={{ fontSize: 16, color: "#bbb" }} />
-                  )}
-                  <Typography
-                    variant="body2"
+                <Box key={parent.name} sx={{ mb: 0.6 }}>
+                  <Box
+                    onClick={() => toggleJsonGroup(parent.name)}
                     sx={{
-                      fontFamily: "monospace", fontSize: "0.78rem",
-                      textDecoration: isMapped ? "none" : undefined,
-                      flexGrow: 1,
+                      display: "flex", alignItems: "center", gap: 0.5,
+                      px: 1, py: 0.5, borderRadius: 1,
+                      cursor: "pointer", bgcolor: "#eef2f7", border: "1px solid #cfd8dc",
+                      "&:hover": { bgcolor: "#e3eaf2" },
                     }}
                   >
-                    {col.name}
-                  </Typography>
-                  {isMapped && (
-                    <Tooltip title="Arraste para re-mapear para outra coluna">
-                      <Typography variant="caption" sx={{ fontSize: "0.6rem", color: "#4caf50" }}>
-                        →{mappings.find(m => m.sourceColumn === col.name)?.destColumn || ""}
-                      </Typography>
-                    </Tooltip>
-                  )}
+                    <IconButton size="small" sx={{ p: 0.25 }} aria-label={collapsed ? "Expandir" : "Recolher"}>
+                      {collapsed ? <ChevronRight sx={{ fontSize: 18 }} /> : <ExpandMore sx={{ fontSize: 18 }} />}
+                    </IconButton>
+                    <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.8rem", fontWeight: 600, flexGrow: 1 }}>
+                      {parent.name}
+                    </Typography>
+                    <Chip label="JSON" size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.62rem" }} />
+                    <Chip
+                      label={`${children.length} campos`}
+                      size="small"
+                      variant="outlined"
+                      sx={{ height: 20, fontSize: "0.62rem" }}
+                    />
+                    {mappedCount > 0 && (
+                      <Chip label={`${mappedCount} mapeados`} size="small" color="success" sx={{ height: 20, fontSize: "0.62rem" }} />
+                    )}
+                  </Box>
+
+                  <Collapse in={!collapsed}>
+                    <Box sx={{ mt: 0.4, pl: 0.5, borderLeft: "2px solid #cfd8dc", ml: 1.2 }}>
+                      {renderSourceColumn(parent, {
+                        subtitle: "Objeto JSON completo (coluna Bronze)",
+                      })}
+                      {children.map((col) => renderSourceColumn(col, {
+                        nested: true,
+                        parent: parent.name,
+                        subtitle: `Caminho: ${col.name}`,
+                      }))}
+                    </Box>
+                  </Collapse>
                 </Box>
               );
             })}
+
+            {flatCols.length === 0 && jsonGroups.length === 0 && sortedSourceCols.map((col) => renderSourceColumn(col))}
           </Paper>
 
           {/* Divider arrow */}
@@ -706,6 +892,9 @@ export default function Relationship() {
                           <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                             <DragIndicator sx={{ fontSize: 12 }} />
                             <span>{mapping.sourceColumn}</span>
+                            {mapping.transformType && mapping.transformType !== "RENAME" && (
+                              <span style={{ opacity: 0.7 }}>[{mapping.transformType}]</span>
+                            )}
                           </Box>
                         }
                         size="small"

@@ -5,7 +5,9 @@ Diretoria, Projeto e Centro de Custos.
 Classificação (3 grupos):
 - Departamentais -> Diretoria=DIR INFRAESTRUTURA E CLOUD, Projeto=DEPARTAMENTAIS
 - Vicky          -> Diretoria=DIR ARQUITETURA E ESTRATEGIA TECH, Projeto=Vicky
-- TI             -> todos os demais (landing-zone, infra TI e casos fora das 2 acima)
+- TI             -> demais projetos; o departamento é o nome lógico
+  (ti-billing → Billing, ti-logging-network-* → Logging Network).
+  O label landing-zone-gcp é mapeamento, não departamento.
 
 Centro de Custos:
 - TI / Departamentais -> 29TN161700 (CC da Diretoria DIR INFRAESTRUTURA E CLOUD na referência)
@@ -18,6 +20,11 @@ Uso: python3 enrich_origem_gcp.py
 import csv
 import json
 import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+from gcp_logical_department import logical_department_name
 
 INPUT = "origem_gcp-ttech_202608.csv"
 OUTPUT = "origem_gcp-ttech_202608_classificado.csv"
@@ -35,7 +42,7 @@ VICKY = {
 }
 TI_DEFAULT = {
     "Diretoria": "DIR INFRAESTRUTURA E CLOUD",
-    "Projeto": "",       # preenchido com o nome do projeto
+    "Projeto": "",       # preenchido com nome lógico (Billing, Logging Network, ...)
     "CentroCusto": "29TN161700",  # CC da Diretoria DIR INFRAESTRUTURA E CLOUD
 }
 
@@ -73,16 +80,8 @@ def classify(rec: dict) -> dict:
             "classificacao": "VICKY",
         }
 
-    # 3) TI: landing-zone, infra TI e todos os demais (inclui os que antes
-    #    ficariam "fora" — Segurança Patrimonial, Externos, B2C, Engenharia, POC...)
-    projeto = name  # default: usa o próprio nome do projeto
-    if lab.get("projeto") in ("landing-zone-gcp", "landing-zone") or str(
-        lab.get("id-orcamento", "")
-    ).lower() == "id000002":
-        projeto = lab.get("projeto", "") or name
-    elif not name.lower().startswith(("ti-", "vivo-ti-")):
-        # casos fora das 3 classificações caem aqui e são tratados como TI
-        projeto = name
+    # 3) TI: usa nome lógico do projeto (não o slug nem o label landing-zone-gcp)
+    projeto = logical_department_name(rec.get("id") or name, name, lab)
 
     return {
         **TI_DEFAULT,

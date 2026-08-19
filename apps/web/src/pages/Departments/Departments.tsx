@@ -1,14 +1,14 @@
-import { useState, useEffect, type ReactElement } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box, Typography, Button, Paper, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Switch, FormControlLabel,
-  Alert, CircularProgress, Tooltip, Divider, List, ListItemButton, Menu, MenuItem,
-  ListItemText, Collapse,
+  Alert, CircularProgress, Tooltip, Divider,
+  List, Menu, MenuItem,
 } from "@mui/material";
 import {
-  Add, Edit, Delete, ExpandMore, ExpandLess, ChevronRight,
+  Add, Edit, Delete, ExpandMore, ExpandLess,
   Business, AccountTree, UploadFile,
   AccountBalance,
 } from "@mui/icons-material";
@@ -19,8 +19,10 @@ import {
   importCsvData, CsvImportResult, Department, Project,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
-
-interface CustomFieldEntry { key: string; value: string }
+import DepartmentTreePicker, {
+  flattenDepartments,
+  descendantIds,
+} from "../../components/DepartmentTreePicker";
 
 const emptyDeptForm = {
   parent_id: null as number | null,
@@ -34,28 +36,7 @@ const emptyProjForm = {
   active: true,
 };
 
-function flattenDepartments(nodes: Department[], parents: string[] = []): Array<Department & { path: string }> {
-  return nodes.flatMap(node => {
-    const path = [...parents, node.name];
-    return [{ ...node, path: path.join(" > ") }, ...flattenDepartments(node.children || [], path)];
-  });
-}
-
-function descendantIds(node: Department): Set<number> {
-  return new Set([node.id, ...(node.children || []).flatMap(child => [...descendantIds(child)])]);
-}
-
-function ancestorIds(nodes: Department[], targetId: number | null): Set<number> {
-  if (targetId == null) return new Set();
-  const byId = new Map(flattenDepartments(nodes).map(department => [department.id, department]));
-  const ids = new Set<number>();
-  let current = byId.get(targetId);
-  while (current) {
-    ids.add(current.id);
-    current = current.parent_id ? byId.get(current.parent_id) : undefined;
-  }
-  return ids;
-}
+interface CustomFieldEntry { key: string; value: string }
 
 export default function Departments() {
   const navigate = useNavigate();
@@ -83,8 +64,6 @@ export default function Departments() {
   const [importing, setImporting] = useState(false);
   const [financialMenu, setFinancialMenu] = useState<HTMLElement | null>(null);
   const [preparingOrganization, setPreparingOrganization] = useState(false);
-  const [parentAnchor, setParentAnchor] = useState<HTMLElement | null>(null);
-  const [parentExpanded, setParentExpanded] = useState<Set<number>>(new Set());
 
   const load = async () => {
     try {
@@ -143,7 +122,6 @@ export default function Departments() {
     setEditingDept(null);
     setDeptForm({ ...emptyDeptForm, parent_id: parentId });
     setCustomFields([]);
-    setParentExpanded(ancestorIds(departments, parentId));
     setDeptDialog(true);
   };
 
@@ -161,7 +139,6 @@ export default function Departments() {
         ? Object.entries(d.custom_fields).map(([key, value]) => ({ key, value: String(value) }))
         : []
     );
-    setParentExpanded(ancestorIds(departments, d.parent_id));
     setDeptDialog(true);
   };
 
@@ -183,44 +160,6 @@ export default function Departments() {
   };
 
   const blockedParentIds = editingDept ? descendantIds(editingDept) : new Set<number>();
-  const parentPath = deptForm.parent_id == null
-    ? "Raiz (sem departamento pai)"
-    : flattenDepartments(departments).find(department => department.id === deptForm.parent_id)?.path
-      || "Departamento pai";
-
-  const toggleParentNode = (id: number) => setParentExpanded(previous => {
-    const next = new Set(previous);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-
-  const chooseParent = (department: Department | null) => {
-    setDeptForm({ ...deptForm, parent_id: department?.id ?? null });
-    setParentAnchor(null);
-  };
-
-  const renderParentNode = (department: Department, depth = 0): ReactElement | null => {
-    if (blockedParentIds.has(department.id)) return null;
-    const children = (department.children || []).filter(child => !blockedParentIds.has(child.id));
-    const expanded = parentExpanded.has(department.id);
-    return (
-      <Box key={department.id}>
-        <ListItemButton selected={department.id === deptForm.parent_id} onClick={() => chooseParent(department)} sx={{ pl: 1 + depth * 2, py: 0.25 }}>
-          <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
-            {children.length > 0 && (
-              <IconButton size="small" tabIndex={-1} onClick={event => { event.stopPropagation(); toggleParentNode(department.id); }}>
-                {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
-              </IconButton>
-            )}
-          </Box>
-          <ListItemText primary={department.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
-        </ListItemButton>
-        <Collapse in={expanded} timeout="auto" unmountOnExit>
-          {children.map(child => renderParentNode(child, depth + 1))}
-        </Collapse>
-      </Box>
-    );
-  };
 
   const removeDept = async (id: number) => {
     if (!confirm("Deletar este departamento? Filhos serão desassociados.")) return;
@@ -419,26 +358,16 @@ export default function Departments() {
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
             <TextField label="Nome" autoFocus value={deptForm.name}
               onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} />
-            <Box>
-              <Typography variant="caption" color="text.secondary">Departamento pai</Typography>
-              <Button variant="outlined" fullWidth onClick={event => setParentAnchor(event.currentTarget)}
-                sx={{ mt: 0.5, justifyContent: "flex-start", textTransform: "none", textAlign: "left" }}>
-                {parentPath}
-              </Button>
-              <Menu anchorEl={parentAnchor} open={Boolean(parentAnchor)} onClose={() => setParentAnchor(null)}
-                disablePortal disableAutoFocusItem disableRestoreFocus
-                PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
-                  Selecione o nível na hierarquia. O caminho completo aparece no botão.
-                </Typography>
-                <List dense disablePadding>
-                  <ListItemButton selected={deptForm.parent_id === null} onClick={() => chooseParent(null)} sx={{ pl: 1, py: 0.25 }}>
-                    <ListItemText primary="Raiz (sem departamento pai)" primaryTypographyProps={{ variant: "body2", fontStyle: "italic" }} />
-                  </ListItemButton>
-                  {departments.map(department => renderParentNode(department))}
-                </List>
-              </Menu>
-            </Box>
+            <DepartmentTreePicker
+              departments={departments}
+              value={deptForm.parent_id}
+              onChange={(parentId) => setDeptForm({ ...deptForm, parent_id: parentId })}
+              label="Departamento pai"
+              placeholder="Raiz (sem departamento pai)"
+              allowClear
+              clearLabel="Raiz (sem departamento pai)"
+              blockedIds={blockedParentIds}
+            />
             <Box sx={{ display: "flex", gap: 2 }}>
               <TextField label="Centro de Custo" value={deptForm.centro_custo}
                 onChange={(e) => setDeptForm({ ...deptForm, centro_custo: e.target.value })} fullWidth />

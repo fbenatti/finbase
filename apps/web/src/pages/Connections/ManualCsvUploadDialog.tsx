@@ -46,12 +46,18 @@ interface CsvPreview {
   columns: CsvColumnPreview[];
   sample_rows: Record<string, unknown>[];
   suggested_billing_period: string | null;
+  monthly_grain?: boolean;
+  current_month?: boolean;
+  warning_message?: string | null;
+  skip_gold_realizado?: boolean;
 }
 
 interface IngestResult {
   row_count: number;
   billing_period: string;
   table_name: string;
+  warning_message?: string | null;
+  skip_gold_realizado?: boolean;
 }
 
 interface ManualCsvUploadDialogProps {
@@ -73,7 +79,7 @@ export default function ManualCsvUploadDialog({
   const [billingPeriod, setBillingPeriod] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<{ row_count: number; billing_period: string; table_name: string } | null>(null);
+  const [result, setResult] = useState<IngestResult | null>(null);
   const [batchResult, setBatchResult] = useState<IngestResult[] | null>(null);
   const [history, setHistory] = useState<IngestedBlob[]>([]);
 
@@ -225,20 +231,41 @@ export default function ManualCsvUploadDialog({
 
         {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>{error}</Alert>}
 
+        {preview?.warning_message && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            {preview.warning_message}
+          </Alert>
+        )}
+
         {result && (
-          <Alert severity="success" sx={{ mb: 3 }} onClose={() => setResult(null)}>
-            <strong>CSV carregado com sucesso.</strong><br />
+          <Alert severity={result.skip_gold_realizado ? "warning" : "success"} sx={{ mb: 3 }} onClose={() => setResult(null)}>
+            <strong>{result.skip_gold_realizado ? "CSV armazenado no Bronze (Gold/Forecast bloqueados)." : "CSV carregado com sucesso."}</strong><br />
             {result.row_count.toLocaleString()} linhas gravadas em {result.table_name} para o período {result.billing_period}.
+            {result.warning_message && (
+              <>
+                <br />
+                {result.warning_message}
+              </>
+            )}
           </Alert>
         )}
 
         {batchResult && batchResult.length > 0 && (
-          <Alert severity="success" sx={{ mb: 3 }} onClose={() => setBatchResult(null)}>
-            <strong>{batchResult.length} arquivo(s) carregado(s) com sucesso.</strong>
+          <Alert
+            severity={batchResult.some(r => r.skip_gold_realizado) ? "warning" : "success"}
+            sx={{ mb: 3 }}
+            onClose={() => setBatchResult(null)}
+          >
+            <strong>
+              {batchResult.length} arquivo(s) gravados no Bronze
+              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com Gold/Forecast bloqueados)." : "."}
+            </strong>
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {batchResult.map((r, i) => (
                 <li key={i}>
                   {r.billing_period}: {r.row_count.toLocaleString()} linhas em {r.table_name}
+                  {r.skip_gold_realizado && " — não entra em realizado/forecast"}
+                  {r.warning_message && !r.skip_gold_realizado && ` — ${r.warning_message}`}
                 </li>
               ))}
             </ul>
@@ -248,9 +275,14 @@ export default function ManualCsvUploadDialog({
         {preview && (
           <Paper sx={{ p: 3, mb: 3 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-              <Typography variant="h6">
-                Preview: {preview.row_count.toLocaleString()} linhas · {preview.column_count} colunas
-              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="h6">
+                  Preview: {preview.row_count.toLocaleString()} linhas · {preview.column_count} colunas
+                </Typography>
+                {preview.monthly_grain && (
+                  <Chip label="Granularidade mensal" size="small" color="warning" />
+                )}
+              </Stack>
               <TextField
                 label="Período de faturamento (YYYYMM)"
                 value={billingPeriod}
