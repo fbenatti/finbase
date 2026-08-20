@@ -20,25 +20,118 @@ import SortableTable, { ColumnDef } from "../../components/SortableTable";
 interface MappingState {
   savedId: number;
   sourceColumn: string;
+  rawSourceColumn: string;
   destColumn: string;
   transformType?: string;
+  transformConfig?: Record<string, unknown> | null;
+}
+
+function describeTransform(
+  mapping: Pick<SourceDestinationMapping, "source_column" | "destination_column" | "transform_type" | "transform_config">,
+): string {
+  const cfg = mapping.transform_config || {};
+  const type = (mapping.transform_type || "RENAME").toUpperCase();
+  const src = mapping.source_column;
+  const dest = mapping.destination_column;
+
+  if (type === "RENAME") {
+    return `${src} → ${dest} (cópia direta)`;
+  }
+  if (type === "JSON_PATH") {
+    const path = cfg.path ? `.${String(cfg.path)}` : "";
+    return `${src}${path} → ${dest}`;
+  }
+  if (type === "CONST") {
+    return `${dest} = ${String(cfg.value ?? "")}`;
+  }
+  if (type === "VALUE_MAP") {
+    const map = cfg.map as Record<string, string> | undefined;
+    const entries = map ? Object.entries(map).map(([k, v]) => `${k}→${v}`).join(", ") : "";
+    return `${src} → ${dest} (mapa: ${entries || "—"}; default: ${String(cfg.default ?? "—")})`;
+  }
+  if (type === "CONDITIONAL") {
+    const whenCol = String(cfg.when_column || src);
+    const whenPath = cfg.when_path ? `.${String(cfg.when_path)}` : "";
+    const whenOp = String(cfg.when_op || "in");
+    const whenValues = Array.isArray(cfg.when_values)
+      ? cfg.when_values.join(", ")
+      : whenOp === "not_empty"
+        ? "preenchido"
+        : "—";
+    const thenType = String(cfg.then_type || "RENAME").toUpperCase();
+    const thenSource = String(cfg.then_source || src);
+    const thenCfg = (cfg.then_config || {}) as Record<string, unknown>;
+    let thenDetail = thenType;
+    if (thenType === "JSON_PATH") {
+      thenDetail = `JSON_PATH ${thenSource}.${String(thenCfg.path || "")}`;
+    } else if (thenType === "VALUE_MAP") {
+      const map = thenCfg.map as Record<string, string> | undefined;
+      const entries = map ? Object.entries(map).map(([k, v]) => `${k}→${v}`).join(", ") : "";
+      thenDetail = `VALUE_MAP {${entries}} default=${String(thenCfg.default ?? "—")}`;
+    } else if (thenType === "CONST") {
+      thenDetail = `CONST ${String(thenCfg.value ?? "")}`;
+    } else {
+      thenDetail = `${thenType} ${thenSource}`;
+    }
+    const predicate = whenOp === "not_empty"
+      ? `${whenCol}${whenPath} preenchido`
+      : `${whenCol}${whenPath} ∈ [${whenValues}]`;
+    return `${src} → ${dest}\nQuando ${predicate}\nEntão ${thenDetail}`;
+  }
+  return `${src} → ${dest} (${type})`;
+}
+
+function transformChipLabel(mapping: MappingState): string {
+  const base = mapping.sourceColumn;
+  const type = mapping.transformType?.toUpperCase();
+  if (!type || type === "RENAME") return base;
+  return `${base} [${type}]`;
 }
 
 function displaySourceColumn(mapping: Pick<SourceDestinationMapping, "source_column" | "transform_type" | "transform_config">): string {
   if (mapping.transform_type === "JSON_PATH" && mapping.transform_config?.path) {
-    return `${mapping.source_column}.${String(mapping.transform_config.path)}`;
+    const path = String(mapping.transform_config.path);
+    if (path.startsWith("[")) {
+      return `${mapping.source_column}${path}`;
+    }
+    return `${mapping.source_column}.${path}`;
   }
   return mapping.source_column;
 }
 
+function jsonGroupRoot(columnName: string): string {
+  const bracket = columnName.indexOf("[");
+  if (bracket > 0) return columnName.slice(0, bracket);
+  const dot = columnName.indexOf(".");
+  if (dot > 0) return columnName.slice(0, dot);
+  return columnName;
+}
+
+function splitVirtualSourcePath(sourceColumn: string): { root: string; path: string | null } {
+  const bracket = sourceColumn.indexOf("[");
+  const dot = sourceColumn.indexOf(".");
+  let rootEnd = -1;
+  if (bracket >= 0 && dot >= 0) rootEnd = Math.min(bracket, dot);
+  else if (bracket >= 0) rootEnd = bracket;
+  else if (dot > 0) rootEnd = dot;
+
+  if (rootEnd <= 0) {
+    return { root: sourceColumn, path: null };
+  }
+
+  const root = sourceColumn.slice(0, rootEnd);
+  const pathStart = sourceColumn[rootEnd] === "." ? rootEnd + 1 : rootEnd;
+  return { root, path: sourceColumn.slice(pathStart) || null };
+}
+
 function buildMappingPayload(sourceColumn: string, destColumn: string): Partial<SourceDestinationMapping> {
-  const dotIndex = sourceColumn.indexOf(".");
-  if (dotIndex > 0) {
+  const { root, path } = splitVirtualSourcePath(sourceColumn);
+  if (path) {
     return {
-      source_column: sourceColumn.slice(0, dotIndex),
+      source_column: root,
       destination_column: destColumn,
       transform_type: "JSON_PATH",
-      transform_config: { path: sourceColumn.slice(dotIndex + 1) },
+      transform_config: { path },
       priority: 0,
       active: true,
     };
@@ -59,13 +152,18 @@ function nestedPathLabel(fullName: string, parent: string): string {
   return fullName;
 }
 
+function nestedParentName(col: ColumnInfo): string {
+  if (col.parent) return col.parent;
+  return jsonGroupRoot(col.name);
+}
+
 function groupSourceColumns(cols: ColumnInfo[]) {
   const topLevel = cols.filter((c) => !c.nested);
   const nested = cols.filter((c) => c.nested);
   const childrenByParent = new Map<string, ColumnInfo[]>();
 
   for (const col of nested) {
-    const parent = col.parent || col.name.split(".")[0];
+    const parent = nestedParentName(col);
     const list = childrenByParent.get(parent) || [];
     list.push(col);
     childrenByParent.set(parent, list);
@@ -146,20 +244,16 @@ export default function Relationship() {
       const restoredMappings = saved.map((m: SourceDestinationMapping) => ({
         savedId: m.id,
         sourceColumn: displaySourceColumn(m),
+        rawSourceColumn: m.source_column,
         destColumn: m.destination_column,
         transformType: m.transform_type,
+        transformConfig: m.transform_config,
       }));
       setMappings(restoredMappings);
 
-      const { jsonGroups } = groupSourceColumns(srcCols);
-      const mappedNames = new Set(restoredMappings.map((m) => m.sourceColumn));
-      const collapsed = new Set<string>();
-      for (const group of jsonGroups) {
-        const hasMapped = mappedNames.has(group.parent.name)
-          || group.children.some((c) => mappedNames.has(c.name));
-        if (!hasMapped) collapsed.add(group.parent.name);
-      }
-      setCollapsedJsonGroups(collapsed);
+      // Keep JSON groups expanded by default so nested origin paths stay visible
+      // after saving mappings (e.g. credits[0].type must not collapse project/service).
+      setCollapsedJsonGroups(new Set());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally { setLoading(false); }
@@ -168,7 +262,7 @@ export default function Relationship() {
   useEffect(() => { if (selectedConnId && selectedDestId) loadAll(); }, [selectedConnId, selectedDestId, loadAll]);
 
   const expandJsonGroup = (columnName: string) => {
-    const parent = columnName.includes(".") ? columnName.split(".")[0] : columnName;
+    const parent = jsonGroupRoot(columnName);
     setCollapsedJsonGroups((prev) => {
       if (!prev.has(parent)) return prev;
       const next = new Set(prev);
@@ -177,13 +271,20 @@ export default function Relationship() {
     });
   };
 
-  // Build lookup: destColumn → { sourceColumn, savedId }
+  // Build lookups: destColumn → mapping; sourceColumn → all mappings (dual-map allowed)
   const mappingByDest = new Map<string, MappingState>();
+  const mappingBySource = new Map<string, MappingState[]>();
   const mappedSources = new Set<string>();
   for (const m of mappings) {
     mappingByDest.set(m.destColumn, m);
     mappedSources.add(m.sourceColumn);
+    const list = mappingBySource.get(m.sourceColumn) || [];
+    list.push(m);
+    mappingBySource.set(m.sourceColumn, list);
   }
+
+  const destinationsForSource = (sourceColumn: string) =>
+    (mappingBySource.get(sourceColumn) || []).map((m) => m.destColumn);
 
   // ─── Drag & Drop handlers ───
   const handleDragStart = (sourceColumn: string) => {
@@ -210,27 +311,38 @@ export default function Relationship() {
     setDragOverDest(null);
     setDragging(null);
 
-    // No-op: same source → same dest
+    // No-op: exact same source → dest pair already exists
     const existingSame = mappings.find(m => m.sourceColumn === dragging && m.destColumn === destColumn);
     if (existingSame) return;
 
-    // Remove existing mapping for this source column (so we don't duplicate)
-    const cleaned = mappings.filter(m => m.sourceColumn !== dragging);
+    const { path } = splitVirtualSourcePath(dragging);
 
-    // If another source was mapped to this dest, swap: the old source gets orphaned
+    // One source may map to multiple destinations; only replace the target dest slot
     const existing = mappingByDest.get(destColumn);
     let updated: MappingState[];
+    const nextMapping: MappingState = {
+      savedId: 0,
+      sourceColumn: dragging,
+      rawSourceColumn: dragging,
+      destColumn,
+      transformType: path ? "JSON_PATH" : "RENAME",
+      transformConfig: path ? { path } : null,
+    };
     if (existing) {
-      // User is re-mapping this dest: old mapping removed, new one added
-      updated = cleaned.filter(m => m.destColumn !== destColumn);
-      updated.push({ savedId: 0, sourceColumn: dragging, destColumn });
+      updated = mappings.filter(m => m.destColumn !== destColumn);
+      updated.push(nextMapping);
     } else {
-      updated = [...cleaned, { savedId: 0, sourceColumn: dragging, destColumn }];
+      updated = [...mappings, nextMapping];
+    }
+
+    if (existing?.transformType === "CONDITIONAL") {
+      setSuccess(`"${dragging}" → "${destColumn}" substituirá regra CONDITIONAL existente. Salve para persistir (será RENAME simples).`);
+    } else {
+      setSuccess(`"${dragging}" → "${destColumn}"`);
     }
 
     setMappings(updated);
     expandJsonGroup(dragging);
-    setSuccess(`"${dragging}" → "${destColumn}"`);
   };
 
   const handleUnmap = (destColumn: string) => {
@@ -332,13 +444,12 @@ export default function Relationship() {
     // Explicit provider aliases always win over fuzzy matching, independent
     // of the order in which Azure returned the source columns.
     for (const sc of sourceCols) {
-      if (!sc.name || alreadyMappedSrcs.has(sc.name)) continue;
+      if (!sc.name) continue;
       const sourceKey = sc.name.replace(/^\ufeff/, "");
       const candidates = aliases[sc.name] || aliases[sourceKey] || aliases[sourceKey.toLowerCase()] || [];
-      const target = candidates.find(name => destCols.some(d => d.name === name));
-      if (target) {
-        // An automatic fuzzy suggestion may have occupied this destination.
-        // Replace only that suggestion; never overwrite a saved/manual map.
+      let addedAlias = false;
+      for (const target of candidates) {
+        if (!destCols.some(d => d.name === target) || alreadyMappedDests.has(target)) continue;
         const conflicting = newMappings.find(m => m.destColumn === target && m.savedId === 0);
         if (conflicting && conflicting.sourceColumn !== sc.name) {
           const index = newMappings.indexOf(conflicting);
@@ -347,10 +458,11 @@ export default function Relationship() {
         }
         const savedConflict = newMappings.find(m => m.destColumn === target && m.savedId !== 0);
         if (savedConflict) continue;
-        newMappings.push({ savedId: 0, sourceColumn: sc.name, destColumn: target });
+        newMappings.push({ savedId: 0, sourceColumn: sc.name, rawSourceColumn: sc.name, destColumn: target });
         alreadyMappedDests.add(target);
-        alreadyMappedSrcs.add(sc.name);
+        addedAlias = true;
       }
+      if (addedAlias) alreadyMappedSrcs.add(sc.name);
     }
 
     for (const sc of sourceCols) {
@@ -373,7 +485,7 @@ export default function Relationship() {
       if (best) {
         alreadyMappedDests.add(best);
         alreadyMappedSrcs.add(sc.name);
-        newMappings.push({ savedId: 0, sourceColumn: sc.name, destColumn: best });
+        newMappings.push({ savedId: 0, sourceColumn: sc.name, rawSourceColumn: sc.name, destColumn: best });
       }
     }
     setMappings(newMappings);
@@ -401,13 +513,9 @@ export default function Relationship() {
       for (const [source, dest] of Object.entries(requiredAzureMappings)) {
         const actual = sourceCols.find(c => c.name.replace(/^\ufeff/, "").toLowerCase() === source.toLowerCase())?.name;
         if (!actual || !destCols.some(c => c.name === dest)) continue;
-        // A profile mapping is intentional: replace stale automatic mappings
-        // that currently occupy this destination, while retaining the source
-        // column's existing saved id only when it already points to this dest.
-        // Keep other valid source alternatives for the same FOCUS field;
-        // the source column must not disappear from the relationship editor.
-        next = next.filter(m => m.sourceColumn !== actual);
-        next.push({ savedId: 0, sourceColumn: actual, destColumn: dest });
+        // Replace only this source→dest pair; keep other destinations for the same source.
+        next = next.filter(m => !(m.sourceColumn === actual && m.destColumn === dest));
+        next.push({ savedId: 0, sourceColumn: actual, rawSourceColumn: actual, destColumn: dest });
       }
       return next;
     });
@@ -444,7 +552,7 @@ export default function Relationship() {
         await createSourceDestMapping({
           source_connection_id: connId,
           destination_table_id: destId,
-          ...buildMappingPayload(m.sourceColumn, m.destColumn),
+          ...buildMappingPayload(m.rawSourceColumn, m.destColumn),
         } as Partial<SourceDestinationMapping>);
         created++;
       }
@@ -472,6 +580,7 @@ export default function Relationship() {
     destination_table_id: number;
     column_count: number;
     columns: string;
+    columnDetails: string;
     mappingIds: number[];
   }
 
@@ -495,6 +604,7 @@ export default function Relationship() {
           const suffix = m.transform_type && m.transform_type !== "RENAME" ? ` [${m.transform_type}]` : "";
           return `${src} → ${m.destination_column}${suffix}`;
         }).join(", "),
+        columnDetails: maps.map(m => describeTransform(m)).join("\n\n"),
         mappingIds: maps.map(m => m.id),
       };
     });
@@ -557,7 +667,14 @@ export default function Relationship() {
     },
     {
       key: "columns", label: "Mapeamentos", render: (r) => (
-        <Tooltip title={r.columns} arrow>
+        <Tooltip
+          title={
+            <Box component="pre" sx={{ m: 0, fontFamily: "monospace", fontSize: "0.68rem", whiteSpace: "pre-wrap" }}>
+              {r.columnDetails || r.columns}
+            </Box>
+          }
+          arrow
+        >
           <Typography
             variant="body2"
             sx={{
@@ -672,9 +789,22 @@ export default function Relationship() {
           <Chip label="path" size="small" variant="outlined" sx={{ height: 18, fontSize: "0.58rem" }} />
         )}
         {isMapped && (
-          <Tooltip title="Arraste para re-mapear para outra coluna">
-            <Typography variant="caption" sx={{ fontSize: "0.6rem", color: "#4caf50", flexShrink: 0 }}>
-              →{mappings.find((m) => m.sourceColumn === col.name)?.destColumn || ""}
+          <Tooltip
+            title={
+              <Box component="pre" sx={{ m: 0, fontFamily: "monospace", fontSize: "0.68rem", whiteSpace: "pre-wrap" }}>
+                {(mappingBySource.get(col.name) || [])
+                  .map((m) => describeTransform({
+                    source_column: m.rawSourceColumn,
+                    destination_column: m.destColumn,
+                    transform_type: m.transformType || "RENAME",
+                    transform_config: m.transformConfig,
+                  }))
+                  .join("\n\n")}
+              </Box>
+            }
+          >
+            <Typography variant="caption" sx={{ fontSize: "0.6rem", color: "#4caf50", flexShrink: 0, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
+              →{destinationsForSource(col.name).join(", ")}
             </Typography>
           </Tooltip>
         )}
@@ -767,8 +897,11 @@ export default function Relationship() {
               borderRadius: 2,
             }}
           >
-            <Typography variant="subtitle2" sx={{ mb: 1, px: 1, color: "text.secondary" }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5, px: 1, color: "text.secondary" }}>
               Colunas da Fonte ({connName})
+            </Typography>
+            <Typography variant="caption" sx={{ display: "block", mb: 1, px: 1, color: "text.secondary" }}>
+              Uma coluna origem pode mapear para vários destinos (ex.: quantity → ConsumedQuantity e PricingQuantity).
             </Typography>
 
             {flatCols.map((col) => renderSourceColumn(col))}
@@ -887,23 +1020,40 @@ export default function Relationship() {
 
                   {mapping ? (
                     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Chip
-                        label={
-                          <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                            <DragIndicator sx={{ fontSize: 12 }} />
-                            <span>{mapping.sourceColumn}</span>
-                            {mapping.transformType && mapping.transformType !== "RENAME" && (
-                              <span style={{ opacity: 0.7 }}>[{mapping.transformType}]</span>
+                      <Tooltip
+                        title={
+                          <Box component="pre" sx={{ m: 0, fontFamily: "monospace", fontSize: "0.68rem", whiteSpace: "pre-wrap" }}>
+                            {describeTransform({
+                              source_column: mapping.rawSourceColumn,
+                              destination_column: mapping.destColumn,
+                              transform_type: mapping.transformType || "RENAME",
+                              transform_config: mapping.transformConfig,
+                            })}
+                            {mapping.transformType === "CONDITIONAL" && (
+                              <>
+                                {"\n\n"}
+                                Regra criada via seed/config (ex.: Marketplace). Arrastar substitui por RENAME simples ao salvar.
+                              </>
                             )}
                           </Box>
                         }
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                        onDelete={() => handleUnmap(dc.name)}
-                        deleteIcon={<Delete sx={{ fontSize: 14 }} />}
-                        sx={{ fontSize: "0.68rem", height: 22 }}
-                      />
+                        arrow
+                      >
+                        <Chip
+                          label={
+                            <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                              <DragIndicator sx={{ fontSize: 12 }} />
+                              <span>{transformChipLabel(mapping)}</span>
+                            </Box>
+                          }
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          onDelete={() => handleUnmap(dc.name)}
+                          deleteIcon={<Delete sx={{ fontSize: 14 }} />}
+                          sx={{ fontSize: "0.68rem", height: 22, maxWidth: 280 }}
+                        />
+                      </Tooltip>
                     </Box>
                   ) : dragging ? (
                     <Typography variant="caption" sx={{ color: "#bbb", fontStyle: "italic" }}>

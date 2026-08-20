@@ -6,6 +6,7 @@ import pandas as pd
 from app.services.forecast_service import (
     _apply_forecast_business_rules,
     _build_series_context,
+    _cloud_effective_cutoff,
     _replicated_month_value,
     _series_key,
 )
@@ -56,7 +57,7 @@ def test_last_closed_month_is_zero_when_no_prior_nonzero_month():
 def test_recurring_monthly_uses_last_nonzero_closed_month():
     index = pd.date_range("2026-07-01", periods=31, freq="D")
     daily = pd.Series([100.0] * len(index), index=index)
-    ctx = _build_series_context(daily, date(2026, 8, 18))
+    ctx = _build_series_context(daily, date(2026, 7, 31))
     assert ctx["last_closed_month_total"] == 3100.0
     key_cols = ["cloud_origem", "servicename"]
     key_values = {"cloud_origem": "oci-prod", "servicename": "COMPUTE"}
@@ -80,8 +81,60 @@ def test_recurring_monthly_uses_last_nonzero_closed_month():
         date(2026, 8, 18),
     )
     assert rule.name in applied
-    assert output.loc[output["forecast_month"] == "202608", "forecast_value"].iloc[0] == 0.0
+    assert output.loc[output["forecast_month"] == "202608", "forecast_value"].iloc[0] == 3100.0
     assert output.loc[output["forecast_month"] == "202609", "forecast_value"].iloc[0] == 3100.0
+
+
+def test_cloud_effective_cutoff_uses_per_origin_anchor():
+    cloud_cutoffs = {
+        "azure-marketplace": date(2026, 7, 10),
+        "gcp-ti": date(2026, 8, 16),
+    }
+    assert _cloud_effective_cutoff(
+        cloud_cutoffs,
+        "cloud_origem",
+        {"cloud_origem": "azure-marketplace"},
+        date(2026, 8, 16),
+    ) == date(2026, 7, 10)
+    assert _cloud_effective_cutoff(
+        cloud_cutoffs,
+        "cloud_origem",
+        {"cloud_origem": "gcp-ti"},
+        date(2026, 8, 16),
+    ) == date(2026, 8, 16)
+
+
+def test_july_only_marketplace_forecasts_august_when_global_cutoff_is_later():
+    index = pd.to_datetime(["2026-07-10"])
+    daily = pd.Series([1_417_849.0], index=index)
+    ctx = _build_series_context(daily, date(2026, 7, 10))
+    assert ctx["last_closed_month_total"] == 1_417_849.0
+    assert ctx["current_key"] == "202607"
+
+    key_cols = ["cloud_origem", "marketplaceproductname", "marketplacebillingmodel"]
+    key_values = {
+        "cloud_origem": "azure-marketplace",
+        "marketplaceproductname": "Teradata Vantage (SaaS)",
+        "marketplacebillingmodel": "RECURRING",
+    }
+    output = pd.DataFrame([
+        {**key_values, "forecast_month": "202607", "tipo": "realizado", "forecast_value": 1_417_849.0},
+        {**key_values, "forecast_month": "202608", "tipo": "forecast", "forecast_value": 0.0},
+    ])
+    rule = _rule(
+        name="Marketplace RECURRING mensal",
+        identification_clauses=[{"column": "marketplacebillingmodel", "values": ["RECURRING"]}],
+        behavior="RECURRING_MONTHLY",
+    )
+    applied = _apply_forecast_business_rules(
+        output,
+        [rule],
+        {_series_key(key_values, key_cols): ctx},
+        key_cols,
+        date(2026, 8, 18),
+    )
+    assert "Marketplace RECURRING mensal" in applied
+    assert output.loc[output["forecast_month"] == "202608", "forecast_value"].iloc[0] == 1_417_849.0
 
 
 def test_marketplace_oneshot_rule_zeros_forecast():

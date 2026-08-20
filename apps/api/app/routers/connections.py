@@ -1,12 +1,44 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import date
+import json
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, or_, select
 from app.database import get_db
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
 from app.schemas.schemas import SourceConnectionCreate, SourceConnectionUpdate, SourceConnectionOut
 
 router = APIRouter(prefix="/connections", tags=["connections"])
+
+
+GRID_FIELDS = {
+    "name": SourceConnection.name,
+    "code": SourceConnection.code,
+    "provider": SourceConnection.cloud_scope,
+    "connector_type": SourceConnection.connector_type,
+    "cloud_name": SourceConnection.cloud_name,
+    "updated_at": SourceConnection.updated_at,
+    "test_status": SourceConnection.last_test_status,
+    "last_test_status": SourceConnection.last_test_status,
+}
+
+GRID_FILTER_VALUES = {
+    "provider": {
+        "azure": "azure",
+        "gcp": "gcp",
+        "ibm cloud": "ibm",
+        "aws": "aws",
+        "oracle cloud (oci)": "oci",
+        "mongodb atlas": "atlas",
+    },
+    "connector_type": {
+        "azure blob storage": "azure_blob",
+        "gcp bigquery": "gcp_bigquery",
+        "oracle cloud (oci)": "oci",
+        "mongodb atlas": "mongodb_atlas",
+        "upload manual de csv": "manual_csv",
+    },
+}
 
 
 @router.get("/", response_model=list[SourceConnectionOut])
@@ -25,6 +57,74 @@ async def list_connections(
     else:
         result = await db.execute(select(SourceConnection).order_by(SourceConnection.code))
     return result.scalars().all()
+
+
+@router.get("/grid")
+async def list_connections_grid(
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    provider: str | None = None,
+    sort_field: str = "name",
+    sort_direction: str = "asc",
+    filter_field: str | None = None,
+    filter_operator: str | None = None,
+    filter_value: str | None = None,
+    filters: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side query used by the Connections DataGrid."""
+    conditions = []
+    if provider:
+        conditions.append(SourceConnection.cloud_scope == provider)
+    if search:
+        needle = f"%{search.strip()}%"
+        conditions.append(or_(
+            SourceConnection.name.ilike(needle),
+            SourceConnection.code.ilike(needle),
+            SourceConnection.cloud_name.ilike(needle),
+            SourceConnection.cloud_scope.ilike(needle),
+            SourceConnection.connector_type.ilike(needle),
+            cast(SourceConnection.config_json, String).ilike(needle),
+        ))
+
+    filter_specs: list[dict[str, str]] = []
+    if filters:
+        try:
+            parsed_filters = json.loads(filters)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Filtros inválidos") from exc
+        if not isinstance(parsed_filters, list):
+            raise HTTPException(status_code=422, detail="Filtros inválidos")
+        filter_specs = [item for item in parsed_filters if isinstance(item, dict)]
+    elif filter_field and filter_value:
+        filter_specs = [{"field": filter_field, "operator": filter_operator or "equals", "value": filter_value}]
+
+    for filter_spec in filter_specs:
+        current_field = str(filter_spec.get("field", ""))
+        current_value = str(filter_spec.get("value", ""))
+        current_operator = str(filter_spec.get("operator", "equals"))
+        column = GRID_FIELDS.get(current_field)
+        if current_field == "updated_at" and current_value:
+            try:
+                conditions.append(func.date(SourceConnection.updated_at) == date.fromisoformat(current_value[:10]))
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Data de filtro inválida")
+        elif column is not None and current_value:
+            current_value = GRID_FILTER_VALUES.get(current_field, {}).get(current_value.lower(), current_value)
+            if current_operator == "notEquals":
+                conditions.append(or_(column.is_(None), cast(column, String) != current_value))
+            else:
+                conditions.append(cast(column, String) == current_value)
+
+    sort_column = GRID_FIELDS.get(sort_field, SourceConnection.name)
+    ordering = sort_column.desc() if sort_direction == "desc" else sort_column.asc()
+    where = tuple(conditions)
+    total = (await db.execute(select(func.count()).select_from(SourceConnection).where(*where))).scalar_one()
+    result = await db.execute(
+        select(SourceConnection).where(*where).order_by(ordering, SourceConnection.id).offset(offset).limit(limit)
+    )
+    return {"items": result.scalars().all(), "total": total}
 
 
 @router.get("/{connection_id}", response_model=SourceConnectionOut)

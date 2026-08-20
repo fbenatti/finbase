@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, Card, CardContent, Chip, Alert,
   FormControl, InputLabel, Select, MenuItem, Tabs, Tab,
@@ -17,12 +18,24 @@ import {
   getAnalysisDestinations, queryAnalysisDestination,
   SourceAnalysis, SourceDataResult,
   DestinationAnalysis, DestinationDataResult,
+  formatApiError, PivotFilter,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import PivotAnalysis from "../../components/PivotAnalysis";
 import SourceSearch from "../../components/SourceSearch";
 
 const PAGE_SIZE = 50;
+
+function filtersFromSearch(params: URLSearchParams): PivotFilter[] {
+  const filters: PivotFilter[] = [];
+  const path = params.get("path") || "";
+  path.split(" > ").map(part => part.trim()).filter(Boolean).forEach((name, index) => {
+    filters.push({ column: `departamento_nivel_${index + 1}`, values: [name], operator: "IN" });
+  });
+  const year = params.get("year");
+  if (year) filters.push({ column: "_billing_period", values: [year], operator: "CONTAINS" });
+  return filters;
+}
 
 type AnalysisTab = "destino" | "fontes" | "iceberg" | "pivot" | "busca";
 
@@ -47,7 +60,8 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
 };
 
 export default function Analysis() {
-  const [tab, setTab] = useState<AnalysisTab>("fontes");
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<AnalysisTab>((searchParams.get("tab") as AnalysisTab) || "fontes");
   const [health, setHealth] = useState<TrinoHealth>({ trino: "?", nessie: "?", minio: "?" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -87,7 +101,7 @@ export default function Analysis() {
       const next = await getAnalysisDestinations();
       setDestinations(next);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao atualizar o Data Lakehouse");
+      setError(formatApiError(e, "Falha ao atualizar o Data Lakehouse"));
     }
   };
 
@@ -99,7 +113,7 @@ export default function Analysis() {
       setSrcData(d);
       setSrcPage(0);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Query failed");
+      setError(formatApiError(e, "Query failed"));
     } finally { setLoading(false); }
   };
 
@@ -117,7 +131,7 @@ export default function Analysis() {
       setDestData(d);
       setDestPage(0);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Query failed");
+      setError(formatApiError(e, "Query failed"));
     } finally { setLoading(false); }
   };
 
@@ -137,7 +151,7 @@ export default function Analysis() {
       setResult(res);
       setPage(0);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Query failed");
+      setError(formatApiError(e, "Query failed"));
     } finally { setLoading(false); }
   };
 
@@ -504,7 +518,14 @@ export default function Analysis() {
       {/* ================================================================ */}
       {tab === "pivot" && (
         destinations.length > 0
-          ? <PivotAnalysis destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS")?.id} />
+          ? <PivotAnalysis
+              destinations={destinations}
+              initialTableId={destinations.find(d => d.id > 0 && d.name.toUpperCase() === "MODELO FOCUS")?.id || destinations.find(d => d.id > 0)?.id}
+              initialMeasure={searchParams.get("measure") || "realizado"}
+              initialFilters={filtersFromSearch(searchParams)}
+              autoRun={searchParams.get("tab") === "pivot"}
+              showSearch
+            />
           : <EmptyState message="Nenhuma tabela Gold ativa disponível para análise pivot." />
       )}
       {tab === "busca" && (

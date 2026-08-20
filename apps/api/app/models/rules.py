@@ -1,6 +1,7 @@
 from sqlalchemy import (
-    Column, Integer, String, DateTime, JSON, Boolean, ForeignKey, func, Index,
+    Column, Integer, String, DateTime, JSON, Boolean, Float, ForeignKey, UniqueConstraint, func, Index,
 )
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 
@@ -34,6 +35,36 @@ class Department(Base):
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DepartmentSharedCost(Base):
+    """Shared-cost allocation configured on a donor department."""
+    __tablename__ = "department_shared_cost"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    department_id = Column(Integer, ForeignKey("department.id", ondelete="CASCADE"), nullable=False, unique=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    mode = Column(String(20), nullable=False, default="consumption")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    targets = relationship(
+        "DepartmentSharedCostTarget",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
+
+class DepartmentSharedCostTarget(Base):
+    __tablename__ = "department_shared_cost_target"
+    __table_args__ = (UniqueConstraint("config_id", "target_department_id", name="uq_shared_cost_target"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    config_id = Column(Integer, ForeignKey("department_shared_cost.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_department_id = Column(Integer, ForeignKey("department.id", ondelete="CASCADE"), nullable=False, index=True)
+    percent = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class OrganizationMoveAudit(Base):

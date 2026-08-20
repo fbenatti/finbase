@@ -13,6 +13,8 @@ entender, modificar ou depurar o projeto.
 5. **[04-api-reference.md](04-api-reference.md)** — todos os endpoints REST organizados por router.
 6. **[05-frontend.md](05-frontend.md)** — páginas React, componentes e integração com a API.
 7. **[06-glossary.md](06-glossary.md)** — glossário de termos do domínio FinOps usados no código.
+8. **[08-ui-design-reference.md](08-ui-design-reference.md)** — padrão visual e interacional
+   de referência, validado em Connections.
 
 ## Resumo executivo (TL;DR para a IA)
 

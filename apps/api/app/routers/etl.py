@@ -1,8 +1,12 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Literal, Any
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text, delete as sa_delete, or_
+from sqlalchemy import select, text, delete as sa_delete, or_, String, cast, func
+import json
 from app.database import get_db
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
@@ -10,7 +14,7 @@ from app.models.skipped_blob import SkippedBlob
 from app.schemas.schemas import (
     BlobScanResult, IngestedBlobOut, EtlRunRequest,
     SkippedBlobOut, SkipBlobRequest, ReprocessRequest,
-    ScheduledTaskCreate, ScheduledTaskUpdate, ScheduledTaskOut,
+    ScheduledTaskCreate, ScheduledTaskUpdate, ScheduledTaskOut, SourceConnectionCreate,
 )
 from app.services.azure_extractor import AzureExtractor
 from app.services.task_runner import get_task_status as _get_task_status, cancel_task, get_running_tasks
@@ -99,6 +103,10 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.oci_extractor import OciExtractor
         extractor = OciExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "mongodb_atlas":
+        from app.services.mongodb_extractor import MongoAtlasExtractor
+        extractor = MongoAtlasExtractor(conn)
+        return await extractor.scan(db)
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
@@ -128,13 +136,71 @@ async def clear_skipped_blobs(
     await db.commit()
 
 
+async def _destination_names_for_connection(db: AsyncSession, connection_id: int) -> list[str]:
+    from app.models.destination import DestinationTable, SourceDestinationMapping
+
+    result = await db.execute(
+        select(DestinationTable.physical_name)
+        .join(
+            SourceDestinationMapping,
+            SourceDestinationMapping.destination_table_id == DestinationTable.id,
+        )
+        .where(SourceDestinationMapping.source_connection_id == connection_id)
+        .distinct()
+    )
+    return [name for name in result.scalars().all() if name]
+
+
+def _drop_manual_period_meta(config: dict | None, period: str) -> dict:
+    next_config = dict(config or {})
+    meta = dict(next_config.get("manual_csv_metadata") or {})
+    if period in meta:
+        meta.pop(period, None)
+        next_config["manual_csv_metadata"] = meta
+    return next_config
+
+
+async def _purge_gold_if_period_empty(
+    db: AsyncSession,
+    conn: SourceConnection,
+    billing_period: str | None,
+) -> None:
+    """When a month has no remaining ingested blobs, drop that Gold slice too."""
+    if not billing_period:
+        return
+    remaining = await db.execute(
+        select(IngestedBlob.id).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.billing_period == billing_period,
+        ).limit(1)
+    )
+    if remaining.first():
+        return
+
+    from app.services.iceberg_service import delete_destination_slice
+
+    names = await _destination_names_for_connection(db, conn.id)
+    loop = asyncio.get_running_loop()
+    for name in names:
+        await loop.run_in_executor(
+            None,
+            lambda physical=name: delete_destination_slice(
+                physical,
+                billing_period=billing_period,
+                connection_id=conn.id,
+            ),
+        )
+    if conn.connector_type == "manual_csv":
+        conn.config_json = _drop_manual_period_meta(conn.config_json, billing_period)
+
+
 @router.delete("/blobs/{blob_id}", status_code=204)
 async def delete_ingested_blob(blob_id: int, db: AsyncSession = Depends(get_db)):
-    """Remove ingestion metadata and physical Bronze rows from Iceberg."""
+    """Remove ingestion metadata and physical Bronze/Gold rows from Iceberg."""
     from app.services.iceberg_service import delete_bronze_slice
 
     result = await db.execute(
-        select(IngestedBlob, SourceConnection.code)
+        select(IngestedBlob, SourceConnection)
         .join(SourceConnection, SourceConnection.id == IngestedBlob.connection_id)
         .where(IngestedBlob.id == blob_id)
     )
@@ -142,24 +208,20 @@ async def delete_ingested_blob(blob_id: int, db: AsyncSession = Depends(get_db))
     if not row:
         return
 
-    blob, conn_code = row
-
-    # 1. Remover dados físicos da camada Bronze no Apache Iceberg
-    try:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: delete_bronze_slice(
-                conn_code,
-                blob_path=blob.blob_path,
-                billing_period=blob.billing_period,
-            )
+    blob, conn = row
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: delete_bronze_slice(
+            conn.code,
+            blob_path=blob.blob_path,
+            billing_period=blob.billing_period,
         )
-    except Exception as exc:
-        logger.warning("Falha ao remover slice Bronze para blob %d: %s", blob_id, exc)
+    )
 
-    # 2. Remover metadados do PostgreSQL
     await db.execute(text("DELETE FROM ingested_blob WHERE id = :blob_id"), {"blob_id": blob_id})
+    await db.flush()
+    await _purge_gold_if_period_empty(db, conn, blob.billing_period)
     await db.commit()
 
 
@@ -237,34 +299,33 @@ async def delete_all_ingested_blobs(
     conn_res = await db.execute(select(SourceConnection).where(SourceConnection.id == connection_id))
     conn = conn_res.scalar_one_or_none()
 
-    # 1. Remover dados físicos da camada Bronze no Apache Iceberg
     if conn:
-        try:
-            loop = asyncio.get_running_loop()
-            if billing_period:
-                await loop.run_in_executor(
-                    None,
-                    lambda: delete_bronze_slice(conn.code, billing_period=billing_period)
-                )
-            else:
-                await loop.run_in_executor(
-                    None,
-                    lambda: reset_bronze(conn.code)
-                )
-        except Exception as exc:
-            logger.warning("Falha ao remover Bronze para conexao %d: %s", connection_id, exc)
+        loop = asyncio.get_running_loop()
+        if billing_period:
+            await loop.run_in_executor(
+                None,
+                lambda: delete_bronze_slice(conn.code, billing_period=billing_period)
+            )
+        else:
+            await loop.run_in_executor(
+                None,
+                lambda: reset_bronze(conn.code)
+            )
 
-    # 2. Remover metadados do PostgreSQL
-    where = "WHERE ib.connection_id = :connection_id"
     params: dict = {"connection_id": connection_id}
+    sql = "DELETE FROM ingested_blob WHERE connection_id = :connection_id"
     if billing_period:
-        where += " AND ib.billing_period = :billing_period"
+        sql += " AND billing_period = :billing_period"
         params["billing_period"] = billing_period
+    await db.execute(text(sql), params)
 
-    await db.execute(text(f"""
-        DELETE FROM ingested_blob {where}
-    """), params)
+    if not billing_period:
+        await db.execute(text("DELETE FROM skipped_blob WHERE connection_id = :connection_id"), params)
+        await db.execute(text("DELETE FROM etl_task WHERE connection_id = :connection_id"), params)
 
+    await db.flush()
+    if conn and billing_period:
+        await _purge_gold_if_period_empty(db, conn, billing_period)
     await db.commit()
 
 
@@ -277,7 +338,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci"):
+    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -426,15 +487,7 @@ async def unskip_blob(skip_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@router.post("/connections/{connection_id}/test")
-async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(SourceConnection).where(SourceConnection.id == connection_id)
-    )
-    conn = result.scalar_one_or_none()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
+async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
     config = conn.config_json
 
     if conn.connector_type == "azure_blob":
@@ -443,8 +496,7 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
             client = extractor._get_blob_service_client()
             container = config.get("container_name", "")
             cc = client.get_container_client(container)
-            blobs = cc.list_blobs()
-            next(iter(blobs))
+            next(iter(cc.list_blobs()))
             return {
                 "status": "OK",
                 "message": f"Connected to {config.get('storage_account','?')}/{container}",
@@ -455,8 +507,7 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
     if conn.connector_type == "gcp_bigquery":
         try:
             from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
-            result = GcpBigQueryExtractor(conn).test_connection()
-            return result
+            return GcpBigQueryExtractor(conn).test_connection()
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 
@@ -473,23 +524,23 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
+                response = await client.get(
                     base_url.rstrip("/"),
                     auth=DigestAuth(username=public_key, password=private_key),
                 )
-                if resp.status_code == 200:
+                if response.status_code == 200:
                     return {
                         "status": "OK",
                         "message": f"MongoDB Atlas ({config.get('contract_type','?')}) — API respondendo OK",
                     }
                 detail = ""
                 try:
-                    detail = resp.json().get("detail", "")
+                    detail = response.json().get("detail", "")
                 except Exception:
                     pass
                 return {
                     "status": "FAILED",
-                    "message": f"MongoDB Atlas retornou HTTP {resp.status_code}: {detail}"[:500],
+                    "message": f"MongoDB Atlas retornou HTTP {response.status_code}: {detail}"[:500],
                 }
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
@@ -497,8 +548,7 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
     if conn.connector_type == "oci":
         try:
             from app.services.oci_extractor import OciExtractor
-            result = OciExtractor(conn).test_connection()
-            return result
+            return OciExtractor(conn).test_connection()
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 
@@ -507,6 +557,32 @@ async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)
         "message": f"Test not implemented for {conn.connector_type}",
     }
 
+
+@router.post("/connections/test-config")
+async def test_connection_config(data: SourceConnectionCreate):
+    """Test a connection from form data without persisting it."""
+    conn = SourceConnection(**data.model_dump())
+    return await _execute_connection_test(conn)
+
+
+@router.post("/connections/{connection_id}/test")
+async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(SourceConnection).where(SourceConnection.id == connection_id)
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    test_result = await _execute_connection_test(conn)
+    conn.last_test_status = str(test_result.get("status", "FAILED"))
+    conn.last_test_message = str(test_result.get("message", ""))[:500]
+    conn.last_tested_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {
+        "status": conn.last_test_status,
+        "message": conn.last_test_message,
+    }
 
 # ═══════════════════════════════════════════════════════════════════════
 # Destination table reprocessing (standalone, async with progress)
@@ -862,6 +938,14 @@ def _reprocess_destination_sync(
             db2 = SyncSession()
             row = db2.get(EtlTask, task_id)
             if row:
+                if row.status == "CANCELLED" or _check_cancelled(task_id):
+                    status["status"] = "CANCELLED"
+                    row.status = "CANCELLED"
+                    row.phase = row.phase or "Cancelado pelo usuario"
+                    row.finished_at = func.now()
+                    db2.commit()
+                    db2.close()
+                    return
                 row.status = status.get("status", row.status)
                 row.total_blobs = status.get("total_blobs", row.total_blobs)
                 row.processed_blobs = status.get("processed_blobs", row.processed_blobs)
@@ -1095,6 +1179,11 @@ def _reprocess_destination_sync(
             if c not in stable_stage_cols
         )
 
+        # Colunas BIGINT que devem sempre ser Int64 (nullable), nunca float64.
+        # Pandas converte int+None para float64 por padrão, o que quebra o
+        # schema Iceberg (long -> double). Forçamos Int64 explicitamente.
+        _BIGINT_COLS = {"clone_rule_id", "clone_rule_version", "source_connection_id"}
+
         def _prepare_for_stage(frame: pd.DataFrame) -> pd.DataFrame:
             prepared = frame.drop(columns=["diretoria", "projeto_nome"], errors="ignore").copy()
             for column in stable_stage_cols:
@@ -1105,9 +1194,28 @@ def _reprocess_destination_sync(
                         prepared[column] = False
                     else:
                         prepared[column] = None
-            return prepared[stable_stage_cols].where(
+            # Marketplace/Azure batches often have no clone rows, so this
+            # column arrives all-null. Keep BOOLEAN to match existing Gold.
+            if "is_synthetic" in prepared.columns:
+                prepared["is_synthetic"] = (
+                    prepared["is_synthetic"].map(lambda v: True if v is True or str(v).strip().lower() in {"true", "1"} else False)
+                ).astype(bool)
+            # Garante colunas BIGINT como Int64 nullable (nunca float64/double).
+            # Sem isso, Pandas promove int+None para float64, quebrando o schema
+            # Iceberg com o erro "Cannot change column type: long -> double".
+            for _bc in _BIGINT_COLS:
+                if _bc in prepared.columns:
+                    prepared[_bc] = pd.to_numeric(prepared[_bc], errors="coerce").astype("Int64")
+            staged = prepared[stable_stage_cols].where(
                 pd.notna(prepared[stable_stage_cols]), None
             )
+            # Re-aplicar Int64 após .where() que pode regredir para float64
+            for _bc in _BIGINT_COLS:
+                if _bc in staged.columns:
+                    staged[_bc] = pd.to_numeric(staged[_bc], errors="coerce").astype("Int64")
+            if "is_synthetic" in staged.columns:
+                staged["is_synthetic"] = staged["is_synthetic"].fillna(False).astype(bool)
+            return staged
 
         temp_name: str | None = None
         staged_rows = 0
@@ -1239,6 +1347,15 @@ def _reprocess_destination_sync(
                 )
                 expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
                 if blob_input_rows == 0:
+                    if expected_blob_rows == 0:
+                        processed += 1
+                        status["processed_blobs"] = processed
+                        warn_msg = f"Aviso: Blob {blob_id} ({bperiod}) não possui consumo (fatura zerada)"
+                        logger.warning(warn_msg)
+                        _append_reprocess_log(task_id, warn_msg, details={"blob_id": blob_id, "billing_period": bperiod})
+                        status["current_blob"] = f"blob {processed}/{total_blobs}: {bperiod} (Aviso: fatura zerada)"
+                        _sync_db()
+                        continue
                     raise RuntimeError(
                         f"Nenhuma linha encontrada no Bronze para o blob {blob_id} ({bperiod})"
                     )
@@ -1304,22 +1421,13 @@ def _reprocess_destination_sync(
                 session.add(ClonePricePendencies(**pending))
         session.commit()
         try:
-            status["current_blob"] = f"substituindo tabela MODELO FOCUS (swap atomico)..."
+            status["current_blob"] = f"publicando lotes na Gold (swap por partição)..."
             _sync_db()
-            _append_reprocess_log(task_id, "Validação concluída; iniciando swap atômico da Gold")
+            _append_reprocess_log(task_id, "Validação concluída; iniciando publicação na Gold")
 
-            if publish_by_partition:
-                if len(set(connection_ids)) != 1 or len(set(billing_periods)) != 1:
-                    raise RuntimeError("Publicação por partição exige exatamente uma fonte e um mês")
-                total_written = iceberg.publish_staged_partition(
-                    phys_name, temp_name,
-                    billing_period=str(billing_periods[0]),
-                    connection_id=int(connection_ids[0]),
-                )
-            else:
-                total_written = iceberg.swap_staged_table(
-                    phys_name, temp_name, known_row_count=total_rows_processed,
-                )
+            total_written = iceberg.publish_staged_by_slices(
+                phys_name, temp_name,
+            )
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
             _sync_db()
@@ -1437,18 +1545,131 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             "message": f"{len(task_ids)} publicação(ões) fonte+mês enfileiradas"}
 
 
-@router.get("/reprocess-history")
-async def get_reprocess_history(limit: int = 30):
-    """Return completed and active reprocess runs with their persisted log."""
+@router.post("/reprocess-shared-cost")
+async def reprocess_shared_cost(db: AsyncSession = Depends(get_db)):
+    """Enqueue a worker job that writes tipo=rateio rows into the planning table."""
+    from app.models.etl_task import EtlTask
+    from app.models.rules import Department, DepartmentSharedCost
+    from app.services.shared_cost import snapshot_enabled_shared_costs
+
+    enabled = (await db.execute(
+        select(DepartmentSharedCost).where(DepartmentSharedCost.enabled == True)
+    )).scalars().all()
+    if not enabled:
+        raise HTTPException(
+            status_code=422,
+            detail="Nenhum custo compartilhado habilitado. Ative Custo compartilhado no departamento correspondente.",
+        )
+
+    snapshot = snapshot_enabled_shared_costs(
+        list(enabled),
+        {department.id: department for department in (await db.execute(select(Department))).scalars().all()},
+    )
+    if not snapshot["shared_nodes"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Custo compartilhado habilitado, mas sem cloud de origem ou projetos para ratear.",
+        )
+
+    now = datetime.now(timezone.utc)
+    active = list((await db.execute(
+        select(EtlTask).where(
+            EtlTask.task_type == "shared_cost",
+            EtlTask.status.in_(["QUEUED", "RUNNING"]),
+        )
+    )).scalars().all())
+    if active:
+        task = active[0]
+        for leftover in active[1:]:
+            leftover.status = "CANCELLED"
+            leftover.phase = "Substituído por um novo reprocessamento de custo compartilhado"
+            leftover.finished_at = now
+    else:
+        task = EtlTask(task_type="shared_cost", errors=[])
+        db.add(task)
+        await db.flush()
+    task.status = "QUEUED"
+    task.phase = "Na fila: gerar linhas de rateio na tabela de planejamento"
+    task.started_at = now
+    task.finished_at = None
+    task.total_blobs = len(snapshot["shared_nodes"])
+    task.processed_blobs = 0
+    task.rows_destination = 0
+    task.result_json = {
+        "snapshot": snapshot,
+        "event_log": [{
+            "at": now.isoformat(),
+            "level": "INFO",
+            "message": "Reprocessamento de custo compartilhado enfileirado. O worker grava tipo=rateio no planejamento.",
+        }],
+    }
+    await db.commit()
+    await db.refresh(task)
+    return {
+        "task_id": task.id,
+        "status": "QUEUED",
+        "message": task.phase,
+    }
+
+
+@router.get("/shared-cost-history")
+async def get_shared_cost_history(limit: int = 30):
+    """Return queued, running and finished shared-cost (rateio) jobs."""
     from app.database import SyncSession
     from app.models.etl_task import EtlTask
     session = SyncSession()
     try:
         rows = session.execute(
-            select(EtlTask).where(EtlTask.task_type == "reprocess")
+            select(EtlTask).where(EtlTask.task_type == "shared_cost")
             .order_by(EtlTask.started_at.desc()).limit(max(1, min(limit, 100)))
         ).scalars().all()
         return [{
+            "id": row.id,
+            "status": row.status,
+            "phase": row.phase or row.current_blob or "",
+            "rows_written": row.rows_destination,
+            "total_blobs": row.total_blobs,
+            "processed_blobs": row.processed_blobs,
+            "table": (row.result_json or {}).get("planning_table") or (row.result_json or {}).get("table", ""),
+            "error": (row.result_json or {}).get("error", ""),
+            "errors": row.errors or [],
+            "event_log": (row.result_json or {}).get("event_log", []),
+            "snapshot": (row.result_json or {}).get("snapshot"),
+            "started_at": row.started_at,
+            "finished_at": row.finished_at,
+        } for row in rows]
+    finally:
+        session.close()
+
+
+@router.get("/reprocess-history")
+async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0), search: str | None = None, sort_field: str = "started_at", sort_direction: str = "desc", filters: str | None = None):
+    """Return completed and active reprocess runs with their persisted log."""
+    from app.database import SyncSession
+    from app.models.etl_task import EtlTask
+    session = SyncSession()
+    try:
+        fields = {"id": EtlTask.id, "status": EtlTask.status, "destination_table_id": EtlTask.destination_table_id, "rows_written": EtlTask.rows_destination, "phase": EtlTask.phase, "started_at": EtlTask.started_at, "finished_at": EtlTask.finished_at}
+        conditions = [EtlTask.task_type == "reprocess"]
+        if search:
+            needle = f"%{search.strip()}%"
+            conditions.append(or_(EtlTask.status.ilike(needle), EtlTask.phase.ilike(needle), cast(EtlTask.result_json, String).ilike(needle), cast(EtlTask.errors, String).ilike(needle)))
+        try: specs = json.loads(filters) if filters else []
+        except json.JSONDecodeError as exc: raise HTTPException(422, "Filtros inválidos") from exc
+        for spec in specs if isinstance(specs, list) else []:
+            field, value, op = str(spec.get("field", "")), str(spec.get("value", "")), str(spec.get("operator", "equals"))
+            column = fields.get(field)
+            if not column or not value: continue
+            if field in ("started_at", "finished_at"):
+                try: value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError: continue
+            expr = column == value
+            conditions.append(or_(column.is_(None), column != value) if op == "notEquals" else expr)
+        sort = fields.get(sort_field, EtlTask.started_at)
+        ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+        total = session.execute(select(func.count()).select_from(EtlTask).where(*conditions)).scalar_one()
+        rows = session.execute(select(EtlTask).where(*conditions).order_by(ordering, EtlTask.id).offset(offset).limit(limit)).scalars().all()
+        items = [{
             "id": row.id, "status": row.status, "destination_table_id": row.destination_table_id,
             "connection_ids": row.connection_ids or [], "billing_periods": row.billing_periods or [],
             "total_blobs": row.total_blobs, "processed_blobs": row.processed_blobs,
@@ -1457,6 +1678,7 @@ async def get_reprocess_history(limit: int = 30):
             "errors": row.errors or [], "event_log": (row.result_json or {}).get("event_log", []),
             "started_at": row.started_at, "finished_at": row.finished_at,
         } for row in rows]
+        return {"items": items, "total": total}
     finally:
         session.close()
 

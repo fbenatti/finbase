@@ -41,6 +41,22 @@ def _build_series_context(daily: pd.Series, effective_cutoff: date) -> dict[str,
             break
         cursor = cursor - 1
     current_month_realized = float(monthly.get(current_period, 0.0))
+    if last_closed_month_total == 0.0 and len(monthly) > 0:
+        found_prior = False
+        cursor = previous_period
+        while cursor >= min_period:
+            if float(monthly.get(cursor, 0.0)) != 0.0:
+                found_prior = True
+                break
+            cursor = cursor - 1
+        if not found_prior:
+            month_daily = daily[daily.index.to_period("M") == current_period]
+            nonzero_days = int((month_daily != 0).sum())
+            anchor_total = float(monthly.get(current_period, 0.0))
+            last_day = calendar.monthrange(effective_cutoff.year, effective_cutoff.month)[1]
+            month_fully_collected = effective_cutoff.day >= last_day or nonzero_days <= 3
+            if anchor_total != 0.0 and month_fully_collected:
+                last_closed_month_total = anchor_total
     return {
         "monthly_realized": monthly_realized,
         "last_closed_month_total": last_closed_month_total,
@@ -133,7 +149,6 @@ def _apply_forecast_business_rules(
     effective_cutoff: date,
 ) -> list[str]:
     applied_rules: list[str] = []
-    current_month_key = f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}"
     output_by_lower = {str(column).lower(): column for column in output.columns}
 
     for rule in sorted(business_rules or [], key=lambda item: item.priority):
@@ -191,7 +206,7 @@ def _apply_forecast_business_rules(
                 replicated = _replicated_month_value(
                     behavior=behavior,
                     forecast_month=str(row["forecast_month"]),
-                    current_month_key=current_month_key,
+                    current_month_key=str(ctx["current_key"]),
                     last_closed_month_total=float(ctx["last_closed_month_total"]),
                     current_month_realized=float(ctx["current_month_realized"]),
                     growth_rate=growth_rate,
@@ -259,23 +274,27 @@ def _lit(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def gold_date_expr(date_col: str, period_col: str | None = None) -> str:
+def gold_date_expr(date_col: str, period_col: str | None = None, *, table_alias: str | None = None) -> str:
     """Parse Gold charge dates across Azure slash formats and GCP ISO-8601 timestamps.
 
     GCP ChargePeriodStart is stored as varchar ``YYYY-MM-DDTHH:MM:SS+00:00``.
     ``TRY_CAST AS DATE`` and ``date_parse(..., '%Y-%m-%d')`` both fail on that
     shape, which previously dropped every GCP series from the forecast.
     """
+    def ident(name: str) -> str:
+        quoted = _q(name)
+        return f"{table_alias}.{quoted}" if table_alias else quoted
+
     if period_col and date_col == period_col:
-        return f"TRY_CAST(date_parse(CAST({_q(period_col)} AS VARCHAR) || '01', '%Y%m%d') AS DATE)"
-    raw_date = f"CAST({_q(date_col)} AS VARCHAR)"
+        return f"TRY_CAST(date_parse(CAST({ident(period_col)} AS VARCHAR) || '01', '%Y%m%d') AS DATE)"
+    raw_date = f"CAST({ident(date_col)} AS VARCHAR)"
     # Do not use TRY_CAST for slash-delimited strings: Trino accepts them
     # using a locale-dependent parser before we can validate the billing
     # period. Limit it strictly to ISO dates and ISO-8601 timestamps.
     iso_date = (
         f"CASE WHEN regexp_like({raw_date}, '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}') "
         f"THEN COALESCE("
-        f"TRY_CAST({_q(date_col)} AS DATE), "
+        f"TRY_CAST({ident(date_col)} AS DATE), "
         f"TRY(date_parse({raw_date}, '%Y-%m-%d')), "
         f"TRY(CAST(from_iso8601_timestamp({raw_date}) AS DATE)), "
         f"TRY(date_parse(substr({raw_date}, 1, 10), '%Y-%m-%d'))"
@@ -289,7 +308,7 @@ def gold_date_expr(date_col: str, period_col: str | None = None) -> str:
     # non-ISO format, and when a billing period exists use it to resolve
     # ambiguous day/month values deterministically. For example,
     # ``08/01/2026`` in billing period 202608 is 1 Aug, never 8 Jan.
-    period_number = f"TRY_CAST(CAST({_q(period_col)} AS VARCHAR) AS INTEGER)"
+    period_number = f"TRY_CAST(CAST({ident(period_col)} AS VARCHAR) AS INTEGER)"
     return (
         f"COALESCE({iso_date}, "
         f"CASE WHEN year({mdy_date}) * 100 + month({mdy_date}) = {period_number} THEN {mdy_date} END, "
@@ -520,6 +539,187 @@ def _billing_period_values(history_start: date, effective_cutoff: date, minimum_
     return period_values
 
 
+def _charge_interval_rules(allocation_rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        rule for rule in allocation_rules
+        if rule.get("period_allocation") == "charge_interval"
+    ]
+
+
+async def _fetch_invoice_cloud_cutoffs(
+    *,
+    source: str,
+    type_filter: str,
+    period_col: str,
+    charge_end_col: str,
+    cloud_col: str,
+    connection_filter: str | None,
+    excluded_days: int,
+) -> dict[str, date]:
+    """Cutoff for invoice-style clouds from charge end, not ChargePeriodStart.
+
+    IBM FOCUS stamps the full month on day 1. Using MAX(ChargePeriodStart) keeps
+    the anchor in the prior month even after the invoice partition is loaded.
+    """
+    extra = f" AND {connection_filter}" if connection_filter else ""
+    charge_end_expr = gold_date_expr(charge_end_col, period_col)
+    period_end = _billing_period_end_expr(period_col)
+    sql = f"""
+        WITH latest_period AS (
+            SELECT
+                CAST({_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                MAX(CAST({_q(period_col)} AS VARCHAR)) AS max_period
+            FROM {source}
+            WHERE {type_filter}{extra}
+            GROUP BY 1
+        )
+        SELECT
+            CAST(g.{_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+            MAX(COALESCE({charge_end_expr}, {period_end})) AS collected_through
+        FROM {source} g
+        INNER JOIN latest_period lp
+            ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.cloud_origem
+           AND CAST(g.{_q(period_col)} AS VARCHAR) = lp.max_period
+        WHERE {type_filter}{extra}
+        GROUP BY 1
+    """
+    rows = await trino_execute(sql, timeout_s=120)
+    cutoffs: dict[str, date] = {}
+    for row in rows:
+        cloud = str(row.get("cloud_origem") or "").strip()
+        collected = pd.to_datetime(row.get("collected_through"), errors="coerce")
+        if not cloud or pd.isna(collected):
+            continue
+        cutoffs[cloud] = collected.date() - timedelta(days=excluded_days)
+    return cutoffs
+
+
+async def _apply_interval_cloud_cutoff_overrides(
+    cloud_cutoffs: dict[str, date],
+    *,
+    allocation_rules: list[dict[str, Any]],
+    config: Any,
+    source: str,
+    type_filter: str,
+    period_col: str | None,
+    cloud_col: str | None,
+    id_col: str | None,
+    excluded_days: int,
+) -> None:
+    """Refresh cutoffs for every connection enabled in interval allocation rules."""
+    interval_rules = _charge_interval_rules(allocation_rules)
+    if not interval_rules or not period_col or not cloud_col:
+        return
+
+    global_rules = [rule for rule in interval_rules if rule.get("_global")]
+    per_connection_rules = [rule for rule in interval_rules if not rule.get("_global")]
+
+    if global_rules:
+        charge_end_col = _rule_charge_end_column(global_rules[0], config)
+        if charge_end_col:
+            cloud_cutoffs.update(
+                await _fetch_invoice_cloud_cutoffs(
+                    source=source,
+                    type_filter=type_filter,
+                    period_col=period_col,
+                    charge_end_col=charge_end_col,
+                    cloud_col=cloud_col,
+                    connection_filter=None,
+                    excluded_days=excluded_days,
+                )
+            )
+
+    if not per_connection_rules:
+        return
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for rule in per_connection_rules:
+        charge_end_col = _rule_charge_end_column(rule, config)
+        if not charge_end_col:
+            continue
+        grouped.setdefault(charge_end_col, []).append(rule)
+
+    for charge_end_col, rules in grouped.items():
+        connection_filter = _connection_rule_filter(rules, cloud_col, id_col, negate=False)
+        if not connection_filter:
+            continue
+        cloud_cutoffs.update(
+            await _fetch_invoice_cloud_cutoffs(
+                source=source,
+                type_filter=type_filter,
+                period_col=period_col,
+                charge_end_col=charge_end_col,
+                cloud_col=cloud_col,
+                connection_filter=connection_filter,
+                excluded_days=excluded_days,
+            )
+        )
+
+
+async def _fetch_cloud_cutoffs(
+    *,
+    source: str,
+    type_filter: str,
+    date_expr: str,
+    cloud_col: str,
+    period_col: str | None,
+    excluded_days: int,
+) -> dict[str, date]:
+    """Return effective cutoff per ``cloud_origem`` from each cloud's latest collection."""
+    if period_col:
+        sql = f"""
+            WITH latest_period AS (
+                SELECT
+                    CAST({_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                    MAX(CAST({_q(period_col)} AS VARCHAR)) AS max_period
+                FROM {source}
+                WHERE {type_filter}
+                GROUP BY 1
+            )
+            SELECT
+                CAST(g.{_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                MAX({date_expr}) AS collected_through
+            FROM {source} g
+            INNER JOIN latest_period lp
+                ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.cloud_origem
+               AND CAST(g.{_q(period_col)} AS VARCHAR) = lp.max_period
+            WHERE {type_filter}
+            GROUP BY 1
+        """
+    else:
+        sql = f"""
+            SELECT
+                CAST({_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                MAX({date_expr}) AS collected_through
+            FROM {source}
+            WHERE {type_filter}
+            GROUP BY 1
+        """
+    rows = await trino_execute(sql, timeout_s=120)
+    cutoffs: dict[str, date] = {}
+    for row in rows:
+        cloud = str(row.get("cloud_origem") or "").strip()
+        collected = pd.to_datetime(row.get("collected_through"), errors="coerce")
+        if not cloud or pd.isna(collected):
+            continue
+        cutoffs[cloud] = collected.date() - timedelta(days=excluded_days)
+    return cutoffs
+
+
+def _cloud_effective_cutoff(
+    cloud_cutoffs: dict[str, date],
+    cloud_col: str | None,
+    key_values: dict[str, Any],
+    fallback: date,
+) -> date:
+    if not cloud_col:
+        return fallback
+    cloud_name = str(key_values.get(cloud_col) or "").strip()
+    if cloud_name and cloud_name in cloud_cutoffs:
+        return cloud_cutoffs[cloud_name]
+    return fallback
+
+
 async def _fetch_period_records(
     *,
     source: str,
@@ -612,20 +812,53 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         if getattr(config, "has_type_column", False) else "TRUE"
     )
     source = f"iceberg.{namespace}.{table}"
-    # Determine the as-of date before the expensive dimensional aggregation.
-    latest_period_filter = (
-        f" AND CAST({_q(period)} AS VARCHAR) = (SELECT MAX(CAST({_q(period)} AS VARCHAR)) FROM {source} WHERE {type_filter})"
-        if period else ""
-    )
-    latest_sql = f"SELECT MAX({date_expr}) AS collected_through FROM {source} WHERE {type_filter}{latest_period_filter}"
-    latest_records = await trino_execute(latest_sql, timeout_s=120)
-    latest_value = latest_records[0].get("collected_through") if latest_records else None
-    collected_timestamp = pd.to_datetime(latest_value, errors="coerce")
-    if pd.isna(collected_timestamp):
-        raise ValueError("Não foi possível identificar a última data válida na Gold")
-    collected_through = collected_timestamp.date()
     excluded_days = max(0, int(getattr(config, "cutoff_days", 2) or 0))
-    effective_cutoff = collected_through - timedelta(days=excluded_days)
+    metadata = getattr(config, "gold_metadata", None) or {}
+    cloud_col, id_col = _resolve_connection_columns(metadata)
+    allocation_rules = _merge_allocation_rules(
+        _normalize_allocation_rules(config),
+        _allocation_rules_from_business_rules(business_rules, cloud_col, id_col, config),
+    )
+    cloud_cutoffs: dict[str, date] = {}
+    if cloud_col:
+        cloud_cutoffs = await _fetch_cloud_cutoffs(
+            source=source,
+            type_filter=type_filter,
+            date_expr=date_expr,
+            cloud_col=cloud_col,
+            period_col=period,
+            excluded_days=excluded_days,
+        )
+        await _apply_interval_cloud_cutoff_overrides(
+            cloud_cutoffs,
+            allocation_rules=allocation_rules,
+            config=config,
+            source=source,
+            type_filter=type_filter,
+            period_col=period,
+            cloud_col=cloud_col,
+            id_col=id_col,
+            excluded_days=excluded_days,
+        )
+    if cloud_cutoffs:
+        collected_through = max(
+            cutoff + timedelta(days=excluded_days) for cutoff in cloud_cutoffs.values()
+        )
+        effective_cutoff = max(cloud_cutoffs.values())
+    else:
+        # Fallback when Gold has no cloud_origem populated.
+        latest_period_filter = (
+            f" AND CAST({_q(period)} AS VARCHAR) = (SELECT MAX(CAST({_q(period)} AS VARCHAR)) FROM {source} WHERE {type_filter})"
+            if period else ""
+        )
+        latest_sql = f"SELECT MAX({date_expr}) AS collected_through FROM {source} WHERE {type_filter}{latest_period_filter}"
+        latest_records = await trino_execute(latest_sql, timeout_s=120)
+        latest_value = latest_records[0].get("collected_through") if latest_records else None
+        collected_timestamp = pd.to_datetime(latest_value, errors="coerce")
+        if pd.isna(collected_timestamp):
+            raise ValueError("Não foi possível identificar a última data válida na Gold")
+        collected_through = collected_timestamp.date()
+        effective_cutoff = collected_through - timedelta(days=excluded_days)
     # The longest model uses 28 days and AUTO_BACKTEST reserves seven days for
     # validation. Keep the current month in full when it starts earlier.
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
@@ -634,16 +867,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         effective_cutoff - timedelta(days=max_window + 7),
     )
     minimum_monthly = max(1, int(getattr(config, "minimum_monthly_points", 3) or 3))
-    metadata = getattr(config, "gold_metadata", None) or {}
-    cloud_col, id_col = _resolve_connection_columns(metadata)
     query_dims = list(dims)
     for extra_col in (cloud_col, id_col):
         if extra_col and extra_col not in query_dims:
             query_dims.append(extra_col)
-    allocation_rules = _merge_allocation_rules(
-        _normalize_allocation_rules(config),
-        _allocation_rules_from_business_rules(business_rules, cloud_col, id_col, config),
-    )
     interval_rule_names = [
         str(rule.get("_from_business_rule"))
         for rule in allocation_rules
@@ -717,25 +944,28 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     for key, group_frame in frame.groupby(key_cols, dropna=False) if key_cols else [((), frame)]:
         if not isinstance(key, tuple): key = (key,)
         key_values = {col: (None if pd.isna(value) else value) for col, value in zip(key_cols, key)}
+        cloud_effective_cutoff = _cloud_effective_cutoff(
+            cloud_cutoffs, cloud_col, key_values, effective_cutoff,
+        )
         history = group_frame.set_index("forecast_day")["value"].sort_index()
         if history.empty:
             continue
         series_last_date = history.index.max().date()
-        series_cutoff = min(effective_cutoff, series_last_date)
+        series_cutoff = min(cloud_effective_cutoff, series_last_date)
         history = history[history.index.date <= series_cutoff]
         if history.empty:
             continue
         interval_series = _series_matches_charge_interval(key_values, allocation_rules, cloud_col, id_col)
         # Invoice-interval series that did not appear in the current month have
         # already ended; projecting them alongside the current invoice double-counts.
-        if interval_series and series_last_date < effective_cutoff.replace(day=1):
+        if interval_series and series_last_date < cloud_effective_cutoff.replace(day=1):
             continue
         daily = history.resample("D").sum()
         daily = daily.reindex(
             pd.date_range(daily.index.min(), pd.Timestamp(series_cutoff), freq="D"),
             fill_value=0.0,
         )
-        series_context[_series_key(key_values, key_cols)] = _build_series_context(daily, effective_cutoff)
+        series_context[_series_key(key_values, key_cols)] = _build_series_context(daily, series_cutoff)
         enabled_windows = [int(w) for w in config.enabled_windows or [7, 14, 28]]
         candidates = []
         for window in enabled_windows:
@@ -790,25 +1020,32 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
                 method, baseline = selected
             else:
                 method, baseline = candidates[0]
-        if series_last_date < effective_cutoff.replace(day=1):
+        if series_last_date < cloud_effective_cutoff.replace(day=1):
             # A lump that ended in a prior month must not be treated as a
             # daily run-rate for the open month (one purchase day × 30).
             method, baseline = "ENDED_SERIES", 0.0
         methods[method] = methods.get(method, 0) + 1
-        # Realized part of current month, followed by forecast remainder.
-        last_day = calendar.monthrange(effective_cutoff.year, effective_cutoff.month)[1]
-        realized_value = float(history[history.index.to_period("M") == pd.Timestamp(effective_cutoff).to_period("M")].sum())
-        remaining_days = last_day - effective_cutoff.day
+        # Each series projects from its own last collected date, not the global
+        # Gold max date (which may belong to another cloud/month).
+        series_anchor = series_cutoff
+        anchor_period = pd.Timestamp(series_anchor).to_period("M")
+        last_day = calendar.monthrange(series_anchor.year, series_anchor.month)[1]
+        realized_value = float(history[history.index.to_period("M") == anchor_period].sum())
+        remaining_days = last_day - series_anchor.day
         # Invoice-interval series already hold the full month on a daily grid.
-        # Project the whole month so the forecast column matches the invoice,
-        # not only the days after cutoff.
-        current_forecast_days = last_day if interval_series else remaining_days
+        # Project the whole month only while the invoice is still missing; once
+        # realizado is present the month is closed and forecast would double-count.
+        if interval_series:
+            current_forecast_days = 0 if realized_value > 0 else last_day
+        else:
+            current_forecast_days = remaining_days
+        anchor_month_key = f"{series_anchor.year:04d}{series_anchor.month:02d}"
         if current_forecast_days > 0:
-            results.append({**key_values, "forecast_month": f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}", "tipo": "forecast", "forecast_value": baseline * current_forecast_days, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
-        results.append({**key_values, "forecast_month": f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}", "tipo": "realizado", "forecast_value": realized_value, "selected_method": "REALIZADO", "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
+            results.append({**key_values, "forecast_month": anchor_month_key, "tipo": "forecast", "forecast_value": baseline * current_forecast_days, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
+        results.append({**key_values, "forecast_month": anchor_month_key, "tipo": "realizado", "forecast_value": realized_value, "selected_method": "REALIZADO", "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
         for month_offset in range(1, int(config.horizon_months) + 1):
-            month = effective_cutoff.month - 1 + month_offset
-            year = effective_cutoff.year + month // 12
+            month = series_anchor.month - 1 + month_offset
+            year = series_anchor.year + month // 12
             month = month % 12 + 1
             value = baseline * ((1.0 + float(config.growth_rate)) ** month_offset) * calendar.monthrange(year, month)[1]
             results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
@@ -838,4 +1075,14 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     result_table = result_table or f"result_{config.id}_{int(cutoff.strftime('%Y%m%d'))}"
     iceberg.write_forecast_result(result_table, output)
     planning_table = iceberg.write_forecast_planning(table, output, value_column=measure)
-    return {"rows": len(output), "table": result_table, "planning_table": planning_table, "methods": methods, "series": len(output.groupby(key_cols)) if key_cols else 1, "business_rules": applied_rules, "collected_through": collected_through.isoformat(), "effective_cutoff": effective_cutoff.isoformat()}
+    return {
+        "rows": len(output),
+        "table": result_table,
+        "planning_table": planning_table,
+        "methods": methods,
+        "series": len(output.groupby(key_cols)) if key_cols else 1,
+        "business_rules": applied_rules,
+        "collected_through": collected_through.isoformat(),
+        "effective_cutoff": effective_cutoff.isoformat(),
+        "cloud_cutoffs": {cloud: cutoff.isoformat() for cloud, cutoff in sorted(cloud_cutoffs.items())},
+    }

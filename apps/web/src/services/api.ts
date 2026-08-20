@@ -40,7 +40,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci", "mongodb_atlas"]);
 
 export function formatApiError(error: unknown, fallback = "Request failed"): string {
   if (axios.isAxiosError(error)) {
@@ -64,6 +64,9 @@ export interface SourceConnection {
   cloud_scope: string | null;
   config_json: Record<string, unknown>;
   blob_prefixes: string[];
+  last_test_status: string | null;
+  last_test_message: string | null;
+  last_tested_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -137,6 +140,7 @@ export interface BusinessRule {
   priority: number;
   valid_from: string | null;
   valid_until: string | null;
+  cloud_scope: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -205,6 +209,28 @@ export async function getConnections(withData?: boolean): Promise<SourceConnecti
 
 export async function getConnection(id: number): Promise<SourceConnection> {
   const { data } = await api.get(`/connections/${id}`);
+  return data;
+}
+
+export interface ConnectionsGridResponse {
+  items: SourceConnection[];
+  total: number;
+}
+
+export async function getConnectionsGrid(params: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  provider?: string;
+  sort_field?: string;
+  sort_direction?: "asc" | "desc";
+  filter_field?: string;
+  filter_operator?: "equals" | "notEquals";
+  filter_value?: string;
+  filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+}): Promise<ConnectionsGridResponse> {
+  const { filters, ...query } = params;
+  const { data } = await api.get("/connections/grid", { params: { ...query, ...(filters?.length ? { filters: JSON.stringify(filters) } : {}) } });
   return data;
 }
 
@@ -322,6 +348,11 @@ export async function testConnection(connectionId: number): Promise<{ status: st
   return data;
 }
 
+export async function testConnectionConfig(body: Partial<SourceConnection>): Promise<{ status: string; message: string }> {
+  const { data } = await api.post("/etl/connections/test-config", body);
+  return data;
+}
+
 export async function processDestinationTables(connectionId: number): Promise<{ success: boolean; rows_written: number; error?: string }> {
   const { data } = await api.post(`/etl/connections/${connectionId}/process-destination`);
   return data;
@@ -334,6 +365,32 @@ export interface AvailablePeriod {
 
 export async function getAvailablePeriods(connectionId: number): Promise<AvailablePeriod[]> {
   const { data } = await api.get("/etl/periods", { params: { connection_id: connectionId } });
+  return data;
+}
+
+export async function reprocessSharedCost(): Promise<{ task_id: number; status: string; message: string }> {
+  const { data } = await api.post("/etl/reprocess-shared-cost");
+  return data;
+}
+
+export interface SharedCostJob {
+  id: number;
+  status: string;
+  phase: string;
+  rows_written: number;
+  total_blobs?: number;
+  processed_blobs?: number;
+  table?: string;
+  error?: string;
+  errors?: string[];
+  event_log?: Array<{ at: string; level: string; message: string }>;
+  started_at?: string;
+  finished_at?: string;
+  snapshot?: Record<string, unknown> | null;
+}
+
+export async function getSharedCostHistory(): Promise<SharedCostJob[]> {
+  const { data } = await api.get("/etl/shared-cost-history");
   return data;
 }
 
@@ -369,8 +426,8 @@ export async function getReprocessStatus(taskId: number): Promise<ReprocessStatu
   const { data } = await api.get(`/etl/reprocess-status/${taskId}`);
   return data;
 }
-export async function getReprocessHistory(): Promise<ReprocessStatus[]> {
-  const { data } = await api.get("/etl/reprocess-history");
+export async function getReprocessHistory(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> } = {}): Promise<{ items: ReprocessStatus[]; total: number }> {
+  const { data } = await api.get("/etl/reprocess-history", { params: { ...params, filters: params.filters ? JSON.stringify(params.filters) : undefined } });
   return data;
 }
 
@@ -520,6 +577,34 @@ export async function updateDepartment(id: number, body: Partial<Department>): P
 
 export async function deleteDepartment(id: number): Promise<void> {
   await api.delete(`/departments/${id}`);
+}
+
+export type SharedCostMode = "consumption" | "equal" | "custom";
+export interface SharedCostTarget {
+  department_id: number;
+  percent: number | null;
+  name?: string | null;
+  path?: string | null;
+}
+export interface SharedCostConfig {
+  department_id: number;
+  enabled: boolean;
+  mode: SharedCostMode;
+  name?: string | null;
+  path?: string | null;
+  targets: SharedCostTarget[];
+}
+export async function getSharedCosts(): Promise<SharedCostConfig[]> {
+  const { data } = await api.get("/departments/shared-costs");
+  return data;
+}
+export async function getDepartmentSharedCost(id: number): Promise<SharedCostConfig> {
+  const { data } = await api.get(`/departments/${id}/shared-cost`);
+  return data;
+}
+export async function upsertDepartmentSharedCost(id: number, body: { enabled: boolean; mode: SharedCostMode; targets: Array<{ department_id: number; percent?: number | null }> }): Promise<SharedCostConfig> {
+  const { data } = await api.put(`/departments/${id}/shared-cost`, body);
+  return data;
 }
 
 export interface CloudOrganizationBootstrapResult {
@@ -1119,12 +1204,17 @@ export interface PivotMetadata {
   dimensions: string[]; measures: string[]; recommended_dimensions: string[];
   default_measure: string | null;
 }
+export interface PivotUnionTable { id: number; physical_name: string; origin: string }
 export interface PivotResult {
   rows: string[]; columns: string[]; measures: PivotMeasure[];
   row_keys: unknown[][]; column_keys: unknown[][];
   cells: { row: unknown[]; column: unknown[]; values: Array<number | null> }[];
   totals: { rows: Record<string, Array<number | null>>; columns: Record<string, Array<number | null>>; grand: Array<number | null> } | null;
   record_count: number; currency_added: boolean;
+  period_auto_applied?: string | null;
+  origin_column?: string;
+  origin_values?: string[];
+  tables?: PivotUnionTable[];
 }
 export interface PivotView { id: number; name: string; destination_table_id: number; config: PivotRequest & { perspective_config?: unknown }; created_at?: string; updated_at?: string }
 export async function getPivotMetadata(tableId: number): Promise<PivotMetadata> {
@@ -1142,7 +1232,6 @@ export interface PivotUnionRequest {
   origin_column?: string;
   sort_rows?: PivotSort[]; sort_columns?: PivotSort[];
 }
-export interface PivotUnionTable { id: number; physical_name: string; origin: string }
 export interface PivotUnionResult extends PivotResult {
   origin_column: string;
   origin_values: string[];
@@ -1198,17 +1287,17 @@ export async function deleteDashboard(id: number): Promise<void> { await api.del
 export async function createDashboardWidget(dashboardId: number, body: { dashboard_id: number; pivot_view_id?: number | null; title: string; chart_type: ChartType; config?: Record<string, unknown>; position?: Record<string, unknown> }): Promise<DashboardWidget> { return (await api.post(`/analysis/dashboards/${dashboardId}/widgets`, body)).data; }
 export async function deleteDashboardWidget(dashboardId: number, widgetId: number): Promise<void> { await api.delete(`/analysis/dashboards/${dashboardId}/widgets/${widgetId}`); }
 export async function queryDashboardWidget(body: { pivot_view_id: number; chart_type: ChartType; config?: Record<string, unknown>; global_filters?: Record<string, unknown>; source_ids?: number[] }): Promise<WidgetChartResult> { return (await api.post("/analysis/dashboard-widgets/query", body)).data; }
-export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
-export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; }
+export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; shared_value?: number | null; shared_received?: number | null; shared_given?: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
+export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; actual_value?: number; shared_value?: number; }
 type ExpectedViewResult = { director: string; department_id?: number; rows: ExpectedViewRow[]; drivers: ExpectedViewDriver[] };
 
-export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal): Promise<ExpectedViewResult> {
-  const key = `${director}|${year}|${departmentId ?? ""}`;
+export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal, includeSharedCost = false): Promise<ExpectedViewResult> {
+  const key = `${director}|${year}|${departmentId ?? ""}|${includeSharedCost ? 1 : 0}`;
   let entry = expectedViewInflight.get(key);
   if (!entry || entry.controller.signal.aborted) {
     const controller = new AbortController();
     trackAnalysisAbort(controller);
-    const promise = api.post("/analysis/expected-view", { director, year, department_id: departmentId }, { timeout: 120000, signal: controller.signal }).then(result => result.data as ExpectedViewResult).finally(() => {
+    const promise = api.post("/analysis/expected-view", { director, year, department_id: departmentId, include_shared_cost: includeSharedCost }, { timeout: 120000, signal: controller.signal }).then(result => result.data as ExpectedViewResult).finally(() => {
       const current = expectedViewInflight.get(key);
       if (current?.controller === controller) expectedViewInflight.delete(key);
     });

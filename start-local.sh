@@ -439,7 +439,7 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-(cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001) \
+(cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload) \
   >"$LOG_DIR/api.log" 2>&1 &
 api_pid=$!
 write_pid_file api "$api_pid"

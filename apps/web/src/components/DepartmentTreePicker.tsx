@@ -18,9 +18,12 @@ export function flattenDepartments(
   });
 }
 
-function ancestorIds(nodes: Department[], targetId: number | null): Set<number> {
+function ancestorIdsFromFlat(
+  flat: Array<Department & { path: string }>,
+  targetId: number | null,
+): Set<number> {
   if (targetId == null) return new Set();
-  const byId = new Map(flattenDepartments(nodes).map((department) => [department.id, department]));
+  const byId = new Map(flat.map((department) => [department.id, department]));
   const ids = new Set<number>();
   let current = byId.get(targetId);
   while (current) {
@@ -28,6 +31,10 @@ function ancestorIds(nodes: Department[], targetId: number | null): Set<number> 
     current = current.parent_id ? byId.get(current.parent_id) : undefined;
   }
   return ids;
+}
+
+function ancestorIds(nodes: Department[], targetId: number | null): Set<number> {
+  return ancestorIdsFromFlat(flattenDepartments(nodes), targetId);
 }
 
 export function descendantIds(node: Department): Set<number> {
@@ -62,13 +69,15 @@ export default function DepartmentTreePicker({
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+
   const selectedPath = useMemo(() => {
     if (value == null) return placeholder;
-    return flattenDepartments(departments).find((d) => d.id === value)?.path || placeholder;
-  }, [departments, placeholder, value]);
+    return flatDepartments.find((d) => d.id === value)?.path || placeholder;
+  }, [flatDepartments, placeholder, value]);
 
   const openMenu = (event: React.MouseEvent<HTMLElement>) => {
-    setExpanded(ancestorIds(departments, value));
+    setExpanded(ancestorIdsFromFlat(flatDepartments, value));
     setAnchor(event.currentTarget);
   };
 

@@ -2,10 +2,14 @@ from datetime import date
 
 import pandas as pd
 
+from app.services.azure_extractor import derive_billing_period
 from app.services.csv_upload_service import (
+    _derive_billing_period,
     analyze_csv_grain,
+    derive_billing_period_from_df,
     detect_monthly_grain,
     is_current_billing_period,
+    resolve_billing_period,
     should_skip_gold_realizado,
 )
 from app.services.forecast_service import _expand_charge_interval
@@ -103,3 +107,47 @@ def test_expand_charge_interval_by_dimension():
     assert len(daily) == 2
     assert abs(float(daily.loc[daily["cloud"] == "ibm", "value"].sum()) - 60.0) < 0.01
     assert abs(float(daily["value"].iloc[0]) - 30.0) < 0.01
+
+
+def test_derive_billing_period_from_df_azure_date_column():
+    df = pd.DataFrame({
+        "date": ["2025-11-15", "2025-11-16", "2025-11-17"],
+        "costInBillingCurrency": [10.0, 20.0, 30.0],
+    })
+    assert derive_billing_period_from_df(df) == "202511"
+
+
+def test_derive_billing_period_prefers_content_over_filename():
+    df = pd.DataFrame({
+        "billingPeriodStartDate": ["2026-01-01", "2026-01-31"],
+        "BilledCost": [100.0, 200.0],
+    })
+    assert _derive_billing_period("report-202608.csv", df) == "202601"
+
+
+def test_resolve_billing_period_prefers_content_over_explicit_form():
+    df = pd.DataFrame({
+        "date": ["2025-12-01", "2025-12-02"],
+        "costInBillingCurrency": [10.0, 20.0],
+    })
+    assert resolve_billing_period("report-202608.csv", df, billing_period="202608") == "202512"
+
+
+def test_derive_billing_period_azure_blob_prefers_content():
+    df = pd.DataFrame({
+        "date": ["20251201", "20251202"],
+        "productName": ["A", "B"],
+    })
+    assert derive_billing_period("reports/azure-marketplace/wrong-name.csv", df) == "202512"
+
+
+def test_df_to_arrow_keeps_all_null_boolean_as_boolean():
+    import pyarrow as pa
+    from app.services.iceberg_service import _df_to_arrow
+
+    table = _df_to_arrow(
+        pd.DataFrame({"is_synthetic": [None, None], "tipo": ["realizado", "realizado"]}),
+        column_types={"is_synthetic": "BOOLEAN", "tipo": "TEXT"},
+    )
+    assert pa.types.is_boolean(table.schema.field("is_synthetic").type)
+    assert pa.types.is_string(table.schema.field("tipo").type)

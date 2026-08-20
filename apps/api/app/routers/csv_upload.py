@@ -191,10 +191,11 @@ async def ingest_csv_batch(
     connection_id: int = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Load multiple CSVs into Bronze, deriving the period from each filename.
+    """Load multiple CSVs into Bronze, deriving the period from each file.
 
-    The billing period is extracted from a YYYY-MM or YYYYMM token in the
-    filename (e.g. ``focus-2026-01.csv`` -> 202601). Types are auto-inferred.
+    The billing period is taken from date/billing columns inside the CSV when
+    available (e.g. ``date``, ``ChargePeriodStart``, ``billingPeriodStartDate``),
+    falling back to a YYYYMM token in the filename. Types are auto-inferred.
     """
     await _validate_connection(connection_id, db)
 

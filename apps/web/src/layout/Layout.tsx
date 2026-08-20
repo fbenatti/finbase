@@ -316,7 +316,8 @@ export default function Layout() {
               <Box sx={{ mt: 1, display: "flex", flexDirection: "column", gap: 1 }}>
                 {runningTasks.map((t) => {
                   const isForecast = t.type === "forecast" || t.task_type === "forecast";
-                  const isReprocess = !isForecast && (t.type === "reprocess" || (!t.connection_id && t.destination_table_id));
+                  const isSharedCost = t.type === "shared_cost" || t.task_type === "shared_cost";
+                  const isReprocess = !isForecast && !isSharedCost && (t.type === "reprocess" || (!t.connection_id && t.destination_table_id));
                   const pct = t.total_blobs > 0 ? (t.processed_blobs / t.total_blobs) * 100 : 0;
                   const cancelFn = isReprocess ? doCancelReprocess : doCancelTask;
                   return (
@@ -324,10 +325,12 @@ export default function Layout() {
                       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <Box>
                           <Typography variant="caption" fontWeight={600}>
-                            {isForecast ? "Forecast" : isReprocess ? `Reprocessar: ${t.table || "?"}` : getConnName(t.connection_id!)}
+                            {isSharedCost ? "Custo compartilhado" : isForecast ? "Forecast" : isReprocess ? `Reprocessar: ${t.table || "?"}` : getConnName(t.connection_id!)}
                           </Typography>
                           <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                            {isForecast
+                            {isSharedCost
+                              ? `${t.processed_blobs}/${t.total_blobs || "?"} configs · ${(t.rows_destination || 0).toLocaleString()} projetos`
+                              : isForecast
                               ? `${(t.rows_destination || 0).toLocaleString()} linhas escritas`
                               : isReprocess
                               ? `${t.processed_blobs}/${t.total_blobs || "?"} lotes · ${(t.rows_destination || 0).toLocaleString()} linhas`

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import {
   Box, Typography, Button, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
@@ -78,6 +78,268 @@ export default function Classification() {
   );
 }
 
+function formFromRule(r: ClassificationRule | null) {
+  if (!r) {
+    return { ...emptyForm, conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] };
+  }
+  const conds = (r.conditions || []).map((c: Record<string, unknown>) => ({
+    field: String(c.field || ""),
+    operator: String(c.operator || "="),
+    values: Array.isArray(c.values) ? c.values.join(" | ") : String(c.values || ""),
+    logic: String(c.logic || "AND"),
+  }));
+  if (conds.length === 0) conds.push({ field: "", operator: "=", values: "", logic: "AND" });
+  return {
+    name: r.name,
+    target_field: r.target_field,
+    department_id: r.department_id,
+    cloud_scope: r.cloud_scope || "global",
+    conditions: conds,
+    priority: r.priority,
+    active: r.active,
+  };
+}
+
+const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
+  open,
+  editing,
+  selectedDestName,
+  destColumns,
+  departments,
+  destinationTableId,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  open: boolean;
+  editing: ClassificationRule | null;
+  selectedDestName: string | null;
+  destColumns: string[];
+  departments: Department[];
+  destinationTableId: number | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(() => {
+    if (open) setForm(formFromRule(editing));
+  }, [open, editing]);
+
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+  const hasValidConditions = form.conditions.some((c) => c.field.trim() && c.values.trim());
+
+  const updateCondition = useCallback((i: number, key: keyof CondEntry, val: string) => {
+    setForm((prev) => {
+      const updated = prev.conditions.map((cond, idx) =>
+        idx === i ? { ...cond, [key]: val } : cond,
+      );
+      return { ...prev, conditions: updated };
+    });
+  }, []);
+
+  const addCondition = useCallback(() => {
+    setForm((prev) => ({
+      ...prev,
+      conditions: [...prev.conditions, { field: "", operator: "=", values: "", logic: "AND" }],
+    }));
+  }, []);
+
+  const removeCondition = useCallback((i: number) => {
+    setForm((prev) => ({
+      ...prev,
+      conditions: prev.conditions.filter((_, idx) => idx !== i),
+    }));
+  }, []);
+
+  const save = async () => {
+    if (!form.department_id) {
+      onError("Selecione o departamento responsável pela classificação.");
+      return;
+    }
+    if (!hasValidConditions) {
+      onError("Defina ao menos uma condição com campo e valor.");
+      return;
+    }
+
+    const body: Record<string, unknown> = {
+      connection_id: editing?.connection_id ?? null,
+      destination_table_id: destinationTableId,
+      department_id: form.department_id,
+      name: form.name,
+      target_field: "departamento",
+      priority: form.priority,
+      active: form.active,
+      cloud_scope: form.cloud_scope === "global" ? null : form.cloud_scope,
+      pattern_type: "multi_condition",
+      match_value: form.department_id
+        ? (flatDepartments.find((d) => d.id === form.department_id)?.name || "")
+        : form.name,
+    };
+
+    const validConds = form.conditions.filter((c) => c.field && c.values);
+    if (validConds.length > 0) {
+      body.conditions = validConds.map((c) => ({
+        field: c.field,
+        operator: c.operator,
+        values: c.values.split("|").map((v) => v.trim()).filter(Boolean),
+        logic: c.logic,
+      }));
+      body.source_field = validConds[0].field;
+      body.pattern = validConds
+        .map((c) => `${c.field}${c.operator}${c.values.replace(/\|/g, " | ")}`)
+        .join(" ; ");
+    }
+
+    try {
+      if (editing) await updateClassification(editing.id, body as Partial<ClassificationRule>);
+      else await createClassification(body as Partial<ClassificationRule>);
+      onClose();
+      onSaved();
+    } catch (e: unknown) {
+      onError(e instanceof Error ? e.message : "Save failed");
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>{editing ? "Editar" : "Nova"} Classificação</DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+          {selectedDestName && (
+            <Alert severity="info" icon={false} sx={{ py: 0 }}>
+              Tabela Destino: <strong>{selectedDestName}</strong>
+            </Alert>
+          )}
+
+          <TextField
+            label="Nome"
+            value={form.name}
+            onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+          />
+
+          <DepartmentTreePicker
+            departments={departments}
+            value={form.department_id}
+            onChange={(departmentId) => setForm((prev) => ({ ...prev, department_id: departmentId }))}
+            label="Departamento"
+            helperText="Escolha o departamento na hierarquia, como em Departamentos > Editar Departamento."
+          />
+
+          <FormControl fullWidth>
+            <InputLabel>Cloud (escopo da regra)</InputLabel>
+            <Select
+              value={form.cloud_scope}
+              label="Cloud (escopo da regra)"
+              onChange={(e) => setForm((prev) => ({ ...prev, cloud_scope: e.target.value }))}
+            >
+              {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
+                <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+            Define em quais provedores esta regra é aplicada no reprocessamento (ex.: GCP não usa regras Azure).
+          </Typography>
+
+          <Divider />
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Typography variant="subtitle2">
+              Condições ({form.conditions.filter((c) => c.field && c.values).length} definidas)
+            </Typography>
+            <Button size="small" onClick={addCondition}>+ Condição</Button>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: -0.5 }}>
+            Use | nos valores para OR entre opções do mesmo campo.
+            {destColumns.length === 0 ? " Selecione a tabela destino no topo para listar os campos FOCUS." : ""}
+          </Typography>
+
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1.2fr) 120px minmax(0, 1.4fr) 40px",
+              columnGap: 1.5,
+              rowGap: 1,
+              alignItems: "start",
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>Campo</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>Operador</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>Valores</Typography>
+            <Box />
+
+            {form.conditions.map((cond, i) => (
+              <Box key={i} sx={{ display: "contents" }}>
+                <Autocomplete
+                  freeSolo
+                  size="small"
+                  options={destColumns}
+                  value={cond.field}
+                  onInputChange={(_, v, reason) => {
+                    if (reason === "reset") return;
+                    updateCondition(i, "field", v);
+                  }}
+                  sx={{ minWidth: 0 }}
+                  renderInput={(params) => (
+                    <TextField {...params} placeholder="SubAccountId" fullWidth />
+                  )}
+                />
+                <FormControl size="small" fullWidth>
+                  <Select
+                    value={cond.operator}
+                    onChange={(e) => updateCondition(i, "operator", e.target.value)}
+                  >
+                    <MenuItem value="=">= (igual)</MenuItem>
+                    <MenuItem value="~">~ (contém)</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField
+                  size="small"
+                  placeholder="valor1 | valor2"
+                  value={cond.values}
+                  onChange={(e) => updateCondition(i, "values", e.target.value)}
+                  fullWidth
+                />
+                <IconButton
+                  size="small"
+                  onClick={() => removeCondition(i)}
+                  color="error"
+                  sx={{ mt: 0.25 }}
+                >
+                  <Delete fontSize="small" />
+                </IconButton>
+              </Box>
+            ))}
+          </Box>
+
+          <TextField
+            label="Prioridade"
+            type="number"
+            value={form.priority}
+            onChange={(e) => setForm((prev) => ({ ...prev, priority: Number(e.target.value) }))}
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={form.active}
+                onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))}
+              />
+            }
+            label="Ativo"
+          />
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancelar</Button>
+        <Button onClick={save} variant="contained" disabled={!form.name || !hasValidConditions}>
+          Salvar
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+});
+
 function RulesTab() {
   const [rules, setRules] = useState<ClassificationRule[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -89,7 +351,6 @@ function RulesTab() {
   const [success, setSuccess] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
-  const [form, setForm] = useState(emptyForm);
   const [destColumns, setDestColumns] = useState<string[]>([]);
 
   useEffect(() => {
@@ -97,7 +358,6 @@ function RulesTab() {
     getDestinationTables(true).then(setDestTables).catch(() => {});
   }, []);
 
-  // Load destination columns for condition autocomplete
   useEffect(() => {
     if (selectedDestId) {
       getDestinationSchema(selectedDestId as number)
@@ -108,7 +368,7 @@ function RulesTab() {
     }
   }, [selectedDestId]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       const destId = selectedDestId === "" ? undefined : selectedDestId as number;
@@ -116,88 +376,24 @@ function RulesTab() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally { setLoading(false); }
-  };
+  }, [selectedDestId]);
 
-  useEffect(() => { load(); }, [selectedDestId]);
+  useEffect(() => { load(); }, [load]);
 
-  const flatDepartments = flattenDepartments(departments);
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+  const departmentById = useMemo(
+    () => new Map(flatDepartments.map((d) => [d.id, d])),
+    [flatDepartments],
+  );
 
   const openNew = () => {
     setEditing(null);
-    setForm({ ...emptyForm, conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] });
     setDialogOpen(true);
   };
 
   const openEdit = (r: ClassificationRule) => {
     setEditing(r);
-    const conds = (r.conditions || []).map((c: Record<string, unknown>) => ({
-      field: String(c.field || ""),
-      operator: String(c.operator || "="),
-      values: Array.isArray(c.values) ? c.values.join(" | ") : String(c.values || ""),
-      logic: String(c.logic || "AND"),
-    }));
-    if (conds.length === 0) conds.push({ field: "", operator: "=", values: "", logic: "AND" });
-
-    setForm({
-      name: r.name,
-      target_field: r.target_field,
-      department_id: r.department_id,
-      cloud_scope: r.cloud_scope || "global",
-      conditions: conds,
-      priority: r.priority, active: r.active,
-    });
     setDialogOpen(true);
-  };
-
-  const hasValidConditions = form.conditions.some(c => c.field.trim() && c.values.trim());
-
-  const save = async () => {
-    if (!form.department_id) {
-      setError("Selecione o departamento responsável pela classificação.");
-      return;
-    }
-    if (!hasValidConditions) {
-      setError("Defina ao menos uma condição com campo e valor.");
-      return;
-    }
-    const destId = selectedDestId === "" ? null : selectedDestId as number;
-
-    const body: Record<string, unknown> = {
-      connection_id: editing?.connection_id ?? null,
-      destination_table_id: destId,
-      department_id: form.department_id,
-      name: form.name,
-      target_field: "departamento",
-      priority: form.priority, active: form.active,
-      cloud_scope: form.cloud_scope === "global" ? null : form.cloud_scope,
-      pattern_type: "multi_condition",
-      match_value: form.department_id
-        ? (flatDepartments.find((d) => d.id === form.department_id)?.name || "")
-        : form.name,
-    };
-
-    const validConds = form.conditions.filter(c => c.field && c.values);
-    if (validConds.length > 0) {
-      body.conditions = validConds.map(c => ({
-        field: c.field,
-        operator: c.operator,
-        values: c.values.split("|").map(v => v.trim()).filter(Boolean),
-        logic: c.logic,
-      }));
-      body.source_field = validConds[0].field;
-      body.pattern = validConds
-        .map(c => `${c.field}${c.operator}${c.values.replace(/\|/g, " | ")}`)
-        .join(" ; ");
-    }
-
-    try {
-      if (editing) await updateClassification(editing.id, body as Partial<ClassificationRule>);
-      else await createClassification(body as Partial<ClassificationRule>);
-      setDialogOpen(false);
-      load();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    }
   };
 
   const remove = async (id: number) => {
@@ -207,20 +403,71 @@ function RulesTab() {
     }
   };
 
-  const addCondition = () => setForm({
-    ...form, conditions: [...form.conditions, { field: "", operator: "=", values: "", logic: "AND" }],
-  });
-  const removeCondition = (i: number) => setForm({
-    ...form, conditions: form.conditions.filter((_, idx) => idx !== i),
-  });
-  const updateCondition = (i: number, key: keyof CondEntry, val: string) => {
-    const updated = [...form.conditions];
-    updated[i][key] = val;
-    setForm({ ...form, conditions: updated });
-  };
-
   const selectedDestName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : null;
-  const filteredRules = filterRulesByCloud(rules, cloudFilter);
+  const filteredRules = useMemo(
+    () => filterRulesByCloud(rules, cloudFilter),
+    [rules, cloudFilter],
+  );
+
+  const tableColumns = useMemo(() => [
+    { key: "name", label: "Nome" },
+    {
+      key: "_conditions", label: "Condições", width: 300,
+      render: (r: Record<string, unknown>) => {
+        const rule = r as unknown as ClassificationRule;
+        const conds = rule.conditions || [];
+        return (
+          <Typography variant="body2" sx={{ fontSize: "0.7rem", fontFamily: "monospace" }}>
+            {conds.length > 0
+              ? conds.slice(0, 2).map((c: Record<string, unknown>) =>
+                  `${c.field || "?"}${c.operator || "="}${Array.isArray(c.values) ? (c.values as string[]).join("|") : c.values}`
+                ).join(" ; ")
+              : "-"}
+          </Typography>
+        );
+      },
+    },
+    {
+      key: "target_field", label: "Campo Dest.", width: 100,
+    },
+    {
+      key: "cloud_scope", label: "Cloud", width: 90,
+      render: (r: Record<string, unknown>) => (
+        <Chip
+          size="small"
+          label={cloudScopeLabel((r as unknown as ClassificationRule).cloud_scope)}
+          variant="outlined"
+          sx={{ fontSize: "0.65rem", height: 22 }}
+        />
+      ),
+    },
+    {
+      key: "_dept", label: "Departamento", width: 140,
+      render: (r: Record<string, unknown>) => {
+        const d = departmentById.get((r as unknown as ClassificationRule).department_id as number);
+        return d?.path || d?.name || "-";
+      },
+    },
+    { key: "priority", label: "Pri", width: 50 },
+    {
+      key: "active", label: "Ativo", width: 60,
+      render: (r: Record<string, unknown>) => (r as unknown as ClassificationRule).active ? "Sim" : "Não",
+    },
+    {
+      key: "_actions", label: "", width: 80, sortable: false,
+      render: (r: Record<string, unknown>) => (
+        <>
+          <IconButton size="small" onClick={() => openEdit(r as unknown as ClassificationRule)}>
+            <Edit fontSize="small" />
+          </IconButton>
+          <IconButton size="small"
+            onClick={() => remove((r as unknown as ClassificationRule).id)} color="error">
+            <Delete fontSize="small" />
+          </IconButton>
+        </>
+      ),
+    },
+  ], [departmentById]);
 
   return (
     <Box>
@@ -292,190 +539,21 @@ function RulesTab() {
           getRowKey={(r) => (r as unknown as ClassificationRule).id}
           defaultSortKey="priority"
           defaultSortDir="asc"
-          columns={[
-            { key: "name", label: "Nome" },
-            {
-              key: "_conditions", label: "Condições", width: 300,
-              render: (r: Record<string, unknown>) => {
-                const rule = r as unknown as ClassificationRule;
-                const conds = rule.conditions || [];
-                return (
-                  <Typography variant="body2" sx={{ fontSize: "0.7rem", fontFamily: "monospace" }}>
-                    {conds.length > 0
-                      ? conds.slice(0, 2).map((c: Record<string, unknown>) =>
-                          `${c.field || "?"}${c.operator || "="}${Array.isArray(c.values) ? (c.values as string[]).join("|") : c.values}`
-                        ).join(" ; ")
-                      : "-"}
-                  </Typography>
-                );
-              },
-            },
-            {
-              key: "target_field", label: "Campo Dest.", width: 100,
-            },
-            {
-              key: "cloud_scope", label: "Cloud", width: 90,
-              render: (r: Record<string, unknown>) => (
-                <Chip
-                  size="small"
-                  label={cloudScopeLabel((r as unknown as ClassificationRule).cloud_scope)}
-                  variant="outlined"
-                  sx={{ fontSize: "0.65rem", height: 22 }}
-                />
-              ),
-            },
-            {
-              key: "_dept", label: "Departamento", width: 140,
-              render: (r: Record<string, unknown>) => {
-                const d = flatDepartments.find((dep) => dep.id === (r as unknown as ClassificationRule).department_id);
-                return d?.path || d?.name || "-";
-              },
-            },
-            { key: "priority", label: "Pri", width: 50 },
-            {
-              key: "active", label: "Ativo", width: 60,
-              render: (r: Record<string, unknown>) => (r as unknown as ClassificationRule).active ? "Sim" : "Não",
-            },
-            {
-              key: "_actions", label: "", width: 80, sortable: false,
-              render: (r: Record<string, unknown>) => (
-                <>
-                  <IconButton size="small" onClick={() => openEdit(r as unknown as ClassificationRule)}>
-                    <Edit fontSize="small" />
-                  </IconButton>
-                  <IconButton size="small"
-                    onClick={() => remove((r as unknown as ClassificationRule).id)} color="error">
-                    <Delete fontSize="small" />
-                  </IconButton>
-                </>
-              ),
-            },
-          ]}
+          columns={tableColumns}
         />
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editing ? "Editar" : "Nova"} Classificação</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-            {/* Context banner */}
-            {selectedDestName && (
-              <Alert severity="info" icon={false} sx={{ py: 0 }}>
-                Tabela Destino: <strong>{selectedDestName}</strong>
-              </Alert>
-            )}
-
-            <TextField label="Nome" value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })} />
-
-            <DepartmentTreePicker
-              departments={departments}
-              value={form.department_id}
-              onChange={(departmentId) => setForm({ ...form, department_id: departmentId })}
-              label="Departamento"
-              helperText="Escolha o departamento na hierarquia, como em Departamentos > Editar Departamento."
-            />
-
-            <FormControl fullWidth>
-              <InputLabel>Cloud (escopo da regra)</InputLabel>
-              <Select
-                value={form.cloud_scope}
-                label="Cloud (escopo da regra)"
-                onChange={(e) => setForm({ ...form, cloud_scope: e.target.value })}
-              >
-                {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
-                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-              Define em quais provedores esta regra é aplicada no reprocessamento (ex.: GCP não usa regras Azure).
-            </Typography>
-
-            <Divider />
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Typography variant="subtitle2">
-                Condições ({form.conditions.filter(c => c.field && c.values).length} definidas)
-              </Typography>
-              <Button size="small" onClick={addCondition}>+ Condição</Button>
-            </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: -0.5 }}>
-              Use | nos valores para OR entre opções do mesmo campo.
-              {destColumns.length === 0 ? " Selecione a tabela destino no topo para listar os campos FOCUS." : ""}
-            </Typography>
-
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1.2fr) 120px minmax(0, 1.4fr) 40px",
-                columnGap: 1.5,
-                rowGap: 1,
-                alignItems: "start",
-              }}
-            >
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>Campo</Typography>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>Operador</Typography>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>Valores</Typography>
-              <Box />
-
-              {form.conditions.map((cond, i) => (
-                <Box key={i} sx={{ display: "contents" }}>
-                  <Autocomplete
-                    freeSolo
-                    size="small"
-                    options={destColumns}
-                    value={cond.field}
-                    onInputChange={(_, v) => updateCondition(i, "field", v)}
-                    onChange={(_, v) => updateCondition(i, "field", v || "")}
-                    sx={{ minWidth: 0 }}
-                    renderInput={(params) => (
-                      <TextField {...params} placeholder="SubAccountId" fullWidth />
-                    )}
-                  />
-                  <FormControl size="small" fullWidth>
-                    <Select
-                      value={cond.operator}
-                      onChange={(e) => updateCondition(i, "operator", e.target.value)}
-                    >
-                      <MenuItem value="=">= (igual)</MenuItem>
-                      <MenuItem value="~">~ (contém)</MenuItem>
-                    </Select>
-                  </FormControl>
-                  <TextField
-                    size="small"
-                    placeholder="valor1 | valor2"
-                    value={cond.values}
-                    onChange={(e) => updateCondition(i, "values", e.target.value)}
-                    fullWidth
-                  />
-                  <IconButton
-                    size="small"
-                    onClick={() => removeCondition(i)}
-                    color="error"
-                    sx={{ mt: 0.25 }}
-                  >
-                    <Delete fontSize="small" />
-                  </IconButton>
-                </Box>
-              ))}
-            </Box>
-
-            <TextField label="Prioridade" type="number" value={form.priority}
-              onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} />
-            <FormControlLabel
-              control={<Switch checked={form.active}
-                onChange={(e) => setForm({ ...form, active: e.target.checked })} />}
-              label="Ativo" />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={save} variant="contained"
-            disabled={!form.name || !hasValidConditions}>
-            Salvar
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ClassificationRuleDialog
+        open={dialogOpen}
+        editing={editing}
+        selectedDestName={selectedDestName ?? null}
+        destColumns={destColumns}
+        departments={departments}
+        destinationTableId={selectedDestId === "" ? null : selectedDestId}
+        onClose={() => setDialogOpen(false)}
+        onSaved={load}
+        onError={setError}
+      />
     </Box>
   );
 }

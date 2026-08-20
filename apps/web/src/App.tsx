@@ -15,6 +15,7 @@ import Relationship from "./pages/Relationship/Relationship";
 import Reprocess from "./pages/Reprocess/Reprocess";
 import Forecast from "./pages/Forecast/Forecast";
 import ForecastHistory from "./pages/Forecast/ForecastHistory";
+import SharedCostHistory from "./pages/Reprocess/SharedCostHistory";
 import CloneRules from "./pages/CloneRules/CloneRules";
 import Dashboards from "./pages/Dashboards/Dashboards";
 import ExpectedView from "./pages/Dashboards/ExpectedView";
@@ -47,6 +48,7 @@ function App() {
         <Route path="forecast" element={<Forecast />} />
         <Route path="savings" element={<Savings />} />
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
+        <Route path="reprocess/shared-cost/history/:runId" element={<SharedCostHistory />} />
         <Route path="extraction/history/:taskId" element={<ExtractionHistory />} />
         <Route path="dashboards" element={<Dashboards />} />
       </Route>

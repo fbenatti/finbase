@@ -24,6 +24,13 @@ PERIOD_RE = re.compile(r"[_-](\d{6})(?:\.csv)?$")
 
 
 def derive_billing_period(blob_path: str, df: pd.DataFrame | None = None) -> str | None:
+    if df is not None and not df.empty:
+        from app.services.csv_upload_service import derive_billing_period_from_df
+
+        period = derive_billing_period_from_df(df)
+        if period:
+            return period
+
     m = DATE_RANGE_RE.search(blob_path)
     if m:
         return m.group(1)[:6]
@@ -32,16 +39,8 @@ def derive_billing_period(blob_path: str, df: pd.DataFrame | None = None) -> str
     if m:
         return m.group(1)
 
-    if df is not None:
-        for col in ["BillingPeriod", "BillingCurrency", "Date"]:
-            if col in df.columns and not df[col].dropna().empty:
-                val = str(df[col].dropna().iloc[0])
-                if col == "Date":
-                    return val[:7].replace("-", "")
-                return val[:6]
-
     logger.warning(
-        "Could not derive billing_period for blob=%s (no date range in path, no BillingPeriod/Date column in CSV)",
+        "Could not derive billing_period for blob=%s (no billing/date column in CSV, no period token in path)",
         blob_path,
     )
     return None

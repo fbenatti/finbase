@@ -367,7 +367,13 @@ def _apply_destination_suggestions(dest: DestinationTable, metadata: dict[str, A
     available = {c["name"].lower(): c["name"] for c in metadata.get("columns", [])}
     # ServiceName is the FOCUS service grain used by Azure (consumedService) and GCP (service.description).
     # Do not suggest ResourceName/PricingCategory by default: GCP instance/SKU values explode the series.
-    focus_order = ("cloud_origem", "departamento", "servicename", "subaccountname")
+    focus_order = (
+        "cloud_origem",
+        "marketplaceproductname",
+        "marketplacebillingmodel",
+        "servicename",
+        "subaccountname",
+    )
     metadata["recommended_dimensions"] = [available[name] for name in focus_order if name in available]
     metadata["suggestion_profile"] = "FOCUS"
     if "chargeperiodend" in available:

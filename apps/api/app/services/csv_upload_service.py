@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 from app.models.ingested_blob import IngestedBlob
 from app.models.source_connection import SourceConnection
 from app.services import iceberg_service as iceberg
-from app.services.azure_extractor import AzureExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,23 @@ _DATE_END_COLUMNS = (
     "ChargePeriodEnd",
     "BillingPeriodEnd",
 )
+
+_PERIOD_LITERAL_COLUMNS = (
+    "BillingPeriod",
+    "billing_period",
+    "_billing_period",
+)
+
+_DATE_PERIOD_COLUMNS = _DATE_START_COLUMNS + (
+    "date",
+    "billingPeriodStartDate",
+    "servicePeriodStartDate",
+    "servicePeriodStart",
+    "BillingPeriodStart",
+)
+
+_PATH_DATE_RANGE_RE = re.compile(r"(\d{8})-(\d{8})")
+_PATH_PERIOD_RE = re.compile(r"[_-](\d{6})(?:\.csv)?$")
 
 _CURRENT_MONTH_MONTHLY_WARNING = (
     "Este CSV tem granularidade mensal (fatura) para o mês corrente. "
@@ -427,19 +443,119 @@ def _sanitize_filename(name: str) -> str:
     return safe or "upload"
 
 
-def _derive_billing_period(filename: str, df: pd.DataFrame) -> str:
-    """Derive YYYYMM from filename or DataFrame columns."""
-    m = re.search(r"(\d{6})", filename)
-    if m:
-        return m.group(1)
-    for col in ["BillingPeriod", "BillingCurrency", "Date", "billing_period"]:
-        if col in df.columns and not df[col].dropna().empty:
-            val = str(df[col].dropna().iloc[0])
-            if col in {"Date", "billing_period"}:
-                return val[:7].replace("-", "")
-            return val[:6]
+def _is_valid_yyyymm(value: str) -> bool:
+    if not re.fullmatch(r"\d{6}", value):
+        return False
+    return 1 <= int(value[4:6]) <= 12
+
+
+def _normalize_to_yyyymm(value: str) -> str | None:
+    """Parse a scalar billing-period token into YYYYMM when possible."""
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "nat"}:
+        return None
+
+    if _is_valid_yyyymm(text):
+        return text
+
+    match = re.match(r"^(\d{4})[-/](\d{2})", text)
+    if match:
+        month = int(match.group(2))
+        if 1 <= month <= 12:
+            return f"{match.group(1)}{match.group(2)}"
+
+    match = re.match(r"^(\d{4})(\d{2})(\d{2})", text)
+    if match:
+        month = int(match.group(2))
+        if 1 <= month <= 12:
+            return f"{match.group(1)}{match.group(2)}"
+
+    parsed = pd.to_datetime(text, errors="coerce", utc=True)
+    if pd.notna(parsed):
+        return parsed.strftime("%Y%m")
+    return None
+
+
+def _mode_yyyymm_from_series(series: pd.Series) -> str | None:
+    parsed = _parse_date_series(series)
+    valid = parsed.dropna()
+    if valid.empty:
+        return None
+    periods = valid.dt.strftime("%Y%m")
+    mode = periods.mode()
+    if mode.empty:
+        return None
+    return str(mode.iloc[0])
+
+
+def derive_billing_period_from_df(df: pd.DataFrame) -> str | None:
+    """Derive YYYYMM from billing/date columns inside a CSV payload."""
+    if df.empty:
+        return None
+
+    for candidate in _PERIOD_LITERAL_COLUMNS:
+        col = _find_column(df, (candidate,))
+        if col is None:
+            continue
+        for value in df[col].dropna().head(20):
+            period = _normalize_to_yyyymm(str(value))
+            if period:
+                return period
+
+    for candidate in _DATE_PERIOD_COLUMNS:
+        col = _find_column(df, (candidate,))
+        if col is None:
+            continue
+        period = _mode_yyyymm_from_series(df[col])
+        if period:
+            return period
+
+    return None
+
+
+def _derive_billing_period_from_path(name: str) -> str | None:
+    """Fallback: derive YYYYMM from filename or blob path tokens."""
+    match = _PATH_DATE_RANGE_RE.search(name)
+    if match:
+        return match.group(1)[:6]
+
+    match = _PATH_PERIOD_RE.search(name)
+    if match:
+        return match.group(1)
+
+    match = re.search(r"(\d{6})", name)
+    if match:
+        candidate = match.group(1)
+        if _is_valid_yyyymm(candidate):
+            return candidate
+    return None
+
+
+def resolve_billing_period(
+    filename: str,
+    df: pd.DataFrame,
+    billing_period: str | None = None,
+) -> str:
+    """Resolve YYYYMM for Bronze ingestion.
+
+    Priority: billing/date columns in the CSV, explicit form value, filename token,
+    then current month.
+    """
+    derived = derive_billing_period_from_df(df)
+    if derived:
+        return derived
+    if billing_period and re.fullmatch(r"\d{6}", billing_period):
+        return billing_period
+    path_period = _derive_billing_period_from_path(filename)
+    if path_period:
+        return path_period
     now = datetime.now()
     return f"{now.year}{now.month:02d}"
+
+
+def _derive_billing_period(filename: str, df: pd.DataFrame) -> str:
+    """Derive YYYYMM from CSV content first, then filename."""
+    return resolve_billing_period(filename, df)
 
 
 def load_csv_to_bronze(
@@ -457,7 +573,7 @@ def load_csv_to_bronze(
         connection: the source_connection row (manual_csv connector).
         df: parsed DataFrame.
         filename: original uploaded filename.
-        billing_period: explicit YYYYMM; inferred from filename/data if omitted.
+        billing_period: optional YYYYMM fallback; CSV date columns take precedence.
         column_types: optional user-overridden types keyed by column name.
 
     Returns:
@@ -466,7 +582,7 @@ def load_csv_to_bronze(
     if df.empty:
         raise ValueError("CSV está vazio")
 
-    period = billing_period or _derive_billing_period(filename, df)
+    period = resolve_billing_period(filename, df, billing_period)
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError(f"Período de faturamento inválido: {period} (esperado YYYYMM)")
 
@@ -488,6 +604,7 @@ def load_csv_to_bronze(
             "Carregue apenas a fonte bruta."
         )
 
+    iceberg.delete_bronze_slice(connection.code, blob_path=blob_path, billing_period=period)
     rows = iceberg.write_bronze(
         connection_code=connection.code,
         df=df,

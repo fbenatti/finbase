@@ -8,7 +8,7 @@ legacy rows that predate the column.
 
 from __future__ import annotations
 
-_SUPPORTED_SCOPES = frozenset({"azure", "gcp", "ibm", "aws", "oci", "atlas"})
+_SUPPORTED_SCOPES = frozenset({"azure", "gcp", "ibm", "aws", "oci", "mongodb", "atlas"})
 
 
 def connection_cloud_scope(cloud_name: str | None) -> str | None:
@@ -33,7 +33,7 @@ def connection_cloud_scope(cloud_name: str | None) -> str | None:
     if name.startswith("oracle") or name.startswith("oci"):
         return "oci"
     if "atlas" in name or "mongodb" in name:
-        return "atlas"
+        return "mongodb"
     # Unknown provider: return the raw token so manual matching still works,
     # but never pretend it is one of the known slugs.
     return name.split("-", 1)[0] or name
@@ -46,6 +46,8 @@ def resolve_connection_scope(conn_cloud_scope: str | None, cloud_name: str | Non
     ``cloud_name`` so legacy rows participate in rule matching unchanged.
     """
     scope = (conn_cloud_scope or "").strip().lower() or None
+    if scope == "atlas":
+        scope = "mongodb"
     if scope:
         return scope
     return connection_cloud_scope(cloud_name)
@@ -65,5 +67,10 @@ def rule_matches_cloud(
     """
     if not rule_cloud_scope:
         return True
+    rscope = rule_cloud_scope.strip().lower()
+    if rscope == "atlas":
+        rscope = "mongodb"
     effective = resolve_connection_scope(connection_cloud_scope_value, connection_cloud_name)
-    return rule_cloud_scope == effective
+    if effective == "atlas":
+        effective = "mongodb"
+    return rscope == effective

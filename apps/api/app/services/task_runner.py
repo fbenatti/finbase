@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import select, or_, update as sa_update
 from sqlalchemy.orm import Session
@@ -26,7 +27,12 @@ from app.models.destination import DestinationTable, DestinationColumn, SourceDe
 from app.services.azure_extractor import AzureExtractor, derive_billing_period
 from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
 from app.services.oci_extractor import OciExtractor, derive_billing_period_oci
-from app.services.expression_engine import evaluate_expression, evaluate_conditional
+from app.services.mongodb_extractor import MongoAtlasExtractor
+from app.services.expression_engine import (
+    evaluate_expression,
+    evaluate_conditional,
+    build_scope_mask,
+)
 from app.services import iceberg_service as iceberg
 
 logger = logging.getLogger(__name__)
@@ -316,6 +322,20 @@ def _apply_mapping_sync(df: pd.DataFrame, mapping: EtlMapping) -> None:
                 pass
 
 
+def _resolve_scope_filter(
+    by_lower: dict[str, str],
+    scope_filter: dict | None,
+) -> dict | None:
+    if not scope_filter or not scope_filter.get("field"):
+        return None
+    field = str(scope_filter.get("field", ""))
+    resolved = by_lower.get(field.lower(), field)
+    return {
+        **scope_filter,
+        "field": resolved,
+    }
+
+
 def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_period: str) -> None:
     """Synchronous business-rule application."""
     if rule.valid_from and billing_period < rule.valid_from:
@@ -328,13 +348,18 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
     # changing the persisted schema.
     by_lower = {str(column).lower(): column for column in df.columns}
     target_column = by_lower.get(str(rule.target_column or "").lower(), rule.target_column)
+    cfg = rule.config_json or {}
+    scope_mask = build_scope_mask(
+        df,
+        _resolve_scope_filter(by_lower, cfg.get("scope_filter")),
+    )
 
     if rule.rule_type == "EXPRESSION" and rule.expression:
         expression = str(rule.expression)
         for logical, physical in sorted(by_lower.items(), key=lambda item: len(item[0]), reverse=True):
             import re
             expression = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(logical)}(?![A-Za-z0-9_])", str(physical), expression, flags=re.IGNORECASE)
-        evaluate_expression(df, expression, target_column)
+        evaluate_expression(df, expression, target_column, scope_mask=scope_mask)
     elif rule.rule_type == "CONDITIONAL" and rule.conditions:
         conditions = []
         for original in rule.conditions:
@@ -352,19 +377,20 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
                     then_value = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(logical)}(?![A-Za-z0-9_])", str(physical), then_value, flags=re.IGNORECASE)
                 condition["then_value"] = then_value
             conditions.append(condition)
-        evaluate_conditional(df, conditions)
+        evaluate_conditional(df, conditions, scope_mask=scope_mask)
     elif rule.rule_type in ("PTAX_BRL", "TAX_BASE", "TAX_MARKETPLACE", "MARKUP"):
-        cfg = rule.config_json or {}
         src = cfg.get("source_column", "")
         rate = float(cfg.get("rate", 1))
         if src in df.columns and rule.target_column:
             # "First match wins" — don't overwrite already-filled values
             if rule.target_column in df.columns:
                 unfilled = df[rule.target_column].isna() | (df[rule.target_column].astype(str).str.strip() == "")
+                unfilled = unfilled & scope_mask
                 result = pd.to_numeric(df[src], errors="coerce").fillna(0) * rate
                 df.loc[unfilled, rule.target_column] = result[unfilled]
             else:
-                df[rule.target_column] = pd.to_numeric(df[src], errors="coerce").fillna(0) * rate
+                result = pd.to_numeric(df[src], errors="coerce").fillna(0) * rate
+                df[target_column] = result.where(scope_mask, np.nan)
 
 
 def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[ClassificationRule], session: Session | None = None,
@@ -907,6 +933,136 @@ def _process_oci_blob_sync_worker(
             pass
 
 
+def _process_mongodb_invoice_sync(
+    session: Session,
+    extractor: MongoAtlasExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Busca os line items de uma invoice MongoDB Atlas e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+    invoice_id = blob_path
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=content_length or 0,
+            download_bytes=0,
+            phase=f"Download MongoDB Atlas: invoice {invoice_id}",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, content_length or 0)
+
+        df, billing_period, _invoice_fields = extractor.fetch_invoice(invoice_id)
+        raw_df_bronze = df.copy()
+        total_cents = content_length or 0
+
+        if df.empty:
+            logger.info("Invoice MongoDB Atlas %s sem line items (fatura zerada)", invoice_id)
+
+        _persist_download_blob(task_id, blob_path, "PARSING", total_cents, total_cents)
+    except Exception as e:
+        logger.error("Falha ao processar invoice MongoDB Atlas %s: %s", invoice_id, e)
+        errors.append(f"Failed to process MongoDB Atlas invoice {invoice_id}: {e}")
+        return 0, 0, 0, errors
+    finally:
+        if task_id:
+            _persist_download_blob(task_id, blob_path, "DOWNLOADED", content_length or 0, content_length or 0)
+            _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    if not billing_period:
+        return 0, 0, 0, [f"Could not derive billing_period for invoice {invoice_id}"]
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando invoice MongoDB Atlas ({len(df)} line items)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=billing_period,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=content_length or 0,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    # Iceberg Bronze
+    if not raw_df_bronze.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_cents, total_cents)
+        try:
+            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+        except Exception as exc:
+            logger.error("Bronze write failed for MongoDB Atlas (%s): %s", blob_path, exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze MongoDB Atlas ({billing_period}) concluída com {len(df)} linhas")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_cents, total_cents)
+    return len(df), 0, 0, []
+
+
+def _process_mongodb_invoice_sync_worker(
+    task_id: int,
+    item,
+    extractor: MongoAtlasExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_mongodb_invoice_sync(
+            session,
+            extractor,
+            item.blob_path,
+            item.blob_prefix,
+            item.last_modified,
+            item.content_length,
+            task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1,
+                download_bytes=0,
+                current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
 def _process_gcp_month_sync_worker(
     task_id: int,
     item,
@@ -1052,7 +1208,7 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci"):
+        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -1068,6 +1224,10 @@ def _run_etl_sync(
             extractor = OciExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_oci_blob_sync_worker
+        elif conn.connector_type == "mongodb_atlas":
+            extractor = MongoAtlasExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_mongodb_invoice_sync_worker
         else:
             extractor = GcpBigQueryExtractor(conn)
             scan_result = extractor._scan_sync(session)
@@ -1079,13 +1239,14 @@ def _run_etl_sync(
         if selected_blobs:
             selected_set = set(selected_blobs)
             to_process = [item for item in scan_items if item.blob_path in selected_set]
+        elif force_periods:
+            force_set = set(force_periods)
+            to_process = [
+                item for item in scan_items 
+                if (item.billing_period in force_set or any(p in (item.billing_period or "") for p in force_set))
+            ]
         else:
             to_process = [item for item in scan_items if item.status in ("NEW", "CHANGED")]
-
-        if force_periods:
-            force_set = set(force_periods)
-            extra = [item for item in scan_items if item.billing_period in force_set and item not in to_process]
-            to_process.extend(extra)
 
         result.total_blobs = len(to_process)
         result.processed_blobs = 0
@@ -1123,7 +1284,7 @@ def _run_etl_sync(
 
         # Para OCI e GCP BigQuery (cargas de meses consolidados), usar 1 worker por vez para evitar
         # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
-        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery") else 2
+        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas") else 2
 
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="blob-dl") as dl_executor:
             futures = {}

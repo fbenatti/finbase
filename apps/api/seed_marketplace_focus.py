@@ -1,5 +1,5 @@
 """
-Ensure Marketplace FOCUS columns and provider mappings (Azure/GCP).
+Ensure Marketplace FOCUS columns and provider mappings (OCI/Azure/GCP).
 
 Usage: cd apps/api && python seed_marketplace_focus.py
 """
@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 
 from app.database import SyncSession
 from app.models.destination import DestinationTable
@@ -45,6 +45,18 @@ GCP_MARKETPLACE_MAPPINGS: list[dict] = [
         },
     },
     {
+        "source_column": "usage",
+        "destination_column": "MarketplaceOfferUnit",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "invoice",
+            "when_path": "publisher_type",
+            "when_values": ["THIRD_PARTY_RESELLER"],
+            "then_type": "JSON_PATH",
+            "then_config": {"path": "unit"},
+        },
+    },
+    {
         "source_column": "invoice",
         "destination_column": "MarketplaceBillingModel",
         "transform_type": "CONDITIONAL",
@@ -60,11 +72,21 @@ GCP_MARKETPLACE_MAPPINGS: list[dict] = [
 
 AZURE_MARKETPLACE_MAPPINGS: list[dict] = [
     {
-        "source_column": "productName",
+        "source_column": "productname",
         "destination_column": "MarketplaceProductName",
         "transform_type": "CONDITIONAL",
         "transform_config": {
-            "when_column": "publishertype",
+            "when_column": "publisherType",
+            "when_values": ["Marketplace"],
+            "then_type": "RENAME",
+        },
+    },
+    {
+        "source_column": "unitofmeasure",
+        "destination_column": "MarketplaceOfferUnit",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "publisherType",
             "when_values": ["Marketplace"],
             "then_type": "RENAME",
         },
@@ -74,13 +96,78 @@ AZURE_MARKETPLACE_MAPPINGS: list[dict] = [
         "destination_column": "MarketplaceBillingModel",
         "transform_type": "CONDITIONAL",
         "transform_config": {
-            "when_column": "publishertype",
+            "when_column": "publisherType",
             "when_values": ["Marketplace"],
             "then_type": "VALUE_MAP",
             "then_config": {
                 "map": {"Recurring": "RECURRING", "UsageBased": "RECURRING"},
                 "default": "ONESHOT",
             },
+        },
+    },
+]
+
+OCI_MARKETPLACE_MAPPINGS: list[dict] = [
+    {
+        "source_column": "cost/productSku",
+        "destination_column": "MarketplaceProductName",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "product/service",
+            "when_values": ["MARKETPLACE"],
+            "then_type": "RENAME",
+        },
+    },
+    {
+        "source_column": "cost/billingUnitReadable",
+        "destination_column": "MarketplaceOfferUnit",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "product/service",
+            "when_values": ["MARKETPLACE"],
+            "then_type": "RENAME",
+        },
+    },
+    {
+        "source_column": "cost/billingUnitReadable",
+        "destination_column": "MarketplaceBillingModel",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "product/service",
+            "when_values": ["MARKETPLACE"],
+            "then_type": "VALUE_MAP",
+            "then_config": {"map": {"ONE PRIVATE OFFER": "ONESHOT"}, "default": "RECURRING"},
+        },
+    },
+    {
+        "source_column": "tags/orcl-marketplace.listing-id",
+        "destination_column": "MarketplaceProductName",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "tags/orcl-marketplace.listing-id",
+            "when_op": "not_empty",
+            "then_type": "RENAME",
+        },
+    },
+    {
+        "source_column": "cost/billingUnitReadable",
+        "destination_column": "MarketplaceOfferUnit",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "tags/orcl-marketplace.listing-id",
+            "when_op": "not_empty",
+            "then_type": "RENAME",
+        },
+    },
+    {
+        "source_column": "cost/billingUnitReadable",
+        "destination_column": "MarketplaceBillingModel",
+        "transform_type": "CONDITIONAL",
+        "transform_config": {
+            "when_column": "tags/orcl-marketplace.listing-id",
+            "when_op": "not_empty",
+            "then_type": "CONST",
+            "then_config": {"value": "USAGE"},
         },
     },
 ]
@@ -158,14 +245,20 @@ def _upsert_mapping(
     })
 
 
-def seed_gcp_marketplace_mappings(session) -> int:
+def _seed_mappings_for_connections(
+    session,
+    *,
+    connections: list,
+    mappings: list[dict],
+    base_priority: int,
+) -> int:
     inserted = 0
-    base_priority = 950
-    for conn_id, cloud_label in GCP_CONNECTIONS.items():
-        for offset, mapping in enumerate(GCP_MARKETPLACE_MAPPINGS):
+    for conn in connections:
+        cloud_label = conn.code or conn.name
+        for offset, mapping in enumerate(mappings):
             _upsert_mapping(
                 session,
-                conn_id=conn_id,
+                conn_id=conn.id,
                 cloud_label=cloud_label,
                 mapping=mapping,
                 priority=base_priority + offset,
@@ -174,23 +267,55 @@ def seed_gcp_marketplace_mappings(session) -> int:
     return inserted
 
 
+def seed_gcp_marketplace_mappings(session) -> int:
+    connections = [
+        session.get(SourceConnection, conn_id)
+        for conn_id in GCP_CONNECTIONS
+    ]
+    connections = [c for c in connections if c is not None]
+    return _seed_mappings_for_connections(
+        session,
+        connections=connections,
+        mappings=GCP_MARKETPLACE_MAPPINGS,
+        base_priority=950,
+    )
+
+
 def seed_azure_marketplace_mappings(session) -> int:
-    inserted = 0
     connections = session.execute(
         select(SourceConnection).where(SourceConnection.code.ilike("azure%"))
     ).scalars().all()
-    base_priority = 950
     for conn in connections:
-        for offset, mapping in enumerate(AZURE_MARKETPLACE_MAPPINGS):
-            _upsert_mapping(
-                session,
-                conn_id=conn.id,
-                cloud_label=conn.code,
-                mapping=mapping,
-                priority=base_priority + offset,
+        session.execute(text("""
+            DELETE FROM source_destination_mapping
+            WHERE source_connection_id = :cid
+              AND destination_table_id = :did
+              AND destination_column IN ('MarketplaceProductName', 'MarketplaceOfferUnit', 'MarketplaceBillingModel')
+              AND source_column IN ('productName', 'unitOfMeasure')
+        """), {"cid": conn.id, "did": DEST_TABLE_ID})
+    return _seed_mappings_for_connections(
+        session,
+        connections=connections,
+        mappings=AZURE_MARKETPLACE_MAPPINGS,
+        base_priority=950,
+    )
+
+
+def seed_oci_marketplace_mappings(session) -> int:
+    connections = session.execute(
+        select(SourceConnection).where(
+            or_(
+                SourceConnection.connector_type == "oci",
+                SourceConnection.code == "oci-prod",
             )
-            inserted += 1
-    return inserted
+        )
+    ).scalars().all()
+    return _seed_mappings_for_connections(
+        session,
+        connections=connections,
+        mappings=OCI_MARKETPLACE_MAPPINGS,
+        base_priority=950,
+    )
 
 
 def ensure_marketplace_focus(session=None) -> dict[str, int]:
@@ -201,13 +326,19 @@ def ensure_marketplace_focus(session=None) -> dict[str, int]:
             select(DestinationTable).where(DestinationTable.id == DEST_TABLE_ID)
         ).scalar_one_or_none()
         if not dest:
-            return {"columns": 0, "gcp_mappings": 0, "azure_mappings": 0}
+            return {"columns": 0, "gcp_mappings": 0, "azure_mappings": 0, "oci_mappings": 0}
         ensure_destination_columns(session)
         gcp = seed_gcp_marketplace_mappings(session)
         azure = seed_azure_marketplace_mappings(session)
+        oci = seed_oci_marketplace_mappings(session)
         if own_session:
             session.commit()
-        return {"columns": len(MARKETPLACE_COLUMNS), "gcp_mappings": gcp, "azure_mappings": azure}
+        return {
+            "columns": len(MARKETPLACE_COLUMNS),
+            "gcp_mappings": gcp,
+            "azure_mappings": azure,
+            "oci_mappings": oci,
+        }
     except Exception:
         if own_session:
             session.rollback()

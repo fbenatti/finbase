@@ -7,6 +7,9 @@ import {
   FormControlLabel, Switch, IconButton, Tabs, Tab, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
 import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility, History as HistoryIcon } from "@mui/icons-material";
+import OperationalHistoryDataGrid from "../../components/OperationalHistoryDataGrid";
+import { GridColDef } from "@mui/x-data-grid";
+import { DataGrid } from "@mui/x-data-grid";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
   resetSourceForReimport,
@@ -39,12 +42,15 @@ function formatFileSize(bytes: number): string {
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-export default function Extraction() {
+export default function Extraction({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") || "extraction";
+  const tabKey = embedded ? "extTab" : "tab";
+  const tab = params.get(tabKey) || "extraction";
   const setTab = (newTab: string) => {
-    setParams({ tab: newTab });
+    const next = new URLSearchParams(params);
+    next.set(tabKey, newTab);
+    setParams(next, { replace: true });
   };
 
   const [connections, setConnections] = useState<SourceConnection[]>([]);
@@ -95,7 +101,7 @@ export default function Extraction() {
   }, []);
 
   useEffect(() => {
-    if (tab === "history") {
+    if (tab === "history" || embedded) {
       void loadHistory();
     }
   }, [tab, loadHistory]);
@@ -454,17 +460,17 @@ export default function Extraction() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>Extração & Monitoramento</Typography>
+      {!embedded && <Typography variant="h4" sx={{ mb: 2 }}>Extração & Monitoramento</Typography>}
 
-      <Tabs value={tab} onChange={(_, val) => setTab(val)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
+      {!embedded && <Tabs value={tab} onChange={(_, val) => setTab(val)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
         <Tab label="Extração & Agendamentos" value="extraction" />
         <Tab label="Histórico de Execuções" value="history" icon={<HistoryIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
-      </Tabs>
+      </Tabs>}
 
-      {tab === "extraction" && (
+      {(tab === "extraction" || embedded) && (
         <>
           <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <FormControl sx={{ minWidth: 280 }}>
+            <FormControl size="small" sx={{ minWidth: 280 }}>
               <InputLabel>Conexao</InputLabel>
               <Select value={connId} label="Conexao" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
                 {extractableConnections.map((c) => (
@@ -738,6 +744,33 @@ export default function Extraction() {
               </Button>
             )}
           </Box>
+          <Box sx={{ height: 520, width: "100%", mb: 2 }}>
+            <TextField
+              size="small"
+              value={blobFilter}
+              onChange={event => setBlobFilter(event.target.value)}
+              placeholder="Buscar nos dados escaneados..."
+              sx={{ mb: 1, minWidth: 320 }}
+            />
+            <DataGrid
+              rows={filteredScanItems.map((item, index) => ({ ...item, id: item.blob_path || index }))}
+              columns={[
+                { field: "_check", headerName: "", width: 52, sortable: false, filterable: false, renderHeader: () => { const allSelected = filteredEligibleItems.length > 0 && filteredEligibleItems.every(item => selectedPaths.has(item.blob_path)); const someSelected = filteredEligibleItems.some(item => selectedPaths.has(item.blob_path)); return <Tooltip title={allSelected ? "Desmarcar itens filtrados" : "Selecionar todos os itens filtrados"}><Checkbox size="small" checked={allSelected} indeterminate={!allSelected && someSelected} disabled={isActive || filteredEligibleItems.length === 0} onClick={event => event.stopPropagation()} onChange={toggleAll} /></Tooltip>; }, renderCell: ({ row }) => <Checkbox size="small" checked={selectedPaths.has(row.blob_path)} disabled={isActive || row.status === "SKIPPED" || skippedPaths.has(row.blob_path)} onClick={e => e.stopPropagation()} onChange={() => toggleSelect(row.blob_path)} /> },
+                { field: "status", headerName: "Status", width: 120, renderCell: ({ value }) => <Chip size="small" label={value} color={STATUS_COLORS[String(value)] || "default"} /> },
+                { field: "blob_path", headerName: "Blob", minWidth: 300, flex: 1 },
+                { field: "billing_period", headerName: "Período", width: 120 },
+                { field: "last_modified", headerName: "Modificado", width: 150, type: "dateTime", valueGetter: (_, row) => row.last_modified ? new Date(String(row.last_modified)) : null },
+                { field: "content_length", headerName: "Linhas / tamanho", width: 150, valueGetter: (_, row) => row.row_count != null ? Number(row.row_count).toLocaleString() : formatFileSize(Number(row.content_length || 0)) },
+                { field: "_skip", headerName: "Ações", width: 90, sortable: false, filterable: false, renderCell: ({ row }) => <Tooltip title={skippedPaths.has(row.blob_path) ? "Desfazer ACK" : "Ignorar blob"}><IconButton size="small" color={skippedPaths.has(row.blob_path) ? "success" : "warning"} disabled={isActive || skippingPaths.has(row.blob_path)} onClick={event => { event.stopPropagation(); const entry = skippedBlobs.find(item => item.blob_path === row.blob_path); if (entry) void doUnskipBlob(entry.id, row.blob_path); else void doSkipBlob(row.blob_path); }}>{skippedPaths.has(row.blob_path) ? <Undo fontSize="small" /> : <Block fontSize="small" />}</IconButton></Tooltip> },
+              ] as GridColDef[]}
+              loading={scanning}
+              disableRowSelectionOnClick
+              pageSizeOptions={[100, 250, 500]}
+              initialState={{ pagination: { paginationModel: { pageSize: 100, page: 0 } } }}
+              sx={{ border: 1, borderColor: "divider", borderRadius: 2, bgcolor: "background.paper", "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc" } }}
+            />
+          </Box>
+          <Box sx={{ display: "none" }}>
           <SortableTable
             data={filteredScanItems}
             searchValue={blobFilter}
@@ -861,6 +894,7 @@ export default function Extraction() {
               },
             ]}
           />
+          </Box>
         </Box>
       )}
 
@@ -1139,7 +1173,7 @@ export default function Extraction() {
         </>
       )}
 
-      {tab === "history" && (
+      {(tab === "history" || embedded) && (
         <Box>
           <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
             <Box>
@@ -1166,6 +1200,16 @@ export default function Extraction() {
           ) : historyList.length === 0 ? (
             <EmptyState message="Nenhuma execução de extração registrada até o momento." />
           ) : (
+            <>
+            <OperationalHistoryDataGrid rows={historyList as unknown as Record<string, unknown>[]} columns={[
+              { field: "id", headerName: "ID", width: 80 },
+              { field: "status", headerName: "Status", width: 150, renderCell: ({ value }) => <Chip label={value} size="small" color={STATUS_COLORS[String(value)] || "default"} /> },
+              { field: "connection_name", headerName: "Conexão", flex: 1, minWidth: 180 },
+              { field: "processed_blobs", headerName: "Blobs", width: 120 }, { field: "rows_raw", headerName: "Linhas raw", width: 130 },
+              { field: "started_at", headerName: "Início", type: "dateTime", minWidth: 170, valueGetter: (_, row) => row.started_at ? new Date(String(row.started_at)) : null },
+              { field: "actions", headerName: "Ações", width: 90, sortable: false, filterable: false, renderCell: ({ row }) => <Tooltip title="Abrir dados"><IconButton onClick={() => navigate(`/extraction/history/${row.id}`)}><Visibility fontSize="small" /></IconButton></Tooltip> },
+            ] as GridColDef[]} />
+            <Box sx={{ display: "none" }}>
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
               <Table size="small">
                 <TableHead sx={{ bgcolor: "grey.100" }}>
@@ -1234,10 +1278,11 @@ export default function Extraction() {
                 </TableBody>
               </Table>
             </TableContainer>
+            </Box>
+            </>
           )}
         </Box>
       )}
     </Box>
   );
 }
-

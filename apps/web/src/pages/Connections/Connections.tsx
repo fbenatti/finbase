@@ -1,17 +1,18 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Box, Typography, Button, Card, CardContent, CardActions, IconButton,
+  Box, Typography, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Select, MenuItem, FormControl, InputLabel, Chip, Alert, CircularProgress,
+  Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
+  FormControlLabel, Checkbox, Tab, Tabs, Paper, InputAdornment, Stack, Snackbar,
 } from "@mui/material";
-import { Add, Edit, Delete, Visibility, Cable, CloudUpload } from "@mui/icons-material";
+import { Add, Search, Cloud, CloudUpload, Dataset, Download, Storage } from "@mui/icons-material";
 import {
   getConnections, createConnection, updateConnection,
-  deleteConnection, testConnection, SourceConnection,
+  deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import ManualCsvUploadDialog from "./ManualCsvUploadDialog";
+import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
 
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
@@ -20,6 +21,23 @@ const CONNECTOR_TYPES = [
   { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
   { value: "manual_csv", label: "Upload manual de CSV", scope: "" },
 ];
+
+const CONNECTOR_PICKER_OPTIONS = [
+  { value: "azure_blob", label: "Azure", description: "Blob Storage", icon: <Cloud />, color: "#0078D4" },
+  { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, color: "#4285F4" },
+  { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, color: "#F80000" },
+  { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, color: "#13AA52" },
+  { value: "manual_csv", label: "Upload manual", description: "Arquivo CSV", icon: <CloudUpload />, color: "#0A8FDC" },
+];
+
+const PROVIDER_LOGOS: Record<string, string> = {
+  azure: "/provider-logos/azure.svg",
+  gcp: "/provider-logos/gcp.svg",
+  ibm: "/provider-logos/ibm.svg",
+  aws: "/provider-logos/aws.svg",
+  oci: "/provider-logos/oci.svg",
+  atlas: "/provider-logos/mongodb.svg",
+};
 
 const CLOUD_SCOPES = [
   { value: "azure", label: "Azure" },
@@ -36,26 +54,38 @@ const emptyForm = {
   tenant_id: "", client_id: "", client_secret: "",
   storage_account: "", container_name: "", blob_prefixes: "",
   gcp_token: "", table_name: "",
-  mongo_group_id: "", mongo_contract_type: "",
+  mongo_group_id: "", mongo_contract_type: "", marketplace: false,
   oci_region: "sa-saopaulo-1", oci_fingerprint: "", oci_private_key: "",
 };
 
 export default function Connections() {
-  const navigate = useNavigate();
   const [connections, setConnections] = useState<SourceConnection[]>([]);
+  const [connectionCatalog, setConnectionCatalog] = useState<SourceConnection[]>([]);
+  const [gridTotal, setGridTotal] = useState(0);
+  const [gridLoading, setGridLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [testMsgs, setTestMsgs] = useState<Record<number, { ok: boolean; severity: "success" | "warning" | "error"; msg: string }>>({});
+  const [testMsgs, setTestMsgs] = useState<Record<number, ConnectionTestMessage>>({});
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [activeProvider, setActiveProvider] = useState("all");
+  const [search, setSearch] = useState("");
+  const initializedProviderTab = useRef(false);
+  const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
+  const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SourceConnection | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
+  const [testingForm, setTestingForm] = useState(false);
+  const [formTestMessage, setFormTestMessage] = useState<{ severity: "success" | "warning" | "error"; msg: string } | null>(null);
+  const [connectionPendingDeletion, setConnectionPendingDeletion] = useState<SourceConnection | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFeedback, setDeleteFeedback] = useState("");
 
   const load = async () => {
     try {
       setLoading(true);
-      setConnections(await getConnections());
+      setConnectionCatalog(await getConnections());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -65,14 +95,64 @@ export default function Connections() {
 
   useEffect(() => { load(); }, []);
 
-  const openNew = () => {
+  const providerTabs = useMemo(() => Array.from(new Set(
+    connectionCatalog
+      .filter((connection) => Boolean(connection.cloud_scope))
+      .map((connection) => connection.cloud_scope as string),
+  )).sort((left, right) => getProviderLabel(left).localeCompare(getProviderLabel(right), "pt-BR")), [connectionCatalog]);
+
+  useEffect(() => {
+    if (!providerTabs.length) return;
+    if (!initializedProviderTab.current) {
+      initializedProviderTab.current = true;
+      setActiveProvider(providerTabs[0]);
+      return;
+    }
+    if (activeProvider !== "all" && !providerTabs.includes(activeProvider)) setActiveProvider(providerTabs[0]);
+  }, [activeProvider, providerTabs]);
+
+  const loadGrid = async (query = gridQuery.current) => {
+    try {
+      setGridLoading(true);
+      const data = await getConnectionsGrid({
+        limit: query.limit,
+        offset: query.offset,
+        search: search || undefined,
+        provider: activeProvider === "all" ? undefined : activeProvider,
+        sort_field: query.sort?.field,
+        sort_direction: query.sort?.direction,
+        filters: query.filters,
+      });
+      setConnections(data.items);
+      setGridTotal(data.total);
+    } catch (gridError: unknown) {
+      setError(gridError instanceof Error ? gridError.message : "Falha ao carregar conexões");
+    } finally {
+      setGridLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    gridQuery.current = { offset: 0, limit: gridQuery.current.limit, filters: [] };
+    void loadGrid(gridQuery.current);
+  }, [activeProvider, search]);
+
+  const openNew = (connectorType = "azure_blob") => {
     setEditing(null);
-    setForm({ ...emptyForm, connector_type: "azure_blob", cloud_scope: "azure" });
+    setFormTestMessage(null);
+    const scope = CONNECTOR_TYPES.find((type) => type.value === connectorType)?.scope || "";
+    setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: scope });
     setDialogOpen(true);
+  };
+
+  const chooseConnector = (connectorType: string) => {
+    setConnectorPickerOpen(false);
+    openNew(connectorType);
   };
 
   const openEdit = (conn: SourceConnection) => {
     setEditing(conn);
+    setFormTestMessage(null);
     const cfg = conn.config_json as Record<string, string>;
     if (conn.connector_type === "azure_blob") {
       setForm({
@@ -126,6 +206,7 @@ export default function Connections() {
         client_secret: cfg.private_key || "",
         mongo_group_id: cfg.group_id || "",
         mongo_contract_type: cfg.contract_type || "",
+        marketplace: conn.config_json?.marketplace === true,
       });
     } else {
       setForm({
@@ -139,8 +220,8 @@ export default function Connections() {
     setDialogOpen(true);
   };
 
-  const save = async () => {
-    const configJson: Record<string, string> = {};
+  const buildConnectionBody = () => {
+    const configJson: Record<string, unknown> = {};
     if (form.connector_type === "azure_blob") {
       if (form.tenant_id) configJson.tenant_id = form.tenant_id;
       if (form.client_id) configJson.client_id = form.client_id;
@@ -164,210 +245,254 @@ export default function Connections() {
       if (form.client_secret) configJson.private_key = form.client_secret;
       if (form.mongo_group_id) configJson.group_id = form.mongo_group_id;
       if (form.mongo_contract_type) configJson.contract_type = form.mongo_contract_type;
+      if (form.marketplace) configJson.marketplace = true;
     }
 
-    const prefixes = form.blob_prefixes.split("\n").map((s) => s.trim()).filter(Boolean);
-
-    const body = {
-      code: form.code, name: form.name,
+    return {
+      code: form.code,
+      name: form.name,
       connector_type: form.connector_type,
       cloud_name: form.cloud_name || null,
       cloud_scope: form.cloud_scope === "other" ? null : (form.cloud_scope || null),
       config_json: configJson,
-      blob_prefixes: prefixes,
+      blob_prefixes: form.blob_prefixes.split("\n").map((value) => value.trim()).filter(Boolean),
     };
+  };
 
+  const save = async () => {
     try {
+      const body = buildConnectionBody();
       if (editing) await updateConnection(editing.id, body);
-      else await createConnection(body as any);
+      else await createConnection(body);
       setDialogOpen(false);
-      load();
+      void load();
+      void loadGrid();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save");
     }
   };
 
-  const remove = async (id: number) => {
-    if (!confirm("Delete this connection?")) return;
-    try { await deleteConnection(id); load(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+  const testFormConnection = async () => {
+    setTestingForm(true);
+    setFormTestMessage(null);
+    try {
+      const result = await testConnectionConfig(buildConnectionBody());
+      const isOk = result.status === "OK";
+      const isPending = result.status === "PENDING";
+      setFormTestMessage({
+        severity: isOk ? "success" : isPending ? "warning" : "error",
+        msg: isOk ? "Conexão validada: " + result.message : isPending ? "Aguardando configuração: " + result.message : "Falha ao testar: " + result.message,
+      });
+    } catch (testError: unknown) {
+      const message = testError instanceof Error ? testError.message : "Não foi possível testar a conexão";
+      setFormTestMessage({ severity: "error", msg: "Falha ao testar: " + message });
+    } finally {
+      setTestingForm(false);
     }
   };
 
-  const maskSecret = (s: string) => s ? s.slice(0, 10) + "..." : "";
+  const remove = async () => {
+    if (!connectionPendingDeletion) return;
+    try {
+      setDeleting(true);
+      await deleteConnection(connectionPendingDeletion.id);
+      setConnectionPendingDeletion(null);
+      setDeleteFeedback(`Conexão “${connectionPendingDeletion.name}” excluída com sucesso.`);
+      await load();
+      await loadGrid();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const runTest = async (connection: SourceConnection) => {
+    setTestingId(connection.id);
+    try {
+      const result = await testConnection(connection.id);
+      const isOk = result.status === "OK";
+      const isPending = result.status === "PENDING";
+      setTestMsgs((previous) => ({
+        ...previous,
+        [connection.id]: {
+          severity: isOk ? "success" : isPending ? "warning" : "error",
+          msg: isOk ? `OK: ${result.message}` : isPending ? `Aguardando: ${result.message}` : `Erro: ${result.message}`,
+        },
+      }));
+      setConnections((previous) => previous.map((item) => item.id === connection.id ? {
+        ...item,
+        last_test_status: result.status,
+        last_test_message: result.message,
+        last_tested_at: new Date().toISOString(),
+      } : item));
+    } catch (testError: unknown) {
+      const message = testError instanceof Error ? testError.message : "Não foi possível testar a conexão";
+      setTestMsgs((previous) => ({ ...previous, [connection.id]: { severity: "error", msg: `Erro: ${message}` } }));
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const exportConnections = () => {
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const csv = [
+      ["Conexão", "Código", "Provedor", "Tipo", "Atualizado em", "Último teste"],
+      ...connections.map((connection) => [
+        connection.name,
+        connection.code,
+        getProviderLabel(connection.cloud_scope),
+        connection.connector_type,
+        connection.updated_at,
+        connection.last_test_status || "",
+      ]),
+    ].map((row) => row.map(escape).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "conexoes.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const activeProviderLogo = activeProvider === "all" ? null : PROVIDER_LOGOS[activeProvider];
 
   if (loading) return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-        <Typography variant="h4">Conexoes</Typography>
-        <Button variant="contained" startIcon={<Add />} onClick={openNew}>
-          Nova Conexao
-        </Button>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ mb: 2 }}>
+        <Box>
+          <Typography variant="h4">Credenciais</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+            Integre as fontes que alimentam os dados de custo da plataforma.
+          </Typography>
+        </Box>
+        </Box>
+
+        <Tabs
+          value={activeProvider}
+          onChange={(_, value: string) => setActiveProvider(value)}
+          aria-label="Filtrar conexões por provedor"
+          sx={{ mb: 0, minHeight: 42 }}
+        >
+          {providerTabs.map((provider) => (
+            <Tab
+              key={provider}
+              value={provider}
+              label={`${getProviderLabel(provider)} (${connectionCatalog.filter((connection) => connection.cloud_scope === provider).length})`}
+              sx={{ minHeight: 42 }}
+            />
+          ))}
+          <Tab value="all" label={`Todas (${connectionCatalog.length})`} sx={{ minHeight: 42 }} />
+        </Tabs>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      <Box sx={{ p: 3 }}>
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
 
-      {!loading && connections.length === 0 && (
-        <EmptyState message="Nenhuma conexao cadastrada. Clique em 'Nova Conexao' para comecar." />
-      )}
-
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 2 }}>
-        {connections.map((conn) => {
-          const cfg = conn.config_json as Record<string, string>;
-          return (
-            <Card key={conn.id}>
-              <CardContent sx={{ pb: 1 }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600 }}>{conn.name}</Typography>
-                  <Chip label={conn.connector_type} size="small" color="primary" variant="outlined" />
-                </Box>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Code: {conn.code}{conn.cloud_name ? ` | Cloud: ${conn.cloud_name}` : ""}
-                </Typography>
-
-                {conn.connector_type === "azure_blob" && (
-                  <Box sx={{ mt: 1, p: 1.5, bgcolor: "grey.50", borderRadius: 1, fontSize: "0.8rem" }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Storage:</Typography>
-                      <Typography variant="caption">{cfg.storage_account || "-"}</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Container:</Typography>
-                      <Typography variant="caption">{cfg.container_name || "-"}</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Tenant:</Typography>
-                      <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{cfg.tenant_id?.slice(0, 16) || "-"}...</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                      <Typography variant="caption" color="text.secondary">Secret:</Typography>
-                      <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{maskSecret(cfg.client_secret)}</Typography>
-                    </Box>
-                  </Box>
-                )}
-
-                {conn.connector_type === "gcp_bigquery" && (
-                  <Box sx={{ mt: 1, p: 1.5, bgcolor: "grey.50", borderRadius: 1, fontSize: "0.8rem" }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Project:</Typography>
-                      <Typography variant="caption">{cfg.project_id || "-"}</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Dataset:</Typography>
-                      <Typography variant="caption">{cfg.dataset_id || "-"}</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                      <Typography variant="caption" color="text.secondary">Token:</Typography>
-                      <Typography variant="caption">{(cfg.token_json || cfg.token_path || "").slice(0, 30)}...</Typography>
-                    </Box>
-                  </Box>
-                )}
-
-                {conn.connector_type === "oci" && (
-                  <Box sx={{ mt: 1, p: 1.5, bgcolor: "grey.50", borderRadius: 1, fontSize: "0.8rem" }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Tenancy:</Typography>
-                      <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{(cfg.tenancy_ocid || cfg.tenancy || "").slice(0, 18)}...</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Region:</Typography>
-                      <Typography variant="caption">{cfg.region || "sa-saopaulo-1"}</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Fingerprint:</Typography>
-                      <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{cfg.fingerprint ? `${cfg.fingerprint.slice(0, 14)}...` : "-"}</Typography>
-                    </Box>
-                    <Box sx={{ mt: 1, pt: 0.5, borderTop: "1px dashed #ccc" }}>
-                      <Typography variant="caption" sx={{ color: "info.main", fontSize: "0.7rem", display: "block" }}>
-                        ℹ️ Dados agregados e consolidados por dia e recurso (granularidade horária condensada para otimização FinOps).
-                      </Typography>
-                    </Box>
-                  </Box>
-                )}
-
-                {conn.connector_type === "mongodb_atlas" && (
-                  <Box sx={{ mt: 1, p: 1.5, bgcolor: "grey.50", borderRadius: 1, fontSize: "0.8rem" }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">Contract:</Typography>
-                      <Typography variant="caption">{cfg.contract_type || "-"}</Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                      <Typography variant="caption" color="text.secondary">Group:</Typography>
-                      <Typography variant="caption">{cfg.group_id || "-"}</Typography>
-                    </Box>
-                  </Box>
-                )}
-
-                <Box sx={{ mt: 1 }}>
-                  {(conn.blob_prefixes || []).slice(0, 3).map((p) => (
-                    <Chip key={p} label={p} size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-                  ))}
-                </Box>
-              </CardContent>
-              <CardActions>
-                <IconButton onClick={() => navigate(`/explorer/${conn.id}`)} title="Explorer">
-                  <Visibility />
-                </IconButton>
-                <IconButton onClick={() => openEdit(conn)} title="Editar credenciais">
-                  <Edit />
-                </IconButton>
-                {conn.connector_type === "manual_csv" ? (
-                  <IconButton onClick={() => setUploadConn(conn)} title="Upload CSV" color="primary">
-                    <CloudUpload />
-                  </IconButton>
-                ) : (
-                  <IconButton
-                    onClick={async () => {
-                      setTestingId(conn.id);
-                      setTestMsgs(prev => ({ ...prev, [conn.id]: { ok: false, severity: "error" as const, msg: "" } }));
-                      try {
-                        const r = await testConnection(conn.id);
-                        const isOk = r.status === "OK";
-                        const isPending = r.status === "PENDING";
-                        setTestMsgs(prev => ({
-                          ...prev,
-                          [conn.id]: {
-                            ok: isOk || isPending,
-                            severity: isOk ? "success" : isPending ? "warning" : "error",
-                            msg: isOk ? `OK: ${r.message}` : isPending ? `Aguardando: ${r.message}` : `Erro: ${r.message}`,
-                          },
-                        }));
-                      } catch (e: any) {
-                        setTestMsgs(prev => ({ ...prev, [conn.id]: { ok: false, severity: "error", msg: `Erro: ${e.message}` } }));
-                      }
-                      setTestingId(null);
-                    }}
-                    disabled={testingId === conn.id}
-                    title="Testar Conexao"
-                  >
-                    <Cable color={testingId === conn.id ? "disabled" : "action"} />
-                  </IconButton>
-                )}
-                <IconButton onClick={() => remove(conn.id)} color="error" title="Remover">
-                  <Delete />
-                </IconButton>
-              </CardActions>
-              {testMsgs[conn.id] && (
-                <Alert
-                  severity={testMsgs[conn.id].severity}
-                  sx={{ mx: 1, mb: 1 }}
-                  onClose={() => setTestMsgs(prev => {
-                    const next = { ...prev };
-                    delete next[conn.id];
-                    return next;
-                  })}
-                >{testMsgs[conn.id].msg}</Alert>
+        <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, minHeight: 52, mb: 2 }}>
+            <Stack direction="row" alignItems="center">
+              {activeProviderLogo && (
+                <Box component="img" src={activeProviderLogo} alt={getProviderLabel(activeProvider)} sx={{ width: 42, height: 42, mr: 1.25, objectFit: "contain" }} />
               )}
-            </Card>
-          );
-        })}
+              <Box>
+                <Typography variant="h6">
+                  {activeProvider === "all" ? "Todas as fontes" : getProviderLabel(activeProvider)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {activeProvider === "all" ? "Conexões configuradas para ingestão de dados." : "Conexões configuradas para este provedor."}
+                </Typography>
+              </Box>
+            </Stack>
+            <Stack direction="row" spacing={1} flexShrink={0}>
+              <Button variant="outlined" size="small" startIcon={<Download />} onClick={exportConnections} disabled={connections.length === 0}>
+                Exportar
+              </Button>
+              <Button variant="contained" size="small" startIcon={<Add />} onClick={() => setConnectorPickerOpen(true)} sx={{ px: 2 }}>
+                Credenciais
+              </Button>
+            </Stack>
+          </Box>
+        <TextField
+          fullWidth
+          size="small"
+          label="Buscar fontes de dados"
+          placeholder="Nome, código, provedor ou origem"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> } }}
+          sx={{ mb: 2, maxWidth: 520 }}
+        />
+        {!gridLoading && connections.length === 0 ? (
+          <Box sx={{ py: 7 }}>
+            <EmptyState message={search ? "Nenhuma fonte corresponde à busca." : "Nenhuma conexão cadastrada neste provedor."} />
+          </Box>
+        ) : (
+          <ConnectionsDataGrid
+            connections={connections}
+            total={gridTotal}
+            loading={gridLoading}
+            testingId={testingId}
+            testMessages={testMsgs}
+            onEdit={openEdit}
+            onUpload={setUploadConn}
+            onTest={(connection) => void runTest(connection)}
+            onDelete={setConnectionPendingDeletion}
+            onQuery={(query) => {
+              gridQuery.current = { ...gridQuery.current, ...query };
+              void loadGrid(gridQuery.current);
+            }}
+          />
+        )}
+        </Paper>
       </Box>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={connectorPickerOpen} onClose={() => setConnectorPickerOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pb: 0 }}>Adicionar fonte de dados</DialogTitle>
+        <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Selecione o provedor ou formato de origem para configurar uma nova conexão.
+          </Typography>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>Fontes de entrada</Typography>
+          <Stack direction="row" gap={1.5} flexWrap="wrap">
+            {CONNECTOR_PICKER_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                variant="outlined"
+                color="inherit"
+                onClick={() => chooseConnector(option.value)}
+                sx={{
+                  width: 156,
+                  height: 148,
+                  flexDirection: "column",
+                  gap: 1,
+                  borderColor: "divider",
+                  color: "text.primary",
+                  "&:hover": { borderColor: "primary.main", bgcolor: "rgba(10, 143, 220, 0.06)" },
+                }}
+              >
+                <Box sx={{ color: option.color, display: "flex", fontSize: 38 }}>{option.icon}</Box>
+                <Typography fontWeight={700}>{option.label}</Typography>
+                <Typography variant="caption" color="text.secondary">{option.description}</Typography>
+              </Button>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setConnectorPickerOpen(false)}>Cancelar</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{editing ? "Editar Conexao" : "Nova Conexao"}</DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{
+          "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
+          "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
+        }}>
+          {formTestMessage && <Alert severity={formTestMessage.severity} sx={{ mb: 2 }}>{formTestMessage.msg}</Alert>}
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
             <FormControl fullWidth>
               <InputLabel>Connector Type</InputLabel>
@@ -477,15 +602,46 @@ export default function Connections() {
                 <TextField label="Contract Type" value={form.mongo_contract_type}
                   onChange={(e) => setForm({ ...form, mongo_contract_type: e.target.value })}
                   helperText="pro ou enterprise" />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={form.marketplace}
+                      onChange={(e) => setForm({ ...form, marketplace: e.target.checked })}
+                    />
+                  }
+                  label="Marketplace"
+                />
               </>
             )}
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={save} variant="contained">Salvar</Button>
+          <Button onClick={() => void testFormConnection()} disabled={testingForm}>
+            {testingForm ? "Testando…" : "Testar conexão"}
+          </Button>
+          <Button onClick={() => void save()} variant="contained" disabled={testingForm}>Salvar</Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog open={Boolean(connectionPendingDeletion)} onClose={() => !deleting && setConnectionPendingDeletion(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Excluir conexão?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Você está prestes a excluir a conexão <strong>{connectionPendingDeletion?.name}</strong>. Esta ação não pode ser desfeita.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button disabled={deleting} onClick={() => setConnectionPendingDeletion(null)}>Cancelar</Button>
+          <Button variant="contained" color="error" disabled={deleting} onClick={() => void remove()}>
+            {deleting ? "Excluindo…" : "Excluir conexão"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar open={Boolean(deleteFeedback)} autoHideDuration={5000} onClose={() => setDeleteFeedback("")} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}>
+        <Alert severity="success" variant="filled" onClose={() => setDeleteFeedback("")}>{deleteFeedback}</Alert>
+      </Snackbar>
 
       {uploadConn && (
         <ManualCsvUploadDialog

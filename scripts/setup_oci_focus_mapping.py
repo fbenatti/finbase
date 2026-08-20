@@ -135,6 +135,17 @@ def setup_oci_focus_mapping():
                 "when_op": "not_empty",
                 "then_type": "RENAME",
             }),
+            ("cost/billingUnitReadable", "MarketplaceOfferUnit", "CONDITIONAL", {
+                "when_column": "tags/orcl-marketplace.listing-id",
+                "when_op": "not_empty",
+                "then_type": "RENAME",
+            }),
+            ("cost/billingUnitReadable", "MarketplaceBillingModel", "CONDITIONAL", {
+                "when_column": "tags/orcl-marketplace.listing-id",
+                "when_op": "not_empty",
+                "then_type": "CONST",
+                "then_config": {"value": "USAGE"},
+            }),
 
             # ── Moeda ──
             ("cost/currencyCode", "BillingCurrency", "RENAME", None),

@@ -75,7 +75,7 @@ services:
       retries: 5
 
   trino:
-    image: trinodb/trino:latest
+    image: trinodb/trino:483
     # Trino is required by dashboards, pivots and forecasts.  It must start
     # with the default stack and recover automatically after a Docker restart.
     restart: unless-stopped

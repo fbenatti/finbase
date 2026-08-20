@@ -139,7 +139,7 @@ def main():
             task = session.execute(
                 select(EtlTask).where(
                     EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast"]),
+                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "shared_cost"]),
                 )
                 .order_by(EtlTask.id)
                 .limit(1)
@@ -221,6 +221,18 @@ def main():
                             task_row.phase = "Forecast publicado"
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit()
+                        try:
+                            from app.services.shared_cost import run_shared_cost_job_sync
+                            rateio = run_shared_cost_job_sync(s, allow_empty=True)
+                            if task_row:
+                                task_row.phase = (
+                                    f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
+                                )
+                                s.commit()
+                        except Exception as rateio_exc:
+                            if task_row:
+                                task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
+                                s.commit()
                         s.close()
                     except Exception as exc:
                         import traceback
@@ -346,6 +358,45 @@ def main():
                             s2.close()
 
                         _inmemory_tasks.pop(task_id, None)
+
+                elif task.task_type == "shared_cost":
+                    task.status = "RUNNING"
+                    task.phase = "Agregando Gold e forecast e gravando linhas de rateio"
+                    session.commit()
+                    session.close()
+                    try:
+                        from app.services.shared_cost import run_shared_cost_job_sync
+                        s = SyncSession()
+                        result = run_shared_cost_job_sync(s)
+                        snapshot = result["snapshot"]
+                        row = s.get(EtlTask, task_id)
+                        if row:
+                            payload = dict(row.result_json or {})
+                            payload["snapshot"] = snapshot
+                            payload["planning_table"] = result.get("planning_table")
+                            payload["rateio_rows"] = result.get("rows")
+                            row.result_json = payload
+                            row.status = "COMPLETED"
+                            row.phase = (
+                                f"{result.get('rows', 0)} linhas de rateio em {result.get('planning_table')} · "
+                                f"{len(snapshot['shared_nodes'])} custo(s) compartilhado(s)"
+                            )
+                            row.processed_blobs = len(snapshot["shared_nodes"])
+                            row.rows_destination = int(result.get("rows") or 0)
+                            row.finished_at = datetime.now(timezone.utc)
+                            s.commit()
+                        s.close()
+                    except Exception as exc:
+                        s2 = SyncSession()
+                        try:
+                            t2 = s2.get(EtlTask, task_id)
+                            if t2:
+                                t2.status = "FAILED"
+                                t2.phase = f"Erro: {exc}"
+                                t2.finished_at = datetime.now(timezone.utc)
+                                s2.commit()
+                        finally:
+                            s2.close()
 
                 elif task.task_type == "extraction":
                     conn_id = task.connection_id

@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         from app.models.source_connection import SourceConnection  # noqa: F401
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
-        from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, OrganizationMoveAudit  # noqa: F401
+        from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping  # noqa: F401
@@ -33,6 +33,9 @@ async def lifespan(app: FastAPI):
         # so each migration operation must be sent independently.
         for statement in (
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_status VARCHAR(30)",
+            "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_message VARCHAR(500)",
+            "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMPTZ",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS charge_end_column VARCHAR(200)",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS connection_allocation_rules JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS config_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb",
@@ -42,9 +45,22 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS classification_version_id INTEGER",
             "ALTER TABLE forecast_run ALTER COLUMN forecast_config_id DROP NOT NULL",
             "ALTER TABLE forecast_business_rule ADD COLUMN IF NOT EXISTS identification_clauses JSONB NOT NULL DEFAULT '[]'::jsonb",
-            'ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "MarketplaceProductName" TEXT',
-            'ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "MarketplaceOfferUnit" TEXT',
-            'ALTER TABLE public.dest_modelo_focus ADD COLUMN IF NOT EXISTS "MarketplaceBillingModel" TEXT',
+            """CREATE TABLE IF NOT EXISTS department_shared_cost (
+              id SERIAL PRIMARY KEY,
+              department_id INTEGER NOT NULL UNIQUE REFERENCES department(id) ON DELETE CASCADE,
+              enabled BOOLEAN NOT NULL DEFAULT FALSE,
+              mode VARCHAR(20) NOT NULL DEFAULT 'consumption',
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            """CREATE TABLE IF NOT EXISTS department_shared_cost_target (
+              id SERIAL PRIMARY KEY,
+              config_id INTEGER NOT NULL REFERENCES department_shared_cost(id) ON DELETE CASCADE,
+              target_department_id INTEGER NOT NULL REFERENCES department(id) ON DELETE CASCADE,
+              percent DOUBLE PRECISION,
+              created_at TIMESTAMPTZ DEFAULT now(),
+              UNIQUE (config_id, target_department_id)
+            )""",
         ):
             await conn.execute(text(statement))
         await conn.execute(text("""

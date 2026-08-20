@@ -16,10 +16,21 @@ import SortableTable from "../../components/SortableTable";
 const OPERATIONS: { value: string; label: string; symbol: string }[] = [
   { value: "%", label: "Porcentagem", symbol: "%" },
   { value: "*", label: "Multiplicar", symbol: "×" },
-  { value: "+", label: "Somar", symbol: "+" },
-  { value: "-", label: "Subtrair", symbol: "−" },
+  { value: "+", label: "Somar valor", symbol: "+" },
+  { value: "-", label: "Subtrair valor", symbol: "−" },
+  { value: "col+", label: "Somar coluna", symbol: "+" },
+  { value: "col-", label: "Subtrair coluna", symbol: "−" },
   { value: "=", label: "Valor Fixo", symbol: "=" },
 ];
+
+const isValueLessOp = (op: string) => ["not_empty", "empty"].includes(op.toLowerCase());
+
+const conditionOpLabel = (op: string): string => {
+  const lower = op.toLowerCase();
+  if (lower === "not_empty") return "não vazio";
+  if (lower === "empty") return "vazio";
+  return op;
+};
 
 interface CondRow {
   field: string;
@@ -28,12 +39,146 @@ interface CondRow {
   logic: "AND" | "OR";
 }
 
+const isValidCondition = (c: CondRow) => c.field && (isValueLessOp(c.op) || Boolean(c.value));
+
+const CLOUD_SCOPE_FORM_OPTIONS = [
+  { value: "global", label: "Todas as nuvens (fallback)" },
+  { value: "azure", label: "Azure" },
+  { value: "gcp", label: "GCP" },
+  { value: "atlas", label: "MongoDB Atlas" },
+  { value: "aws", label: "AWS" },
+  { value: "oci", label: "Oracle (OCI)" },
+  { value: "ibm", label: "IBM Cloud" },
+] as const;
+
+const cloudScopeLabel = (scope: string | null | undefined) => {
+  if (!scope) return "Todas as nuvens";
+  return CLOUD_SCOPE_FORM_OPTIONS.find((o) => o.value === scope)?.label ?? scope.toUpperCase();
+};
+
+const INTERNAL_SCOPE_COLUMNS = ["cloud_origem", "source_connection_id", "tipo"];
+
+interface ScopeFilterRow {
+  field: string;
+  op: string;
+  value: string;
+}
+
+const emptyScopeFilter = (): ScopeFilterRow => ({ field: "", op: "=", value: "" });
+
+const isValidScopeFilter = (scope: ScopeFilterRow) =>
+  scope.field && (isValueLessOp(scope.op) || Boolean(scope.value));
+
 const emptyForm = {
   name: "", description: "",
-  source_column: "", operation: "%", rate: "",
+  source_column: "", operand_column: "", operation: "%", rate: "",
   target_column: "",
   conditions: [] as CondRow[],
+  cloud_scope: "global",
+  scope_filter: emptyScopeFilter(),
   priority: 0, valid_from: "", valid_until: "", active: true,
+};
+
+const findKnownColumn = (columns: string[], token: string): string => {
+  const exact = columns.find((c) => c === token);
+  if (exact) return exact;
+  const lower = token.toLowerCase();
+  return columns.find((c) => c.toLowerCase() === lower) || token;
+};
+
+const buildExpressionFromForm = (form: typeof emptyForm): string => {
+  const src = form.source_column;
+  const rv = parseFloat(form.rate) || 0;
+  if (form.operation === "%" && src) return `${src} * ${rv / 100}`;
+  if (form.operation === "*" && src) return `${src} * ${rv}`;
+  if (form.operation === "+" && src) return `${src} + ${rv}`;
+  if (form.operation === "-" && src) return `${src} - ${rv}`;
+  if (form.operation === "col+" && src && form.operand_column) {
+    return `${src} + ${form.operand_column}`;
+  }
+  if (form.operation === "col-" && src && form.operand_column) {
+    return `${src} - ${form.operand_column}`;
+  }
+  if (form.operation === "=") return String(rv);
+  return "";
+};
+
+const parseExpression = (
+  expr: string,
+  targetCol: string,
+  columns: string[],
+  config?: Record<string, unknown>,
+): Partial<typeof emptyForm> => {
+  if (!expr) return {};
+
+  const trimmed = expr.trim();
+  if (/^[\d.]+$/.test(trimmed)) {
+    return { source_column: "", operand_column: "", operation: "=", rate: trimmed, target_column: targetCol };
+  }
+
+  const colOpCol = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*([+-])\s*([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (colOpCol) {
+    const [, left, op, right] = colOpCol;
+    const rightNum = Number(right);
+    if (Number.isNaN(rightNum) || !/^[\d.]+$/.test(right)) {
+      return {
+        source_column: findKnownColumn(columns, left),
+        operand_column: findKnownColumn(columns, right),
+        operation: op === "+" ? "col+" : "col-",
+        rate: "",
+        target_column: targetCol,
+      };
+    }
+  }
+
+  const match = trimmed.match(/^(.+?)\s*([*/+-])\s*([\d.]+)$/);
+  if (match) {
+    const [, srcToken, sop, val] = match;
+    const src = findKnownColumn(columns, srcToken.trim());
+    const op = sop === "*" ? (parseFloat(val) < 100 ? "*" : "%") : sop;
+    return { source_column: src, operand_column: "", operation: op, rate: val, target_column: targetCol };
+  }
+
+  const cfgOp = String(config?.operation || "");
+  const cfgOperand = String(config?.operand_column || "");
+  if (cfgOp === "col+" || cfgOp === "col-") {
+    return {
+      source_column: String(config?.source_column || ""),
+      operand_column: cfgOperand,
+      operation: cfgOp,
+      rate: "",
+      target_column: targetCol,
+    };
+  }
+
+  const col = columns.find((c) => trimmed.includes(c)) || "";
+  return { source_column: col, operand_column: "", operation: "%", rate: "", target_column: targetCol };
+};
+
+const formatOperationSummary = (r: BusinessRule): string => {
+  const cfg = (r.config_json || {}) as Record<string, unknown>;
+  const op = String(cfg.operation || "");
+  const src = String(cfg.source_column || "");
+  const operand = String(cfg.operand_column || "");
+  const rate = cfg.rate ?? cfg.percentage ?? "";
+
+  if (r.rule_type === "EXPRESSION" && r.expression) {
+    if (op === "col+" && src && operand) return `${src} + ${operand}`;
+    if (op === "col-" && src && operand) return `${src} − ${operand}`;
+    if (op === "=" || /^[\d.]+$/.test(String(r.expression).trim())) {
+      return `= ${r.expression}`;
+    }
+    if (src && op) {
+      const opMeta = OPERATIONS.find((item) => item.value === op);
+      return `${src} ${opMeta?.symbol || op} ${rate}`;
+    }
+    return String(r.expression);
+  }
+  if (r.rule_type === "CONDITIONAL" && r.conditions?.length) {
+    const thenVal = String((r.conditions[0] as Record<string, unknown>)?.then_value || "");
+    return thenVal || "condicional";
+  }
+  return r.rule_type;
 };
 
 export default function Rules() {
@@ -47,6 +192,7 @@ export default function Rules() {
   const [form, setForm] = useState(emptyForm);
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [numericColumns, setNumericColumns] = useState<string[]>([]);
+  const scopeColumnOptions = [...INTERNAL_SCOPE_COLUMNS, ...sourceColumns.filter((c) => !INTERNAL_SCOPE_COLUMNS.includes(c))];
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
@@ -84,30 +230,14 @@ export default function Rules() {
   }, [selectedDestId]);
 
   // Parse an expression like "CostInBillingCurrency * 0.186065" back to form fields
-  const parseExpression = (expr: string, targetCol: string): Partial<typeof emptyForm> => {
-    if (!expr) return {};
-    const col = sourceColumns.find(c => expr.includes(c)) || "";
-    let op = "%";
-    let rate = "";
-    // Try to parse operation and rate from expression
-    const match = expr.match(/^(.+?)\s*([*/+-])\s*([\d.]+)$/);
-    if (match) {
-      const [, src, sop, val] = match;
-      op = sop === "*" ? (parseFloat(val) < 100 ? "*" : "%") : sop;
-      rate = val;
-    }
-    // Fixed value pattern: just a number
-    if (/^[\d.]+$/.test(expr.trim())) {
-      op = "=";
-      rate = expr.trim();
-    }
-    return { source_column: col || "", operation: op, rate, target_column: targetCol };
-  };
+  const parseExpressionForForm = (expr: string, targetCol: string, config?: Record<string, unknown>) =>
+    parseExpression(expr, targetCol, sourceColumns, config);
 
   const openNew = () => { setEditing(null); setForm(emptyForm); setDialogOpen(true); };
 
   const openEdit = (r: BusinessRule) => {
     setEditing(r);
+    const cfg = r.config_json as Record<string, unknown> | undefined;
     let conds: CondRow[] = [];
     let parsed: Partial<typeof emptyForm> = {};
 
@@ -122,26 +252,34 @@ export default function Rules() {
       }));
       const thenField = String((r.conditions as Record<string, unknown>[])[0]?.then_field || "");
       const thenVal = String((r.conditions as Record<string, unknown>[])[0]?.then_value || "");
-      parsed = parseExpression(thenVal, thenField || r.target_column);
+      parsed = parseExpressionForForm(thenVal, thenField || r.target_column, cfg);
     } else if (r.rule_type === "EXPRESSION") {
-      parsed = parseExpression(r.expression || "", r.target_column);
+      parsed = parseExpressionForForm(r.expression || "", r.target_column, cfg);
     } else if (r.config_json) {
       // Legacy PTAX_BRL / TAX_BASE / MARKUP
-      const cfg = r.config_json as Record<string, unknown>;
       parsed = {
-        source_column: String(cfg.source_column || ""),
-        operation: String(cfg.operation || (cfg.rate && Number(cfg.rate) > 1 ? "*" : "%")),
-        rate: String(cfg.rate || cfg.percentage || ""),
+        source_column: String(cfg?.source_column || ""),
+        operation: String(cfg?.operation || (cfg?.rate && Number(cfg.rate) > 1 ? "*" : "%")),
+        rate: String(cfg?.rate || cfg?.percentage || ""),
         target_column: r.target_column,
       };
     }
 
+    const rawScope = cfg?.scope_filter as Record<string, unknown> | undefined;
+
     setForm({
       name: r.name, description: r.description || "",
-      source_column: parsed.source_column || "", operation: parsed.operation || "%",
+      source_column: parsed.source_column || "", operand_column: parsed.operand_column || "",
+      operation: parsed.operation || "%",
       rate: parsed.rate || "",
       target_column: parsed.target_column || r.target_column || "",
       conditions: conds, priority: r.priority,
+      cloud_scope: r.cloud_scope || "global",
+      scope_filter: {
+        field: String(rawScope?.field || ""),
+        op: String(rawScope?.op || "="),
+        value: String(rawScope?.value || ""),
+      },
       valid_from: r.valid_from || "", valid_until: r.valid_until || "",
       active: r.active,
     });
@@ -150,35 +288,34 @@ export default function Rules() {
 
   const save = async () => {
     const destId = selectedDestId === "" ? null : selectedDestId as number;
+    const expression = buildExpressionFromForm(form);
 
-    // Build expression from operation
-    const src = form.source_column;
-    const rv = parseFloat(form.rate) || 0;
-    let expression = "";
-    if (form.operation === "%" && src) {
-      expression = `${src} * ${rv / 100}`;
-    } else if (form.operation === "*" && src) {
-      expression = `${src} * ${rv}`;
-    } else if (form.operation === "+" && src) {
-      expression = `${src} + ${rv}`;
-    } else if (form.operation === "-" && src) {
-      expression = `${src} - ${rv}`;
-    } else if (form.operation === "=") {
-      expression = String(rv);
-    }
-
-    const hasConditions = form.conditions.some(c => c.field && c.value);
+    const hasConditions = form.conditions.some(isValidCondition);
     const ruleType = hasConditions ? "CONDITIONAL" : "EXPRESSION";
+
+    const configJson: Record<string, unknown> = {
+      source_column: form.source_column,
+      operation: form.operation,
+      rate: parseFloat(form.rate) || 0,
+    };
+    if (form.operation === "col+" || form.operation === "col-") {
+      configJson.operand_column = form.operand_column;
+      delete configJson.rate;
+    }
+    if (isValidScopeFilter(form.scope_filter)) {
+      configJson.scope_filter = {
+        field: form.scope_filter.field,
+        op: form.scope_filter.op,
+        value: isValueLessOp(form.scope_filter.op) ? "" : form.scope_filter.value,
+      };
+    }
 
     const body: Record<string, unknown> = {
       destination_table_id: destId,
       name: form.name, description: form.description || null,
       target_column: form.target_column, rule_type: ruleType,
-      config_json: {
-        source_column: form.source_column,
-        operation: form.operation,
-        rate: parseFloat(form.rate) || 0,
-      },
+      cloud_scope: form.cloud_scope === "global" ? null : form.cloud_scope,
+      config_json: configJson,
       priority: form.priority,
       valid_from: form.valid_from || null,
       valid_until: form.valid_until || null,
@@ -189,12 +326,16 @@ export default function Rules() {
       body.expression = expression;
     } else {
       body.conditions = form.conditions
-        .filter(c => c.field && c.value)
-        .map((c, idx) => ({
+        .filter(isValidCondition)
+        .map((c) => ({
           field: c.field,
           op: c.op,
           logic: c.logic || "AND",
-          value: c.op === "in" ? c.value.split("|").map(v => v.trim()).filter(Boolean) : c.value,
+          value: isValueLessOp(c.op)
+            ? ""
+            : c.op === "in"
+              ? c.value.split("|").map(v => v.trim()).filter(Boolean)
+              : c.value,
           then_field: form.target_column,
           then_value: expression,
         }));
@@ -238,7 +379,9 @@ export default function Rules() {
       const parts = conds.map((c, i) => {
         const val = Array.isArray(c.value) ? (c.value as string[]).join("|") : String(c.value || "");
         const logic = i > 0 ? ` ${String(c.logic || "AND")} ` : "";
-        return `${logic}${c.field} ${c.op} ${val}`;
+        const op = conditionOpLabel(String(c.op || "=="));
+        const valPart = isValueLessOp(String(c.op || "")) ? "" : ` ${val}`;
+        return `${logic}${c.field} ${op}${valPart}`;
       });
       const thenPart = (conds[0] as Record<string, unknown>)?.then_field || r.target_column;
       const thenVal = (conds[0] as Record<string, unknown>)?.then_value || "?";
@@ -310,11 +453,25 @@ export default function Rules() {
           columns={[
             { key: "name", label: "Nome" },
             {
+              key: "_operation", label: "Operação", width: 220,
+              render: (r: BusinessRule) => (
+                <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+                  {formatOperationSummary(r)} → {r.target_column}
+                </Typography>
+              ),
+            },
+            {
               key: "_summary", label: "Regra", width: 350,
               render: (r: BusinessRule) => (
                 <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
                   {formatRuleSummary(r)}
                 </Typography>
+              ),
+            },
+            {
+              key: "cloud_scope", label: "Cloud", width: 120,
+              render: (r: BusinessRule) => (
+                <Chip size="small" label={cloudScopeLabel(r.cloud_scope)} variant={r.cloud_scope ? "filled" : "outlined"} />
               ),
             },
             {
@@ -351,6 +508,70 @@ export default function Rules() {
 
             <TextField label="Nome" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <TextField label="Descrição (opcional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+
+            <FormControl fullWidth>
+              <InputLabel>Cloud (escopo da regra)</InputLabel>
+              <Select
+                value={form.cloud_scope}
+                label="Cloud (escopo da regra)"
+                onChange={(e) => setForm({ ...form, cloud_scope: e.target.value })}
+              >
+                {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
+                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+              Regras com escopo Azure/GCP/etc. só rodam no reprocessamento da nuvem correspondente.
+              Use &quot;Todas as nuvens&quot; para o fallback final (<code>realizado = BilledCost</code>).
+            </Typography>
+
+            <Divider />
+
+            <Box sx={{ bgcolor: "#e3f2fd", borderRadius: 2, p: 2, border: "1px solid #90caf9" }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "#1565c0", mb: 1 }}>
+                Delimitador por linha (opcional)
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+                Filtro adicional sobre os dados já mapeados — ex.: <code>cloud_origem</code>, <code>ServiceProviderName</code>.
+              </Typography>
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+                <Autocomplete
+                  freeSolo
+                  size="small"
+                  options={scopeColumnOptions}
+                  value={form.scope_filter.field}
+                  onInputChange={(_, v) => setForm({ ...form, scope_filter: { ...form.scope_filter, field: v } })}
+                  onChange={(_, v) => setForm({ ...form, scope_filter: { ...form.scope_filter, field: v || "" } })}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Campo" sx={{ width: 220 }} />
+                  )}
+                />
+                <Select
+                  size="small"
+                  value={form.scope_filter.op}
+                  onChange={(e) => setForm({ ...form, scope_filter: { ...form.scope_filter, op: e.target.value } })}
+                  sx={{ minWidth: 140 }}
+                >
+                  <MenuItem value="=">= (igual)</MenuItem>
+                  <MenuItem value="!=">!= (diferente)</MenuItem>
+                  <MenuItem value="contains">contém</MenuItem>
+                  <MenuItem value="in">em lista (|)</MenuItem>
+                  <MenuItem value="not_empty">não vazio</MenuItem>
+                  <MenuItem value="empty">vazio</MenuItem>
+                </Select>
+                {!isValueLessOp(form.scope_filter.op) && (
+                  <TextField
+                    size="small"
+                    label="Valor"
+                    value={form.scope_filter.value}
+                    onChange={(e) => setForm({ ...form, scope_filter: { ...form.scope_filter, value: e.target.value } })}
+                    placeholder={form.scope_filter.op === "in" ? "valor1|valor2" : "valor"}
+                    sx={{ flex: 1, minWidth: 180 }}
+                  />
+                )}
+              </Box>
+            </Box>
 
             <Divider />
 
@@ -416,11 +637,15 @@ export default function Rules() {
                       <MenuItem value="!=">!= (diferente)</MenuItem>
                       <MenuItem value="contains">contém (~)</MenuItem>
                       <MenuItem value="in">em lista (|)</MenuItem>
+                      <MenuItem value="not_empty">não vazio</MenuItem>
+                      <MenuItem value="empty">vazio</MenuItem>
                     </Select>
+                    {!isValueLessOp(cond.op) && (
                     <TextField size="small" label="Valor" value={cond.value}
                       onChange={(e) => updateCondition(i, "value", e.target.value)}
                       placeholder={cond.op === "in" ? "valor1|valor2|..." : "valor"}
                       sx={{ flex: 1, minWidth: 180 }} />
+                    )}
                     <IconButton size="small" onClick={() => removeCondition(i)} color="error">
                       <Delete fontSize="small" />
                     </IconButton>
@@ -453,24 +678,47 @@ export default function Rules() {
                     )}
                   />
                 )}
-                <FormControl size="small" sx={{ minWidth: 140 }}>
+                <FormControl size="small" sx={{ minWidth: 160 }}>
                   <InputLabel>Operação</InputLabel>
                   <Select value={form.operation} label="Operação"
-                    onChange={(e) => setForm({ ...form, operation: e.target.value })}>
+                    onChange={(e) => {
+                      const operation = e.target.value;
+                      setForm({
+                        ...form,
+                        operation,
+                        operand_column: operation === "col+" || operation === "col-" ? form.operand_column : "",
+                        rate: operation === "col+" || operation === "col-" ? "" : form.rate,
+                      });
+                    }}>
                     {OPERATIONS.map(op => (
                       <MenuItem key={op.value} value={op.value}>{op.label} ({op.symbol})</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
-                <TextField
-                  size="small"
-                  label={form.operation === "%" ? "Percentual" : form.operation === "=" ? "Valor Fixo" : "Taxa / Valor"}
-                  value={form.rate}
-                  onChange={(e) => setForm({ ...form, rate: e.target.value })}
-                  type="number"
-                  inputProps={{ step: "any" }}
-                  sx={{ width: 130 }}
-                />
+                {(form.operation === "col+" || form.operation === "col-") ? (
+                  <Autocomplete
+                    freeSolo
+                    size="small"
+                    options={numericColumns.filter((c) => c !== form.source_column)}
+                    value={form.operand_column}
+                    onInputChange={(_, v) => setForm({ ...form, operand_column: v })}
+                    onChange={(_, v) => setForm({ ...form, operand_column: v || "" })}
+                    renderInput={(params) => (
+                      <TextField {...params} label="Coluna Operando" sx={{ width: 240 }}
+                        helperText="Segunda coluna numérica (ex.: CreditAmount)" />
+                    )}
+                  />
+                ) : (
+                  <TextField
+                    size="small"
+                    label={form.operation === "%" ? "Percentual" : form.operation === "=" ? "Valor Fixo" : "Taxa / Valor"}
+                    value={form.rate}
+                    onChange={(e) => setForm({ ...form, rate: e.target.value })}
+                    type="number"
+                    inputProps={{ step: "any" }}
+                    sx={{ width: 130 }}
+                  />
+                )}
                 <Typography variant="h6" sx={{ color: "#666", alignSelf: "center" }}>→</Typography>
                 <Autocomplete
                   freeSolo
@@ -490,16 +738,18 @@ export default function Rules() {
             {/* ═══════════════════════════════════════════════════════ */}
             {/*  PREVIEW                                                 */}
             {/* ═══════════════════════════════════════════════════════ */}
-            {(form.source_column || form.operation === "=") && form.rate && form.target_column && (
+            {(form.source_column || form.operation === "=" || ((form.operation === "col+" || form.operation === "col-") && form.operand_column))
+              && (form.operation === "col+" || form.operation === "col-" || form.rate)
+              && form.target_column && (
               <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#fafafa", borderLeft: "4px solid #1976d2" }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.3 }}>
                   Preview da regra
                 </Typography>
                 <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.82rem" }}>
-                  {form.conditions.filter(c => c.field && c.value).length > 0 ? (
+                  {form.conditions.some(isValidCondition) ? (
                     <>
                       <Box component="span" sx={{ color: "#7b1fa2", fontWeight: 600 }}>SE </Box>
-                      {form.conditions.filter(c => c.field && c.value).map((c, i) => (
+                      {form.conditions.filter(isValidCondition).map((c, i) => (
                         <Box component="span" key={i}>
                           {i > 0 && (
                             <Box component="span" sx={{ color: "#9c27b0", fontWeight: 700, mx: 0.5 }}>
@@ -507,8 +757,10 @@ export default function Rules() {
                             </Box>
                           )}
                           <Box component="span" sx={{ color: "#1565c0" }}>{c.field}</Box>
-                          <Box component="span" sx={{ color: "#666" }}> {c.op} </Box>
-                          <Box component="span" sx={{ color: "#e65100" }}>"{c.value}"</Box>
+                          <Box component="span" sx={{ color: "#666" }}> {conditionOpLabel(c.op)} </Box>
+                          {!isValueLessOp(c.op) && (
+                            <Box component="span" sx={{ color: "#e65100" }}>"{c.value}"</Box>
+                          )}
                         </Box>
                       ))}
                       <br />
@@ -521,6 +773,8 @@ export default function Rules() {
                   {form.operation === "*" && <>{form.source_column} × {form.rate}</>}
                   {form.operation === "+" && <>{form.source_column} + {form.rate}</>}
                   {form.operation === "-" && <>{form.source_column} − {form.rate}</>}
+                  {form.operation === "col+" && <>{form.source_column} + {form.operand_column}</>}
+                  {form.operation === "col-" && <>{form.source_column} − {form.operand_column}</>}
                   {form.operation === "=" && <>{form.rate}</>}
                   <Box component="span" sx={{ color: "#2e7d32", fontWeight: 600 }}> → {form.target_column}</Box>
                 </Typography>
@@ -547,9 +801,9 @@ export default function Rules() {
 
             {/* Cardinality hint for multi-rule strategy */}
             <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
-              <strong>Estratégia de fallback:</strong> Crie uma regra para cada condição com prioridades diferentes
-              (ex: 0, 1, 2) e uma regra final <strong>sem condições</strong> como valor padrão.
-              As regras são executadas em ordem de prioridade e <strong>não sobrescrevem</strong> valores já preenchidos.
+              <strong>Ordem de prioridade:</strong> números menores rodam primeiro. Regras específicas por cloud
+              (ex.: Azure 20, 25) devem vir <strong>antes</strong> do fallback global (ex.: prioridade 100).
+              Cada regra só preenche linhas ainda vazias — por isso o fallback precisa ser o último.
             </Alert>
           </Box>
         </DialogContent>

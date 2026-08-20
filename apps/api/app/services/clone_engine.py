@@ -98,6 +98,10 @@ class CloneEngine:
 
     def apply(self, frame: pd.DataFrame, period: str) -> tuple[pd.DataFrame, int]:
         if frame.empty: return frame, 0
+        if "is_synthetic" not in frame.columns:
+            frame["is_synthetic"] = False
+        else:
+            frame["is_synthetic"] = frame["is_synthetic"].fillna(False)
         generated: list[pd.DataFrame] = []
         for rule in self.rules:
             if not rule.active or (rule.valid_from and period < rule.valid_from) or (rule.valid_until and period > rule.valid_until): continue

@@ -190,7 +190,8 @@ export default function ManualCsvUploadDialog({
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Carregue relatórios CSV locais diretamente na camada Bronze. Para carregar vários meses de uma
-          vez, use o botão "Carregar vários"; o período é identificado automaticamente pelo nome de cada arquivo.
+          vez, use o botão "Carregar vários"; o período é identificado pelas colunas de data/faturamento
+          do CSV (com fallback para o nome do arquivo).
         </Typography>
 
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 3 }} alignItems="flex-start">
@@ -288,7 +289,7 @@ export default function ManualCsvUploadDialog({
                 value={billingPeriod}
                 onChange={(e) => setBillingPeriod(e.target.value)}
                 sx={{ width: 240 }}
-                helperText="Ex: 202601"
+                helperText="Inferido do CSV; tem prioridade sobre o nome do arquivo"
               />
             </Stack>
 

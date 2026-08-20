@@ -17,5 +17,8 @@ class SourceConnection(Base):
     cloud_scope = Column(String(50), nullable=True, index=True)
     config_json = Column(JSON, nullable=False, default=dict)
     blob_prefixes = Column(JSON, nullable=False, default=list)
+    last_test_status = Column(String(30), nullable=True)
+    last_test_message = Column(String(500), nullable=True)
+    last_tested_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -4,9 +4,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, delete, or_
+from sqlalchemy.exc import IntegrityError
 from app.database import get_db
-from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, Department, Project, OrganizationMoveAudit
+from app.models.rules import (
+    EtlMapping, BusinessRule, ClassificationRule, Department, Project, OrganizationMoveAudit,
+    DepartmentSharedCost, DepartmentSharedCostTarget,
+)
 from app.models.planning import PlanningEntry
 from app.models.destination import DestinationColumn, SourceDestinationMapping
 from app.services.classification_engine import map_legacy_field, normalize_rule_conditions
@@ -18,7 +22,9 @@ from app.schemas.schemas import (
     DepartmentCreate, DepartmentUpdate, DepartmentOut,
     ProjectCreate, ProjectUpdate, ProjectOut,
     CsvImportRequest, CsvImportResult,
+    SharedCostOut, SharedCostUpsert, SharedCostTargetOut,
 )
+from app.services.shared_cost import SHARED_COST_MODES, department_path, subtree_ids, children_map
 
 logger = logging.getLogger(__name__)
 
@@ -604,8 +610,126 @@ async def delete_department(dept_id: int, db: AsyncSession = Depends(get_db)):
     )
     for child in children_result.scalars().all():
         child.parent_id = None
+    await db.flush()
+    config_ids = select(DepartmentSharedCost.id).where(DepartmentSharedCost.department_id == dept_id)
+    await db.execute(delete(DepartmentSharedCostTarget).where(or_(
+        DepartmentSharedCostTarget.target_department_id == dept_id,
+        DepartmentSharedCostTarget.config_id.in_(config_ids),
+    )))
+    await db.execute(delete(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))
+    await db.execute(delete(Project).where(Project.department_id == dept_id))
+    await db.execute(delete(OrganizationMoveAudit).where(OrganizationMoveAudit.department_id == dept_id))
+    for rule in (await db.execute(select(ClassificationRule).where(ClassificationRule.department_id == dept_id))).scalars().all():
+        rule.department_id = None
+        rule.active = False
+    for entry in (await db.execute(select(PlanningEntry).where(PlanningEntry.department_id == dept_id))).scalars().all():
+        entry.department_id = None
+    await db.flush()
     await db.delete(dept)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Não foi possível excluir este departamento porque ainda há vínculos (classificação, orçamento ou custo compartilhado).",
+        )
+
+
+def _shared_cost_out(config: DepartmentSharedCost, departments: dict[int, Department]) -> SharedCostOut:
+    targets: list[SharedCostTargetOut] = []
+    for target in config.targets or []:
+        node = departments.get(target.target_department_id)
+        path = " > ".join(department_path(target.target_department_id, departments)) if node else None
+        targets.append(SharedCostTargetOut(
+            department_id=target.target_department_id,
+            percent=target.percent,
+            name=node.name if node else None,
+            path=path,
+        ))
+    donor = departments.get(config.department_id)
+    return SharedCostOut(
+        department_id=config.department_id,
+        enabled=config.enabled,
+        mode=config.mode,
+        name=donor.name if donor else None,
+        path=" > ".join(department_path(config.department_id, departments)) if donor else None,
+        targets=targets,
+    )
+
+
+@router.get("/departments/shared-costs", response_model=list[SharedCostOut])
+async def list_shared_costs(db: AsyncSession = Depends(get_db)):
+    departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
+    configs = (await db.execute(select(DepartmentSharedCost))).scalars().all()
+    return [_shared_cost_out(config, departments) for config in configs]
+
+
+@router.get("/departments/{dept_id}/shared-cost", response_model=SharedCostOut)
+async def get_shared_cost(dept_id: int, db: AsyncSession = Depends(get_db)):
+    departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
+    if dept_id not in departments:
+        raise HTTPException(status_code=404, detail="Department not found")
+    config = (await db.execute(select(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))).scalar_one_or_none()
+    if not config:
+        return SharedCostOut(department_id=dept_id, enabled=False, mode="consumption", targets=[])
+    return _shared_cost_out(config, departments)
+
+
+@router.put("/departments/{dept_id}/shared-cost", response_model=SharedCostOut)
+async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSession = Depends(get_db)):
+    departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
+    donor = departments.get(dept_id)
+    if not donor:
+        raise HTTPException(status_code=404, detail="Department not found")
+    mode = (data.mode or "consumption").lower()
+    if mode not in SHARED_COST_MODES:
+        raise HTTPException(status_code=422, detail="Modo de rateio inválido")
+    if data.enabled and mode != "consumption" and not data.targets:
+        raise HTTPException(status_code=422, detail="Selecione ao menos um projeto ou departamento destino")
+    donor_tree = subtree_ids(dept_id, children_map(departments))
+    seen: set[int] = set()
+    percent_sum = 0.0
+    clean_targets: list[DepartmentSharedCostTarget] = []
+    selected_targets = [] if mode == "consumption" else data.targets
+    for target in selected_targets:
+        if target.department_id not in departments:
+            raise HTTPException(status_code=422, detail="Departamento destino não encontrado")
+        if target.department_id in seen:
+            continue
+        if target.department_id in donor_tree:
+            raise HTTPException(status_code=422, detail="O destino não pode estar dentro do próprio custo compartilhado")
+        seen.add(target.department_id)
+        percent = target.percent
+        if mode == "custom":
+            if percent is None:
+                raise HTTPException(status_code=422, detail="Informe o percentual de cada destino")
+            if percent < 0 or percent > 100:
+                raise HTTPException(status_code=422, detail="Percentual deve estar entre 0 e 100")
+            percent_sum += percent
+        else:
+            percent = None
+        clean_targets.append(DepartmentSharedCostTarget(target_department_id=target.department_id, percent=percent))
+    if mode == "custom" and percent_sum > 100 + 1e-6:
+        raise HTTPException(status_code=422, detail="A soma dos percentuais não pode passar de 100%")
+    config = (await db.execute(select(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))).scalar_one_or_none()
+    if not config:
+        config = DepartmentSharedCost(department_id=dept_id, enabled=data.enabled, mode=mode)
+        db.add(config)
+        await db.flush()
+    else:
+        config.enabled = data.enabled
+        config.mode = mode
+        await db.execute(delete(DepartmentSharedCostTarget).where(DepartmentSharedCostTarget.config_id == config.id))
+        await db.flush()
+    for target in clean_targets:
+        target.config_id = config.id
+        db.add(target)
     await db.commit()
+    config = (await db.execute(select(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))).scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=500, detail="O custo compartilhado foi gravado, mas não pôde ser recarregado")
+    return _shared_cost_out(config, departments)
 
 
 # ---- Project ----

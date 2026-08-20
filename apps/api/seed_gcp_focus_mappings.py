@@ -82,6 +82,7 @@ MAPPINGS: list[dict] = [
     {"source_column": "project", "destination_column": "x_Project", "transform_type": "RENAME"},
     {"source_column": "project", "destination_column": "x_ProjectLabels", "transform_type": "JSON_PATH", "transform_config": {"path": "labels"}},
     {"source_column": "credits", "destination_column": "x_Credits", "transform_type": "RENAME"},
+    {"source_column": "credits", "destination_column": "CreditAmount", "transform_type": "JSON_PATH", "transform_config": {"path": "[0].amount"}},
     {"source_column": "labels", "destination_column": "x_Labels", "transform_type": "RENAME"},
     {"source_column": "labels", "destination_column": "Tags", "transform_type": "RENAME"},
     {"source_column": "system_labels", "destination_column": "x_SystemLabels", "transform_type": "RENAME"},
@@ -108,11 +109,12 @@ MAPPINGS: list[dict] = [
     {"source_column": "adjustment_info", "destination_column": "x_AdjustmentInfo", "transform_type": "RENAME"},
     {"source_column": "cost", "destination_column": "PricingCurrencyEffectiveCost", "transform_type": "EXPR", "transform_config": {"expression": "cost + credits_sum"}},
     {"source_column": "sku", "destination_column": "MarketplaceProductName", "transform_type": "CONDITIONAL", "transform_config": {"when_column": "invoice", "when_path": "publisher_type", "when_values": ["THIRD_PARTY_RESELLER"], "then_type": "JSON_PATH", "then_config": {"path": "description"}}},
+    {"source_column": "usage", "destination_column": "MarketplaceOfferUnit", "transform_type": "CONDITIONAL", "transform_config": {"when_column": "invoice", "when_path": "publisher_type", "when_values": ["THIRD_PARTY_RESELLER"], "then_type": "JSON_PATH", "then_config": {"path": "unit"}}},
     {"source_column": "invoice", "destination_column": "MarketplaceBillingModel", "transform_type": "CONDITIONAL", "transform_config": {"when_column": "invoice", "when_path": "publisher_type", "when_values": ["THIRD_PARTY_RESELLER"], "then_type": "CONST", "then_config": {"value": "RECURRING"}}},
 ]
 
 X_COLUMNS = [
-    ("x_CostType", "TEXT"), ("x_Credits", "JSONB"), ("x_CurrencyConversionRate", "DOUBLE PRECISION"),
+    ("x_CostType", "TEXT"), ("x_Credits", "JSONB"), ("CreditAmount", "DOUBLE PRECISION"), ("x_CurrencyConversionRate", "DOUBLE PRECISION"),
     ("x_ExportTime", "TIMESTAMPTZ"), ("x_Labels", "JSONB"), ("x_Location", "TEXT"),
     ("x_Project", "JSONB"), ("x_ProjectLabels", "JSONB"), ("x_ServiceId", "TEXT"),
     ("x_SystemLabels", "JSONB"), ("x_Tags", "JSONB"), ("x_SubscriptionInstanceId", "TEXT"),

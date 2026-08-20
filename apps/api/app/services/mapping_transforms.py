@@ -31,6 +31,16 @@ def _parse_json(value: Any) -> Any:
         return text
 
 
+def _list_index(current: Any, idx: int) -> Any | None:
+    if not isinstance(current, list) or not current:
+        return None
+    if idx < 0:
+        idx = len(current) + idx
+    if idx < 0 or idx >= len(current):
+        return None
+    return current[idx]
+
+
 def _resolve_path(data: Any, path: str) -> Any:
     if data is None:
         return None
@@ -39,6 +49,13 @@ def _resolve_path(data: Any, path: str) -> Any:
     for part in parts:
         if current is None:
             return None
+        bare_index = re.match(r"^\[(-?\d+)\]$", part)
+        if bare_index:
+            current = _list_index(current, int(bare_index.group(1)))
+            continue
+        if part.isdigit() or (part.startswith("-") and part[1:].isdigit()):
+            current = _list_index(current, int(part))
+            continue
         array_match = re.match(r"^(.+)\[(-?\d+)\]$", part)
         if array_match:
             key, idx = array_match.group(1), int(array_match.group(2))
@@ -46,9 +63,7 @@ def _resolve_path(data: Any, path: str) -> Any:
                 current = current.get(key)
             else:
                 return None
-            if not isinstance(current, list) or not current:
-                return None
-            current = current[idx]
+            current = _list_index(current, idx)
             continue
         if part.endswith("[]"):
             key = part[:-2]
@@ -66,16 +81,40 @@ def _resolve_path(data: Any, path: str) -> Any:
     return current
 
 
+def _column_lookup(df: pd.DataFrame, name: str) -> str | None:
+    if name in df.columns:
+        return name
+    lower = name.lower()
+    for column in df.columns:
+        if str(column).lower() == lower:
+            return str(column)
+    return None
+
+
 def split_source_ref(df: pd.DataFrame, source_column: str) -> tuple[str | None, str]:
     """Resolve a source reference to a Bronze column and optional nested JSON path.
 
     Examples:
       ``project`` -> (``project``, ````)
       ``project.name`` -> (``project``, ``name``)
+      ``credits[0].type`` -> (``credits``, ``[0].type``)
+      ``credits[0]`` -> (``credits``, ``[0]``)
+      ``ProductName`` -> (``productname``, ````) when Bronze columns are lowercase
       ``unknown.field`` -> (``None``, ````) when no prefix matches a column
     """
-    if source_column in df.columns:
-        return source_column, ""
+    resolved = _column_lookup(df, source_column)
+    if resolved is not None:
+        return resolved, ""
+
+    bracket_match = re.match(r"^(.+?)\[(-?\d+)\](?:\.(.+))?$", source_column)
+    if bracket_match:
+        root_name, idx, rest = bracket_match.groups()
+        resolved = _column_lookup(df, root_name)
+        if resolved is not None:
+            implicit = f"[{idx}]"
+            if rest:
+                implicit = f"{implicit}.{rest}"
+            return resolved, implicit
 
     if "." not in source_column:
         return None, ""
@@ -83,8 +122,9 @@ def split_source_ref(df: pd.DataFrame, source_column: str) -> tuple[str | None, 
     parts = source_column.split(".")
     for end in range(len(parts) - 1, 0, -1):
         candidate = ".".join(parts[:end])
-        if candidate in df.columns:
-            return candidate, ".".join(parts[end:])
+        resolved = _column_lookup(df, candidate)
+        if resolved is not None:
+            return resolved, ".".join(parts[end:])
     return None, ""
 
 

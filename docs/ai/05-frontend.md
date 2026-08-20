@@ -39,6 +39,10 @@ timeout 120s) com interfaces TypeScript espelhando os schemas do backend.
 - **Banner global de tarefas**: mostra execuções ativas diferenciando Extração,
   Reprocessamento e Forecast (polling; a tela de forecast atualiza a cada 3s).
 
+Para o padrão visual, de DataGrid e de interações operacionais reutilizável, consulte
+`[08-ui-design-reference.md](08-ui-design-reference.md)`. Connections é a referência
+canônica para essa evolução.
+
 ## Padrões de integração
 
 - Todo acesso à API passa por `services/api.ts` (nunca axios direto nas páginas).

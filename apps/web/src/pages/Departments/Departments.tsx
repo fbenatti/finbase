@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import {
   Box, Typography, Button, Paper, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Switch, FormControlLabel,
+  Switch, FormControlLabel, FormControl,
   Alert, CircularProgress, Tooltip, Divider,
   List, Menu, MenuItem,
+  Radio, RadioGroup, FormLabel,
 } from "@mui/material";
 import {
   Add, Edit, Delete, ExpandMore, ExpandLess,
@@ -13,10 +14,13 @@ import {
   AccountBalance,
 } from "@mui/icons-material";
 import {
-  getDepartments, createDepartment, updateDepartment, deleteDepartment,
-  bootstrapCloudOrganization,
-  getProjects, createProject, updateProject, deleteProject,
-  importCsvData, CsvImportResult, Department, Project,
+    getDepartments, createDepartment, updateDepartment, deleteDepartment,
+    bootstrapCloudOrganization,
+    getProjects, createProject, updateProject, deleteProject,
+    importCsvData, CsvImportResult, Department, Project,
+    getSharedCosts, getDepartmentSharedCost, upsertDepartmentSharedCost,
+    SharedCostConfig, SharedCostMode, SharedCostTarget,
+    formatApiError,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, {
@@ -64,15 +68,25 @@ export default function Departments() {
   const [importing, setImporting] = useState(false);
   const [financialMenu, setFinancialMenu] = useState<HTMLElement | null>(null);
   const [preparingOrganization, setPreparingOrganization] = useState(false);
+  const [sharedCosts, setSharedCosts] = useState<SharedCostConfig[]>([]);
+  const [sharedEnabled, setSharedEnabled] = useState(false);
+  const [sharedMode, setSharedMode] = useState<SharedCostMode>("consumption");
+  const [sharedTargets, setSharedTargets] = useState<SharedCostTarget[]>([]);
+  const [sharedPicker, setSharedPicker] = useState<number | null>(null);
+  const [sharedLoaded, setSharedLoaded] = useState(true);
+  const [savingDept, setSavingDept] = useState(false);
+  const [deptDialogError, setDeptDialogError] = useState("");
 
   const load = async () => {
     try {
-      const [deps, projs] = await Promise.all([
+      const [deps, projs, costs] = await Promise.all([
         getDepartments(false),
         getProjects(),
+        getSharedCosts().catch(() => [] as SharedCostConfig[]),
       ]);
       setDepartments(deps);
       setProjects(projs);
+      setSharedCosts(costs);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -122,10 +136,16 @@ export default function Departments() {
     setEditingDept(null);
     setDeptForm({ ...emptyDeptForm, parent_id: parentId });
     setCustomFields([]);
+    setSharedEnabled(false);
+    setSharedMode("consumption");
+    setSharedTargets([]);
+    setSharedPicker(null);
+    setSharedLoaded(true);
+    setDeptDialogError("");
     setDeptDialog(true);
   };
 
-  const openEditDept = (d: Department) => {
+  const openEditDept = async (d: Department) => {
     setEditingDept(d);
     setDeptForm({
       parent_id: d.parent_id,
@@ -139,7 +159,23 @@ export default function Departments() {
         ? Object.entries(d.custom_fields).map(([key, value]) => ({ key, value: String(value) }))
         : []
     );
+    setSharedEnabled(false);
+    setSharedMode("consumption");
+    setSharedTargets([]);
+    setSharedPicker(null);
+    setSharedLoaded(false);
+    setDeptDialogError("");
     setDeptDialog(true);
+    try {
+      const config = await getDepartmentSharedCost(d.id);
+      setSharedEnabled(config.enabled);
+      setSharedMode(config.mode);
+      setSharedTargets(config.targets || []);
+    } catch (e: unknown) {
+      setDeptDialogError(formatApiError(e, "Não foi possível carregar o custo compartilhado"));
+    } finally {
+      setSharedLoaded(true);
+    }
   };
 
   const saveDept = async () => {
@@ -149,22 +185,38 @@ export default function Departments() {
     }
 
     const body = { ...deptForm, custom_fields: Object.keys(cf).length > 0 ? cf : null };
+    setSavingDept(true);
+    setDeptDialogError("");
     try {
-      if (editingDept) await updateDepartment(editingDept.id, body);
-      else await createDepartment(body);
+      const saved = editingDept ? await updateDepartment(editingDept.id, body) : await createDepartment(body);
+      await upsertDepartmentSharedCost(saved.id, {
+        enabled: sharedEnabled,
+        mode: sharedMode,
+        targets: sharedMode === "consumption" ? [] : sharedTargets.map(target => ({
+          department_id: target.department_id,
+          percent: sharedMode === "custom" ? Number(target.percent || 0) : null,
+        })),
+      });
       setDeptDialog(false);
-      load();
+      setSuccess(sharedEnabled ? "Departamento e custo compartilhado salvos." : "Departamento salvo.");
+      await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setDeptDialogError(formatApiError(e, "Não foi possível salvar o departamento"));
+    } finally {
+      setSavingDept(false);
     }
   };
 
   const blockedParentIds = editingDept ? descendantIds(editingDept) : new Set<number>();
 
   const removeDept = async (id: number) => {
-    if (!confirm("Deletar este departamento? Filhos serão desassociados.")) return;
-    try { await deleteDepartment(id); load(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+    if (!confirm("Excluir este departamento? Filhos sobem para a raiz. Projetos deste nó e o cadastro de custo compartilhado vinculado serão removidos.")) return;
+    try {
+      await deleteDepartment(id);
+      setSuccess("Departamento excluído.");
+      await load();
+    } catch (e: unknown) {
+      setError(formatApiError(e, "Não foi possível excluir o departamento"));
     }
   };
 
@@ -208,9 +260,13 @@ export default function Departments() {
   };
 
   const removeProj = async (id: number) => {
-    if (!confirm("Deletar projeto?")) return;
-    try { await deleteProject(id); load(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+    if (!confirm("Excluir este projeto?")) return;
+    try {
+      await deleteProject(id);
+      setSuccess("Projeto excluído.");
+      await load();
+    } catch (e: unknown) {
+      setError(formatApiError(e, "Não foi possível excluir o projeto"));
     }
   };
 
@@ -226,6 +282,7 @@ export default function Departments() {
   const renderDeptNode = (dept: Department, depth: number) => {
     const deptProjects = projects.filter(p => p.department_id === dept.id);
     const isExpanded = expanded.has(dept.id);
+    const isShared = sharedCosts.some(config => config.department_id === dept.id && config.enabled);
 
     return (
       <Box key={dept.id}>
@@ -234,7 +291,8 @@ export default function Departments() {
             p: 1.5, mb: 0.5, ml: depth * 3,
             display: "flex", alignItems: "center", gap: 1,
             borderLeft: 4,
-            borderColor: depth === 0 ? "primary.main" : depth === 1 ? "secondary.main" : "grey.400",
+            borderColor: isShared ? "#ED6C02" : depth === 0 ? "primary.main" : depth === 1 ? "secondary.main" : "grey.400",
+            bgcolor: isShared ? "#FFF4E5" : "background.paper",
           }}
         >
           {dept.children.length > 0 ? (
@@ -244,11 +302,12 @@ export default function Departments() {
           ) : (
             <Box sx={{ width: 32 }} />
           )}
-          {depth === 0 ? <Business color="primary" /> : <AccountTree color="secondary" />}
+          {depth === 0 ? <Business color="primary" /> : <AccountTree color={isShared ? "warning" : "secondary"} />}
           <Box sx={{ flexGrow: 1 }}>
-            <Typography variant="body2" fontWeight={600} component="div">
+            <Typography variant="body2" fontWeight={600} component="div" color={isShared ? "warning.dark" : "inherit"}>
               {dept.name}
               {dept.parent_id && <Chip label="filho" size="small" sx={{ ml: 1, height: 18, fontSize: "0.6rem" }} />}
+              {isShared && <Chip label="Custo compartilhado" size="small" color="warning" sx={{ ml: 1, height: 18, fontSize: "0.6rem" }} />}
             </Typography>
             <Box sx={{ display: "flex", gap: 1, mt: 0.25 }}>
               {dept.centro_custo && <Chip label={`CC: ${dept.centro_custo}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
@@ -277,7 +336,9 @@ export default function Departments() {
             <IconButton size="small" onClick={() => navigate(`/departments/financial?department_id=${dept.id}`)}><AccountBalance fontSize="small" /></IconButton>
           </Tooltip>
           <IconButton size="small" onClick={() => openEditDept(dept)}><Edit fontSize="small" /></IconButton>
-          <IconButton size="small" onClick={() => removeDept(dept.id)} color="error"><Delete fontSize="small" /></IconButton>
+          <Tooltip title="Excluir departamento">
+            <IconButton size="small" onClick={(event) => { event.stopPropagation(); void removeDept(dept.id); }} color="error"><Delete fontSize="small" /></IconButton>
+          </Tooltip>
         </Paper>
 
         {/* Projects under this department */}
@@ -288,14 +349,18 @@ export default function Departments() {
             bgcolor: "grey.50",
           }}>
             <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="body2" fontWeight={600}>{p.projeto_name}</Typography>
+              <Typography variant="body2" fontWeight={600}>
+                {p.projeto_name}
+              </Typography>
               <Box sx={{ display: "flex", gap: 0.5, mt: 0.25 }}>
                 {p.cloud && <Chip label={p.cloud} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
                 {p.subscription_rg && <Chip label={`RG: ${p.subscription_rg}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
               </Box>
             </Box>
             <IconButton size="small" onClick={() => openEditProj(p)}><Edit fontSize="small" /></IconButton>
-            <IconButton size="small" onClick={() => removeProj(p.id)} color="error"><Delete fontSize="small" /></IconButton>
+            <Tooltip title="Excluir projeto">
+              <IconButton size="small" onClick={(event) => { event.stopPropagation(); void removeProj(p.id); }} color="error"><Delete fontSize="small" /></IconButton>
+            </Tooltip>
           </Paper>
         ))}
 
@@ -352,10 +417,14 @@ export default function Departments() {
       )}
 
       {/* Department Dialog */}
-      <Dialog open={deptDialog} onClose={() => setDeptDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={deptDialog} onClose={() => setDeptDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle>{editingDept ? "Editar" : "Novo"} Departamento</DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+            {deptDialogError && <Alert severity="error">{deptDialogError}</Alert>}
+            {!sharedLoaded && editingDept && (
+              <Typography variant="body2" color="text.secondary">Carregando configuração de custo compartilhado…</Typography>
+            )}
             <TextField label="Nome" autoFocus value={deptForm.name}
               onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} />
             <DepartmentTreePicker
@@ -400,11 +469,89 @@ export default function Departments() {
               control={<Switch checked={deptForm.active} onChange={(e) => setDeptForm({ ...deptForm, active: e.target.checked })} />}
               label="Ativo"
             />
+            {editingDept && <>
+              <Divider />
+              <FormControlLabel
+                control={<Switch checked={sharedEnabled} onChange={(e) => setSharedEnabled(e.target.checked)} disabled={!sharedLoaded} />}
+                label="Custo compartilhado"
+              />
+              {sharedEnabled && <>
+                <FormControl>
+                  <FormLabel>Como ratear o custo</FormLabel>
+                  <RadioGroup
+                    value={sharedMode}
+                    onChange={(event) => setSharedMode(event.target.value as SharedCostMode)}
+                  >
+                    <FormControlLabel value="consumption" control={<Radio />} label="Por consumo na mesma cloud de origem" />
+                    <FormControlLabel value="equal" control={<Radio />} label="Equalitário entre quem consumiu no período" />
+                    <FormControlLabel value="custom" control={<Radio />} label="Percentual personalizado (o que faltar fica no doador)" />
+                  </RadioGroup>
+                </FormControl>
+                {sharedMode === "consumption" ? (
+                  <Typography variant="body2" color="text.secondary">
+                    O valor rateado é o gasto deste departamento e de todos os filhos. Ligue a flag no projeto
+                    Condomínio (folha), não na diretoria de Infra — senão a DIR Dados/IA paga uma fatia de Compra de RIs,
+                    redes e o resto da Infra, não só os 2 MM do Condomínio. O rateio vai para os projetos da mesma cloud,
+                    na proporção do consumo. Quem não consumiu não paga.
+                  </Typography>
+                ) : <>
+                <DepartmentTreePicker
+                  departments={departments}
+                  value={sharedPicker}
+                  onChange={(departmentId) => {
+                    if (departmentId == null) return;
+                    if (sharedTargets.some(target => target.department_id === departmentId)) return;
+                    const found = flattenDepartments(departments).find(item => item.id === departmentId);
+                    if (!found) return;
+                    setSharedTargets([...sharedTargets, { department_id: found.id, percent: null, name: found.name, path: found.path }]);
+                    setSharedPicker(null);
+                  }}
+                  label="Adicionar projeto ou diretoria destino"
+                  placeholder="Selecione para incluir no rateio"
+                  blockedIds={blockedParentIds}
+                />
+                {sharedTargets.map((target, index) => (
+                  <Box key={target.department_id} sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                    <Typography variant="body2" sx={{ flex: 1 }}>{target.path || target.name}</Typography>
+                    {sharedMode === "custom" && (
+                      <TextField
+                        size="small"
+                        type="number"
+                        label="%"
+                        value={target.percent ?? ""}
+                        onChange={(event) => {
+                          const next = [...sharedTargets];
+                          next[index] = { ...target, percent: event.target.value === "" ? null : Number(event.target.value) };
+                          setSharedTargets(next);
+                        }}
+                        sx={{ width: 100 }}
+                      />
+                    )}
+                    <IconButton size="small" color="error" onClick={() => setSharedTargets(sharedTargets.filter(item => item.department_id !== target.department_id))}>
+                      <Delete fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
+                {sharedMode === "custom" && (
+                  <Typography variant="caption" color="text.secondary">
+                    Soma: {sharedTargets.reduce((sum, target) => sum + Number(target.percent || 0), 0)}%. O restante permanece no doador.
+                  </Typography>
+                )}
+                {sharedMode === "equal" && (
+                  <Typography variant="caption" color="text.secondary">
+                    O valor é dividido igualmente entre os destinos selecionados que tiverem consumo no período.
+                  </Typography>
+                )}
+                </>}
+              </>}
+            </>}
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeptDialog(false)}>Cancelar</Button>
-          <Button onClick={saveDept} variant="contained">Salvar</Button>
+          <Button onClick={() => setDeptDialog(false)} disabled={savingDept}>Cancelar</Button>
+          <Button onClick={saveDept} variant="contained" disabled={savingDept || (Boolean(editingDept) && !sharedLoaded)}>
+            {savingDept ? "Salvando..." : "Salvar"}
+          </Button>
         </DialogActions>
       </Dialog>
 

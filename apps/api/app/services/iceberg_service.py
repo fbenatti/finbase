@@ -238,19 +238,19 @@ def _df_to_arrow(
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
 
         elif target in _BOOL_TYPES:
-            if df[col].dtype == bool:
-                pass
-            elif df[col].dtype == object:
-                # Map common boolean string representations
-                bool_map = {
-                    "true": True, "false": False, "1": True, "0": False,
-                    "yes": True, "no": False, "sim": True, "não": False,
-                    True: True, False: False, 1: True, 0: False,
-                }
-                df[col] = df[col].map(bool_map)
-                # Unmapped values become None
-                non_bool = ~df[col].isin([True, False])
-                df.loc[non_bool, col] = None
+            def _as_bool(value):
+                if value is None or (isinstance(value, float) and value != value):
+                    return pd.NA
+                if isinstance(value, bool):
+                    return value
+                text = str(value).strip().lower()
+                if text in {"true", "1", "yes", "sim"}:
+                    return True
+                if text in {"false", "0", "no", "não", "nao", "nan", "none", "<na>", ""}:
+                    return False if text in {"false", "0", "no", "não", "nao"} else pd.NA
+                return pd.NA
+
+            df[col] = df[col].map(_as_bool).astype("boolean")
 
         elif not target:
             # No type hint — force object columns to string (safe default)
@@ -264,16 +264,39 @@ def _df_to_arrow(
     # ── Phase 2: Replace NaN/NaT with None ──
     df = df.where(pd.notna(df), None)
 
+    # ── Phase 2b: Re-aplicar coerção de tipo após .where() ──
+    # O .where(..., None) acima converte silenciosamente Int64 (nullable bigint)
+    # para float64/object. Isso causa "Cannot change column type: long -> double"
+    # no Iceberg. Re-aplicamos a coerção para INT e BOOL explicitamente.
+    if column_types:
+        for col in df.columns:
+            target = column_types.get(col, "").lower().strip()
+            if target in _INT_TYPES:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+            elif target in _BOOL_TYPES:
+                df[col] = df[col].astype("boolean")
+
     # ── Phase 3: Convert to PyArrow ──
     arrow_table = pa_lib.Table.from_pandas(df, preserve_index=False)
 
-    # Fix columns that ended up as null type (all None) — convert to string
+    # All-null columns infer as Arrow null. Keep the declared Gold contract
+    # (boolean stays boolean); only fall back to string when no type was given.
+    def _declared_arrow_type(name: str):
+        target = (column_types.get(name, "") if column_types else "").lower().strip()
+        if target in _BOOL_TYPES:
+            return pa_lib.bool_()
+        if target in _INT_TYPES:
+            return pa_lib.int64()
+        if target in _FLOAT_TYPES:
+            return pa_lib.float64()
+        return pa_lib.string()
+
     schema_changed = False
     new_fields = []
     for i in range(len(arrow_table.schema)):
         field = arrow_table.schema.field(i)
         if pa_lib.types.is_null(field.type):
-            new_fields.append(pa_lib.field(field.name, pa_lib.string(), nullable=True))
+            new_fields.append(pa_lib.field(field.name, _declared_arrow_type(field.name), nullable=True))
             schema_changed = True
         else:
             new_fields.append(field)
@@ -442,6 +465,27 @@ def reset_bronze(connection_code: str) -> bool:
     return dropped
 
 
+def _combine_filters(*parts: Any) -> Any:
+    from pyiceberg.expressions import And
+
+    exprs = [part for part in parts if part is not None]
+    if not exprs:
+        raise ValueError("Iceberg row filter requires at least one predicate")
+    row_filter = exprs[0]
+    for part in exprs[1:]:
+        row_filter = And(row_filter, part)
+    return row_filter
+
+
+def _bronze_slice_filter(*, blob_path: str | None = None, billing_period: str | None = None):
+    from pyiceberg.expressions import EqualTo
+
+    return _combine_filters(
+        EqualTo("_blob_path", blob_path) if blob_path else None,
+        EqualTo("_billing_period", str(billing_period)) if billing_period else None,
+    )
+
+
 def delete_bronze_slice(
     connection_code: str,
     *,
@@ -452,22 +496,43 @@ def delete_bronze_slice(
     if not blob_path and not billing_period:
         return
     table_id = _bronze_table_id(connection_code)
-    from pyiceberg.expressions import AlwaysTrue, And, EqualTo
 
     try:
         table = _get_catalog().load_table(table_id)
     except Exception:
         return
 
-    row_filter = AlwaysTrue()
-    if blob_path:
-        row_filter = And(row_filter, EqualTo("_blob_path", blob_path))
-    if billing_period:
-        row_filter = And(row_filter, EqualTo("_billing_period", str(billing_period)))
+    row_filter = _bronze_slice_filter(blob_path=blob_path, billing_period=billing_period)
     table.delete(row_filter)
     logger.info(
         "Deleted Bronze slice from %s.%s (blob_path=%s, billing_period=%s)",
         table_id[0], table_id[1], blob_path, billing_period,
+    )
+
+
+def delete_destination_slice(
+    physical_name: str,
+    *,
+    billing_period: str,
+    connection_id: int,
+    namespace: str = "gold",
+) -> None:
+    """Remove one source/month from a Gold destination table."""
+    from pyiceberg.expressions import And, EqualTo
+
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    tid = _table_id(namespace, safe_name)
+    try:
+        table = _get_catalog().load_table(tid)
+    except Exception:
+        return
+    table.delete(And(
+        EqualTo("_billing_period", str(billing_period)),
+        EqualTo("source_connection_id", int(connection_id)),
+    ))
+    logger.info(
+        "Deleted Gold slice %s.%s period=%s connection_id=%s",
+        namespace, safe_name, billing_period, connection_id,
     )
 
 
@@ -483,15 +548,11 @@ def read_bronze(connection_code: str, blob_path: str | None = None,
     table_id = _bronze_table_id(connection_code)
     table_name = f"{table_id[0]}.{table_id[1]}"
     table = _get_catalog().load_table(table_id)
-    from pyiceberg.expressions import AlwaysTrue, And, EqualTo
-
-    row_filter = AlwaysTrue()
-    if blob_path:
-        row_filter = And(row_filter, EqualTo("_blob_path", blob_path))
-    if billing_period:
-        row_filter = And(row_filter, EqualTo("_billing_period", str(billing_period)))
-
-    scan_kwargs = {"row_filter": row_filter}
+    scan_kwargs: dict[str, Any] = {}
+    if blob_path or billing_period:
+        scan_kwargs["row_filter"] = _bronze_slice_filter(
+            blob_path=blob_path, billing_period=billing_period,
+        )
     if max_rows is not None and max_rows >= 0:
         scan_kwargs["limit"] = max_rows
     return table.scan(**scan_kwargs).to_pandas().reset_index(drop=True)
@@ -505,15 +566,14 @@ def read_bronze_batches(connection_code: str, blob_path: str | None = None,
     table_id = _bronze_table_id(connection_code)
     table_name = f"{table_id[0]}.{table_id[1]}"
     table = _get_catalog().load_table(table_id)
-    from pyiceberg.expressions import AlwaysTrue, And, EqualTo
-
-    row_filter = AlwaysTrue()
-    if blob_path:
-        row_filter = And(row_filter, EqualTo("_blob_path", blob_path))
-    if billing_period:
-        row_filter = And(row_filter, EqualTo("_billing_period", str(billing_period)))
-
-    scan = table.scan(row_filter=row_filter, limit=max_rows if max_rows is not None and max_rows >= 0 else None)
+    scan_kwargs: dict[str, Any] = {}
+    if blob_path or billing_period:
+        scan_kwargs["row_filter"] = _bronze_slice_filter(
+            blob_path=blob_path, billing_period=billing_period,
+        )
+    if max_rows is not None and max_rows >= 0:
+        scan_kwargs["limit"] = max_rows
+    scan = table.scan(**scan_kwargs)
     reader = scan.to_arrow_batch_reader()
     emitted = 0
     for arrow_batch in reader:
@@ -714,7 +774,16 @@ def read_destination_batches(physical_name: str, excluded_periods: set[str] | No
         row_filter = And(row_filter, Not(selected_rows))
     for arrow_batch in table.scan(row_filter=row_filter).to_arrow_batch_reader():
         if arrow_batch.num_rows:
-            yield arrow_batch.to_pandas().reset_index(drop=True)
+            batch_df = arrow_batch.to_pandas().reset_index(drop=True)
+            # Parquet escritos anteriormente armazenaram clone_rule_id/clone_rule_version
+            # como float64 (double). Ao reescrever na staged table (schema=long), o Iceberg
+            # rejeita com "Cannot change column type: long -> double".
+            # Forçamos Int64 (nullable bigint) aqui para evitar esse conflito.
+            _FORCE_INT64 = {"clone_rule_id", "clone_rule_version", "source_connection_id"}
+            for _col in _FORCE_INT64:
+                if _col in batch_df.columns:
+                    batch_df[_col] = pd.to_numeric(batch_df[_col], errors="coerce").astype("Int64")
+            yield batch_df
 
     try:
         table = cat.load_table(tid)
@@ -938,6 +1007,61 @@ def publish_staged_partition(
     return int(row_count)
 
 
+def publish_staged_by_slices(physical_name: str, temp_safe_name: str, namespace: str = "gold") -> int:
+    """Publish a staged table slice-by-slice into the Gold destination table.
+
+    Groups rows by (_billing_period, source_connection_id) and calls
+    publish_staged_partition for each slice, ensuring that other connections'
+    data in the Gold destination table is NEVER overwritten or dropped.
+    """
+    cat = _get_catalog()
+    staging_id = _table_id(namespace, temp_safe_name)
+    try:
+        staged = cat.load_table(staging_id)
+        df_staged = staged.scan().to_arrow().to_pandas()
+    except Exception as e:
+        logger.error("Failed to load staging table %s: %s", temp_safe_name, e)
+        return 0
+
+    if df_staged.empty:
+        _force_delete_table(staging_id, temp_safe_name)
+        return 0
+
+    # to_arrow().to_pandas() converte BIGINT nullable (Int64) para float64 quando
+    # há nulos. Como cada slice é re-escrito abaixo SEM column_types, o schema do
+    # slice staging inferiria clone_rule_id como double e a publicação na Gold
+    # (long) falharia com "Cannot change column type: long -> double".
+    for _col in ("clone_rule_id", "clone_rule_version", "source_connection_id"):
+        if _col in df_staged.columns:
+            df_staged[_col] = pd.to_numeric(df_staged[_col], errors="coerce").astype("Int64")
+
+    total_published = 0
+    grouped = df_staged.groupby(["_billing_period", "source_connection_id"])
+    for (bperiod, cid), group in grouped:
+        slice_temp_name = write_destination_staged(
+            physical_name, group, partition_col="_billing_period", namespace=namespace
+        )
+        try:
+            pub_rows = publish_staged_partition(
+                physical_name, slice_temp_name,
+                billing_period=str(bperiod),
+                connection_id=int(cid),
+                namespace=namespace,
+            )
+        except Exception:
+            # Sem isso, cada fatia cuja publicação falha vira uma tabela
+            # *_stg_* órfã acumulada na Gold.
+            try:
+                _force_delete_table(_table_id(namespace, slice_temp_name), slice_temp_name)
+            except Exception:
+                logger.warning("Falha ao remover staging órfão %s", slice_temp_name)
+            raise
+        total_published += pub_rows
+
+    _force_delete_table(staging_id, temp_safe_name)
+    return total_published
+
+
 def append_to_staged(
     temp_safe_name: str,
     df: pd.DataFrame,
@@ -1137,23 +1261,13 @@ def write_forecast_result(table_name: str, df: pd.DataFrame) -> int:
     return len(df)
 
 
-def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: str | None = None) -> str:
-    """Publish the compact monthly planning table in Gold.
+def planning_table_name(physical_name: str) -> str:
+    return physical_name.replace("-", "_").replace(".", "_") + "_planning"
 
-    This is intentionally separate from the detailed Gold fact table. It only
-    contains configured series dimensions, month, type and forecast measures.
-    ``value_column`` names the forecast measure (e.g. the configured measure
-    column) in the published table; when empty it falls back to ``value``.
-    """
-    if df.empty:
-        return f"{physical_name}_planning"
+
+def _publish_planning_dataframe(safe_name: str, df: pd.DataFrame, value_column: str) -> str:
     _ensure_namespace("gold")
-    safe_name = physical_name.replace("-", "_").replace(".", "_") + "_planning"
-    keep = [c for c in df.columns if c not in {"selected_method", "fallback_level", "history_points", "backtest_wape"}]
-    planning = df[keep].copy()
-    measure_name = value_column or "value"
-    planning = planning.rename(columns={"forecast_month": "period", "forecast_value": measure_name})
-    arrow_table = _df_to_arrow(planning, column_types={measure_name: "DOUBLE"})
+    arrow_table = _df_to_arrow(df, column_types={value_column: "DOUBLE"})
     tid = ("gold", safe_name)
     cat = _get_catalog()
     try:
@@ -1163,5 +1277,51 @@ def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: 
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     table = cat.create_table(tid, schema=pyarrow_to_schema(arrow_table.schema))
     table.append(arrow_table)
-    logger.info("Published %d planning rows to gold.%s", len(planning), safe_name)
+    logger.info("Published %d planning rows to gold.%s", len(df), safe_name)
     return safe_name
+
+
+def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: str | None = None) -> str:
+    """Publish the compact monthly planning table in Gold.
+
+    This is intentionally separate from the detailed Gold fact table. It only
+    contains configured series dimensions, month, type and forecast measures.
+    ``value_column`` names the forecast measure (e.g. the configured measure
+    column) in the published table; when empty it falls back to ``value``.
+    Forecast publish replaces the table; shared-cost rateio is rewritten afterwards.
+    """
+    safe_name = planning_table_name(physical_name)
+    if df.empty:
+        return safe_name
+    keep = [c for c in df.columns if c not in {"selected_method", "fallback_level", "history_points", "backtest_wape"}]
+    planning = df[keep].copy()
+    measure_name = value_column or "value"
+    planning = planning.rename(columns={"forecast_month": "period", "forecast_value": measure_name})
+    return _publish_planning_dataframe(safe_name, planning, measure_name)
+
+
+def merge_planning_rateio(planning_name: str, rateio_df: pd.DataFrame, value_column: str = "realizado") -> int:
+    """Replace ``tipo='rateio'`` rows in the planning table, keeping forecast/realizado."""
+    safe_name = planning_name.replace("-", "_").replace(".", "_")
+    cat = _get_catalog()
+    tid = ("gold", safe_name)
+    existing = pd.DataFrame()
+    try:
+        table = cat.load_table(tid)
+        existing = table.scan().to_pandas()
+    except Exception:
+        existing = pd.DataFrame()
+    if existing.empty:
+        keep = existing
+    elif "tipo" in existing.columns:
+        keep = existing[existing["tipo"].astype(str).str.lower() != "rateio"].copy()
+    else:
+        keep = existing.copy()
+    if rateio_df is None:
+        rateio_df = pd.DataFrame()
+    if keep.empty and rateio_df.empty:
+        return 0
+    frames = [frame for frame in (keep, rateio_df) if frame is not None and not frame.empty]
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    _publish_planning_dataframe(safe_name, combined, value_column)
+    return 0 if rateio_df.empty else int(len(rateio_df))

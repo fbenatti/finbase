@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from app.services.forecast_service import (
     _billing_period_values,
+    _charge_interval_rules,
     _connection_rule_filter,
     _normalize_allocation_rules,
     _series_matches_charge_interval,
@@ -82,3 +83,20 @@ def test_billing_period_values_include_closed_invoice_months():
     )
     assert "202607" in periods
     assert "202608" in periods
+
+
+def test_charge_interval_rules_include_connection_allocation_config():
+    rules = _charge_interval_rules([
+        {"connection_code": "ibm-ti", "connection_id": 3, "period_allocation": "charge_interval", "charge_end_column": "ChargePeriodEnd"},
+        {"connection_code": "gcp-ti", "period_allocation": "none"},
+    ])
+    assert len(rules) == 1
+    assert rules[0]["connection_id"] == 3
+
+
+def test_connection_rule_filter_matches_connection_id_only():
+    rules = [{"connection_id": 3, "period_allocation": "charge_interval"}]
+    clause = _connection_rule_filter(rules, "cloud_origem", "source_connection_id", negate=False)
+    assert clause is not None
+    assert "3" in clause
+    assert "source_connection_id" in clause

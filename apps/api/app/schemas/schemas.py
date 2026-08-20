@@ -32,6 +32,9 @@ class SourceConnectionOut(BaseModel):
     cloud_scope: str | None
     config_json: dict[str, Any]
     blob_prefixes: list[str]
+    last_test_status: str | None = None
+    last_test_message: str | None = None
+    last_tested_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -146,6 +149,35 @@ class DepartmentOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     children: list["DepartmentOut"] = []
+
+    model_config = {"from_attributes": True}
+
+
+class SharedCostTargetIn(BaseModel):
+    department_id: int
+    percent: float | None = None
+
+
+class SharedCostTargetOut(BaseModel):
+    department_id: int
+    percent: float | None = None
+    name: str | None = None
+    path: str | None = None
+
+
+class SharedCostUpsert(BaseModel):
+    enabled: bool = False
+    mode: str = "consumption"
+    targets: list[SharedCostTargetIn] = []
+
+
+class SharedCostOut(BaseModel):
+    department_id: int
+    enabled: bool
+    mode: str
+    name: str | None = None
+    path: str | None = None
+    targets: list[SharedCostTargetOut] = []
 
     model_config = {"from_attributes": True}
 

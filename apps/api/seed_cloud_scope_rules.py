@@ -63,10 +63,10 @@ def recreate_business_rules(session) -> None:
             "priority": 20,
             "expression": None,
             "conditions": [{
-                "field": "ServiceCategory",
-                "op": "==",
+                "field": "MarketplaceProductName",
+                "op": "not_empty",
                 "logic": "AND",
-                "value": "Azure Marketplace Services",
+                "value": "",
                 "then_field": "realizado",
                 "then_value": "BilledCost * 1.1383",
             }],
@@ -83,6 +83,18 @@ def recreate_business_rules(session) -> None:
             "config_json": {},
         },
         {
+            "name": "Realizado GCP com desconto de credito",
+            "rule_type": "EXPRESSION",
+            "target_column": "realizado",
+            "cloud_scope": "gcp",
+            "priority": 10,
+            "expression": "BilledCost + CreditAmount",
+            "conditions": None,
+            "config_json": {
+                "scope_filter": {"field": "Credits", "op": "=", "value": "CREDIT"},
+            },
+        },
+        {
             "name": "Realizado GCP (sem imposto)",
             "rule_type": "EXPRESSION",
             "target_column": "realizado",
@@ -92,19 +104,12 @@ def recreate_business_rules(session) -> None:
             "conditions": None,
             "config_json": {},
         },
-        # Generic fallback: any provider without a specific tax/adjustment rule
-        # still gets ``realizado = BilledCost``. Keeps a new CSV source (IBM,
-        # AWS, OCI, etc.) working with zero code/seed changes.
-        #
-        # Lowest priority on purpose: it runs FIRST and specific provider rules
-        # applied later (higher priority) overwrite it for clouds that need a
-        # tax/adjustment factor.
         {
             "name": "Realizado padrão (qualquer nuvem, sem imposto)",
             "rule_type": "EXPRESSION",
             "target_column": "realizado",
             "cloud_scope": None,
-            "priority": 5,
+            "priority": 100,
             "expression": "BilledCost",
             "conditions": None,
             "config_json": {},

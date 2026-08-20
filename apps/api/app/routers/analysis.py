@@ -35,6 +35,7 @@ from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
 from app.services.iceberg_service import list_tables, get_catalog
+from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
 
 logger = logging.getLogger(__name__)
@@ -155,8 +156,9 @@ class PivotUnionRequest(BaseModel):
 
     ``destination_table_ids`` accepts regular destination ids and negative
     planning pseudo-ids. Each id is resolved via ``_analysis_physical_name``.
-    An ``origem`` column (realizado/forecast) is injected so the user can break
-    the result by source.
+    An ``origem`` column (realizado/forecast) is available as a synthetic
+    dimension so the user can break the result by source, but it is only
+    grouped when requested in ``rows`` or ``columns``.
     """
     destination_table_ids: list[int]
     rows: list[str] = []
@@ -230,6 +232,7 @@ class ExpectedViewRequest(BaseModel):
     director: str = "DIR DADOS E INTELIGENCIA ARTIFICIAL"
     department_id: int | None = None
     year: int = 2026
+    include_shared_cost: bool = False
 
 
 def _quote_ident(identifier: str) -> str:
@@ -257,6 +260,16 @@ async def _describe_gold_schema(safe_name: str, max_retries: int | None) -> dict
         raise HTTPException(status_code=422, detail="A tabela Gold não possui schema disponível no Trino")
     _SCHEMA_CACHE[safe_name] = (time.monotonic(), columns)
     return columns
+
+
+async def _gold_from(
+    db: AsyncSession,
+    destination_table_id: int,
+    table_name: str,
+    schema: dict[str, str],
+) -> str:
+    """Gold scan target. D-n overlay is disabled; forecast overwrites overlapping days."""
+    return f"iceberg.gold.{table_name}"
 
 
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
@@ -334,29 +347,132 @@ def _where_clause(filters: list[PivotFilter], cell_filters: dict[str, Any] | Non
     clauses: list[str] = []
     for item in filters:
         if item.values:
-            values = ', '.join(_quote_literal(v) for v in item.values)
             if item.operator == "NOT_IN":
-                clauses.append(f"({_quote_ident(item.column)} IS NULL OR {_quote_ident(item.column)} NOT IN ({values}))")
+                vals = []
+                for v in item.values:
+                    sv = str(v).lower()
+                    vals.extend([_quote_literal(sv), _quote_literal(sv.replace(" ", "-")), _quote_literal(sv.replace("-", " "))])
+                vals_str = ', '.join(set(vals))
+                clauses.append(f"({_quote_ident(item.column)} IS NULL OR lower(CAST({_quote_ident(item.column)} AS VARCHAR)) NOT IN ({vals_str}))")
             elif item.operator == "CONTAINS":
                 clauses.append("(" + " OR ".join(f"lower(CAST({_quote_ident(item.column)} AS VARCHAR)) LIKE {_quote_literal('%' + str(v).lower() + '%')}" for v in item.values) + ")")
             elif item.operator == "NOT_CONTAINS":
                 clauses.append("(" + " AND ".join(f"lower(CAST({_quote_ident(item.column)} AS VARCHAR)) NOT LIKE {_quote_literal('%' + str(v).lower() + '%')}" for v in item.values) + ")")
             else:
-                clauses.append(f"{_quote_ident(item.column)} IN ({values})")
+                vals = []
+                for v in item.values:
+                    sv = str(v).lower()
+                    vals.extend([_quote_literal(sv), _quote_literal(sv.replace(" ", "-")), _quote_literal(sv.replace("-", " "))])
+                vals_str = ', '.join(set(vals))
+                clauses.append(f"lower(CAST({_quote_ident(item.column)} AS VARCHAR)) IN ({vals_str})")
     for column, value in (cell_filters or {}).items():
         if value is None:
             clauses.append(f"{_quote_ident(column)} IS NULL")
         else:
-            clauses.append(f"{_quote_ident(column)} = {_quote_literal(value)}")
+            clauses.append(f"lower(CAST({_quote_ident(column)} AS VARCHAR)) = {_quote_literal(str(value).lower())}")
     return " WHERE " + " AND ".join(clauses) if clauses else ""
 
 
 _PERIOD_COLUMNS = ("_billing_period", "period", "forecast_month")
+_PERIOD_NAMES_LOWER = {name.lower() for name in _PERIOD_COLUMNS}
+_MEASURE_FALLBACKS = ("realizado", "value", "EffectiveCost", "BilledCost")
 
 
 def _has_period_filter(filters: list[PivotFilter]) -> bool:
-    period_names = {name.lower() for name in _PERIOD_COLUMNS}
-    return any(f.values and f.column.lower() in period_names for f in filters)
+    return any(f.values and f.column.lower() in _PERIOD_NAMES_LOWER for f in filters)
+
+
+def _period_on_axes(*axis_groups: list[str]) -> bool:
+    names = {str(name).lower() for group in axis_groups for name in group}
+    return bool(names & _PERIOD_NAMES_LOWER)
+
+
+def _schema_period_column(schema: dict[str, str]) -> str | None:
+    lowered = {name.lower(): name for name in schema}
+    for candidate in _PERIOD_COLUMNS:
+        if candidate.lower() in lowered:
+            return lowered[candidate.lower()]
+    return None
+
+
+def _filters_for_side(filters: list[PivotFilter], schema: dict[str, str]) -> list[PivotFilter]:
+    """Keep filters this table can evaluate, remapping Gold/planning period names.
+
+    Realized Gold filters on ``_billing_period``; planning uses ``period``.
+    Without the remap, a union applied the auto month filter only on Gold and
+    returned every forecast month.
+    """
+    applied: list[PivotFilter] = []
+    for item in filters:
+        if item.column in schema:
+            applied.append(item)
+            continue
+        if item.column.lower() not in _PERIOD_NAMES_LOWER:
+            continue
+        physical = _schema_period_column(schema)
+        if physical:
+            applied.append(item.model_copy(update={"column": physical}))
+    return applied
+
+
+def _origin_from_cell_filters(
+    cell_filters: dict[str, Any],
+    origin_column: str = "origem",
+) -> tuple[dict[str, Any], str | None]:
+    """Split the synthetic union dimension from real Gold/planning predicates."""
+    remaining: dict[str, Any] = {}
+    origin_value: str | None = None
+    wanted = origin_column.lower()
+    for column, value in cell_filters.items():
+        if str(column).lower() == wanted:
+            origin_value = None if value is None else str(value)
+        else:
+            remaining[column] = value
+    return remaining, origin_value
+
+
+def _destination_id_for_origin(table_id: int, origin_value: str | None) -> int:
+    """Map realizado/forecast cell labels onto Gold vs planning destination ids."""
+    if not origin_value:
+        return table_id
+    label = origin_value.strip().lower()
+    if label in {"forecast", "previsto", "planejado"}:
+        return -abs(table_id) if table_id else table_id
+    if label in {"realizado", "actual", "gold"}:
+        return abs(table_id)
+    return table_id
+
+
+def _cell_filters_for_side(cell_filters: dict[str, Any], schema: dict[str, str]) -> dict[str, Any]:
+    """Keep cell predicates this table can evaluate, remapping period names."""
+    mapped: dict[str, Any] = {}
+    by_lower = {name.lower(): name for name in schema}
+    for column, value in cell_filters.items():
+        if column in schema:
+            mapped[column] = value
+            continue
+        canonical = by_lower.get(str(column).lower())
+        if canonical:
+            mapped[canonical] = value
+            continue
+        if str(column).lower() in _PERIOD_NAMES_LOWER:
+            physical = _schema_period_column(schema)
+            if physical:
+                mapped[physical] = value
+    return mapped
+
+
+def _measure_column_for_side(schema: dict[str, str], requested: str) -> str | None:
+    """Resolve a pivot measure on a union side, including planning aliases."""
+    if requested in schema:
+        return requested
+    lowered = {name.lower(): name for name in schema}
+    if requested.lower() in lowered:
+        return lowered[requested.lower()]
+    for candidate in _MEASURE_FALLBACKS:
+        if candidate.lower() in lowered:
+            return lowered[candidate.lower()]
+    return None
 
 
 async def _inject_latest_period_filter(
@@ -365,15 +481,20 @@ async def _inject_latest_period_filter(
     schema: dict[str, str],
     filters: list[PivotFilter],
     trino_kwargs: dict[str, Any] | None = None,
+    axis_names: list[str] | None = None,
 ) -> tuple[list[PivotFilter], str | None]:
     """Restrict unbounded pivots to the latest billing partition.
 
     The Gold FOCUS table holds ~25M rows (mostly Azure-TI). Pivot/search
     without a period filter forces Trino to scan every partition and often
     OOMs the 2 GB coordinator heap.
+
+    When the user already put a period column on rows/columns, do not collapse
+    the axis to a single month — that made realizado look like "current month
+    only" while forecast still spanned ``period``.
     """
-    period_col = next((name for name in _PERIOD_COLUMNS if name in schema), None)
-    if not period_col or _has_period_filter(filters):
+    period_col = _schema_period_column(schema)
+    if not period_col or _has_period_filter(filters) or _period_on_axes(axis_names or []):
         return filters, None
     latest_rows = await trino_execute(
         f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
@@ -401,6 +522,63 @@ def _measure_sql(measure: PivotMeasure, index: int) -> tuple[str, str]:
         "MAX": f"MAX({column})",
     }[measure.aggregation]
     return f"{expression} AS {alias}", alias
+
+
+def _dimension_order_by(row_count: int, column_count: int) -> str:
+    """Order the outer pivot by positional aliases ``d0..dn``.
+
+    After ``_apply_pivot_axis_limits`` the result set only exposes those
+    aliases, so ``ORDER BY "departamento"`` 503s in Trino.
+    """
+    total = row_count + column_count
+    if total <= 0:
+        return ""
+    return " ORDER BY " + ", ".join(f"d{i}" for i in range(total))
+
+
+def _apply_pivot_axis_limits(
+    aggregated_sql: str,
+    rows: list[str],
+    columns: list[str],
+    num_measures: int,
+    row_limit: int,
+    column_limit: int,
+    order_by: str,
+) -> str:
+    """Keep every billing period for the top row keys.
+
+    A global ``LIMIT row_limit * column_limit`` on the grouped result filled up
+    with early months / forecast keys and dropped realizado from January onward.
+    """
+    all_names = [*rows, *columns]
+    period_aliases = [f"d{i}" for i, name in enumerate(all_names) if str(name).lower() in _PERIOD_NAMES_LOWER]
+    other_aliases = [f"d{i}" for i, name in enumerate(all_names) if str(name).lower() not in _PERIOD_NAMES_LOWER]
+    hard_cap = 30000
+    if not all_names:
+        return f"{aggregated_sql}{order_by} LIMIT {hard_cap}"
+
+    rlim = max(1, min(int(row_limit or 500), 2000))
+    clim = max(1, min(int(column_limit or 60), 120))
+    measure0 = "m0" if num_measures else None
+    ctes = [f"agg AS ({aggregated_sql})"]
+    joins: list[str] = []
+    if other_aliases:
+        keys = ", ".join(other_aliases)
+        rank = f" ORDER BY SUM(COALESCE({measure0}, 0)) DESC" if measure0 else f" ORDER BY {keys}"
+        ctes.append(f"row_keys AS (SELECT {keys} FROM agg GROUP BY {keys}{rank} LIMIT {rlim})")
+        # IS NOT DISTINCT FROM: JOIN ... USING eliminava silenciosamente toda
+        # linha cuja chave contivesse NULL em qualquer dimensão (ex.: fontes
+        # com menos níveis de departamento preenchidos, como MongoDB).
+        cond = " AND ".join(f"agg.{k} IS NOT DISTINCT FROM row_keys.{k}" for k in other_aliases)
+        joins.append(f"JOIN row_keys ON {cond}")
+    if period_aliases:
+        keys = ", ".join(period_aliases)
+        ctes.append(f"period_keys AS (SELECT {keys} FROM agg GROUP BY {keys} ORDER BY {keys} LIMIT {clim})")
+        cond = " AND ".join(f"agg.{k} IS NOT DISTINCT FROM period_keys.{k}" for k in period_aliases)
+        joins.append(f"JOIN period_keys ON {cond}")
+    if not joins:
+        return f"{aggregated_sql}{order_by} LIMIT {hard_cap}"
+    return f"WITH {', '.join(ctes)} SELECT agg.* FROM agg {' '.join(joins)}{order_by} LIMIT {hard_cap}"
 
 
 def _build_order_by(
@@ -438,22 +616,49 @@ def _build_order_by(
     return " ORDER BY " + ", ".join(terms)
 
 
+async def _declared_column_order(
+    db: AsyncSession,
+    destination_table_id: int,
+    schema: dict[str, str],
+) -> list[str]:
+    """Order Gold columns from destination metadata, then remaining Iceberg fields."""
+    from app.models.destination import DestinationColumn
+
+    declared: list[str] = []
+    dest_id = abs(destination_table_id)
+    if dest_id:
+        result = await db.execute(
+            select(DestinationColumn.column_name)
+            .where(DestinationColumn.destination_table_id == dest_id)
+            .order_by(DestinationColumn.position, DestinationColumn.id)
+        )
+        declared = [name for name in result.scalars().all() if name in schema]
+    extras = [name for name in schema if name not in set(declared)]
+    return [*declared, *extras]
+
+
 @router.get("/pivot/metadata/{destination_table_id}")
 async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(get_db)):
-    """Return the real Gold schema and sensible FinOps field suggestions."""
+    """Return the live Gold/Iceberg schema, ordered by destination column metadata."""
     _, schema = await _pivot_table_context(db, destination_table_id)
-    numeric = [name for name, typ in schema.items() if any(t in typ.lower() for t in ("int", "double", "real", "decimal", "float", "bigint"))]
-    dimensions = [name for name in schema if name not in numeric]
-    recommended = [name for name in ["_billing_period", "departamento", "cloud_origem", "ChargeCategory", "ServiceName", "RegionName", "SubscriptionName", "Currency"] if name in schema]
-    effective = next((name for name in numeric if name.lower() == "effectivecost"), None)
-    billed = next((name for name in numeric if name.lower() == "billedcost"), None)
+    ordered = await _declared_column_order(db, destination_table_id, schema)
+    numeric = [
+        name for name in ordered
+        if any(token in schema[name].lower() for token in ("int", "double", "real", "decimal", "float", "bigint"))
+    ]
+    numeric_set = set(numeric)
+    dimensions = [name for name in ordered if name not in numeric_set]
+    float_measures = [
+        name for name in numeric
+        if any(token in schema[name].lower() for token in ("double", "real", "decimal", "float"))
+    ]
     return {
         "destination_table_id": destination_table_id,
-        "columns": [{"name": name, "type": typ, "numeric": name in numeric} for name, typ in schema.items()],
+        "columns": [{"name": name, "type": schema[name], "numeric": name in numeric_set} for name in ordered],
         "dimensions": dimensions,
         "measures": numeric,
-        "recommended_dimensions": recommended,
-        "default_measure": effective or billed or (numeric[0] if numeric else None),
+        "recommended_dimensions": dimensions[:8],
+        "default_measure": (float_measures[0] if float_measures else numeric[0]) if numeric else None,
     }
 
 
@@ -483,6 +688,7 @@ async def _search_pivot_table_core(
     effective_filters, auto_period = await _inject_latest_period_filter(
         "gold", table_name, schema, filter_request.filters, trino_kwargs=trino_kwargs,
     )
+    gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
     filter_sql = _where_clause(effective_filters)
     text_columns = [name for name, typ in schema.items() if any(token in typ.lower() for token in ("varchar", "char", "json"))]
     if not text_columns:
@@ -527,7 +733,7 @@ async def _search_pivot_table_core(
             ) + ")"
             where = f" WHERE {search_condition}" + (f" AND {filter_sql[7:]}" if filter_sql else "")
             selected = ", ".join(_quote_ident(column) for column in group)
-            sql = f"SELECT {selected} FROM iceberg.gold.{table_name}{where} LIMIT {limit - len(rows)}"
+            sql = f"SELECT {selected} FROM {gold_from}{where} LIMIT {limit - len(rows)}"
             try:
                 group_rows = await trino_execute(
                     sql,
@@ -560,6 +766,25 @@ async def _search_pivot_table_core(
     if auto_period:
         response["period_auto_applied"] = auto_period
     return response
+
+
+def _period_sort_tuple(value: Any) -> tuple:
+    """Sort YYYYMM / YYYY-MM as calendar time, not first-seen insertion order."""
+    text = str(value or "").strip()
+    digits = re.sub(r"[^0-9]", "", text)
+    if len(digits) >= 6:
+        return (0, int(digits[:6]))
+    return (1, text.lower())
+
+
+def _chronological_axis_keys(keys: list[tuple[Any, ...]], dim_names: list[str]) -> list[tuple[Any, ...]]:
+    period_idx = [i for i, name in enumerate(dim_names) if str(name).lower() in _PERIOD_NAMES_LOWER]
+    if not period_idx or not keys:
+        return keys
+    return sorted(
+        keys,
+        key=lambda item: tuple(_period_sort_tuple(item[i] if i < len(item) else None) for i in period_idx),
+    )
 
 
 def _build_pivot_result(
@@ -599,6 +824,10 @@ def _build_pivot_result(
 
     ordered_row_keys = _order_keys(list(row_keys), rows + columns, records, sort_rows, axis="row", other_count=len(columns))
     ordered_col_keys = _order_keys(list(col_keys), rows + columns, records, sort_columns, axis="col", other_count=len(rows))
+    if not sort_rows:
+        ordered_row_keys = _chronological_axis_keys(ordered_row_keys, rows)
+    if not sort_columns:
+        ordered_col_keys = _chronological_axis_keys(ordered_col_keys, columns)
 
     # Recompute grand total (sum across all cells) once, independent of order.
     for cell in cells:
@@ -703,6 +932,7 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
     rows, columns, measures = _validate_pivot_request(req, schema)
     req.filters, auto_period = await _inject_latest_period_filter(
         "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
+        axis_names=[*rows, *columns],
     )
     dimensions = rows + columns
     select_dims = [f"{_quote_ident(name)} AS d{index}" for index, name in enumerate(dimensions)]
@@ -712,10 +942,13 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
     if req.sort_rows:
         order_by = _build_order_by(req.sort_rows, rows, columns, len(measures))
     else:
-        order_by = f" ORDER BY {', '.join(_quote_ident(name) for name in dimensions)}" if dimensions else ""
+        order_by = _dimension_order_by(len(rows), len(columns))
     # A bounded aggregated result is deliberate: it protects Trino and the UI.
-    limit = max(1, min(req.row_limit * max(1, req.column_limit), 30000))
-    sql = f"SELECT {', '.join([*select_dims, *measure_parts])} FROM iceberg.gold.{table_name}{where}{group_by}{order_by} LIMIT {limit}"
+    gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
+    inner_sql = f"SELECT {', '.join([*select_dims, *measure_parts])} FROM {gold_from}{where}{group_by}"
+    sql = _apply_pivot_axis_limits(
+        inner_sql, rows, columns, len(measures), req.row_limit, req.column_limit, order_by,
+    )
     try:
         records = await trino_execute(sql, **trino_kwargs)
     except TrinoCancelled:
@@ -744,8 +977,9 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
     planning pseudo-destinations). The schemas differ (a Gold table has hundreds
     of columns, a planning table keeps only dimensions + period + tipo + the
     measure), so a plain ``UNION ALL`` would fail. Instead each side selects the
-    same column set using ``CAST(NULL AS ...)`` for columns it lacks, and an
-    origin column (``origem``) is injected to tell realized from forecast.
+    same column set using ``CAST(NULL AS ...)`` for columns it lacks. A
+    synthetic origin column (``origem``) is projected so the client can group
+    by realizado vs forecast when that field is on the axes — never forced.
     """
     if not req.destination_table_ids:
         raise HTTPException(status_code=422, detail="Informe ao menos uma tabela para união")
@@ -773,12 +1007,14 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
     _canonicalize_request(req, merged_schema)  # type: ignore[arg-type]
     rows, columns, measures = _validate_pivot_request(req, merged_schema)  # type: ignore[arg-type]
     auto_period: str | None = None
-    for _table_id, safe_name, schema in sides:
-        if _table_id >= 0 and not safe_name.endswith("_planning"):
-            req.filters, auto_period = await _inject_latest_period_filter(
-                "gold", safe_name, schema, req.filters, trino_kwargs=trino_kwargs,
-            )
-            break
+    if not _period_on_axes(rows, columns):
+        for _table_id, safe_name, schema in sides:
+            if _table_id >= 0 and not safe_name.endswith("_planning"):
+                req.filters, auto_period = await _inject_latest_period_filter(
+                    "gold", safe_name, schema, req.filters, trino_kwargs=trino_kwargs,
+                    axis_names=[*rows, *columns],
+                )
+                break
 
     # Determine an origin label for each side. Planning pseudo-destinations
     # (negative id, or a name ending in `_planning`) map to "forecast".
@@ -836,8 +1072,9 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
                     exprs.append(f"CAST(NULL AS VARCHAR) AS {_quote_ident(name)}")
         for i, measure in enumerate(measures):
             inner = measure_aliases_inner[i]
-            if measure.column in schema:
-                exprs.append(f"TRY_CAST({_quote_ident(measure.column)} AS DOUBLE) AS {inner}")
+            source = _measure_column_for_side(schema, measure.column)
+            if source:
+                exprs.append(f"TRY_CAST({_quote_ident(source)} AS DOUBLE) AS {inner}")
             else:
                 exprs.append(f"CAST(NULL AS DOUBLE) AS {inner}")
         exprs.append(f"CAST({_quote_literal(origin)} AS VARCHAR) AS {origin_name}")
@@ -849,14 +1086,22 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
     # the aligned axes. A side missing a filtered column simply skips that
     # filter (e.g. a planning table lacks most Gold dimensions).
     def side_filters(schema: dict[str, str]) -> list[PivotFilter]:
-        return [f for f in req.filters if f.column in schema]  # type: ignore[union-attr]
+        return _filters_for_side(req.filters, schema)
 
     union_parts: list[str] = []
     for (_table_id, safe_name, schema), origin in zip(sides, origin_values):
         exprs = aligned_projection(schema, origin)
-        filter_sql = _where_clause(side_filters(schema))
+        extra_filters = list(side_filters(schema))
+        if origin == "forecast" and "tipo" in schema:
+            extra_filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
+        filter_sql = _where_clause(extra_filters)
+        gold_from = (
+            f"iceberg.gold.{safe_name}"
+            if origin == "forecast"
+            else await _gold_from(db, _table_id, safe_name, schema)
+        )
         union_parts.append(
-            f"SELECT {', '.join(exprs)} FROM iceberg.gold.{safe_name}{filter_sql}"
+            f"SELECT {', '.join(exprs)} FROM {gold_from}{filter_sql}"
         )
 
     # The outer query aliases the aligned columns back to d0..dn / m0..mk and
@@ -880,12 +1125,14 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
     if req.sort_rows:
         order_by = _build_order_by(req.sort_rows, rows, columns, len(measures))
     else:
-        order_by = f" ORDER BY {', '.join(_quote_ident(name) for name in dimensions)}" if dimensions else ""
-    limit = max(1, min(req.row_limit * max(1, req.column_limit), 30000))
+        order_by = _dimension_order_by(len(rows), len(columns))
     union_sql = " UNION ALL ".join(f"({part})" for part in union_parts)
-    sql = (
+    inner_sql = (
         f"SELECT {', '.join([*dim_aliases, *measure_aliases])} "
-        f"FROM ({union_sql}) AS u_src{group_by}{order_by} LIMIT {limit}"
+        f"FROM ({union_sql}) AS u_src{group_by}"
+    )
+    sql = _apply_pivot_axis_limits(
+        inner_sql, rows, columns, len(measures), req.row_limit, req.column_limit, order_by,
     )
 
     try:
@@ -918,10 +1165,14 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     """Return raw (non-aggregated) Gold records for the browser to feed Perspective."""
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     by_lower = {name.lower(): name for name in schema}
-    canonical_columns = [by_lower.get(name.lower(), name) for name in req.columns]
-    invalid = sorted({name for name in canonical_columns if name not in schema})
-    if invalid:
-        raise HTTPException(status_code=422, detail=f"Colunas inválidas para esta tabela: {', '.join(invalid)}")
+    requested = [name for name in req.columns if name.lower() != "origem"]
+    if requested:
+        canonical_columns = [by_lower.get(name.lower(), name) for name in requested]
+        invalid = sorted({name for name in canonical_columns if name not in schema})
+        if invalid:
+            raise HTTPException(status_code=422, detail=f"Colunas inválidas para esta tabela: {', '.join(invalid)}")
+    else:
+        canonical_columns = await _declared_column_order(db, req.destination_table_id, schema)
     filter_items = [item.model_copy(update={"column": by_lower.get(item.column.lower(), item.column)}) for item in req.filters]
     invalid_filters = sorted({item.column for item in filter_items if item.column not in schema})
     if invalid_filters:
@@ -932,17 +1183,11 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     where = _where_clause(filter_items)
     limit = max(1, min(req.limit, 50000))
     offset = max(0, req.offset)
-    if canonical_columns:
-        select_expr = ", ".join(_quote_ident(name) for name in canonical_columns)
-    else:
-        select_expr = "*"
-    # Without ORDER BY, Iceberg/Trino returns rows in an undefined file order,
-    # which can make a LIMIT sample consist of a single billing period. Sort by
-    # the best available temporal column so the browser sees a representative
-    # slice across periods.
-    order_candidates = [name for name in ("_billing_period", "period", "ChargePeriodStart", "BillingPeriodStart") if name in schema]
-    order_by = f" ORDER BY {_quote_ident(order_candidates[0])} DESC" if order_candidates else ""
-    sql = f"SELECT {select_expr} FROM iceberg.gold.{table_name}{where}{order_by} OFFSET {offset} LIMIT {limit}"
+    select_expr = ", ".join(_quote_ident(name) for name in canonical_columns) if canonical_columns else "*"
+    period_col = _schema_period_column(schema)
+    order_by = f" ORDER BY {_quote_ident(period_col)} DESC" if period_col else ""
+    gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
+    sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
     try:
         rows = await trino_execute(sql, **trino_kwargs)
     except TrinoCancelled:
@@ -971,20 +1216,31 @@ async def pivot_drill_down(req: PivotDrillDownRequest, request: Request, db: Asy
 
 
 async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
-    table_name, schema = await _pivot_table_context(db, req.destination_table_id)
-    _canonicalize_request(req, schema)
-    req.cell_filters = {next((name for name in schema if name.lower() == column.lower()), column): value for column, value in req.cell_filters.items()}
-    _validate_pivot_request(req, schema)
-    invalid = [column for column in req.cell_filters if column not in schema]
-    if invalid:
-        raise HTTPException(status_code=422, detail=f"Filtros da célula inválidos: {', '.join(invalid)}")
-    req.filters, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
+    cell_filters, origin_value = _origin_from_cell_filters(req.cell_filters)
+    table_id = _destination_id_for_origin(req.destination_table_id, origin_value)
+    table_name, schema = await _pivot_table_context(db, table_id)
+    req.filters = _filters_for_side(
+        [item.model_copy(update={"column": next((name for name in schema if name.lower() == item.column.lower()), item.column)}) for item in req.filters],
+        schema,
     )
-    where = _where_clause(req.filters, req.cell_filters)
+    cell_filters = _cell_filters_for_side(cell_filters, schema)
+    period_in_cell = any(str(column).lower() in _PERIOD_NAMES_LOWER for column in cell_filters)
+    auto_period: str | None = None
+    if not period_in_cell:
+        req.filters, auto_period = await _inject_latest_period_filter(
+            "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
+            axis_names=list(cell_filters),
+        )
+    where = _where_clause(req.filters, cell_filters)
+    ordered = await _declared_column_order(db, table_id, schema)
     limit = max(1, min(req.limit, 500))
-    sql = f"SELECT * FROM iceberg.gold.{table_name}{where} OFFSET {max(0, req.offset)} LIMIT {limit}"
-    count_sql = f"SELECT COUNT(*) AS total FROM iceberg.gold.{table_name}{where}"
+    offset = max(0, req.offset)
+    select_expr = ", ".join(_quote_ident(name) for name in ordered) if ordered else "*"
+    period_col = _schema_period_column(schema)
+    order_by = f" ORDER BY {_quote_ident(period_col)} DESC" if period_col else ""
+    gold_from = await _gold_from(db, table_id, table_name, schema)
+    sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
+    count_sql = f"SELECT COUNT(*) AS total FROM {gold_from}{where}"
     try:
         rows = await trino_execute(sql, **trino_kwargs)
         counted = await trino_execute(count_sql, **trino_kwargs)
@@ -993,11 +1249,11 @@ async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, t
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha no drill-down do Trino: {exc}")
     response = {
-        "columns": list(rows[0].keys()) if rows else list(schema.keys()),
+        "columns": ordered,
         "rows": rows,
         "total": int(counted[0]["total"]) if counted else 0,
         "limit": limit,
-        "offset": req.offset,
+        "offset": offset,
     }
     if auto_period:
         response["period_auto_applied"] = auto_period
@@ -1188,6 +1444,8 @@ def _expected_view_cloud_filter(
     if "cloud_origem" not in columns:
         return ""
     prefix = (selected.cloud_filter.strip().lower() if selected and selected.cloud_filter else "")
+    if not prefix and any("mongo" in part.lower() for part in scope_path):
+        prefix = "mongodb"
     if not prefix and len(scope_path) >= 3 and scope_path[1] in _CLOUD_BRANCHES and scope_path[2] in _CLOUD_PROVIDERS:
         prefix = _PROVIDER_CLOUD_PREFIX.get(scope_path[2], scope_path[2].lower())
     if not prefix:
@@ -1199,7 +1457,7 @@ def _expected_view_cloud_filter(
 @router.post("/expected-view")
 async def expected_view(body: ExpectedViewRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Executive view for any node of the seven-level organization tree."""
-    async with _ClientCancelScope(request) as scope:
+    async with _ClientCancelScope(request, timeout_s=120) as scope:
         try:
             return await _expected_view_core(body, db, scope.trino_kwargs)
         except TrinoCancelled:
@@ -1241,7 +1499,7 @@ async def _expected_view_core(
         current: Department | None = selected
         seen: set[int] = set()
         while current and current.id not in seen:
-            seen.add(current.id); scope_path.append(current.name)
+            seen.add(current.id); scope_path.append((current.name or "").strip())
             current = department_map.get(current.parent_id) if current.parent_id else None
         scope_path.reverse()
     else:
@@ -1255,7 +1513,9 @@ async def _expected_view_core(
             key = f"departamento_nivel_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}; reprocese os dados após ajustar o organograma")
-            checks.append(f"{_quote_ident(columns[key])} = {_quote_literal(name)}")
+            checks.append(
+                f"TRIM(CAST({_quote_ident(columns[key])} AS VARCHAR)) = {_quote_literal(name.strip())}"
+            )
         return " AND ".join(checks)
 
     actual_scope_filter = scope_filter(actual_columns)
@@ -1287,21 +1547,24 @@ async def _expected_view_core(
         raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
     cutoff = str(cutoff_rows[0]["period"]) if cutoff_rows and cutoff_rows[0].get("period") is not None else None
     cutoff_lit = _quote_literal(cutoff) if cutoff else None
-    actual_cutoff = f" AND {actual_period} < {cutoff_lit}" if cutoff_lit else ""
+    # Realizado always comes from Gold for every collected month. A global
+    # ``actual_period < MIN(forecast)`` cutoff hid recent loads (e.g. July
+    # azure-marketplace) whenever another series already had forecast rows in
+    # an earlier month.
     forecast_from = f" AND {forecast_period} >= {cutoff_lit}" if cutoff_lit else ""
     driver_level = min(len(scope_path) + 1, 7)
     driver_key = f"departamento_nivel_{driver_level}"
     actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
     forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
+    actual_from = await _gold_from(db, 1, actual_name, actual_schema)
     actual_sql = f"""
       SELECT {actual_period} AS period,
              COALESCE(NULLIF(TRIM(CAST({actual_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
              SUM(COALESCE(TRY_CAST({actual_value} AS DOUBLE), 0)) AS actual_value
-      FROM iceberg.gold.{actual_name}
+      FROM {actual_from}
       WHERE {actual_scope_filter}{actual_cloud_filter}
         AND {actual_year_filter}
         {tipo_actual}
-        {actual_cutoff}
       GROUP BY 1, 2
     """
     forecast_sql = f"""
@@ -1325,6 +1588,7 @@ async def _expected_view_core(
     by_period_facts: dict[str, dict[str, Any]] = {}
     actual_by_driver: dict[str, float] = {}
     forecast_by_driver: dict[str, float] = {}
+    shared_by_driver: dict[str, float] = {}
     for row in actual_fact_rows:
         period = str(row.get("period") or "")
         driver = str(row.get("driver") or "Sem departamento filho")
@@ -1338,7 +1602,49 @@ async def _expected_view_core(
         value = float(row.get("forecast_value") or 0)
         current = by_period_facts.setdefault(period, {"period": period, "actual_value": None, "forecast_value": 0.0})
         current["forecast_value"] = float(current.get("forecast_value") or 0) + value
-        forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
+        # Closed months already count as realizado. Keep leftover planning
+        # forecast on the row for the chart, but do not add it to the year
+        # forecast / waterfall — otherwise the donor still shows the full
+        # condomínio forecast after rateio has zeroed the actual.
+        if current.get("actual_value") is None:
+            forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
+    if body.include_shared_cost:
+        medida_col = forecast_columns.get("rateio_medida")
+        medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
+        rateio_sql = f"""
+          SELECT {forecast_period} AS period,
+                 COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
+                 {medida_sql},
+                 SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
+          FROM iceberg.gold.{forecast_name}
+          WHERE {forecast_scope_filter}{forecast_cloud_filter}
+            AND {forecast_year_filter}
+            AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
+          GROUP BY 1, 2{', 3' if medida_col else ''}
+        """
+        try:
+            rateio_rows = await trino_execute(rateio_sql, **interactive)
+        except TrinoCancelled:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Falha ao consultar o rateio de custo compartilhado: {exc}")
+        actual_rateio: list[dict[str, Any]] = []
+        forecast_rateio: list[dict[str, Any]] = []
+        closed_periods = {
+            period for period, fact in by_period_facts.items()
+            if fact.get("actual_value") is not None
+        }
+        for row in rateio_rows:
+            period = str(row.get("period") or "")
+            medida = str(row.get("rateio_medida") or "").lower()
+            fact = {"period": row.get("period"), "driver": row.get("driver"), "value": row.get("value")}
+            if period in closed_periods:
+                if medida != RATEIO_MEDIDA_FORECAST:
+                    actual_rateio.append(fact)
+            elif medida != RATEIO_MEDIDA_ACTUAL:
+                forecast_rateio.append(fact)
+        apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_value")
+        apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_value")
     fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
     budget_year = body.year
     budget_entries = (await db.execute(
@@ -1388,19 +1694,35 @@ async def _expected_view_core(
         row = by_period[period]
         actual = row.get("actual_value")
         forecast = row.get("forecast_value")
+        shared = float(row.get("shared_value") or 0)
+        received = float(row.get("shared_received") or 0)
+        given = float(row.get("shared_given") or 0)
         budget = budget_by_period.get(period, 0.0)
-        # Forecast is realized only for closed months; the current forecast
-        # month and every future month come from the automatic forecast.
-        expected = actual if actual is not None else (forecast if forecast is not None else budget)
-        cumulative += float(expected or 0)
-        rows.append({"period": period, "actual_value": actual, "forecast_value": forecast,
-                     "budget_value": budget, "expected_value": expected, "cumulative_value": cumulative})
+        # Realizado from Gold wins for closed/collected months; forecast fills
+        # open and future months from the planning table. Shared cost is a
+        # separate stack on top of that base, not mixed into Gold.
+        base = actual if actual is not None else (forecast if forecast is not None else budget)
+        expected = float(base or 0) + shared
+        cumulative += expected
+        rows.append({
+            "period": period,
+            "actual_value": actual,
+            "forecast_value": forecast,
+            "shared_value": shared if abs(shared) >= 1e-12 else 0.0,
+            "shared_received": received if abs(received) >= 1e-12 else 0.0,
+            "shared_given": given if abs(given) >= 1e-12 else 0.0,
+            "budget_value": budget,
+            "expected_value": expected,
+            "cumulative_value": cumulative,
+        })
     composed_forecast_by_driver = {
-        name: actual_by_driver.get(name, 0.0) + forecast_by_driver.get(name, 0.0)
-        for name in set(actual_by_driver) | set(forecast_by_driver)
+        name: actual_by_driver.get(name, 0.0) + forecast_by_driver.get(name, 0.0) + shared_by_driver.get(name, 0.0)
+        for name in set(actual_by_driver) | set(forecast_by_driver) | set(shared_by_driver)
     }
     drivers = [
         {"name": name, "budget_value": budget_by_driver.get(name, 0.0),
+         "actual_value": actual_by_driver.get(name, 0.0),
+         "shared_value": shared_by_driver.get(name, 0.0),
          "forecast_value": composed_forecast_by_driver.get(name, 0.0),
          "variance": budget_by_driver.get(name, 0.0) - composed_forecast_by_driver.get(name, 0.0)}
         for name in sorted(set(budget_by_driver) | set(composed_forecast_by_driver))
@@ -1530,7 +1852,10 @@ async def get_summary(
     if layer == "gold":
         where = ["1=1"]
         if connection_code:
-            where.append(f'"source_connection_id" = \'{connection_code}\'')
+            if connection_code.isdigit():
+                where.append(f'"source_connection_id" = {int(connection_code)}')
+            else:
+                where.append(f'"cloud_origem" = \'{connection_code}\'')
         if billing_period:
             where.append(f'"_billing_period" = \'{billing_period}\'')
         sql = f"""
@@ -1541,7 +1866,7 @@ async def get_summary(
                 COUNT(*) AS total_rows,
                 SUM(COALESCE("BilledCost", 0)) AS total_billed,
                 SUM(COALESCE("EffectiveCost", 0)) AS total_effective,
-                COUNT(DISTINCT diretoria) AS num_diretorias,
+                COUNT(DISTINCT "departamento_nivel_1") AS num_diretorias,
                 COUNT(DISTINCT "ServiceName") AS num_services
             FROM iceberg.gold.dest_modelo_focus
             WHERE {' AND '.join(where)}
@@ -1563,7 +1888,7 @@ async def get_summary(
         return {"summary": rows}
 
     try:
-        result = await trino_execute(sql)
+        result = await trino_execute(sql, timeout_s=180)
         return {"summary": result}
     except TrinoError as e:
         raise HTTPException(status_code=502, detail=str(e))
