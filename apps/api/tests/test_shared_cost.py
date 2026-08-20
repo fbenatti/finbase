@@ -304,6 +304,35 @@ def test_same_cloud_leaves_exclude_donor_and_other_clouds():
     assert leaves == [6]
 
 
+def test_same_cloud_leaves_shallow_marketplace_structure():
+    """Marketplace > Azure - MongoDB > MongoDB - X: doador no nível 3.
+
+    O piso fixo de profundidade 4 excluía todos os projetos da branch e o
+    condomínio era silenciosamente descartado do rateio. Projetos com
+    ``cloud_filter`` obsoleto (``Atlas-MongoDB``) continuam elegíveis porque
+    o rateio segue a cloud de origem (subárvore do doador), não filtros por nó.
+    """
+    from app.models.rules import Department
+    from app.services.shared_cost import (
+        children_map, cloud_root_path_for, same_cloud_leaf_ids, subtree_ids,
+    )
+
+    departments = {
+        1: Department(id=1, parent_id=None, name="Marketplace", active=True, cloud_filter="mongodb"),
+        2: Department(id=2, parent_id=1, name="Azure - MongoDB", active=True, cloud_filter="mongodb"),
+        3: Department(id=3, parent_id=2, name="MongoDB - Condominio", active=True),
+        4: Department(id=4, parent_id=2, name="MongoDB - ATMA", active=True),
+        5: Department(id=5, parent_id=2, name="MongoDB - Invoice", active=True, cloud_filter="Atlas-MongoDB"),
+    }
+    child_ids = children_map(departments)
+    root = cloud_root_path_for(departments[3], ["Marketplace", "Azure - MongoDB", "MongoDB - Condominio"], departments)
+    assert root == ["Marketplace", "Azure - MongoDB"]
+    leaves = same_cloud_leaf_ids(
+        "mongodb", departments, child_ids, subtree_ids(3, child_ids), donor_depth=3, donor_root=root,
+    )
+    assert sorted(leaves) == [4, 5]
+
+
 def test_consumption_splits_parent_project_and_sibling_leaf():
     from app.services.shared_cost import ResolvedSharedCost, build_rateio_rows
 

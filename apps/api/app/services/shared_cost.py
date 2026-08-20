@@ -86,6 +86,26 @@ def cloud_prefix_for(department: Department | None, path: list[str], departments
     return ""
 
 
+def cloud_root_path_for(donor: Department | None, path: list[str], departments: dict[int, Department]) -> list[str]:
+    """Subtree that defines the donor's origin cloud.
+
+    Uses the nearest ancestor carrying a ``cloud_filter`` (same rule as
+    ``cloud_prefix_for``) or the ``Branch > Provider`` prefix of the donor
+    path. Departments inside this subtree belong to the donor's origin cloud
+    even when their own ``cloud_filter`` is stale or absent.
+    """
+    current = donor
+    seen: set[int] = set()
+    while current and current.id not in seen:
+        seen.add(current.id)
+        if (current.cloud_filter or "").strip():
+            return department_path(current.id, departments)
+        current = departments.get(current.parent_id) if current.parent_id else None
+    if len(path) >= 3 and path[1] in CLOUD_BRANCHES and path[2] in CLOUD_PROVIDERS:
+        return path[:3]
+    return []
+
+
 def driver_name_for(path: list[str], scope_path: list[str]) -> str | None:
     if len(path) <= len(scope_path) or path[: len(scope_path)] != scope_path:
         return None
@@ -151,23 +171,39 @@ def same_cloud_leaf_ids(
     departments: dict[int, Department],
     child_ids: dict[int | None, list[int]],
     donor_tree: set[int],
+    donor_depth: int = 4,
+    donor_root: list[str] | None = None,
 ) -> list[int]:
     """Same-cloud departments that can receive rateio, excluding the donor subtree.
 
     Project folders (non-leaves) are included. Cost often sits on
     ``Sinfonia - Watson`` while a sibling leaf such as VivoCog is the only
     org-chart leaf — counting only leaves would give VivoCog 100%.
-    Cloud roots (Consumo Cloud / Showback / provider) are skipped.
+    Cloud roots (Consumo Cloud / Showback / provider) are skipped via the
+    ``donor_depth`` floor: ancestors of the donor always sit above it, and
+    same-cloud targets live at the donor's level or below. This also supports
+    shallower structures like ``Marketplace > Azure - MongoDB > MongoDB - X``
+    (donor at depth 3), which a fixed depth-4 floor silently excluded.
+
+    Eligibility is by origin cloud: a department qualifies when its resolved
+    prefix relates to the donor's OR when it lives inside the donor's cloud
+    root subtree (``donor_root``). The subtree rule keeps projects with a
+    stale ``cloud_filter`` (e.g. ``Atlas-MongoDB`` under a ``mongodb`` parent)
+    eligible, since the rateio follows the origin cloud, not per-node filters.
     """
     targets: list[int] = []
+    root = [part for part in (donor_root or []) if part]
     for department in departments.values():
         if not department.active or department.id in donor_tree:
             continue
         path = department_path(department.id, departments)
-        if len(path) < 4:
+        if len(path) < donor_depth:
             continue
         prefix = cloud_prefix_for(department, path, departments)
         if prefix and (prefix.startswith(donor_prefix) or donor_prefix.startswith(prefix)):
+            targets.append(department.id)
+            continue
+        if root and len(path) > len(root) and path[: len(root)] == root:
             targets.append(department.id)
     return targets
 
@@ -206,7 +242,16 @@ def resolve_shared_costs(
         custom_targets: list[tuple[list[int], float]] = []
         leaf_paths: dict[int, list[str]] = {}
         if mode == "consumption":
-            target_leaves = same_cloud_leaf_ids(prefix, departments, child_ids, donor_tree)
+            # Piso de profundidade: 4 preserva o comportamento da estrutura
+            # "Consumo Cloud > Showback > Provedor > Projeto"; doadores mais
+            # rasos (ex.: Marketplace > Azure - MongoDB > MongoDB - X, nível 3)
+            # rebaixam o piso para a própria profundidade, senão nenhum projeto
+            # da branch é elegível e o rateio é silenciosamente descartado.
+            target_leaves = same_cloud_leaf_ids(
+                prefix, departments, child_ids, donor_tree,
+                donor_depth=min(len(path), 4),
+                donor_root=cloud_root_path_for(donor, path, departments),
+            )
             for leaf_id in target_leaves:
                 leaf_paths[leaf_id] = department_path(leaf_id, departments)
         else:
