@@ -79,10 +79,14 @@ def cloud_prefix_for(department: Department | None, path: list[str], departments
         seen.add(current.id)
         prefix = (current.cloud_filter or "").strip().lower()
         if prefix:
+            if "mongo" in prefix or "atlas" in prefix:
+                return "mongodb"
             return prefix
         current = departments.get(current.parent_id) if current.parent_id else None
     if len(path) >= 3 and path[1] in CLOUD_BRANCHES and path[2] in CLOUD_PROVIDERS:
         return PROVIDER_CLOUD_PREFIX.get(path[2], path[2].lower())
+    if any("mongo" in part.lower() for part in path):
+        return "mongodb"
     return ""
 
 

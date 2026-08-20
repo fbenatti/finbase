@@ -60,6 +60,29 @@ async def ensure_default_financial_types(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def ensure_planning_paths_synced(db: AsyncSession) -> int:
+    departments = {d.id: d for d in (await db.execute(select(Department))).scalars().all()}
+    entries = (await db.execute(select(PlanningEntry).where(PlanningEntry.department_id != None))).scalars().all()
+    updated = 0
+    for entry in entries:
+        dept = departments.get(entry.department_id)
+        if dept:
+            path: list[str] = []
+            cur = dept
+            seen = set()
+            while cur and cur.id not in seen:
+                seen.add(cur.id)
+                path.append((cur.name or "").strip())
+                cur = departments.get(cur.parent_id) if cur.parent_id else None
+            path.reverse()
+            if entry.department_levels != path:
+                entry.department_levels = path
+                updated += 1
+    if updated:
+        await db.commit()
+    return updated
+
+
 async def _type_for_write(code: str, db: AsyncSession) -> FinancialType:
     row = (await db.execute(select(FinancialType).where(FinancialType.code == code))).scalar_one_or_none()
     if not row:

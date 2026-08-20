@@ -534,10 +534,15 @@ async def update_department(dept_id: int, data: DepartmentUpdate, db: AsyncSessi
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
     update_data = data.model_dump(exclude_unset=True)
+    name_changed = "name" in update_data and (update_data["name"] or "").strip() != (dept.name or "").strip()
     if "parent_id" in update_data and update_data["parent_id"] != dept.parent_id:
         await _move_department(db, dept, update_data.pop("parent_id"), departments)
     for k, v in update_data.items():
         setattr(dept, k, v)
+    if name_changed:
+        departments[dept.id] = dept
+        impacted_ids = _subtree_ids(dept.id, departments)
+        await _refresh_planning_paths(db, departments, impacted_ids)
     await db.commit()
     await db.refresh(dept)
     return DepartmentOut.model_validate(dept)

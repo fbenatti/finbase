@@ -136,8 +136,9 @@ async def lifespan(app: FastAPI):
         from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules
         await ensure_default_config(db)
         await ensure_provider_forecast_rules(db)
-        from app.routers.planning import ensure_default_financial_types
+        from app.routers.planning import ensure_default_financial_types, ensure_planning_paths_synced
         await ensure_default_financial_types(db)
+        await ensure_planning_paths_synced(db)
         from app.routers.clone_rules import ensure_focus_templates
         await ensure_focus_templates(db)
         from seed_marketplace_focus import ensure_marketplace_focus

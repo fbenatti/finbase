@@ -365,3 +365,16 @@ def test_consumption_splits_parent_project_and_sibling_leaf():
     assert consumers["Sinfonia - Watson"] == 50
     assert consumers["Sinfonia - VivoCog"] == 50
     assert "env" not in consumers
+
+
+def test_cloud_prefix_for_atlas_mongodb():
+    from app.models.rules import Department
+    from app.services.shared_cost import cloud_prefix_for
+
+    departments = {
+        1: Department(id=1, parent_id=None, name="Marketplace", active=True),
+        2: Department(id=2, parent_id=1, name="Azure - MongoDB", active=True, cloud_filter="mongodb"),
+        3: Department(id=3, parent_id=2, name="MongoDB - Invoice", active=True, cloud_filter="Atlas-MongoDB"),
+    }
+    assert cloud_prefix_for(departments[3], ["Marketplace", "Azure - MongoDB", "MongoDB - Invoice"], departments) == "mongodb"
+    assert cloud_prefix_for(departments[2], ["Marketplace", "Azure - MongoDB"], departments) == "mongodb"
