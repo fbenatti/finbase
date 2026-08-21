@@ -5,7 +5,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
   FormControlLabel, Checkbox, Tab, Tabs, Paper, InputAdornment, Stack, Snackbar,
 } from "@mui/material";
-import { Add, Search, Cloud, Dataset, Download, Storage, AutoAwesome } from "@mui/icons-material";
+import { Add, Search, Cloud, Dataset, Download, Storage, AutoAwesome, Psychology } from "@mui/icons-material";
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
