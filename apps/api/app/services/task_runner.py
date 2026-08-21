@@ -31,6 +31,10 @@ from app.services.mongodb_extractor import MongoAtlasExtractor
 from app.services.github_extractor import GithubBillingExtractor
 from app.services.github_license_extractor import GithubLicenseExtractor
 from app.services.github_token_extractor import GithubTokenExtractor
+from app.services.notebooklm_license_extractor import NotebookLMLicenseExtractor
+from app.services.notebooklm_token_extractor import NotebookLMTokenExtractor
+from app.services.claude_license_extractor import ClaudeLicenseExtractor
+from app.services.claude_token_extractor import ClaudeTokenExtractor
 from app.services.expression_engine import (
     evaluate_expression,
     evaluate_conditional,
@@ -1221,7 +1225,8 @@ def _process_github_token_sync(
     content_length,
     task_id: int | None = None,
 ) -> tuple[int, int, int, list[str]]:
-    """Coleta Copilot seats do GitHub Enterprise e grava em Bronze Iceberg."""
+    """Gera/baixa relatório detalhado de consumo de tokens do GitHub e grava em Bronze Iceberg."""
+    billing_period = blob_path
     errors: list[str] = []
     conn = extractor.connection
 
@@ -1231,22 +1236,22 @@ def _process_github_token_sync(
             current_blob=blob_path,
             current_blob_size=0,
             download_bytes=0,
-            phase="Download GitHub Token: buscando Copilot seats...",
+            phase=f"Download GitHub Token ({billing_period}): solicitando relatório de consumo de tokens...",
         )
         _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
 
-        df = extractor._fetch_tokens()
-        total_size = len(df) * 100
+        df, report_id = extractor._fetch_report_for_period(billing_period)
+        total_size = len(df) * 150
         _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
     except Exception as e:
-        logger.error("[GithubToken] Falha ao coletar tokens/seats: %s", e)
-        errors.append(f"Failed to process GitHub Token: {e}")
+        logger.error("[GithubToken] Falha ao processar período %s: %s", billing_period, e)
+        errors.append(f"Failed to process GitHub Token {billing_period}: {e}")
         return 0, 0, 0, errors
     finally:
         _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
         _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
 
-    _persist_download_progress(task_id, phase=f"Bronze: gravando Copilot seats GitHub ({len(df)} registros)")
+    _persist_download_progress(task_id, phase=f"Bronze: gravando consumo de tokens GitHub ({billing_period}) com {len(df)} linhas")
 
     existing = session.execute(
         select(IngestedBlob).where(
@@ -1263,10 +1268,10 @@ def _process_github_token_sync(
         connection_id=conn.id,
         blob_path=blob_path,
         blob_prefix=blob_prefix,
-        billing_period=None,
+        billing_period=billing_period,
         last_modified=last_modified or datetime.now(timezone.utc),
-        etag="",
-        content_length=0,
+        etag=report_id or "",
+        content_length=total_size,
         row_count=len(df),
         status="INGESTED",
     )
@@ -1276,16 +1281,17 @@ def _process_github_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, None, blob_path)
+            iceberg.write_bronze(conn.code, df, billing_period, blob_path)
         except Exception as exc:
-            logger.error("[GithubToken] Bronze write failed: %s", exc)
+            logger.error("Bronze write failed for GitHub Token (%s): %s", blob_path, exc)
             session.delete(ingested)
             session.flush()
             return len(df), 0, 0, [f"Bronze write failed: {exc}"]
 
-    _persist_download_progress(task_id, phase=f"Carga Bronze GitHub Token concluída com {len(df)} seats")
+    _persist_download_progress(task_id, phase=f"Carga Bronze GitHub Token ({billing_period}) concluída com {len(df)} linhas")
     _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
     return len(df), 0, 0, []
+
 
 
 def _process_github_token_sync_worker(
@@ -1302,6 +1308,456 @@ def _process_github_token_sync_worker(
     session = WorkerSync()
     try:
         result = _process_github_token_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── NotebookLM Licenças ────────────────────────────────────────────────────────
+
+def _process_notebooklm_license_sync(
+    session: Session,
+    extractor: NotebookLMLicenseExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta lista completa de usuários licenciados do NotebookLM e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase="Download NotebookLM Licenças: coletando colaboradores...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_licenses()
+        total_size = len(df) * 120
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[NotebookLMLicense] Falha ao coletar dados: %s", e)
+        errors.append(f"Failed to process NotebookLM License: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando licenças NotebookLM ({len(df)} registros)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=datetime.now(timezone.utc).strftime("%Y%m"),
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, None, blob_path)
+        except Exception as exc:
+            logger.error("[NotebookLMLicense] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze NotebookLM Licenças concluída com {len(df)} usuários")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_notebooklm_license_sync_worker(
+    task_id: int,
+    item,
+    extractor: NotebookLMLicenseExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_notebooklm_license_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── NotebookLM Tokens (Consumo de Tokens por Mês) ─────────────────────────────
+
+def _process_notebooklm_token_sync(
+    session: Session,
+    extractor: NotebookLMTokenExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Gera relatório de consumo de tokens NotebookLM para o período e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+    period = blob_path
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase=f"Download NotebookLM Tokens: gerando telemetria {period}...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_tokens_for_period(period)
+        total_size = len(df) * 150
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[NotebookLMToken] Falha ao coletar dados para período %s: %s", period, e)
+        errors.append(f"Failed to process NotebookLM Token for {period}: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando tokens NotebookLM {period} ({len(df)} linhas)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=period,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, None, blob_path)
+        except Exception as exc:
+            logger.error("[NotebookLMToken] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze NotebookLM Tokens {period} concluída com {len(df)} registros")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_notebooklm_token_sync_worker(
+    task_id: int,
+    item,
+    extractor: NotebookLMTokenExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_notebooklm_token_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── Claude Licenças (Anthropic) ────────────────────────────────────────────────
+
+def _process_claude_license_sync(
+    session: Session,
+    extractor: ClaudeLicenseExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta lista de colaboradores licenciados do Claude Enterprise e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase="Download Claude Licenças: consultando colaboradores...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_licenses()
+        total_size = len(df) * 120
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[ClaudeLicense] Falha ao coletar dados: %s", e)
+        errors.append(f"Failed to process Claude License: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando licenças Claude Enterprise ({len(df)} registros)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=datetime.now(timezone.utc).strftime("%Y%m"),
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, None, blob_path)
+        except Exception as exc:
+            logger.error("[ClaudeLicense] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze Claude Licenças concluída com {len(df)} colaboradores")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_claude_license_sync_worker(
+    task_id: int,
+    item,
+    extractor: ClaudeLicenseExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_claude_license_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── Claude Tokens (Consumo de Tokens por Mês) ──────────────────────────────────
+
+def _process_claude_token_sync(
+    session: Session,
+    extractor: ClaudeTokenExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Gera relatório de telemetria de tokens Claude e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+    period = blob_path
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase=f"Download Claude Tokens: gerando telemetria {period}...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_tokens_for_period(period)
+        total_size = len(df) * 150
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[ClaudeToken] Falha ao coletar dados para período %s: %s", period, e)
+        errors.append(f"Failed to process Claude Token for {period}: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando tokens Claude {period} ({len(df)} linhas)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=period,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, None, blob_path)
+        except Exception as exc:
+            logger.error("[ClaudeToken] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze Claude Tokens {period} concluída com {len(df)} registros")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_claude_token_sync_worker(
+    task_id: int,
+    item,
+    extractor: ClaudeTokenExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_claude_token_sync(
             session, extractor, item.blob_path, item.blob_prefix,
             item.last_modified, item.content_length, task_id,
         )
@@ -1553,7 +2009,7 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token"):
+        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -1573,10 +2029,6 @@ def _run_etl_sync(
             extractor = MongoAtlasExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_mongodb_invoice_sync_worker
-        elif conn.connector_type == "github_billing":
-            extractor = GithubBillingExtractor(conn)
-            scan_items = extractor._scan_sync(session)
-            worker_fn = _process_github_report_sync_worker
         elif conn.connector_type == "github_license":
             extractor = GithubLicenseExtractor(conn)
             scan_items = extractor._scan_sync(session)
@@ -1585,6 +2037,22 @@ def _run_etl_sync(
             extractor = GithubTokenExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_github_token_sync_worker
+        elif conn.connector_type == "notebooklm_license":
+            extractor = NotebookLMLicenseExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_notebooklm_license_sync_worker
+        elif conn.connector_type == "notebooklm_token":
+            extractor = NotebookLMTokenExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_notebooklm_token_sync_worker
+        elif conn.connector_type == "claude_license":
+            extractor = ClaudeLicenseExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_claude_license_sync_worker
+        elif conn.connector_type == "claude_token":
+            extractor = ClaudeTokenExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_claude_token_sync_worker
         else:
             extractor = GcpBigQueryExtractor(conn)
             scan_result = extractor._scan_sync(session)
@@ -1639,9 +2107,11 @@ def _run_etl_sync(
         total = len(to_process)
         completed = 0
 
-        # Para OCI e GCP BigQuery (cargas de meses consolidados), usar 1 worker por vez para evitar
+        # Para OCI, GCP BigQuery, MongoDB, GitHub, NotebookLM e Claude, usar 1 worker por vez para evitar
         # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
-        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token") else 2
+        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token") else 2
+
+
 
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="blob-dl") as dl_executor:
             futures = {}

@@ -40,7 +40,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"]);
 
 export function formatApiError(error: unknown, fallback = "Request failed"): string {
   if (axios.isAxiosError(error)) {

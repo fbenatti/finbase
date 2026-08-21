@@ -119,6 +119,22 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.github_token_extractor import GithubTokenExtractor
         extractor = GithubTokenExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "notebooklm_license":
+        from app.services.notebooklm_license_extractor import NotebookLMLicenseExtractor
+        extractor = NotebookLMLicenseExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "notebooklm_token":
+        from app.services.notebooklm_token_extractor import NotebookLMTokenExtractor
+        extractor = NotebookLMTokenExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "claude_license":
+        from app.services.claude_license_extractor import ClaudeLicenseExtractor
+        extractor = ClaudeLicenseExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "claude_token":
+        from app.services.claude_token_extractor import ClaudeTokenExtractor
+        extractor = ClaudeTokenExtractor(conn)
+        return await extractor.scan(db)
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
@@ -350,12 +366,13 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token"):
+    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
             "message": f"ETL para {conn.connector_type} ainda nao disponivel."
         }
+
 
     from app.models.etl_task import EtlTask
     from sqlalchemy import insert
@@ -582,6 +599,27 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         try:
             from app.services.github_token_extractor import GithubTokenExtractor
             return GithubTokenExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "notebooklm_license":
+        try:
+            from app.services.notebooklm_license_extractor import NotebookLMLicenseExtractor
+            return NotebookLMLicenseExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "claude_license":
+        try:
+            from app.services.claude_license_extractor import ClaudeLicenseExtractor
+            return ClaudeLicenseExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "claude_token":
+        try:
+            from app.services.claude_token_extractor import ClaudeTokenExtractor
+            return ClaudeTokenExtractor(conn).test_connection()
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 

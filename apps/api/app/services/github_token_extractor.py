@@ -1,4 +1,7 @@
+import calendar
+import io
 import logging
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -16,12 +19,8 @@ logger = logging.getLogger(__name__)
 
 class GithubTokenExtractor:
     """
-    Extrator de Copilot Seats (tokens/acessos) do GitHub Enterprise.
-
-    Usa o endpoint GET /enterprises/{slug}/copilot/billing/seats para coletar
-    todos os usuários com seat Copilot ativo, incluindo dados de último acesso,
-    editor utilizado e data de criação do seat.
-    Os dados são gravados como Bronze em raw_github_token_{code}.
+    Extrator de consumo de tokens e métricas de uso (Copilot / Actions) do GitHub Enterprise.
+    Gera e coleta relatórios mensais de consumo através da API de billing reports.
     """
 
     def __init__(self, connection: SourceConnection):
@@ -34,149 +33,210 @@ class GithubTokenExtractor:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        self.base_url = f"https://api.github.com/enterprises/{self.enterprise_slug}"
+        self.base_url = f"https://api.github.com/enterprises/{self.enterprise_slug}/settings/billing/reports"
 
     def test_connection(self) -> dict:
         if not self.enterprise_slug or not self.pat_token:
             return {
                 "status": "PENDING",
-                "message": "GitHub Token — credenciais não configuradas (enterprise_slug e pat_token obrigatórios).",
+                "message": "GitHub Token — credenciais não configuradas.",
             }
         try:
             with httpx.Client(timeout=15) as client:
-                resp = client.get("https://api.github.com/user", headers=self.headers)
-                if resp.status_code == 401:
-                    return {"status": "FAILED", "message": "Token inválido ou expirado (HTTP 401)."}
+                resp_user = client.get("https://api.github.com/user", headers=self.headers)
+                if resp_user.status_code == 401:
+                    return {"status": "FAILED", "message": "GitHub retornou HTTP 401: Token inválido ou expirado (Bad credentials)."}
 
-                resp_seats = client.get(
-                    f"{self.base_url}/copilot/billing/seats",
-                    headers=self.headers,
-                    params={"per_page": 1},
-                )
-                if resp_seats.status_code == 200:
-                    data = resp_seats.json()
-                    total = data.get("total_seats", "?")
+                resp = client.get(self.base_url, headers=self.headers)
+                if resp.status_code in (200, 201, 202, 400, 422):
                     return {
                         "status": "OK",
-                        "message": f"GitHub Enterprise ({self.enterprise_slug}) — {total} seat(s) Copilot ativo(s).",
+                        "message": f"GitHub Enterprise ({self.enterprise_slug}) — Conexão validada com sucesso!",
                     }
-                if resp_seats.status_code == 404:
+                if resp.status_code == 404:
                     return {
                         "status": "FAILED",
-                        "message": f"Enterprise '{self.enterprise_slug}' não encontrada ou Copilot não habilitado (HTTP 404).",
+                        "message": f"HTTP 404: A Enterprise '{self.enterprise_slug}' não foi encontrada ou o token não possui 'manage_billing:enterprise'.",
                     }
                 return {
                     "status": "FAILED",
-                    "message": f"HTTP {resp_seats.status_code}: {resp_seats.text[:300]}",
+                    "message": f"GitHub retornou HTTP {resp.status_code}: {resp.text[:500]}",
                 }
         except Exception as e:
-            logger.error("[GithubToken] Erro ao testar conexão: %s", e)
+            logger.error("[GithubToken] Erro ao testar conexao: %s", e)
             return {"status": "FAILED", "message": str(e)[:500]}
 
     def _scan_sync(self, db_session: Session) -> list[BlobScanItem]:
         """
-        Seats Copilot não têm período — usamos um blob fixo 'current' que sempre
-        é marcado como CHANGED para re-extração a cada execução.
+        Lista os últimos 12 meses para permitir extração histórica e atual de consumo de tokens.
         """
+        items: list[BlobScanItem] = []
         now = datetime.now(timezone.utc)
-        existing = db_session.execute(
-            select(IngestedBlob).where(
-                IngestedBlob.connection_id == self.connection.id,
-                IngestedBlob.blob_path == "current",
-            )
-        ).scalar_one_or_none()
-        status = "CHANGED" if existing else "NEW"
-        return [
-            BlobScanItem(
-                blob_path="current",
+        
+        for i in range(12):
+            m = now.month - i
+            y = now.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            period = f"{y}{m:02d}"
+            
+            existing = db_session.execute(
+                select(IngestedBlob).where(
+                    IngestedBlob.connection_id == self.connection.id,
+                    IngestedBlob.blob_path == period
+                )
+            ).scalar_one_or_none()
+            
+            if i == 0:
+                status = "CHANGED" if existing else "NEW"
+            else:
+                status = "UNCHANGED" if existing else "NEW"
+            
+            items.append(BlobScanItem(
+                blob_path=period,
                 blob_prefix="github_token",
-                last_modified=now,
+                last_modified=existing.last_modified if existing else now,
                 content_length=None,
                 status=status,
-                billing_period=None,
-            )
-        ]
+                billing_period=period,
+            ))
+
+        return items
 
     async def scan(self, db: AsyncSession) -> BlobScanResult:
+        items = []
         now = datetime.now(timezone.utc)
-        existing = await db.execute(
-            select(IngestedBlob).where(
-                IngestedBlob.connection_id == self.connection.id,
-                IngestedBlob.blob_path == "current",
+        
+        for i in range(12):
+            m = now.month - i
+            y = now.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            period = f"{y}{m:02d}"
+            
+            existing = await db.execute(
+                select(IngestedBlob).where(
+                    IngestedBlob.connection_id == self.connection.id,
+                    IngestedBlob.blob_path == period
+                )
             )
-        )
-        blob_row = existing.scalar_one_or_none()
-        status = "CHANGED" if blob_row else "NEW"
-        items = [
-            BlobScanItem(
-                blob_path="current",
+            blob_row = existing.scalar_one_or_none()
+            
+            if i == 0:
+                status = "CHANGED" if blob_row else "NEW"
+            else:
+                status = "UNCHANGED" if blob_row else "NEW"
+            
+            items.append(BlobScanItem(
+                blob_path=period,
                 blob_prefix="github_token",
-                last_modified=now,
+                last_modified=blob_row.last_modified if blob_row else now,
                 content_length=None,
                 status=status,
-                billing_period=None,
-            )
-        ]
+                billing_period=period,
+            ))
+            
+        new_count = sum(1 for it in items if it.status == "NEW")
+        changed_count = sum(1 for it in items if it.status == "CHANGED")
+        unchanged_count = sum(1 for it in items if it.status == "UNCHANGED")
         return BlobScanResult(
             connection_id=self.connection.id,
-            total=1,
-            new=1 if status == "NEW" else 0,
-            changed=1 if status == "CHANGED" else 0,
-            unchanged=0,
+            total=len(items),
+            new=new_count,
+            changed=changed_count,
+            unchanged=unchanged_count,
             items=items,
         )
 
-    def _fetch_tokens(self) -> pd.DataFrame:
+    def _fetch_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
         """
-        Coleta todos os Copilot seats via paginação.
-        Endpoint: GET /enterprises/{slug}/copilot/billing/seats
-        Retorna campos: created_at, updated_at, last_activity_at, last_activity_editor,
-                        plan_type, pending_cancellation_date + dados do assignee.
+        Solicita ou reutiliza o relatório detalhado de consumo de tokens para o período.
+        Retorna (DataFrame, report_id).
         """
-        all_seats: list[dict] = []
-        page = 1
-        per_page = 100
+        year = int(period[:4])
+        month = int(period[4:6])
+        last_day = calendar.monthrange(year, month)[1]
 
-        with httpx.Client(timeout=30) as client:
-            while True:
-                logger.info(
-                    "[GithubToken] Buscando página %d de Copilot seats...", page
-                )
-                resp = client.get(
-                    f"{self.base_url}/copilot/billing/seats",
-                    headers=self.headers,
-                    params={"per_page": per_page, "page": page},
-                )
-                if resp.status_code != 200:
-                    raise ValueError(
-                        f"[GithubToken] Falha ao buscar seats: HTTP {resp.status_code} - {resp.text[:300]}"
-                    )
-                data = resp.json()
-                seats = data.get("seats", [])
-                if not seats:
-                    break
+        now = datetime.now(timezone.utc).date()
+        start_date = f"{year:04d}-{month:02d}-01"
+        end_date_obj = min(now, datetime(year, month, last_day, tzinfo=timezone.utc).date())
+        end_date = end_date_obj.strftime("%Y-%m-%d")
 
-                # Achata campos aninhados
-                for seat in seats:
-                    assignee = seat.pop("assignee", {}) or {}
-                    assigning_team = seat.pop("assigning_team", {}) or {}
-                    seat["username"] = assignee.get("login", "")
-                    seat["user_id"] = assignee.get("id", "")
-                    seat["user_url"] = assignee.get("html_url", "")
-                    seat["assigning_team"] = assigning_team.get("name", "") if assigning_team else ""
+        with httpx.Client(timeout=60) as client:
+            report_id = None
+            report_status = None
+            logger.info("[GithubToken] Verificando relatórios existentes para %s...", period)
+            list_resp = client.get(self.base_url, headers=self.headers)
+            if list_resp.status_code == 200:
+                exports = list_resp.json().get("usage_report_exports", [])
+                for exp in exports:
+                    if (
+                        exp.get("report_type") == "detailed"
+                        and exp.get("start_date") == start_date
+                        and exp.get("end_date") == end_date
+                    ):
+                        report_id = exp.get("id")
+                        report_status = (exp.get("status") or "").lower()
+                        logger.info("[GithubToken] Relatório existente: id=%s status=%s", report_id, report_status)
+                        break
 
-                all_seats.extend(seats)
-                logger.info(
-                    "[GithubToken] Página %d: %d seats (acumulado: %d)",
-                    page, len(seats), len(all_seats),
-                )
-                if len(seats) < per_page:
-                    break
-                page += 1
+            if not report_id or report_status in ("failed", "error", "cancelled"):
+                payload = {
+                    "report_type": "detailed",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+                logger.info("[GithubToken] Criando relatório para %s: %s", period, payload)
+                resp = client.post(self.base_url, headers=self.headers, json=payload)
+                if resp.status_code == 409:
+                    logger.info("[GithubToken] Relatório já em andamento: id=%s", report_id)
+                elif resp.status_code in (200, 201, 202):
+                    data = resp.json()
+                    report_id = data.get("id") or period
+                    report_status = (data.get("status") or "").lower()
+                else:
+                    raise ValueError(f"Falha ao solicitar relatório GitHub: HTTP {resp.status_code} - {resp.text}")
 
-        df = pd.DataFrame(all_seats)
-        logger.info(
-            "[GithubToken] Total de Copilot seats: %d, colunas: %s",
-            len(df), list(df.columns) if not df.empty else "vazio",
-        )
-        return df
+            if not report_id:
+                raise ValueError(f"[GithubToken] Não foi possível obter report_id para {period}")
+
+            # Polling usando o endpoint do report específico (onde o download_urls é retornado)
+            download_url = None
+            for attempt in range(40):
+                poll_resp = client.get(f"{self.base_url}/{report_id}", headers=self.headers)
+                if poll_resp.status_code == 200:
+                    item_data = poll_resp.json()
+                    current_status = (item_data.get("status") or "").lower()
+                    if current_status == "completed":
+                        urls = item_data.get("download_urls") or []
+                        if urls:
+                            download_url = urls[0]
+                        elif item_data.get("download_url"):
+                            download_url = item_data.get("download_url")
+                        if download_url:
+                            break
+                    elif current_status in ("failed", "error", "cancelled"):
+                        raise ValueError(f"[GithubToken] Relatório {report_id} falhou com status '{current_status}'")
+                time.sleep(2)
+
+
+            if not download_url:
+                raise ValueError(f"[GithubToken] Timeout aguardando geração do relatório para {period} (id={report_id})")
+
+            # Download CSV
+            logger.info("[GithubToken] Baixando CSV do relatório %s...", report_id)
+            csv_resp = client.get(download_url, timeout=120)
+            if csv_resp.status_code != 200:
+                raise ValueError(f"Falha ao baixar CSV do GitHub: HTTP {csv_resp.status_code}")
+
+            content = csv_resp.content
+            if content.startswith(b"\x1f\x8b"):
+                import gzip
+                content = gzip.decompress(content)
+
+            df = pd.read_csv(io.BytesIO(content), dtype=str)
+            df = df.fillna("")
+            df.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
+            return df, report_id

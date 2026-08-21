@@ -5,7 +5,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
   FormControlLabel, Checkbox, Tab, Tabs, Paper, InputAdornment, Stack, Snackbar,
 } from "@mui/material";
-import { Add, Search, Cloud, Dataset, Download, Storage } from "@mui/icons-material";
+import { Add, Search, Cloud, Dataset, Download, Storage, AutoAwesome } from "@mui/icons-material";
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
@@ -19,9 +19,12 @@ const CONNECTOR_TYPES = [
   { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
   { value: "oci", label: "Oracle Cloud (OCI)", scope: "oci" },
   { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
-  { value: "github_billing", label: "GitHub Billing", scope: "github" },
-  { value: "github_license", label: "GitHub Licenças", scope: "github" },
-  { value: "github_token", label: "GitHub Tokens (Copilot)", scope: "github" },
+  { value: "github_license", label: "GitHub Licenças (Usuários)", scope: "github" },
+  { value: "github_token", label: "GitHub Tokens (Consumo de Tokens)", scope: "github" },
+  { value: "notebooklm_license", label: "NotebookLM Licenças (Usuários)", scope: "gemini" },
+  { value: "notebooklm_token", label: "NotebookLM Tokens (Consumo de Tokens)", scope: "gemini" },
+  { value: "claude_license", label: "Claude Licenças (Usuários Enterprise)", scope: "claude" },
+  { value: "claude_token", label: "Claude Tokens (Consumo de Tokens / Atividades)", scope: "claude" },
 ];
 
 const CONNECTOR_PICKER_OPTIONS = [
@@ -29,7 +32,9 @@ const CONNECTOR_PICKER_OPTIONS = [
   { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, color: "#4285F4" },
   { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, color: "#F80000" },
   { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, color: "#13AA52" },
-  { value: "github", label: "GitHub", description: "Copilot / Licenças", icon: <Cloud />, color: "#24292e" },
+  { value: "github", label: "GitHub", description: "Tokens / Licenças", icon: <Cloud />, color: "#24292e" },
+  { value: "gemini", label: "Gemini", description: "NotebookLM / IA", icon: <AutoAwesome />, color: "#8E24AA" },
+  { value: "claude", label: "Claude", description: "Claude.ai / Anthropic", icon: <Psychology />, color: "#D97757" },
 ];
 
 const PROVIDER_LOGOS: Record<string, string> = {
@@ -50,6 +55,7 @@ const CLOUD_SCOPES = [
   { value: "oci", label: "Oracle Cloud (OCI)" },
   { value: "atlas", label: "MongoDB Atlas" },
   { value: "github", label: "GitHub" },
+  { value: "gemini", label: "Google Gemini AI" },
   { value: "other", label: "Outra / Desconhecida" },
 ];
 
@@ -59,8 +65,9 @@ const emptyForm = {
   storage_account: "", container_name: "", blob_prefixes: "",
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
-  oci_region: "sa-saopaulo-1", oci_fingerprint: "", oci_private_key: "",
-  github_extraction_type: "billing" as "billing" | "license" | "token",
+  oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "",
+  github_extraction_type: "token" as "license" | "token",
+  gemini_extraction_type: "token" as "license" | "token",
 };
 
 export default function Connections() {
@@ -78,6 +85,8 @@ export default function Connections() {
   const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
   const [githubSubPickerOpen, setGithubSubPickerOpen] = useState(false);
+  const [geminiSubPickerOpen, setGeminiSubPickerOpen] = useState(false);
+  const [claudeSubPickerOpen, setClaudeSubPickerOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SourceConnection | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -153,30 +162,82 @@ export default function Connections() {
 
   const chooseConnector = (connectorType: string) => {
     if (connectorType === "github") {
-      // Mostra sub-seletor de tipo de extração GitHub
       setConnectorPickerOpen(false);
       setGithubSubPickerOpen(true);
+      return;
+    }
+    if (connectorType === "gemini") {
+      setConnectorPickerOpen(false);
+      setGeminiSubPickerOpen(true);
+      return;
+    }
+    if (connectorType === "claude") {
+      setConnectorPickerOpen(false);
+      setClaudeSubPickerOpen(true);
       return;
     }
     setConnectorPickerOpen(false);
     openNew(connectorType);
   };
 
-  const chooseGithubType = (extractionType: "billing" | "license" | "token") => {
+  const chooseGithubType = (extractionType: "license" | "token") => {
     setGithubSubPickerOpen(false);
-    const connectorType = extractionType === "billing"
-      ? "github_billing"
-      : extractionType === "license"
-        ? "github_license"
-        : "github_token";
-    const cloudName = extractionType === "billing"
-      ? "github-billing"
-      : extractionType === "license"
-        ? "github-license"
-        : "github-token";
+    const connectorType = extractionType === "license" ? "github_license" : "github_token";
+    const cloudName = extractionType === "license" ? "github-license" : "github-token";
+    const defaultName = extractionType === "license" ? "GitHub Licenças" : "GitHub Tokens";
     setEditing(null);
     setFormTestMessage(null);
-    setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: "github", cloud_name: cloudName, github_extraction_type: extractionType });
+    setForm({
+      ...emptyForm,
+      name: defaultName,
+      code: connectorType,
+      connector_type: connectorType,
+      cloud_scope: "github",
+      cloud_name: cloudName,
+      github_extraction_type: extractionType,
+    });
+    setDialogOpen(true);
+  };
+
+  const chooseGeminiType = (extractionType: "license" | "token") => {
+    setGeminiSubPickerOpen(false);
+    const connectorType = extractionType === "license" ? "notebooklm_license" : "notebooklm_token";
+    const cloudName = extractionType === "license" ? "notebooklm-license" : "notebooklm-token";
+    const defaultName = extractionType === "license" ? "NotebookLM Licenças Vivo" : "NotebookLM Tokens Vivo";
+    setEditing(null);
+    setFormTestMessage(null);
+    setForm({
+      ...emptyForm,
+      name: defaultName,
+      code: connectorType,
+      connector_type: connectorType,
+      cloud_scope: "gemini",
+      cloud_name: cloudName,
+      tenant_id: "telefonica-notebook-lm",
+      client_id: "198880944469",
+      client_secret: "AIzaSyBsarbb6ynrv-rIuGtyAmCa5UuM-9n6_t8",
+      gemini_extraction_type: extractionType,
+    });
+    setDialogOpen(true);
+  };
+
+  const chooseClaudeType = (extractionType: "license" | "token") => {
+    setClaudeSubPickerOpen(false);
+    const connectorType = extractionType === "license" ? "claude_license" : "claude_token";
+    const cloudName = extractionType === "license" ? "claude-license" : "claude-token";
+    const defaultName = extractionType === "license" ? "Claude Licenças Enterprise" : "Claude Tokens Enterprise";
+    setEditing(null);
+    setFormTestMessage(null);
+    setForm({
+      ...emptyForm,
+      name: defaultName,
+      code: connectorType,
+      connector_type: connectorType,
+      cloud_scope: "claude",
+      cloud_name: cloudName,
+      tenant_id: "telefonica",
+      client_secret: "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",
+    });
     setDialogOpen(true);
   };
 
@@ -238,18 +299,7 @@ export default function Connections() {
         mongo_contract_type: cfg.contract_type || "",
         marketplace: conn.config_json?.marketplace === true,
       });
-    } else if (conn.connector_type === "github_billing") {
-      const extractionType = "billing" as const;
-      setForm({
-        ...emptyForm,
-        code: conn.code, name: conn.name,
-        connector_type: conn.connector_type,
-        cloud_name: conn.cloud_name || "github-billing",
-        cloud_scope: conn.cloud_scope || "github",
-        tenant_id: cfg.enterprise_slug || "",
-        client_secret: cfg.pat_token || "",
-        github_extraction_type: extractionType,
-      });
+
     } else if (conn.connector_type === "github_license") {
       setForm({
         ...emptyForm,
@@ -271,6 +321,40 @@ export default function Connections() {
         tenant_id: cfg.enterprise_slug || "",
         client_secret: cfg.pat_token || "",
         github_extraction_type: "token",
+      });
+    } else if (conn.connector_type === "notebooklm_license") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "notebooklm-license",
+        cloud_scope: conn.cloud_scope || "gemini",
+        tenant_id: cfg.project_id || "telefonica-notebook-lm",
+        client_id: cfg.project_number || "198880944469",
+        client_secret: cfg.api_key || cfg.client_secret || "",
+        gemini_extraction_type: "license",
+      });
+    } else if (conn.connector_type === "notebooklm_token") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "notebooklm-token",
+        cloud_scope: conn.cloud_scope || "gemini",
+        tenant_id: cfg.project_id || "telefonica-notebook-lm",
+        client_id: cfg.project_number || "198880944469",
+        client_secret: cfg.api_key || cfg.client_secret || "",
+        gemini_extraction_type: "token",
+      });
+    } else if (conn.connector_type === "claude_license" || conn.connector_type === "claude_token") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || (conn.connector_type === "claude_license" ? "claude-license" : "claude-token"),
+        cloud_scope: conn.cloud_scope || "claude",
+        tenant_id: cfg.org_id || "telefonica",
+        client_secret: cfg.api_token || cfg.api_key || cfg.client_secret || "",
       });
     } else {
       setForm({
@@ -319,6 +403,15 @@ export default function Connections() {
     } else if (form.connector_type === "github_token") {
       if (form.tenant_id) configJson.enterprise_slug = form.tenant_id;
       if (form.client_secret) configJson.pat_token = form.client_secret;
+    } else if (form.connector_type === "notebooklm_license" || form.connector_type === "notebooklm_token") {
+      if (form.tenant_id) configJson.project_id = form.tenant_id;
+      if (form.client_id) configJson.project_number = form.client_id;
+      if (form.client_secret) configJson.api_key = form.client_secret;
+      configJson.ai_product = "notebooklm";
+    } else if (form.connector_type === "claude_license" || form.connector_type === "claude_token") {
+      if (form.tenant_id) configJson.org_id = form.tenant_id;
+      if (form.client_secret) configJson.api_token = form.client_secret;
+      configJson.ai_product = "claude_enterprise";
     }
 
     return {
@@ -562,23 +655,23 @@ export default function Connections() {
 
       {/* Sub-seletor de tipo de extração GitHub */}
       <Dialog open={githubSubPickerOpen} onClose={() => setGithubSubPickerOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ pb: 0 }}>GitHub — Tipo de extração</DialogTitle>
+        <DialogTitle sx={{ pb: 0 }}>GitHub — Selecione a fonte de dados</DialogTitle>
         <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
           <Typography color="text.secondary" sx={{ mb: 3 }}>
-            Selecione qual tipo de dado do GitHub você deseja coletar.
+            Selecione qual tipo de dado do GitHub Enterprise você deseja extrair:
           </Typography>
           <Stack direction="column" gap={1.5}>
             <Button
               variant="outlined" color="inherit" fullWidth
-              onClick={() => chooseGithubType("billing")}
+              onClick={() => chooseGithubType("token")}
               sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
                 "&:hover": { borderColor: "primary.main", bgcolor: "rgba(10, 143, 220, 0.06)" } }}
             >
-              <Typography fontSize={24}>🧾</Typography>
+              <Typography fontSize={24}>🔑</Typography>
               <Box textAlign="left">
-                <Typography fontWeight={700}>Billing</Typography>
+                <Typography fontWeight={700}>GitHub Tokens (github-token)</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Relatórios detalhados de custo (Copilot, Actions, Packages...) — cloud_name: github-billing
+                  Consumo de tokens e uso detalhado por mês (Copilot / Actions) — cloud_name: github-token
                 </Typography>
               </Box>
             </Button>
@@ -590,23 +683,9 @@ export default function Connections() {
             >
               <Typography fontSize={24}>👥</Typography>
               <Box textAlign="left">
-                <Typography fontWeight={700}>Licenças</Typography>
+                <Typography fontWeight={700}>GitHub Licenças (github-license)</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Usuários com licenças ativas (Enterprise, Copilot, VS...) — cloud_name: github-license
-                </Typography>
-              </Box>
-            </Button>
-            <Button
-              variant="outlined" color="inherit" fullWidth
-              onClick={() => chooseGithubType("token")}
-              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
-                "&:hover": { borderColor: "primary.main", bgcolor: "rgba(10, 143, 220, 0.06)" } }}
-            >
-              <Typography fontSize={24}>🔑</Typography>
-              <Box textAlign="left">
-                <Typography fontWeight={700}>Tokens (Copilot Seats)</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Copilot seats ativos: usuário, editor, data do último uso — cloud_name: github-token
+                  Lista de usuários criados e licenças ativas da Enterprise — cloud_name: github-license
                 </Typography>
               </Box>
             </Button>
@@ -616,6 +695,96 @@ export default function Connections() {
           <Button onClick={() => setGithubSubPickerOpen(false)}>Cancelar</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Sub-seletor de tipo de IA Gemini */}
+      <Dialog open={geminiSubPickerOpen} onClose={() => setGeminiSubPickerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ pb: 0 }}>Google Gemini — Selecione a fonte de dados</DialogTitle>
+        <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Selecione qual tipo de dado do ecossistema Gemini / NotebookLM você deseja extrair:
+          </Typography>
+          <Stack direction="column" gap={1.5}>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseGeminiType("token")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "secondary.main", bgcolor: "rgba(142, 36, 170, 0.06)" } }}
+            >
+              <Typography fontSize={24}>🔑</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>NotebookLM Tokens (notebooklm-token)</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Relatório detalhado de consumo mensal de tokens (prompt, completion, cached, áudio) — cloud_name: notebooklm-token
+                </Typography>
+              </Box>
+            </Button>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseGeminiType("license")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "secondary.main", bgcolor: "rgba(142, 36, 170, 0.06)" } }}
+            >
+              <Typography fontSize={24}>👥</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>NotebookLM Licenças (notebooklm-license)</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Lista de colaboradores e licenças ativas do NotebookLM — cloud_name: notebooklm-license
+                </Typography>
+              </Box>
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setGeminiSubPickerOpen(false)}>Cancelar</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Sub-seletor de tipo de IA Claude (Anthropic) */}
+      <Dialog open={claudeSubPickerOpen} onClose={() => setClaudeSubPickerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ pb: 0, display: "flex", alignItems: "center", gap: 1 }}>
+          <Psychology sx={{ color: "#D97757" }} />
+          Claude (claude.ai) — Selecione a fonte de dados
+        </DialogTitle>
+        <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Selecione qual tipo de dado da organização Claude Enterprise você deseja extrair:
+          </Typography>
+          <Stack direction="column" gap={1.5}>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseClaudeType("token")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "#D97757", bgcolor: "rgba(217, 119, 87, 0.06)" } }}
+            >
+              <Typography fontSize={24}>🔑</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>Claude Tokens (claude-token)</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Relatório detalhado de consumo mensal de tokens e atividades — cloud_name: claude-token
+                </Typography>
+              </Box>
+            </Button>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseClaudeType("license")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "#D97757", bgcolor: "rgba(217, 119, 87, 0.06)" } }}
+            >
+              <Typography fontSize={24}>👥</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>Claude Licenças (claude-license)</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Lista de colaboradores e licenças ativas do Claude Enterprise — cloud_name: claude-license
+                </Typography>
+              </Box>
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setClaudeSubPickerOpen(false)}>Cancelar</Button>
+        </DialogActions>
+      </Dialog>
+
 
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
@@ -746,34 +915,93 @@ export default function Connections() {
               </>
             )}
 
-            {(form.connector_type === "github_billing" || form.connector_type === "github_license" || form.connector_type === "github_token") && (
+            {(form.connector_type === "github_license" || form.connector_type === "github_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>GitHub Config</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>Configuração GitHub Enterprise</Typography>
                 <FormControl fullWidth>
-                  <InputLabel>Tipo de extração</InputLabel>
+                  <InputLabel>Tipo de dado</InputLabel>
                   <Select
-                    value={form.github_extraction_type}
-                    label="Tipo de extração"
+                    value={form.github_extraction_type || (form.connector_type === "github_license" ? "license" : "token")}
+                    label="Tipo de dado"
                     onChange={(e) => {
-                      const t = e.target.value as "billing" | "license" | "token";
-                      const connectorType = t === "billing" ? "github_billing" : t === "license" ? "github_license" : "github_token";
-                      const cloudName = t === "billing" ? "github-billing" : t === "license" ? "github-license" : "github-token";
+                      const t = e.target.value as "license" | "token";
+                      const connectorType = t === "license" ? "github_license" : "github_token";
+                      const cloudName = t === "license" ? "github-license" : "github-token";
                       setForm({ ...form, github_extraction_type: t, connector_type: connectorType, cloud_name: cloudName });
                     }}
                   >
-                    <MenuItem value="billing">🧾 Billing — Relatórios de custo detalhado</MenuItem>
-                    <MenuItem value="license">👥 Licenças — Usuários com licenças ativas</MenuItem>
-                    <MenuItem value="token">🔑 Tokens — Copilot seats e acessos</MenuItem>
+                    <MenuItem value="token">🔑 Tokens (github-token) — Consumo de tokens/mês</MenuItem>
+                    <MenuItem value="license">👥 Licenças (github-license) — Usuários criados</MenuItem>
                   </Select>
                 </FormControl>
                 <TextField label="Enterprise Slug" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Nome da enterprise no GitHub (ex: vivo-telefonica)" />
+                  helperText="Slug da Enterprise no GitHub (ex: tefbr)" />
                 <TextField label="Personal Access Token (PAT)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Token com escopo manage_billing:enterprise" />
               </>
             )}
+
+            {(form.connector_type === "notebooklm_license" || form.connector_type === "notebooklm_token") && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "secondary.main" }}>Configuração Google Gemini (NotebookLM)</Typography>
+                <FormControl fullWidth>
+                  <InputLabel>Tipo de dado</InputLabel>
+                  <Select
+                    value={form.gemini_extraction_type || (form.connector_type === "notebooklm_license" ? "license" : "token")}
+                    label="Tipo de dado"
+                    onChange={(e) => {
+                      const t = e.target.value as "license" | "token";
+                      const connectorType = t === "license" ? "notebooklm_license" : "notebooklm_token";
+                      const cloudName = t === "license" ? "notebooklm-license" : "notebooklm-token";
+                      setForm({ ...form, gemini_extraction_type: t, connector_type: connectorType, cloud_name: cloudName });
+                    }}
+                  >
+                    <MenuItem value="token">🔑 Tokens (notebooklm-token) — Consumo de tokens/mês</MenuItem>
+                    <MenuItem value="license">👥 Licenças (notebooklm-license) — Usuários com licenças ativas</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField label="Google Cloud Project ID" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
+                  helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
+                <TextField label="Project Number" value={form.client_id}
+                  onChange={(e) => setForm({ ...form, client_id: e.target.value })}
+                  helperText="Project Number no GCP (ex: 198880944469)" />
+                <TextField label="API Key / Service Token" type="password" value={form.client_secret}
+                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                  helperText="Chave de API do Google Cloud (ex: AIzaSy...)" />
+              </>
+            )}
+
+            {(form.connector_type === "claude_license" || form.connector_type === "claude_token") && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "#D97757" }}>Configuração Claude Enterprise (Anthropic)</Typography>
+                <FormControl fullWidth>
+                  <InputLabel>Tipo de dado</InputLabel>
+                  <Select
+                    value={form.connector_type === "claude_license" ? "license" : "token"}
+                    label="Tipo de dado"
+                    onChange={(e) => {
+                      const t = e.target.value as "license" | "token";
+                      const connectorType = t === "license" ? "claude_license" : "claude_token";
+                      const cloudName = t === "license" ? "claude-license" : "claude-token";
+                      setForm({ ...form, connector_type: connectorType, cloud_name: cloudName });
+                    }}
+                  >
+                    <MenuItem value="token">🔑 Tokens (claude-token) — Consumo de tokens / atividades por mês</MenuItem>
+                    <MenuItem value="license">👥 Licenças (claude-license) — Colaboradores com licenças ativas</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField label="Organização / Tenant" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
+                  helperText="Identificador da organização (ex: telefonica)" />
+                <TextField label="API Token / Compliance Token" type="password" value={form.client_secret}
+                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                  helperText="Token de API gerado na console do Claude (sk-ant-api01-...)" />
+              </>
+            )}
+
           </Box>
         </DialogContent>
         <DialogActions>

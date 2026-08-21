@@ -70,39 +70,40 @@ class GithubBillingExtractor:
 
     def _scan_sync(self, db_session: Session) -> list[BlobScanItem]:
         """
-        Para o GitHub, consideramos que queremos extrair o mês atual e o mês anterior.
-        Vamos gerar BlobScanItems para esses meses, marcando-os como CHANGED para forçar a extração.
+        Lista os últimos 12 meses para permitir extração histórica e atual.
         """
         items: list[BlobScanItem] = []
         now = datetime.now(timezone.utc)
         
-        # Mês atual
-        current_period = now.strftime("%Y%m")
-        items.append(BlobScanItem(
-            blob_path=current_period,
-            blob_prefix="github_reports",
-            last_modified=now,
-            content_length=None,
-            status="CHANGED",
-            billing_period=current_period,
-        ))
-
-        # Mês anterior
-        prev_month = now.month - 1
-        prev_year = now.year
-        if prev_month == 0:
-            prev_month = 12
-            prev_year -= 1
-        prev_period = f"{prev_year}{prev_month:02d}"
-        
-        items.append(BlobScanItem(
-            blob_path=prev_period,
-            blob_prefix="github_reports",
-            last_modified=now,
-            content_length=None,
-            status="CHANGED",
-            billing_period=prev_period,
-        ))
+        for i in range(12):
+            m = now.month - i
+            y = now.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            period = f"{y}{m:02d}"
+            
+            existing = db_session.execute(
+                select(IngestedBlob).where(
+                    IngestedBlob.connection_id == self.connection.id,
+                    IngestedBlob.blob_path == period
+                )
+            ).scalar_one_or_none()
+            
+            # Mês atual sempre como CHANGED para permitir atualização contínua de custos do mês corrente
+            if i == 0:
+                status = "CHANGED" if existing else "NEW"
+            else:
+                status = "UNCHANGED" if existing else "NEW"
+            
+            items.append(BlobScanItem(
+                blob_path=period,
+                blob_prefix="github_reports",
+                last_modified=existing.last_modified if existing else now,
+                content_length=None,
+                status=status,
+                billing_period=period,
+            ))
 
         return items
 
@@ -110,8 +111,8 @@ class GithubBillingExtractor:
         items = []
         now = datetime.now(timezone.utc)
         
-        # Lista os últimos 6 meses para permitir extração histórica e atual
-        for i in range(6):
+        # Lista os últimos 12 meses para permitir extração histórica e atual
+        for i in range(12):
             m = now.month - i
             y = now.year
             while m <= 0:
@@ -126,7 +127,12 @@ class GithubBillingExtractor:
                 )
             )
             blob_row = existing.scalar_one_or_none()
-            status = "UNCHANGED" if blob_row else "NEW"
+            
+            # Mês atual sempre como CHANGED para permitir atualização contínua de custos do mês corrente
+            if i == 0:
+                status = "CHANGED" if blob_row else "NEW"
+            else:
+                status = "UNCHANGED" if blob_row else "NEW"
             
             items.append(BlobScanItem(
                 blob_path=period,
@@ -148,6 +154,7 @@ class GithubBillingExtractor:
             unchanged=unchanged_count,
             items=items,
         )
+
 
     def _fetch_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
         """
