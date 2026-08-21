@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Plot from "react-plotly.js";
-import { Alert, Box, Breadcrumbs, Button, Card, CardContent, CircularProgress, Collapse, FormControl, FormControlLabel, Grid, IconButton, InputLabel, Link, List, ListItemButton, ListItemText, Menu, MenuItem, Paper, Select, Stack, Switch, Typography } from "@mui/material";
-import { ChevronRight, ExpandMore } from "@mui/icons-material";
+import { Alert, Box, Breadcrumbs, Button, Card, CardContent, Chip, CircularProgress, Collapse, FormControl, FormControlLabel, Grid, IconButton, InputLabel, Link, List, ListItemButton, ListItemText, Menu, MenuItem, Paper, Select, Stack, Switch, Typography } from "@mui/material";
+import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
+import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { Department, formatApiError, getDepartments, getExpectedView, ExpectedViewDriver, ExpectedViewRow } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
@@ -29,6 +30,7 @@ export default function ExpectedView() {
   const [cumulative, setCumulative] = useState(true);
   const [includeSharedCost, setIncludeSharedCost] = useState(params.get("shared") === "1");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [showBudget, setShowBudget] = useState(true);
   useEffect(() => {
     let cancelled = false;
     getDepartments().then((departments: Department[]) => {
@@ -201,6 +203,60 @@ export default function ExpectedView() {
     const found = departmentOptions.find(item => item.path === [...pathParts, name].join(" > ") && item.active);
     if (found) chooseDepartment(found);
   };
+
+  // ── Quadro executivo: pivot com drill (cloud → diretorias → departamentos) ──
+  const currentDept = departmentId ? departmentOptions.find(department => department.id === departmentId) : undefined;
+  const parentDept = currentDept?.parent_id ? departmentOptions.find(department => department.id === currentDept.parent_id) : undefined;
+  const pivotDrivers = useMemo(
+    () => [...drivers]
+      .filter(driver => Math.abs(Number(driver.actual_value || 0)) + Math.abs(Number(driver.shared_value || 0)) + Math.abs(Number(driver.forecast_value || 0)) > 0.005)
+      .sort((a, b) => (Number(b.actual_value || 0) + Number(b.shared_value || 0)) - (Number(a.actual_value || 0) + Number(a.shared_value || 0))),
+    [drivers],
+  );
+  const offenderSet = useMemo(
+    () => new Set(
+      [...pivotDrivers]
+        .sort((a, b) => Math.abs(Number(b.variance || 0)) - Math.abs(Number(a.variance || 0)))
+        .slice(0, 5)
+        .map(driver => driver.name),
+    ),
+    [pivotDrivers],
+  );
+  const measureRows = useMemo(() => {
+    const realized = pivotDrivers.map(driver => Number(driver.actual_value || 0) + (sharedOn ? Number(driver.shared_value || 0) : 0));
+    const forecast = pivotDrivers.map(driver => Number(driver.forecast_value || 0));
+    const budget = pivotDrivers.map(driver => Number(driver.budget_value || 0));
+    const toRow = (id: string, medida: string, values: number[]) => Object.fromEntries([
+      ["id", id],
+      ["medida", medida],
+      ...pivotDrivers.map((driver, index) => [driver.name, values[index] || 0]),
+    ]);
+    return [
+      toRow("realizado", "Realizado", realized),
+      toRow("forecast", "Forecast", forecast),
+      ...(showBudget ? [toRow("orcamento", "Orçamento", budget)] : []),
+    ];
+  }, [pivotDrivers, showBudget, sharedOn]);
+  const pivotColumns: GridColDef[] = useMemo(
+    () => [
+      { field: "medida", headerName: "Medida", width: 140, sortable: false, pinned: "left", disableColumnMenu: true },
+      ...pivotDrivers.map(driver => ({
+        field: driver.name,
+        headerName: driver.name,
+        type: "number" as const,
+        width: 170,
+        sortable: false,
+        disableColumnMenu: true,
+        headerClassName: offenderSet.has(driver.name) ? "offender-header" : undefined,
+        valueFormatter: (value: unknown) => money.format(Number(value || 0)),
+      })),
+    ],
+    [pivotDrivers, offenderSet],
+  );
+  const onPivotCellClick = (params: { field: string }) => {
+    if (params.field === "medida") return;
+    openDriver(params.field);
+  };
   const renderOrganizationNode = (department: Department, depth = 0): ReactElement => {
     const children = (department.children || []).filter(child => child.active);
     const expanded = expandedNodes.has(department.id);
@@ -209,44 +265,153 @@ export default function ExpectedView() {
       <ListItemText primary={department.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
     </ListItemButton><Collapse in={expanded} timeout="auto" unmountOnExit>{children.map(child => renderOrganizationNode(child, depth + 1))}</Collapse></Box>;
   };
-  return <Box>
-    <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 1, pb: 1 }}>
-      <Typography variant="h4" fontWeight={700}>Plano de Nuvem e IA</Typography>
-      <Breadcrumbs separator=">" sx={{ mt: 0.5, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}>
-        <Typography color="text.secondary">Dashboard</Typography>
-        <Typography color="text.secondary">Variância de Forecast</Typography>
-        {pathParts.map((name, index) => {
-          const path = pathParts.slice(0, index + 1).join(" > ");
-          const last = index === pathParts.length - 1;
-          return last
-            ? <Typography key={path} color="text.primary" fontWeight={600}>{name}</Typography>
-            : <Link key={path} component="button" underline="hover" color="inherit" onClick={() => choosePath(path)}>{name}</Link>;
-        })}
-      </Breadcrumbs>
+  return (
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      {/* Faixa de contexto branca */}
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h4">Visão esperada</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+            Realizado × forecast × orçamento por departamento, com rateio de custo compartilhado.
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Área de trabalho com campos simples de 40px */}
+      <Box sx={{
+        p: 3,
+        "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
+        "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
+      }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+          <Breadcrumbs separator=">" sx={{ mb: 1.5, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}>
+            <Typography color="text.secondary">Visão esperada</Typography>
+            <Typography color="text.secondary">Variância de Forecast</Typography>
+            {pathParts.map((name, index) => {
+              const path = pathParts.slice(0, index + 1).join(" > ");
+              const last = index === pathParts.length - 1;
+              return last
+                ? <Typography key={path} color="text.primary" fontWeight={600}>{name}</Typography>
+                : <Link key={path} component="button" underline="hover" color="inherit" onClick={() => choosePath(path)}>{name}</Link>;
+            })}
+          </Breadcrumbs>
+
+          <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={2}>
+            <Typography variant="subtitle2" color="text.secondary">Variância de forecast</Typography>
+            <Stack direction="row" gap={1} flexWrap="wrap">
+              <Button variant="outlined" size="small" onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 320, justifyContent: "flex-start", textTransform: "none" }}>
+                {director || "Consumo Cloud"}
+              </Button>
+              <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Selecione um nível para consolidar todos os seus filhos</Typography>
+                <List dense disablePadding>{organization.filter(department => department.active).map(department => renderOrganizationNode(department))}</List>
+              </Menu>
+              <FormControl sx={{ minWidth: 170 }}>
+                <InputLabel>Período</InputLabel>
+                <Select label="Período" value={periodFilter} onChange={e => setPeriodFilter(String(e.target.value))}>
+                  <MenuItem value="current">Ano atual</MenuItem>
+                  <MenuItem value="all">Todos os períodos</MenuItem>
+                  {years.map(year => <MenuItem key={year} value={year}>{year}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControlLabel control={<Switch checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label="Incluir custo compartilhado" />
+            </Stack>
+          </Stack>
+
+          <Alert severity="info" sx={{ mb: 2 }}>Forecast = realizado dos meses fechados + forecast dos meses futuros. Variação = orçamento menos forecast. Com o interruptor ligado, o custo compartilhado aparece empilhado em laranja sobre o consumo real — não mistura as duas barras. O card Realizado soma os dois.</Alert>
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}<Button size="small" sx={{ ml: 1 }} onClick={() => setReloadNonce(n => n + 1)}>Tentar de novo</Button></Alert>}
+
+          {loading ? (
+            <Stack alignItems="center" mt={6} gap={1}><CircularProgress /><Typography color="text.secondary">Consultando realizado e forecast no Trino…</Typography></Stack>
+          ) : (
+            <>
+              <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
+                {card("Realizado", actual, "#F2A900", openActualDetails)}
+                {card("Orçamento", budget, "#64748B")}
+                {card("Forecast", forecast, "#16A34A")}
+                {card("Variação", variance, variance >= 0 ? "#16A34A" : "#EF4444")}
+              </Stack>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={7}>
+                  <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Box>
+                        <Typography variant="h6">Gasto ao longo do tempo</Typography>
+                        <Typography variant="caption" color="text.secondary">{cumulative ? (sharedOn ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast" : "Acumulado · Realizado, orçamento e forecast") : (sharedOn ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento" : "Mensal · Realizado e forecast empilhados; orçamento em linha")}</Typography>
+                      </Box>
+                      <FormControlLabel control={<Switch checked={cumulative} onChange={(_, checked) => setCumulative(checked)} />} label="Acumulado" />
+                    </Stack>
+                    <Plot useResizeHandler style={{ width: "100%", height: 420 }} data={chartData} layout={chartLayout} config={{ responsive: true, displaylogo: false }} onClick={event => { if (String(event.points?.[0]?.data?.name ?? "") === "Realizado") openActualDetails(); }} />
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={5}>
+                  <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+                    <Typography variant="h6">{sharedOn ? "Rateio por departamento" : "Drivers da variação"}</Typography>
+                    <Typography variant="caption" color="text.secondary">{sharedOn ? "Laranja empilhado no filho que recebe o custo · clique para abrir" : "Filhos do departamento selecionado · clique na barra para abrir o subnível"}</Typography>
+                    <Plot useResizeHandler style={{ width: "100%", height: 420, cursor: "pointer" }} data={waterfallData} layout={waterfallLayout} config={{ responsive: true, displaylogo: false }} onClick={event => openDriver(String(event.points?.[0]?.x ?? ""))} />
+                  </Paper>
+                </Grid>
+              </Grid>
+
+              <Paper elevation={0} sx={{ mt: 2, p: 2, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} sx={{ mb: 1 }}>
+                  <Box>
+                    <Typography variant="h6">Quadro executivo - drill por {pathParts.length <= 1 ? "cloud" : "departamento"}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Clique em uma coluna para abrir o nivel abaixo - {pathParts.join(" > ") || "Consumo Cloud"}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" gap={1} alignItems="center">
+                    <Button size="small" variant="outlined" disabled={!parentDept} onClick={() => parentDept && chooseDepartment(parentDept)}>
+                      Voltar
+                    </Button>
+                    <Button size="small" variant="text" startIcon={showBudget ? <Remove /> : <Add />} onClick={() => setShowBudget((value: boolean) => !value)}>
+                      {showBudget ? "Ocultar orcamento" : "Mostrar orcamento"}
+                    </Button>
+                  </Stack>
+                </Stack>
+                {offenderSet.size > 0 && (
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center" sx={{ mb: 1.5 }}>
+                    <Typography variant="caption" fontWeight={700}>Top ofensores:</Typography>
+                    {pivotDrivers.filter(driver => offenderSet.has(driver.name)).map(driver => (
+                      <Chip
+                        key={driver.name}
+                        size="small"
+                        variant="outlined"
+                        color={Number(driver.variance || 0) >= 0 ? "success" : "error"}
+                        label={driver.name + " - " + money.format(Number(driver.variance || 0))}
+                      />
+                    ))}
+                  </Stack>
+                )}
+                {pivotDrivers.length === 0 ? (
+                  <Typography color="text.secondary">Nenhum dado no nivel atual para o periodo selecionado.</Typography>
+                ) : (
+                  <DataGrid
+                    rows={measureRows}
+                    columns={pivotColumns}
+                    autoHeight
+                    disableColumnMenu
+                    hideFooter
+                    density="compact"
+                    onCellClick={(params) => onPivotCellClick(params as { field: string })}
+                    getCellClassName={(params) => (params.field !== "medida" && offenderSet.has(params.field) ? "offender-cell" : "")}
+                    sx={{
+                      "& .offender-header": { bgcolor: "#FEF3C7", fontWeight: 700 },
+                      "& .offender-cell": { bgcolor: "#FFF7E6" },
+                    }}
+                  />
+                )}
+              </Paper>
+            </>
+          )}
+
+          {!loading && filteredRows.length > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Orçamento anual carregado: {money.format(budget)}</Typography>
+          )}
+        </Paper>
+      </Box>
     </Box>
-    <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={2}>
-      <Typography variant="subtitle2" color="text.secondary">Variância de forecast</Typography>
-      <Stack direction="row" gap={1}>
-        <Button variant="outlined" size="small" onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 320, justifyContent: "flex-start", textTransform: "none" }}>
-          {director || "Consumo Cloud"}
-        </Button>
-        <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Selecione um nível para consolidar todos os seus filhos</Typography>
-          <List dense disablePadding>{organization.filter(department => department.active).map(department => renderOrganizationNode(department))}</List>
-        </Menu>
-        <FormControl size="small" sx={{ minWidth: 170 }}><InputLabel>Período</InputLabel><Select label="Período" value={periodFilter} onChange={e => setPeriodFilter(String(e.target.value))}><MenuItem value="current">Ano atual</MenuItem><MenuItem value="all">Todos os períodos</MenuItem>{years.map(year => <MenuItem key={year} value={year}>{year}</MenuItem>)}</Select></FormControl>
-        <FormControlLabel control={<Switch checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label="Incluir custo compartilhado" />
-      </Stack>
-    </Stack>
-    <Alert severity="info" sx={{ mb: 2 }}>Forecast = realizado dos meses fechados + forecast dos meses futuros. Variação = orçamento menos forecast. Com o interruptor ligado, o custo compartilhado aparece empilhado em laranja sobre o consumo real — não mistura as duas barras. O card Realizado soma os dois.</Alert>
-    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}<Button size="small" sx={{ ml: 1 }} onClick={() => setReloadNonce(n => n + 1)}>Tentar de novo</Button></Alert>}
-    {loading ? <Stack alignItems="center" mt={6} gap={1}><CircularProgress /><Typography color="text.secondary">Consultando realizado e forecast no Trino…</Typography></Stack> : <>
-      <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>{card("Realizado", actual, "#F2A900", openActualDetails)}{card("Orçamento", budget, "#64748B")}{card("Forecast", forecast, "#16A34A")}{card("Variação", variance, variance >= 0 ? "#16A34A" : "#EF4444")}</Stack>
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={7}><Paper sx={{ p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Box><Typography variant="h6">Gasto ao longo do tempo</Typography><Typography variant="caption" color="text.secondary">{cumulative ? (sharedOn ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast" : "Acumulado · Realizado, orçamento e forecast") : (sharedOn ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento" : "Mensal · Realizado e forecast empilhados; orçamento em linha")}</Typography></Box><FormControlLabel control={<Switch checked={cumulative} onChange={(_, checked) => setCumulative(checked)} />} label="Acumulado" /></Stack><Plot useResizeHandler style={{ width: "100%", height: 420 }} data={chartData} layout={chartLayout} config={{ responsive: true, displaylogo: false }} onClick={event => { if (String(event.points?.[0]?.data?.name ?? "") === "Realizado") openActualDetails(); }} /></Paper></Grid>
-        <Grid item xs={12} md={5}><Paper sx={{ p: 2 }}><Typography variant="h6">{sharedOn ? "Rateio por departamento" : "Drivers da variação"}</Typography><Typography variant="caption" color="text.secondary">{sharedOn ? "Laranja empilhado no filho que recebe o custo · clique para abrir" : "Filhos do departamento selecionado · clique na barra para abrir o subnível"}</Typography><Plot useResizeHandler style={{ width: "100%", height: 420, cursor: "pointer" }} data={waterfallData} layout={waterfallLayout} config={{ responsive: true, displaylogo: false }} onClick={event => openDriver(String(event.points?.[0]?.x ?? ""))} /></Paper></Grid>
-      </Grid>
-    </>}
-    {!loading && filteredRows.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Orçamento anual carregado: {money.format(budget)}</Typography>}
-  </Box>;
+  );
 }
+

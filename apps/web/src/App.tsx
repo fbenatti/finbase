@@ -3,8 +3,7 @@ import Layout from "./layout/Layout";
 import Connections from "./pages/Connections/Connections";
 import Explorer from "./pages/Explorer/Explorer";
 import Mappings from "./pages/Mappings/Mappings";
-import Rules from "./pages/Rules/Rules";
-import Classification from "./pages/Classification/Classification";
+import Governance from "./pages/Governance/Governance";
 import Departments from "./pages/Departments/Departments";
 import Destinations from "./pages/Destinations/Destinations";
 import Extraction from "./pages/Extraction/Extraction";
@@ -17,9 +16,8 @@ import Forecast from "./pages/Forecast/Forecast";
 import ForecastHistory from "./pages/Forecast/ForecastHistory";
 import SharedCostHistory from "./pages/Reprocess/SharedCostHistory";
 import CloneRules from "./pages/CloneRules/CloneRules";
-import Dashboards from "./pages/Dashboards/Dashboards";
+import Tables from "./pages/Tables/Tables";
 import ExpectedView from "./pages/Dashboards/ExpectedView";
-import FinancialTypes from "./pages/FinancialTypes/FinancialTypes";
 import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
 function App() {
@@ -32,16 +30,16 @@ function App() {
         <Route path="departments" element={<Departments />} />
         <Route path="departments/financial" element={<Planning />} />
         <Route path="budgets" element={<Planning budgetMode />} />
-        <Route path="financial-types" element={<FinancialTypes />} />
-        <Route path="destinations" element={<Destinations />} />
-        <Route path="relationship" element={<Relationship />} />
+        <Route path="tables" element={<Tables />} />
+        <Route path="destinations" element={<Navigate to="/tables?tab=destinations" replace />} />
+        <Route path="relationship" element={<Navigate to="/tables?tab=relationship" replace />} />
+        <Route path="clone-rules" element={<Navigate to="/tables?tab=clone-rules" replace />} />
         <Route path="mappings" element={<Mappings />} />
-        <Route path="rules" element={<Rules />} />
-        <Route path="clone-rules" element={<CloneRules />} />
-        <Route path="classifications" element={<Classification />} />
-        <Route path="extraction" element={<Extraction />} />
+        <Route path="governance" element={<Governance />} />
+        <Route path="rules" element={<Navigate to="/governance?tab=rules" replace />} />
+        <Route path="classifications" element={<Navigate to="/governance?tab=classification" replace />} />
+        <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />
         <Route path="analysis" element={<Analysis />} />
-        <Route path="dashboards" element={<Dashboards />} />
         <Route path="expected-view" element={<ExpectedView />} />
         <Route path="pipeline" element={<PipelineBuilder />} />
         <Route path="reprocess" element={<Reprocess />} />
@@ -50,7 +48,6 @@ function App() {
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
         <Route path="reprocess/shared-cost/history/:runId" element={<SharedCostHistory />} />
         <Route path="extraction/history/:taskId" element={<ExtractionHistory />} />
-        <Route path="dashboards" element={<Dashboards />} />
       </Route>
     </Routes>
   );

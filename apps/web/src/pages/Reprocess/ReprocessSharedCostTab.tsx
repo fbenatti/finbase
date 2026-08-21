@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useNotifications } from "../../context/NotificationContext";
 import { Alert, Box, Button, Chip, CircularProgress, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import { Refresh, Stop, Visibility } from "@mui/icons-material";
 import OperationalHistoryDataGrid from "../../components/OperationalHistoryDataGrid";
@@ -8,12 +9,6 @@ import {
   SharedCostConfig, SharedCostJob, cancelEtl, formatApiError, getSharedCostHistory, getSharedCosts,
   reprocessSharedCost,
 } from "../../services/api";
-
-const MODE_LABEL: Record<string, string> = {
-  consumption: "Por consumo na mesma cloud",
-  equal: "Equalitário",
-  custom: "Percentual personalizado",
-};
 
 const isActive = (status: string) => status === "QUEUED" || status === "RUNNING";
 const statusColor = (status: string): "success" | "error" | "info" | "warning" | "default" => {
@@ -26,10 +21,11 @@ const statusColor = (status: string): "success" | "error" | "info" | "warning" |
 
 export default function ReprocessSharedCostTab() {
   const navigate = useNavigate();
+  const notifications = useNotifications();
   const [configs, setConfigs] = useState<SharedCostConfig[]>([]);
   const [history, setHistory] = useState<SharedCostJob[]>([]);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [startMessage, setStartMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState<number | null>(null);
@@ -66,10 +62,11 @@ export default function ReprocessSharedCostTab() {
   const run = async () => {
     setRunning(true);
     setError("");
-    setSuccess("");
+    setStartMessage("");
     try {
       const result = await reprocessSharedCost();
-      setSuccess(`${result.message} (task ${result.task_id}). Acompanhe o status no histórico abaixo.`);
+      setStartMessage(result.message + " (task " + result.task_id + "). Acompanhe o andamento no ícone de notificações.");
+      await notifications.addTaskById(result.task_id, { kind: "shared_cost", title: "Custo compartilhado" });
       await loadHistory();
     } catch (e: unknown) {
       setError(formatApiError(e, "Não foi possível reprocessar o custo compartilhado"));
@@ -98,12 +95,8 @@ export default function ReprocessSharedCostTab() {
 
   return (
     <Box>
-      <Alert severity="info" sx={{ mb: 2 }}>
-        O worker gera linhas mensais tipo=rateio na tabela de planejamento. O histórico abaixo atualiza sozinho
-        a cada 3s até a task sair de QUEUED/RUNNING.
-      </Alert>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
+      {startMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setStartMessage("")}>{startMessage}</Alert>}
       <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
         <Button
           variant="contained"
@@ -120,26 +113,11 @@ export default function ReprocessSharedCostTab() {
         <Button variant="text" onClick={() => void load()}>Atualizar</Button>
       </Box>
       {loading && <Typography color="text.secondary">Carregando custos compartilhados…</Typography>}
-      {!loading && configs.length === 0 && (
+      {!loading && enabled.length === 0 && (
         <Typography color="text.secondary">
-          Nenhum custo compartilhado cadastrado. Em Departamentos, edite o nó doador, ligue Custo compartilhado e salve.
+          Nenhuma configuração ativa de custo compartilhado. Em Departamentos, edite o nó doador, ligue Custo compartilhado e salve.
         </Typography>
       )}
-      {configs.map(config => (
-        <Paper key={config.department_id} variant="outlined" sx={{ p: 2, mb: 1.5 }}>
-          <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-            <Chip size="small" color={config.enabled ? "warning" : "default"} label={config.enabled ? "Ativo" : "Inativo"} />
-            <Chip size="small" variant="outlined" label={MODE_LABEL[config.mode] || config.mode} />
-            <Typography fontWeight={600}>{config.path || config.name || `Departamento ${config.department_id}`}</Typography>
-          </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {config.mode === "consumption"
-              ? "Rateio em todos os projetos da mesma cloud de origem, na proporção do consumo."
-              : `Destinos: ${config.targets.map(target => target.path || target.name || target.department_id).join(" · ") || "nenhum"}`}
-          </Typography>
-        </Paper>
-      ))}
-
       <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
         <Typography variant="h6" sx={{ mb: 1 }}>Histórico</Typography>
         {history.length === 0 && (

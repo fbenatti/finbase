@@ -197,7 +197,8 @@ stop_compose_dev_conflicts() {
     return 0
   fi
   echo "Parando containers Docker api/web deste projeto (Docker Desktop permanece ativo)..."
-  compose_cmd stop api web >/dev/null 2>&1 || true
+  compose_cmd stop -t 2 api web >/dev/null 2>&1 || true
+  compose_cmd kill api web >/dev/null 2>&1 || true
 }
 
 free_listeners_on_port() {
@@ -240,6 +241,19 @@ free_stale_processes() {
     echo "Encerrando worker ETL legado (PIDs:$(echo "$worker_pids" | tr '\n' ' ' | sed 's/ $//'))"
     kill_pids "$worker_pids"
   fi
+
+  # Limpa processos filho spawn_main/heartbeat do worker que ficam vivos após crash no macOS.
+  # Esses filhos herdam o file descriptor do flock e impedem reinicialização com
+  # "Another FinOps Worker already owns the worker lock".
+  zombie_pids="$(pgrep -f "multiprocessing.spawn import spawn_main" 2>/dev/null || true)"
+  if [[ -n "$zombie_pids" ]]; then
+    echo "Encerrando processos filho zumbis do worker (spawn_main, PIDs:$(echo "$zombie_pids" | tr '\n' ' ' | sed 's/ $//'))"
+    kill -9 $zombie_pids 2>/dev/null || true
+    sleep 1
+  fi
+  # Remove o lock file para garantir que o próximo worker possa adquirir o lock
+  rm -f /tmp/openfinops-worker.lock
+
 
   if [[ -n "$(non_docker_listeners_on_port 8001)" ]]; then
     echo "ERRO: porta 8001 ainda ocupada após tentar liberar." >&2

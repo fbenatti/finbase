@@ -1,26 +1,51 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Box, Typography, Button, Paper, IconButton, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Switch, FormControlLabel, FormControl,
-  Alert, CircularProgress, Tooltip, Divider,
-  List, Menu, MenuItem,
-  Radio, RadioGroup, FormLabel,
+  Alert,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  FormControlLabel,
+  FormLabel,
+  IconButton,
+  InputAdornment,
+  Menu,
+  MenuItem,
+  Paper,
+  Radio,
+  RadioGroup,
+  Stack,
+  Switch,
+  TextField,
+  Tooltip,
+  Typography,
 } from "@mui/material";
 import {
-  Add, Edit, Delete, ExpandMore, ExpandLess,
-  Business, AccountTree, UploadFile,
-  AccountBalance,
+  Add, AccountBalance, AccountTree, Business, Delete, Edit, ExpandLess, ExpandMore, Search, UploadFile,
 } from "@mui/icons-material";
 import {
-    getDepartments, createDepartment, updateDepartment, deleteDepartment,
-    bootstrapCloudOrganization,
-    getProjects, createProject, updateProject, deleteProject,
-    importCsvData, CsvImportResult, Department, Project,
-    getSharedCosts, getDepartmentSharedCost, upsertDepartmentSharedCost,
-    SharedCostConfig, SharedCostMode, SharedCostTarget,
-    formatApiError,
+  getDepartments,
+  createDepartment,
+  updateDepartment,
+  deleteDepartment,
+  bootstrapCloudOrganization,
+  importCsvData,
+  CsvImportResult,
+  Department,
+  getSharedCosts,
+  getDepartmentSharedCost,
+  upsertDepartmentSharedCost,
+  SharedCostConfig,
+  SharedCostMode,
+  SharedCostTarget,
+  formatApiError,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, {
@@ -35,57 +60,53 @@ const emptyDeptForm = {
   active: true,
 };
 
-const emptyProjForm = {
-  department_id: 0, projeto_name: "", cloud: "", subscription_rg: "",
-  active: true,
-};
-
 interface CustomFieldEntry { key: string; value: string }
 
 export default function Departments() {
   const navigate = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [sharedCosts, setSharedCosts] = useState<SharedCostConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  // Busca do organograma (filtra a arvore mantendo os ancestrais)
+  const [deptSearch, setDeptSearch] = useState("");
 
   // Department dialog
   const [deptDialog, setDeptDialog] = useState(false);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [deptForm, setDeptForm] = useState(emptyDeptForm);
   const [customFields, setCustomFields] = useState<CustomFieldEntry[]>([]);
+  const [savingDept, setSavingDept] = useState(false);
+  const [deptDialogError, setDeptDialogError] = useState("");
 
-  // Project dialog
-  const [projDialog, setProjDialog] = useState(false);
-  const [editingProj, setEditingProj] = useState<Project | null>(null);
-  const [projForm, setProjForm] = useState(emptyProjForm);
-
-  // Expand state
+  // Expand state do organograma
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  // Import
+  // Import / organizacao
   const [importing, setImporting] = useState(false);
   const [financialMenu, setFinancialMenu] = useState<HTMLElement | null>(null);
   const [preparingOrganization, setPreparingOrganization] = useState(false);
-  const [sharedCosts, setSharedCosts] = useState<SharedCostConfig[]>([]);
+
+  // Shared cost (dentro do dialogo de departamento)
   const [sharedEnabled, setSharedEnabled] = useState(false);
   const [sharedMode, setSharedMode] = useState<SharedCostMode>("consumption");
   const [sharedTargets, setSharedTargets] = useState<SharedCostTarget[]>([]);
   const [sharedPicker, setSharedPicker] = useState<number | null>(null);
   const [sharedLoaded, setSharedLoaded] = useState(true);
-  const [savingDept, setSavingDept] = useState(false);
-  const [deptDialogError, setDeptDialogError] = useState("");
+
+  // Confirmacoes Material
+  const [deleteDeptPending, setDeleteDeptPending] = useState<Department | null>(null);
+  const [prepareOrgPending, setPrepareOrgPending] = useState(false);
 
   const load = async () => {
     try {
-      const [deps, projs, costs] = await Promise.all([
+      const [deps, costs] = await Promise.all([
         getDepartments(false),
-        getProjects(),
         getSharedCosts().catch(() => [] as SharedCostConfig[]),
       ]);
       setDepartments(deps);
-      setProjects(projs);
       setSharedCosts(costs);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -94,14 +115,19 @@ export default function Departments() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, []);
 
+  // ── Acoes de página ──
   const prepareCloudOrganization = async () => {
-    if (!confirm("Preparar Consumo Cloud > Showback/Chargeback > Provedores e mover as diretorias atuais para Showback > Azure? Isso não reprocessa os dados.")) return;
-    setPreparingOrganization(true); setError(""); setSuccess("");
+    setPrepareOrgPending(false);
+    setPreparingOrganization(true);
+    setError(""); setSuccess("");
     try {
       const result = await bootstrapCloudOrganization();
-      setSuccess(`${result.message} ${result.moved_directories.length} diretorias reposicionadas e ${result.planning_entries_updated} entradas de orçamento atualizadas.`);
+      setSuccess(
+        result.message + " " + result.moved_directories.length + " diretorias reposicionadas e " +
+        result.planning_entries_updated + " entradas de orçamento atualizadas."
+      );
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Não foi possível preparar o organograma");
@@ -116,14 +142,13 @@ export default function Departments() {
     try {
       const result: CsvImportResult = await importCsvData();
       setSuccess(
-        `Importado: ${result.departments_created} departamentos, ` +
-        `${result.projects_created} projetos, ` +
-        `${result.classification_rules_created} regras de classificação`
+        "Importado: " + result.departments_created + " departamentos e " +
+        result.classification_rules_created + " regras de classificação"
       );
       if (result.errors.length > 0) {
         setError(result.errors.join("; "));
       }
-      load();
+      await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -131,7 +156,7 @@ export default function Departments() {
     }
   };
 
-  // --- Department CRUD ---
+  // ── Department CRUD ──
   const openNewDept = (parentId: number | null = null) => {
     setEditingDept(null);
     setDeptForm({ ...emptyDeptForm, parent_id: parentId });
@@ -209,10 +234,11 @@ export default function Departments() {
 
   const blockedParentIds = editingDept ? descendantIds(editingDept) : new Set<number>();
 
-  const removeDept = async (id: number) => {
-    if (!confirm("Excluir este departamento? Filhos sobem para a raiz. Projetos deste nó e o cadastro de custo compartilhado vinculado serão removidos.")) return;
+  const removeDept = async () => {
+    if (!deleteDeptPending) return;
     try {
-      await deleteDepartment(id);
+      await deleteDepartment(deleteDeptPending.id);
+      setDeleteDeptPending(null);
       setSuccess("Departamento excluído.");
       await load();
     } catch (e: unknown) {
@@ -220,54 +246,13 @@ export default function Departments() {
     }
   };
 
-  // --- Custom fields ---
+  // ── Custom fields ──
   const addCustomField = () => setCustomFields([...customFields, { key: "", value: "" }]);
   const removeCustomField = (i: number) => setCustomFields(customFields.filter((_, idx) => idx !== i));
   const updateCustomField = (i: number, field: "key" | "value", val: string) => {
     const updated = [...customFields];
     updated[i][field] = val;
     setCustomFields(updated);
-  };
-
-  // --- Project CRUD ---
-  const openNewProj = (deptId: number) => {
-    setEditingProj(null);
-    setProjForm({ ...emptyProjForm, department_id: deptId });
-    setProjDialog(true);
-  };
-
-  const openEditProj = (p: Project) => {
-    setEditingProj(p);
-    setProjForm({
-      department_id: p.department_id,
-      projeto_name: p.projeto_name,
-      cloud: p.cloud || "",
-      subscription_rg: p.subscription_rg || "",
-      active: p.active,
-    });
-    setProjDialog(true);
-  };
-
-  const saveProj = async () => {
-    try {
-      if (editingProj) await updateProject(editingProj.id, projForm);
-      else await createProject(projForm);
-      setProjDialog(false);
-      load();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    }
-  };
-
-  const removeProj = async (id: number) => {
-    if (!confirm("Excluir este projeto?")) return;
-    try {
-      await deleteProject(id);
-      setSuccess("Projeto excluído.");
-      await load();
-    } catch (e: unknown) {
-      setError(formatApiError(e, "Não foi possível excluir o projeto"));
-    }
   };
 
   const toggleExpand = (id: number) => {
@@ -279,9 +264,28 @@ export default function Departments() {
     });
   };
 
-  const renderDeptNode = (dept: Department, depth: number) => {
-    const deptProjects = projects.filter(p => p.department_id === dept.id);
-    const isExpanded = expanded.has(dept.id);
+  // Organograma filtrado pela busca: mantem o no quando ele ou um descendente
+  // corresponde ao termo (os ancestrais ficam visiveis para dar contexto).
+  const searchTerm = deptSearch.trim().toLowerCase();
+  const filteredTree = useMemo(() => {
+    if (!searchTerm) return departments;
+    const matches = (d: Department): boolean =>
+      [d.name, d.centro_custo, d.ambiente, d.cloud_filter]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(searchTerm));
+    const filter = (nodes: Department[]): Department[] =>
+      nodes
+        .map((node) => {
+          const children = filter(node.children || []);
+          if (matches(node) || children.length > 0) return { ...node, children };
+          return null;
+        })
+        .filter(Boolean) as Department[];
+    return filter(departments);
+  }, [departments, searchTerm]);
+
+  const renderDeptNode = (dept: Department, depth: number, forceExpanded: boolean) => {
+    const isExpanded = forceExpanded || expanded.has(dept.id);
     const isShared = sharedCosts.some(config => config.department_id === dept.id && config.enabled);
 
     return (
@@ -310,18 +314,17 @@ export default function Departments() {
               {isShared && <Chip label="Custo compartilhado" size="small" color="warning" sx={{ ml: 1, height: 18, fontSize: "0.6rem" }} />}
             </Typography>
             <Box sx={{ display: "flex", gap: 1, mt: 0.25 }}>
-              {dept.centro_custo && <Chip label={`CC: ${dept.centro_custo}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
+              {dept.centro_custo && <Chip label={"CC: " + dept.centro_custo} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
               {dept.ambiente && <Chip label={dept.ambiente} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
               {dept.cloud_filter && <Chip label={dept.cloud_filter} size="small" variant="outlined" color="info" sx={{ height: 18, fontSize: "0.6rem" }} />}
-              {deptProjects.length > 0 && <Chip label={`${deptProjects.length} projetos`} size="small" sx={{ height: 18, fontSize: "0.6rem" }} />}
             </Box>
             {dept.custom_fields && Object.keys(dept.custom_fields).length > 0 && (
               <Box sx={{ display: "flex", gap: 0.5, mt: 0.25, flexWrap: "wrap" }}>
                 {Object.entries(dept.custom_fields).slice(0, 3).map(([k, v]) => (
-                  <Chip key={k} label={`${k}: ${String(v).slice(0, 30)}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.55rem" }} />
+                  <Chip key={k} label={k + ": " + String(v).slice(0, 30)} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.55rem" }} />
                 ))}
                 {Object.keys(dept.custom_fields).length > 3 && (
-                  <Chip label={`+${Object.keys(dept.custom_fields).length - 3}`} size="small" sx={{ height: 18, fontSize: "0.55rem" }} />
+                  <Chip label={"+" + (Object.keys(dept.custom_fields).length - 3)} size="small" sx={{ height: 18, fontSize: "0.55rem" }} />
                 )}
               </Box>
             )}
@@ -329,43 +332,17 @@ export default function Departments() {
           <Tooltip title="Adicionar filho">
             <IconButton size="small" onClick={() => openNewDept(dept.id)}><Add fontSize="small" /></IconButton>
           </Tooltip>
-          <Tooltip title="Adicionar projeto">
-            <IconButton size="small" onClick={() => openNewProj(dept.id)}><AccountTree fontSize="small" /></IconButton>
-          </Tooltip>
           <Tooltip title="Cadastro financeiro deste departamento">
-            <IconButton size="small" onClick={() => navigate(`/departments/financial?department_id=${dept.id}`)}><AccountBalance fontSize="small" /></IconButton>
+            <IconButton size="small" onClick={() => navigate("/departments/financial?department_id=" + dept.id)}><AccountBalance fontSize="small" /></IconButton>
           </Tooltip>
-          <IconButton size="small" onClick={() => openEditDept(dept)}><Edit fontSize="small" /></IconButton>
+          <IconButton size="small" onClick={() => void openEditDept(dept)}><Edit fontSize="small" /></IconButton>
           <Tooltip title="Excluir departamento">
-            <IconButton size="small" onClick={(event) => { event.stopPropagation(); void removeDept(dept.id); }} color="error"><Delete fontSize="small" /></IconButton>
+            <IconButton size="small" color="error" onClick={(event) => { event.stopPropagation(); setDeleteDeptPending(dept); }}><Delete fontSize="small" /></IconButton>
           </Tooltip>
         </Paper>
 
-        {/* Projects under this department */}
-        {isExpanded && deptProjects.map(p => (
-          <Paper key={p.id} sx={{
-            p: 1, mb: 0.5, ml: depth * 3 + 4,
-            display: "flex", alignItems: "center", gap: 1,
-            bgcolor: "grey.50",
-          }}>
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="body2" fontWeight={600}>
-                {p.projeto_name}
-              </Typography>
-              <Box sx={{ display: "flex", gap: 0.5, mt: 0.25 }}>
-                {p.cloud && <Chip label={p.cloud} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
-                {p.subscription_rg && <Chip label={`RG: ${p.subscription_rg}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
-              </Box>
-            </Box>
-            <IconButton size="small" onClick={() => openEditProj(p)}><Edit fontSize="small" /></IconButton>
-            <Tooltip title="Excluir projeto">
-              <IconButton size="small" onClick={(event) => { event.stopPropagation(); void removeProj(p.id); }} color="error"><Delete fontSize="small" /></IconButton>
-            </Tooltip>
-          </Paper>
-        ))}
-
         {/* Children departments (recursive) */}
-        {isExpanded && dept.children.map(child => renderDeptNode(child, depth + 1))}
+        {isExpanded && dept.children.map(child => renderDeptNode(child, depth + 1, forceExpanded))}
       </Box>
     );
   };
@@ -373,55 +350,106 @@ export default function Departments() {
   if (loading) return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-        <Box>
-          <Typography variant="h4">Departamentos & Projetos</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Hierarquia de Diretorias, Departamentos e Projetos com campos customizados
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      {/* Faixa de contexto branca */}
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h4">Departamentos</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+            Hierarquia de Diretorias e Departamentos (até 7 níveis) com campos customizados.
           </Typography>
-        </Box>
-        <Box sx={{ display: "flex", gap: 1 }}>
-          <Button variant="outlined" startIcon={<AccountBalance />} onClick={(e) => setFinancialMenu(e.currentTarget)}>
-            Cadastro financeiro
-          </Button>
-          <Menu anchorEl={financialMenu} open={Boolean(financialMenu)} onClose={() => setFinancialMenu(null)}>
-            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=orcamento"); }}>Importar orçamento</MenuItem>
-            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=forecast-manual"); }}>Importar forecast manual</MenuItem>
-            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=saldo-contratual"); }}>Importar saldo contratual</MenuItem>
-            <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial"); }}>Download modelo e editar cadastro</MenuItem>
-          </Menu>
-          <Button variant="outlined" startIcon={preparingOrganization ? <CircularProgress size={18} /> : <AccountTree />}
-            onClick={prepareCloudOrganization} disabled={preparingOrganization}>
-            Preparar organograma cloud
-          </Button>
-          <Button variant="outlined" startIcon={importing ? <CircularProgress size={18} /> : <UploadFile />}
-            onClick={handleImport} disabled={importing}>
-            {importing ? "Importando..." : "Importar CSV"}
-          </Button>
-          <Button variant="contained" startIcon={<Add />} onClick={() => openNewDept(null)}>
-            Novo Departamento
-          </Button>
         </Box>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
+      {/* Área de trabalho com campos simples de 40px */}
+      <Box sx={{
+        p: 3,
+        "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
+        "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
+      }}>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
+            {error}
+          </Alert>
+        )}
+        {success && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>
+            {success}
+          </Alert>
+        )}
 
-      {departments.length === 0 ? (
-        <EmptyState message="Nenhum departamento cadastrado. Clique em 'Novo Departamento' ou 'Importar CSV' para começar." />
-      ) : (
-        <Box>
-          {departments.map(d => renderDeptNode(d, 0))}
-        </Box>
-      )}
+        <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
+            <Box>
+              <Typography variant="h6">Organograma</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Diretorias, departamentos e hierarquia com custo compartilhado.
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} flexWrap="wrap" flexShrink={0}>
+              <Button size="small" startIcon={<AccountBalance />} onClick={(e) => setFinancialMenu(e.currentTarget)}>
+                Cadastro financeiro
+              </Button>
+              <Menu anchorEl={financialMenu} open={Boolean(financialMenu)} onClose={() => setFinancialMenu(null)}>
+                <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=orcamento"); }}>Importar orçamento</MenuItem>
+                <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=forecast-manual"); }}>Importar forecast manual</MenuItem>
+                <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial?type=saldo-contratual"); }}>Importar saldo contratual</MenuItem>
+                <MenuItem onClick={() => { setFinancialMenu(null); navigate("/departments/financial"); }}>Download modelo e editar cadastro</MenuItem>
+              </Menu>
+              <Button size="small" startIcon={preparingOrganization ? <CircularProgress size={16} /> : <AccountTree />} onClick={() => setPrepareOrgPending(true)} disabled={preparingOrganization}>
+                Preparar organograma cloud
+              </Button>
+              <Button size="small" startIcon={importing ? <CircularProgress size={16} /> : <UploadFile />} onClick={handleImport} disabled={importing}>
+                {importing ? "Importando..." : "Importar CSV"}
+              </Button>
+              <Button size="small" variant="contained" startIcon={<Add />} onClick={() => openNewDept(null)}>
+                Novo Departamento
+              </Button>
+            </Stack>
+          </Stack>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Buscar departamento (nome, centro de custo, ambiente ou cloud)"
+            value={deptSearch}
+            onChange={(event) => setDeptSearch(event.target.value)}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+                sx: { height: 40 },
+              },
+            }}
+            sx={{ mb: 2, maxWidth: 520 }}
+          />
+          {departments.length === 0 ? (
+            <Box sx={{ py: 7 }}>
+              <EmptyState message="Nenhum departamento cadastrado. Clique em 'Novo Departamento' ou 'Importar CSV' para começar." />
+            </Box>
+          ) : filteredTree.length === 0 ? (
+            <Box sx={{ py: 7 }}>
+              <EmptyState message="Nenhum departamento corresponde à busca." />
+            </Box>
+          ) : (
+            <Box>
+              {filteredTree.map(d => renderDeptNode(d, 0, Boolean(searchTerm)))}
+            </Box>
+          )}
+        </Paper>
+      </Box>
 
       {/* Department Dialog */}
       <Dialog open={deptDialog} onClose={() => setDeptDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle>{editingDept ? "Editar" : "Novo"} Departamento</DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{
+          "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
+          "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
+        }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-            {deptDialogError && <Alert severity="error">{deptDialogError}</Alert>}
+            {deptDialogError && <Alert severity="error" onClose={() => setDeptDialogError("")}>{deptDialogError}</Alert>}
             {!sharedLoaded && editingDept && (
               <Typography variant="body2" color="text.secondary">Carregando configuração de custo compartilhado…</Typography>
             )}
@@ -454,10 +482,10 @@ export default function Departments() {
             </Box>
             {customFields.map((cf, i) => (
               <Box key={i} sx={{ display: "flex", gap: 1 }}>
-                <TextField size="small" label="Chave" value={cf.key}
+                <TextField label="Chave" value={cf.key}
                   onChange={(e) => updateCustomField(i, "key", e.target.value)}
                   sx={{ width: "40%" }} />
-                <TextField size="small" label="Valor" value={cf.value}
+                <TextField label="Valor" value={cf.value}
                   onChange={(e) => updateCustomField(i, "value", e.target.value)}
                   sx={{ width: "50%" }} />
                 <IconButton size="small" onClick={() => removeCustomField(i)} color="error">
@@ -489,10 +517,10 @@ export default function Departments() {
                 </FormControl>
                 {sharedMode === "consumption" ? (
                   <Typography variant="body2" color="text.secondary">
-                    O valor rateado é o gasto deste departamento e de todos os filhos. Ligue a flag no projeto
+                    O valor rateado é o gasto deste departamento e de todos os filhos. Ligue a flag no departamento
                     Condomínio (folha), não na diretoria de Infra — senão a DIR Dados/IA paga uma fatia de Compra de RIs,
-                    redes e o resto da Infra, não só os 2 MM do Condomínio. O rateio vai para os projetos da mesma cloud,
-                    na proporção do consumo. Quem não consumiu não paga.
+                    redes e o resto da Infra, não só os 2 MM do Condomínio. O rateio vai para os departamentos da mesma
+                    cloud, na proporção do consumo. Quem não consumiu não paga.
                   </Typography>
                 ) : <>
                 <DepartmentTreePicker
@@ -506,7 +534,7 @@ export default function Departments() {
                     setSharedTargets([...sharedTargets, { department_id: found.id, percent: null, name: found.name, path: found.path }]);
                     setSharedPicker(null);
                   }}
-                  label="Adicionar projeto ou diretoria destino"
+                  label="Adicionar departamento destino"
                   placeholder="Selecione para incluir no rateio"
                   blockedIds={blockedParentIds}
                 />
@@ -549,34 +577,40 @@ export default function Departments() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeptDialog(false)} disabled={savingDept}>Cancelar</Button>
-          <Button onClick={saveDept} variant="contained" disabled={savingDept || (Boolean(editingDept) && !sharedLoaded)}>
+          <Button onClick={() => void saveDept()} variant="contained" disabled={savingDept || (Boolean(editingDept) && !sharedLoaded)}>
             {savingDept ? "Salvando..." : "Salvar"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Project Dialog */}
-      <Dialog open={projDialog} onClose={() => setProjDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingProj ? "Editar" : "Novo"} Projeto</DialogTitle>
+      {/* Confirmações Material — nunca window.confirm */}
+      <Dialog open={Boolean(deleteDeptPending)} onClose={() => setDeleteDeptPending(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Excluir departamento?</DialogTitle>
         <DialogContent>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-            <TextField label="Nome do Projeto" value={projForm.projeto_name}
-              onChange={(e) => setProjForm({ ...projForm, projeto_name: e.target.value })} />
-            <Box sx={{ display: "flex", gap: 2 }}>
-              <TextField label="Cloud" value={projForm.cloud}
-                onChange={(e) => setProjForm({ ...projForm, cloud: e.target.value })} fullWidth />
-              <TextField label="Subscription/RG" value={projForm.subscription_rg}
-                onChange={(e) => setProjForm({ ...projForm, subscription_rg: e.target.value })} fullWidth />
-            </Box>
-            <FormControlLabel
-              control={<Switch checked={projForm.active} onChange={(e) => setProjForm({ ...projForm, active: e.target.checked })} />}
-              label="Ativo"
-            />
-          </Box>
+          <Typography>
+            Você está prestes a excluir <strong>{deleteDeptPending?.name}</strong>. Filhos sobem para a raiz e o cadastro de custo compartilhado vinculado será removido.
+          </Typography>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setProjDialog(false)}>Cancelar</Button>
-          <Button onClick={saveProj} variant="contained">Salvar</Button>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDeleteDeptPending(null)}>Cancelar</Button>
+          <Button variant="contained" color="error" onClick={() => void removeDept()}>
+            Excluir departamento
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={prepareOrgPending} onClose={() => setPrepareOrgPending(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Preparar organograma cloud?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Preparar Consumo Cloud &gt; Showback/Chargeback &gt; Provedores e mover as diretorias atuais para Showback &gt; Azure? Isso não reprocessa os dados.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setPrepareOrgPending(false)}>Cancelar</Button>
+          <Button variant="contained" color="warning" onClick={() => void prepareCloudOrganization()}>
+            Preparar organograma
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

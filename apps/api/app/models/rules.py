@@ -81,19 +81,6 @@ class OrganizationMoveAudit(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class Project(Base):
-    """Project linked to a Department, with subscription/resource-group mapping."""
-    __tablename__ = "project"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    department_id = Column(Integer, ForeignKey("department.id"), nullable=False, index=True)
-    projeto_name = Column(String(200), nullable=False)
-    cloud = Column(String(50), nullable=True)
-    subscription_rg = Column(String(500), nullable=True)
-    active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
 
 class BusinessRule(Base):
     __tablename__ = "business_rule"
@@ -117,6 +104,23 @@ class BusinessRule(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ClassificationFieldValue(Base):
+    """Distinct values per destination table / cloud / field, used for rule autocomplete."""
+    __tablename__ = "classification_field_value"
+    __table_args__ = (
+        UniqueConstraint("destination_table_id", "cloud", "field", "value", name="uq_classification_field_value"),
+        Index("ix_classification_field_value_lookup", "destination_table_id", "cloud", "field"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    destination_table_id = Column(Integer, ForeignKey("destination_table.id"), nullable=False, index=True)
+    cloud = Column(String(50), nullable=False)
+    field = Column(String(200), nullable=False)
+    value = Column(String(500), nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ClassificationRule(Base):
     __tablename__ = "classification_rule"
 
@@ -124,7 +128,6 @@ class ClassificationRule(Base):
     connection_id = Column(Integer, ForeignKey("source_connection.id"), nullable=True, index=True)
     destination_table_id = Column(Integer, ForeignKey("destination_table.id"), nullable=True, index=True)
     department_id = Column(Integer, ForeignKey("department.id"), nullable=True, index=True)
-    project_id = Column(Integer, ForeignKey("project.id"), nullable=True, index=True)
     name = Column(String(200), nullable=False)
     source_field = Column(String(200), nullable=False)
     pattern = Column(String(500), nullable=False)

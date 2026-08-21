@@ -17,7 +17,7 @@ import SortableTable from "../../components/SortableTable";
 
 const DATA_TYPES = ["TEXT", "VARCHAR(50)", "VARCHAR(100)", "VARCHAR(200)", "NUMERIC", "DATE", "TIMESTAMPTZ", "JSONB", "BOOLEAN"];
 
-export default function Destinations() {
+export default function Destinations({ embedded }: { embedded?: boolean } = {}) {
   const [tables, setTables] = useState<DestinationTable[]>([]);
   const [selectedTable, setSelectedTable] = useState<DestinationTableDetail | null>(null);
   const [mappings, setMappings] = useState<SourceDestinationMapping[]>([]);

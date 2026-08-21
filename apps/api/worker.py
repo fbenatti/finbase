@@ -33,7 +33,7 @@ from app.models.etl_task import EtlTask
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
-from app.models.rules import BusinessRule, ClassificationRule, Department, Project
+from app.models.rules import BusinessRule, ClassificationRule, Department
 from app.models.skipped_blob import SkippedBlob
 from app.models.fact_cost import FactCost
 from app.models.period_status import PeriodStatus
@@ -99,6 +99,12 @@ def main():
     WORKER_PID.write_text(str(os.getpid()))
     print("FinOps Worker started. Polling for QUEUED tasks every", POLL_INTERVAL, "seconds...", flush=True)
     HEARTBEAT.touch()
+    # Set close-on-exec so the child heartbeat process does NOT inherit the lock fd.
+    # On macOS, multiprocessing uses 'spawn' which forks+exec; without FD_CLOEXEC
+    # the child keeps the flock open and the lock is never released when the parent dies.
+    import fcntl as _fcntl_flags
+    flags = _fcntl_flags.fcntl(lock_handle.fileno(), _fcntl_flags.F_GETFD)
+    _fcntl_flags.fcntl(lock_handle.fileno(), _fcntl_flags.F_SETFD, flags | _fcntl_flags.FD_CLOEXEC)
     heartbeat_worker = multiprocessing.Process(
         target=_heartbeat_process, args=(os.getpid(),), name="worker-heartbeat", daemon=True
     )

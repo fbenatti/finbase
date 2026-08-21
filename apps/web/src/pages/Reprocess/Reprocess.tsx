@@ -4,7 +4,6 @@ import Extraction from "../Extraction/Extraction";
 import ReprocessDataTab from "./ReprocessDataTab";
 import ReprocessForecastTab from "./ReprocessForecastTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
-import ReprocessTasksPanel from "./ReprocessTasksPanel";
 
 const TABS = [
   { id: "data", label: "Reprocessar dados" },
@@ -29,7 +28,7 @@ export default function Reprocess() {
       <Box sx={{ bgcolor: "background.paper", px: { xs: 2, md: 4 }, pt: 3, borderBottom: 1, borderColor: "divider" }}>
         <Typography variant="h4" sx={{ mb: 0.5 }}>Reprocessar</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Extração, Gold, forecast e custo compartilhado no mesmo lugar, com as tasks da fila visíveis acima de cada ação.
+        Extração, Gold, forecast e custo compartilhado no mesmo lugar. O andamento das execuções aparece no sino de notificações (canto superior direito).
         </Typography>
         <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" allowScrollButtonsMobile>
           {TABS.map(item => <Tab key={item.id} value={item.id} label={item.label} />)}
@@ -37,7 +36,6 @@ export default function Reprocess() {
       </Box>
       <Box sx={{ bgcolor: "#f8fafc", p: { xs: 2, md: 4 }, minHeight: "calc(100vh - 150px)" }}>
         <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
-          <ReprocessTasksPanel />
           {tab === "data" && <ReprocessDataTab />}
           {tab === "forecast" && <ReprocessForecastTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}

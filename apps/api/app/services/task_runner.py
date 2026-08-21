@@ -28,12 +28,16 @@ from app.services.azure_extractor import AzureExtractor, derive_billing_period
 from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
 from app.services.oci_extractor import OciExtractor, derive_billing_period_oci
 from app.services.mongodb_extractor import MongoAtlasExtractor
+from app.services.github_extractor import GithubBillingExtractor
+from app.services.github_license_extractor import GithubLicenseExtractor
+from app.services.github_token_extractor import GithubTokenExtractor
 from app.services.expression_engine import (
     evaluate_expression,
     evaluate_conditional,
     build_scope_mask,
 )
 from app.services import iceberg_service as iceberg
+from app.services.classification_field_values import enrich_from_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +251,10 @@ def _process_blob_sync(
             physical_name, target, partition_col="_billing_period",
             column_types=column_types,
         )
+        try:
+            enrich_from_dataframe(session, destination_id, conn.code, target)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Field-value enrichment failed for %s: %s", physical_name, exc)
 
     _persist_download_blob(task_id, blob_path, "IMPORTED", content_length or 0, content_length or 0)
     return len(df), normalized_count, destination_count, errors
@@ -394,34 +402,32 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
 
 
 def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[ClassificationRule], session: Session | None = None,
-                               dept_map: dict | None = None, proj_map: dict | None = None,
+                               dept_map: dict | None = None,
                                hierarchy_cache: dict | None = None) -> None:
     """Synchronous classification application. First-match-wins per row.
 
-    Pre-loads departments and projects into dicts (zero DB queries during loop),
-    then applies vectorized boolean masks to the DataFrame.
+    Pre-loads departments into dicts (zero DB queries during loop), then applies
+    vectorized boolean masks to the DataFrame.
 
-    When dept_map, proj_map, and hierarchy_cache are provided, no DB queries are made.
+    When dept_map and hierarchy_cache are provided, no DB queries are made.
     When session is provided and caches are None, loads from DB (backward compat).
 
     For each rule that matches, populates:
     - target_field (e.g., 'departamento') with match_value
     - department hierarchy fields: centro_custo, ambiente, custom_fields
     """
-    from app.models.rules import Department, Project
+    from app.models.rules import Department
     from app.services.classification_engine import (
         _canon,
         evaluate_rule_conditions,
         normalize_rule_conditions,
     )
 
-    # ── Load department/project caches from DB only if not pre-loaded ──
-    if dept_map is None and proj_map is None and hierarchy_cache is None:
+    # ── Load department caches from DB only if not pre-loaded ──
+    if dept_map is None and hierarchy_cache is None:
         dept_ids_needed = {r.department_id for r in class_rules if r.department_id}
-        proj_ids_needed = {r.project_id for r in class_rules if r.project_id}
 
         dept_map = {}
-        proj_map = {}
 
         if dept_ids_needed and session:
             # Classification materializes the complete organizational path.
@@ -431,17 +437,9 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
             depts = session.execute(select(Department)).scalars().all()
             dept_map = {d.id: d for d in depts}
 
-        if proj_ids_needed and session:
-            projs = session.execute(
-                select(Project).where(Project.id.in_(proj_ids_needed))
-            ).scalars().all()
-            proj_map = {p.id: p for p in projs}
-
-    # Ensure dept_map and proj_map are always initialized
+    # Ensure dept_map is always initialized
     if dept_map is None:
         dept_map = {}
-    if proj_map is None:
-        proj_map = {}
 
     # ── Pre-build department hierarchy chains (cached in dict) ──
     if hierarchy_cache is None:
@@ -516,8 +514,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
 
         # Resolve department hierarchy from pre-built cache (zero DB queries!)
         dept_id = rule.department_id
-        proj_id = rule.project_id
-        
+
         if dept_id:
             leaf, root, chain = get_hierarchy(dept_id)
             if leaf:
@@ -558,13 +555,6 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                         df['custom_fields'] = None
                     import json
                     df.loc[effective_mask, 'custom_fields'] = json.dumps(merged_custom_fields, default=str, ensure_ascii=False)
-        
-        if proj_id:
-            proj = proj_map.get(proj_id)
-            if proj:
-                if 'subscription_rg' not in df.columns:
-                    df['subscription_rg'] = None
-                df.loc[effective_mask, 'subscription_rg'] = proj.subscription_rg or ''
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -684,6 +674,11 @@ def _write_to_destination_tables_sync(
 
         total_written += rows_written
         logger.info("Wrote %d rows to Iceberg %s (connection %s)", rows_written, phys_name, connection_code)
+        if rows_written:
+            try:
+                enrich_from_dataframe(session, dest_table_id, connection_code, target)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Field-value enrichment failed for table %s: %s", phys_name, exc)
 
     return total_written
 
@@ -1020,6 +1015,313 @@ def _process_mongodb_invoice_sync(
     return len(df), 0, 0, []
 
 
+def _process_github_report_sync(
+    session: Session,
+    extractor: GithubBillingExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Busca o CSV detalhado de billing do GitHub e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+    period = blob_path # blob_path carries the billing period (YYYYMM) here
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=content_length or 0,
+            download_bytes=0,
+            phase=f"Download GitHub Billing: {period}",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, content_length or 0)
+
+        df, report_id = extractor._fetch_report_for_period(period)
+        raw_df_bronze = df.copy()
+        
+        # O csv pode não ter o tamanho em content_length
+        total_size = len(df) * 100 
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("Falha ao processar GitHub Billing %s: %s", period, e)
+        errors.append(f"Failed to process GitHub Billing {period}: {e}")
+        return 0, 0, 0, errors
+    finally:
+        if task_id:
+            _persist_download_blob(task_id, blob_path, "DOWNLOADED", content_length or 0, content_length or 0)
+            _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    billing_period = period
+    _persist_download_progress(task_id, phase=f"Bronze: gravando relatório GitHub ({len(df)} linhas)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=billing_period,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=content_length or 0,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not raw_df_bronze.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+        except Exception as exc:
+            logger.error("Bronze write failed for GitHub Billing (%s): %s", blob_path, exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze GitHub Billing ({billing_period}) concluída com {len(df)} linhas")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+# ── GitHub License ────────────────────────────────────────────────────────────
+
+def _process_github_license_sync(
+    session: Session,
+    extractor: GithubLicenseExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta usuários licenciados do GitHub Enterprise e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase="Download GitHub License: buscando usuários licenciados...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_licenses()
+        total_size = len(df) * 100
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[GithubLicense] Falha ao coletar licenças: %s", e)
+        errors.append(f"Failed to process GitHub License: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando licenças GitHub ({len(df)} usuários)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=None,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=0,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, None, blob_path)
+        except Exception as exc:
+            logger.error("[GithubLicense] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze GitHub License concluída com {len(df)} usuários")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_github_license_sync_worker(
+    task_id: int,
+    item,
+    extractor: GithubLicenseExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_github_license_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── GitHub Token (Copilot Seats) ──────────────────────────────────────────────
+
+def _process_github_token_sync(
+    session: Session,
+    extractor: GithubTokenExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta Copilot seats do GitHub Enterprise e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase="Download GitHub Token: buscando Copilot seats...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_tokens()
+        total_size = len(df) * 100
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[GithubToken] Falha ao coletar tokens/seats: %s", e)
+        errors.append(f"Failed to process GitHub Token: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando Copilot seats GitHub ({len(df)} registros)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=None,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=0,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, None, blob_path)
+        except Exception as exc:
+            logger.error("[GithubToken] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze GitHub Token concluída com {len(df)} seats")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_github_token_sync_worker(
+    task_id: int,
+    item,
+    extractor: GithubTokenExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_github_token_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
 def _process_mongodb_invoice_sync_worker(
     task_id: int,
     item,
@@ -1036,6 +1338,49 @@ def _process_mongodb_invoice_sync_worker(
     session = WorkerSync()
     try:
         result = _process_mongodb_invoice_sync(
+            session,
+            extractor,
+            item.blob_path,
+            item.blob_prefix,
+            item.last_modified,
+            item.content_length,
+            task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1,
+                download_bytes=0,
+                current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+def _process_github_report_sync_worker(
+    task_id: int,
+    item,
+    extractor: GithubBillingExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_github_report_sync(
             session,
             extractor,
             item.blob_path,
@@ -1208,7 +1553,7 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas"):
+        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -1228,6 +1573,18 @@ def _run_etl_sync(
             extractor = MongoAtlasExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_mongodb_invoice_sync_worker
+        elif conn.connector_type == "github_billing":
+            extractor = GithubBillingExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_github_report_sync_worker
+        elif conn.connector_type == "github_license":
+            extractor = GithubLicenseExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_github_license_sync_worker
+        elif conn.connector_type == "github_token":
+            extractor = GithubTokenExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_github_token_sync_worker
         else:
             extractor = GcpBigQueryExtractor(conn)
             scan_result = extractor._scan_sync(session)
@@ -1284,7 +1641,7 @@ def _run_etl_sync(
 
         # Para OCI e GCP BigQuery (cargas de meses consolidados), usar 1 worker por vez para evitar
         # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
-        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas") else 2
+        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token") else 2
 
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="blob-dl") as dl_executor:
             futures = {}

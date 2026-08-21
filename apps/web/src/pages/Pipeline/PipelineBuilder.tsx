@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box, Typography, Button, Paper, Select, MenuItem, FormControl,
-  InputLabel, Chip, Alert, CircularProgress,
+  InputLabel, Chip, Alert, CircularProgress, Stack,
 } from "@mui/material";
 import { Refresh, AccountTree } from "@mui/icons-material";
 import {
@@ -36,14 +36,10 @@ function SourceColNode({ data }: NodeProps) {
 
 function FocusColNode({ data }: NodeProps) {
   const d = data as any;
-  const isOutput = d.isOutput;
-  const bg = isOutput ? "#1b5e20" : "#1a237e";
-  const border = isOutput ? "#4caf50" : "#0d47a1";
   return (
-    <Box sx={{ bgcolor: bg, border: `2px solid ${border}`, borderRadius: 2, p: 1, minWidth: 140 }}>
+    <Box sx={{ bgcolor: "#1a237e", border: "2px solid #0d47a1", borderRadius: 2, p: 1, minWidth: 140 }}>
       <Handle type="target" position={Position.Left} />
       <Typography variant="body2" sx={{ color: "#fff", fontWeight: 600, fontSize: "0.65rem", fontFamily: "monospace" }}>{d.label}</Typography>
-      {isOutput && <Typography variant="caption" sx={{ color: "#a5d6a7", fontSize: "0.5rem" }}>enriquecido</Typography>}
       <Handle type="source" position={Position.Right} />
     </Box>
   );
@@ -57,7 +53,7 @@ function ProcessNode({ data }: NodeProps) {
   const label = isClassif ? "CLASSIF" : "REGRA";
   const color = isClassif ? "#2e7d32" : "#e65100";
   return (
-    <Box sx={{ bgcolor: bg, border: `2px solid ${border}`, borderRadius: 2, p: 1, minWidth: 180 }}>
+    <Box sx={{ bgcolor: bg, border: "2px solid " + border, borderRadius: 2, p: 1, minWidth: 180 }}>
       <Handle type="target" position={Position.Left} />
       <Typography variant="caption" sx={{ color, fontWeight: 600, fontSize: "0.55rem" }}>{label}</Typography>
       <Typography variant="body2" sx={{ fontSize: "0.65rem" }}>{d.label}</Typography>
@@ -79,7 +75,6 @@ const nodeTypes = {
 const X_SOURCE = 50;
 const X_FOCUS = 380;
 const X_PROCESS = 720;
-const X_ENRICHED = 1060;
 const ROW_H = 38;
 
 // ─── Main Component ────────────────────────────────────────────────────
@@ -89,6 +84,7 @@ export default function PipelineBuilder() {
   const [destId, setDestId] = useState<number | "">("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
@@ -114,6 +110,7 @@ export default function PipelineBuilder() {
   const loadPipeline = async () => {
     if (!destId) return;
     setLoading(true); setError("");
+    setSelectedId(null);
     try {
       const destIdNum = destId as number;
       const destSchema = await getDestinationSchema(destIdNum);
@@ -128,18 +125,7 @@ export default function PipelineBuilder() {
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
-      // ──────────────────────────────────────────────────────────────────
-      // Enriched output column set — these always live in zone 4 (rightmost)
-      // ──────────────────────────────────────────────────────────────────
-      const enrichedCols = new Set<string>([
-        "diretoria", "departamento", "centro_custo", "ambiente",
-        "CostBRL", "Tax_Base", "Tax_Marketplace", "VL_CUSTO_FINAL_BRL",
-        "Diretoria", "ModeloAI", "custom_fields",
-      ]);
-
-      // ──────────────────────────────────────────────────────────────────
       // Collect which FOCUS columns are actually used (mapped, classified, ruled)
-      // ──────────────────────────────────────────────────────────────────
       const mappedDestCols = new Set<string>();
       for (const m of allMappings) mappedDestCols.add(m.destination_column);
 
@@ -147,59 +133,43 @@ export default function PipelineBuilder() {
       const srcToDest = new Map<string, string>();
       for (const m of allMappings) srcToDest.set(m.source_column, m.destination_column);
 
-      const classifiedFields = new Set<string>();
+      const referencedCols = new Set<string>();
       for (const c of allClassifs) {
+        if (c.target_field) referencedCols.add(c.target_field);
         if (c.conditions) {
-          for (const cond of c.conditions) classifiedFields.add((cond as any).field);
+          for (const cond of c.conditions) {
+            if ((cond as any).field) referencedCols.add((cond as any).field);
+          }
         }
-        if (c.source_field) classifiedFields.add(c.source_field);
+        if (c.source_field) referencedCols.add(c.source_field);
       }
-
-      const ruledFields = new Set<string>();
       for (const r of allRules) {
         const cfgSrc = (r.config_json as any)?.source_column;
-        if (cfgSrc) {
-          ruledFields.add(srcToDest.get(cfgSrc) || cfgSrc);
-        }
+        if (cfgSrc) referencedCols.add(srcToDest.get(cfgSrc) || cfgSrc);
+        if (r.target_column) referencedCols.add(r.target_column);
       }
 
       const usedFocusCols = new Set<string>([
-        ...mappedDestCols, ...classifiedFields, ...ruledFields,
+        ...mappedDestCols, ...referencedCols,
       ]);
 
-      // ──────────────────────────────────────────────────────────────────
-      // ZONE 2: FOCUS — destination table columns that are referenced
-      // ──────────────────────────────────────────────────────────────────
+      // ── ZONE: FOCUS — destination table columns that are referenced ──
       const focusY = new Map<string, number>();
       let focusYIdx = 0;
       destCols
-        .filter(c => usedFocusCols.has(c.name) && !enrichedCols.has(c.name))
+        .filter(c => usedFocusCols.has(c.name))
         .forEach((c) => {
           const y = 50 + focusYIdx * ROW_H;
           focusY.set(c.name, y);
           newNodes.push({
-            id: `foc-${c.name}`, type: "focusCol",
+            id: "foc-" + c.name, type: "focusCol",
             position: { x: X_FOCUS, y },
-            data: { label: c.name, isOutput: false },
+            data: { label: c.name },
           });
           focusYIdx += 1;
         });
 
-      // ──────────────────────────────────────────────────────────────────
-      // ZONE 4: FOCUS Enriquecida — final enriched output columns
-      // ──────────────────────────────────────────────────────────────────
-      const enrichedList = destCols.filter(c => enrichedCols.has(c.name));
-      enrichedList.forEach((c, i) => {
-        newNodes.push({
-          id: `enr-${c.name}`, type: "focusCol",
-          position: { x: X_ENRICHED, y: 50 + i * ROW_H },
-          data: { label: c.name, isOutput: true },
-        });
-      });
-
-      // ──────────────────────────────────────────────────────────────────
-      // Build per-connection groups
-      // ──────────────────────────────────────────────────────────────────
+      // ── Build per-connection groups ──
       const mappingsByConn = new Map<number, SourceDestinationMapping[]>();
       for (const m of allMappings) {
         const g = mappingsByConn.get(m.source_connection_id) || [];
@@ -220,14 +190,11 @@ export default function PipelineBuilder() {
 
       let srcY = 50;
 
-      // ──────────────────────────────────────────────────────────────────
-      // ZONE 1: Source columns — per connection, direct edges to FOCUS
-      // ──────────────────────────────────────────────────────────────────
+      // ── ZONE: Source columns — per connection, direct edges to FOCUS ──
       for (const cid of connIds) {
         const conn = connections.find(c => c.id === cid);
         if (!conn) continue;
 
-        // Load source schema
         let srcCols: string[] = [];
         try {
           const schema = await discoverSchema(cid);
@@ -235,63 +202,51 @@ export default function PipelineBuilder() {
         } catch { continue; }
 
         const connMappings = mappingsByConn.get(cid) || [];
-
-        // Only show source cols that are actually mapped
         const mappedSet = new Set(connMappings.map(m => m.source_column));
         const shownSrc = srcCols.filter(c => mappedSet.has(c));
         if (shownSrc.length === 0) continue;
 
-        // Source column nodes (Zone 1)
         const srcNodePos = new Map<string, number>();
         shownSrc.forEach((col, i) => {
           const y = srcY + i * ROW_H;
           srcNodePos.set(col, y);
           newNodes.push({
-            id: `src-${cid}-${col}`, type: "sourceCol",
+            id: "src-" + cid + "-" + col, type: "sourceCol",
             position: { x: X_SOURCE, y },
             data: { label: col, cloud: conn.code },
           });
         });
 
-        // Direct edges: source → FOCUS (the mapping IS the edge)
         connMappings.forEach((m) => {
-          const srcId = `src-${cid}-${m.source_column}`;
-          const focId = `foc-${m.destination_column}`;
+          const srcId = "src-" + cid + "-" + m.source_column;
+          const focId = "foc-" + m.destination_column;
           if (srcNodePos.has(m.source_column) && focusY.has(m.destination_column)) {
-            newEdges.push(newEdge(`e-map-${m.id}`, srcId, focId, "#42a5f5"));
+            newEdges.push(newEdge("e-map-" + m.id, srcId, focId, "#42a5f5"));
           }
         });
 
         srcY += shownSrc.length * ROW_H + 60;
       }
 
-      // ──────────────────────────────────────────────────────────────────
-      // ZONE 3: Business Rules + Classifications
-      // ──────────────────────────────────────────────────────────────────
+      // ── ZONE: Business Rules + Classifications ──
       let procY = 50;
 
       // ── Business rules (global) ──
       for (const r of globalRules) {
-        const rId = `rule-${r.id}`;
+        const rId = "rule-" + r.id;
         newNodes.push({
           id: rId, type: "process",
           position: { x: X_PROCESS, y: procY },
           data: { kind: "rule", label: r.name },
         });
 
-        // Incoming: connect from enriched zone if destCol is enriched, otherwise from FOCUS
         const cfgSrcCol = (r.config_json as any)?.source_column;
         const destCol = cfgSrcCol ? srcToDest.get(cfgSrcCol) || cfgSrcCol : null;
-        if (destCol) {
-          if (enrichedCols.has(destCol))
-            newEdges.push(newEdge(`e-${rId}-in`, `enr-${destCol}`, rId, "#ff9800"));
-          else if (focusY.has(destCol))
-            newEdges.push(newEdge(`e-${rId}-in`, `foc-${destCol}`, rId, "#ff9800"));
-        }
+        if (destCol && focusY.has(destCol))
+          newEdges.push(newEdge("e-" + rId + "-in", "foc-" + destCol, rId, "#ff9800"));
 
-        // Outgoing: only to enriched zone (rule output IS enriched data)
-        if (r.target_column && enrichedCols.has(r.target_column))
-          newEdges.push(newEdge(`e-${rId}-out`, rId, `enr-${r.target_column}`, "#ff9800"));
+        if (r.target_column && focusY.has(r.target_column))
+          newEdges.push(newEdge("e-" + rId + "-out", rId, "foc-" + r.target_column, "#ff9800"));
 
         procY += ROW_H + 8;
       }
@@ -300,18 +255,18 @@ export default function PipelineBuilder() {
       for (const cid of connIds) {
         const list = rulesByConn.get(cid) || [];
         if (list.length === 0) continue;
-        const connLabel = connections.find(c => c.id === cid)?.code || `conn${cid}`;
+        const connLabel = connections.find(c => c.id === cid)?.code || "conn" + cid;
 
-        const labelId = `rule-label-${cid}`;
+        const labelId = "rule-label-" + cid;
         newNodes.push({
           id: labelId, type: "process",
           position: { x: X_PROCESS, y: procY },
-          data: { kind: "rule", label: `Regras / ${connLabel}` },
+          data: { kind: "rule", label: "Regras / " + connLabel },
         });
         procY += ROW_H + 4;
 
         for (const r of list) {
-          const rId = `rule-${cid}-${r.id}`;
+          const rId = "rule-" + cid + "-" + r.id;
           newNodes.push({
             id: rId, type: "process",
             position: { x: X_PROCESS, y: procY },
@@ -320,16 +275,11 @@ export default function PipelineBuilder() {
 
           const cfgSrcCol = (r.config_json as any)?.source_column;
           const destCol = cfgSrcCol ? srcToDest.get(cfgSrcCol) || cfgSrcCol : null;
-          if (destCol) {
-            if (enrichedCols.has(destCol))
-              newEdges.push(newEdge(`e-${rId}-in`, `enr-${destCol}`, rId, "#ff9800"));
-            else if (focusY.has(destCol))
-              newEdges.push(newEdge(`e-${rId}-in`, `foc-${destCol}`, rId, "#ff9800"));
-          }
+          if (destCol && focusY.has(destCol))
+            newEdges.push(newEdge("e-" + rId + "-in", "foc-" + destCol, rId, "#ff9800"));
 
-          // Outgoing: only to enriched zone (rule output IS enriched data)
-          if (r.target_column && enrichedCols.has(r.target_column))
-            newEdges.push(newEdge(`e-${rId}-out`, rId, `enr-${r.target_column}`, "#ff9800"));
+          if (r.target_column && focusY.has(r.target_column))
+            newEdges.push(newEdge("e-" + rId + "-out", rId, "foc-" + r.target_column, "#ff9800"));
 
           procY += ROW_H + 4;
         }
@@ -358,28 +308,26 @@ export default function PipelineBuilder() {
         }
       }
 
-      // Render grouped classification summary nodes
       for (const [focusCol, grp] of classifGroups) {
-        const gId = `cls-group-${focusCol}`;
-        const scope = grp.global ? "Global" : [...grp.connIds].map(cid => connections.find(c => c.id === cid)?.code || `conn${cid}`).join(", ");
+        const gId = "cls-group-" + focusCol;
+        const scope = grp.global ? "Global" : [...grp.connIds].map(cid => connections.find(c => c.id === cid)?.code || "conn" + cid).join(", ");
 
         newNodes.push({
           id: gId, type: "process",
           position: { x: X_PROCESS, y: procY },
           data: {
             kind: "classification",
-            label: `${grp.count} classificações`,
-            detail: `de ${scope} para ${focusCol}`,
+            label: grp.count + " classificações",
+            detail: "de " + scope + " para " + focusCol,
           },
         });
 
-        // Input edge: from FOCUS column
-        newEdges.push(newEdge(`e-${gId}-in`, `foc-${focusCol}`, gId, "#4caf50"));
+        newEdges.push(newEdge("e-" + gId + "-in", "foc-" + focusCol, gId, "#4caf50"));
 
-        // Output edges: to enriched columns
-        for (const enrichedCol of ["diretoria", "departamento", "centro_custo", "ambiente"]) {
-          if (enrichedCols.has(enrichedCol)) {
-            newEdges.push(newEdge(`e-${gId}-to-${enrichedCol}`, gId, `enr-${enrichedCol}`, "#4caf50", "4 2"));
+        // Saida para colunas FOCUS de destino (quando existem no schema)
+        for (const outCol of ["diretoria", "departamento", "centro_custo", "ambiente"]) {
+          if (focusY.has(outCol)) {
+            newEdges.push(newEdge("e-" + gId + "-to-" + outCol, gId, "foc-" + outCol, "#4caf50", "4 2"));
           }
         }
 
@@ -396,60 +344,153 @@ export default function PipelineBuilder() {
 
   const destName = destId ? destTables.find(t => t.id === destId)?.name : null;
 
+  // ── Clique: realcar o objeto e seus relacionamentos ──
+  const relatedIds = useMemo(() => {
+    if (!selectedId) return new Set<string>();
+    const set = new Set<string>([selectedId]);
+    for (const e of edges) {
+      if (e.source === selectedId) set.add(e.target);
+      if (e.target === selectedId) set.add(e.source);
+    }
+    return set;
+  }, [selectedId, edges]);
+
+  const displayNodes = useMemo(
+    () => nodes.map(n => ({ ...n, style: { ...(n.style || {}), opacity: selectedId && !relatedIds.has(n.id) ? 0.15 : 1 } })),
+    [nodes, selectedId, relatedIds],
+  );
+  const displayEdges = useMemo(
+    () => edges.map(e => ({
+      ...e,
+      style: { ...(e.style || {}), opacity: selectedId && e.source !== selectedId && e.target !== selectedId ? 0.1 : 1 },
+    })),
+    [edges, selectedId],
+  );
+
+  const selectedNode = selectedId ? nodes.find(n => n.id === selectedId) : null;
+  const relatedList = useMemo(() => {
+    if (!selectedId) return [];
+    return edges
+      .filter(e => e.source === selectedId || e.target === selectedId)
+      .map(e => {
+        const otherId = e.source === selectedId ? e.target : e.source;
+        const other = nodes.find(n => n.id === otherId);
+        return other ? { id: other.id, label: String((other.data as any)?.label || other.id), outgoing: e.source === selectedId } : null;
+      })
+      .filter(Boolean) as Array<{ id: string; label: string; outgoing: boolean }>;
+  }, [selectedId, edges, nodes]);
+
   return (
-    <Box sx={{ height: "calc(100vh - 80px)", display: "flex", flexDirection: "column", mx: -3, mt: -3 }}>
-      <Paper sx={{ p: 2, mb: 1, display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap", mx: 3, mt: 3 }}>
-        <Typography variant="h6" sx={{ mr: 2 }}>
-          <AccountTree sx={{ verticalAlign: "middle", mr: 1 }} />Pipeline Builder
-        </Typography>
-        <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela Destino *</InputLabel>
-          <Select value={destId} label="Tabela Destino *"
-            onChange={(e) => { setDestId(e.target.value as number); setNodes([]); setEdges([]); }}>
-            {destTables.map((t) => (<MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>))}
-          </Select>
-        </FormControl>
-        <Button variant="outlined" startIcon={<Refresh />} onClick={loadPipeline} disabled={!destId}>
-          Carregar Pipeline
-        </Button>
-        <Box sx={{ flexGrow: 1 }} />
-        {destName && <Chip label={`Destino: ${destName}`} color="primary" />}
-      </Paper>
-
-      {error && <Alert severity="error" sx={{ mb: 1, mx: 3 }} onClose={() => setError("")}>{error}</Alert>}
-
-      {nodes.length > 0 && (
-        <Box sx={{ display: "flex", gap: 2, mb: 1, px: 2, mx: 3, flexWrap: "wrap" }}>
-          <Chip label="Origens" size="small" sx={{ bgcolor: "#e3f2fd", border: "1px solid #1976d2" }} />
-          <Chip label="FOCUS" size="small" sx={{ bgcolor: "#1a237e", color: "#fff" }} />
-          <Chip label="Regras de Negócio" size="small" sx={{ bgcolor: "#fff3e0", border: "1px solid #ff9800" }} />
-          <Chip label="Classificações" size="small" sx={{ bgcolor: "#e8f5e9", border: "1px solid #4caf50" }} />
-          <Chip label="FOCUS Enriquecida" size="small" sx={{ bgcolor: "#1b5e20", color: "#a5d6a7", border: "1px solid #4caf50" }} />
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      {/* Faixa de contexto branca */}
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h4">Pipeline do dado</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+            Fluxo de transformação: origens → colunas FOCUS → regras de negócio e classificações. Clique em um objeto para ver com quem ele se relaciona.
+          </Typography>
         </Box>
-      )}
+      </Box>
 
-      <Box sx={{ flexGrow: 1, border: "1px solid #ddd", borderRadius: 1, overflow: "hidden" }}>
-        {loading ? (
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><CircularProgress /></Box>
-        ) : !destId ? (
-          <EmptyState message="Selecione uma Tabela Destino e clique em 'Carregar Pipeline'." />
-        ) : nodes.length === 0 ? (
-          <EmptyState message="Nenhuma relação encontrada." />
-        ) : (
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-            onConnect={onConnect} nodeTypes={nodeTypes} fitView minZoom={0.1} maxZoom={2}>
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-            <Controls />
-            <MiniMap nodeColor={(n) => {
-              switch (n.type) {
-                case "sourceCol": return "#1976d2";
-                case "focusCol": return (n.data as any)?.isOutput ? "#4caf50" : "#1a237e";
-                case "process": return (n.data as any)?.kind === "classification" ? "#4caf50" : "#ff9800";
-                default: return "#888";
-              }
-            }} />
-          </ReactFlow>
-        )}
+      {/* Área de trabalho */}
+      <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 2, height: "calc(100vh - 190px)" }}>
+        {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
+
+        <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+          <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">
+            <Typography variant="h6" sx={{ mr: 1, display: "flex", alignItems: "center" }}>
+              <AccountTree sx={{ mr: 1 }} />Pipeline Builder
+            </Typography>
+            <FormControl sx={{ minWidth: 260 }}>
+              <InputLabel>Tabela Destino *</InputLabel>
+              <Select value={destId} label="Tabela Destino *"
+                onChange={(e) => { setDestId(e.target.value as number); setNodes([]); setEdges([]); setSelectedId(null); }}>
+                {destTables.map((t) => (<MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>))}
+              </Select>
+            </FormControl>
+            <Button variant="contained" startIcon={<Refresh />} onClick={loadPipeline} disabled={!destId}>
+              Carregar Pipeline
+            </Button>
+            {destName && <Chip label={"Destino: " + destName} color="primary" />}
+          </Stack>
+
+          {nodes.length > 0 && (
+            <Stack direction="row" gap={1} sx={{ mt: 1.5, flexWrap: "wrap" }}>
+              <Chip label="Origens" size="small" sx={{ bgcolor: "#e3f2fd", border: "1px solid #1976d2" }} />
+              <Chip label="FOCUS" size="small" sx={{ bgcolor: "#1a237e", color: "#fff" }} />
+              <Chip label="Regras de Negócio" size="small" sx={{ bgcolor: "#fff3e0", border: "1px solid #ff9800" }} />
+              <Chip label="Classificações" size="small" sx={{ bgcolor: "#e8f5e9", border: "1px solid #4caf50" }} />
+            </Stack>
+          )}
+        </Paper>
+
+        <Paper elevation={0} sx={{ position: "relative", flexGrow: 1, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
+          {loading ? (
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><CircularProgress /></Box>
+          ) : !destId ? (
+            <EmptyState message="Selecione uma Tabela Destino e clique em 'Carregar Pipeline'." />
+          ) : nodes.length === 0 ? (
+            <EmptyState message="Nenhuma relação encontrada para esta tabela." />
+          ) : (
+            <ReactFlow
+              nodes={displayNodes}
+              edges={displayEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.1}
+              maxZoom={2}
+              onNodeClick={(_, node) => setSelectedId(node.id)}
+              onPaneClick={() => setSelectedId(null)}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+              <Controls />
+              <MiniMap nodeColor={(n) => {
+                switch (n.type) {
+                  case "sourceCol": return "#1976d2";
+                  case "focusCol": return "#1a237e";
+                  case "process": return (n.data as any)?.kind === "classification" ? "#4caf50" : "#ff9800";
+                  default: return "#888";
+                }
+              }} />
+            </ReactFlow>
+          )}
+
+          {/* Painel de relacionamentos do objeto selecionado */}
+          {selectedNode && (
+            <Paper elevation={4} sx={{
+              position: "absolute", top: 12, right: 12, zIndex: 10,
+              p: 1.5, borderRadius: 2, maxWidth: 280, bgcolor: "background.paper",
+              border: "1px solid", borderColor: "divider",
+            }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {(selectedNode.data as any)?.label || selectedNode.id}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                {relatedList.length} relacionamento(s)
+              </Typography>
+              {relatedList.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">Nenhum relacionamento.</Typography>
+              ) : (
+                <Stack spacing={0.5} sx={{ maxHeight: 220, overflowY: "auto" }}>
+                  {relatedList.map(r => (
+                    <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      <Typography component="span" sx={{ fontSize: "0.8rem", color: r.outgoing ? "#2e7d32" : "#1565c0", flexShrink: 0 }}>
+                        {r.outgoing ? "→" : "←"}
+                      </Typography>
+                      <Typography variant="body2" noWrap sx={{ fontSize: "0.78rem" }}>{r.label}</Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                Clique fora para limpar a seleção.
+              </Typography>
+            </Paper>
+          )}
+        </Paper>
       </Box>
     </Box>
   );

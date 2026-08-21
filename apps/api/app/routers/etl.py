@@ -107,6 +107,18 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.mongodb_extractor import MongoAtlasExtractor
         extractor = MongoAtlasExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "github_billing":
+        from app.services.github_extractor import GithubBillingExtractor
+        extractor = GithubBillingExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "github_license":
+        from app.services.github_license_extractor import GithubLicenseExtractor
+        extractor = GithubLicenseExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "github_token":
+        from app.services.github_token_extractor import GithubTokenExtractor
+        extractor = GithubTokenExtractor(conn)
+        return await extractor.scan(db)
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
@@ -338,7 +350,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas"):
+    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -552,6 +564,27 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 
+    if conn.connector_type == "github_billing":
+        try:
+            from app.services.github_extractor import GithubBillingExtractor
+            return GithubBillingExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "github_license":
+        try:
+            from app.services.github_license_extractor import GithubLicenseExtractor
+            return GithubLicenseExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "github_token":
+        try:
+            from app.services.github_token_extractor import GithubTokenExtractor
+            return GithubTokenExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
     return {
         "status": "NOT_IMPLEMENTED",
         "message": f"Test not implemented for {conn.connector_type}",
@@ -738,7 +771,6 @@ def _process_blob_for_reprocess(
     cmapps: list,       # detached SourceDestinationMapping objects
     dest_col_names: set[str],
     dept_cache: dict,
-    proj_cache: dict,
     hierarchy_cache: dict,
     output_cols: set[str],
     task_id: int,
@@ -746,7 +778,6 @@ def _process_blob_for_reprocess(
     source_frame: "pd.DataFrame | None" = None,
     batch_callback=None,
     connection_cloud_name: str | None = None,
-    project_rows: list | None = None,
 ) -> "pd.DataFrame | None":
     """Process a single blob in a thread — reads from DB, applies rules/mappings/classifications.
 
@@ -857,7 +888,6 @@ def _process_blob_for_reprocess(
                 _apply_classifications_sync(
                     target, crules, None,
                     dept_map=dept_cache,
-                    proj_map=proj_cache,
                     hierarchy_cache=hierarchy_cache,
                 )
 
@@ -920,7 +950,7 @@ def _reprocess_destination_sync(
     from app.models.source_connection import SourceConnection
     from app.models.ingested_blob import IngestedBlob
     from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
-    from app.models.rules import BusinessRule, ClassificationRule, Department, Project
+    from app.models.rules import BusinessRule, ClassificationRule, Department
     from app.models.clone_rule import CloneRule, ClonePricePendencies
     from app.models.etl_task import EtlTask
     from sqlalchemy import select, text, func
@@ -1041,7 +1071,7 @@ def _reprocess_destination_sync(
         # Detached objects retain their loaded attributes (expire_on_commit=False), so
         # worker threads can safely read them without any DB interaction.
         conn_map: dict[int, SourceConnection] = {}
-        conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, proj_cache, hierarchy_cache)
+        conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
         unique_cids = set(cid for _, cid, _, _ in all_blobs)
         output_cols = {'departamento', 'centro_custo',
@@ -1114,15 +1144,9 @@ def _reprocess_destination_sync(
                     output_cols.add(rule.target_field)
 
             _dept_cache: dict = {}
-            _proj_cache: dict = {}
             _hierarchy_cache: dict = {}
-            _project_rows: list = []
             depts = session.execute(select(Department)).scalars().all()
             _dept_cache = {d.id: d for d in depts}
-            _project_rows = session.execute(
-                select(Project).where(Project.active == True)
-            ).scalars().all()
-            _proj_cache = {p.id: p for p in _project_rows}
 
             if _crules:
                 dept_ids_needed = {r.department_id for r in _crules if r.department_id}
@@ -1145,8 +1169,8 @@ def _reprocess_destination_sync(
                     _hierarchy_cache[did] = (dept, visited[-1], visited)
 
             conn_rules[cid] = (
-                _brules, _crules, _dept_cache, _proj_cache, _hierarchy_cache,
-                conn.cloud_name, _project_rows,
+                _brules, _crules, _dept_cache, _hierarchy_cache,
+                conn.cloud_name,
             )
             clone_rules = session.execute(select(CloneRule).where(
                 CloneRule.destination_table_id == destination_table_id,
@@ -1280,7 +1304,7 @@ def _reprocess_destination_sync(
                     status["processed_blobs"] = processed
                     _sync_db()
                     continue
-                brules, crules, dept_cache, proj_cache, hierarchy_cache, conn_cloud, project_rows = conn_rules[cid]
+                brules, crules, dept_cache, hierarchy_cache, conn_cloud = conn_rules[cid]
                 cmapps = [m for m in all_mappings if m.source_connection_id == cid]
                 if not cmapps:
                     processed += 1
@@ -1339,11 +1363,10 @@ def _reprocess_destination_sync(
                 _process_blob_for_reprocess(
                     blob_id, cid, conn.code, bperiod,
                     brules, crules, cmapps, dest_col_names,
-                    dept_cache, proj_cache, hierarchy_cache,
+                    dept_cache, hierarchy_cache,
                     output_cols, task_id,
                     clone_engine=clone_engines.get(cid), batch_callback=_write_batch,
                     connection_cloud_name=conn_cloud,
-                    project_rows=project_rows,
                 )
                 expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
                 if blob_input_rows == 0:
@@ -1649,26 +1672,59 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
     from app.models.etl_task import EtlTask
     session = SyncSession()
     try:
-        fields = {"id": EtlTask.id, "status": EtlTask.status, "destination_table_id": EtlTask.destination_table_id, "rows_written": EtlTask.rows_destination, "phase": EtlTask.phase, "started_at": EtlTask.started_at, "finished_at": EtlTask.finished_at}
+        json_str = cast(EtlTask.result_json, String)
+        fields = {
+            "id": EtlTask.id,
+            "status": EtlTask.status,
+            "destination_table_id": EtlTask.destination_table_id,
+            "rows_written": EtlTask.rows_destination,
+            "phase": EtlTask.phase,
+            "started_at": EtlTask.started_at,
+            "finished_at": EtlTask.finished_at,
+        }
         conditions = [EtlTask.task_type == "reprocess"]
         if search:
             needle = f"%{search.strip()}%"
-            conditions.append(or_(EtlTask.status.ilike(needle), EtlTask.phase.ilike(needle), cast(EtlTask.result_json, String).ilike(needle), cast(EtlTask.errors, String).ilike(needle)))
-        try: specs = json.loads(filters) if filters else []
-        except json.JSONDecodeError as exc: raise HTTPException(422, "Filtros inválidos") from exc
+            conditions.append(or_(
+                EtlTask.status.ilike(needle),
+                EtlTask.phase.ilike(needle),
+                json_str.ilike(needle),
+                cast(EtlTask.errors, String).ilike(needle),
+            ))
+        try:
+            specs = json.loads(filters) if filters else []
+        except json.JSONDecodeError as exc:
+            raise HTTPException(422, "Filtros inválidos") from exc
         for spec in specs if isinstance(specs, list) else []:
-            field, value, op = str(spec.get("field", "")), str(spec.get("value", "")), str(spec.get("operator", "equals"))
+            field = str(spec.get("field", ""))
+            value = str(spec.get("value", ""))
+            op = str(spec.get("operator", "equals"))
             column = fields.get(field)
-            if not column or not value: continue
+            if not column or not value:
+                continue
             if field in ("started_at", "finished_at"):
-                try: value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                except ValueError: continue
-            expr = column == value
-            conditions.append(or_(column.is_(None), column != value) if op == "notEquals" else expr)
+                try:
+                    clean_val = value.replace("Z", "+00:00")
+                    if "T" in clean_val:
+                        dt_val = datetime.fromisoformat(clean_val)
+                    else:
+                        dt_val = datetime.fromisoformat(clean_val + "T00:00:00")
+                    expr = func.date_trunc("minute", column) == func.date_trunc("minute", dt_val) if ":" in value else func.date(column) == dt_val.date()
+                except ValueError:
+                    continue
+            elif field == "rows_written":
+                try:
+                    num_val = int(value)
+                    expr = column == num_val
+                except ValueError:
+                    continue
+            else:
+                expr = column == value
+            conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
         sort = fields.get(sort_field, EtlTask.started_at)
         ordering = sort.desc() if sort_direction == "desc" else sort.asc()
         total = session.execute(select(func.count()).select_from(EtlTask).where(*conditions)).scalar_one()
-        rows = session.execute(select(EtlTask).where(*conditions).order_by(ordering, EtlTask.id).offset(offset).limit(limit)).scalars().all()
+        rows = session.execute(select(EtlTask).where(*conditions).order_by(ordering, EtlTask.id.desc()).offset(offset).limit(limit)).scalars().all()
         items = [{
             "id": row.id, "status": row.status, "destination_table_id": row.destination_table_id,
             "connection_ids": row.connection_ids or [], "billing_periods": row.billing_periods or [],

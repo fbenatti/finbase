@@ -2,10 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import date
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, delete, func, or_, select
 from app.database import get_db
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
+from app.models.etl_task import EtlTask
+from app.models.skipped_blob import SkippedBlob
+from app.models.period_status import PeriodStatus
 from app.schemas.schemas import SourceConnectionCreate, SourceConnectionUpdate, SourceConnectionOut
 
 router = APIRouter(prefix="/connections", tags=["connections"])
@@ -180,5 +183,51 @@ async def delete_connection(connection_id: int, db: AsyncSession = Depends(get_d
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+
+    # Bloqueia deleção se ainda existem dados ingeridos (Bronze não limpo)
+    blob_count_result = await db.execute(
+        select(func.count(IngestedBlob.id)).where(IngestedBlob.connection_id == connection_id)
+    )
+    blob_count = blob_count_result.scalar_one()
+    if blob_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Não é possível remover a conexão '{conn.name}': existem {blob_count} dataset(s) ingerido(s). "
+                "Acesse Extração → 'Reprocessar origem limpa' para remover os dados Bronze antes de excluir a conexão."
+            ),
+        )
+
+    # Guarda o code antes de deletar para dropar a tabela Bronze
+    connection_code = conn.code
+
+    # Remove registros filhos com FK sem CASCADE para evitar IntegrityError
+    # etl_task — nullifica connection_id (nullable=True)
+    await db.execute(
+        EtlTask.__table__.update()
+        .where(EtlTask.connection_id == connection_id)
+        .values(connection_id=None)
+    )
+    # skipped_blob — remove diretamente
+    await db.execute(
+        delete(SkippedBlob).where(SkippedBlob.connection_id == connection_id)
+    )
+    # period_status — remove diretamente
+    await db.execute(
+        delete(PeriodStatus).where(PeriodStatus.connection_id == connection_id)
+    )
+
     await db.delete(conn)
     await db.commit()
+
+    # Remove a tabela Bronze do Iceberg (non-blocking — falha silenciosa não impede a deleção)
+    try:
+        from app.services import iceberg_service as iceberg
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, iceberg.reset_bronze, connection_code)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Falha ao remover tabela Bronze para conexão '%s': %s", connection_code, exc
+        )

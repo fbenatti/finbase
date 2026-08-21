@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.rules import ClassificationRule, Department, Project
+from app.models.rules import ClassificationRule, Department
 from app.models.destination import SourceDestinationMapping
 from app.models.source_connection import SourceConnection
 from app.services.cloud_scope import resolve_connection_scope
@@ -138,10 +138,6 @@ class AzureTagPolicyService:
     async def _load_departments(self) -> dict[int, Department]:
         result = await self.db.execute(select(Department).where(Department.active == True))
         return {d.id: d for d in result.scalars().all()}
-
-    async def _load_projects(self) -> dict[int, Project]:
-        result = await self.db.execute(select(Project).where(Project.active == True))
-        return {p.id: p for p in result.scalars().all()}
 
     async def _load_reverse_mapping(self, connection_id: int) -> dict[str, str]:
         """Build destination_column -> source_column for a connection (reverse)."""

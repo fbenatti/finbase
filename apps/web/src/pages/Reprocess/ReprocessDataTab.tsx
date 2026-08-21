@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNotifications } from "../../context/NotificationContext";
 import {
   Box, Typography, Button, Alert, Chip, CircularProgress,
   FormControl, InputLabel, Select, MenuItem, Checkbox, ListItemText,
   OutlinedInput, Paper, LinearProgress, Divider, FormControlLabel, Switch,
+  TextField, InputAdornment,
 } from "@mui/material";
-import { Refresh, Stop } from "@mui/icons-material";
+import { Refresh, Stop, Search } from "@mui/icons-material";
 import {
   getDestinationTables, DestinationTable,
   getConnectionsForDestination, MappedConnection,
@@ -47,23 +49,53 @@ export default function ReprocessDataTab() {
   const [historySearch, setHistorySearch] = useState("");
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const historyQuery = useCallback(async (query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>; search: string }) => {
+  const notifications = useNotifications();
+  const historyQueryState = useRef<{
+    offset: number;
+    limit: number;
+    sort?: { field: string; direction: "asc" | "desc" };
+    filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+  }>({ offset: 0, limit: 10, filters: [] });
+
+  const historyQuery = useCallback(async (queryParam?: {
+    offset: number;
+    limit: number;
+    sort?: { field: string; direction: "asc" | "desc" };
+    filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+  }) => {
     setHistoryLoading(true);
-    try { const response = await getReprocessHistory(query); setHistory(response.items); setHistoryTotal(response.total); } finally { setHistoryLoading(false); }
-  }, []);
+    try {
+      if (queryParam) historyQueryState.current = queryParam;
+      const response = await getReprocessHistory({
+        ...historyQueryState.current,
+        search: historySearch || undefined,
+      });
+      setHistory(response.items);
+      setHistoryTotal(response.total);
+    } catch {
+      setHistory([]);
+      setHistoryTotal(0);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historySearch]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
-    historyQuery({ offset: 0, limit: 10, filters: [], search: "" }).catch(() => {});
+    historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     const refreshWorker = () => getWorkerHealth().then(setWorkerHealth).catch(() => setWorkerHealth({ status: "offline", heartbeat_age_seconds: null }));
     refreshWorker();
     const healthTimer = setInterval(refreshWorker, 3000);
     return () => clearInterval(healthTimer);
   }, []);
 
-  // When dest table changes: load only connections with mappings, reset selections
+  useEffect(() => {
+    historyQuery({ offset: 0, limit: 10, filters: historyQueryState.current.filters });
+  }, [historySearch]);
+
+  // When dest table changes: load only connections with active mappings
   useEffect(() => {
     if (!selDestId) {
       setMappedConns([]);
@@ -130,7 +162,7 @@ export default function ReprocessDataTab() {
           } else {
             setResult({ type: "error", message: "Processamento cancelado." });
           }
-          historyQuery({ offset: 0, limit: 10, filters: [], search: historySearch }).catch(() => {});
+          historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
         }
       } catch {
         if (pollRef.current) clearInterval(pollRef.current);
@@ -186,9 +218,10 @@ export default function ReprocessDataTab() {
         billing_periods: selPeriods,
         replace_existing: replaceExisting,
       });
+      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: "Reprocessar dados" });
       setTaskId(res.task_id);
       pollTask(res.task_ids || [res.task_id]);
-      historyQuery({ offset: 0, limit: 10, filters: [], search: historySearch }).catch(() => {});
+      historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     } catch (e: unknown) {
       setResult({
         type: "error",
@@ -360,43 +393,11 @@ export default function ReprocessDataTab() {
           ))}
         </Box>
       )}
-
-      {/* ── Progress bar ── */}
-      {taskStatus && (isRunning || isQueued || taskStatus.status === "COMPLETED" || taskStatus.status === "FAILED" || taskStatus.status === "CANCELLED") && (
-        <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: isQueued ? "#fff8e1" : isRunning ? "#f0f7ff" : "#f5f5f5" }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-            <Box>
-              <Typography variant="body2" fontWeight={600}>
-                {isQueued ? "Aguardando worker..." : isRunning ? "Processando dados" : taskStatus.status === "COMPLETED" ? "Concluido" : taskStatus.status === "CANCELLED" ? "Cancelado" : "Falha"}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {isQueued ? "Tarefa na fila de processamento" : isRunning && taskStatus.phase ? `Fase: ${taskStatus.phase}` : ""}
-                {" · "}{taskStatus.rows_written.toLocaleString()} linhas processadas
-                {" · "}batch {taskStatus.completed_batches}/{taskStatus.total_batches}
-              </Typography>
-            </Box>
-            <Chip
-              label={isQueued ? "QUEUED" : isRunning ? `${progress}%` : "100%"}
-              size="small"
-              color={
-                taskStatus.status === "COMPLETED" ? "success" :
-                taskStatus.status === "FAILED" || taskStatus.status === "CANCELLED" ? "error" :
-                isQueued ? "warning" :
-                "info"
-              }
-            />
-          </Box>
-          <LinearProgress
-            variant={isQueued ? "indeterminate" : isRunning && taskStatus.total_batches > 0 ? "determinate" : "indeterminate"}
-            value={isQueued ? 0 : isRunning ? progress : 100}
-            color={
-              taskStatus.status === "COMPLETED" ? "success" :
-              taskStatus.status === "FAILED" || taskStatus.status === "CANCELLED" ? "error" :
-              isQueued ? "warning" : "primary"
-            }
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-        </Paper>
+      {/* ── Andamento — movido para o ícone de notificações ── */}
+      {(isRunning || isQueued) && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Processando dados{isQueued ? " (aguardando worker)" : ""} — acompanhe o andamento no ícone de notificações (canto superior direito).
+        </Alert>
       )}
 
       {/* ── Context summary ── */}
@@ -429,11 +430,32 @@ export default function ReprocessDataTab() {
 
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, mb: 1.5, flexWrap: "wrap" }}>
-          <Box><Typography variant="h6">Histórico de reprocessamentos</Typography><Typography variant="caption" color="text.secondary">Últimas execuções e mensagens operacionais</Typography></Box>
-          <input aria-label="Buscar histórico" value={historySearch} onChange={e => { setHistorySearch(e.target.value); historyQuery({ offset: 0, limit: 10, filters: [], search: e.target.value }); }} style={{ height: 40, minWidth: 240, border: "1px solid #cbd5e1", borderRadius: 4, padding: "0 12px" }} />
+          <Box>
+            <Typography variant="h6">Histórico de reprocessamentos</Typography>
+            <Typography variant="caption" color="text.secondary">Últimas execuções e mensagens operacionais</Typography>
+          </Box>
+          <TextField
+            size="small"
+            placeholder="Buscar no histórico…"
+            value={historySearch}
+            onChange={(e) => setHistorySearch(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search fontSize="small" />
+                </InputAdornment>
+              ),
+              sx: { height: 40 },
+            }}
+            sx={{ minWidth: 260 }}
+          />
         </Box>
-        {history.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Nenhum reprocessamento registrado.</Typography>}
-        {history.length > 0 && <ReprocessHistoryDataGrid rows={history} total={historyTotal} loading={historyLoading} search={historySearch} onQuery={historyQuery} />}
+        <ReprocessHistoryDataGrid
+          rows={history}
+          total={historyTotal}
+          loading={historyLoading}
+          onQuery={historyQuery}
+        />
       </Paper>
 
       {/* ── Empty state ── */}

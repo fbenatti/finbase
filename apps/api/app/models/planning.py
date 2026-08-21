@@ -32,12 +32,10 @@ class PlanningEntry(Base):
     __tablename__ = "planning_entry"
     id = Column(Integer, primary_key=True, autoincrement=True)
     planning_version_id = Column(Integer, ForeignKey("planning_version.id", ondelete="CASCADE"), nullable=False, index=True)
-    entity_type = Column(String(20), nullable=False)  # department | project
+    entity_type = Column(String(20), nullable=False)  # department
     department_id = Column(Integer, nullable=True, index=True)
-    project_id = Column(Integer, nullable=True, index=True)
     # Frozen labels make a historical version readable after organization edits.
     department_levels = Column(JSON, nullable=False, default=list)
-    project_name = Column(String(200), nullable=True)
     month = Column(Integer, nullable=False)
     value = Column(Float, nullable=False, default=0)
-    __table_args__ = (Index("ix_planning_entry_version_entity_month", "planning_version_id", "entity_type", "department_id", "project_id", "month"),)
+    __table_args__ = (Index("ix_planning_entry_version_entity_month", "planning_version_id", "entity_type", "department_id", "month"),)

@@ -18,7 +18,7 @@ import unicodedata
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.rules import ClassificationRule, Department, Project
+from app.models.rules import ClassificationRule, Department
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,6 @@ def evaluate_rule_conditions(
 def _build_department_path(
     dept_id: int,
     dept_map: dict[int, Department],
-    project_map: dict[int, list[Project]],
 ) -> dict:
     """Build department info including inherited custom_fields by walking up the tree."""
     info: dict = {
@@ -344,19 +343,11 @@ def _build_department_path(
     return info
 
 
-async def _load_department_tree(db: AsyncSession) -> tuple[dict[int, Department], dict[int, list[Project]]]:
-    """Load all departments and projects into memory for fast lookup."""
+async def _load_department_tree(db: AsyncSession) -> dict[int, Department]:
+    """Load all departments into memory for fast lookup."""
     dept_result = await db.execute(select(Department).where(Department.active == True))
     departments = list(dept_result.scalars().all())
-    dept_map = {d.id: d for d in departments}
-
-    proj_result = await db.execute(select(Project).where(Project.active == True))
-    projects = list(proj_result.scalars().all())
-    project_map: dict[int, list[Project]] = {}
-    for p in projects:
-        project_map.setdefault(p.department_id, []).append(p)
-
-    return dept_map, project_map
+    return {d.id: d for d in departments}
 
 
 async def apply_classification_rules(
@@ -383,7 +374,7 @@ async def apply_classification_rules(
         return df
 
     # Load department tree
-    dept_map, project_map = await _load_department_tree(db)
+    dept_map = await _load_department_tree(db)
 
     # Initialize target columns if they don't exist
     default_targets = {"departamento", "centro_custo", "ambiente"}
@@ -415,7 +406,7 @@ async def apply_classification_rules(
 
         # Apply department inheritance if rule has a department
         if rule.department_id and rule.department_id in dept_map:
-            dept_info = _build_department_path(rule.department_id, dept_map, project_map)
+            dept_info = _build_department_path(rule.department_id, dept_map)
             for col, val in dept_info.items():
                 if col not in df.columns:
                     df[col] = ""

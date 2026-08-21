@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         from app.models.source_connection import SourceConnection  # noqa: F401
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
-        from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
+        from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping  # noqa: F401
@@ -109,8 +109,20 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",
             "CREATE INDEX IF NOT EXISTS ix_classification_rule_cloud_scope ON classification_rule (cloud_scope)",
+            "CREATE INDEX IF NOT EXISTS ix_classification_field_value_value_prefix ON classification_field_value (destination_table_id, cloud, field, value text_pattern_ops)",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_source_connection_cloud_scope ON source_connection (cloud_scope)",
+        ):
+            await conn.execute(text(statement))
+        # The Projects feature was removed (UI, API and metadata).  Drop the
+        # legacy table and its columns.  Classification rules keep their
+        # department target; the project_id column is dropped with its values.
+        for statement in (
+            "ALTER TABLE classification_rule DROP CONSTRAINT IF EXISTS classification_rule_project_id_fkey",
+            "ALTER TABLE classification_rule DROP COLUMN IF EXISTS project_id",
+            "ALTER TABLE planning_entry DROP COLUMN IF EXISTS project_id",
+            "ALTER TABLE planning_entry DROP COLUMN IF EXISTS project_name",
+            "DROP TABLE IF EXISTS project",
         ):
             await conn.execute(text(statement))
         # Backfill the canonical provider slug for legacy rows that only have a

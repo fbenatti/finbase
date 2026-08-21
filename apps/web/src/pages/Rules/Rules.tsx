@@ -181,7 +181,7 @@ const formatOperationSummary = (r: BusinessRule): string => {
   return r.rule_type;
 };
 
-export default function Rules() {
+export default function Rules({ embedded = false }: { embedded?: boolean } = {}) {
   const [rules, setRules] = useState<BusinessRule[]>([]);
   const [destTables, setDestTables] = useState<DestinationTable[]>([]);
   const [selectedDestId, setSelectedDestId] = useState<number | "">("");
@@ -397,8 +397,8 @@ export default function Rules() {
 
   return (
     <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-        <Typography variant="h4">Regras de Negócio</Typography>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 2, flexWrap: "wrap" }}>
+        {!embedded && <Typography variant="h4">Regras de Negócio</Typography>}
         <Button
           variant="contained" startIcon={<Add />}
           onClick={openNew}

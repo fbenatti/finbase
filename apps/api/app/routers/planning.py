@@ -27,17 +27,6 @@ SYSTEM_CODES = {"realizado", "forecast"}
 DEFAULT_TYPES = [("realizado", "Realizado"), ("forecast", "Forecast (projetado)"), ("saldo-contratual", "Saldo contratual"), ("orcamento", "Orçamento"), ("forecast-manual", "Forecast manual")]
 
 
-class FinancialTypeIn(BaseModel):
-    code: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-    name: str = Field(min_length=2, max_length=160)
-    active: bool = True
-
-
-class FinancialTypeUpdate(BaseModel):
-    name: str = Field(min_length=2, max_length=160)
-    active: bool = True
-
-
 class PlanningRowIn(BaseModel):
     entity_type: str
     department_id: int
@@ -150,7 +139,7 @@ async def _validate_rows(rows: list[PlanningRowIn], db: AsyncSession) -> list[di
             errors.append(f"Linha {pos}: entidade duplicada")
             continue
         seen.add(key)
-        prepared.append({"entity_type": entity_type, "department_id": department.id, "project_id": None, "department_levels": _levels(department, departments), "project_name": None, "values": row.values})
+        prepared.append({"entity_type": entity_type, "department_id": department.id, "department_levels": _levels(department, departments), "values": row.values})
     if errors:
         raise HTTPException(422, {"message": "Dados inválidos", "errors": errors})
     return prepared
@@ -168,7 +157,7 @@ async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[s
     await db.flush()
     for row in rows:
         for month, value in enumerate(row["values"], 1):
-            db.add(PlanningEntry(planning_version_id=snapshot.id, entity_type=row["entity_type"], department_id=row["department_id"], project_id=row["project_id"], department_levels=row["department_levels"], project_name=row["project_name"], month=month, value=float(value)))
+            db.add(PlanningEntry(planning_version_id=snapshot.id, entity_type=row["entity_type"], department_id=row["department_id"], department_levels=row["department_levels"], month=month, value=float(value)))
     await db.commit()
     await db.refresh(snapshot)
     return snapshot
@@ -179,24 +168,6 @@ async def list_types(db: AsyncSession = Depends(get_db)):
     await ensure_default_financial_types(db)
     rows = (await db.execute(select(FinancialType).order_by(FinancialType.name))).scalars().all()
     return [_out(r) for r in rows]
-
-
-@router.post("/types", status_code=201)
-async def create_type(body: FinancialTypeIn, db: AsyncSession = Depends(get_db)):
-    if (await db.execute(select(FinancialType.id).where(FinancialType.code == body.code))).scalar_one_or_none():
-        raise HTTPException(409, "Código de tipificação já existe")
-    row = FinancialType(**body.model_dump())
-    db.add(row); await db.commit(); await db.refresh(row)
-    return _out(row)
-
-
-@router.put("/types/{type_id}")
-async def update_type(type_id: int, body: FinancialTypeUpdate, db: AsyncSession = Depends(get_db)):
-    row = await db.get(FinancialType, type_id)
-    if not row: raise HTTPException(404, "Tipificação financeira não encontrada")
-    row.name, row.active = body.name, body.active
-    await db.commit(); await db.refresh(row)
-    return _out(row)
 
 
 @router.get("/template")
@@ -396,9 +367,9 @@ async def restore_version(type_code: str, year: int, version_id: int, db: AsyncS
     version = await db.get(PlanningVersion, version_id)
     if not version or version.financial_type_id != fin_type.id or version.year != year: raise HTTPException(404, "Snapshot não encontrado")
     entries = (await db.execute(select(PlanningEntry).where(PlanningEntry.planning_version_id == version.id, PlanningEntry.entity_type == "department"))).scalars().all()
-    grouped: dict[tuple[str, int, int | None], dict[str, Any]] = {}
+    grouped: dict[tuple[str, int], dict[str, Any]] = {}
     for entry in entries:
-        key = (entry.entity_type, entry.department_id, None)
-        grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "project_id": entry.project_id, "department_levels": entry.department_levels, "project_name": entry.project_name, "values": [0.0] * 12})["values"][entry.month - 1] = entry.value
+        key = (entry.entity_type, entry.department_id)
+        grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] = entry.value
     snapshot = await _publish_version(fin_type, year, list(grouped.values()), "RESTORE", db, restored_from=version.id)
     return {"version": _out(snapshot)}

@@ -1,14 +1,15 @@
-import { useState, useEffect, useMemo, useCallback, memo } from "react";
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react";
 import {
   Box, Typography, Button, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
-  Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab,
+  Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab, InputAdornment, Stack,
 } from "@mui/material";
-import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal } from "@mui/icons-material";
+import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
-  deleteClassification, ClassificationRule,
+  deleteClassification, ClassificationRule, getClassificationsGrid,
+  getClassificationFieldValues, refreshClassificationFieldValues, ClassificationFieldValue,
   getDepartments, Department,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
@@ -16,8 +17,8 @@ import {
   AzureTenant, AzureTenantPolicy,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
-import SortableTable from "../../components/SortableTable";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
+import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
 
 interface CondEntry { field: string; operator: string; values: string; logic: string }
 
@@ -47,13 +48,6 @@ const cloudScopeLabel = (scope: string | null | undefined) => {
   return CLOUD_SCOPE_FORM_OPTIONS.find((o) => o.value === scope)?.label ?? scope.toUpperCase();
 };
 
-const filterRulesByCloud = (rules: ClassificationRule[], cloudFilter: string) => {
-  if (cloudFilter === "every") return rules;
-  if (cloudFilter === "global") {
-    return rules.filter((r) => !r.cloud_scope);
-  }
-  return rules.filter((r) => r.cloud_scope === cloudFilter);
-};
 
 const emptyForm = {
   name: "", target_field: "departamento",
@@ -73,7 +67,7 @@ export default function Classification() {
         <Tab label="Regras" />
         <Tab label="Criação de Tags" />
       </Tabs>
-      {tab === 0 ? <RulesTab /> : <TagsTab />}
+      {tab === 0 ? <ClassificationRulesTab /> : <TagsTab />}
     </Box>
   );
 }
@@ -126,6 +120,46 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   useEffect(() => {
     if (open) setForm(formFromRule(editing));
   }, [open, editing]);
+
+  // Autocomplete de valores reais por campo (tabela auxiliar no Postgres, enriquecida no reprocessamento).
+  const [valueSearch, setValueSearch] = useState<Record<number, string>>({});
+  const [valueOptions, setValueOptions] = useState<Record<number, ClassificationFieldValue[]>>({});
+  const [valueLoading, setValueLoading] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    if (open) {
+      setValueSearch({});
+      setValueOptions({});
+      setValueLoading({});
+    }
+  }, [open, editing]);
+
+  const conditionKey = form.conditions.map((c) => c.field.trim()).join("|");
+  useEffect(() => {
+    if (!open || !destinationTableId) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    form.conditions.forEach((cond, i) => {
+      const fieldName = cond.field.trim();
+      if (!fieldName) return;
+      const searchTerm = valueSearch[i] || "";
+      timers.push(
+        setTimeout(() => {
+          setValueLoading((prev) => ({ ...prev, [i]: true }));
+          getClassificationFieldValues({
+            destination_table_id: destinationTableId,
+            field: fieldName,
+            cloud: form.cloud_scope === "global" ? undefined : form.cloud_scope,
+            search: searchTerm || undefined,
+            limit: 50,
+          })
+            .then((values) => setValueOptions((prev) => ({ ...prev, [i]: values })))
+            .catch(() => setValueOptions((prev) => ({ ...prev, [i]: [] })))
+            .finally(() => setValueLoading((prev) => ({ ...prev, [i]: false })));
+        }, 350),
+      );
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [open, destinationTableId, form.cloud_scope, conditionKey, valueSearch]);
 
   const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
   const hasValidConditions = form.conditions.some((c) => c.field.trim() && c.values.trim());
@@ -294,12 +328,35 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
                     <MenuItem value="~">~ (contém)</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField
+                <Autocomplete
+                  multiple
+                  freeSolo
                   size="small"
-                  placeholder="valor1 | valor2"
-                  value={cond.values}
-                  onChange={(e) => updateCondition(i, "values", e.target.value)}
-                  fullWidth
+                  options={(valueOptions[i] || []).map((option) => option.value)}
+                  value={cond.values.split("|").map((v) => v.trim()).filter(Boolean)}
+                  onInputChange={(_, v) => setValueSearch((prev) => ({ ...prev, [i]: v }))}
+                  onChange={(_, newValue) => updateCondition(i, "values", (newValue as string[]).join(" | "))}
+                  loading={Boolean(valueLoading[i])}
+                  filterOptions={(options, state) => {
+                    const input = state.inputValue.trim().toLowerCase();
+                    if (!input) return options;
+                    return options.filter((option) => option.toLowerCase().includes(input)).slice(0, 50);
+                  }}
+                  renderTags={(value, getTagProps) =>
+                    value.map((option, index) => <Chip size="small" {...getTagProps({ index })} label={option} />)
+                  }
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      fullWidth
+                      placeholder="Selecione ou digite valor | valor2"
+                      helperText={
+                        cond.field && destinationTableId && !(valueOptions[i] || []).length && !valueLoading[i]
+                          ? "Sem sugestões ainda — digite manualmente ou clique em Atualizar valores."
+                          : undefined
+                      }
+                    />
+                  )}
                 />
                 <IconButton
                   size="small"
@@ -340,17 +397,21 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   );
 });
 
-function RulesTab() {
+export function ClassificationRulesTab() {
   const [rules, setRules] = useState<ClassificationRule[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const queryRef = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] }>({ offset: 0, limit: 25, filters: [] });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [destTables, setDestTables] = useState<DestinationTable[]>([]);
   const [selectedDestId, setSelectedDestId] = useState<number | "">("");
   const [cloudFilter, setCloudFilter] = useState<string>("every");
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
+  const [deletePending, setDeletePending] = useState<ClassificationRule | null>(null);
   const [destColumns, setDestColumns] = useState<string[]>([]);
 
   useEffect(() => {
@@ -368,23 +429,47 @@ function RulesTab() {
     }
   }, [selectedDestId]);
 
-  const load = useCallback(async () => {
+  // cloud/dest sao passados explicitamente: setState e assincrono, entao ler do
+  // estado em load usaria valores antigos no mesmo tick (stale closure).
+  const load = async (
+    query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] },
+    cloudOverride?: string,
+    destOverride?: number | "",
+  ) => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const destId = selectedDestId === "" ? undefined : selectedDestId as number;
-      setRules(await getClassifications(undefined, undefined, destId));
+      const cloud = cloudOverride ?? cloudFilter;
+      const destId = destOverride === undefined ? (selectedDestId === "" ? undefined : (selectedDestId as number)) : (destOverride === "" ? undefined : (destOverride as number));
+      if (cloud === "every" || !destId) {
+        setRules([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
+      const data = await getClassificationsGrid({
+        ...query,
+        search: search.trim() || undefined,
+        destination_table_id: destId,
+        cloud,
+      });
+      setRules(data.items);
+      setTotal(data.total);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load");
-    } finally { setLoading(false); }
-  }, [selectedDestId]);
+      setError(e instanceof Error ? e.message : "Falha ao carregar classificações");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  useEffect(() => { load(); }, [load]);
+  const handleQuery = (query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] }) => {
+    queryRef.current = query;
+    void load(query);
+  };
 
-  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
-  const departmentById = useMemo(
-    () => new Map(flatDepartments.map((d) => [d.id, d])),
-    [flatDepartments],
-  );
+  const changeFilters = (nextCloud: string, nextDest: number | "") => {
+    queryRef.current = { ...queryRef.current, offset: 0 };
+    void load(queryRef.current, nextCloud, nextDest);
+  };
 
   const openNew = () => {
     setEditing(null);
@@ -396,105 +481,78 @@ function RulesTab() {
     setDialogOpen(true);
   };
 
-  const remove = async (id: number) => {
-    if (!confirm("Delete?")) return;
-    try { await deleteClassification(id); load(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+  const remove = async () => {
+    if (!deletePending) return;
+    try {
+      await deleteClassification(deletePending.id);
+      setDeletePending(null);
+      setSuccess("Classificação excluída.");
+      void load(queryRef.current);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Falha ao excluir classificação");
     }
   };
 
-  const selectedDestName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : null;
-  const filteredRules = useMemo(
-    () => filterRulesByCloud(rules, cloudFilter),
-    [rules, cloudFilter],
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+  const departmentById = useMemo(
+    () => new Map(flatDepartments.map((d) => [d.id, d])),
+    [flatDepartments],
   );
 
-  const tableColumns = useMemo(() => [
-    { key: "name", label: "Nome" },
-    {
-      key: "_conditions", label: "Condições", width: 300,
-      render: (r: Record<string, unknown>) => {
-        const rule = r as unknown as ClassificationRule;
-        const conds = rule.conditions || [];
-        return (
-          <Typography variant="body2" sx={{ fontSize: "0.7rem", fontFamily: "monospace" }}>
-            {conds.length > 0
-              ? conds.slice(0, 2).map((c: Record<string, unknown>) =>
-                  `${c.field || "?"}${c.operator || "="}${Array.isArray(c.values) ? (c.values as string[]).join("|") : c.values}`
-                ).join(" ; ")
-              : "-"}
-          </Typography>
-        );
-      },
-    },
-    {
-      key: "target_field", label: "Campo Dest.", width: 100,
-    },
-    {
-      key: "cloud_scope", label: "Cloud", width: 90,
-      render: (r: Record<string, unknown>) => (
-        <Chip
-          size="small"
-          label={cloudScopeLabel((r as unknown as ClassificationRule).cloud_scope)}
-          variant="outlined"
-          sx={{ fontSize: "0.65rem", height: 22 }}
-        />
-      ),
-    },
-    {
-      key: "_dept", label: "Departamento", width: 140,
-      render: (r: Record<string, unknown>) => {
-        const d = departmentById.get((r as unknown as ClassificationRule).department_id as number);
-        return d?.path || d?.name || "-";
-      },
-    },
-    { key: "priority", label: "Pri", width: 50 },
-    {
-      key: "active", label: "Ativo", width: 60,
-      render: (r: Record<string, unknown>) => (r as unknown as ClassificationRule).active ? "Sim" : "Não",
-    },
-    {
-      key: "_actions", label: "", width: 80, sortable: false,
-      render: (r: Record<string, unknown>) => (
-        <>
-          <IconButton size="small" onClick={() => openEdit(r as unknown as ClassificationRule)}>
-            <Edit fontSize="small" />
-          </IconButton>
-          <IconButton size="small"
-            onClick={() => remove((r as unknown as ClassificationRule).id)} color="error">
-            <Delete fontSize="small" />
-          </IconButton>
-        </>
-      ),
-    },
-  ], [departmentById]);
+  const selectedDestName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : null;
+  const filtersReady = cloudFilter !== "every" && selectedDestId !== "";
 
   return (
     <Box>
-      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 3 }}>
-        <Box sx={{ display: "flex", gap: 1 }}>
-          <Button
-            variant="contained" startIcon={<Add />}
-            onClick={openNew}
-            disabled={!selectedDestId}
-          >
-            Nova
-          </Button>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
+        <Box>
+          <Typography variant="h6">Classificar Departamentos</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Regras que classificam linhas de custo em departamentos da hierarquia.
+          </Typography>
         </Box>
-      </Box>
-
-      {/* ── Primary: Tabela Destino (mandatory) ── */}
-      <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "center" }}>
-        <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela Destino *</InputLabel>
-          <Select
-            value={selectedDestId}
-            label="Tabela Destino *"
-            onChange={(e) => {
-              setSelectedDestId(e.target.value as number | "");
-              setLoading(true);
+        <Stack direction="row" gap={1}>
+          <Button
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => {
+              setSuccess("");
+              refreshClassificationFieldValues(selectedDestId === "" ? undefined : (selectedDestId as number))
+                .then(() => setSuccess("Atualização de valores iniciada em segundo plano."))
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : "Falha ao iniciar a atualização de valores"));
             }}
           >
+            Atualizar valores
+          </Button>
+          <Button variant="contained" startIcon={<Add />} onClick={openNew}>
+            Nova
+          </Button>
+        </Stack>
+      </Stack>
+
+      {/* Filtros: Cloud primeiro, depois Tabela Destino */}
+      <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="center">
+        <FormControl sx={{ minWidth: 220 }} size="small">
+          <InputLabel>Cloud</InputLabel>
+          <Select
+            value={cloudFilter}
+            label="Cloud"
+            onChange={(e) => { const value = e.target.value; setCloudFilter(value); changeFilters(value, selectedDestId); }}
+          >
+            {CLOUD_FILTER_OPTIONS.map((s) => (
+              <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl sx={{ minWidth: 260 }} size="small">
+          <InputLabel>Tabela Destino</InputLabel>
+          <Select
+            value={selectedDestId}
+            label="Tabela Destino"
+            onChange={(e) => { const value = e.target.value as number | ""; setSelectedDestId(value); changeFilters(cloudFilter, value); }}
+          >
+            <MenuItem value="">Todas as tabelas</MenuItem>
             {destTables.map((t) => (
               <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
             ))}
@@ -503,44 +561,61 @@ function RulesTab() {
 
         {selectedDestName && (
           <Chip
-            label={`${filteredRules.length} regras em ${selectedDestName}`}
+            label={total + " regras em " + selectedDestName}
             color="primary" size="small"
           />
         )}
-
-        <FormControl sx={{ minWidth: 200 }} size="small">
-          <InputLabel>Cloud</InputLabel>
-          <Select
-            value={cloudFilter}
-            label="Cloud"
-            onChange={(e) => setCloudFilter(e.target.value)}
-          >
-            {CLOUD_FILTER_OPTIONS.map((s) => (
-              <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
+      </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
 
-      {!selectedDestId ? (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Selecione uma Tabela Destino acima para visualizar as regras de classificação.
-        </Alert>
-      ) : loading ? (
-        <CircularProgress sx={{ display: "block", mx: "auto", mt: 5 }} />
-      ) : filteredRules.length === 0 ? (
-        <EmptyState message="Nenhuma regra de classificação para esta tabela destino e cloud." />
+      {!filtersReady ? (
+        <Box sx={{ py: 7 }}>
+          <EmptyState
+            message="Selecione a Cloud e a Tabela Destino para listar as regras. As regras são específicas por provedor."
+          />
+        </Box>
       ) : (
-        <SortableTable
-          data={filteredRules as unknown as Record<string, unknown>[]}
-          getRowKey={(r) => (r as unknown as ClassificationRule).id}
-          defaultSortKey="priority"
-          defaultSortDir="asc"
-          columns={tableColumns}
-        />
+        <>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Buscar classificações (nome, departamento ou padrão)"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+                sx: { height: 40 },
+              },
+            }}
+            sx={{ mb: 2, maxWidth: 520 }}
+          />
+
+          {!loading && rules.length === 0 ? (
+            <Box sx={{ py: 7 }}>
+              <EmptyState
+                message={search ? "Nenhuma classificação corresponde aos filtros." : "Nenhuma classificação cadastrada para esta Cloud/Tabela. Clique em 'Nova' para começar."}
+              />
+            </Box>
+          ) : (
+            <ClassificationDataGrid
+              key={cloudFilter + "|" + selectedDestId}
+              rows={rules}
+              total={total}
+              loading={loading}
+              search={search}
+              onQuery={handleQuery}
+              onEdit={openEdit}
+              onDelete={setDeletePending}
+            />
+          )}
+        </>
       )}
 
       <ClassificationRuleDialog
@@ -549,11 +624,27 @@ function RulesTab() {
         selectedDestName={selectedDestName ?? null}
         destColumns={destColumns}
         departments={departments}
-        destinationTableId={selectedDestId === "" ? null : selectedDestId}
+        destinationTableId={selectedDestId === "" ? null : (selectedDestId as number)}
         onClose={() => setDialogOpen(false)}
-        onSaved={load}
+        onSaved={() => void load(queryRef.current)}
         onError={setError}
       />
+
+      {/* Confirmação Material */}
+      <Dialog open={Boolean(deletePending)} onClose={() => setDeletePending(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Excluir classificação?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Você está prestes a excluir a classificação <strong>{deletePending?.name}</strong>. Esta ação não pode ser desfeita.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDeletePending(null)}>Cancelar</Button>
+          <Button variant="contained" color="error" onClick={() => void remove()}>
+            Excluir classificação
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
@@ -622,7 +713,7 @@ function highlightBashHtml(bashStr: string): string {
   return highlightedLines.join("\n");
 }
 
-function TagsTab() {
+export function TagsTab() {
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
   const [rows, setRows] = useState<AzureTenantPolicy[]>([]);

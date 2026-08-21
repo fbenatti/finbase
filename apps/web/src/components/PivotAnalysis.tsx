@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Autocomplete, Box, Button, Chip, Divider, Drawer, FormControl, IconButton, InputLabel,
   MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer,
@@ -129,6 +129,62 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [searchLoading, setSearchLoading] = useState(false);
   const [chartType, setChartType] = useState<"bar" | "line" | "pie" | "area">("bar");
   const [chartMeasure, setChartMeasure] = useState(0);
+
+  const [drag, setDrag] = useState<{ area: "rows" | "cols" | "filters"; name: string } | null>(null);
+  const [dragOverZone, setDragOverZone] = useState<"rows" | "cols" | "filters" | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
+
+  const reorderStrings = (list: string[], name: string, targetIndex: number | null) => {
+    const from = list.indexOf(name);
+    if (from < 0 || targetIndex == null || from === targetIndex) return list;
+    const next = list.filter(item => item !== name);
+    const insertAt = from < targetIndex ? targetIndex - 1 : targetIndex;
+    next.splice(insertAt, 0, name);
+    return next;
+  };
+  const reorderFilters = (list: PivotFilter[], name: string, targetIndex: number | null) => {
+    const from = list.findIndex(item => item.column === name);
+    if (from < 0 || targetIndex == null || from === targetIndex) return list;
+    const next = list.filter(item => item.column !== name);
+    const insertAt = from < targetIndex ? targetIndex - 1 : targetIndex;
+    next.splice(insertAt, 0, list[from]);
+    return next;
+  };
+  const startDrag = (area: "rows" | "cols" | "filters", name: string, e: DragEvent<HTMLDivElement>) => {
+    setDrag({ area, name });
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", name); } catch { /* ignore */ }
+  };
+  const dropField = (target: "rows" | "cols" | "filters") => {
+    if (!drag) return;
+    const source = drag.area;
+    const name = drag.name;
+    const targetIndex = dropIndexRef.current;
+    dropIndexRef.current = null;
+    setDrag(null);
+    if (source === target) {
+      if (target === "rows") setRows(reorderStrings(rows, name, targetIndex));
+      else if (target === "cols") setCols(reorderStrings(cols, name, targetIndex));
+      else setFilters(reorderFilters(filters, name, targetIndex));
+      return;
+    }
+    const nextRows = rows.filter(item => item !== name);
+    const nextCols = cols.filter(item => item !== name);
+    const nextFilters = filters.filter(item => item.column !== name);
+    const insertAt = targetIndex == null ? Number.POSITIVE_INFINITY : targetIndex;
+    if (target === "rows") {
+      if (!nextRows.includes(name)) nextRows.splice(insertAt, 0, name);
+    } else if (target === "cols") {
+      if (!nextCols.includes(name)) nextCols.splice(insertAt, 0, name);
+    } else {
+      if (!nextFilters.some(item => item.column === name)) {
+        nextFilters.splice(insertAt, 0, { column: name, values: [], operator: "IN" as PivotFilter["operator"] });
+      }
+    }
+    setRows(nextRows);
+    setCols(nextCols);
+    setFilters(nextFilters);
+  };
 
   const request = useMemo<PivotRequest>(() => ({ destination_table_id: tableId, rows, columns: cols, measures, filters, row_limit: 500, column_limit: 60, include_totals: true }), [tableId, rows, cols, measures, filters]);
 
@@ -355,8 +411,63 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         <Button variant="outlined" startIcon={<Visibility />} onClick={executeSearch} disabled={searchLoading || !searchTerm.trim()}>{searchLoading ? "Buscando..." : "Buscar"}</Button>
       </Stack>}
       <Divider sx={{ my: 1.5 }} />
+      <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+        Arraste os campos para reordenar ou movê-los entre Linhas, Colunas e Filtros.
+      </Typography>
       <Stack direction="row" gap={1.5} flexWrap="wrap">
-        {(["rows", "cols", "filters"] as const).map(area => <Paper key={area} variant="outlined" sx={{ p: 1, minWidth: 210, flex: 1 }}><Typography variant="caption" fontWeight={700}>{area === "rows" ? "LINHAS" : area === "cols" ? "COLUNAS" : "FILTROS"}</Typography><Stack direction="row" gap={.5} flexWrap="wrap" mt={.5}>{(area === "rows" ? rows : area === "cols" ? cols : filters.map(f => f.column)).map(name => <Chip key={name} label={name} onDelete={() => removeField(area, name)} size="small" />)} {!((area === "rows" ? rows : area === "cols" ? cols : filters).length) && <Typography variant="caption" color="text.secondary">Nenhum campo</Typography>}</Stack></Paper>)}
+        {(["rows", "cols", "filters"] as const).map(area => {
+          const items = area === "rows" ? rows : area === "cols" ? cols : filters;
+          const label = area === "rows" ? "LINHAS" : area === "cols" ? "COLUNAS" : "FILTROS";
+          return (
+            <Paper
+              key={area}
+              variant="outlined"
+              sx={{
+                p: 1,
+                minWidth: 210,
+                flex: 1,
+                borderColor: dragOverZone === area ? "primary.main" : undefined,
+                bgcolor: dragOverZone === area ? "action.hover" : undefined,
+                transition: "border-color 0.15s",
+              }}
+              onDragOver={(e) => { e.preventDefault(); setDragOverZone(area); }}
+              onDragLeave={() => setDragOverZone(prev => prev === area ? null : prev)}
+              onDrop={(e) => { e.preventDefault(); setDragOverZone(null); dropField(area); }}
+            >
+              <Typography variant="caption" fontWeight={700}>{label}</Typography>
+              <Stack direction="row" gap={0.5} flexWrap="wrap" mt={0.5}>
+                {area === "filters"
+                  ? filters.map((f, index) => (
+                      <Box
+                        key={f.column}
+                        draggable
+                        sx={{ cursor: "grab" }}
+                        onDragStart={(e) => startDrag(area, f.column, e)}
+                        onDragEnd={() => setDrag(null)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDragEnter={() => { dropIndexRef.current = index; }}
+                      >
+                        <Chip label={f.column} onDelete={() => removeField(area, f.column)} size="small" />
+                      </Box>
+                    ))
+                  : (area === "rows" ? rows : cols).map((name, index) => (
+                      <Box
+                        key={name}
+                        draggable
+                        sx={{ cursor: "grab" }}
+                        onDragStart={(e) => startDrag(area, name, e)}
+                        onDragEnd={() => setDrag(null)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDragEnter={() => { dropIndexRef.current = index; }}
+                      >
+                        <Chip label={name} onDelete={() => removeField(area, name)} size="small" />
+                      </Box>
+                    ))}
+                {items.length === 0 && <Typography variant="caption" color="text.secondary">Nenhum campo</Typography>}
+              </Stack>
+            </Paper>
+          );
+        })}
         <Paper variant="outlined" sx={{ p: 1, minWidth: 260, flex: 1 }}><Typography variant="caption" fontWeight={700}>VALORES</Typography>{measures.map((m, index) => <Stack key={index} direction="row" gap={.5} mt={.5}><Select size="small" value={m.column} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, column: e.target.value } : x))} sx={{ flex: 1 }}>{meta?.measures.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select><Select size="small" value={m.aggregation} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, aggregation: e.target.value as PivotMeasure["aggregation"] } : x))}>{["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"].map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}</Select><IconButton size="small" onClick={() => setMeasures(measures.filter((_, i) => i !== index))}><Delete fontSize="small" /></IconButton></Stack>)}<Button size="small" startIcon={<Add />} onClick={() => meta?.default_measure && setMeasures([...measures, { column: meta.default_measure, aggregation: "SUM" }])}>Adicionar medida</Button></Paper>
       </Stack>
       {filters.map(filter => <Stack key={filter.column} direction="row" gap={1} alignItems="center" sx={{ mt: 1, mr: 1, flexWrap: "wrap" }}>

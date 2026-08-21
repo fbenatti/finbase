@@ -5,13 +5,13 @@ import {
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
   FormControlLabel, Checkbox, Tab, Tabs, Paper, InputAdornment, Stack, Snackbar,
 } from "@mui/material";
-import { Add, Search, Cloud, CloudUpload, Dataset, Download, Storage } from "@mui/icons-material";
+import { Add, Search, Cloud, Dataset, Download, Storage } from "@mui/icons-material";
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
+  formatApiError,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
-import ManualCsvUploadDialog from "./ManualCsvUploadDialog";
 import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
 
 const CONNECTOR_TYPES = [
@@ -19,7 +19,9 @@ const CONNECTOR_TYPES = [
   { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
   { value: "oci", label: "Oracle Cloud (OCI)", scope: "oci" },
   { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
-  { value: "manual_csv", label: "Upload manual de CSV", scope: "" },
+  { value: "github_billing", label: "GitHub Billing", scope: "github" },
+  { value: "github_license", label: "GitHub Licenças", scope: "github" },
+  { value: "github_token", label: "GitHub Tokens (Copilot)", scope: "github" },
 ];
 
 const CONNECTOR_PICKER_OPTIONS = [
@@ -27,7 +29,7 @@ const CONNECTOR_PICKER_OPTIONS = [
   { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, color: "#4285F4" },
   { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, color: "#F80000" },
   { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, color: "#13AA52" },
-  { value: "manual_csv", label: "Upload manual", description: "Arquivo CSV", icon: <CloudUpload />, color: "#0A8FDC" },
+  { value: "github", label: "GitHub", description: "Copilot / Licenças", icon: <Cloud />, color: "#24292e" },
 ];
 
 const PROVIDER_LOGOS: Record<string, string> = {
@@ -37,6 +39,7 @@ const PROVIDER_LOGOS: Record<string, string> = {
   aws: "/provider-logos/aws.svg",
   oci: "/provider-logos/oci.svg",
   atlas: "/provider-logos/mongodb.svg",
+  github: "/provider-logos/github.svg",
 };
 
 const CLOUD_SCOPES = [
@@ -46,6 +49,7 @@ const CLOUD_SCOPES = [
   { value: "aws", label: "AWS" },
   { value: "oci", label: "Oracle Cloud (OCI)" },
   { value: "atlas", label: "MongoDB Atlas" },
+  { value: "github", label: "GitHub" },
   { value: "other", label: "Outra / Desconhecida" },
 ];
 
@@ -56,6 +60,7 @@ const emptyForm = {
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
   oci_region: "sa-saopaulo-1", oci_fingerprint: "", oci_private_key: "",
+  github_extraction_type: "billing" as "billing" | "license" | "token",
 };
 
 export default function Connections() {
@@ -72,15 +77,16 @@ export default function Connections() {
   const initializedProviderTab = useRef(false);
   const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
+  const [githubSubPickerOpen, setGithubSubPickerOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SourceConnection | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
   const [testingForm, setTestingForm] = useState(false);
   const [formTestMessage, setFormTestMessage] = useState<{ severity: "success" | "warning" | "error"; msg: string } | null>(null);
   const [connectionPendingDeletion, setConnectionPendingDeletion] = useState<SourceConnection | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState("");
+  const [deleteError, setDeleteError] = useState("");
 
   const load = async () => {
     try {
@@ -146,8 +152,32 @@ export default function Connections() {
   };
 
   const chooseConnector = (connectorType: string) => {
+    if (connectorType === "github") {
+      // Mostra sub-seletor de tipo de extração GitHub
+      setConnectorPickerOpen(false);
+      setGithubSubPickerOpen(true);
+      return;
+    }
     setConnectorPickerOpen(false);
     openNew(connectorType);
+  };
+
+  const chooseGithubType = (extractionType: "billing" | "license" | "token") => {
+    setGithubSubPickerOpen(false);
+    const connectorType = extractionType === "billing"
+      ? "github_billing"
+      : extractionType === "license"
+        ? "github_license"
+        : "github_token";
+    const cloudName = extractionType === "billing"
+      ? "github-billing"
+      : extractionType === "license"
+        ? "github-license"
+        : "github-token";
+    setEditing(null);
+    setFormTestMessage(null);
+    setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: "github", cloud_name: cloudName, github_extraction_type: extractionType });
+    setDialogOpen(true);
   };
 
   const openEdit = (conn: SourceConnection) => {
@@ -208,6 +238,40 @@ export default function Connections() {
         mongo_contract_type: cfg.contract_type || "",
         marketplace: conn.config_json?.marketplace === true,
       });
+    } else if (conn.connector_type === "github_billing") {
+      const extractionType = "billing" as const;
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "github-billing",
+        cloud_scope: conn.cloud_scope || "github",
+        tenant_id: cfg.enterprise_slug || "",
+        client_secret: cfg.pat_token || "",
+        github_extraction_type: extractionType,
+      });
+    } else if (conn.connector_type === "github_license") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "github-license",
+        cloud_scope: conn.cloud_scope || "github",
+        tenant_id: cfg.enterprise_slug || "",
+        client_secret: cfg.pat_token || "",
+        github_extraction_type: "license",
+      });
+    } else if (conn.connector_type === "github_token") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "github-token",
+        cloud_scope: conn.cloud_scope || "github",
+        tenant_id: cfg.enterprise_slug || "",
+        client_secret: cfg.pat_token || "",
+        github_extraction_type: "token",
+      });
     } else {
       setForm({
         ...emptyForm,
@@ -246,6 +310,15 @@ export default function Connections() {
       if (form.mongo_group_id) configJson.group_id = form.mongo_group_id;
       if (form.mongo_contract_type) configJson.contract_type = form.mongo_contract_type;
       if (form.marketplace) configJson.marketplace = true;
+    } else if (form.connector_type === "github_billing") {
+      if (form.tenant_id) configJson.enterprise_slug = form.tenant_id;
+      if (form.client_secret) configJson.pat_token = form.client_secret;
+    } else if (form.connector_type === "github_license") {
+      if (form.tenant_id) configJson.enterprise_slug = form.tenant_id;
+      if (form.client_secret) configJson.pat_token = form.client_secret;
+    } else if (form.connector_type === "github_token") {
+      if (form.tenant_id) configJson.enterprise_slug = form.tenant_id;
+      if (form.client_secret) configJson.pat_token = form.client_secret;
     }
 
     return {
@@ -295,13 +368,15 @@ export default function Connections() {
     if (!connectionPendingDeletion) return;
     try {
       setDeleting(true);
+      setDeleteError("");
       await deleteConnection(connectionPendingDeletion.id);
       setConnectionPendingDeletion(null);
-      setDeleteFeedback(`Conexão “${connectionPendingDeletion.name}” excluída com sucesso.`);
+      setDeleteError("");
+      setDeleteFeedback(`Conexão "${connectionPendingDeletion.name}" excluída com sucesso. Tabela Bronze removida.`);
       await load();
       await loadGrid();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setDeleteError(formatApiError(e, "Falha ao excluir conexão"));
     } finally {
       setDeleting(false);
     }
@@ -438,7 +513,6 @@ export default function Connections() {
             testingId={testingId}
             testMessages={testMsgs}
             onEdit={openEdit}
-            onUpload={setUploadConn}
             onTest={(connection) => void runTest(connection)}
             onDelete={setConnectionPendingDeletion}
             onQuery={(query) => {
@@ -484,7 +558,65 @@ export default function Connections() {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setConnectorPickerOpen(false)}>Cancelar</Button>
         </DialogActions>
+        </Dialog>
+
+      {/* Sub-seletor de tipo de extração GitHub */}
+      <Dialog open={githubSubPickerOpen} onClose={() => setGithubSubPickerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ pb: 0 }}>GitHub — Tipo de extração</DialogTitle>
+        <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Selecione qual tipo de dado do GitHub você deseja coletar.
+          </Typography>
+          <Stack direction="column" gap={1.5}>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseGithubType("billing")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "primary.main", bgcolor: "rgba(10, 143, 220, 0.06)" } }}
+            >
+              <Typography fontSize={24}>🧾</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>Billing</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Relatórios detalhados de custo (Copilot, Actions, Packages...) — cloud_name: github-billing
+                </Typography>
+              </Box>
+            </Button>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseGithubType("license")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "primary.main", bgcolor: "rgba(10, 143, 220, 0.06)" } }}
+            >
+              <Typography fontSize={24}>👥</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>Licenças</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Usuários com licenças ativas (Enterprise, Copilot, VS...) — cloud_name: github-license
+                </Typography>
+              </Box>
+            </Button>
+            <Button
+              variant="outlined" color="inherit" fullWidth
+              onClick={() => chooseGithubType("token")}
+              sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
+                "&:hover": { borderColor: "primary.main", bgcolor: "rgba(10, 143, 220, 0.06)" } }}
+            >
+              <Typography fontSize={24}>🔑</Typography>
+              <Box textAlign="left">
+                <Typography fontWeight={700}>Tokens (Copilot Seats)</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Copilot seats ativos: usuário, editor, data do último uso — cloud_name: github-token
+                </Typography>
+              </Box>
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setGithubSubPickerOpen(false)}>Cancelar</Button>
+        </DialogActions>
       </Dialog>
+
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{editing ? "Editar Conexao" : "Nova Conexao"}</DialogTitle>
@@ -613,6 +745,35 @@ export default function Connections() {
                 />
               </>
             )}
+
+            {(form.connector_type === "github_billing" || form.connector_type === "github_license" || form.connector_type === "github_token") && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>GitHub Config</Typography>
+                <FormControl fullWidth>
+                  <InputLabel>Tipo de extração</InputLabel>
+                  <Select
+                    value={form.github_extraction_type}
+                    label="Tipo de extração"
+                    onChange={(e) => {
+                      const t = e.target.value as "billing" | "license" | "token";
+                      const connectorType = t === "billing" ? "github_billing" : t === "license" ? "github_license" : "github_token";
+                      const cloudName = t === "billing" ? "github-billing" : t === "license" ? "github-license" : "github-token";
+                      setForm({ ...form, github_extraction_type: t, connector_type: connectorType, cloud_name: cloudName });
+                    }}
+                  >
+                    <MenuItem value="billing">🧾 Billing — Relatórios de custo detalhado</MenuItem>
+                    <MenuItem value="license">👥 Licenças — Usuários com licenças ativas</MenuItem>
+                    <MenuItem value="token">🔑 Tokens — Copilot seats e acessos</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField label="Enterprise Slug" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
+                  helperText="Nome da enterprise no GitHub (ex: vivo-telefonica)" />
+                <TextField label="Personal Access Token (PAT)" type="password" value={form.client_secret}
+                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                  helperText="Token com escopo manage_billing:enterprise" />
+              </>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
@@ -624,33 +785,33 @@ export default function Connections() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(connectionPendingDeletion)} onClose={() => !deleting && setConnectionPendingDeletion(null)} maxWidth="xs" fullWidth>
+      <Dialog open={Boolean(connectionPendingDeletion)} onClose={() => { if (!deleting) { setConnectionPendingDeletion(null); setDeleteError(""); } }} maxWidth="xs" fullWidth>
         <DialogTitle>Excluir conexão?</DialogTitle>
         <DialogContent>
-          <Typography>
-            Você está prestes a excluir a conexão <strong>{connectionPendingDeletion?.name}</strong>. Esta ação não pode ser desfeita.
-          </Typography>
+          {deleteError ? (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {deleteError}
+            </Alert>
+          ) : (
+            <Typography>
+              Você está prestes a excluir a conexão <strong>{connectionPendingDeletion?.name}</strong>.
+              A tabela Bronze associada também será removida. Esta ação não pode ser desfeita.
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button disabled={deleting} onClick={() => setConnectionPendingDeletion(null)}>Cancelar</Button>
-          <Button variant="contained" color="error" disabled={deleting} onClick={() => void remove()}>
+          <Button disabled={deleting} onClick={() => { setConnectionPendingDeletion(null); setDeleteError(""); }}>Cancelar</Button>
+          <Button variant="contained" color="error" disabled={deleting || !!deleteError} onClick={() => void remove()}>
             {deleting ? "Excluindo…" : "Excluir conexão"}
           </Button>
         </DialogActions>
       </Dialog>
 
+
       <Snackbar open={Boolean(deleteFeedback)} autoHideDuration={5000} onClose={() => setDeleteFeedback("")} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}>
         <Alert severity="success" variant="filled" onClose={() => setDeleteFeedback("")}>{deleteFeedback}</Alert>
       </Snackbar>
 
-      {uploadConn && (
-        <ManualCsvUploadDialog
-          open={!!uploadConn}
-          onClose={() => setUploadConn(null)}
-          connectionId={uploadConn.id}
-          connectionName={uploadConn.name}
-        />
-      )}
     </Box>
   );
 }

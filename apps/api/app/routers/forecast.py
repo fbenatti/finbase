@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime
 from typing import Any, Literal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import io
 from pydantic import BaseModel, Field
@@ -395,6 +395,105 @@ async def list_configs(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(ForecastConfig).order_by(ForecastConfig.updated_at.desc()))).scalars().all()
     return [_out(r) for r in rows]
 
+@router.get("/configs/grid")
+async def list_configs_grid(
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    sort_field: str = "updated_at",
+    sort_direction: str = Query("desc", pattern="^(asc|desc)$"),
+    filters: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side grid over forecast configurations (pagination, search, sort, AND filters)."""
+    import json
+    from sqlalchemy import or_, String as SAString, cast as sacast, func as safunc
+    from datetime import datetime as _dt
+
+    table_join = DestinationTable
+    stmt = select(ForecastConfig, table_join.name).join(
+        table_join, table_join.id == ForecastConfig.destination_table_id
+    )
+    conditions = []
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        conditions.append(or_(
+            ForecastConfig.name.ilike(needle),
+            table_join.name.ilike(needle),
+            ForecastConfig.measure_column.ilike(needle),
+            ForecastConfig.model_mode.ilike(needle),
+            ForecastConfig.period_allocation.ilike(needle),
+        ))
+    fields = {
+        "id": ForecastConfig.id,
+        "name": ForecastConfig.name,
+        "table_name": table_join.name,
+        "measure_column": ForecastConfig.measure_column,
+        "horizon_months": ForecastConfig.horizon_months,
+        "model_mode": ForecastConfig.model_mode,
+        "version": ForecastConfig.version,
+        "active": ForecastConfig.active,
+        "updated_at": ForecastConfig.updated_at,
+    }
+    try:
+        specs = json.loads(filters) if filters else []
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, "Filtros inválidos") from exc
+    for spec in specs if isinstance(specs, list) else []:
+        field = str(spec.get("field", ""))
+        value = str(spec.get("value", ""))
+        op = str(spec.get("operator", "equals"))
+        column = fields.get(field)
+        if not column or not value:
+            continue
+        if field == "updated_at":
+            try:
+                clean_val = value.replace("Z", "+00:00")
+                dt_val = _dt.fromisoformat(clean_val) if "T" in clean_val else _dt.fromisoformat(clean_val + "T00:00:00")
+                expr = safunc.date_trunc("minute", column) == safunc.date_trunc("minute", dt_val) if ":" in value else safunc.date(column) == dt_val.date()
+            except ValueError:
+                continue
+        elif field in ("id", "horizon_months", "version"):
+            try:
+                num_val = int(value)
+                expr = column == num_val
+            except ValueError:
+                continue
+        elif field in ("active",):
+            truthy = value.strip().lower() in {"true", "1", "yes", "sim", "ativa", "ativo"}
+            expr = column.is_(True) if truthy else column.is_(False)
+        elif field == "table_name":
+            expr = table_join.name == value
+        else:
+            expr = column == value
+        conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
+    sort = fields.get(sort_field, ForecastConfig.updated_at)
+    ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+    if sort_field == "table_name":
+        ordering = safunc.lower(sort).desc() if sort_direction == "desc" else safunc.lower(sort).asc()
+    filtered = stmt.where(*conditions) if conditions else stmt
+    total = (await db.execute(select(safunc.count()).select_from(filtered.subquery()))).scalar_one()
+    rows = (await db.execute(filtered.order_by(ordering, ForecastConfig.id.desc()).offset(offset).limit(limit))).all()
+    items = [{
+        "id": row.id,
+        "name": row.name,
+        "table_name": name,
+        "destination_table_id": row.destination_table_id,
+        "measure_column": row.measure_column,
+        "date_column": row.date_column,
+        "period_column": row.period_column,
+        "dimensions": row.dimensions or [],
+        "horizon_months": row.horizon_months,
+        "model_mode": row.model_mode,
+        "period_allocation": row.period_allocation,
+        "charge_end_column": row.charge_end_column,
+        "connection_allocation_rules": row.connection_allocation_rules or [],
+        "version": row.version,
+        "active": row.active,
+        "updated_at": row.updated_at,
+    } for row, name in rows]
+    return {"items": items, "total": total}
+
 @router.post("/configs", status_code=201)
 async def create_config(body: ConfigIn, db: AsyncSession = Depends(get_db)):
     row = ForecastConfig(**body.model_dump()); db.add(row); await db.commit(); await db.refresh(row)
@@ -459,6 +558,76 @@ async def list_business_rules(config_id: int, db: AsyncSession = Depends(get_db)
     await ensure_provider_forecast_rules(db, config_id=config_id)
     rows = (await db.execute(select(ForecastBusinessRule).where(ForecastBusinessRule.forecast_config_id == config_id).order_by(ForecastBusinessRule.priority, ForecastBusinessRule.id))).scalars().all()
     return [_out(r) for r in rows]
+
+@router.get("/configs/{config_id}/business-rules/grid")
+async def list_business_rules_grid(
+    config_id: int,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    sort_field: str = "priority",
+    sort_direction: str = Query("asc", pattern="^(asc|desc)$"),
+    filters: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side grid over the business rules of one forecast configuration."""
+    import json
+    from sqlalchemy import or_, func as safunc
+
+    if not await db.get(ForecastConfig, config_id): raise HTTPException(404, "Configuração não encontrada")
+    await ensure_provider_forecast_rules(db, config_id=config_id)
+    stmt = select(ForecastBusinessRule).where(ForecastBusinessRule.forecast_config_id == config_id)
+    conditions = []
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        conditions.append(or_(
+            ForecastBusinessRule.name.ilike(needle),
+            ForecastBusinessRule.charge_type.ilike(needle),
+            ForecastBusinessRule.behavior.ilike(needle),
+            ForecastBusinessRule.identification_column.ilike(needle),
+        ))
+    fields = {
+        "id": ForecastBusinessRule.id,
+        "name": ForecastBusinessRule.name,
+        "charge_type": ForecastBusinessRule.charge_type,
+        "behavior": ForecastBusinessRule.behavior,
+        "start_period": ForecastBusinessRule.start_period,
+        "end_period": ForecastBusinessRule.end_period,
+        "priority": ForecastBusinessRule.priority,
+        "active": ForecastBusinessRule.active,
+        "version": ForecastBusinessRule.version,
+        "updated_at": ForecastBusinessRule.updated_at,
+    }
+    try:
+        specs = json.loads(filters) if filters else []
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, "Filtros inválidos") from exc
+    for spec in specs if isinstance(specs, list) else []:
+        field = str(spec.get("field", ""))
+        value = str(spec.get("value", ""))
+        op = str(spec.get("operator", "equals"))
+        column = fields.get(field)
+        if not column or not value:
+            continue
+        if field in ("id", "priority", "version"):
+            try:
+                num_val = int(value)
+                expr = column == num_val
+            except ValueError:
+                continue
+        elif field == "active":
+            truthy = value.strip().lower() in {"true", "1", "yes", "sim", "ativa", "ativo"}
+            expr = column.is_(True) if truthy else column.is_(False)
+        else:
+            expr = column == value
+        conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
+    sort = fields.get(sort_field, ForecastBusinessRule.priority)
+    ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+    filtered = stmt.where(*conditions) if conditions else stmt
+    total = (await db.execute(select(safunc.count()).select_from(filtered.subquery()))).scalar_one()
+    rows = (await db.execute(filtered.order_by(ordering, ForecastBusinessRule.id).offset(offset).limit(limit))).scalars().all()
+    items = [_out(r) for r in rows]
+    return {"items": items, "total": total}
 
 async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncSession):
     config = await db.get(ForecastConfig, config_id)
@@ -578,6 +747,108 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", db: AsyncSess
 async def list_runs(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(ForecastRun).order_by(ForecastRun.started_at.desc()).limit(100))).scalars().all()
     return [_out(r) for r in rows]
+
+@router.get("/runs/grid")
+async def list_runs_grid(
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    sort_field: str = "started_at",
+    sort_direction: str = Query("desc", pattern="^(asc|desc)$"),
+    filters: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side grid over forecast runs: pagination, search, sort and AND filters.
+
+    Mirrors the contract of GET /etl/reprocess-history so the frontend can
+    drive a MUI DataGrid with paginationMode/sortingMode/filterMode=server.
+    """
+    import json
+    from sqlalchemy import or_, String as SAString, cast as sacast, func as safunc
+    from datetime import datetime as _dt
+
+    config_join = ForecastConfig
+    stmt = select(ForecastRun, config_join.name).outerjoin(
+        config_join, config_join.id == ForecastRun.forecast_config_id
+    )
+    conditions = []
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        conditions.append(or_(
+            ForecastRun.status.ilike(needle),
+            ForecastRun.phase.ilike(needle),
+            sacast(ForecastRun.result_table, SAString).ilike(needle),
+            ForecastRun.error.ilike(needle),
+            ForecastRun.trigger_type.ilike(needle),
+            config_join.name.ilike(needle),
+        ))
+    fields = {
+        "id": ForecastRun.id,
+        "forecast_config_id": ForecastRun.forecast_config_id,
+        "status": ForecastRun.status,
+        "phase": ForecastRun.phase,
+        "rows_written": ForecastRun.rows_written,
+        "total_series": ForecastRun.total_series,
+        "processed_series": ForecastRun.processed_series,
+        "result_table": ForecastRun.result_table,
+        "error": ForecastRun.error,
+        "started_at": ForecastRun.started_at,
+        "finished_at": ForecastRun.finished_at,
+        "config_name": config_join.name,
+    }
+    try:
+        specs = json.loads(filters) if filters else []
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, "Filtros inválidos") from exc
+    for spec in specs if isinstance(specs, list) else []:
+        field = str(spec.get("field", ""))
+        value = str(spec.get("value", ""))
+        op = str(spec.get("operator", "equals"))
+        column = fields.get(field)
+        if not column or not value:
+            continue
+        if field in ("started_at", "finished_at"):
+            try:
+                clean_val = value.replace("Z", "+00:00")
+                dt_val = _dt.fromisoformat(clean_val) if "T" in clean_val else _dt.fromisoformat(clean_val + "T00:00:00")
+                expr = safunc.date_trunc("minute", column) == safunc.date_trunc("minute", dt_val) if ":" in value else safunc.date(column) == dt_val.date()
+            except ValueError:
+                continue
+        elif field in ("id", "rows_written", "total_series", "processed_series"):
+            try:
+                num_val = int(value)
+                expr = column == num_val
+            except ValueError:
+                continue
+        elif field == "config_name":
+            expr = config_join.name == value
+        else:
+            expr = column == value
+        conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
+    sort = fields.get(sort_field, ForecastRun.started_at)
+    ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+    if sort_field == "config_name":
+        ordering = safunc.lower(sort).desc() if sort_direction == "desc" else safunc.lower(sort).asc()
+    filtered = stmt.where(*conditions) if conditions else stmt
+    total = (await db.execute(select(safunc.count()).select_from(filtered.subquery()))).scalar_one()
+    rows = (await db.execute(filtered.order_by(ordering, ForecastRun.id.desc()).offset(offset).limit(limit))).all()
+    items = [{
+        "id": run.id,
+        "forecast_config_id": run.forecast_config_id,
+        "config_name": name,
+        "config_version": run.config_version,
+        "trigger_type": run.trigger_type,
+        "status": run.status,
+        "phase": run.phase or "",
+        "total_series": run.total_series,
+        "processed_series": run.processed_series,
+        "rows_written": run.rows_written,
+        "result_table": run.result_table,
+        "error": run.error or "",
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+    } for run, name in rows]
+    return {"items": items, "total": total}
 
 @router.get("/runs/{run_id}/history/metadata")
 async def history_metadata(run_id: int, db: AsyncSession = Depends(get_db)):

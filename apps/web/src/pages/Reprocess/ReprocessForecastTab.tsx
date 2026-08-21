@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useNotifications } from "../../context/NotificationContext";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, IconButton, Stack, Tooltip, Typography,
 } from "@mui/material";
@@ -26,6 +27,7 @@ export default function ReprocessForecastTab() {
   const [error, setError] = useState("");
   const [runningConfig, setRunningConfig] = useState<number | null>(null);
   const [cancelling, setCancelling] = useState<number | null>(null);
+  const notifications = useNotifications();
 
   const load = async () => {
     try {
@@ -47,7 +49,8 @@ export default function ReprocessForecastTab() {
     setRunningConfig(configId);
     setError("");
     try {
-      await createForecastRun(configId);
+      const result = await createForecastRun(configId);
+      await notifications.addTaskById(result.task_id, { kind: "forecast", title: "Forecast" });
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao enfileirar o forecast");
@@ -79,7 +82,7 @@ export default function ReprocessForecastTab() {
   return (
     <Box>
       <Alert severity="info" sx={{ mb: 2 }}>
-        Reprocessa o forecast da tabela Gold configurada. A execução entra na fila do worker e aparece nas tasks acima.
+        Reprocessa o forecast da tabela Gold configurada. Acompanhe o andamento no sino de notificações (canto superior direito).
       </Alert>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       <Card sx={{ mb: 2 }}>

@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import logging
 from pathlib import Path
@@ -8,9 +9,10 @@ from sqlalchemy import select, text, delete, or_
 from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.models.rules import (
-    EtlMapping, BusinessRule, ClassificationRule, Department, Project, OrganizationMoveAudit,
-    DepartmentSharedCost, DepartmentSharedCostTarget,
+    EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, Department,
+    OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget,
 )
+from app.services.classification_field_values import refresh_destination_values
 from app.models.planning import PlanningEntry
 from app.models.destination import DestinationColumn, SourceDestinationMapping
 from app.services.classification_engine import map_legacy_field, normalize_rule_conditions
@@ -20,7 +22,6 @@ from app.schemas.schemas import (
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleOut,
     ClassificationRuleCreate, ClassificationRuleUpdate, ClassificationRuleOut,
     DepartmentCreate, DepartmentUpdate, DepartmentOut,
-    ProjectCreate, ProjectUpdate, ProjectOut,
     CsvImportRequest, CsvImportResult,
     SharedCostOut, SharedCostUpsert, SharedCostTargetOut,
 )
@@ -29,6 +30,9 @@ from app.services.shared_cost import SHARED_COST_MODES, department_path, subtree
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["rules"])
+
+# Keep references to background refresh tasks so they are not garbage-collected.
+_refresh_tasks: set[asyncio.Task] = set()
 
 MAX_DEPARTMENT_LEVELS = 7
 
@@ -409,6 +413,158 @@ async def list_classifications(
     return [_classification_rule_out(r) for r in result.scalars().all()]
 
 
+
+@router.get("/classifications/grid")
+async def list_classifications_grid(
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    sort_field: str = "priority",
+    sort_direction: str = Query("asc", pattern="^(asc|desc)$"),
+    filters: str | None = None,
+    destination_table_id: int | None = None,
+    cloud: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side grid over classification rules (pagination, search, sort, AND filters).
+
+    cloud maps the UI filter: "global" matches rules without cloud_scope,
+    "every"/None means no cloud filter, otherwise an exact cloud_scope match.
+    """
+    import json
+    from datetime import datetime as _dt
+    from sqlalchemy import or_, func
+
+    dept = Department
+    stmt = select(ClassificationRule, dept.name).outerjoin(dept, dept.id == ClassificationRule.department_id)
+    conditions = []
+    if destination_table_id is not None:
+        conditions.append(ClassificationRule.destination_table_id == destination_table_id)
+    if cloud is not None and cloud != "every":
+        if cloud == "global":
+            conditions.append(ClassificationRule.cloud_scope.is_(None))
+        else:
+            conditions.append(ClassificationRule.cloud_scope == cloud)
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        conditions.append(or_(
+            ClassificationRule.name.ilike(needle),
+            dept.name.ilike(needle),
+            ClassificationRule.pattern.ilike(needle),
+            ClassificationRule.match_value.ilike(needle),
+        ))
+    fields = {
+        "id": ClassificationRule.id,
+        "name": ClassificationRule.name,
+        "department_name": dept.name,
+        "target_field": ClassificationRule.target_field,
+        "cloud_scope": ClassificationRule.cloud_scope,
+        "priority": ClassificationRule.priority,
+        "active": ClassificationRule.active,
+        "updated_at": ClassificationRule.updated_at,
+    }
+    try:
+        specs = json.loads(filters) if filters else []
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, "Filtros inválidos") from exc
+    for spec in specs if isinstance(specs, list) else []:
+        field = str(spec.get("field", ""))
+        value = str(spec.get("value", ""))
+        op = str(spec.get("operator", "equals"))
+        column = fields.get(field)
+        if column is None or not value:
+            continue
+        if field == "updated_at":
+            try:
+                clean_val = value.replace("Z", "+00:00")
+                dt_val = _dt.fromisoformat(clean_val) if "T" in clean_val else _dt.fromisoformat(clean_val + "T00:00:00")
+                expr = func.date_trunc("minute", column) == func.date_trunc("minute", dt_val) if ":" in value else func.date(column) == dt_val.date()
+            except ValueError:
+                continue
+        elif field in ("id", "priority"):
+            try:
+                num_val = int(value)
+                expr = column == num_val
+            except ValueError:
+                continue
+        elif field == "active":
+            truthy = value.strip().lower() in {"true", "1", "yes", "sim", "ativa", "ativo"}
+            expr = column.is_(True) if truthy else column.is_(False)
+        elif field == "cloud_scope":
+            expr = column.is_(None) if value.strip().lower() in {"global", "null", "none"} else column == value
+        elif field == "department_name":
+            expr = dept.name == value
+        else:
+            expr = column == value
+        conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
+    sort = fields.get(sort_field, ClassificationRule.priority)
+    ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+    if sort_field == "department_name":
+        ordering = func.lower(sort).desc() if sort_direction == "desc" else func.lower(sort).asc()
+    filtered = stmt.where(*conditions) if conditions else stmt
+    total = (await db.execute(select(func.count()).select_from(filtered.subquery()))).scalar_one()
+    rows = (await db.execute(filtered.order_by(ordering, ClassificationRule.id).offset(offset).limit(limit))).all()
+    items = [{
+        "id": rule.id,
+        "connection_id": rule.connection_id,
+        "destination_table_id": rule.destination_table_id,
+        "department_id": rule.department_id,
+        "department_name": department_name,
+        "name": rule.name,
+        "source_field": rule.source_field,
+        "pattern": rule.pattern,
+        "pattern_type": rule.pattern_type,
+        "match_value": rule.match_value,
+        "target_field": rule.target_field,
+        "conditions": rule.conditions,
+        "priority": rule.priority,
+        "cloud_scope": rule.cloud_scope,
+        "active": rule.active,
+        "created_at": rule.created_at,
+        "updated_at": rule.updated_at,
+    } for rule, department_name in rows]
+    return {"items": items, "total": total}
+
+
+@router.get("/classifications/field-values")
+async def classification_field_values(
+    destination_table_id: int = Query(...),
+    field: str = Query(..., min_length=1),
+    cloud: str | None = Query(None),
+    search: str | None = Query(None, max_length=200),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Autocomplete values for a classification condition field (fast Postgres lookup)."""
+    stmt = select(ClassificationFieldValue).where(
+        ClassificationFieldValue.destination_table_id == destination_table_id,
+        ClassificationFieldValue.field == field,
+    )
+    if cloud and cloud != "global":
+        stmt = stmt.where(ClassificationFieldValue.cloud == cloud.strip().lower())
+    if search and search.strip():
+        stmt = stmt.where(ClassificationFieldValue.value.ilike(f"{search.strip()}%"))
+    stmt = (
+        stmt.order_by(ClassificationFieldValue.count.desc(), ClassificationFieldValue.value.asc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{"value": row.value, "count": row.count} for row in rows]
+
+
+@router.post("/classifications/refresh-field-values", status_code=202)
+async def refresh_classification_field_values(
+    destination_table_id: int | None = Query(None),
+    fields: str | None = Query(None, description="Campos separados por vírgula (opcional)"),
+):
+    """Backfill the field-value reference from Gold via Trino (background)."""
+    field_list = [f.strip() for f in fields.split(",")] if fields else None
+    _refresh_tasks.add(
+        asyncio.create_task(refresh_destination_values(destination_table_id, field_list))
+    )
+    return {"status": "started", "destination_table_id": destination_table_id, "fields": field_list}
+
+
 @router.post("/classifications/", response_model=ClassificationRuleOut, status_code=201)
 async def create_classification(data: ClassificationRuleCreate, db: AsyncSession = Depends(get_db)):
     department = (await db.execute(
@@ -510,6 +666,114 @@ async def list_departments(
         return []
 
     return roots
+
+
+@router.get("/departments/grid")
+async def list_departments_grid(
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    sort_field: str = "name",
+    sort_direction: str = Query("asc", pattern="^(asc|desc)$"),
+    filters: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side grid over departments (pagination, search, sort, AND filters).
+
+    Includes the parent department name and the shared-cost flag so the
+    DataGrid can render them without extra round-trips.
+    """
+    import json
+    from datetime import datetime as _dt
+    from sqlalchemy import or_, func
+    from sqlalchemy.orm import aliased
+
+    parent = aliased(Department)
+    shared_enabled = (
+        select(DepartmentSharedCost.enabled)
+        .where(DepartmentSharedCost.department_id == Department.id)
+        .correlate(Department)
+        .scalar_subquery()
+    )
+    stmt = select(Department, parent.name, shared_enabled).outerjoin(
+        parent, parent.id == Department.parent_id
+    )
+    conditions = []
+    if search and search.strip():
+        needle = f"%{search.strip()}%"
+        conditions.append(or_(
+            Department.name.ilike(needle),
+            parent.name.ilike(needle),
+            Department.centro_custo.ilike(needle),
+            Department.ambiente.ilike(needle),
+            Department.cloud_filter.ilike(needle),
+        ))
+    fields = {
+        "id": Department.id,
+        "name": Department.name,
+        "parent_name": parent.name,
+        "centro_custo": Department.centro_custo,
+        "ambiente": Department.ambiente,
+        "cloud_filter": Department.cloud_filter,
+        "shared_cost": shared_enabled,
+        "active": Department.active,
+        "updated_at": Department.updated_at,
+    }
+    try:
+        specs = json.loads(filters) if filters else []
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, "Filtros inválidos") from exc
+    for spec in specs if isinstance(specs, list) else []:
+        field = str(spec.get("field", ""))
+        value = str(spec.get("value", ""))
+        op = str(spec.get("operator", "equals"))
+        column = fields.get(field)
+        if column is None or not value:
+            continue
+        if field == "updated_at":
+            try:
+                clean_val = value.replace("Z", "+00:00")
+                dt_val = _dt.fromisoformat(clean_val) if "T" in clean_val else _dt.fromisoformat(clean_val + "T00:00:00")
+                expr = func.date_trunc("minute", column) == func.date_trunc("minute", dt_val) if ":" in value else func.date(column) == dt_val.date()
+            except ValueError:
+                continue
+        elif field == "id":
+            try:
+                num_val = int(value)
+                expr = column == num_val
+            except ValueError:
+                continue
+        elif field == "active":
+            truthy = value.strip().lower() in {"true", "1", "yes", "sim", "ativa", "ativo"}
+            expr = column.is_(True) if truthy else column.is_(False)
+        elif field == "shared_cost":
+            truthy = value.strip().lower() in {"true", "1", "yes", "sim"}
+            expr = column.is_(True) if truthy else (or_(column.is_(None), column.is_(False)))
+        elif field == "parent_name":
+            expr = parent.name == value
+        else:
+            expr = column == value
+        conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
+    sort = fields.get(sort_field, Department.name)
+    ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+    filtered = stmt.where(*conditions) if conditions else stmt
+    total = (await db.execute(select(func.count()).select_from(filtered.subquery()))).scalar_one()
+    rows = (await db.execute(filtered.order_by(ordering, Department.id).offset(offset).limit(limit))).all()
+    items = [{
+        "id": department.id,
+        "parent_id": department.parent_id,
+        "name": department.name,
+        "parent_name": parent_name,
+        "centro_custo": department.centro_custo,
+        "ambiente": department.ambiente,
+        "cloud_filter": department.cloud_filter,
+        "custom_fields": department.custom_fields,
+        "shared_cost": bool(shared_cost),
+        "active": department.active,
+        "created_at": department.created_at,
+        "updated_at": department.updated_at,
+    } for department, parent_name, shared_cost in rows]
+    return {"items": items, "total": total}
 
 
 @router.post("/departments/", response_model=DepartmentOut, status_code=201)
@@ -622,7 +886,6 @@ async def delete_department(dept_id: int, db: AsyncSession = Depends(get_db)):
         DepartmentSharedCostTarget.config_id.in_(config_ids),
     )))
     await db.execute(delete(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))
-    await db.execute(delete(Project).where(Project.department_id == dept_id))
     await db.execute(delete(OrganizationMoveAudit).where(OrganizationMoveAudit.department_id == dept_id))
     for rule in (await db.execute(select(ClassificationRule).where(ClassificationRule.department_id == dept_id))).scalars().all():
         rule.department_id = None
@@ -691,7 +954,7 @@ async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSess
     if mode not in SHARED_COST_MODES:
         raise HTTPException(status_code=422, detail="Modo de rateio inválido")
     if data.enabled and mode != "consumption" and not data.targets:
-        raise HTTPException(status_code=422, detail="Selecione ao menos um projeto ou departamento destino")
+        raise HTTPException(status_code=422, detail="Selecione ao menos um departamento destino")
     donor_tree = subtree_ids(dept_id, children_map(departments))
     seen: set[int] = set()
     percent_sum = 0.0
@@ -735,57 +998,6 @@ async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSess
     if not config:
         raise HTTPException(status_code=500, detail="O custo compartilhado foi gravado, mas não pôde ser recarregado")
     return _shared_cost_out(config, departments)
-
-
-# ---- Project ----
-
-@router.get("/projects/", response_model=list[ProjectOut])
-async def list_projects(
-    department_id: int | None = Query(None, description="Filter by department"),
-    cloud: str | None = Query(None, description="Filter by cloud"),
-    db: AsyncSession = Depends(get_db),
-):
-    stmt = select(Project)
-    if department_id is not None:
-        stmt = stmt.where(Project.department_id == department_id)
-    if cloud is not None:
-        stmt = stmt.where(Project.cloud == cloud)
-    stmt = stmt.order_by(Project.projeto_name)
-    result = await db.execute(stmt)
-    return result.scalars().all()
-
-
-@router.post("/projects/", response_model=ProjectOut, status_code=201)
-async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)):
-    proj = Project(**data.model_dump())
-    db.add(proj)
-    await db.commit()
-    await db.refresh(proj)
-    return proj
-
-
-@router.put("/projects/{proj_id}", response_model=ProjectOut)
-async def update_project(proj_id: int, data: ProjectUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == proj_id))
-    proj = result.scalar_one_or_none()
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-    update_data = data.model_dump(exclude_unset=True)
-    for k, v in update_data.items():
-        setattr(proj, k, v)
-    await db.commit()
-    await db.refresh(proj)
-    return proj
-
-
-@router.delete("/projects/{proj_id}", status_code=204)
-async def delete_project(proj_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == proj_id))
-    proj = result.scalar_one_or_none()
-    if not proj:
-        raise HTTPException(status_code=404)
-    await db.delete(proj)
-    await db.commit()
 
 
 # ---- CSV Import ----
@@ -865,8 +1077,8 @@ def _adapt_conditions_to_destination(
 
 @router.post("/departments/import", response_model=CsvImportResult, status_code=201)
 async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get_db)):
-    """Import departments, projects, and business rules from finopsNew CSV files."""
-    result = CsvImportResult(departments_created=0, projects_created=0, classification_rules_created=0)
+    """Import departments and business rules from finopsNew CSV files."""
+    result = CsvImportResult(departments_created=0, classification_rules_created=0)
     focus_table_id = await _default_focus_table_id(db)
 
     # Load the current relationship contract once.  A classification rule is
@@ -1003,62 +1215,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
 
         await db.commit()
 
-    # --- Step 2: Import Projects from projetos_download.csv ---
-    projetos_path = Path(data.projetos_path)
-    if not projetos_path.exists():
-        result.errors.append(f"File not found: {data.projetos_path}")
-    else:
-        with open(projetos_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f, delimiter=";")
-            proj_rows = list(reader)
-
-        seen_proj: set[str] = set()
-        for row in proj_rows:
-            pn = row.get("Projeto", "").strip()
-            cloud = row.get("Cloud", "").strip()
-            sub_rg = row.get("SubscriptionRG", "").strip()
-
-            if not pn:
-                continue
-
-            # Find department (child) by name — try cloud filter then fallback
-            stmt = select(Department).where(Department.name == pn, Department.parent_id != None)
-            if cloud:
-                stmt = stmt.where(Department.cloud_filter == cloud)
-            stmt = stmt.order_by(Department.id).limit(1)
-            res = await db.execute(stmt)
-            dept = res.scalars().first()
-
-            if dept is None and cloud:
-                stmt = select(Department).where(Department.name == pn, Department.parent_id != None)
-                stmt = stmt.order_by(Department.id).limit(1)
-                res = await db.execute(stmt)
-                dept = res.scalars().first()
-
-            if dept is None:
-                continue
-
-            proj_key = f"{dept.id}|{pn}|{sub_rg}"
-            if proj_key in seen_proj:
-                continue
-            seen_proj.add(proj_key)
-
-            existing = await db.execute(
-                select(Project).where(Project.department_id == dept.id, Project.projeto_name == pn).limit(1)
-            )
-            if existing.scalars().first() is None:
-                db.add(Project(
-                    department_id=dept.id,
-                    projeto_name=pn,
-                    cloud=cloud,
-                    subscription_rg=sub_rg,
-                ))
-                await db.flush()
-                result.projects_created += 1
-
-        await db.commit()
-
-    # --- Step 3: Import Classification Rules from businessRules_download.csv ---
+    # --- Step 2: Import Classification Rules from businessRules_download.csv ---
     br_path = Path(data.business_rules_path)
     if not br_path.exists():
         result.errors.append(f"File not found: {data.business_rules_path}")
@@ -1089,9 +1246,8 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 relationship_by_connection.get(connection_id, {}),
             )
 
-            # Find department/project from project_name
+            # Find department from project_name (a directory row)
             dept_id = None
-            proj_id = None
             if project_name:
                 csv_candidates = directory_department_map.get((cloud, project_name), [])
                 dept = None
@@ -1136,13 +1292,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 if dept:
                     dept_id = dept.id
 
-                pr = await db.execute(
-                    select(Project).where(Project.projeto_name == project_name).limit(1)
-                )
-                proj = pr.scalars().first()
-                if proj:
-                    proj_id = proj.id
-
             # A project label alone is not an organizational allocation.  Do
             # not import a new active rule unless its target Department was
             # resolved from the directory hierarchy.
@@ -1177,7 +1326,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     connection_id=connection_id,
                     destination_table_id=focus_table_id,
                     department_id=dept_id,
-                    project_id=proj_id,
                     name=rule_name,
                     source_field=source_field,
                     pattern=conditions_raw[:500],
@@ -1224,7 +1372,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                         connection_id=connection_id,
                         destination_table_id=focus_table_id,
                         department_id=dept_id,
-                        project_id=proj_id,
                         name=usage_name,
                         source_field=source_field,
                         pattern="ChargeCategory=Usage ; CommitmentDiscountName~AVS",

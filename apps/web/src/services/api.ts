@@ -5,7 +5,7 @@ const api = axios.create({
   timeout: 120000,
 });
 
-const CANCELLABLE_ANALYSIS = /^\/analysis\/(expected-view|pivot|query|dashboard-widgets\/query)/;
+const CANCELLABLE_ANALYSIS = /^\/analysis\/(expected-view|pivot|query)/;
 const pendingAnalysis = new Set<AbortController>();
 type ExpectedViewInflight = { count: number; controller: AbortController; promise: Promise<unknown>; abortTimer?: number };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
@@ -40,7 +40,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci", "mongodb_atlas"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token"]);
 
 export function formatApiError(error: unknown, fallback = "Request failed"): string {
   if (axios.isAxiosError(error)) {
@@ -151,7 +151,7 @@ export interface ClassificationRule {
   connection_id: number | null;
   destination_table_id: number | null;
   department_id: number | null;
-  project_id: number | null;
+  department_name?: string | null;
   name: string;
   source_field: string;
   pattern: string;
@@ -170,6 +170,8 @@ export interface Department {
   id: number;
   parent_id: number | null;
   name: string;
+  parent_name?: string | null;
+  shared_cost?: boolean;
   centro_custo: string | null;
   ambiente: string | null;
   cloud_filter: string | null;
@@ -180,16 +182,7 @@ export interface Department {
   updated_at: string;
 }
 
-export interface Project {
-  id: number;
-  department_id: number;
-  projeto_name: string;
-  cloud: string | null;
-  subscription_rg: string | null;
-  active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+
 
 export interface EtlRunStatus {
   connection_id: number;
@@ -494,6 +487,21 @@ export async function getClassifications(
   return data;
 }
 
+export interface ClassificationsGridResponse { items: ClassificationRule[]; total: number; }
+export async function getClassificationsGrid(params: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  sort_field?: string;
+  sort_direction?: "asc" | "desc";
+  filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+  destination_table_id?: number;
+  cloud?: string;
+} = {}): Promise<ClassificationsGridResponse> {
+  const { data } = await api.get("/classifications/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+  return data;
+}
+
 export async function createClassification(body: Partial<ClassificationRule>): Promise<ClassificationRule> {
   const { data } = await api.post("/classifications/", body);
   return data;
@@ -506,6 +514,26 @@ export async function updateClassification(id: number, body: Partial<Classificat
 
 export async function deleteClassification(id: number): Promise<void> {
   await api.delete(`/classifications/${id}`);
+}
+
+export interface ClassificationFieldValue { value: string; count: number }
+
+export async function getClassificationFieldValues(params: {
+  destination_table_id: number;
+  field: string;
+  cloud?: string;
+  search?: string;
+  limit?: number;
+}): Promise<ClassificationFieldValue[]> {
+  const { data } = await api.get("/classifications/field-values", { params });
+  return data;
+}
+
+export async function refreshClassificationFieldValues(destination_table_id?: number): Promise<{ status: string; destination_table_id?: number | null }> {
+  const { data } = await api.post("/classifications/refresh-field-values", null, {
+    params: destination_table_id ? { destination_table_id } : {},
+  });
+  return data;
 }
 
 // Azure Tag Policy
@@ -618,40 +646,27 @@ export async function bootstrapCloudOrganization(): Promise<CloudOrganizationBoo
   return data;
 }
 
-// Projects
-export async function getProjects(departmentId?: number, cloud?: string): Promise<Project[]> {
-  const params: Record<string, string | number> = {};
-  if (departmentId !== undefined) params.department_id = departmentId;
-  if (cloud) params.cloud = cloud;
-  const { data } = await api.get("/projects/", { params });
+export interface GridParams {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  sort_field?: string;
+  sort_direction?: "asc" | "desc";
+  filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+}
+export async function getDepartmentsGrid(params: GridParams = {}): Promise<{ items: Department[]; total: number }> {
+  const { data } = await api.get("/departments/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
   return data;
 }
-
-export async function createProject(body: Partial<Project>): Promise<Project> {
-  const { data } = await api.post("/projects/", body);
-  return data;
-}
-
-export async function updateProject(id: number, body: Partial<Project>): Promise<Project> {
-  const { data } = await api.put(`/projects/${id}`, body);
-  return data;
-}
-
-export async function deleteProject(id: number): Promise<void> {
-  await api.delete(`/projects/${id}`);
-}
-
 // CSV Import
 export interface CsvImportResult {
   departments_created: number;
-  projects_created: number;
   classification_rules_created: number;
   errors: string[];
 }
 
 export async function importCsvData(body?: {
   diretorias_path?: string;
-  projetos_path?: string;
   business_rules_path?: string;
 }): Promise<CsvImportResult> {
   const { data } = await api.post("/departments/import", body || {});
@@ -839,8 +854,8 @@ export async function getSavingsMetadata(tableId:number): Promise<{columns:Array
 
 export interface ForecastMetadata { destination_table_id: number; destination_table: string; suggestion_profile?: string | null; columns: { name: string; type: string; numeric: boolean; temporal: boolean }[]; measures: string[]; date_columns: string[]; period_columns: string[]; dimensions: string[]; recommended_dimensions: string[]; default_measure: string | null; default_date: string | null; default_period: string | null; default_period_allocation?: string | null; default_charge_end_column?: string | null; }
 export interface ConnectionAllocationRule { connection_id?: number | null; connection_code?: string | null; period_allocation?: "charge_interval"; charge_end_column?: string | null; }
-export interface ForecastConfig { id: number; name: string; destination_table_id: number; measure_column: string; currency_column: string | null; date_column: string; period_column: string | null; type_column: string | null; dimensions: string[]; cutoff_days: number; horizon_months: number; growth_rate: number; model_mode: string; enabled_windows: number[]; period_allocation?: string; charge_end_column?: string | null; connection_allocation_rules?: ConnectionAllocationRule[]; version: number; active: boolean; }
-export interface ForecastRun { id: number; forecast_config_id: number; status: string; phase: string | null; rows_written: number; total_series?: number; processed_series?: number; result_table: string | null; error: string | null; started_at?: string; finished_at?: string | null; }
+export interface ForecastConfig { id: number; name: string; table_name?: string | null; destination_table_id: number; measure_column: string; currency_column: string | null; date_column: string; period_column: string | null; type_column: string | null; dimensions: string[]; cutoff_days: number; horizon_months: number; growth_rate: number; model_mode: string; enabled_windows: number[]; period_allocation?: string; charge_end_column?: string | null; connection_allocation_rules?: ConnectionAllocationRule[]; version: number; active: boolean; updated_at?: string; }
+export interface ForecastRun { id: number; forecast_config_id: number; config_name?: string | null; status: string; phase: string | null; rows_written: number; total_series?: number; processed_series?: number; result_table: string | null; error: string | null; started_at?: string; finished_at?: string | null; }
 export interface ForecastHistoryMetadata { run_id: number; result_table: string; cutoff_date: string; snapshot: Record<string, unknown>; columns: { name: string; type: string }[]; dimensions: string[]; default_rows: string[]; default_columns: string[]; types: string[]; }
 export interface ForecastHistoryPivot { run_id: number; comparison: boolean; rows: string[]; columns: string[]; records: Record<string, unknown>[]; wape?: number | null; compared_at?: string; }
 export interface ForecastIdentificationClause { column: string; values: string[]; }
@@ -853,6 +868,11 @@ export async function deleteForecastConfig(id: number): Promise<void> { await ap
 export async function validateForecastConfig(id: number): Promise<{ valid: boolean; errors: string[]; metadata: ForecastMetadata }> { const { data } = await api.post(`/forecast/configs/${id}/validate`); return data; }
 export async function createForecastRun(configId: number): Promise<{ run_id: number; task_id: number; status: string }> { const { data } = await api.post(`/forecast/runs?config_id=${configId}`); return data; }
 export async function getForecastRuns(): Promise<ForecastRun[]> { const { data } = await api.get("/forecast/runs"); return data; }
+export interface ForecastRunsGridResponse { items: ForecastRun[]; total: number; }
+export async function getForecastRunsGrid(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> } = {}): Promise<ForecastRunsGridResponse> {
+  const { data } = await api.get("/forecast/runs/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+  return data;
+}
 export async function cancelForecastRun(runId: number): Promise<{ run_id: number; status: string }> {
   const { data } = await api.post(`/forecast/runs/${runId}/cancel`);
   return data;
@@ -863,6 +883,17 @@ export type HistorySort = { field: string; direction: "asc" | "desc" };
 export async function runForecastHistoryPivot(runId: number, body: { rows: string[]; columns: string[]; filters?: Record<string, HistoryFilter>; row_limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc" }): Promise<ForecastHistoryPivot> { const { data } = await api.post(`/forecast/runs/${runId}/history/pivot`, body); return data; }
 export async function compareForecastHistory(runId: number, body: { rows: string[]; columns: string[]; filters?: Record<string, HistoryFilter>; row_limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc" }): Promise<ForecastHistoryPivot> { const { data } = await api.post(`/forecast/runs/${runId}/history/comparison`, body); return data; }
 export async function getForecastBusinessRules(configId: number): Promise<ForecastBusinessRule[]> { const { data } = await api.get(`/forecast/configs/${configId}/business-rules`); return data; }
+export type ForecastGridParams = { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> };
+export interface ForecastConfigsGridResponse { items: ForecastConfig[]; total: number; }
+export async function getForecastConfigsGrid(params: ForecastGridParams = {}): Promise<ForecastConfigsGridResponse> {
+  const { data } = await api.get("/forecast/configs/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+  return data;
+}
+export interface ForecastRulesGridResponse { items: ForecastBusinessRule[]; total: number; }
+export async function getForecastBusinessRulesGrid(configId: number, params: ForecastGridParams = {}): Promise<ForecastRulesGridResponse> {
+  const { data } = await api.get(`/forecast/configs/${configId}/business-rules/grid`, { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+  return data;
+}
 export async function createForecastBusinessRule(configId: number, body: Record<string, unknown>): Promise<ForecastBusinessRule> { const { data } = await api.post(`/forecast/configs/${configId}/business-rules`, body); return data; }
 export async function updateForecastBusinessRule(id: number, body: Record<string, unknown>): Promise<ForecastBusinessRule> { const { data } = await api.put(`/forecast/business-rules/${id}`, body); return data; }
 export async function deleteForecastBusinessRule(id: number): Promise<void> { await api.delete(`/forecast/business-rules/${id}`); }
@@ -948,8 +979,6 @@ export interface PlanningVersion { id: number; financial_type_id: number; year: 
 export interface PlanningRow { entity_type: "department"; department_id: number; department_levels: string[]; values: number[]; }
 export interface PlanningGrid { type: FinancialType; version: PlanningVersion | null; rows: PlanningRow[]; }
 export async function getFinancialTypes(): Promise<FinancialType[]> { return (await api.get("/planning/types")).data; }
-export async function createFinancialType(body: Pick<FinancialType, "code" | "name" | "active">): Promise<FinancialType> { return (await api.post("/planning/types", body)).data; }
-export async function updateFinancialType(id: number, body: Pick<FinancialType, "name" | "active">): Promise<FinancialType> { return (await api.put(`/planning/types/${id}`, body)).data; }
 export async function getPlanningGrid(type: string, year: number, versionId?: number): Promise<PlanningGrid> { return (await api.get(`/planning/${type}/${year}`, { params: versionId ? { version_id: versionId } : {} })).data; }
 export async function savePlanningGrid(type: string, year: number, rows: PlanningRow[]): Promise<{ version: PlanningVersion; rows: number }> { return (await api.post(`/planning/${type}/${year}`, { rows })).data; }
 export async function getPlanningVersions(type: string, year: number): Promise<PlanningVersion[]> { return (await api.get(`/planning/${type}/${year}/versions`)).data; }
@@ -1276,23 +1305,13 @@ export async function searchPivotTable(destinationTableId: number, term: string,
   return (await api.post("/analysis/pivot/search", { destination_table_id: destinationTableId, term, limit, offset, filters })).data;
 }
 
-export type ChartType = "kpi" | "line" | "area" | "bar" | "stacked_bar" | "pie" | "donut" | "heatmap" | "map";
-export interface DashboardWidget { id: number; dashboard_id: number; pivot_view_id: number | null; title: string; chart_type: ChartType; config: Record<string, unknown>; position: Record<string, unknown>; }
-export interface SavedDashboard { id: number; name: string; pivot_view_id: number | null; global_filters: Record<string, unknown>; layout: Record<string, unknown>; widgets: DashboardWidget[]; }
-export interface WidgetChartResult { chart_type: ChartType; measure: PivotMeasure; x_dimension: string | null; series: Array<{ x: unknown; y: number | null; series: string | null }>; rows: string[]; columns: string[]; applied_filters: Record<string, unknown>; }
-export async function getDashboards(): Promise<SavedDashboard[]> { return (await api.get("/analysis/dashboards")).data; }
-export async function createDashboard(body: { name: string; pivot_view_id?: number | null; global_filters?: Record<string, unknown>; layout?: Record<string, unknown> }): Promise<SavedDashboard> { return (await api.post("/analysis/dashboards", body)).data; }
-export async function updateDashboard(id: number, body: { name: string; pivot_view_id?: number | null; global_filters?: Record<string, unknown>; layout?: Record<string, unknown> }): Promise<SavedDashboard> { return (await api.put(`/analysis/dashboards/${id}`, body)).data; }
-export async function deleteDashboard(id: number): Promise<void> { await api.delete(`/analysis/dashboards/${id}`); }
-export async function createDashboardWidget(dashboardId: number, body: { dashboard_id: number; pivot_view_id?: number | null; title: string; chart_type: ChartType; config?: Record<string, unknown>; position?: Record<string, unknown> }): Promise<DashboardWidget> { return (await api.post(`/analysis/dashboards/${dashboardId}/widgets`, body)).data; }
-export async function deleteDashboardWidget(dashboardId: number, widgetId: number): Promise<void> { await api.delete(`/analysis/dashboards/${dashboardId}/widgets/${widgetId}`); }
-export async function queryDashboardWidget(body: { pivot_view_id: number; chart_type: ChartType; config?: Record<string, unknown>; global_filters?: Record<string, unknown>; source_ids?: number[] }): Promise<WidgetChartResult> { return (await api.post("/analysis/dashboard-widgets/query", body)).data; }
+
 export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; shared_value?: number | null; shared_received?: number | null; shared_given?: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
 export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; actual_value?: number; shared_value?: number; }
 type ExpectedViewResult = { director: string; department_id?: number; rows: ExpectedViewRow[]; drivers: ExpectedViewDriver[] };
 
 export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal, includeSharedCost = false): Promise<ExpectedViewResult> {
-  const key = `${director}|${year}|${departmentId ?? ""}|${includeSharedCost ? 1 : 0}`;
+  const key = director + "|" + year + "|" + (departmentId ?? "") + "|" + (includeSharedCost ? 1 : 0);
   let entry = expectedViewInflight.get(key);
   if (!entry || entry.controller.signal.aborted) {
     const controller = new AbortController();

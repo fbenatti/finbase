@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
@@ -11,11 +11,6 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Collapse,
-  Button,
-  Chip,
-  LinearProgress,
-  Paper,
   Divider,
   Tooltip,
   useTheme,
@@ -32,9 +27,6 @@ import {
   BarChart as BarChartIcon,
   AccountTree as AccountTreeIcon,
   Business as BusinessIcon,
-  Cancel,
-  ExpandLess,
-  ExpandMore,
   TableChart as TableChartIcon,
   Refresh as RefreshIcon,
   ShowChart as ForecastIcon,
@@ -44,11 +36,8 @@ import {
   Savings as SavingsIcon,
   CloudUpload as CloudUploadIcon,
 } from "@mui/icons-material";
-import {
-  getRunningTasks, cancelEtl, getConnections,
-  TaskStatus, SourceConnection, cancelReprocess,
-  cancelPendingAnalysisRequests,
-} from "../services/api";
+import { cancelPendingAnalysisRequests } from "../services/api";
+import { NotificationBell } from "../context/NotificationContext";
 
 const DRAWER_WIDTH = 280;
 const COLLAPSED_WIDTH = 56;
@@ -61,10 +50,8 @@ const menuGroups = [
     background: "#eff6ff",
     items: [
       { path: "/connections", label: "Fontes de dados", icon: <CloudIcon /> },
-      { path: "/clone-rules", label: "Regras de clonagem", icon: <SwapHorizIcon /> },
-      { path: "/extraction", label: "Extração", icon: <PlayArrowIcon /> },
-      { path: "/destinations", label: "Tabelas de destino", icon: <TableChartIcon /> },
-      { path: "/relationship", label: "Relacionamentos", icon: <SwapHorizIcon /> },
+      { path: "/tables", label: "Tabelas", icon: <TableChartIcon /> },
+      { path: "/reprocess", label: "Reprocessar", icon: <RefreshIcon /> },
     ],
   },
   {
@@ -77,10 +64,7 @@ const menuGroups = [
       { path: "/savings", label: "Ações de saving", icon: <SavingsIcon /> },
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
       { path: "/budgets", label: "Orçamentos", icon: <AccountBalanceIcon /> },
-      { path: "/financial-types", label: "Tipificações financeiras", icon: <TimelineIcon /> },
-      { path: "/rules", label: "Ajuste de taxas e impostos (Regras)", icon: <RuleIcon /> },
-      { path: "/classifications", label: "Classificação", icon: <CategoryIcon /> },
-      { path: "/reprocess", label: "Reprocessar", icon: <RefreshIcon /> },
+      { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
   },
   {
@@ -91,7 +75,6 @@ const menuGroups = [
     items: [
       { path: "/pipeline", label: "Pipeline do dado", icon: <AccountTreeIcon /> },
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
-      { path: "/dashboards", label: "Dashboard", icon: <DashboardIcon /> },
       { path: "/expected-view", label: "Visão esperada", icon: <TimelineIcon /> },
     ],
   },
@@ -103,27 +86,9 @@ export default function Layout() {
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
 
-  // Global running tasks
-  const [runningTasks, setRunningTasks] = useState<TaskStatus[]>([]);
-  const [connections, setConnections] = useState<SourceConnection[]>([]);
-  const [tasksExpanded, setTasksExpanded] = useState(true);
+  const drawerWidth = expanded ? DRAWER_WIDTH : COLLAPSED_WIDTH;
+
   const skipRouteCancelRef = useRef(true);
-
-  useEffect(() => {
-    getConnections().then(setConnections).catch(() => {});
-  }, []);
-
-  const pollTasks = useCallback(async () => {
-    try {
-      setRunningTasks(await getRunningTasks());
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => {
-    pollTasks();
-    const interval = setInterval(pollTasks, 3000);
-    return () => clearInterval(interval);
-  }, [pollTasks]);
 
   useEffect(() => {
     if (skipRouteCancelRef.current) {
@@ -132,29 +97,6 @@ export default function Layout() {
     }
     cancelPendingAnalysisRequests();
   }, [location.pathname]);
-
-  const doCancelTask = async (taskId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await cancelEtl(taskId);
-      pollTasks();
-    } catch { /* ignore */ }
-  };
-
-  const doCancelReprocess = async (taskId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await cancelReprocess(taskId);
-      pollTasks();
-    } catch { /* ignore */ }
-  };
-
-  const getConnName = (connectionId: number) => {
-    const c = connections.find(c => c.id === connectionId);
-    return c ? `${c.name} (${c.code})` : `Conexao #${connectionId}`;
-  };
-
-  const drawerWidth = expanded ? DRAWER_WIDTH : COLLAPSED_WIDTH;
 
   return (
     <Box sx={{ display: "flex", height: "100%" }}>
@@ -177,6 +119,8 @@ export default function Layout() {
           <Typography variant="h6" noWrap sx={{ fontWeight: 600 }}>
             FinOps Platform
           </Typography>
+          <Box sx={{ flexGrow: 1 }} />
+          <NotificationBell />
         </Toolbar>
       </AppBar>
 
@@ -296,80 +240,6 @@ export default function Layout() {
           minHeight: "100vh",
         }}
       >
-        {/* Global Running Tasks Banner — visible on all pages */}
-        {runningTasks.length > 0 && (
-          <Paper sx={{ p: 1.5, mb: 2, borderLeft: 4, borderColor: "info.main", bgcolor: "#f0f7ff" }}>
-            <Box
-              sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
-              onClick={() => setTasksExpanded(!tasksExpanded)}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                {tasksExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
-                <Typography variant="body2" fontWeight={600}>
-                  Processos ativos ({runningTasks.length})
-                </Typography>
-                <Chip label={runningTasks.some(t => t.status === "RUNNING") ? "RUNNING" : "QUEUED"} size="small" color="info" />
-              </Box>
-            </Box>
-
-            <Collapse in={tasksExpanded}>
-              <Box sx={{ mt: 1, display: "flex", flexDirection: "column", gap: 1 }}>
-                {runningTasks.map((t) => {
-                  const isForecast = t.type === "forecast" || t.task_type === "forecast";
-                  const isSharedCost = t.type === "shared_cost" || t.task_type === "shared_cost";
-                  const isReprocess = !isForecast && !isSharedCost && (t.type === "reprocess" || (!t.connection_id && t.destination_table_id));
-                  const pct = t.total_blobs > 0 ? (t.processed_blobs / t.total_blobs) * 100 : 0;
-                  const cancelFn = isReprocess ? doCancelReprocess : doCancelTask;
-                  return (
-                    <Box key={t.id} sx={{ p: 1, bgcolor: "#fff", borderRadius: 1, border: "1px solid #e0e0e0" }}>
-                      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <Box>
-                          <Typography variant="caption" fontWeight={600}>
-                            {isSharedCost ? "Custo compartilhado" : isForecast ? "Forecast" : isReprocess ? `Reprocessar: ${t.table || "?"}` : getConnName(t.connection_id!)}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                            {isSharedCost
-                              ? `${t.processed_blobs}/${t.total_blobs || "?"} configs · ${(t.rows_destination || 0).toLocaleString()} projetos`
-                              : isForecast
-                              ? `${(t.rows_destination || 0).toLocaleString()} linhas escritas`
-                              : isReprocess
-                              ? `${t.processed_blobs}/${t.total_blobs || "?"} lotes · ${(t.rows_destination || 0).toLocaleString()} linhas`
-                              : `${t.processed_blobs}/${t.total_blobs || "?"} blobs · ${(t.rows_raw || 0).toLocaleString()} raw / ${(t.rows_normalized || 0).toLocaleString()} norm`
-                            }
-                          </Typography>
-                          {t.phase && (
-                            <Typography variant="caption" color="info.main" sx={{ display: "block" }}>
-                              Fase: {t.phase}
-                            </Typography>
-                          )}
-                        </Box>
-                        <Button
-                          size="small" variant="outlined" color="error"
-                          startIcon={<Cancel />}
-                          onClick={(e) => cancelFn(t.id, e)}
-                          sx={{ fontSize: "0.7rem", py: 0.25, px: 1 }}
-                        >
-                          Cancelar
-                        </Button>
-                      </Box>
-                      <LinearProgress
-                        variant={t.total_blobs ? "determinate" : "indeterminate"}
-                        value={pct}
-                        sx={{ height: 4, borderRadius: 2, mt: 0.5 }}
-                      />
-                      {t.current_blob && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25 }}>
-                          {t.current_blob}
-                        </Typography>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Box>
-            </Collapse>
-          </Paper>
-        )}
-
         <Outlet />
       </Box>
     </Box>

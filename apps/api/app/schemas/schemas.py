@@ -182,33 +182,6 @@ class SharedCostOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ---- Project ----
-
-class ProjectCreate(BaseModel):
-    department_id: int
-    projeto_name: str
-    cloud: str | None = None
-    subscription_rg: str | None = None
-    active: bool = True
-
-
-class ProjectUpdate(BaseModel):
-    department_id: int | None = None
-    projeto_name: str | None = None
-    cloud: str | None = None
-    subscription_rg: str | None = None
-    active: bool | None = None
-
-
-class ProjectOut(BaseModel):
-    id: int
-    department_id: int
-    projeto_name: str
-    cloud: str | None
-    subscription_rg: str | None
-    active: bool
-    created_at: datetime
-    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -293,10 +266,9 @@ class ClassificationRuleCreate(BaseModel):
     connection_id: int | None = None
     destination_table_id: int | None = None
     # A classification is an allocation to an organizational object.  Rules
-    # without a department can populate a free-text project but cannot provide
-    # a reliable hierarchy in Gold, so they are not a valid new rule.
+    # without a department cannot provide a reliable hierarchy in Gold, so
+    # they are not a valid new rule.
     department_id: int
-    project_id: int | None = None
     name: str
     source_field: str
     pattern: str
@@ -318,7 +290,6 @@ class ClassificationRuleUpdate(BaseModel):
     target_field: str | None = None
     conditions: list[dict[str, Any]] | None = None
     department_id: int | None = None
-    project_id: int | None = None
     destination_table_id: int | None = None
     priority: int | None = None
     cloud_scope: str | None = None
@@ -330,7 +301,6 @@ class ClassificationRuleOut(BaseModel):
     connection_id: int | None = None
     destination_table_id: int | None = None
     department_id: int | None = None
-    project_id: int | None = None
     name: str
     source_field: str
     pattern: str
@@ -351,14 +321,12 @@ class ClassificationRuleOut(BaseModel):
 
 class CsvImportRequest(BaseModel):
     diretorias_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/diretorias_download.csv"
-    projetos_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/projetos_download.csv"
     business_rules_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/businessRules_download.csv"
     cloud_root_map: dict[str, int] | None = None
 
 
 class CsvImportResult(BaseModel):
     departments_created: int
-    projects_created: int
     classification_rules_created: int
     errors: list[str] = []
 

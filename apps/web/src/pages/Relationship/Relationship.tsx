@@ -27,7 +27,12 @@ interface MappingState {
 }
 
 function describeTransform(
-  mapping: Pick<SourceDestinationMapping, "source_column" | "destination_column" | "transform_type" | "transform_config">,
+  mapping: {
+    source_column: string;
+    destination_column: string;
+    transform_type?: string;
+    transform_config?: Record<string, unknown> | null;
+  },
 ): string {
   const cfg = mapping.transform_config || {};
   const type = (mapping.transform_type || "RENAME").toUpperCase();
@@ -189,7 +194,7 @@ function groupSourceColumns(cols: ColumnInfo[]) {
   return { flatCols, jsonGroups };
 }
 
-export default function Relationship() {
+export default function Relationship({ embedded }: { embedded?: boolean } = {}) {
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [destTables, setDestTables] = useState<DestinationTable[]>([]);
   const [selectedConnId, setSelectedConnId] = useState<number | "">("");
@@ -213,7 +218,7 @@ export default function Relationship() {
   const [collapsedJsonGroups, setCollapsedJsonGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    getConnections().then(setConnections).catch(() => {});
+    getConnections(true).then(setConnections).catch(() => {});
     getDestinationTables(true).then(setDestTables).catch(() => {});
     loadAllMappings();
   }, []);

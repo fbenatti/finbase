@@ -215,36 +215,46 @@ export default function Analysis() {
   }, [destData, destPage]);
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-        <Typography variant="h4">Análise — Data Lakehouse</Typography>
-        <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={refreshLakehouse}>
-          Atualizar
-        </Button>
-      </Box>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Explore os dados importados, classificados e aplicados com regras de negócio
-      </Typography>
-
-      {/* Health status */}
-      <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
-        {Object.entries(health).map(([k, v]) => (
-          <Chip key={k} label={`${k}: ${v}`} size="small" color={v === "ok" ? "success" : "warning"} variant="outlined" />
-        ))}
-      </Box>
-
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-
-      {/* ── Main tabs ── */}
-      <Paper sx={{ mb: 2 }}>
-        <Tabs value={tab} onChange={(_, v) => { setTab(v); setResult(null); setSrcData(null); setDestData(null); setError(""); }}>
-          <Tab label="Tabela Destino" value="destino" icon={<AttachMoney />} iconPosition="start" />
-          <Tab label="Fontes de Origem" value="fontes" icon={<Storage />} iconPosition="start" />
-          <Tab label="Iceberg / Trino" value="iceberg" icon={<Terminal />} iconPosition="start" />
-          <Tab label="Pivot" value="pivot" icon={<BarChart />} iconPosition="start" />
-          <Tab label="Busca na Fonte" value="busca" icon={<SearchIcon />} iconPosition="start" />
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      {/* Faixa de contexto branca */}
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
+          <Box>
+            <Typography variant="h4">Análise — Data Lakehouse</Typography>
+            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+              Explore os dados importados, classificados e aplicados com regras de negócio.
+            </Typography>
+          </Box>
+          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={refreshLakehouse} sx={{ flexShrink: 0 }}>
+            Atualizar
+          </Button>
+        </Box>
+        <Tabs value={tab} onChange={(_, v) => { setTab(v); setResult(null); setSrcData(null); setDestData(null); setError(""); }} sx={{ mb: 0, minHeight: 42 }}>
+          <Tab label="Tabela Destino" value="destino" icon={<AttachMoney />} iconPosition="start" sx={{ minHeight: 42 }} />
+          <Tab label="Fontes de Origem" value="fontes" icon={<Storage />} iconPosition="start" sx={{ minHeight: 42 }} />
+          <Tab label="Iceberg / Trino" value="iceberg" icon={<Terminal />} iconPosition="start" sx={{ minHeight: 42 }} />
+          <Tab label="Pivot" value="pivot" icon={<BarChart />} iconPosition="start" sx={{ minHeight: 42 }} />
+          <Tab label="Busca na Fonte" value="busca" icon={<SearchIcon />} iconPosition="start" sx={{ minHeight: 42 }} />
         </Tabs>
-      </Paper>
+      </Box>
+
+      {/* Área de trabalho com campos simples de 40px */}
+      <Box sx={{
+        p: 3,
+        "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
+        "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
+      }}>
+        {/* Health status */}
+        <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+          {Object.entries(health).map(([k, v]) => (
+            <Chip key={k} label={k + ": " + v} size="small" color={v === "ok" ? "success" : "warning"} variant="outlined" />
+          ))}
+        </Box>
+
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+
+      <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+
 
       {/* ================================================================ */}
       {/* TAB: DESTINO (classified data)                                    */}
@@ -354,20 +364,19 @@ export default function Analysis() {
           {!selectedSrcId && !loading && (
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 2, mb: 3 }}>
               {sources.filter(s => s.row_count > 0).map((s) => (
-                <Card
+                <Paper
                   key={s.id}
-                  sx={{ cursor: "pointer", border: "2px solid transparent", "&:hover": { borderColor: "primary.main" } }}
+                  elevation={0}
+                  sx={{ p: 2, cursor: "pointer", borderRadius: 2, bgcolor: "background.paper", border: "2px solid", borderColor: "divider", "&:hover": { borderColor: "primary.main" } }}
                   onClick={() => handleSrcChange(s.id)}
                 >
-                  <CardContent>
-                    <Typography variant="caption" color="text.secondary">{s.code}</Typography>
-                    <Typography variant="body1" sx={{ fontWeight: 600 }}>{s.name}</Typography>
-                    <Typography variant="h5" sx={{ mt: 1, fontWeight: 700, color: "primary.main" }}>
-                      {s.row_count.toLocaleString()}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">linhas ingeridas</Typography>
-                  </CardContent>
-                </Card>
+                  <Typography variant="caption" color="text.secondary">{s.code}</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 600 }}>{s.name}</Typography>
+                  <Typography variant="h5" sx={{ mt: 1, fontWeight: 700, color: "primary.main" }}>
+                    {s.row_count.toLocaleString()}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">linhas ingeridas</Typography>
+                </Paper>
               ))}
             </Box>
           )}
@@ -442,24 +451,22 @@ export default function Analysis() {
             ))}
           </Box>
 
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
-                {(PREBUILT[layer] || []).map((q) => (
-                  <Button key={q.label} size="small" variant="outlined" onClick={() => setPrebuilt(q.sql)}>{q.label}</Button>
-                ))}
-              </Box>
-              <Box sx={{ display: "flex", gap: 1 }}>
-                <TextField fullWidth multiline minRows={2} maxRows={6} size="small"
-                  placeholder={`SELECT * FROM iceberg.${layer}.${(tables[layer] || [])[0] || "..."} LIMIT 10`}
-                  value={sql} onChange={(e) => setSql(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && e.metaKey && executeSql()}
-                  sx={{ fontFamily: "monospace", "& textarea": { fontSize: "0.85rem" } }} />
-                <Button variant="contained" startIcon={<PlayArrow />} onClick={() => executeSql()}
-                  disabled={loading || !sql.trim()} sx={{ minWidth: 100 }}>Run</Button>
-              </Box>
-            </CardContent>
-          </Card>
+          <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+            <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
+              {(PREBUILT[layer] || []).map((q) => (
+                <Button key={q.label} size="small" variant="outlined" onClick={() => setPrebuilt(q.sql)}>{q.label}</Button>
+              ))}
+            </Box>
+            <Box sx={{ display: "flex", gap: 1 }}>
+              <TextField fullWidth multiline minRows={2} maxRows={6} size="small"
+                placeholder={"SELECT * FROM iceberg." + layer + "." + ((tables[layer] || [])[0] || "...") + " LIMIT 10"}
+                value={sql} onChange={(e) => setSql(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && e.metaKey && executeSql()}
+                sx={{ fontFamily: "monospace", "& textarea": { fontSize: "0.85rem" } }} />
+              <Button variant="contained" startIcon={<PlayArrow />} onClick={() => executeSql()}
+                disabled={loading || !sql.trim()} sx={{ minWidth: 100 }}>Run</Button>
+            </Box>
+          </Paper>
 
           {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
@@ -533,6 +540,8 @@ export default function Analysis() {
           ? <SourceSearch destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS")?.id} />
           : <EmptyState message="Nenhuma tabela Gold ativa disponível para busca." />
       )}
+      </Paper>
+      </Box>
     </Box>
   );
 }

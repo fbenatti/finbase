@@ -12,7 +12,6 @@ import {
 } from "@mui/material";
 import {
   Cable,
-  CloudUpload,
   Delete,
   Edit,
   FilterAlt,
@@ -34,7 +33,6 @@ type Props = {
   testingId: number | null;
   testMessages: Record<number, ConnectionTestMessage>;
   onEdit: (connection: SourceConnection) => void;
-  onUpload: (connection: SourceConnection) => void;
   onTest: (connection: SourceConnection) => void;
   onDelete: (connection: SourceConnection) => void;
   onQuery: (query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ConnectionGridFilter[] }) => void;
@@ -98,7 +96,6 @@ export default function ConnectionsDataGrid({
   testingId,
   testMessages,
   onEdit,
-  onUpload,
   onTest,
   onDelete,
   onQuery,
@@ -218,17 +215,11 @@ export default function ConnectionsDataGrid({
           <Tooltip title="Editar conexão">
             <IconButton size="small" aria-label={`Editar ${row.name}`} onClick={() => onEdit(row)}><Edit fontSize="small" /></IconButton>
           </Tooltip>
-          {row.connector_type === "manual_csv" ? (
-            <Tooltip title="Enviar CSV">
-              <IconButton size="small" color="primary" aria-label={`Enviar CSV para ${row.name}`} onClick={() => onUpload(row)}><CloudUpload fontSize="small" /></IconButton>
-            </Tooltip>
-          ) : (
-            <Tooltip title="Testar conexão">
-              <span>
-                <IconButton size="small" disabled={testingId === row.id} aria-label={`Testar ${row.name}`} onClick={() => onTest(row)}><Cable fontSize="small" /></IconButton>
-              </span>
-            </Tooltip>
-          )}
+          <Tooltip title="Testar conexão">
+            <span>
+              <IconButton size="small" disabled={testingId === row.id} aria-label={`Testar ${row.name}`} onClick={() => onTest(row)}><Cable fontSize="small" /></IconButton>
+            </span>
+          </Tooltip>
           <Tooltip title="Excluir conexão">
             <IconButton size="small" color="error" aria-label={`Excluir ${row.name}`} onClick={() => onDelete(row)}><Delete fontSize="small" /></IconButton>
           </Tooltip>
