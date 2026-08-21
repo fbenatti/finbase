@@ -3,11 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import Destinations from "../Destinations/Destinations";
 import CloneRules from "../CloneRules/CloneRules";
 import Relationship from "../Relationship/Relationship";
+import AICostOrigin from "../AICostOrigin/AICostOrigin";
 
 const TABS = [
   { id: "destinations", label: "Tabelas de destino" },
   { id: "clone-rules", label: "Regras de clonagem" },
   { id: "relationship", label: "Relacionamentos" },
+  { id: "ai-cost-relationship", label: "Relacionamento Origem de Custo IA" },
 ] as const;
 
 export default function Tables() {
@@ -65,6 +67,7 @@ export default function Tables() {
           {activeTab === "destinations" && <Destinations embedded />}
           {activeTab === "clone-rules" && <CloneRules embedded />}
           {activeTab === "relationship" && <Relationship embedded />}
+          {activeTab === "ai-cost-relationship" && <AICostOrigin embedded />}
         </Paper>
       </Box>
     </Box>

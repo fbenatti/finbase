@@ -133,6 +133,17 @@ def _build_connections():
         "blob_prefixes": ["manual"],
     })
 
+    # Manual AI license cost — unit-cost entries materialized into Bronze/FOCUS
+    conns.append({
+        "code": "manual_ai_cost",
+        "name": "Custo manual de IA",
+        "connector_type": "manual_ai_cost",
+        "cloud_name": None,
+        "cloud_scope": None,
+        "config_json": {},
+        "blob_prefixes": ["manual_ai_cost"],
+    })
+
     return conns
 
 

@@ -135,6 +135,18 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.claude_token_extractor import ClaudeTokenExtractor
         extractor = ClaudeTokenExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "gemini_license":
+        from app.services.gemini_license_extractor import GeminiLicenseExtractor
+        extractor = GeminiLicenseExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "gemini_token":
+        from app.services.gemini_token_extractor import GeminiTokenExtractor
+        extractor = GeminiTokenExtractor(conn)
+        return await extractor.scan(db)
+    if conn.connector_type == "gemini_notebooklm":
+        from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
+        extractor = GeminiNotebookLMExtractor(conn)
+        return await extractor.scan(db)
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
@@ -220,6 +232,9 @@ async def _purge_gold_if_period_empty(
         )
     if conn.connector_type == "manual_csv":
         conn.config_json = _drop_manual_period_meta(conn.config_json, billing_period)
+    if conn.connector_type == "manual_ai_cost":
+        from app.services.manual_ai_cost_extractor import drop_manual_period_meta
+        conn.config_json = drop_manual_period_meta(conn.config_json, billing_period)
 
 
 @router.delete("/blobs/{blob_id}", status_code=204)
@@ -366,7 +381,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"):
+    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -609,6 +624,13 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 
+    if conn.connector_type == "notebooklm_token":
+        try:
+            from app.services.notebooklm_token_extractor import NotebookLMTokenExtractor
+            return NotebookLMTokenExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
     if conn.connector_type == "claude_license":
         try:
             from app.services.claude_license_extractor import ClaudeLicenseExtractor
@@ -622,6 +644,33 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
             return ClaudeTokenExtractor(conn).test_connection()
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "gemini_license":
+        try:
+            from app.services.gemini_license_extractor import GeminiLicenseExtractor
+            return GeminiLicenseExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "gemini_token":
+        try:
+            from app.services.gemini_token_extractor import GeminiTokenExtractor
+            return GeminiTokenExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "gemini_notebooklm":
+        try:
+            from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
+            return GeminiNotebookLMExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "manual_ai_cost":
+        return {
+            "status": "OK",
+            "message": "Conexão de custo manual de IA — lançamentos via POST /ai-cost-origin/manual-entry",
+        }
 
     return {
         "status": "NOT_IMPLEMENTED",
@@ -1018,8 +1067,13 @@ def _reprocess_destination_sync(
                 row.total_blobs = status.get("total_blobs", row.total_blobs)
                 row.processed_blobs = status.get("processed_blobs", row.processed_blobs)
                 row.rows_destination = status.get("rows_destination", row.rows_destination)
-                row.current_blob = status.get("current_blob", row.current_blob)
-                row.phase = status.get("current_blob", row.phase)
+                current = status.get("current_blob", row.current_blob)
+                if isinstance(current, str):
+                    row.current_blob = current[:500]
+                    row.phase = current[:200]
+                else:
+                    row.current_blob = current
+                    row.phase = current
                 previous = dict(row.result_json or {})
                 row.result_json = {
                     **previous,
@@ -1262,6 +1316,20 @@ def _reprocess_destination_sync(
                 prepared["is_synthetic"] = (
                     prepared["is_synthetic"].map(lambda v: True if v is True or str(v).strip().lower() in {"true", "1"} else False)
                 ).astype(bool)
+            bool_cols = {
+                name for name, dtype in dest_col_types.items()
+                if str(dtype or "").upper() in {"BOOLEAN", "BOOL"}
+            }
+            def _as_bool(value):
+                if value is None or (isinstance(value, float) and value != value):
+                    return False
+                if isinstance(value, bool):
+                    return value
+                text = str(value).strip().lower()
+                return text in {"true", "1", "yes", "sim"}
+            for col in bool_cols:
+                if col in prepared.columns:
+                    prepared[col] = prepared[col].map(_as_bool).astype(bool)
             # Garante colunas BIGINT como Int64 nullable (nunca float64/double).
             # Sem isso, Pandas promove int+None para float64, quebrando o schema
             # Iceberg com o erro "Cannot change column type: long -> double".
@@ -1574,7 +1642,14 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         if (connection_id, period) in available
     ]
     if not ordered_pairs:
-        raise HTTPException(status_code=422, detail="Nenhum blob Bronze encontrado para as fontes e meses selecionados")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Nenhum blob Bronze encontrado para as fontes e meses selecionados. "
+                "Importe a origem primeiro (Extração). Se a extração falhou, o Bronze "
+                "fica vazio e o reprocesso não tem meses para publicar."
+            ),
+        )
 
     queue_group = str(uuid4())
     task_ids: list[int] = []

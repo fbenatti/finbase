@@ -44,6 +44,16 @@ const connectorLabels: Record<string, string> = {
   oci: "Oracle Cloud (OCI)",
   mongodb_atlas: "MongoDB Atlas",
   manual_csv: "Upload manual de CSV",
+  github_billing: "GitHub Billing (Copilot)",
+  github_license: "GitHub Licenças (Copilot)",
+  github_token: "GitHub Tokens (Copilot)",
+  notebooklm_license: "NotebookLM Licenças",
+  notebooklm_token: "NotebookLM Tokens",
+  claude_license: "Claude Licenças",
+  claude_token: "Claude Tokens",
+  gemini_license: "Gemini Licenças",
+  gemini_token: "Gemini Tokens",
+  gemini_notebooklm: "Gemini NotebookLM",
 };
 
 const providerLabels: Record<string, string> = {
@@ -53,6 +63,11 @@ const providerLabels: Record<string, string> = {
   aws: "AWS",
   oci: "Oracle Cloud (OCI)",
   atlas: "MongoDB Atlas",
+  mongodb: "MongoDB Atlas",
+  github: "GitHub",
+  notebooklm: "NotebookLM",
+  gemini: "Gemini",
+  claude: "Claude",
 };
 
 export function getProviderLabel(scope: string | null): string {
@@ -77,6 +92,21 @@ function getConnectionSummary(connection: SourceConnection): string {
       return [config.group_id, config.contract_type].filter(Boolean).join(" · ") || "Grupo e contrato não informados";
     case "manual_csv":
       return "Arquivo CSV enviado manualmente";
+    case "github_billing":
+      return [config.enterprise_slug, "Billing"].filter(Boolean).join(" · ") || "Enterprise não informada";
+    case "github_license":
+      return [config.enterprise_slug, "Licenças (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não informada";
+    case "github_token":
+      return [config.enterprise_slug, "Tokens (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não informada";
+    case "notebooklm_license":
+    case "notebooklm_token":
+    case "gemini_license":
+    case "gemini_token":
+    case "gemini_notebooklm":
+      return [config.project_id, config.project_number].filter(Boolean).join(" · ") || "Project ID não informado";
+    case "claude_license":
+    case "claude_token":
+      return [config.org_id, config.org_name].filter(Boolean).join(" · ") || "Org não informada";
     default:
       return connection.cloud_name || "Configuração disponível ao editar";
   }

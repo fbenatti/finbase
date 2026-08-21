@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, ai_cost_origin
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
         from app.models.planning import FinancialType, PlanningVersion, PlanningEntry  # noqa: F401
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
+        from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
@@ -61,6 +62,44 @@ async def lifespan(app: FastAPI):
               created_at TIMESTAMPTZ DEFAULT now(),
               UNIQUE (config_id, target_department_id)
             )""",
+            """CREATE TABLE IF NOT EXISTS ai_cost_link (
+              id SERIAL PRIMARY KEY,
+              name VARCHAR(200) NOT NULL,
+              provider VARCHAR(100) NOT NULL,
+              product_name VARCHAR(200) NOT NULL,
+              license_sku VARCHAR(200),
+              valid_from VARCHAR(6),
+              valid_until VARCHAR(6),
+              active BOOLEAN NOT NULL DEFAULT TRUE,
+              distribution_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+              distribution_basis VARCHAR(30),
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            """CREATE TABLE IF NOT EXISTS ai_cost_link_source (
+              id SERIAL PRIMARY KEY,
+              link_id INTEGER NOT NULL REFERENCES ai_cost_link(id) ON DELETE CASCADE,
+              connection_id INTEGER REFERENCES source_connection(id) ON DELETE SET NULL,
+              filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+              value_column VARCHAR(50) NOT NULL DEFAULT 'BilledCost',
+              percent DOUBLE PRECISION NOT NULL DEFAULT 100.0,
+              created_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            """CREATE TABLE IF NOT EXISTS ai_cost_allocation (
+              id SERIAL PRIMARY KEY,
+              link_id INTEGER NOT NULL REFERENCES ai_cost_link(id) ON DELETE CASCADE,
+              billing_period VARCHAR(6) NOT NULL,
+              user_email VARCHAR(320),
+              provider VARCHAR(100) NOT NULL,
+              product_name VARCHAR(200) NOT NULL,
+              allocated_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+              allocation_basis VARCHAR(30),
+              source_refs JSONB,
+              created_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_provider ON ai_cost_link (provider)",
+            "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_source_link ON ai_cost_link_source (link_id)",
+            "CREATE INDEX IF NOT EXISTS ix_ai_cost_allocation_link_period ON ai_cost_allocation (link_id, billing_period)",
         ):
             await conn.execute(text(statement))
         await conn.execute(text("""
@@ -181,6 +220,7 @@ app.include_router(etl.router)
 app.include_router(rules.router)
 app.include_router(periods.router)
 app.include_router(analysis.router)
+app.include_router(ai_dashboards.router)
 app.include_router(destinations.router)
 app.include_router(schema.router)
 app.include_router(forecast.router)
@@ -188,6 +228,7 @@ app.include_router(clone_rules.router)
 app.include_router(planning.router)
 app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
+app.include_router(ai_cost_origin.router)
 
 
 @app.get("/health")

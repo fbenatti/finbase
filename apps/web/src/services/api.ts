@@ -5,7 +5,7 @@ const api = axios.create({
   timeout: 120000,
 });
 
-const CANCELLABLE_ANALYSIS = /^\/analysis\/(expected-view|pivot|query)/;
+const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/)/;
 const pendingAnalysis = new Set<AbortController>();
 type ExpectedViewInflight = { count: number; controller: AbortController; promise: Promise<unknown>; abortTimer?: number };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
@@ -215,6 +215,7 @@ export async function getConnectionsGrid(params: {
   offset?: number;
   search?: string;
   provider?: string;
+  category?: "provedor" | "ferramenta" | "marketplace";
   sort_field?: string;
   sort_direction?: "asc" | "desc";
   filter_field?: string;
@@ -1473,6 +1474,288 @@ export async function ingestCsvBatch(files: File[], connectionId: number): Promi
   formData.append("connection_id", String(connectionId));
   const { data } = await api.post("/csv-upload/ingest-batch", formData, {
     headers: { "Content-Type": undefined },
+  });
+  return data;
+}
+
+// ── AI Dashboards ──
+export type AIMetricKind = "tokens" | "cost";
+
+export interface AICostCoveragePct {
+  token: number;
+  license: number;
+  overall: number;
+}
+
+export interface AIDashboardFilter {
+  period?: string;
+  year?: number;
+  department_id?: number;
+  department_path?: string;
+  provider?: string;
+  metric?: AIMetricKind;
+}
+
+export interface AIOverviewResult {
+  metric: AIMetricKind;
+  cost_coverage_pct: AICostCoveragePct;
+  department_path?: string | null;
+  kpis: {
+    total_usage: number;
+    active_licenses: number;
+    utilization_rate: number;
+    usage_per_active_user: number;
+    estimated_waste: number;
+    mom_change_pct: number;
+  };
+  monthly_series: Array<{ period: string; provider: string; value: number }>;
+  license_utilization_by_dept: Array<{ department: string; licenses: number; active_users: number; utilization_rate: number }>;
+  adoption_funnel: { assigned: number; logged_in: number; used: number; healthy: number };
+  provider_bubble: Array<{ provider: string; licenses: number; usage_value: number }>;
+}
+
+export interface AILicensesResult {
+  metric: AIMetricKind;
+  cost_coverage_pct: AICostCoveragePct;
+  summary: {
+    total_licenses: number;
+    never_used: number;
+    inactive_30d?: number;
+    inactive_60d?: number;
+    inactive_90d?: number;
+    total_allocated_cost: number;
+    reclaim_potential: number;
+    [key: string]: number | undefined;
+  };
+  items: Array<{
+    user_email: string;
+    provider: string;
+    product_name: string;
+    license_sku: string;
+    activity_status: string;
+    days_since_activity: number;
+    allocated_cost: number;
+    last_activity_at?: string | null;
+  }>;
+}
+
+export interface AIConsumptionResult {
+  metric: AIMetricKind;
+  cost_coverage_pct: AICostCoveragePct;
+  percentiles: { p10: number; p95: number };
+  pareto: Array<{ provider: string; value: number }>;
+  cost_per_million_tokens: Array<{ provider: string; model_name: string; cost_per_million: number }>;
+  outliers: Array<{ user_email: string; provider: string; metric_value: number; usage_index: number; percent_rank: number }>;
+  zombies: Array<{ user_email: string; provider: string; metric_value: number; usage_index: number; percent_rank: number }>;
+  ranked_users: Array<{ user_email: string; provider: string; metric_value: number; total_tokens: number; usage_index: number; percent_rank: number }>;
+  heatmap: Array<{ usage_date: string; user_email: string; value: number }>;
+}
+
+export interface AIUserResult {
+  metric: AIMetricKind;
+  cost_coverage_pct: AICostCoveragePct;
+  user_email: string;
+  summary: {
+    total_usage: number;
+    total_cost: number;
+    total_tokens: number;
+    dept_percent_rank: number;
+    license_count: number;
+  };
+  licenses: Array<{
+    provider: string;
+    product_name: string;
+    license_status: string;
+    activity_status: string;
+    last_activity_at?: string | null;
+    days_since_activity: number;
+    allocated_cost: number;
+  }>;
+  consumption_by_model: Array<{
+    provider: string;
+    model_name: string;
+    usage_date: string;
+    total_tokens: number;
+    cost: number;
+    metric_value: number;
+  }>;
+}
+
+async function postAIDashboard<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const { data } = await api.post(`/ai-dashboards/${path}`, body, { signal, timeout: 120000 });
+  return data;
+}
+
+export async function getAIDashboardOverview(body: AIDashboardFilter, signal?: AbortSignal): Promise<AIOverviewResult> {
+  return postAIDashboard("overview", body, signal);
+}
+
+export async function getAIDashboardLicenses(
+  body: AIDashboardFilter & { limit?: number; offset?: number; reclaim_only?: boolean },
+  signal?: AbortSignal,
+): Promise<AILicensesResult> {
+  return postAIDashboard("licenses", body, signal);
+}
+
+export async function getAIDashboardConsumption(
+  body: AIDashboardFilter & { limit?: number; outliers_only?: boolean; zombie_only?: boolean },
+  signal?: AbortSignal,
+): Promise<AIConsumptionResult> {
+  return postAIDashboard("consumption", body, signal);
+}
+
+export async function getAIDashboardUser(
+  body: AIDashboardFilter & { user_email: string },
+  signal?: AbortSignal,
+): Promise<AIUserResult> {
+  return postAIDashboard("user", body, signal);
+}
+
+// ── AI Cost Origin ──
+export interface AICostLinkSource {
+  id?: number;
+  connection_id?: number | null;
+  filter_json: Array<{ column: string; operator: string; values: string[] }>;
+  value_column: string;
+  percent: number;
+}
+
+export interface AICostLink {
+  id?: number;
+  name: string;
+  provider: string;
+  product_name: string;
+  license_sku?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  active?: boolean;
+  distribution_enabled?: boolean;
+  distribution_basis?: string | null;
+  distribution_user_key?: "email" | "login" | null;
+  unit_cost?: number | null;  // R$/licença/mês — custo unitário manual (ex.: Claude)
+  sources?: AICostLinkSource[];
+}
+
+export interface AIUnlinkedLicense {
+  provider: string;
+  product_name: string;
+  license_sku?: string | null;
+  billing_period?: string;
+  license_count: number;
+  has_link: boolean;
+}
+
+function mapLinkSources(sources: AICostLinkSource[] = []) {
+  return sources.map(source => ({
+    connection_id: source.connection_id ?? null,
+    filter_json: source.filter_json,
+    value_column: source.value_column,
+    percent: source.percent,
+  }));
+}
+
+/** Normaliza o filter_json que vem do backend como {conditions:[...]} para um array plano. */
+function normalizeFilterJson(raw: unknown): Array<{ column: string; operator: string; values: string[] }> {
+  if (Array.isArray(raw)) return raw as Array<{ column: string; operator: string; values: string[] }>;
+  if (raw && typeof raw === "object" && "conditions" in raw) {
+    const conds = (raw as { conditions: unknown }).conditions;
+    if (Array.isArray(conds)) return conds as Array<{ column: string; operator: string; values: string[] }>;
+  }
+  return [{ column: "ServiceName", operator: "CONTAINS", values: [""] }];
+}
+
+/** Normaliza os sources recebidos do backend para o formato esperado pelo frontend. */
+function normalizeSources(sources: AICostLinkSource[] = []): AICostLinkSource[] {
+  return sources.map(s => ({
+    ...s,
+    filter_json: normalizeFilterJson(s.filter_json),
+  }));
+}
+
+export async function getAICostLinks(): Promise<AICostLink[]> {
+  const { data } = await api.get("/ai-cost-origin/links");
+  return (data as AICostLink[]).map(link => ({
+    ...link,
+    sources: normalizeSources(link.sources),
+  }));
+}
+
+export async function saveAICostLink(link: Partial<AICostLink>): Promise<AICostLink> {
+  const body = {
+    name: link.name,
+    provider: link.provider,
+    product_name: link.product_name,
+    license_sku: link.license_sku,
+    valid_from: link.valid_from,
+    valid_until: link.valid_until,
+    active: link.active ?? true,
+    distribution_enabled: link.distribution_enabled ?? false,
+    distribution_basis: link.distribution_basis,
+    distribution_user_key: link.distribution_user_key,
+    unit_cost: link.unit_cost ?? null,
+    sources: mapLinkSources(link.sources),
+  };
+  if (link.id) {
+    const { data } = await api.put(`/ai-cost-origin/links/${link.id}`, body);
+    return { ...data, sources: normalizeSources(data.sources) };
+  }
+  const { data } = await api.post("/ai-cost-origin/links", body);
+  return { ...data, sources: normalizeSources(data.sources) };
+}
+
+export async function getAIUnlinkedLicenses(period?: string): Promise<AIUnlinkedLicense[]> {
+  const { data } = await api.get("/ai-cost-origin/unlinked", { params: period ? { billing_period: period } : undefined });
+  return [...(data.unlinked || []), ...(data.linked || [])].map((item: AIUnlinkedLicense & { has_link?: boolean }) => ({
+    ...item,
+    has_link: item.has_link ?? false,
+  }));
+}
+
+export async function previewAICostFilter(body: {
+  period: string;
+  sources: AICostLinkSource[];
+}): Promise<{ matched_rows: number; total_value: number }> {
+  let matched_rows = 0;
+  let total_value = 0;
+  for (const source of body.sources) {
+    const filter_json = source.filter_json?.length ? { conditions: source.filter_json } : {};
+    const { data } = await api.post("/ai-cost-origin/preview", {
+      billing_period: body.period,
+      filter_json,
+      value_column: source.value_column,
+      connection_id: source.connection_id,
+      percent: source.percent,
+    });
+    matched_rows += Number(data.matched_rows || 0);
+    total_value += Number(data.total_value || 0);
+  }
+  return { matched_rows, total_value };
+}
+
+export async function previewAIManualEntry(body: {
+  provider: string;
+  product_name: string;
+  period: string;
+  unit_cost: number;
+  license_sku?: string;
+}): Promise<{ active_license_count: number; total_cost: number }> {
+  const { data } = await api.post("/ai-cost-origin/manual-entry/preview", {
+    provider: body.provider,
+    product_name: body.product_name,
+    billing_period: body.period,
+    unit_price: body.unit_cost,
+    license_sku: body.license_sku,
+  });
+  return {
+    active_license_count: data.active_license_count,
+    total_cost: data.total_cost,
+  };
+}
+
+export async function applyAICostAllocation(body: { link_id: number; period: string }) {
+  const { data } = await api.post("/ai-cost-origin/apply", {
+    billing_period: body.period,
+    link_ids: [body.link_id],
   });
   return data;
 }

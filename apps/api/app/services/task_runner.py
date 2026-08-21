@@ -35,6 +35,9 @@ from app.services.notebooklm_license_extractor import NotebookLMLicenseExtractor
 from app.services.notebooklm_token_extractor import NotebookLMTokenExtractor
 from app.services.claude_license_extractor import ClaudeLicenseExtractor
 from app.services.claude_token_extractor import ClaudeTokenExtractor
+from app.services.gemini_license_extractor import GeminiLicenseExtractor
+from app.services.gemini_token_extractor import GeminiTokenExtractor
+from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
 from app.services.expression_engine import (
     evaluate_expression,
     evaluate_conditional,
@@ -403,6 +406,49 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
             else:
                 result = pd.to_numeric(df[src], errors="coerce").fillna(0) * rate
                 df[target_column] = result.where(scope_mask, np.nan)
+    elif rule.rule_type == "DATE_DIFF":
+        src_name = by_lower.get(str(cfg.get("source_column", "")).lower(), cfg.get("source_column"))
+        if src_name and src_name in df.columns:
+            ref = pd.to_datetime(df[src_name], errors="coerce", utc=True)
+            now = pd.Timestamp.now(tz="UTC")
+            diff = (now - ref).dt.days
+            values = diff.where(ref.notna(), np.nan)
+            if target_column in df.columns:
+                unfilled = df[target_column].isna() | (df[target_column].astype(str).str.strip() == "")
+                unfilled = unfilled & scope_mask
+                df.loc[unfilled, target_column] = values[unfilled]
+            else:
+                df[target_column] = values.where(scope_mask, np.nan)
+    elif rule.rule_type == "AI_ACTIVITY_STATUS":
+        from app.services.expression_engine import _non_empty_mask
+
+        last_col = by_lower.get(str(cfg.get("last_activity_column", "LastActivityAt")).lower(), cfg.get("last_activity_column", "LastActivityAt"))
+        days_col = by_lower.get(str(cfg.get("days_column", "DaysSinceLastActivity")).lower(), cfg.get("days_column", "DaysSinceLastActivity"))
+        thresholds = cfg.get("thresholds") or {}
+        labels = cfg.get("values") or {}
+        active_days = int(thresholds.get("active_days", 30))
+        inactive_30 = int(thresholds.get("inactive_30_days", 60))
+        inactive_60 = int(thresholds.get("inactive_60_days", 90))
+        status = pd.Series(pd.NA, index=df.index, dtype="object")
+        if last_col and last_col in df.columns:
+            never = ~_non_empty_mask(df[last_col])
+            status = status.mask(never, labels.get("never", "NUNCA_USOU"))
+        if days_col and days_col in df.columns:
+            days = pd.to_numeric(df[days_col], errors="coerce")
+            pending = status.isna()
+            status = status.mask(pending & (days <= active_days), labels.get("active", "ATIVO"))
+            pending = status.isna()
+            status = status.mask(pending & (days <= inactive_30), labels.get("inactive_30", "INATIVO_30D"))
+            pending = status.isna()
+            status = status.mask(pending & (days <= inactive_60), labels.get("inactive_60", "INATIVO_60D"))
+            pending = status.isna()
+            status = status.mask(pending & days.notna(), labels.get("inactive_90", "INATIVO_90D"))
+        if target_column in df.columns:
+            unfilled = df[target_column].isna() | (df[target_column].astype(str).str.strip() == "")
+            unfilled = unfilled & scope_mask
+            df.loc[unfilled, target_column] = status[unfilled]
+        else:
+            df[target_column] = status.where(scope_mask, np.nan)
 
 
 def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[ClassificationRule], session: Session | None = None,
@@ -1155,7 +1201,7 @@ def _process_github_license_sync(
         connection_id=conn.id,
         blob_path=blob_path,
         blob_prefix=blob_prefix,
-        billing_period=None,
+        billing_period=blob_path,
         last_modified=last_modified or datetime.now(timezone.utc),
         etag="",
         content_length=0,
@@ -1168,7 +1214,7 @@ def _process_github_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, None, blob_path)
+            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[GithubLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1240,7 +1286,8 @@ def _process_github_token_sync(
         )
         _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
 
-        df, report_id = extractor._fetch_report_for_period(billing_period)
+        df = extractor._fetch_tokens_for_period(billing_period)
+        report_id = f"github_copilot_metrics_{billing_period}"
         total_size = len(df) * 150
         _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
     except Exception as e:
@@ -1270,7 +1317,7 @@ def _process_github_token_sync(
         blob_prefix=blob_prefix,
         billing_period=billing_period,
         last_modified=last_modified or datetime.now(timezone.utc),
-        etag=report_id or "",
+        etag=report_id,
         content_length=total_size,
         row_count=len(df),
         status="INGESTED",
@@ -1381,7 +1428,7 @@ def _process_notebooklm_license_sync(
         connection_id=conn.id,
         blob_path=blob_path,
         blob_prefix=blob_prefix,
-        billing_period=datetime.now(timezone.utc).strftime("%Y%m"),
+        billing_period=blob_path,
         last_modified=last_modified or datetime.now(timezone.utc),
         etag="",
         content_length=total_size,
@@ -1394,7 +1441,7 @@ def _process_notebooklm_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, None, blob_path)
+            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[NotebookLMLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1507,7 +1554,7 @@ def _process_notebooklm_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, None, blob_path)
+            iceberg.write_bronze(conn.code, df, period, blob_path)
         except Exception as exc:
             logger.error("[NotebookLMToken] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1578,7 +1625,15 @@ def _process_claude_license_sync(
         )
         _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
 
-        df = extractor._fetch_licenses()
+        usage_last_active: dict[str, str] = {}
+        try:
+            from app.services.claude_token_extractor import ClaudeTokenExtractor
+            token_ext = ClaudeTokenExtractor(conn)
+            usage_last_active = token_ext.usage_last_active_by_email(blob_path)
+        except Exception as exc:
+            logger.warning("[ClaudeLicense] Could not derive last_active from usage: %s", exc)
+
+        df = extractor._fetch_licenses(usage_last_active=usage_last_active)
         total_size = len(df) * 120
         _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
     except Exception as e:
@@ -1606,7 +1661,7 @@ def _process_claude_license_sync(
         connection_id=conn.id,
         blob_path=blob_path,
         blob_prefix=blob_prefix,
-        billing_period=datetime.now(timezone.utc).strftime("%Y%m"),
+        billing_period=blob_path,
         last_modified=last_modified or datetime.now(timezone.utc),
         etag="",
         content_length=total_size,
@@ -1619,7 +1674,7 @@ def _process_claude_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, None, blob_path)
+            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[ClaudeLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1732,7 +1787,7 @@ def _process_claude_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, None, blob_path)
+            iceberg.write_bronze(conn.code, df, period, blob_path)
         except Exception as exc:
             logger.error("[ClaudeToken] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1758,6 +1813,344 @@ def _process_claude_token_sync_worker(
     session = WorkerSync()
     try:
         result = _process_claude_token_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+
+# ── Gemini Licenças ────────────────────────────────────────────────────────────
+
+def _process_gemini_license_sync(
+    session: Session,
+    extractor: GeminiLicenseExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta licenças ativas do Google Gemini / NotebookLM Enterprise e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase="Download Gemini Licenças: coletando usuários licenciados...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_licenses()
+        total_size = len(df) * 120
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[GeminiLicense] Falha ao coletar dados: %s", e)
+        errors.append(f"Failed to process Gemini License: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando licenças Gemini ({len(df)} registros)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=blob_path,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+        except Exception as exc:
+            logger.error("[GeminiLicense] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze Gemini Licenças concluída com {len(df)} usuários")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_gemini_license_sync_worker(
+    task_id: int,
+    item,
+    extractor: GeminiLicenseExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_gemini_license_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── Gemini Tokens (Consumo de Tokens por Mês) ────────────────────────────────
+
+def _process_gemini_token_sync(
+    session: Session,
+    extractor: GeminiTokenExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Gera relatório de consumo de tokens Gemini para o período e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+    period = blob_path
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase=f"Download Gemini Tokens: gerando telemetria {period}...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_tokens_for_period(period)
+        total_size = len(df) * 150
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[GeminiToken] Falha ao coletar dados para período %s: %s", period, e)
+        errors.append(f"Failed to process Gemini Token for {period}: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando tokens Gemini {period} ({len(df)} linhas)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=period,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, period, blob_path)
+        except Exception as exc:
+            logger.error("[GeminiToken] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze Gemini Tokens {period} concluída com {len(df)} registros")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_gemini_token_sync_worker(
+    task_id: int,
+    item,
+    extractor: GeminiTokenExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_gemini_token_sync(
+            session, extractor, item.blob_path, item.blob_prefix,
+            item.last_modified, item.content_length, task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1, download_bytes=0, current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
+
+
+# ── Gemini NotebookLM (Usuários e Tokens) ─────────────────────────────────────
+
+def _process_gemini_notebooklm_sync(
+    session: Session,
+    extractor: GeminiNotebookLMExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta usuários e consumo de tokens do NotebookLM (Gemini) e grava em Bronze Iceberg."""
+    errors: list[str] = []
+    conn = extractor.connection
+
+    try:
+        _persist_download_progress(
+            task_id,
+            current_blob=blob_path,
+            current_blob_size=0,
+            download_bytes=0,
+            phase="Download Gemini NotebookLM: coletando usuários e tokens...",
+        )
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+
+        df = extractor._fetch_users_and_tokens()
+        total_size = len(df) * 120
+        _persist_download_blob(task_id, blob_path, "PARSING", total_size, total_size)
+    except Exception as e:
+        logger.error("[GeminiNotebookLM] Falha ao coletar dados: %s", e)
+        errors.append(f"Failed to process Gemini NotebookLM: {e}")
+        return 0, 0, 0, errors
+    finally:
+        _persist_download_blob(task_id, blob_path, "DOWNLOADED", 0, 0)
+        _persist_download_progress(task_id, download_bytes=0, current_blob_size=0)
+
+    _persist_download_progress(task_id, phase=f"Bronze: gravando usuários NotebookLM ({len(df)} registros)")
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    from datetime import datetime, timezone
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=blob_path,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=total_size,
+        row_count=len(df),
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
+        try:
+            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+        except Exception as exc:
+            logger.error("[GeminiNotebookLM] Bronze write failed: %s", exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    _persist_download_progress(task_id, phase=f"Carga Bronze Gemini NotebookLM concluída com {len(df)} registros")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", total_size, total_size)
+    return len(df), 0, 0, []
+
+
+def _process_gemini_notebooklm_sync_worker(
+    task_id: int,
+    item,
+    extractor: GeminiNotebookLMExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_gemini_notebooklm_sync(
             session, extractor, item.blob_path, item.blob_prefix,
             item.last_modified, item.content_length, task_id,
         )
@@ -2009,7 +2402,7 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"):
+        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -2053,6 +2446,22 @@ def _run_etl_sync(
             extractor = ClaudeTokenExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_claude_token_sync_worker
+        elif conn.connector_type == "github_billing":
+            extractor = GithubBillingExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_github_report_sync_worker
+        elif conn.connector_type == "gemini_license":
+            extractor = GeminiLicenseExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_gemini_license_sync_worker
+        elif conn.connector_type == "gemini_token":
+            extractor = GeminiTokenExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_gemini_token_sync_worker
+        elif conn.connector_type == "gemini_notebooklm":
+            extractor = GeminiNotebookLMExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_gemini_notebooklm_sync_worker
         else:
             extractor = GcpBigQueryExtractor(conn)
             scan_result = extractor._scan_sync(session)
@@ -2109,7 +2518,7 @@ def _run_etl_sync(
 
         # Para OCI, GCP BigQuery, MongoDB, GitHub, NotebookLM e Claude, usar 1 worker por vez para evitar
         # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
-        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token") else 2
+        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm") else 2
 
 
 

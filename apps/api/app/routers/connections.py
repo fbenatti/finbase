@@ -25,6 +25,16 @@ GRID_FIELDS = {
     "last_test_status": SourceConnection.last_test_status,
 }
 
+# Categorias da página de Conexões: provedores de nuvem, ferramentas (IA /
+# colaboração) e marketplace. Derivadas do connector_type — a UI filtra por elas.
+TOOL_CONNECTOR_TYPES = (
+    "github_billing", "github_license", "github_token",
+    "notebooklm_license", "notebooklm_token",
+    "claude_license", "claude_token",
+    "gemini_license", "gemini_token", "gemini_notebooklm",
+)
+MARKETPLACE_CONNECTOR_TYPES = ("mongodb_atlas",)
+
 GRID_FILTER_VALUES = {
     "provider": {
         "azure": "azure",
@@ -33,6 +43,10 @@ GRID_FILTER_VALUES = {
         "aws": "aws",
         "oracle cloud (oci)": "oci",
         "mongodb atlas": "atlas",
+        "github": "github",
+        "notebooklm": "notebooklm",
+        "gemini": "gemini",
+        "claude": "claude",
     },
     "connector_type": {
         "azure blob storage": "azure_blob",
@@ -40,6 +54,17 @@ GRID_FILTER_VALUES = {
         "oracle cloud (oci)": "oci",
         "mongodb atlas": "mongodb_atlas",
         "upload manual de csv": "manual_csv",
+        "github billing (copilot)": "github_billing",
+        "github licenças (copilot)": "github_license",
+        "github tokens (copilot)": "github_token",
+        "notebooklm licenças": "notebooklm_license",
+        "notebooklm tokens": "notebooklm_token",
+        "claude licenças": "claude_license",
+        "claude tokens": "claude_token",
+        "gemini licenças": "gemini_license",
+        "gemini tokens": "gemini_token",
+        "gemini notebooklm": "gemini_notebooklm",
+        "custo manual de ia": "manual_ai_cost",
     },
 }
 
@@ -68,6 +93,7 @@ async def list_connections_grid(
     offset: int = Query(0, ge=0),
     search: str | None = None,
     provider: str | None = None,
+    category: str | None = None,
     sort_field: str = "name",
     sort_direction: str = "asc",
     filter_field: str | None = None,
@@ -80,6 +106,12 @@ async def list_connections_grid(
     conditions = []
     if provider:
         conditions.append(SourceConnection.cloud_scope == provider)
+    if category == "provedor":
+        conditions.append(SourceConnection.connector_type.not_in(TOOL_CONNECTOR_TYPES + MARKETPLACE_CONNECTOR_TYPES))
+    elif category == "ferramenta":
+        conditions.append(SourceConnection.connector_type.in_(TOOL_CONNECTOR_TYPES))
+    elif category == "marketplace":
+        conditions.append(SourceConnection.connector_type.in_(MARKETPLACE_CONNECTOR_TYPES))
     if search:
         needle = f"%{search.strip()}%"
         conditions.append(or_(

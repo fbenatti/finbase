@@ -536,6 +536,16 @@ def delete_destination_slice(
     )
 
 
+def _bronze_slice_filters(blob_path: str | None, billing_period: str | None) -> list[Any]:
+    """Return slice filters to try, strict first then legacy blob-only fallback."""
+    if not blob_path and not billing_period:
+        return [None]
+    strict = _bronze_slice_filter(blob_path=blob_path, billing_period=billing_period)
+    if blob_path and billing_period:
+        return [strict, _bronze_slice_filter(blob_path=blob_path, billing_period=None)]
+    return [strict]
+
+
 def read_bronze(connection_code: str, blob_path: str | None = None,
                 billing_period: str | None = None,
                 max_rows: int | None = None) -> pd.DataFrame:
@@ -546,16 +556,18 @@ def read_bronze(connection_code: str, blob_path: str | None = None,
     deserialize millions of unrelated rows and appears to freeze the worker.
     """
     table_id = _bronze_table_id(connection_code)
-    table_name = f"{table_id[0]}.{table_id[1]}"
     table = _get_catalog().load_table(table_id)
-    scan_kwargs: dict[str, Any] = {}
-    if blob_path or billing_period:
-        scan_kwargs["row_filter"] = _bronze_slice_filter(
-            blob_path=blob_path, billing_period=billing_period,
-        )
-    if max_rows is not None and max_rows >= 0:
-        scan_kwargs["limit"] = max_rows
-    return table.scan(**scan_kwargs).to_pandas().reset_index(drop=True)
+    filters = _bronze_slice_filters(blob_path, billing_period)
+    for idx, row_filter in enumerate(filters):
+        scan_kwargs: dict[str, Any] = {}
+        if row_filter is not None:
+            scan_kwargs["row_filter"] = row_filter
+        if max_rows is not None and max_rows >= 0:
+            scan_kwargs["limit"] = max_rows
+        df = table.scan(**scan_kwargs).to_pandas().reset_index(drop=True)
+        if not df.empty or idx == len(filters) - 1:
+            return df
+    return pd.DataFrame()
 
 
 def read_bronze_batches(connection_code: str, blob_path: str | None = None,
@@ -564,33 +576,34 @@ def read_bronze_batches(connection_code: str, blob_path: str | None = None,
                         batch_size: int = 25_000):
     """Yield Bronze batches without materializing the complete blob in RAM."""
     table_id = _bronze_table_id(connection_code)
-    table_name = f"{table_id[0]}.{table_id[1]}"
     table = _get_catalog().load_table(table_id)
-    scan_kwargs: dict[str, Any] = {}
-    if blob_path or billing_period:
-        scan_kwargs["row_filter"] = _bronze_slice_filter(
-            blob_path=blob_path, billing_period=billing_period,
-        )
-    if max_rows is not None and max_rows >= 0:
-        scan_kwargs["limit"] = max_rows
-    scan = table.scan(**scan_kwargs)
-    reader = scan.to_arrow_batch_reader()
-    emitted = 0
-    for arrow_batch in reader:
-        offset = 0
-        while offset < arrow_batch.num_rows:
-            if max_rows is not None and max_rows >= 0:
-                remaining = max_rows - emitted
-                if remaining <= 0:
-                    return
-                take = min(batch_size, remaining)
-            else:
-                take = batch_size
-            piece = arrow_batch.slice(offset, min(take, arrow_batch.num_rows - offset))
-            if piece.num_rows:
-                yield piece.to_pandas().reset_index(drop=True)
-                emitted += piece.num_rows
-            offset += piece.num_rows
+    for row_filter in _bronze_slice_filters(blob_path, billing_period):
+        scan_kwargs: dict[str, Any] = {}
+        if row_filter is not None:
+            scan_kwargs["row_filter"] = row_filter
+        if max_rows is not None and max_rows >= 0:
+            scan_kwargs["limit"] = max_rows
+        reader = table.scan(**scan_kwargs).to_arrow_batch_reader()
+        emitted = 0
+        found = False
+        for arrow_batch in reader:
+            offset = 0
+            while offset < arrow_batch.num_rows:
+                if max_rows is not None and max_rows >= 0:
+                    remaining = max_rows - emitted
+                    if remaining <= 0:
+                        return
+                    take = min(batch_size, remaining)
+                else:
+                    take = batch_size
+                piece = arrow_batch.slice(offset, min(take, arrow_batch.num_rows - offset))
+                if piece.num_rows:
+                    found = True
+                    yield piece.to_pandas().reset_index(drop=True)
+                    emitted += piece.num_rows
+                offset += piece.num_rows
+        if found:
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -939,6 +952,45 @@ def cleanup_staged_table(temp_safe_name: str, namespace: str = "gold") -> None:
         logger.warning("Cleanup staged table failed: %s", e)
 
 
+def _iceberg_type_key(field_type: Any) -> str:
+    return type(field_type).__name__.replace("Type", "").lower()
+
+
+def _replace_incompatible_columns(target, staged) -> None:
+    """Drop Gold columns whose Iceberg type cannot evolve to the staged type.
+
+    GitHub-first publishes store unused BOOLEAN dest columns as string (all-null
+    object). A later Claude/NotebookLM slice writes real booleans and Iceberg
+    rejects ``string -> boolean``. Deleting the old field and adding it with the
+    staged type is safe: prior values were empty sentinels, not typed facts.
+    """
+    target_by_name = {field.name: field for field in target.schema().fields}
+    replacements: list[tuple[str, Any]] = []
+    for staged_field in staged.schema().fields:
+        existing = target_by_name.get(staged_field.name)
+        if existing is None:
+            continue
+        old_key = _iceberg_type_key(existing.field_type)
+        new_key = _iceberg_type_key(staged_field.field_type)
+        if old_key == new_key:
+            continue
+        allowed = {
+            ("string", "boolean"),
+            ("string", "long"),
+            ("string", "integer"),
+            ("string", "double"),
+            ("string", "timestamp"),
+        }
+        if (old_key, new_key) in allowed:
+            replacements.append((staged_field.name, staged_field.field_type))
+    for name, field_type in replacements:
+        logger.warning("Replacing Gold column %s type to match staged schema (%s)", name, field_type)
+        with target.update_schema() as schema_update:
+            schema_update.delete_column(name)
+        with target.update_schema() as schema_update:
+            schema_update.add_column(name, field_type)
+
+
 def publish_staged_partition(
     physical_name: str,
     temp_safe_name: str,
@@ -981,6 +1033,8 @@ def publish_staged_partition(
     # Gold table still has the prior schema.  Evolve the target by name before
     # appending Arrow batches; otherwise PyArrow rejects the new fields and the
     # atomic publication fails after all processing has completed.
+    _replace_incompatible_columns(target, staged)
+    target = cat.load_table(target_id)
     with target.update_schema() as schema_update:
         schema_update.union_by_name(staged.schema())
     target = cat.load_table(target_id)

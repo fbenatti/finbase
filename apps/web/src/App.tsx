@@ -18,6 +18,7 @@ import SharedCostHistory from "./pages/Reprocess/SharedCostHistory";
 import CloneRules from "./pages/CloneRules/CloneRules";
 import Tables from "./pages/Tables/Tables";
 import ExpectedView from "./pages/Dashboards/ExpectedView";
+import DashboardsIA from "./pages/Dashboards/DashboardsIA";
 import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
 function App() {
@@ -41,6 +42,8 @@ function App() {
         <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />
         <Route path="analysis" element={<Analysis />} />
         <Route path="expected-view" element={<ExpectedView />} />
+        <Route path="dashboards-ia" element={<DashboardsIA />} />
+        <Route path="ai-cost-origin" element={<Navigate to="/tables?tab=ai-cost-relationship" replace />} />
         <Route path="pipeline" element={<PipelineBuilder />} />
         <Route path="reprocess" element={<Reprocess />} />
         <Route path="forecast" element={<Forecast />} />

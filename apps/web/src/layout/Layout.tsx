@@ -35,6 +35,7 @@ import {
   AccountBalance as AccountBalanceIcon,
   Savings as SavingsIcon,
   CloudUpload as CloudUploadIcon,
+  SmartToy as SmartToyIcon,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { NotificationBell } from "../context/NotificationContext";
@@ -76,6 +77,7 @@ const menuGroups = [
       { path: "/pipeline", label: "Pipeline do dado", icon: <AccountTreeIcon /> },
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
       { path: "/expected-view", label: "Visão esperada", icon: <TimelineIcon /> },
+      { path: "/dashboards-ia", label: "Dashboards IA", icon: <SmartToyIcon /> },
     ],
   },
 ];

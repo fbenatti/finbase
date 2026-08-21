@@ -321,11 +321,15 @@ def main():
                                 succeeded = bool(result.get("success"))
                                 terminal_task.status = "COMPLETED" if succeeded else "FAILED"
                                 terminal_task.rows_destination = int(result.get("rows_written") or 0)
+                                error_text = str(result.get("error") or "Falha ao reprocessar")
                                 terminal_task.phase = (
                                     f"Concluido: {terminal_task.rows_destination:,} linhas"
-                                    if succeeded else str(result.get("error") or "Falha ao reprocessar")[:500]
-                                )
-                                terminal_task.current_blob = terminal_task.phase
+                                    if succeeded else error_text
+                                )[:200]
+                                terminal_task.current_blob = (
+                                    f"Concluido: {terminal_task.rows_destination:,} linhas"
+                                    if succeeded else error_text
+                                )[:500]
                                 existing_result = terminal_task.result_json if isinstance(terminal_task.result_json, dict) else {}
                                 terminal_task.result_json = {
                                     **existing_result,
@@ -353,7 +357,8 @@ def main():
                             t2 = s2.get(EtlTask, task_id)
                             if t2:
                                 t2.status = "FAILED"
-                                t2.phase = f"Erro: {e}"
+                                t2.phase = f"Erro: {e}"[:200]
+                                t2.current_blob = f"Erro: {e}"[:500]
                                 s2.commit()
                             try:
                                 from app.routers.etl import _append_reprocess_log
@@ -398,7 +403,8 @@ def main():
                             t2 = s2.get(EtlTask, task_id)
                             if t2:
                                 t2.status = "FAILED"
-                                t2.phase = f"Erro: {exc}"
+                                t2.phase = f"Erro: {exc}"[:200]
+                                t2.current_blob = f"Erro: {exc}"[:500]
                                 t2.finished_at = datetime.now(timezone.utc)
                                 s2.commit()
                         finally:
@@ -460,7 +466,8 @@ def main():
                             t2 = s2.get(EtlTask, task_id)
                             if t2:
                                 t2.status = "FAILED"
-                                t2.phase = f"Erro: {e}"
+                                t2.phase = f"Erro: {e}"[:200]
+                                t2.current_blob = f"Erro: {e}"[:500]
                                 s2.commit()
                         finally:
                             s2.close()

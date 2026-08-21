@@ -3,184 +3,329 @@ import io
 import logging
 import time
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 import pandas as pd
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
+from app.models.source_connection import SourceConnection
 from app.schemas.schemas import BlobScanItem, BlobScanResult
+from app.services.ai_extractor_base import (
+    GITHUB_API,
+    GitHubEnterpriseClient,
+    iter_monthly_periods,
+    period_range,
+)
 
 logger = logging.getLogger(__name__)
 
+CANONICAL_COLUMNS = (
+    "day",
+    "assignee_login",
+    "aggregation_level",
+    "model",
+    "total_suggestions_count",
+    "total_acceptances_count",
+    "total_lines_suggested",
+    "total_lines_accepted",
+    "total_chat_turns",
+    "total_chat_acceptances",
+    "total_active_users",
+    "editor",
+    "language",
+)
+
 
 class GithubTokenExtractor:
-    """
-    Extrator de consumo de tokens e métricas de uso (Copilot / Actions) do GitHub Enterprise.
-    Gera e coleta relatórios mensais de consumo através da API de billing reports.
-    """
+    """GitHub Copilot usage: Copilot Metrics API with billing-report CSV fallback."""
 
     def __init__(self, connection: SourceConnection):
         self.connection = connection
         self.config_json = connection.config_json or {}
         self.enterprise_slug = self.config_json.get("enterprise_slug", "")
-        self.pat_token = self.config_json.get("pat_token", "")
-        self.headers = {
+        self.pat_token = self.config_json.get("pat_token", "") or self.config_json.get("client_secret", "")
+        self.email_domain = self.config_json.get("email_domain", "telefonica.com.br")
+        self._headers = {
             "Authorization": f"Bearer {self.pat_token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        self.base_url = f"https://api.github.com/enterprises/{self.enterprise_slug}/settings/billing/reports"
+        self._billing_reports_url = (
+            f"{GITHUB_API}/enterprises/{self.enterprise_slug}/settings/billing/reports"
+        )
+
+    def _client(self) -> GitHubEnterpriseClient:
+        return GitHubEnterpriseClient(self.pat_token, self.enterprise_slug, self.email_domain)
 
     def test_connection(self) -> dict:
-        if not self.enterprise_slug or not self.pat_token:
-            return {
-                "status": "PENDING",
-                "message": "GitHub Token — credenciais não configuradas.",
-            }
         try:
-            with httpx.Client(timeout=15) as client:
-                resp_user = client.get("https://api.github.com/user", headers=self.headers)
-                if resp_user.status_code == 401:
-                    return {"status": "FAILED", "message": "GitHub retornou HTTP 401: Token inválido ou expirado (Bad credentials)."}
-
-                resp = client.get(self.base_url, headers=self.headers)
-                if resp.status_code in (200, 201, 202, 400, 422):
-                    return {
-                        "status": "OK",
-                        "message": f"GitHub Enterprise ({self.enterprise_slug}) — Conexão validada com sucesso!",
-                    }
-                if resp.status_code == 404:
-                    return {
-                        "status": "FAILED",
-                        "message": f"HTTP 404: A Enterprise '{self.enterprise_slug}' não foi encontrada ou o token não possui 'manage_billing:enterprise'.",
-                    }
-                return {
-                    "status": "FAILED",
-                    "message": f"GitHub retornou HTTP {resp.status_code}: {resp.text[:500]}",
-                }
-        except Exception as e:
-            logger.error("[GithubToken] Erro ao testar conexao: %s", e)
-            return {"status": "FAILED", "message": str(e)[:500]}
+            self._client().test()
+            return {"status": "OK", "message": f"GitHub Enterprise ({self.enterprise_slug}) — conexão validada"}
+        except Exception as exc:
+            return {"status": "ERROR", "message": str(exc)}
 
     def _scan_sync(self, db_session: Session) -> list[BlobScanItem]:
-        """
-        Lista os últimos 12 meses para permitir extração histórica e atual de consumo de tokens.
-        """
         items: list[BlobScanItem] = []
         now = datetime.now(timezone.utc)
-        
-        for i in range(12):
-            m = now.month - i
-            y = now.year
-            while m <= 0:
-                m += 12
-                y -= 1
-            period = f"{y}{m:02d}"
-            
+        for i, period in enumerate(iter_monthly_periods(12)):
             existing = db_session.execute(
                 select(IngestedBlob).where(
                     IngestedBlob.connection_id == self.connection.id,
-                    IngestedBlob.blob_path == period
+                    IngestedBlob.blob_path == period,
                 )
             ).scalar_one_or_none()
-            
-            if i == 0:
-                status = "CHANGED" if existing else "NEW"
-            else:
-                status = "UNCHANGED" if existing else "NEW"
-            
-            items.append(BlobScanItem(
-                blob_path=period,
-                blob_prefix="github_token",
-                last_modified=existing.last_modified if existing else now,
-                content_length=None,
-                status=status,
-                billing_period=period,
-            ))
-
+            status = "CHANGED" if (existing and i == 0) else ("UNCHANGED" if existing else "NEW")
+            items.append(
+                BlobScanItem(
+                    blob_path=period,
+                    blob_prefix="github_token",
+                    last_modified=existing.last_modified if existing else now,
+                    content_length=None,
+                    status=status,
+                    billing_period=period,
+                )
+            )
         return items
 
     async def scan(self, db: AsyncSession) -> BlobScanResult:
-        items = []
+        periods = iter_monthly_periods(12)
+        result = await db.execute(
+            select(IngestedBlob).where(
+                IngestedBlob.connection_id == self.connection.id,
+                IngestedBlob.blob_path.in_(periods),
+            )
+        )
+        existing_map = {row.blob_path: row for row in result.scalars().all()}
         now = datetime.now(timezone.utc)
-        
-        for i in range(12):
-            m = now.month - i
-            y = now.year
-            while m <= 0:
-                m += 12
-                y -= 1
-            period = f"{y}{m:02d}"
-            
-            existing = await db.execute(
-                select(IngestedBlob).where(
-                    IngestedBlob.connection_id == self.connection.id,
-                    IngestedBlob.blob_path == period
+        items: list[BlobScanItem] = []
+        for i, period in enumerate(periods):
+            blob_row = existing_map.get(period)
+            status = "CHANGED" if (blob_row and i == 0) else ("UNCHANGED" if blob_row else "NEW")
+            items.append(
+                BlobScanItem(
+                    blob_path=period,
+                    blob_prefix="github_token",
+                    last_modified=blob_row.last_modified if blob_row else now,
+                    content_length=None,
+                    status=status,
+                    billing_period=period,
                 )
             )
-            blob_row = existing.scalar_one_or_none()
-            
-            if i == 0:
-                status = "CHANGED" if blob_row else "NEW"
-            else:
-                status = "UNCHANGED" if blob_row else "NEW"
-            
-            items.append(BlobScanItem(
-                blob_path=period,
-                blob_prefix="github_token",
-                last_modified=blob_row.last_modified if blob_row else now,
-                content_length=None,
-                status=status,
-                billing_period=period,
-            ))
-            
-        new_count = sum(1 for it in items if it.status == "NEW")
-        changed_count = sum(1 for it in items if it.status == "CHANGED")
-        unchanged_count = sum(1 for it in items if it.status == "UNCHANGED")
         return BlobScanResult(
             connection_id=self.connection.id,
             total=len(items),
-            new=new_count,
-            changed=changed_count,
-            unchanged=unchanged_count,
+            new=sum(1 for it in items if it.status == "NEW"),
+            changed=sum(1 for it in items if it.status == "CHANGED"),
+            unchanged=sum(1 for it in items if it.status == "UNCHANGED"),
             items=items,
         )
 
-    def _fetch_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
-        """
-        Solicita ou reutiliza o relatório detalhado de consumo de tokens para o período.
-        Retorna (DataFrame, report_id).
-        """
+    @staticmethod
+    def _normalize_billing_csv(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
+        df = df.fillna("")
+
+        # Legacy detailed usage export (day/assignee_login/...) — keep as-is.
+        if "day" in df.columns or "assignee_login" in df.columns:
+            if "day" not in df.columns and "date" in df.columns:
+                df["day"] = df["date"]
+            if "assignee_login" not in df.columns and "username" in df.columns:
+                df["assignee_login"] = df["username"]
+            if "aggregation_level" not in df.columns:
+                df["aggregation_level"] = df["assignee_login"].apply(
+                    lambda login: "user" if str(login).strip() else "organization"
+                )
+            for col in CANONICAL_COLUMNS:
+                if col not in df.columns:
+                    df[col] = ""
+            return df[list(CANONICAL_COLUMNS)].fillna("")
+
+        # Current enterprise billing detailed export (date/username/sku/quantity/...).
+        records = []
+        for row in df.to_dict(orient="records"):
+            username = str(row.get("username") or "").strip()
+            unit_type = str(row.get("unit_type") or "").strip().lower()
+            quantity = row.get("quantity") or "0"
+            records.append(
+                {
+                    "day": str(row.get("date") or "")[:10],
+                    "assignee_login": username,
+                    "aggregation_level": "user" if username else "organization",
+                    "model": str(row.get("sku") or row.get("product") or ""),
+                    "total_suggestions_count": quantity if unit_type != "ai-credits" else "",
+                    "total_acceptances_count": str(row.get("net_amount") or ""),
+                    "total_lines_suggested": str(row.get("gross_amount") or ""),
+                    "total_lines_accepted": str(row.get("discount_amount") or ""),
+                    "total_chat_turns": quantity if unit_type == "ai-credits" else "",
+                    "total_chat_acceptances": "",
+                    "total_active_users": "1" if username else "",
+                    "editor": str(row.get("cost_center_name") or ""),
+                    "language": unit_type,
+                }
+            )
+        return pd.DataFrame(records).fillna("")
+
+    @staticmethod
+    def _metric(value: Any, default: Any = 0) -> Any:
+        if value is None or value == "":
+            return default
+        return value
+
+    @classmethod
+    def _canonical_from_usage_row(cls, row: dict) -> list[dict]:
+        """Map Copilot usage metrics JSON (2026 API) to bronze canonical columns."""
+        day = str(row.get("day") or row.get("day_partition") or "")[:10]
+        login = str(row.get("user_login") or "").strip()
+        level = "user" if login else "organization"
+        active_users = "1" if login else cls._metric(row.get("daily_active_users"), "")
+
+        breakdowns = (
+            row.get("totals_by_language_model")
+            or row.get("totals_by_language_feature")
+            or row.get("totals_by_model_feature")
+            or row.get("totals_by_ide")
+            or []
+        )
+        records: list[dict] = []
+        if breakdowns:
+            for item in breakdowns:
+                feature = str(item.get("feature") or "").lower()
+                chat_turns = ""
+                chat_acceptances = ""
+                if feature in {"chat", "copilot_app", "agent", "cli"}:
+                    chat_turns = cls._metric(
+                        item.get("user_initiated_interaction_count")
+                        or item.get("prompt_count")
+                        or item.get("request_count")
+                    )
+                    chat_acceptances = cls._metric(item.get("session_count"))
+                records.append(
+                    {
+                        "day": day,
+                        "assignee_login": login,
+                        "aggregation_level": level,
+                        "model": str(item.get("model") or ""),
+                        "total_suggestions_count": cls._metric(item.get("code_generation_activity_count")),
+                        "total_acceptances_count": cls._metric(item.get("code_acceptance_activity_count")),
+                        "total_lines_suggested": cls._metric(item.get("loc_suggested_to_add_sum")),
+                        "total_lines_accepted": cls._metric(item.get("loc_added_sum")),
+                        "total_chat_turns": chat_turns,
+                        "total_chat_acceptances": chat_acceptances,
+                        "total_active_users": active_users,
+                        "editor": str(item.get("ide") or item.get("editor") or ""),
+                        "language": str(item.get("language") or ""),
+                    }
+                )
+            return records
+
+        # Legacy aggregated metrics API shape (editors/models/languages).
+        for editor in row.get("editors") or []:
+            editor_name = editor.get("name") or editor.get("editor") or ""
+            for model in editor.get("models") or []:
+                model_name = model.get("name") or model.get("model") or ""
+                for lang in model.get("languages") or [{}]:
+                    lang_name = lang.get("name") or lang.get("language") or ""
+                    records.append(
+                        {
+                            "day": day,
+                            "assignee_login": login,
+                            "aggregation_level": level,
+                            "model": model_name,
+                            "total_suggestions_count": cls._metric(
+                                lang.get("total_suggestions_count") or model.get("total_suggestions_count")
+                            ),
+                            "total_acceptances_count": cls._metric(
+                                lang.get("total_acceptances_count") or model.get("total_acceptances_count")
+                            ),
+                            "total_lines_suggested": cls._metric(
+                                lang.get("total_lines_suggested") or model.get("total_lines_suggested")
+                            ),
+                            "total_lines_accepted": cls._metric(
+                                lang.get("total_lines_accepted") or model.get("total_lines_accepted")
+                            ),
+                            "total_chat_turns": cls._metric(
+                                lang.get("total_chat_turns") or model.get("total_chat_turns")
+                            ),
+                            "total_chat_acceptances": cls._metric(
+                                lang.get("total_chat_acceptances") or model.get("total_chat_acceptances")
+                            ),
+                            "total_active_users": cls._metric(
+                                row.get("total_active_users") or editor.get("total_active_users") or active_users
+                            ),
+                            "editor": editor_name,
+                            "language": lang_name,
+                        }
+                    )
+        if records:
+            return records
+
+        records.append(
+            {
+                "day": day,
+                "assignee_login": login,
+                "aggregation_level": level,
+                "model": "",
+                "total_suggestions_count": cls._metric(row.get("code_generation_activity_count") or row.get("total_suggestions_count")),
+                "total_acceptances_count": cls._metric(row.get("code_acceptance_activity_count") or row.get("total_acceptances_count")),
+                "total_lines_suggested": cls._metric(row.get("loc_suggested_to_add_sum") or row.get("total_lines_suggested")),
+                "total_lines_accepted": cls._metric(row.get("loc_added_sum") or row.get("total_lines_accepted")),
+                "total_chat_turns": cls._metric(row.get("total_chat_turns")),
+                "total_chat_acceptances": cls._metric(row.get("total_chat_acceptances")),
+                "total_active_users": active_users,
+                "editor": "",
+                "language": "",
+            }
+        )
+        return records
+
+    def _fetch_copilot_metrics_for_period(self, period: str) -> pd.DataFrame:
+        client = self._client()
+        start, end = period_range(period)
+        since = f"{start}T00:00:00Z"
+        until = f"{end}T23:59:59Z"
+        records: list[dict] = []
+        for row in client.iter_copilot_metrics(since, until):
+            records.extend(self._canonical_from_usage_row(row))
+        if not records:
+            return pd.DataFrame()
+        df = pd.DataFrame(records).fillna("")
+        for col in CANONICAL_COLUMNS:
+            if col not in df.columns:
+                df[col] = ""
+        return df[list(CANONICAL_COLUMNS)].fillna("")
+
+    def _find_billing_report(
+        self, client: httpx.Client, start_date: str, end_date: str
+    ) -> tuple[str | None, str | None]:
+        list_resp = client.get(self._billing_reports_url, headers=self._headers)
+        if list_resp.status_code != 200:
+            return None, None
+        for exp in list_resp.json().get("usage_report_exports", []):
+            if (
+                exp.get("report_type") == "detailed"
+                and exp.get("start_date") == start_date
+                and exp.get("end_date") == end_date
+            ):
+                return exp.get("id"), (exp.get("status") or "").lower()
+        return None, None
+
+    def _fetch_billing_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
+        """Detailed billing CSV export (per-user when available)."""
         year = int(period[:4])
         month = int(period[4:6])
         last_day = calendar.monthrange(year, month)[1]
-
         now = datetime.now(timezone.utc).date()
         start_date = f"{year:04d}-{month:02d}-01"
         end_date_obj = min(now, datetime(year, month, last_day, tzinfo=timezone.utc).date())
         end_date = end_date_obj.strftime("%Y-%m-%d")
 
         with httpx.Client(timeout=60) as client:
-            report_id = None
-            report_status = None
-            logger.info("[GithubToken] Verificando relatórios existentes para %s...", period)
-            list_resp = client.get(self.base_url, headers=self.headers)
-            if list_resp.status_code == 200:
-                exports = list_resp.json().get("usage_report_exports", [])
-                for exp in exports:
-                    if (
-                        exp.get("report_type") == "detailed"
-                        and exp.get("start_date") == start_date
-                        and exp.get("end_date") == end_date
-                    ):
-                        report_id = exp.get("id")
-                        report_status = (exp.get("status") or "").lower()
-                        logger.info("[GithubToken] Relatório existente: id=%s status=%s", report_id, report_status)
-                        break
+            report_id, report_status = self._find_billing_report(client, start_date, end_date)
 
             if not report_id or report_status in ("failed", "error", "cancelled"):
                 payload = {
@@ -189,45 +334,87 @@ class GithubTokenExtractor:
                     "end_date": end_date,
                 }
                 logger.info("[GithubToken] Criando relatório para %s: %s", period, payload)
-                resp = client.post(self.base_url, headers=self.headers, json=payload)
+                resp = client.post(self._billing_reports_url, headers=self._headers, json=payload)
                 if resp.status_code == 409:
-                    logger.info("[GithubToken] Relatório já em andamento: id=%s", report_id)
+                    report_id, report_status = self._find_billing_report(client, start_date, end_date)
+                    logger.info(
+                        "[GithubToken] 409 — relatório em andamento, id=%s status=%s",
+                        report_id,
+                        report_status,
+                    )
                 elif resp.status_code in (200, 201, 202):
                     data = resp.json()
-                    report_id = data.get("id") or period
-                    report_status = (data.get("status") or "").lower()
+                    report_id = data.get("id") or report_id
+                    report_status = (data.get("status") or report_status or "").lower()
                 else:
-                    raise ValueError(f"Falha ao solicitar relatório GitHub: HTTP {resp.status_code} - {resp.text}")
+                    raise ValueError(
+                        f"Falha ao solicitar relatório GitHub: HTTP {resp.status_code} - {resp.text}"
+                    )
 
             if not report_id:
                 raise ValueError(f"[GithubToken] Não foi possível obter report_id para {period}")
 
-            # Polling usando o endpoint do report específico (onde o download_urls é retornado)
-            download_url = None
-            for attempt in range(40):
-                poll_resp = client.get(f"{self.base_url}/{report_id}", headers=self.headers)
+            if report_status == "completed":
+                poll_resp = client.get(f"{self._billing_reports_url}/{report_id}", headers=self._headers)
                 if poll_resp.status_code == 200:
                     item_data = poll_resp.json()
-                    current_status = (item_data.get("status") or "").lower()
-                    if current_status == "completed":
-                        urls = item_data.get("download_urls") or []
-                        if urls:
-                            download_url = urls[0]
-                        elif item_data.get("download_url"):
-                            download_url = item_data.get("download_url")
-                        if download_url:
-                            break
-                    elif current_status in ("failed", "error", "cancelled"):
-                        raise ValueError(f"[GithubToken] Relatório {report_id} falhou com status '{current_status}'")
-                time.sleep(2)
+                    urls = item_data.get("download_urls") or []
+                    download_url = urls[0] if urls else item_data.get("download_url")
+                    if download_url:
+                        csv_resp = client.get(download_url, follow_redirects=True, timeout=120)
+                        if csv_resp.status_code == 200:
+                            content = csv_resp.content
+                            if content.startswith(b"\x1f\x8b"):
+                                import gzip
+                                content = gzip.decompress(content)
+                            df = pd.read_csv(io.BytesIO(content), dtype=str)
+                            return self._normalize_billing_csv(df), str(report_id)
+                        raise ValueError(
+                            f"Falha ao baixar CSV do GitHub: HTTP {csv_resp.status_code}"
+                        )
 
+            download_url = None
+            poll_url = f"{self._billing_reports_url}/{report_id}"
+            for attempt in range(60):
+                poll_resp = client.get(poll_url, headers=self._headers)
+                if poll_resp.status_code != 200:
+                    logger.warning(
+                        "[GithubToken] Polling HTTP %d para %s (tentativa %d/60)",
+                        poll_resp.status_code,
+                        report_id,
+                        attempt + 1,
+                    )
+                    time.sleep(5)
+                    continue
+                item_data = poll_resp.json()
+                current_status = (item_data.get("status") or "").lower()
+                logger.info(
+                    "[GithubToken] Polling %s (%d/60): status=%s",
+                    report_id,
+                    attempt + 1,
+                    current_status,
+                )
+                if current_status == "completed":
+                    urls = item_data.get("download_urls") or []
+                    download_url = urls[0] if urls else item_data.get("download_url")
+                    if download_url:
+                        break
+                    raise ValueError(
+                        f"[GithubToken] Relatório {report_id} completed mas sem download_urls"
+                    )
+                if current_status in ("failed", "error", "cancelled"):
+                    raise ValueError(
+                        f"[GithubToken] Relatório {report_id} falhou com status '{current_status}'"
+                    )
+                time.sleep(5)
 
             if not download_url:
-                raise ValueError(f"[GithubToken] Timeout aguardando geração do relatório para {period} (id={report_id})")
+                raise ValueError(
+                    f"[GithubToken] Timeout aguardando geração do relatório para {period} (id={report_id})"
+                )
 
-            # Download CSV
             logger.info("[GithubToken] Baixando CSV do relatório %s...", report_id)
-            csv_resp = client.get(download_url, timeout=120)
+            csv_resp = client.get(download_url, follow_redirects=True, timeout=120)
             if csv_resp.status_code != 200:
                 raise ValueError(f"Falha ao baixar CSV do GitHub: HTTP {csv_resp.status_code}")
 
@@ -237,6 +424,39 @@ class GithubTokenExtractor:
                 content = gzip.decompress(content)
 
             df = pd.read_csv(io.BytesIO(content), dtype=str)
-            df = df.fillna("")
-            df.columns = [c.strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
-            return df, report_id
+            return self._normalize_billing_csv(df), str(report_id)
+
+    def _fetch_tokens_for_period(self, period: str) -> pd.DataFrame:
+        try:
+            df = self._fetch_copilot_metrics_for_period(period)
+            if not df.empty:
+                return df
+        except RuntimeError as exc:
+            logger.warning(
+                "[GithubToken] Copilot usage metrics indisponível para %s: %s",
+                period,
+                exc,
+            )
+        logger.warning(
+            "[GithubToken] Copilot metrics vazio para %s; usando billing report CSV",
+            period,
+        )
+        df, _report_id = self._fetch_billing_report_for_period(period)
+        return df
+
+    def _fetch_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
+        try:
+            df = self._fetch_copilot_metrics_for_period(period)
+            if not df.empty:
+                return df, f"github_copilot_metrics_{period}"
+        except RuntimeError as exc:
+            logger.warning(
+                "[GithubToken] Copilot usage metrics indisponível para %s: %s",
+                period,
+                exc,
+            )
+        logger.warning(
+            "[GithubToken] Copilot metrics vazio para %s; usando billing report CSV",
+            period,
+        )
+        return self._fetch_billing_report_for_period(period)
