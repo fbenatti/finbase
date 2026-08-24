@@ -337,6 +337,9 @@ class EtlRunRequest(BaseModel):
     connection_id: int
     selected_blobs: list[str] | None = None
     force_periods: list[str] | None = None
+    backfill: bool | None = None
+    backfill_days: int | None = None
+    lookback_hours: int | None = None
 
 
 class EtlRunStatus(BaseModel):

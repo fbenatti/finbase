@@ -394,6 +394,15 @@ def write_bronze(
 
     if tbl is not None:
         try:
+            # Explicitly evolve before conversion. PyArrow/Iceberg may silently
+            # project away newly introduced provenance and financial columns
+            # when the existing table schema is a strict subset of the frame.
+            existing_names = {field.name for field in tbl.schema().fields}
+            incoming_names = set(iceberg_schema.names())
+            if not incoming_names.issubset(existing_names):
+                with tbl.update_schema() as schema_update:
+                    schema_update.union_by_name(iceberg_schema)
+                tbl = cat.load_table(table_id)
             arrow_table = _df_to_arrow(df, column_types=bronze_types, target_schema=tbl.schema())
             tbl.append(arrow_table)
             logger.info("Appended %d rows to %s", rows, table_name)
@@ -1379,3 +1388,142 @@ def merge_planning_rateio(planning_name: str, rateio_df: pd.DataFrame, value_col
     combined = pd.concat(frames, ignore_index=True, sort=False)
     _publish_planning_dataframe(safe_name, combined, value_column)
     return 0 if rateio_df.empty else int(len(rateio_df))
+
+
+def _append_or_create_table(namespace: str, table_name: str, df: pd.DataFrame, partition_col: str) -> int:
+    if df is None or df.empty:
+        return 0
+    _ensure_namespace(namespace)
+    tid = _table_id(namespace, table_name)
+    frame = df.copy()
+    if partition_col not in frame.columns:
+        frame[partition_col] = "unknown"
+    arrow_table = _df_to_arrow(frame)
+    cat = _get_catalog()
+    try:
+        tbl = cat.load_table(tid)
+        tbl.append(arrow_table)
+    except Exception:
+        from pyiceberg.io.pyarrow import pyarrow_to_schema
+        iceberg_schema = pyarrow_to_schema(arrow_table.schema)
+        partition_field_idx = arrow_table.schema.get_field_index(partition_col)
+        spec = PartitionSpec()
+        if partition_field_idx >= 0:
+            spec = PartitionSpec(
+                PartitionField(
+                    source_id=iceberg_schema.find_field(partition_col).field_id,
+                    field_id=iceberg_schema.highest_field_id + 1,
+                    transform=IdentityTransform(),
+                    name=partition_col,
+                )
+            )
+        cat.create_table(tid, schema=iceberg_schema, partition_spec=spec)
+        cat.load_table(tid).append(arrow_table)
+    return len(frame)
+
+
+def upsert_azure_ptu_hourly(df: pd.DataFrame) -> int:
+    """Replace gold.dest_azure_ptu_metrics rows for the same connection+hour keys."""
+    if df is None or df.empty:
+        return 0
+    from pyiceberg.expressions import And, EqualTo
+
+    _ensure_namespace("gold")
+    tid = _table_id("gold", "dest_azure_ptu_metrics")
+    frame = df.copy()
+    if "_billing_period" not in frame.columns:
+        frame["_billing_period"] = frame["metric_hour"].astype(str).str[:7].str.replace("-", "")
+    numeric_types = {
+        name: "DOUBLE" for name in (
+            "provisioned_ptus", "input_tokens_sum", "output_tokens_sum", "total_tokens_sum",
+            "active_tokens_sum", "active_tokens_max", "active_tokens_p95", "utilization_avg",
+            "utilization_max", "utilization_p95", "request_count", "request_peak_per_minute",
+            "success_count", "client_error_count", "server_error_count", "rate_limited_count",
+            "spillover_request_count", "time_to_response_avg_ms", "time_to_response_max_ms",
+            "time_to_response_p95_ms", "time_to_last_byte_avg_ms", "normalized_ttft_avg_ms",
+            "normalized_ttft_max_ms", "normalized_ttft_p95_ms", "normalized_tbt_avg_ms",
+            "normalized_tbt_max_ms", "normalized_tbt_p95_ms", "tokens_per_second_avg",
+            "tokens_per_second_max", "completeness_pct",
+        )
+    }
+    numeric_types.update({"connection_id": "BIGINT", "source_points": "BIGINT", "expected_points": "BIGINT"})
+    cat = _get_catalog()
+    try:
+        tbl = cat.load_table(tid)
+    except Exception:
+        return _append_or_create_table("gold", "dest_azure_ptu_metrics", frame, "_billing_period")
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+    incoming = _df_to_arrow(frame, column_types=numeric_types)
+    incoming_schema = pyarrow_to_schema(incoming.schema)
+    existing_names = {field.name for field in tbl.schema().fields}
+    incoming_names = {field.name for field in incoming_schema.fields}
+    if not incoming_names.issubset(existing_names):
+        with tbl.update_schema() as schema_update:
+            for field in incoming_schema.fields:
+                if field.name not in existing_names:
+                    schema_update.add_column(field.name, field.field_type)
+        tbl = cat.load_table(tid)
+    target_types: dict[str, str] = {}
+    for field in tbl.schema().fields:
+        field_type = str(field.field_type).lower()
+        if "double" in field_type or "float" in field_type or "decimal" in field_type:
+            target_types[field.name] = "DOUBLE"
+        elif "long" in field_type or "int" in field_type:
+            target_types[field.name] = "BIGINT"
+        elif "bool" in field_type:
+            target_types[field.name] = "BOOLEAN"
+        else:
+            target_types[field.name] = "TEXT"
+    periods = sorted({str(x) for x in frame["_billing_period"].dropna().unique()})
+    for period in periods:
+        subset = frame[frame["_billing_period"].astype(str) == period]
+        if subset.empty:
+            continue
+        period_conn_ids = sorted({int(x) for x in subset["connection_id"].dropna().unique()})
+        hours = [str(x) for x in subset["metric_hour"].dropna().unique()]
+        tx = tbl.transaction()
+        for conn_id in period_conn_ids:
+            for hour in hours:
+                tx.delete(And(
+                    EqualTo("_billing_period", period),
+                    EqualTo("connection_id", conn_id),
+                    EqualTo("metric_hour", hour),
+                ))
+        tx.append(_df_to_arrow(subset, column_types=target_types, target_schema=tbl.schema()))
+        tx.commit_transaction()
+    return len(frame)
+
+
+def write_azure_ptu_bronze_metrics(df: pd.DataFrame) -> int:
+    return _append_or_create_table("bronze", "raw_azure_ptu_metrics", df, "_billing_period")
+
+
+def write_azure_ptu_capacity(df: pd.DataFrame) -> int:
+    tid = _table_id("gold", "dest_azure_ptu_capacity")
+    cat = _get_catalog()
+    try:
+        table = cat.load_table(tid)
+        old_identity_partition = any(
+            field.name == "deployment_resource_id" for field in table.spec().fields
+        )
+        if old_identity_partition:
+            if table.current_snapshot() is None:
+                # The former layout never wrote a data file: its identity
+                # partition path exceeded macOS' file-name limit.
+                cat.drop_table(tid)
+            else:
+                logger.warning(
+                    "Skipping Azure PTU capacity append: existing table uses the unsafe deployment_resource_id partition"
+                )
+                return 0
+    except Exception:
+        pass
+    return _append_or_create_table("gold", "dest_azure_ptu_capacity", df, "_billing_period")
+
+
+def write_azure_ptu_usage_events(df: pd.DataFrame) -> int:
+    return _append_or_create_table("bronze", "raw_azure_ptu_usage_events", df, "_billing_period")
+
+
+def write_azure_ptu_subproject_usage(df: pd.DataFrame) -> int:
+    return _append_or_create_table("gold", "dest_azure_ptu_subproject_usage", df, "_billing_period")

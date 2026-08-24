@@ -3,13 +3,13 @@ import { Link as RouterLink } from "react-router-dom";
 import {
   Alert, Box, Button, Chip, Divider, FormControl, FormControlLabel, Grid, InputLabel,
   Link, List, ListItem, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack,
-  Switch, TextField, Tooltip, Typography,
+  Switch, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import { Add, Link as LinkIcon, PlayArrow, Save } from "@mui/icons-material";
 import {
   AICostLink, AICostLinkSource, AIUnlinkedLicense, applyAICostAllocation,
-  formatApiError, getAICostLinks, getAIUnlinkedLicenses, previewAICostFilter,
-  previewAIManualEntry, saveAICostLink,
+  formatApiError, getAICostLinks, getAICostPtuConflicts, getAIUnlinkedLicenses,
+  previewAICostFilter, previewAICostPtu, previewAIManualEntry, saveAICostLink,
 } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -18,9 +18,9 @@ const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL
 // TotalCostOnDemandBRL = "Realizado" — custo com taxas e impostos (BRL enriquecido),
 // é a coluna que alimenta os dashboards de FinOps.
 const VALUE_COLUMN_OPTIONS = [
-  { value: "BilledCost",           label: "Realizado (BilledCost)" },
-  { value: "EffectiveCost",        label: "Efetivo (EffectiveCost)" },
-  { value: "TotalCostOnDemandBRL", label: "Realizado (TotalCostOnDemandBRL)" },
+  { value: "BilledCost", label: "BilledCost" },
+  { value: "EffectiveCost", label: "EffectiveCost" },
+  { value: "realizado", label: "realizado" },
 ] as const;
 
 // ── Operadores de filtro disponíveis ──────────────────────────────────────────
@@ -43,11 +43,15 @@ const CLOUD_FIELD_HINTS = [
   { cloud: "Azure", field: "ServiceName",  example: "GitHub",                       note: "GitHub Copilot" },
   { cloud: "Azure", field: "SkuName",      example: "GitHub Copilot Business",      note: "SKU exato do Copilot" },
   { cloud: "Azure", field: "ChargeDescription", example: "GitHub Copilot",          note: "Descrição da cobrança" },
+  { cloud: "Azure", field: "skumeter",         example: "Provisioned Managed Global Unit", note: "PTU reservado (global)" },
+  { cloud: "Azure", field: "skumeter",         example: "Provisioned Managed Unit",        note: "PTU regional / OnDemand" },
+  { cloud: "Azure", field: "departamento",     example: "Vivo Mais",                       note: "Pool PTU por departamento" },
+  { cloud: "Azure", field: "ReservationName",  example: "(preenchido)",                    note: "Reserva vs OnDemand (NOT_EMPTY/EMPTY)" },
 ];
 
 const emptySource = (): AICostLinkSource => ({
   filter_json: [{ column: "ServiceName", operator: "CONTAINS", values: [""] }],
-  value_column: "TotalCostOnDemandBRL",   // ← Realizado por padrão
+  value_column: "realizado",   // ← Realizado por padrão
   percent: 100,
 });
 
@@ -55,6 +59,7 @@ const emptyLink = (): Partial<AICostLink> => ({
   name: "",
   provider: "",
   product_name: "",
+  target_type: "license_pool",
   license_sku: "",
   active: true,
   distribution_enabled: false,
@@ -75,12 +80,15 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [poolTab, setPoolTab] = useState(0);
+  const [ptuPreview, setPtuPreview] = useState<any>(null);
+  const [ptuConflicts, setPtuConflicts] = useState<any[]>([]);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [linkRows, unlinkedRows] = await Promise.all([
+      const [linkRows, unlinkedRows, conflictRows] = await Promise.all([
         getAICostLinks().catch((e) => {
           console.warn("[AICostOrigin] Falha ao carregar links:", e);
           return [] as AICostLink[];
@@ -89,10 +97,12 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
           console.warn("[AICostOrigin] Falha com período específico, tentando sem filtro:", e);
           return getAIUnlinkedLicenses().catch(() => [] as AIUnlinkedLicense[]);
         }),
+        getAICostPtuConflicts().catch(() => ({ conflicts: [] })),
       ]);
       console.log("[AICostOrigin] links carregados:", linkRows.length, "| unlinked:", unlinkedRows.length);
       setLinks(linkRows);
       setUnlinked(unlinkedRows);
+      setPtuConflicts(conflictRows.conflicts || []);
     } catch (e) {
       setError(formatApiError(e, "Não foi possível carregar o portal de origem de custo"));
     } finally {
@@ -148,9 +158,21 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
     if (!selected.sources?.length) return;
     console.log("[AICostOrigin] executando preview filtro, período:", period);
     try {
-      const result = await previewAICostFilter({ period, sources: selected.sources });
-      setPreview({ matched_rows: result.matched_rows, total_value: result.total_value });
-      console.log("[AICostOrigin] preview resultado:", result);
+      if ((selected.target_type || "license_pool") === "ptu_pool") {
+        const result = await previewAICostPtu({
+          period,
+          sources: selected.sources,
+          project_key: selected.project_key || undefined,
+          purchase_mode: selected.purchase_mode || undefined,
+          deployment_type: selected.deployment_type || undefined,
+        });
+        setPtuPreview(result);
+        setPreview({ matched_rows: result.focus.matched_rows, total_value: result.focus.realized_cost });
+      } else {
+        const result = await previewAICostFilter({ period, sources: selected.sources });
+        setPreview({ matched_rows: result.matched_rows, total_value: result.total_value });
+        setPtuPreview(null);
+      }
     } catch (e) {
       setError(formatApiError(e, "Preview indisponível — configure o backend ai_cost_origin"));
     }
@@ -221,15 +243,47 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
         <Stack direction="row" gap={1} mb={2} alignItems="center">
           <TextField label="Período (YYYYMM)" size="small" value={period} onChange={e => setPeriod(e.target.value)} sx={{ width: 160 }} />
           <Button component={RouterLink} to="/dashboards-ia" variant="outlined" size="small">Ver dashboards</Button>
+          <Button component={RouterLink} to="/azure-ptu" variant="outlined" size="small">Azure PTU</Button>
         </Stack>
+        <Tabs value={poolTab} onChange={(_, v) => setPoolTab(v)} sx={{ mb: 2 }}>
+          <Tab label="Licenças de IA" />
+          <Tab label="Pools Azure PTU" />
+          <Tab label="PAYG / Spillover" />
+          <Tab label="Conflitos" />
+        </Tabs>
 
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+
+        {poolTab === 3 && ptuConflicts.length > 0 && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {ptuConflicts.length} vínculo(s) PTU com conflito de medidor ou tipo de deployment.
+          </Alert>
+        )}
 
         <Grid container spacing={2}>
           {/* ── Coluna esquerda: licenças ─────────────────────────────────── */}
           <Grid item xs={12} md={3}>
             <Paper elevation={0} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2, minHeight: 480 }}>
-              <Typography variant="h6" gutterBottom>Licenças detectadas</Typography>
+              <Typography variant="h6" gutterBottom>
+                {poolTab === 3 ? "Conflitos PTU" : "Licenças detectadas"}
+              </Typography>
+              {poolTab === 3 ? (
+                <List dense disablePadding>
+                  {ptuConflicts.map(item => (
+                    <ListItem key={item.link_id} sx={{ borderRadius: 1, mb: 0.5, bgcolor: "#FEE2E2" }}>
+                      <ListItemText
+                        primary={item.name}
+                        secondary={`${item.project_key || "—"} · ${item.conflicts.join(", ")}${item.meters?.length ? ` · medidores: ${item.meters.join(", ")}` : ""}`}
+                      />
+                      <Chip size="small" color="error" label="Conflito" />
+                    </ListItem>
+                  ))}
+                  {ptuConflicts.length === 0 && !loading && (
+                    <ListItem><ListItemText secondary="Nenhum conflito PTU detectado nos vínculos salvos." /></ListItem>
+                  )}
+                </List>
+              ) : (
+              <>
               <Typography variant="caption" color="text.secondary" display="block" mb={1}>
                 Pools sem origem amarrada aparecem em destaque.
               </Typography>
@@ -255,7 +309,12 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle2" gutterBottom>Vínculos salvos</Typography>
               <List dense disablePadding>
-                {links.map(link => (
+                {links.filter(link => {
+                  const t = link.target_type || "license_pool";
+                  if (poolTab === 1) return t === "ptu_pool";
+                  if (poolTab === 2) return t === "payg_ai";
+                  return t === "license_pool";
+                }).map(link => (
                   <ListItemButton key={link.id} selected={selected.id === link.id} onClick={() => selectLink(link)}>
                     <LinkIcon fontSize="small" sx={{ mr: 1, opacity: 0.6 }} />
                     <ListItemText
@@ -269,6 +328,8 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
                   </ListItemButton>
                 ))}
               </List>
+              </>
+              )}
             </Paper>
           </Grid>
 
@@ -282,6 +343,50 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
                   <TextField label="Provedor" size="small" value={selected.provider || ""} onChange={e => setSelected({ ...selected, provider: e.target.value })} fullWidth />
                   <TextField label="Produto" size="small" value={selected.product_name || ""} onChange={e => setSelected({ ...selected, product_name: e.target.value })} fullWidth />
                 </Stack>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Tipo de pool</InputLabel>
+                  <Select
+                    label="Tipo de pool"
+                    value={selected.target_type || "license_pool"}
+                    onChange={e => setSelected({ ...selected, target_type: e.target.value as AICostLink["target_type"] })}
+                  >
+                    <MenuItem value="license_pool">Licenças de IA</MenuItem>
+                    <MenuItem value="ptu_pool">Azure OpenAI PTU</MenuItem>
+                    <MenuItem value="payg_ai">PAYG / Spillover</MenuItem>
+                  </Select>
+                </FormControl>
+                {(selected.target_type || "license_pool") === "ptu_pool" && (
+                  <Stack spacing={1}>
+                    <Stack direction="row" gap={1}>
+                      <TextField label="Projeto (project_key)" size="small" fullWidth value={selected.project_key || ""} onChange={e => setSelected({ ...selected, project_key: e.target.value })} placeholder="vivo-mais" />
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>Modo compra</InputLabel>
+                        <Select label="Modo compra" value={selected.purchase_mode || ""} onChange={e => setSelected({ ...selected, purchase_mode: e.target.value })}>
+                          <MenuItem value="reservation">Reserva</MenuItem>
+                          <MenuItem value="ondemand">OnDemand</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Stack>
+                    <Stack direction="row" gap={1}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>Tipo deployment</InputLabel>
+                        <Select label="Tipo deployment" value={selected.deployment_type || ""} onChange={e => setSelected({ ...selected, deployment_type: e.target.value })}>
+                          <MenuItem value="global">Global</MenuItem>
+                          <MenuItem value="regional">Regional</MenuItem>
+                          <MenuItem value="data_zone">Data Zone</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>Nível alocação</InputLabel>
+                        <Select label="Nível alocação" value={selected.allocation_level || "project"} onChange={e => setSelected({ ...selected, allocation_level: e.target.value })}>
+                          <MenuItem value="project">Projeto</MenuItem>
+                          <MenuItem value="deployment">Deployment</MenuItem>
+                          <MenuItem value="subproject">Subprojeto</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Stack>
+                  </Stack>
+                )}
               </Stack>
 
               {(selected.sources || []).map((source, index) => (
@@ -347,7 +452,7 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
                         <InputLabel>Coluna de valor</InputLabel>
                         <Select
                           label="Coluna de valor"
-                          value={source.value_column || "TotalCostOnDemandBRL"}
+                          value={source.value_column || "realizado"}
                           onChange={e => updateSource(index, { value_column: e.target.value })}
                         >
                           {VALUE_COLUMN_OPTIONS.map(opt => (
@@ -377,11 +482,33 @@ export default function AICostOrigin({ embedded }: { embedded?: boolean } = {}) 
               </Button>
 
               <Stack direction="row" gap={1} mt={2}>
-                <Button variant="outlined" startIcon={<PlayArrow />} onClick={runPreview}>Preview filtro</Button>
+                <Button variant="outlined" startIcon={<PlayArrow />} onClick={runPreview}>
+                  {(selected.target_type || "license_pool") === "ptu_pool" ? "Preview PTU (FOCUS + operacional)" : "Preview filtro"}
+                </Button>
                 {preview && (
                   <Chip label={`${preview.matched_rows} linhas · ${money.format(preview.total_value)}`} color="primary" variant="outlined" />
                 )}
               </Stack>
+
+              {ptuPreview && (
+                <Alert severity={ptuPreview.reconciliation?.conflicts?.length ? "warning" : "info"} sx={{ mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>Reconciliação financeiro × operacional</Typography>
+                  <Typography variant="body2">FOCUS: {money.format(ptuPreview.focus?.realized_cost || 0)} · {ptuPreview.focus?.matched_rows || 0} linhas</Typography>
+                  <Typography variant="body2">
+                    Operacional: {ptuPreview.operational?.ptus ?? "—"} PTUs · {ptuPreview.operational?.deployments ?? "—"} deployments ·
+                    utilização {ptuPreview.operational?.utilization_avg != null ? `${ptuPreview.operational.utilization_avg.toFixed(1)}%` : "—"}
+                  </Typography>
+                  <Typography variant="body2">Status: {ptuPreview.reconciliation?.status}</Typography>
+                  {ptuPreview.reconciliation?.conflicts?.length > 0 && (
+                    <Typography variant="body2" color="warning.main">Conflitos: {ptuPreview.reconciliation.conflicts.join(", ")}</Typography>
+                  )}
+                  {(ptuPreview.pool_allocations || []).length > 0 && (
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                      Alocações: {ptuPreview.pool_allocations.map((a: any) => `${a.deployment_key || a.project_key}: ${money.format(a.allocated_amount)}`).join(" · ")}
+                    </Typography>
+                  )}
+                </Alert>
+              )}
 
               <Divider sx={{ my: 2 }} />
 

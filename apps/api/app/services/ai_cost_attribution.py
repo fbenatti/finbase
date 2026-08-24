@@ -10,6 +10,7 @@ from app.models.ai_cost import (
     AiCostAllocation,
     AiCostLink,
     AiCostLinkSource,
+    AiCostPoolAllocation,
     DISTRIBUTION_BASES,
     VALUE_COLUMNS,
 )
@@ -100,6 +101,41 @@ def _period_clause(schema: dict[str, str], billing_period: str) -> str:
     if not period_col:
         return "1=1"
     return f"CAST({_quote_ident(period_col)} AS VARCHAR) = {_quote_literal(billing_period)}"
+
+
+def _focus_date_clause(
+    schema: dict[str, str],
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> str:
+    """Restrict FOCUS rows to a billing/charge period start window (YYYY-MM-DD)."""
+    date_col = None
+    for candidate in ("billingperiodstart", "chargeperiodstart", "date"):
+        date_col = _resolve_column(schema, candidate)
+        if date_col:
+            break
+    if not date_col:
+        return "1=1"
+    col_sql = f"substr(CAST({_quote_ident(date_col)} AS VARCHAR), 1, 10)"
+    clauses: list[str] = []
+    if date_from:
+        clauses.append(f"{col_sql} >= {_quote_literal(str(date_from)[:10])}")
+    if date_to:
+        clauses.append(f"{col_sql} <= {_quote_literal(str(date_to)[:10])}")
+    return " AND ".join(clauses) if clauses else "1=1"
+
+
+def _time_window_clause(
+    schema: dict[str, str],
+    billing_period: str | None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> str:
+    if date_from or date_to:
+        return _focus_date_clause(schema, date_from, date_to)
+    if billing_period:
+        return _period_clause(schema, billing_period)
+    return "1=1"
 
 
 def _connection_clause(schema: dict[str, str], connection_id: int | None) -> str:
@@ -216,6 +252,9 @@ async def resolve_source_rows(
     schema: dict[str, str],
     source: AiCostLinkSource,
     billing_period: str,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> ResolvedSource:
     from app.services.trino_service import execute as trino_execute
 
@@ -225,7 +264,7 @@ async def resolve_source_rows(
     if isinstance(conditions, dict):
         conditions = [conditions]
     where = " AND ".join([
-        _period_clause(schema, billing_period),
+        _time_window_clause(schema, billing_period, date_from, date_to),
         _connection_clause(schema, source.connection_id),
         _filter_clause(schema, list(conditions)),
     ])
@@ -324,34 +363,34 @@ async def _distribution_weights(
 
     if basis == "equal":
         sql = f"""
-          SELECT lower(CAST(l."UserEmail" AS VARCHAR)) AS user_email, 1.0 AS weight
+          SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email, 1.0 AS weight
           FROM iceberg.gold.{LICENSES_TABLE} l
           WHERE CAST(l."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
             AND lower(CAST(l."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
             AND lower(CAST(l."ProductName" AS VARCHAR)) = {_quote_literal(product_name.lower())}
-            AND COALESCE(NULLIF(TRIM(CAST(l."UserEmail" AS VARCHAR)), ''), '') <> ''
+            AND COALESCE(NULLIF(TRIM(CAST(l.{lic_user_col} AS VARCHAR)), ''), '') <> ''
             {sku_clause}
         """
     elif basis == "requests":
         sql = f"""
-          SELECT lower(CAST(l."UserEmail" AS VARCHAR)) AS user_email,
+          SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email,
                  COALESCE(SUM(COALESCE(TRY_CAST(c."RequestCount" AS DOUBLE), 0)), 0) AS weight
           FROM iceberg.gold.{LICENSES_TABLE} l
           LEFT JOIN iceberg.gold.{CONSUMPTION_TABLE} c
-            ON lower(CAST(c."UserEmail" AS VARCHAR)) = lower(CAST(l."UserEmail" AS VARCHAR))
+            ON lower(CAST(c.{con_user_col} AS VARCHAR)) = lower(CAST(l.{lic_user_col} AS VARCHAR))
            AND CAST(c."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
            AND lower(CAST(c."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
           WHERE CAST(l."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
             AND lower(CAST(l."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
             AND lower(CAST(l."ProductName" AS VARCHAR)) = {_quote_literal(product_name.lower())}
-            AND COALESCE(NULLIF(TRIM(CAST(l."UserEmail" AS VARCHAR)), ''), '') <> ''
+            AND COALESCE(NULLIF(TRIM(CAST(l.{lic_user_col} AS VARCHAR)), ''), '') <> ''
             {sku_clause}
           GROUP BY 1
         """
     elif basis == "activity_index":
         sql = f"""
           WITH usage AS (
-            SELECT lower(CAST("UserEmail" AS VARCHAR)) AS user_email,
+            SELECT lower(CAST({con_user_col} AS VARCHAR)) AS user_email,
                    COALESCE(SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)), 0)
                    + COALESCE(SUM(COALESCE(TRY_CAST("SuggestionsCount" AS DOUBLE), 0)), 0) AS metric
             FROM iceberg.gold.{CONSUMPTION_TABLE}
@@ -365,29 +404,29 @@ async def _distribution_weights(
                    COALESCE(percent_rank() OVER (ORDER BY metric), 0) AS weight
             FROM usage
           )
-          SELECT lower(CAST(l."UserEmail" AS VARCHAR)) AS user_email,
+          SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email,
                  COALESCE(r.weight, 0) AS weight
           FROM iceberg.gold.{LICENSES_TABLE} l
-          LEFT JOIN ranked r ON r.user_email = lower(CAST(l."UserEmail" AS VARCHAR))
+          LEFT JOIN ranked r ON r.user_email = lower(CAST(l.{lic_user_col} AS VARCHAR))
           WHERE CAST(l."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
             AND lower(CAST(l."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
             AND lower(CAST(l."ProductName" AS VARCHAR)) = {_quote_literal(product_name.lower())}
-            AND COALESCE(NULLIF(TRIM(CAST(l."UserEmail" AS VARCHAR)), ''), '') <> ''
+            AND COALESCE(NULLIF(TRIM(CAST(l.{lic_user_col} AS VARCHAR)), ''), '') <> ''
             {sku_clause}
         """
     else:
         sql = f"""
-          SELECT lower(CAST(l."UserEmail" AS VARCHAR)) AS user_email,
+          SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email,
                  COALESCE(SUM(COALESCE(TRY_CAST(c."TotalTokens" AS DOUBLE), 0)), 0) AS weight
           FROM iceberg.gold.{LICENSES_TABLE} l
           LEFT JOIN iceberg.gold.{CONSUMPTION_TABLE} c
-            ON lower(CAST(c."UserEmail" AS VARCHAR)) = lower(CAST(l."UserEmail" AS VARCHAR))
+            ON lower(CAST(c.{con_user_col} AS VARCHAR)) = lower(CAST(l.{lic_user_col} AS VARCHAR))
            AND CAST(c."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
            AND lower(CAST(c."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
           WHERE CAST(l."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
             AND lower(CAST(l."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
             AND lower(CAST(l."ProductName" AS VARCHAR)) = {_quote_literal(product_name.lower())}
-            AND COALESCE(NULLIF(TRIM(CAST(l."UserEmail" AS VARCHAR)), ''), '') <> ''
+            AND COALESCE(NULLIF(TRIM(CAST(l.{lic_user_col} AS VARCHAR)), ''), '') <> ''
             {sku_clause}
           GROUP BY 1
         """
@@ -419,8 +458,6 @@ async def propagate_allocated_costs(
     allocations: list[dict[str, Any]],
     user_key: str = "email",
 ) -> None:
-    import asyncio
-
     from app.services.trino_service import execute as trino_execute
 
     if not allocations:
@@ -428,53 +465,241 @@ async def propagate_allocated_costs(
     user_col = "UserLogin" if user_key == "login" else "UserEmail"
     sku_clause = ""
     if link.license_sku:
-        sku_clause = f" AND lower(CAST(\"LicenseSkuName\" AS VARCHAR)) = {_quote_literal(link.license_sku.lower())}"
+        sku_clause = f" AND lower(CAST(t.\"LicenseSkuName\" AS VARCHAR)) = {_quote_literal(link.license_sku.lower())}"
 
-    tasks: list[asyncio.Task] = []
+    valid_allocations = [
+        item for item in allocations
+        if item.get("user_email") and abs(float(item.get("allocated_amount") or 0)) > 1e-12
+    ]
+    if not valid_allocations:
+        return
 
-    async def _run_sql(email: str, sql: str) -> None:
-        try:
-            await trino_execute(sql, timeout_s=300)
-        except Exception as exc:
-            logger.warning("Failed to propagate allocation for %s: %s", email, exc)
-
-    for item in allocations:
-        email = item.get("user_email")
+    values = []
+    for item in valid_allocations:
+        email = str(item.get("user_email")).replace("'", "''")
         amount = float(item.get("allocated_amount") or 0)
-        if not email or abs(amount) < 1e-12:
-            continue
-        method = item.get("allocation_basis") or link.distribution_basis or "link"
-        source_ref = f"ai_cost_link:{link.id}"
-        license_sql = f"""
-          UPDATE iceberg.gold.{LICENSES_TABLE}
-          SET "AllocatedLicenseCost" = {amount},
-              "CostAllocationMethod" = {_quote_literal(method)},
-              "CostSourceRef" = {_quote_literal(source_ref)},
-              "IsCostEstimated" = false
-          WHERE CAST("_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
-            AND lower(CAST("{user_col}" AS VARCHAR)) = {_quote_literal(str(email).lower())}
-            AND lower(CAST("Provider" AS VARCHAR)) = {_quote_literal(link.provider.lower())}
-            AND lower(CAST("ProductName" AS VARCHAR)) = {_quote_literal(link.product_name.lower())}
-            {sku_clause}
-        """
-        consumption_sql = f"""
-          UPDATE iceberg.gold.{CONSUMPTION_TABLE}
-          SET "AllocatedCost" = COALESCE(TRY_CAST("AllocatedCost" AS DOUBLE), 0) + {amount},
-              "CostAllocationMethod" = {_quote_literal(method)},
-              "CostSourceRef" = {_quote_literal(source_ref)},
-              "IsCostEstimated" = {_quote_literal("false")}
-          WHERE CAST("_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
-            AND lower(CAST("{user_col}" AS VARCHAR)) = {_quote_literal(str(email).lower())}
-            AND lower(CAST("Provider" AS VARCHAR)) = {_quote_literal(link.provider.lower())}
-        """
-        tasks.append(asyncio.create_task(_run_sql(str(email), license_sql)))
-        tasks.append(asyncio.create_task(_run_sql(str(email), consumption_sql)))
+        values.append(f"('{email}', {amount})")
 
-    # Run in bounded waves so Trino is not flooded
-    WAVE = 1
-    for start in range(0, len(tasks), WAVE):
-        wave = tasks[start : start + WAVE]
-        await asyncio.gather(*wave)
+    method = valid_allocations[0].get("allocation_basis") or link.distribution_basis or "link"
+    source_ref = f"ai_cost_link:{link.id}"
+
+    BATCH_SIZE = 1000
+    for i in range(0, len(values), BATCH_SIZE):
+        batch = values[i:i + BATCH_SIZE]
+        val_str = ", ".join(batch)
+        
+        license_sql = f"""
+          MERGE INTO iceberg.gold.{LICENSES_TABLE} t
+          USING (VALUES {val_str}) AS s(email, amount)
+          ON lower(COALESCE(CAST(t."UserEmail" AS VARCHAR), CAST(t."UserLogin" AS VARCHAR))) = lower(s.email)
+             AND CAST(t."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
+             AND lower(CAST(t."Provider" AS VARCHAR)) = {_quote_literal(link.provider.lower())}
+             AND lower(CAST(t."ProductName" AS VARCHAR)) = {_quote_literal(link.product_name.lower())}
+             {sku_clause}
+          WHEN MATCHED THEN
+             UPDATE SET "AllocatedLicenseCost" = s.amount,
+                        "CostAllocationMethod" = {_quote_literal(method)},
+                        "CostSourceRef" = {_quote_literal(source_ref)},
+                        "IsCostEstimated" = false
+        """
+        
+        consumption_sql = f"""
+          MERGE INTO iceberg.gold.{CONSUMPTION_TABLE} t
+          USING (VALUES {val_str}) AS s(email, amount)
+          ON lower(COALESCE(CAST(t."UserEmail" AS VARCHAR), CAST(t."UserLogin" AS VARCHAR))) = lower(s.email)
+             AND CAST(t."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
+             AND lower(CAST(t."Provider" AS VARCHAR)) = {_quote_literal(link.provider.lower())}
+          WHEN MATCHED THEN
+             UPDATE SET "AllocatedCost" = COALESCE(TRY_CAST(t."AllocatedCost" AS DOUBLE), 0) + s.amount,
+                        "CostAllocationMethod" = {_quote_literal(method)},
+                        "CostSourceRef" = {_quote_literal(source_ref)},
+                        "IsCostEstimated" = false
+        """
+        try:
+            await trino_execute(license_sql, timeout_s=300)
+            await trino_execute(consumption_sql, timeout_s=300)
+        except Exception as exc:
+            logger.warning("Failed to propagate allocation batch: %s", exc)
+
+
+async def _ptu_token_weights(
+    billing_period: str,
+    *,
+    project_key: str | None,
+    allocation_level: str | None,
+    metric_hour_from: str | None = None,
+    metric_hour_to: str | None = None,
+) -> list[dict[str, Any]]:
+    from app.services.trino_service import execute as trino_execute
+
+    level = (allocation_level or "project").lower()
+    project_filter = f" AND CAST(project_key AS VARCHAR) = {_quote_literal(project_key)}" if project_key else ""
+    hour_clauses: list[str] = []
+    if metric_hour_from:
+        hour_clauses.append(f"CAST(metric_hour AS VARCHAR) >= {_quote_literal(metric_hour_from)}")
+    if metric_hour_to:
+        hour_clauses.append(f"CAST(metric_hour AS VARCHAR) <= {_quote_literal(metric_hour_to)}")
+    hour_filter = (" AND " + " AND ".join(hour_clauses)) if hour_clauses else ""
+    period_filter = (
+        f" AND CAST(_billing_period AS VARCHAR) = {_quote_literal(billing_period)}"
+        if not hour_filter
+        else ""
+    )
+    if level == "subproject":
+        sql = f"""
+          SELECT CAST(subproject_key AS VARCHAR) AS key,
+                 CAST(project_key AS VARCHAR) AS project_key,
+                 COALESCE(SUM(TRY_CAST(total_tokens AS DOUBLE)), 0) AS weight
+          FROM iceberg.gold.dest_azure_ptu_subproject_usage
+          WHERE 1 = 1{period_filter}{hour_filter}{project_filter}
+          GROUP BY 1, 2
+        """
+    elif level == "deployment":
+        hint_filter = f" AND CAST(project_hint AS VARCHAR) = {_quote_literal(project_key)}" if project_key else ""
+        sql = f"""
+          SELECT CAST(deployment_name AS VARCHAR) AS key,
+                 CAST(project_hint AS VARCHAR) AS project_key,
+                 COALESCE(SUM(TRY_CAST(total_tokens_sum AS DOUBLE)), 0) AS weight
+          FROM iceberg.gold.dest_azure_ptu_metrics
+          WHERE 1 = 1{period_filter.replace('project_key', 'project_hint')}{hour_filter}{hint_filter}
+          GROUP BY 1, 2
+        """
+    else:
+        return []
+    try:
+        return await trino_execute(sql, timeout_s=120)
+    except Exception as exc:
+        logger.warning("PTU token weights skipped: %s", exc)
+        return []
+
+
+async def preview_ptu_pool_allocation(
+    link: AiCostLink,
+    billing_period: str,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    metric_hour_from: str | None = None,
+    metric_hour_to: str | None = None,
+    schema: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    if schema is None:
+        schema = await load_focus_schema()
+    total = 0.0
+    refs: list[dict[str, Any]] = []
+    for source in link.sources or []:
+        resolved = await resolve_source_rows(
+            schema, source, billing_period,
+            date_from=date_from, date_to=date_to,
+        )
+        total += resolved.total_value
+        refs.append({"source_id": resolved.source_id, "row_count": resolved.row_count, "value": resolved.total_value})
+
+    level = (link.allocation_level or "project").lower()
+    rows: list[dict[str, Any]] = []
+    if level == "project":
+        rows.append({
+            "project_key": link.project_key,
+            "deployment_key": None,
+            "subproject_key": None,
+            "allocated_amount": total,
+            "allocation_basis": "project",
+            "source_refs": refs,
+        })
+        return rows
+
+    weights = await _ptu_token_weights(
+        billing_period,
+        project_key=link.project_key,
+        allocation_level=level,
+        metric_hour_from=metric_hour_from,
+        metric_hour_to=metric_hour_to,
+    )
+    weight_total = sum(float(w.get("weight") or 0) for w in weights)
+    if weight_total <= 0:
+        rows.append({
+            "project_key": link.project_key,
+            "deployment_key": None,
+            "subproject_key": None,
+            "allocated_amount": total,
+            "allocation_basis": "project_fallback",
+            "source_refs": refs,
+        })
+        return rows
+
+    for item in weights:
+        share = float(item.get("weight") or 0) / weight_total
+        rows.append({
+            "project_key": item.get("project_key") or link.project_key,
+            "deployment_key": item.get("key") if level == "deployment" else None,
+            "subproject_key": item.get("key") if level == "subproject" else None,
+            "allocated_amount": total * share,
+            "allocation_basis": f"tokens_{level}",
+            "total_tokens": float(item.get("weight") or 0),
+            "coverage_pct": 100.0 * share,
+            "source_refs": refs,
+        })
+    return rows
+
+
+async def apply_ptu_pool_links(
+    session: Any,
+    links: list[AiCostLink],
+    billing_period: str,
+    *,
+    dry_run: bool = False,
+) -> ApplyResult:
+    applicable = [
+        link for link in links
+        if link_applies(link, billing_period)
+        and (getattr(link, "target_type", None) or "license_pool") == "ptu_pool"
+    ]
+    result = ApplyResult(
+        billing_period=billing_period,
+        links_processed=len(applicable),
+        total_cost=0.0,
+        allocations_written=0,
+    )
+    if dry_run:
+        for link in applicable:
+            preview = await preview_ptu_pool_allocation(link, billing_period)
+            result.total_cost += sum(float(r.get("allocated_amount") or 0) for r in preview)
+            result.allocations_written += len(preview)
+        return result
+
+    from sqlalchemy import delete
+
+    link_ids = [link.id for link in applicable]
+    if link_ids:
+        session.execute(
+            delete(AiCostPoolAllocation).where(
+                AiCostPoolAllocation.billing_period == billing_period,
+                AiCostPoolAllocation.link_id.in_(link_ids),
+            )
+        )
+        session.flush()
+
+    for link in applicable:
+        preview_rows = await preview_ptu_pool_allocation(link, billing_period)
+        if not preview_rows:
+            result.unmapped_links.append(link.id)
+            continue
+        link_total = sum(float(r.get("allocated_amount") or 0) for r in preview_rows)
+        result.total_cost += link_total
+        for row in preview_rows:
+            session.add(AiCostPoolAllocation(
+                link_id=link.id,
+                billing_period=billing_period,
+                deployment_key=row.get("deployment_key"),
+                allocated_amount=float(row.get("allocated_amount") or 0),
+                allocation_basis=row.get("allocation_basis"),
+                total_tokens=row.get("total_tokens"),
+                coverage_pct=row.get("coverage_pct"),
+                source_refs=row.get("source_refs"),
+            ))
+            result.allocations_written += 1
+    session.flush()
+    return result
 
 
 async def apply_links(
@@ -484,8 +709,31 @@ async def apply_links(
     *,
     dry_run: bool = False,
 ) -> ApplyResult:
+    license_result = await _apply_license_pool_links(session, links, billing_period, dry_run=dry_run)
+    ptu_result = await apply_ptu_pool_links(session, links, billing_period, dry_run=dry_run)
+    return ApplyResult(
+        billing_period=billing_period,
+        links_processed=license_result.links_processed + ptu_result.links_processed,
+        total_cost=license_result.total_cost + ptu_result.total_cost,
+        allocations_written=license_result.allocations_written + ptu_result.allocations_written,
+        conflicts=license_result.conflicts,
+        unmapped_links=license_result.unmapped_links + ptu_result.unmapped_links,
+    )
+
+
+async def _apply_license_pool_links(
+    session: Any,
+    links: list[AiCostLink],
+    billing_period: str,
+    *,
+    dry_run: bool = False,
+) -> ApplyResult:
     schema = await load_focus_schema()
-    applicable = [link for link in links if link_applies(link, billing_period)]
+    applicable = [
+        link for link in links
+        if link_applies(link, billing_period)
+        and (getattr(link, "target_type", None) or "license_pool") == "license_pool"
+    ]
     resolved: list[ResolvedSource] = []
     for link in applicable:
         for source in link.sources or []:

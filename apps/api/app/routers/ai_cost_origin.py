@@ -65,6 +65,14 @@ class LinkCreate(BaseModel):
     name: str
     provider: str
     product_name: str
+    target_type: Literal["license_pool", "ptu_pool", "payg_ai"] = "license_pool"
+    operational_connection_id: int | None = None
+    department_id: int | None = None
+    project_key: str | None = None
+    purchase_mode: str | None = None
+    deployment_type: str | None = None
+    cost_component: str | None = None
+    allocation_level: str | None = None
     license_sku: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
@@ -80,6 +88,14 @@ class LinkUpdate(BaseModel):
     name: str | None = None
     provider: str | None = None
     product_name: str | None = None
+    target_type: Literal["license_pool", "ptu_pool", "payg_ai"] | None = None
+    operational_connection_id: int | None = None
+    department_id: int | None = None
+    project_key: str | None = None
+    purchase_mode: str | None = None
+    deployment_type: str | None = None
+    cost_component: str | None = None
+    allocation_level: str | None = None
     license_sku: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
@@ -96,6 +112,14 @@ class LinkOut(BaseModel):
     name: str
     provider: str
     product_name: str
+    target_type: str = "license_pool"
+    operational_connection_id: int | None = None
+    department_id: int | None = None
+    project_key: str | None = None
+    purchase_mode: str | None = None
+    deployment_type: str | None = None
+    cost_component: str | None = None
+    allocation_level: str | None = None
     license_sku: str | None
     valid_from: str | None
     valid_until: str | None
@@ -141,6 +165,14 @@ def _link_out(link: AiCostLink) -> LinkOut:
         name=link.name,
         provider=link.provider,
         product_name=link.product_name,
+        target_type=getattr(link, "target_type", None) or "license_pool",
+        operational_connection_id=getattr(link, "operational_connection_id", None),
+        department_id=getattr(link, "department_id", None),
+        project_key=getattr(link, "project_key", None),
+        purchase_mode=getattr(link, "purchase_mode", None),
+        deployment_type=getattr(link, "deployment_type", None),
+        cost_component=getattr(link, "cost_component", None),
+        allocation_level=getattr(link, "allocation_level", None),
         license_sku=link.license_sku,
         valid_from=link.valid_from,
         valid_until=link.valid_until,
@@ -157,6 +189,9 @@ def _validate_link_payload(data: LinkCreate | LinkUpdate, *, creating: bool = Fa
     if creating:
         if not data.name or not data.provider or not data.product_name:  # type: ignore[union-attr]
             raise HTTPException(status_code=422, detail="name, provider e product_name são obrigatórios")
+    target_type = getattr(data, "target_type", None)
+    if target_type and target_type not in {"license_pool", "ptu_pool", "payg_ai"}:
+        raise HTTPException(status_code=422, detail="target_type inválido")
     basis = getattr(data, "distribution_basis", None)
     if basis and basis not in DISTRIBUTION_BASES:
         raise HTTPException(status_code=422, detail="distribution_basis inválida")
@@ -202,6 +237,14 @@ async def create_link(data: LinkCreate, db: AsyncSession = Depends(get_db)):
         name=data.name.strip(),
         provider=data.provider.strip(),
         product_name=data.product_name.strip(),
+        target_type=data.target_type,
+        operational_connection_id=data.operational_connection_id,
+        department_id=data.department_id,
+        project_key=data.project_key,
+        purchase_mode=data.purchase_mode,
+        deployment_type=data.deployment_type,
+        cost_component=data.cost_component,
+        allocation_level=data.allocation_level,
         license_sku=(data.license_sku or "").strip() or None,
         valid_from=data.valid_from,
         valid_until=data.valid_until,
@@ -238,7 +281,7 @@ async def update_link(link_id: int, data: LinkUpdate, db: AsyncSession = Depends
     )).scalar_one_or_none()
     if not link:
         raise HTTPException(status_code=404, detail="Vínculo não encontrado")
-    for field in ("name", "provider", "product_name", "license_sku", "valid_from", "valid_until", "active", "distribution_enabled", "distribution_basis", "distribution_user_key", "unit_cost"):
+    for field in ("name", "provider", "product_name", "target_type", "operational_connection_id", "department_id", "project_key", "purchase_mode", "deployment_type", "cost_component", "allocation_level", "license_sku", "valid_from", "valid_until", "active", "distribution_enabled", "distribution_basis", "distribution_user_key", "unit_cost"):
         value = getattr(data, field)
         if value is not None:
             setattr(link, field, value.strip() if isinstance(value, str) else value)
@@ -334,6 +377,153 @@ async def preview_filter(body: PreviewRequest):
         logger.exception("Preview failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
+class PtuPreviewRequest(BaseModel):
+    billing_period: str
+    sources: list[LinkSourceIn] = Field(default_factory=list)
+    project_key: str | None = None
+    purchase_mode: str | None = None
+    deployment_type: str | None = None
+    operational_ptus: float | None = None
+
+
+@router.post("/preview-ptu")
+async def preview_ptu(body: PtuPreviewRequest, db: AsyncSession = Depends(get_db)):
+    from app.services.azure_ptu_meters import is_azure_openai_ptu_meter, meter_deployment_type
+    from app.services.ai_cost_attribution import preview_ptu_pool_allocation
+    from app.models.ai_cost import AiCostLink
+    from app.services.trino_service import execute as trino_execute
+
+    focus = {"matched_rows": 0, "billed_cost": 0.0, "realized_cost": 0.0, "consumed_quantity": 0, "meters": [], "reservations": []}
+    conflicts: list[str] = []
+    for source in body.sources:
+        raw = source.filter_json if isinstance(source.filter_json, dict) else {"conditions": source.filter_json}
+        preview = await preview_source(
+            billing_period=body.billing_period,
+            filter_json=raw,
+            value_column=source.value_column,
+            connection_id=source.connection_id,
+            percent=source.percent,
+        )
+        focus["matched_rows"] += int(preview.get("matched_rows") or 0)
+        focus["realized_cost"] += float(preview.get("total_value") or 0)
+        for sample in preview.get("sample_rows") or []:
+            meter = sample.get("skumeter") or sample.get("SkuMeter") or sample.get("meter")
+            if meter:
+                focus["meters"].append(meter)
+            if meter and body.deployment_type:
+                focus_type = meter_deployment_type(str(meter))
+                if focus_type and focus_type != body.deployment_type:
+                    conflicts.append("METER_DEPLOYMENT_TYPE_MISMATCH")
+            if meter and not is_azure_openai_ptu_meter(sku_meter=str(meter)):
+                conflicts.append("METER_NOT_IN_PTU_ALLOWLIST")
+
+    operational = {"deployments": None, "ptus": body.operational_ptus, "tokens": None, "utilization_avg": None}
+    if body.project_key:
+        try:
+            rows = await trino_execute(f"""
+              SELECT COUNT(DISTINCT CAST(deployment_name AS VARCHAR)) AS deployments,
+                     COALESCE(SUM(TRY_CAST(provisioned_ptus AS DOUBLE)), 0) AS ptus,
+                     COALESCE(SUM(TRY_CAST(total_tokens_sum AS DOUBLE)), 0) AS tokens,
+                     AVG(TRY_CAST(utilization_avg AS DOUBLE)) AS utilization_avg
+              FROM iceberg.gold.dest_azure_ptu_metrics
+              WHERE CAST(_billing_period AS VARCHAR) = '{body.billing_period}'
+                AND CAST(project_hint AS VARCHAR) = '{body.project_key}'
+            """, timeout_s=90)
+            if rows:
+                row = rows[0]
+                operational = {
+                    "deployments": int(row.get("deployments") or 0),
+                    "ptus": float(row.get("ptus") or 0) or body.operational_ptus,
+                    "tokens": float(row.get("tokens") or 0),
+                    "utilization_avg": float(row["utilization_avg"]) if row.get("utilization_avg") is not None else None,
+                }
+        except Exception:
+            pass
+
+    pool_allocations: list[dict[str, Any]] = []
+    if body.project_key:
+        link = AiCostLink(
+            name="preview",
+            provider="Azure",
+            product_name="Azure OpenAI PTU",
+            target_type="ptu_pool",
+            project_key=body.project_key,
+            purchase_mode=body.purchase_mode,
+            deployment_type=body.deployment_type,
+            allocation_level="project",
+            active=True,
+        )
+        for source in body.sources:
+            link.sources.append(AiCostLinkSource(
+                filter_json=source.filter_json if isinstance(source.filter_json, dict) else {"conditions": source.filter_json},
+                value_column=source.value_column,
+                percent=source.percent,
+                connection_id=source.connection_id,
+            ))
+        pool_allocations = await preview_ptu_pool_allocation(link, body.billing_period)
+
+    financial_ptus = focus.get("consumed_quantity") or None
+    operational_ptus = operational.get("ptus")
+    difference = None
+    if financial_ptus is not None and operational_ptus is not None:
+        difference = float(operational_ptus) - float(financial_ptus)
+    status = "CONFLICT" if conflicts else ("OK" if difference is not None and abs(difference) < 1 else "PARTIAL")
+
+    return {
+        "focus": focus,
+        "operational": operational,
+        "reconciliation": {
+            "status": status,
+            "financial_ptus": financial_ptus,
+            "financial_cost": focus["realized_cost"],
+            "operational_ptus": operational_ptus,
+            "operational_utilization_avg": operational.get("utilization_avg"),
+            "difference_ptus": difference,
+            "conflicts": list(dict.fromkeys(conflicts)),
+        },
+        "pool_allocations": pool_allocations,
+    }
+
+
+@router.get("/ptu-conflicts")
+async def list_ptu_conflicts(db: AsyncSession = Depends(get_db)):
+    """Scan PTU pool links for meter allowlist and deployment-type mismatches."""
+    from app.services.azure_ptu_meters import is_azure_openai_ptu_meter, meter_deployment_type
+
+    links = await _load_links(db)
+    conflicts: list[dict[str, Any]] = []
+    for link in links:
+        if (getattr(link, "target_type", None) or "license_pool") != "ptu_pool":
+            continue
+        link_conflicts: list[str] = []
+        meters: list[str] = []
+        for source in link.sources or []:
+            raw = source.filter_json or {}
+            conditions = raw.get("conditions", raw) if isinstance(raw, dict) else raw
+            if isinstance(conditions, list):
+                for cond in conditions:
+                    col = str(cond.get("column") or "").lower()
+                    if col in {"skumeter", "meter", "skuname"}:
+                        for val in cond.get("values") or []:
+                            meters.append(str(val))
+                            if not is_azure_openai_ptu_meter(sku_meter=str(val)):
+                                link_conflicts.append("METER_NOT_IN_PTU_ALLOWLIST")
+                            if link.deployment_type:
+                                detected = meter_deployment_type(str(val))
+                                if detected and detected != link.deployment_type:
+                                    link_conflicts.append("METER_DEPLOYMENT_TYPE_MISMATCH")
+        if link_conflicts:
+            conflicts.append({
+                "link_id": link.id,
+                "name": link.name,
+                "project_key": link.project_key,
+                "purchase_mode": link.purchase_mode,
+                "deployment_type": link.deployment_type,
+                "conflicts": list(dict.fromkeys(link_conflicts)),
+                "meters": meters,
+            })
+    return {"conflicts": conflicts, "count": len(conflicts)}
 
 
 @router.post("/manual-entry/preview")

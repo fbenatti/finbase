@@ -14,7 +14,7 @@ from app.models.rules import (
 )
 from app.services.classification_field_values import refresh_destination_values
 from app.models.planning import PlanningEntry
-from app.models.destination import DestinationColumn, SourceDestinationMapping
+from app.models.destination import DestinationColumn, DestinationTable, SourceDestinationMapping
 from app.services.classification_engine import map_legacy_field, normalize_rule_conditions
 from app.services.cloud_scope import connection_cloud_scope
 from app.schemas.schemas import (
@@ -204,9 +204,20 @@ async def list_business_rules(
             (BusinessRule.connection_id == connection_id) | (BusinessRule.connection_id == None)
         )
     if destination_table_id is not None:
-        stmt = stmt.where(
-            (BusinessRule.destination_table_id == destination_table_id) | (BusinessRule.destination_table_id == None)
-        )
+        destination = await db.get(DestinationTable, destination_table_id)
+        is_focus_destination = bool(destination and (
+            (destination.name or "").strip().upper() == "MODELO FOCUS"
+            or (destination.physical_name or "").strip().lower() == "dest_modelo_focus"
+        ))
+        destination_filter = BusinessRule.destination_table_id == destination_table_id
+        if is_focus_destination:
+            # FOCUS predates the destination-table model. Keep its legacy
+            # global rules visible, but do not expose them in new tables.
+            destination_filter = or_(
+                destination_filter,
+                BusinessRule.destination_table_id.is_(None),
+            )
+        stmt = stmt.where(destination_filter)
     result = await db.execute(stmt)
     return result.scalars().all()
 

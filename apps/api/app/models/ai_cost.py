@@ -8,7 +8,7 @@ from app.database import Base
 
 DISTRIBUTION_BASES = frozenset({"tokens", "requests", "activity_index", "chatturns", "equal"})
 DISTRIBUTION_USER_KEYS = frozenset({"email", "login"})
-VALUE_COLUMNS = frozenset({"BilledCost", "EffectiveCost", "TotalCostOnDemandBRL"})
+VALUE_COLUMNS = frozenset({"BilledCost", "EffectiveCost", "realizado"})
 
 
 class AiCostLink(Base):
@@ -19,6 +19,15 @@ class AiCostLink(Base):
     name = Column(String(200), nullable=False)
     provider = Column(String(100), nullable=False, index=True)
     product_name = Column(String(200), nullable=False)
+    # Pool type: legacy links remain license_pool; PTU links use ptu_pool.
+    target_type = Column(String(30), nullable=False, default="license_pool", server_default="license_pool", index=True)
+    operational_connection_id = Column(Integer, ForeignKey("source_connection.id", ondelete="SET NULL"), nullable=True)
+    department_id = Column(Integer, nullable=True)
+    project_key = Column(String(120), nullable=True)
+    purchase_mode = Column(String(30), nullable=True)
+    deployment_type = Column(String(40), nullable=True)
+    cost_component = Column(String(40), nullable=True)
+    allocation_level = Column(String(30), nullable=True)
     license_sku = Column(String(200), nullable=True)
     valid_from = Column(String(6), nullable=True)
     valid_until = Column(String(6), nullable=True)
@@ -76,4 +85,25 @@ class AiCostAllocation(Base):
     allocated_amount = Column(Float, nullable=False, default=0.0)
     allocation_basis = Column(String(30), nullable=True)
     source_refs = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiCostPoolAllocation(Base):
+    """Audit of PTU/PAYG pool cost allocated to project, deployment or subproject."""
+    __tablename__ = "ai_cost_pool_allocation"
+    __table_args__ = (Index("ix_ai_cost_pool_allocation_link_period", "link_id", "billing_period"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    link_id = Column(Integer, ForeignKey("ai_cost_link.id", ondelete="CASCADE"), nullable=False)
+    billing_period = Column(String(6), nullable=False)
+    project_mapping_id = Column(Integer, nullable=True)
+    deployment_key = Column(String(300), nullable=True)
+    subproject_id = Column(Integer, nullable=True)
+    allocated_amount = Column(Float, nullable=False, default=0.0)
+    allocation_basis = Column(String(40), nullable=True)
+    input_tokens = Column(Float, nullable=True)
+    output_tokens = Column(Float, nullable=True)
+    total_tokens = Column(Float, nullable=True)
+    source_refs = Column(JSON, nullable=True)
+    coverage_pct = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

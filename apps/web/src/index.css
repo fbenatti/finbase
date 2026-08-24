@@ -13,3 +13,86 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+[data-print-only] {
+  display: none;
+}
+
+@media print {
+  body.azure-ptu-print-mode * {
+    visibility: hidden;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-export-root,
+  body.azure-ptu-print-mode .azure-ptu-export-root * {
+    visibility: visible;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-export-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 12mm 10mm;
+    background: #fff;
+  }
+
+  body.azure-ptu-print-mode [data-print-hide] {
+    display: none !important;
+  }
+
+  body.azure-ptu-print-mode [data-print-only] {
+    display: block !important;
+    visibility: visible;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-print-meta {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e5e7eb;
+    page-break-after: avoid;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-print-meta h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-print-meta p {
+    margin: 2px 0;
+    font-size: 11px;
+    color: #374151;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 12px;
+  }
+
+  body.azure-ptu-print-mode .js-plotly-plot,
+  body.azure-ptu-print-mode .plot-container {
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  body.azure-ptu-print-mode .MuiChip-root {
+    border: 1px solid #d1d5db;
+  }
+
+  body.azure-ptu-print-mode table {
+    font-size: 9px;
+  }
+
+  body.azure-ptu-print-mode .MuiTableCell-root {
+    padding: 4px 6px;
+  }
+
+  @page {
+    margin: 10mm;
+    size: A4 landscape;
+  }
+}

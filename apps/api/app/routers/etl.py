@@ -84,7 +84,7 @@ async def worker_health(db: AsyncSession = Depends(get_db)):
         return {"status": "stale", "heartbeat_age_seconds": None, "worker_pid": pid, "orphaned_tasks_cleared": 0}
 
 
-@router.post("/connections/{connection_id}/scan", response_model=BlobScanResult)
+@router.post("/connections/{connection_id}/scan")
 async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(SourceConnection).where(SourceConnection.id == connection_id)
@@ -147,6 +147,34 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
         extractor = GeminiNotebookLMExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "azure_openai_ptu":
+        from app.services.azure_ptu_service import discover, resolve_config
+        inventory = await discover(resolve_config(conn.config_json))
+        items = []
+        for dep in inventory.get("deployments") or []:
+            items.append({
+                "path": dep.get("id") or dep.get("deployment_name"),
+                "size": int(dep.get("ptus") or 0),
+                "last_modified": None,
+                "status": "ptu_deployment",
+                "account_name": dep.get("account_name"),
+                "deployment_name": dep.get("deployment_name"),
+                "region": dep.get("region"),
+                "ptus": dep.get("ptus"),
+                "model_name": dep.get("model_name"),
+            })
+        return {
+            "connection_id": connection_id,
+            "total": len(items),
+            "new": len(items),
+            "changed": 0,
+            "unchanged": 0,
+            "items": items,
+            "accounts": inventory.get("account_count"),
+            "ptu_deployments": inventory.get("ptu_deployment_count"),
+            "total_ptus": inventory.get("total_ptus"),
+            "persisted_metrics": False,
+        }
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
@@ -381,7 +409,11 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
+    if conn.connector_type == "azure_openai_ptu":
+        # PTU is an operational source, not an Azure Blob export.  It is
+        # executed by the worker through the PTU collector below.
+        pass
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -392,6 +424,27 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     from app.models.etl_task import EtlTask
     from sqlalchemy import insert
 
+    cfg = dict(conn.config_json or {})
+    billing_periods = request.force_periods or []
+    result_json: dict | None = None
+    phase: str | None = None
+    if conn.connector_type == "azure_openai_ptu":
+        if billing_periods:
+            result_json = {"periods": billing_periods, "user_triggered": True}
+            phase = f"Na fila: buscar métricas Azure PTU · meses {', '.join(billing_periods)}"
+        elif request.backfill:
+            days = int(request.backfill_days or cfg.get("backfill_days") or 93)
+            result_json = {"backfill": True, "backfill_days": days, "user_triggered": True}
+            phase = f"Na fila: backfill Azure PTU ({days} dias, janelas de 30 dias)"
+        elif request.lookback_hours is not None:
+            lookback = int(request.lookback_hours)
+            result_json = {"lookback_hours": lookback, "user_triggered": True}
+            phase = f"Na fila: coleta incremental Azure PTU ({lookback}h)"
+        else:
+            days = int(request.backfill_days or cfg.get("backfill_days") or 93)
+            result_json = {"backfill": True, "backfill_days": days, "user_triggered": True}
+            phase = f"Na fila: importar histórico Azure PTU ({days} dias, retenção Monitor)"
+
     new_id = await db.execute(
         insert(EtlTask).values(
             task_type="extraction",
@@ -399,7 +452,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
             connection_id=request.connection_id,
             destination_table_id=None,
             connection_ids=[request.connection_id],
-            billing_periods=request.force_periods or [],
+            billing_periods=billing_periods,
             selected_blobs=request.selected_blobs or [],
             total_blobs=0,
             processed_blobs=0,
@@ -407,6 +460,8 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
             rows_normalized=0,
             rows_destination=0,
             errors=[],
+            phase=phase,
+            result_json=result_json,
         ).returning(EtlTask.id)
     )
     task_id = new_id.scalar_one()
@@ -533,6 +588,26 @@ async def unskip_blob(skip_id: int, db: AsyncSession = Depends(get_db)):
 
 async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
     config = conn.config_json
+
+    if conn.connector_type == "azure_openai_ptu":
+        # PTU has its own ARM/Monitor test, but Connections uses this common
+        # endpoint for the row action and the create wizard.
+        try:
+            from app.services.azure_ptu_service import test_connection_checks
+            from app.config import settings
+            cfg = dict(config or {})
+            if cfg.get("credential_profile") == "azure-4p":
+                cfg.setdefault("tenant_id", settings.azure_4p_tenant_id)
+                cfg.setdefault("client_id", settings.azure_4p_client_id)
+                cfg.setdefault("client_secret", settings.azure_4p_client_secret)
+            result = await test_connection_checks(cfg)
+            summary = result.get("summary") or {}
+            result["message"] = (
+                f"Azure PTU validado: {summary.get('ptu_deployments', 0)} deployments / {summary.get('total_ptus', 0)} PTUs"
+            )
+            return result
+        except Exception as e:
+            return {"status": "FAILED", "message": f"Azure PTU: {str(e)[:450]}"}
 
     if conn.connector_type == "azure_blob":
         try:
@@ -1043,7 +1118,11 @@ def _reprocess_destination_sync(
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
     from app.services.task_runner import _inmemory_tasks, _check_cancelled
-    from app.services.cloud_scope import rule_matches_cloud
+    from app.services.cloud_scope import (
+        rule_matches_cloud,
+        rule_matches_connection,
+        rule_matches_destination,
+    )
 
     status = _inmemory_tasks.get(task_id, {})
     status["status"] = "RUNNING"
@@ -1096,6 +1175,10 @@ def _reprocess_destination_sync(
             status["status"] = "FAILED"; status["error"] = "Tabela destino nao encontrada"
             return {"success": False, "error": "Tabela destino nao encontrada", "rows_written": 0}
         phys_name = dest_info.physical_name; status["table"] = dest_info.name
+        is_focus_destination = (
+            (dest_info.name or "").strip().upper() == "MODELO FOCUS"
+            or (phys_name or "").strip().lower() == "dest_modelo_focus"
+        )
 
         all_mappings = []
         for cid in connection_ids:
@@ -1201,15 +1284,44 @@ def _reprocess_destination_sync(
                 continue
             conn_map[cid] = conn
 
-            # Load business rules scoped to this connection's cloud provider.
+            # Rules are isolated by destination and source connection.  The
+            # null-destination compatibility path is deliberately FOCUS-only:
+            # it supports legacy FOCUS rules without letting them run in a
+            # table created later by the user.
+            destination_filter = BusinessRule.destination_table_id == destination_table_id
+            if is_focus_destination:
+                destination_filter = or_(
+                    destination_filter,
+                    BusinessRule.destination_table_id.is_(None),
+                )
             _brules = [
                 rule for rule in session.execute(
                     select(BusinessRule).where(
+                        destination_filter,
                         BusinessRule.active == True,
+                        or_(
+                            BusinessRule.connection_id == cid,
+                            BusinessRule.connection_id.is_(None),
+                        ),
                     ).order_by(BusinessRule.priority)
                 ).scalars().all()
-                if rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
+                if rule_matches_connection(rule.connection_id, cid)
+                and rule_matches_destination(
+                    rule.destination_table_id,
+                    destination_table_id,
+                    is_focus_destination=is_focus_destination,
+                )
+                and rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
             ]
+            logger.info(
+                "Carregadas %d regras financeiras para tabela destino %s (id=%d) e conexão %s (id=%d)",
+                len(_brules), phys_name, destination_table_id, conn.code, cid,
+            )
+            _append_reprocess_log(
+                task_id,
+                f"Regras financeiras selecionadas para {conn.code}: {len(_brules)}",
+                details={"connection_id": cid, "rule_ids": [rule.id for rule in _brules]},
+            )
 
             _crules = [
                 rule for rule in session.execute(
@@ -1628,6 +1740,89 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             detail=f"Já existe um reprocessamento ativo para esta tabela (task {active_id})",
         )
 
+    conn_rows = (await db.execute(
+        select(SourceConnection).where(SourceConnection.id.in_(body.connection_ids))
+    )).scalars().all()
+    conn_by_id = {row.id: row for row in conn_rows}
+    ptu_connections = [
+        conn_by_id[cid] for cid in body.connection_ids
+        if conn_by_id.get(cid) and conn_by_id[cid].connector_type == "azure_openai_ptu"
+    ]
+    blob_connections = [
+        conn_by_id[cid] for cid in body.connection_ids
+        if conn_by_id.get(cid) and conn_by_id[cid].connector_type != "azure_openai_ptu"
+    ]
+
+    if ptu_connections and not blob_connections:
+        cfg_days = int((ptu_connections[0].config_json or {}).get("backfill_days") or 93)
+        periods = body.billing_periods or []
+        backfill_days = cfg_days if not periods else None
+        queue_group = str(uuid4())
+        task_ids: list[int] = []
+        for position, conn in enumerate(ptu_connections, start=1):
+            period_suffix = f" · meses {', '.join(periods)}" if periods else ""
+            if periods:
+                phase = f"Na fila: buscar métricas Azure PTU{period_suffix}"
+                log_message = f"Coleta Azure PTU por período{period_suffix}"
+            else:
+                phase = f"Na fila: coleta histórica Azure PTU ({cfg_days} dias)"
+                log_message = f"Coleta histórica Azure PTU ({cfg_days} dias, janelas de 30 dias)"
+            details = {
+                "connection_ids": [conn.id],
+                "billing_periods": periods,
+                "ptu_backfill": not periods,
+                "backfill_days": backfill_days,
+                "queue_group": queue_group,
+                "queue_position": position,
+                "queue_total": len(ptu_connections),
+            }
+            result = await db.execute(
+                insert(EtlTask).values(
+                    task_type="reprocess",
+                    status="QUEUED",
+                    destination_table_id=body.destination_table_id,
+                    connection_id=conn.id,
+                    connection_ids=[conn.id],
+                    billing_periods=periods,
+                    result_json={
+                        "replace_existing": False,
+                        "backfill": not periods,
+                        **details,
+                        "event_log": [{
+                            "at": datetime.now(timezone.utc).isoformat(),
+                            "level": "INFO",
+                            "message": log_message,
+                            "details": details,
+                        }],
+                    },
+                    total_blobs=0,
+                    processed_blobs=0,
+                    rows_raw=0,
+                    rows_normalized=0,
+                    rows_destination=0,
+                    errors=[],
+                    phase=phase,
+                ).returning(EtlTask.id)
+            )
+            task_ids.append(result.scalar_one())
+        await db.commit()
+        if periods:
+            message = (
+                f"{len(task_ids)} coleta(s) Azure PTU enfileirada(s) "
+                f"para {', '.join(periods)} (Azure Monitor retém ~93 dias)"
+            )
+        else:
+            message = (
+                f"{len(task_ids)} coleta(s) histórica(s) Azure PTU enfileirada(s) "
+                f"({cfg_days} dias, janelas de até 30 dias)"
+            )
+        return {
+            "task_id": task_ids[0],
+            "task_ids": task_ids,
+            "queue_group": queue_group,
+            "message": message,
+        }
+
     available_stmt = select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
         IngestedBlob.connection_id.in_(body.connection_ids)
     )
@@ -1985,7 +2180,25 @@ async def list_available_periods(
     connection_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """List distinct billing periods available for a connection (from ingested blobs)."""
+    """List distinct billing periods available for a connection."""
+    conn = await db.get(SourceConnection, connection_id)
+    if conn and conn.connector_type == "azure_openai_ptu":
+        from app.services.azure_ptu_service import collection_windows, resolve_config
+
+        cfg = resolve_config(dict(conn.config_json or {}))
+        windows = collection_windows(cfg, backfill_days=int(cfg.get("backfill_days") or 93))
+        counts: dict[str, int] = {}
+        for period, _, _ in windows:
+            counts[period] = counts.get(period, 0) + 1
+        return [
+            {
+                "period": period,
+                "blob_count": count,
+                "label": f"{period[4:]}/{period[:4]}",
+            }
+            for period, count in sorted(counts.items(), key=lambda item: item[0], reverse=True)
+        ]
+
     rows = (await db.execute(
         text(
             "SELECT DISTINCT billing_period, COUNT(*) as cnt "
@@ -2008,11 +2221,11 @@ async def list_connections_for_destination(
     """List connections that have SourceDestinationMappings for this destination table."""
     rows = (await db.execute(
         text(
-            "SELECT DISTINCT sc.id, sc.code, sc.name, COUNT(sdm.id) AS mapping_count "
+            "SELECT DISTINCT sc.id, sc.code, sc.name, sc.connector_type, COUNT(sdm.id) AS mapping_count "
             "FROM source_destination_mapping sdm "
             "JOIN source_connection sc ON sc.id = sdm.source_connection_id "
             "WHERE sdm.destination_table_id = :did AND sdm.active = true "
-            "GROUP BY sc.id, sc.code, sc.name "
+            "GROUP BY sc.id, sc.code, sc.name, sc.connector_type "
             "ORDER BY sc.code"
         ),
         {"did": destination_table_id},
@@ -2022,7 +2235,8 @@ async def list_connections_for_destination(
             "id": r[0],
             "code": r[1],
             "name": r[2],
-            "mapping_count": r[3],
+            "connector_type": r[3],
+            "mapping_count": r[4],
         }
         for r in rows
     ]
@@ -2224,7 +2438,14 @@ async def get_extraction_history_metadata(task_id: int, db: AsyncSession = Depen
     # Obter contagem total de linhas
     total_count = task.rows_raw or 0
     try:
-        count_res = await trino.execute(f"SELECT COUNT(*) AS total FROM iceberg.bronze.{_qi_trino(table_name)}")
+        task_periods = [str(period) for period in (task.billing_periods or []) if str(period).isdigit() and len(str(period)) == 6]
+        period_where = ""
+        if task_periods:
+            period_values = ", ".join(f"'{period}'" for period in task_periods)
+            period_where = f" WHERE CAST(_billing_period AS VARCHAR) IN ({period_values})"
+        count_res = await trino.execute(
+            f"SELECT COUNT(*) AS total FROM iceberg.bronze.{_qi_trino(table_name)}{period_where}"
+        )
         if count_res and "total" in count_res[0]:
             total_count = int(count_res[0]["total"])
     except Exception:
@@ -2275,6 +2496,13 @@ async def query_extraction_history_data(
         raise HTTPException(status_code=500, detail=f"Erro ao acessar tabela Bronze no Trino: {exc}")
 
     where_clauses = []
+
+    # Extraction tasks are monthly slices. Keep the history viewer scoped to
+    # the periods recorded by that task instead of returning the whole source.
+    task_periods = [str(period) for period in (task.billing_periods or []) if str(period).isdigit() and len(str(period)) == 6]
+    if task_periods and "_billing_period" in valid_cols:
+        period_values = ", ".join(f"'{period}'" for period in task_periods)
+        where_clauses.append(f"CAST({_qi_trino('_billing_period')} AS VARCHAR) IN ({period_values})")
 
     # 1. Filtro global de texto
     if body.search and body.search.strip():

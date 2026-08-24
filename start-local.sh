@@ -68,6 +68,17 @@ wait_for_pid_exit() {
   done
 }
 
+stop_start_local_pid() {
+  local pid="$1"
+  [[ -z "$pid" ]] && return 0
+  kill "$pid" 2>/dev/null || true
+  if ! wait_for_pid_exit "$pid" 20; then
+    echo "Sessão anterior não encerrou após o cleanup; forçando PID $pid" >&2
+    kill -9 "$pid" 2>/dev/null || true
+    sleep 0.3
+  fi
+}
+
 wait_for_port_free() {
   local port="$1"
   local max_wait="${2:-20}"
@@ -168,8 +179,7 @@ stop_other_start_local() {
     cmd="$(cmdline_for_pid "$pid")"
     [[ "$cmd" != *start-local.sh* ]] && continue
     echo "Encerrando sessão start-local.sh anterior (PID $pid)"
-    kill_pids "$pid"
-    wait_for_pid_exit "$pid" 20 || true
+    stop_start_local_pid "$pid"
   done < <(pgrep -f "$ROOT_DIR/start-local.sh" 2>/dev/null || true)
 }
 
@@ -181,8 +191,7 @@ acquire_session_lock() {
       cmd="$(cmdline_for_pid "$old_pid")"
       if [[ "$cmd" == *start-local.sh* && "$old_pid" -ne $$ ]]; then
         echo "Encerrando sessão start-local.sh anterior (PID $old_pid)"
-        kill_pids "$old_pid"
-        wait_for_pid_exit "$old_pid" 20 || true
+        stop_start_local_pid "$old_pid"
       fi
     fi
     rm -f "$LOCK_FILE"
@@ -392,6 +401,12 @@ ensure_docker_daemon
 free_stale_processes
 
 source "$VENV"
+
+echo "Validando sintaxe do backend..."
+if ! "$ROOT_DIR/.venv/bin/python" -m compileall -q "$ROOT_DIR/apps/api/app" "$ROOT_DIR/apps/api/worker.py"; then
+  echo "ERRO: backend contém erro de sintaxe; inicialização cancelada antes de abrir as portas." >&2
+  exit 1
+fi
 
 ensure_infra
 

@@ -5,7 +5,19 @@ const api = axios.create({
   timeout: 120000,
 });
 
-const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/)/;
+export async function getAzurePtuOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.post("/azure-ptu/dashboard/overview", params, { signal });
+  return data;
+}
+export async function getAzurePtuOpsOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.post("/azure-ptu/dashboard/ops-overview", params, { signal });
+  return data;
+}
+export async function getAzurePtuView(view: "projects"|"deployments"|"subprojects"|"trends"|"reconciliation"|"recommendations", params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.post(`/azure-ptu/dashboard/${view}`, params, { signal }); return data;
+}
+
+const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|azure-ptu\/dashboard)/;
 const pendingAnalysis = new Set<AbortController>();
 type ExpectedViewInflight = { count: number; controller: AbortController; promise: Promise<unknown>; abortTimer?: number };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
@@ -40,7 +52,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"]);
 
 export function formatApiError(error: unknown, fallback = "Request failed"): string {
   if (axios.isAxiosError(error)) {
@@ -281,7 +293,14 @@ export async function downloadIngestedBlob(blobId: number, format: "csv" | "xlsx
 }
 
 
-export async function runEtl(body: { connection_id: number; selected_blobs?: string[]; force_periods?: string[] }): Promise<{ task_id: number; status: string; message?: string }> {
+export async function runEtl(body: {
+  connection_id: number;
+  selected_blobs?: string[];
+  force_periods?: string[];
+  backfill?: boolean;
+  backfill_days?: number;
+  lookback_hours?: number;
+}): Promise<{ task_id: number; status: string; message?: string }> {
   const { data } = await api.post("/etl/run", body);
   return data;
 }
@@ -296,6 +315,7 @@ export interface TaskStatus {
   type?: string; // "etl" or "reprocess"
   task_type?: string;
   connection_id?: number;
+  connector_type?: string;
   destination_table_id?: number;
   connection_ids?: number[];
   status: string;
@@ -355,6 +375,7 @@ export async function processDestinationTables(connectionId: number): Promise<{ 
 export interface AvailablePeriod {
   period: string;
   blob_count: number;
+  label?: string;
 }
 
 export async function getAvailablePeriods(connectionId: number): Promise<AvailablePeriod[]> {
@@ -407,6 +428,7 @@ export interface ReprocessStatus {
   progress: number;
   rows_written: number;
   table: string;
+  destination_table_id?: number;
   connection_ids: number[];
   error: string;
   errors?: string[];
@@ -498,8 +520,13 @@ export async function getClassificationsGrid(params: {
   filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
   destination_table_id?: number;
   cloud?: string;
-} = {}): Promise<ClassificationsGridResponse> {
-  const { data } = await api.get("/classifications/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+} = {},
+  signal?: AbortSignal,
+): Promise<ClassificationsGridResponse> {
+  const { data } = await api.get("/classifications/grid", {
+    params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined },
+    signal,
+  });
   return data;
 }
 
@@ -1403,6 +1430,7 @@ export interface MappedConnection {
   id: number;
   code: string;
   name: string;
+  connector_type?: string;
   mapping_count: number;
 }
 
@@ -1625,6 +1653,13 @@ export interface AICostLink {
   name: string;
   provider: string;
   product_name: string;
+  target_type?: "license_pool" | "ptu_pool" | "payg_ai";
+  operational_connection_id?: number | null;
+  project_key?: string | null;
+  purchase_mode?: string | null;
+  deployment_type?: string | null;
+  cost_component?: string | null;
+  allocation_level?: string | null;
   license_sku?: string | null;
   valid_from?: string | null;
   valid_until?: string | null;
@@ -1685,6 +1720,13 @@ export async function saveAICostLink(link: Partial<AICostLink>): Promise<AICostL
     name: link.name,
     provider: link.provider,
     product_name: link.product_name,
+    target_type: link.target_type ?? "license_pool",
+    operational_connection_id: link.operational_connection_id ?? null,
+    project_key: link.project_key ?? null,
+    purchase_mode: link.purchase_mode ?? null,
+    deployment_type: link.deployment_type ?? null,
+    cost_component: link.cost_component ?? null,
+    allocation_level: link.allocation_level ?? null,
     license_sku: link.license_sku,
     valid_from: link.valid_from,
     valid_until: link.valid_until,
@@ -1757,5 +1799,43 @@ export async function applyAICostAllocation(body: { link_id: number; period: str
     billing_period: body.period,
     link_ids: [body.link_id],
   });
+  return data;
+}
+
+export interface AICostPtuPreview {
+  focus: { matched_rows: number; realized_cost: number; meters: string[] };
+  operational: { deployments: number | null; ptus: number | null; tokens: number | null; utilization_avg: number | null };
+  reconciliation: {
+    status: string;
+    financial_cost: number;
+    operational_ptus: number | null;
+    operational_utilization_avg: number | null;
+    difference_ptus: number | null;
+    conflicts: string[];
+  };
+  pool_allocations: Array<{ project_key?: string; deployment_key?: string; allocated_amount: number; allocation_basis: string }>;
+}
+
+export async function previewAICostPtu(body: {
+  period: string;
+  sources: AICostLinkSource[];
+  project_key?: string;
+  purchase_mode?: string;
+  deployment_type?: string;
+  operational_ptus?: number;
+}): Promise<AICostPtuPreview> {
+  const { data } = await api.post("/ai-cost-origin/preview-ptu", {
+    billing_period: body.period,
+    sources: mapLinkSources(body.sources),
+    project_key: body.project_key,
+    purchase_mode: body.purchase_mode,
+    deployment_type: body.deployment_type,
+    operational_ptus: body.operational_ptus,
+  });
+  return data;
+}
+
+export async function getAICostPtuConflicts(): Promise<{ conflicts: Array<{ link_id: number; name: string; project_key?: string; conflicts: string[]; meters: string[] }>; count: number }> {
+  const { data } = await api.get("/ai-cost-origin/ptu-conflicts");
   return data;
 }

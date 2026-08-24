@@ -19,8 +19,11 @@ import CloneRules from "./pages/CloneRules/CloneRules";
 import Tables from "./pages/Tables/Tables";
 import ExpectedView from "./pages/Dashboards/ExpectedView";
 import DashboardsIA from "./pages/Dashboards/DashboardsIA";
+import GitHubCopilotDashboard from "./pages/GitHubCopilotDashboard/GitHubCopilotDashboard";
 import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
+import AzurePTU from "./pages/AzurePTU/AzurePTU";
+import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
 function App() {
   return (
     <Routes>
@@ -43,6 +46,9 @@ function App() {
         <Route path="analysis" element={<Analysis />} />
         <Route path="expected-view" element={<ExpectedView />} />
         <Route path="dashboards-ia" element={<DashboardsIA />} />
+        <Route path="azure-ptu" element={<AzurePTU />} />
+        <Route path="azure-ptu-ops" element={<AzurePtuOps />} />
+        <Route path="github-copilot" element={<GitHubCopilotDashboard />} />
         <Route path="ai-cost-origin" element={<Navigate to="/tables?tab=ai-cost-relationship" replace />} />
         <Route path="pipeline" element={<PipelineBuilder />} />
         <Route path="reprocess" element={<Reprocess />} />

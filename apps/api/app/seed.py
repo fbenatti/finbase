@@ -275,14 +275,106 @@ def _get_conn_id(db_result, code: str) -> int | None:
     return None
 
 
+async def _seed_ptu_cost_links(db: AsyncSession) -> None:
+    from app.models.ai_cost import AiCostLink, AiCostLinkSource
+    from app.models.azure_ptu import AzurePtuProjectMapping
+
+    existing = await db.execute(select(AiCostLink).where(AiCostLink.target_type == "ptu_pool"))
+    if existing.scalars().first():
+        return
+    vivo = AiCostLink(
+        name="Vivo Mais — PTU reservado",
+        provider="Azure",
+        product_name="Azure OpenAI PTU",
+        target_type="ptu_pool",
+        project_key="vivo-mais",
+        purchase_mode="reservation",
+        deployment_type="global",
+        cost_component="capacity",
+        allocation_level="project",
+        active=True,
+    )
+    vivo.sources.append(AiCostLinkSource(
+        filter_json={"conditions": [
+            {"column": "cloud_origem", "operator": "CONTAINS", "values": ["Azure"]},
+            {"column": "departamento", "operator": "IN", "values": ["Vivo Mais"]},
+            {"column": "skumeter", "operator": "IN", "values": ["Provisioned Managed Global Unit", "Provisioned Managed Unit"]},
+            {"column": "ReservationName", "operator": "NOT_EMPTY", "values": []},
+        ]},
+        value_column="realizado",
+        percent=100,
+    ))
+    aura = AiCostLink(
+        name="Aura Brain — PTU OnDemand",
+        provider="Azure",
+        product_name="Azure OpenAI PTU",
+        target_type="ptu_pool",
+        project_key="aura-brain",
+        purchase_mode="ondemand",
+        deployment_type="regional",
+        cost_component="capacity",
+        allocation_level="project",
+        active=True,
+    )
+    aura.sources.append(AiCostLinkSource(
+        filter_json={"conditions": [
+            {"column": "cloud_origem", "operator": "CONTAINS", "values": ["Azure"]},
+            {"column": "departamento", "operator": "IN", "values": ["Aura Brain"]},
+            {"column": "skumeter", "operator": "IN", "values": ["Provisioned Managed Global Unit", "Provisioned Managed Unit"]},
+            {"column": "ReservationName", "operator": "EMPTY", "values": []},
+        ]},
+        value_column="realizado",
+        percent=100,
+    ))
+    db.add_all([vivo, aura])
+    mapping_exists = await db.execute(select(AzurePtuProjectMapping))
+    if not mapping_exists.scalars().first():
+        conn_id = await db.execute(text("SELECT id FROM source_connection WHERE code = 'azure-4p-ptu'"))
+        row = conn_id.fetchone()
+        if row:
+            db.add_all([
+                AzurePtuProjectMapping(connection_id=row[0], deployment_resource_id="vivo-mais-35", project_key="vivo-mais", project_name="Vivo Mais", purchase_mode="reservation", deployment_type="global"),
+                AzurePtuProjectMapping(connection_id=row[0], deployment_resource_id="vivo-mais-65", project_key="vivo-mais", project_name="Vivo Mais", purchase_mode="reservation", deployment_type="global"),
+                AzurePtuProjectMapping(connection_id=row[0], deployment_resource_id="aura-brain-50a", project_key="aura-brain", project_name="Aura Brain", purchase_mode="ondemand", deployment_type="regional"),
+                AzurePtuProjectMapping(connection_id=row[0], deployment_resource_id="aura-brain-50b", project_key="aura-brain", project_name="Aura Brain", purchase_mode="ondemand", deployment_type="regional"),
+            ])
+
+
 async def seed(db: AsyncSession):
     if settings.skip_seed:
         return
+
+    # Operational Azure OpenAI PTU source.  It reuses the existing 4P
+    # credential profile and deliberately does not copy the client secret into
+    # the connection metadata.
+    ptu_exists = await db.execute(text("SELECT id FROM source_connection WHERE code = 'azure-4p-ptu'"))
+    if not ptu_exists.fetchone() and settings.azure_4p_tenant_id:
+        db.add(SourceConnection(
+            code="azure-4p-ptu",
+            name="Azure 4P — OpenAI PTU",
+            connector_type="azure_openai_ptu",
+            cloud_name="Azure-4P",
+            cloud_scope="azure",
+            config_json={
+                "credential_profile": "azure-4p",
+                "metric_interval": "PT1M",
+                "rollup_interval": "PT1H",
+                "lookback_hours": 3,
+                "backfill_days": 93,
+                "subscription_ids": [],
+                "account_resource_ids": [],
+            },
+            blob_prefixes=[],
+        ))
+        await db.flush()
+
+    await _seed_ptu_cost_links(db)
 
     existing = await db.execute(
         text("SELECT id FROM source_connection WHERE code = 'azure-4p'")
     )
     if existing.fetchone():
+        await db.commit()
         await _seed_pivot_views(db)
         return
 

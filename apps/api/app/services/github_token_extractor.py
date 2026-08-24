@@ -37,6 +37,17 @@ CANONICAL_COLUMNS = (
     "total_active_users",
     "editor",
     "language",
+    # Provenance and financial usage (kept separate from IDE activity).
+    "source_kind",
+    "ai_credits",
+    "gross_amount",
+    "discount_amount",
+    "net_amount",
+    "billing_currency",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
 )
 
 
@@ -151,21 +162,40 @@ class GithubTokenExtractor:
             username = str(row.get("username") or "").strip()
             unit_type = str(row.get("unit_type") or "").strip().lower()
             quantity = row.get("quantity") or "0"
+            is_ai_usage_report = any(
+                key in row for key in ("total_monthly_quota", "aic_quantity", "cache_read", "cache_write")
+            )
             records.append(
                 {
                     "day": str(row.get("date") or "")[:10],
                     "assignee_login": username,
                     "aggregation_level": "user" if username else "organization",
-                    "model": str(row.get("sku") or row.get("product") or ""),
-                    "total_suggestions_count": quantity if unit_type != "ai-credits" else "",
-                    "total_acceptances_count": str(row.get("net_amount") or ""),
-                    "total_lines_suggested": str(row.get("gross_amount") or ""),
-                    "total_lines_accepted": str(row.get("discount_amount") or ""),
-                    "total_chat_turns": quantity if unit_type == "ai-credits" else "",
+                    # The AI-credit export is per date + model + user. SKU only
+                    # identifies the billed product and must not replace model.
+                    "model": str(row.get("model") or row.get("sku") or row.get("product") or ""),
+                    # Financial data is never IDE adoption data. In particular,
+                    # discount/gross amounts must not be mapped as accepted lines.
+                    "total_suggestions_count": "",
+                    "total_acceptances_count": "",
+                    "total_lines_suggested": "",
+                    "total_lines_accepted": "",
+                    # Billing quantity is not an IDE chat interaction. Keep it
+                    # in ai_credits so adoption metrics cannot count billing.
+                    "total_chat_turns": "",
                     "total_chat_acceptances": "",
                     "total_active_users": "1" if username else "",
                     "editor": str(row.get("cost_center_name") or ""),
                     "language": unit_type,
+                    "source_kind": "ai_usage_report" if is_ai_usage_report else "billing_report",
+                    "ai_credits": quantity if unit_type in {"ai-credits", "credits"} else "",
+                    "gross_amount": str(row.get("gross_amount") or ""),
+                    "discount_amount": str(row.get("discount_amount") or ""),
+                    "net_amount": str(row.get("net_amount") or ""),
+                    "billing_currency": str(row.get("billing_currency") or row.get("currency") or ""),
+                    "input_tokens": str(row.get("input") or row.get("input_tokens") or ""),
+                    "output_tokens": str(row.get("output") or row.get("output_tokens") or ""),
+                    "cache_read_tokens": str(row.get("cache_read") or row.get("cache_read_tokens") or ""),
+                    "cache_write_tokens": str(row.get("cache_write") or row.get("cache_write_tokens") or ""),
                 }
             )
         return pd.DataFrame(records).fillna("")
@@ -219,6 +249,15 @@ class GithubTokenExtractor:
                         "total_active_users": active_users,
                         "editor": str(item.get("ide") or item.get("editor") or ""),
                         "language": str(item.get("language") or ""),
+                        "source_kind": "copilot_metrics",
+                        "ai_credits": "",
+                        "gross_amount": "",
+                        "discount_amount": "",
+                        "net_amount": "",
+                        "input_tokens": cls._metric(item.get("input_tokens")),
+                        "output_tokens": cls._metric(item.get("output_tokens")),
+                        "cache_read_tokens": cls._metric(item.get("cache_read_tokens")),
+                        "cache_write_tokens": cls._metric(item.get("cache_write_tokens")),
                     }
                 )
             return records
@@ -300,14 +339,14 @@ class GithubTokenExtractor:
         return df[list(CANONICAL_COLUMNS)].fillna("")
 
     def _find_billing_report(
-        self, client: httpx.Client, start_date: str, end_date: str
+        self, client: httpx.Client, start_date: str, end_date: str, report_type: str
     ) -> tuple[str | None, str | None]:
         list_resp = client.get(self._billing_reports_url, headers=self._headers)
         if list_resp.status_code != 200:
             return None, None
         for exp in list_resp.json().get("usage_report_exports", []):
             if (
-                exp.get("report_type") == "detailed"
+                exp.get("report_type") == report_type
                 and exp.get("start_date") == start_date
                 and exp.get("end_date") == end_date
             ):
@@ -315,7 +354,7 @@ class GithubTokenExtractor:
         return None, None
 
     def _fetch_billing_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
-        """Detailed billing CSV export (per-user when available)."""
+        """AI-credit export: per-user, per-model financial usage and tokens."""
         year = int(period[:4])
         month = int(period[4:6])
         last_day = calendar.monthrange(year, month)[1]
@@ -325,18 +364,22 @@ class GithubTokenExtractor:
         end_date = end_date_obj.strftime("%Y-%m-%d")
 
         with httpx.Client(timeout=60) as client:
-            report_id, report_status = self._find_billing_report(client, start_date, end_date)
+            report_id, report_status = self._find_billing_report(
+                client, start_date, end_date, "ai_credit"
+            )
 
             if not report_id or report_status in ("failed", "error", "cancelled"):
                 payload = {
-                    "report_type": "detailed",
+                    "report_type": "ai_credit",
                     "start_date": start_date,
                     "end_date": end_date,
                 }
                 logger.info("[GithubToken] Criando relatório para %s: %s", period, payload)
                 resp = client.post(self._billing_reports_url, headers=self._headers, json=payload)
                 if resp.status_code == 409:
-                    report_id, report_status = self._find_billing_report(client, start_date, end_date)
+                    report_id, report_status = self._find_billing_report(
+                        client, start_date, end_date, "ai_credit"
+                    )
                     logger.info(
                         "[GithubToken] 409 — relatório em andamento, id=%s status=%s",
                         report_id,
@@ -427,36 +470,46 @@ class GithubTokenExtractor:
             return self._normalize_billing_csv(df), str(report_id)
 
     def _fetch_tokens_for_period(self, period: str) -> pd.DataFrame:
+        metrics_df = pd.DataFrame()
         try:
-            df = self._fetch_copilot_metrics_for_period(period)
-            if not df.empty:
-                return df
+            metrics_df = self._fetch_copilot_metrics_for_period(period)
+            if not metrics_df.empty:
+                metrics_df["source_kind"] = "copilot_metrics"
         except RuntimeError as exc:
             logger.warning(
                 "[GithubToken] Copilot usage metrics indisponível para %s: %s",
                 period,
                 exc,
             )
-        logger.warning(
-            "[GithubToken] Copilot metrics vazio para %s; usando billing report CSV",
-            period,
-        )
-        df, _report_id = self._fetch_billing_report_for_period(period)
-        return df
+        try:
+            billing_df, _report_id = self._fetch_billing_report_for_period(period)
+        except Exception as exc:
+            if metrics_df.empty:
+                raise
+            logger.warning("[GithubToken] Billing report indisponível para %s: %s", period, exc)
+            billing_df = pd.DataFrame()
+        if metrics_df.empty:
+            logger.warning("[GithubToken] Copilot metrics vazio para %s; usando billing report CSV", period)
+            return billing_df
+        if billing_df.empty:
+            return metrics_df
+        return pd.concat([metrics_df, billing_df], ignore_index=True, sort=False).fillna("")
 
     def _fetch_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
+        metrics_df = pd.DataFrame()
         try:
-            df = self._fetch_copilot_metrics_for_period(period)
-            if not df.empty:
-                return df, f"github_copilot_metrics_{period}"
+            metrics_df = self._fetch_copilot_metrics_for_period(period)
+            if not metrics_df.empty:
+                metrics_df["source_kind"] = "copilot_metrics"
         except RuntimeError as exc:
             logger.warning(
                 "[GithubToken] Copilot usage metrics indisponível para %s: %s",
                 period,
                 exc,
             )
-        logger.warning(
-            "[GithubToken] Copilot metrics vazio para %s; usando billing report CSV",
-            period,
-        )
-        return self._fetch_billing_report_for_period(period)
+        billing_df, report_id = self._fetch_billing_report_for_period(period)
+        if metrics_df.empty:
+            return billing_df, report_id
+        if billing_df.empty:
+            return metrics_df, f"github_copilot_metrics_{period}"
+        return pd.concat([metrics_df, billing_df], ignore_index=True, sort=False).fillna(""), report_id

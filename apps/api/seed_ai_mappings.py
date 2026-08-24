@@ -219,6 +219,16 @@ GITHUB_TOKEN_MAPPINGS: list[dict] = [
     {"source_column": "total_active_users", "destination_column": "ActiveUsersCount", "transform_type": "RENAME"},
     {"source_column": "editor", "destination_column": "Editor", "transform_type": "RENAME"},
     {"source_column": "language", "destination_column": "Language", "transform_type": "RENAME"},
+    {"source_column": "source_kind", "destination_column": "SourceKind", "transform_type": "RENAME"},
+    {"source_column": "input_tokens", "destination_column": "InputTokens", "transform_type": "RENAME"},
+    {"source_column": "output_tokens", "destination_column": "OutputTokens", "transform_type": "RENAME"},
+    {"source_column": "cache_read_tokens", "destination_column": "CacheReadTokens", "transform_type": "RENAME"},
+    {"source_column": "cache_write_tokens", "destination_column": "CacheWriteTokens", "transform_type": "RENAME"},
+    {"source_column": "ai_credits", "destination_column": "CreditsAmount", "transform_type": "RENAME"},
+    {"source_column": "gross_amount", "destination_column": "GrossAmount", "transform_type": "RENAME"},
+    {"source_column": "discount_amount", "destination_column": "DiscountAmount", "transform_type": "RENAME"},
+    {"source_column": "net_amount", "destination_column": "NetAmount", "transform_type": "RENAME"},
+    {"source_column": "billing_currency", "destination_column": "BillingCurrency", "transform_type": "RENAME"},
     *_const_mappings(PROVIDER_META["github_token"]),
 ]
 

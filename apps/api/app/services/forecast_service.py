@@ -567,7 +567,7 @@ async def _fetch_invoice_cloud_cutoffs(
     sql = f"""
         WITH latest_period AS (
             SELECT
-                CAST({_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                CAST({_q(cloud_col)} AS VARCHAR) AS latest_cloud,
                 MAX(CAST({_q(period_col)} AS VARCHAR)) AS max_period
             FROM {source}
             WHERE {type_filter}{extra}
@@ -578,7 +578,7 @@ async def _fetch_invoice_cloud_cutoffs(
             MAX(COALESCE({charge_end_expr}, {period_end})) AS collected_through
         FROM {source} g
         INNER JOIN latest_period lp
-            ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.cloud_origem
+            ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.latest_cloud
            AND CAST(g.{_q(period_col)} AS VARCHAR) = lp.max_period
         WHERE {type_filter}{extra}
         GROUP BY 1
@@ -670,7 +670,7 @@ async def _fetch_cloud_cutoffs(
         sql = f"""
             WITH latest_period AS (
                 SELECT
-                    CAST({_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                    CAST({_q(cloud_col)} AS VARCHAR) AS latest_cloud,
                     MAX(CAST({_q(period_col)} AS VARCHAR)) AS max_period
                 FROM {source}
                 WHERE {type_filter}
@@ -681,7 +681,7 @@ async def _fetch_cloud_cutoffs(
                 MAX({date_expr}) AS collected_through
             FROM {source} g
             INNER JOIN latest_period lp
-                ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.cloud_origem
+                ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.latest_cloud
                AND CAST(g.{_q(period_col)} AS VARCHAR) = lp.max_period
             WHERE {type_filter}
             GROUP BY 1

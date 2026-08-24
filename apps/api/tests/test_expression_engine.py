@@ -76,3 +76,22 @@ def test_gcp_credit_realizado_rule_priority_order():
     assert df.loc[1, "realizado"] == pytest.approx(6.0)
     assert df.loc[2, "realizado"] == pytest.approx(1.0)
     assert df["realizado"].sum() == pytest.approx(107.0)
+
+
+def test_azure_marketplace_rule_wins_before_generic_azure_tax():
+    """A Marketplace row must retain 13.83%, not be overwritten by 18.61%."""
+    df = pd.DataFrame({
+        "MarketplaceProductName": ["Teradata", None],
+        "BilledCost": [100.0, 100.0],
+        "realizado": [None, None],
+    })
+    evaluate_conditional(df, [{
+        "field": "MarketplaceProductName",
+        "op": "not_empty",
+        "then_field": "realizado",
+        "then_value": "BilledCost * 1.1383",
+    }])
+    evaluate_expression(df, "BilledCost * 1.186065", "realizado")
+
+    assert df.loc[0, "realizado"] == pytest.approx(113.83)
+    assert df.loc[1, "realizado"] == pytest.approx(118.6065)

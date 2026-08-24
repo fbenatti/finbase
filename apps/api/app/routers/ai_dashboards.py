@@ -173,7 +173,7 @@ def _prov_filter(provider: str | None, alias: str = "") -> str:
 
 def _cons_metric_expr(metric: MetricKind) -> str:
     if metric == "cost":
-        return "COALESCE(TRY_CAST(\"AllocatedCost\" AS DOUBLE), TRY_CAST(\"BilledCost\" AS DOUBLE), 0)"
+        return "COALESCE(TRY_CAST(\"AllocatedCost\" AS DOUBLE), TRY_CAST(\"realizado\" AS DOUBLE), TRY_CAST(\"BilledCost\" AS DOUBLE), 0)"
     return """COALESCE(
       NULLIF(TRY_CAST("TotalTokens" AS DOUBLE), 0),
       TRY_CAST("AcceptancesCount" AS DOUBLE),
@@ -607,7 +607,7 @@ async def ai_consumption(body: AIConsumptionRequest, request: Request, db: Async
             SELECT
               COALESCE(NULLIF(TRIM(CAST("Provider" AS VARCHAR)), ''), 'unknown') AS provider,
               COALESCE(NULLIF(TRIM(CAST("ModelName" AS VARCHAR)), ''), 'all') AS model_name,
-              SUM(COALESCE(TRY_CAST("BilledCost" AS DOUBLE), TRY_CAST("AllocatedCost" AS DOUBLE), 0)) AS cost,
+              SUM(COALESCE(TRY_CAST("AllocatedCost" AS DOUBLE), TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0)) AS cost,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS tokens
             FROM iceberg.gold.{CONS_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}

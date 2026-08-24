@@ -3,13 +3,14 @@ import {
   Box,
   Chip,
   Divider,
+  IconButton,
   Menu,
   MenuItem,
   Stack,
   Tooltip,
   Typography,
 } from "@mui/material";
-import { FilterAlt } from "@mui/icons-material";
+import { FilterAlt, Replay } from "@mui/icons-material";
 import {
   DataGrid,
   GridColDef,
@@ -30,6 +31,7 @@ type Props = {
   rows: ReprocessStatus[];
   total: number;
   loading: boolean;
+  onReprocess?: (row: ReprocessStatus) => void;
   onQuery: (query: {
     offset: number;
     limit: number;
@@ -52,6 +54,7 @@ export default function ReprocessHistoryDataGrid({
   rows,
   total,
   loading,
+  onReprocess,
   onQuery,
 }: Props) {
   const apiRef = useGridApiRef();
@@ -67,6 +70,7 @@ export default function ReprocessHistoryDataGrid({
     mouseY: number;
     field: string;
     value: string;
+    row: ReprocessStatus | null;
   } | null>(null);
   const [headerContext, setHeaderContext] = useState<{
     mouseX: number;
@@ -159,7 +163,35 @@ export default function ReprocessHistoryDataGrid({
         row.finished_at ? new Date(row.finished_at) : null,
       valueFormatter: (value) => formatDateTime(value),
     },
-  ], [activeFilters]);
+    {
+      field: "actions",
+      headerName: "Ações",
+      minWidth: 90,
+      sortable: false,
+      filterable: false,
+      renderCell: ({ row }: { row: ReprocessStatus }) => {
+        const isActionDisabled = row.status === "RUNNING" || row.status === "QUEUED" || !onReprocess;
+        const isFailed = row.status === "FAILED";
+        return (
+          <Tooltip title={isFailed ? "Reprocessar carga com falha" : "Reprocessar esta execução"}>
+            <span>
+              <IconButton
+                size="small"
+                color={isFailed ? "error" : "primary"}
+                disabled={isActionDisabled}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReprocess?.(row);
+                }}
+              >
+                <Replay fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        );
+      },
+    },
+  ], [activeFilters, onReprocess]);
 
   const query = (
     next: Partial<{
@@ -233,6 +265,7 @@ export default function ReprocessHistoryDataGrid({
         mouseY: event.clientY - 4,
         field,
         value,
+        row: row || null,
       });
     }
   };
@@ -361,6 +394,19 @@ export default function ReprocessHistoryDataGrid({
           context ? { top: context.mouseY, left: context.mouseX } : undefined
         }
       >
+        {onReprocess && context?.row && context.row.status !== "RUNNING" && context.row.status !== "QUEUED" && (
+          <MenuItem
+            onClick={() => {
+              if (context.row) onReprocess(context.row);
+              setContext(null);
+            }}
+          >
+            Reprocessar esta execução
+          </MenuItem>
+        )}
+        {onReprocess && context?.row && (
+          <Divider />
+        )}
         <MenuItem onClick={() => applyContextFilter("equals")}>
           Mostrar iguais
         </MenuItem>

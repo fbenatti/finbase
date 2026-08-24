@@ -74,3 +74,34 @@ def rule_matches_cloud(
     if effective == "atlas":
         effective = "mongodb"
     return rscope == effective
+
+
+def rule_matches_connection(
+    rule_connection_id: int | None,
+    connection_id: int,
+) -> bool:
+    """Whether a rule is global to its destination or belongs to this source.
+
+    Destination rules with a null ``connection_id`` are intentionally shared
+    by every connection mapped to that destination. A connection-specific rule
+    must only run for its owning source.
+    """
+    return rule_connection_id is None or rule_connection_id == connection_id
+
+
+def rule_matches_destination(
+    rule_destination_table_id: int | None,
+    destination_table_id: int,
+    *,
+    is_focus_destination: bool,
+) -> bool:
+    """Whether a rule belongs to the destination currently being rebuilt.
+
+    Old FOCUS rules predate destination tables and have a null destination id.
+    They remain valid only while rebuilding MODELO FOCUS.  A null id must not
+    become a wildcard for newer destination tables.
+    """
+    return (
+        rule_destination_table_id == destination_table_id
+        or (is_focus_destination and rule_destination_table_id is None)
+    )

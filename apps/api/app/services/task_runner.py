@@ -1328,6 +1328,14 @@ def _process_github_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
+            # GitHub token reports are snapshots. Remove the prior period slice
+            # before writing the refreshed report so a metrics fallback cannot
+            # coexist with an older billing snapshot for the same month.
+            iceberg.delete_bronze_slice(
+                conn.code,
+                blob_path=blob_path,
+                billing_period=billing_period,
+            )
             iceberg.write_bronze(conn.code, df, billing_period, blob_path)
         except Exception as exc:
             logger.error("Bronze write failed for GitHub Token (%s): %s", blob_path, exc)
@@ -2402,7 +2410,69 @@ def _run_etl_sync(
             return
 
         conn = session.get(SourceConnection, connection_id)
-        if not conn or conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
+        if not conn:
+            result.status = "FAILED"
+            result.errors = ["Invalid connection"]
+            result.finished_at = datetime.now(timezone.utc)
+            session.commit()
+            status["status"] = "FAILED"
+            return
+
+        # PTU is an operational ARM/Monitor source, not a blob ETL source.
+        # Keep this fallback here so queued jobs also work when picked up by
+        # an older worker process that predates the dedicated worker branch.
+        if conn.connector_type == "azure_openai_ptu":
+            from app.services.azure_ptu_service import run_ptu_collection, resolve_ptu_collection_params
+            task_json = result.result_json or {}
+            cfg = dict(conn.config_json or {})
+            params = resolve_ptu_collection_params(
+                task_json=task_json,
+                config=cfg,
+                billing_periods=force_periods,
+                session=session,
+                connection_id=connection_id,
+            )
+            payload = run_ptu_collection(
+                session,
+                connection_id,
+                lookback_hours=params["lookback_hours"],
+                backfill_days=params["backfill_days"],
+                periods=params["periods"],
+                task_id=task_id,
+            )
+            session.commit()
+            metrics = payload.get("metrics") or []
+            persisted = payload.get("persisted") or {}
+            collected_periods = payload.get("billing_periods") or []
+            result.status = "COMPLETED"
+            result.result_json = {
+                "inventory": payload.get("inventory"),
+                "metrics_count": len(metrics),
+                "source": payload.get("source"),
+                "billing_periods": collected_periods,
+                "persisted": persisted,
+                "backfill_days": params["backfill_days"],
+                "periods": params["periods"],
+            }
+            result.billing_periods = collected_periods
+            result.phase = (
+                f"Azure PTU backfill: {len(metrics)} registros"
+                if params["backfill_days"]
+                else (
+                    f"Azure PTU período: {len(metrics)} registros"
+                    if params["periods"]
+                    else f"Azure PTU: {len(metrics)} registros em {len(collected_periods)} mês(es)"
+                )
+            )
+            result.finished_at = datetime.now(timezone.utc)
+            result.rows_destination = persisted.get("gold_metrics", 0)
+            result.rows_raw = persisted.get("bronze", 0)
+            result.errors = []
+            session.commit()
+            status["status"] = "COMPLETED"
+            return
+
+        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -2825,6 +2895,7 @@ def get_task_status(task_id: int) -> dict | None:
                 status["rows_normalized"] = row.rows_normalized
                 status["rows_destination"] = row.rows_destination
                 status["current_blob"] = row.current_blob
+                status["phase"] = row.phase or status.get("phase", "")
                 status["total_download_bytes"] = row.total_download_bytes
                 status["downloaded_bytes_total"] = row.downloaded_bytes_total
                 status["current_blob_size"] = row.current_blob_size
@@ -2832,6 +2903,10 @@ def get_task_status(task_id: int) -> dict | None:
                 status["active_downloads"] = row.active_downloads
                 status["download_blobs"] = row.download_blobs or []
                 status["errors"] = row.errors or []
+                if row.connection_id:
+                    conn = db.get(SourceConnection, row.connection_id)
+                    if conn:
+                        status["connector_type"] = conn.connector_type
         except Exception:
             pass
         return status
@@ -2847,9 +2922,14 @@ def get_task_status(task_id: int) -> dict | None:
         row = db.get(EtlTask, task_id)
         db.close()
         if row:
+            connector_type = None
+            if row.connection_id:
+                conn = db.get(SourceConnection, row.connection_id)
+                connector_type = conn.connector_type if conn else None
             return {
                 "id": row.id,
                 "connection_id": row.connection_id,
+                "connector_type": connector_type,
                 "status": row.status,
                 "task_type": row.task_type,
                 "total_blobs": row.total_blobs,
@@ -2908,12 +2988,17 @@ def get_running_tasks() -> list[dict]:
         )
         existing_ids = {t.get("id") for t in tasks}
         for dt in db_tasks:
+            connector_type = None
+            if dt.connection_id:
+                conn = db.get(SourceConnection, dt.connection_id)
+                connector_type = conn.connector_type if conn else None
             entry = {
                 "id": dt.id,
                 "type": dt.task_type,
                 "status": dt.status,
                 "task_type": dt.task_type,
                 "connection_id": dt.connection_id,
+                "connector_type": connector_type,
                 "destination_table_id": dt.destination_table_id,
                 "connection_ids": dt.connection_ids or [],
                 "total_blobs": dt.total_blobs,

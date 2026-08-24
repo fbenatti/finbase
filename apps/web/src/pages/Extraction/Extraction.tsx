@@ -19,6 +19,7 @@ import {
   processDestinationTables,
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   getExtractionHistory, ExtractionHistoryItem,
+  getAvailablePeriods, AvailablePeriod,
   ScheduledTask,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
   SCANNABLE_CONNECTOR_TYPES, formatApiError,
@@ -119,6 +120,38 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     () => !!uploadConn || extractableConnections.some((c) => c.id === connId && c.connector_type === "manual_csv"),
     [extractableConnections, connId, uploadConn],
   );
+  const isAzurePtuSelected = useMemo(
+    () => extractableConnections.some((c) => c.id === connId && c.connector_type === "azure_openai_ptu"),
+    [extractableConnections, connId],
+  );
+  const [ptuPeriods, setPtuPeriods] = useState<AvailablePeriod[]>([]);
+  const [selPtuPeriods, setSelPtuPeriods] = useState<string[]>([]);
+  const [loadingPtuPeriods, setLoadingPtuPeriods] = useState(false);
+
+  const formatPtuPeriod = (period: string) => {
+    if (period.length !== 6) return period;
+    return `${period.slice(4)}/${period.slice(0, 4)}`;
+  };
+
+  useEffect(() => {
+    if (!connId || !isAzurePtuSelected) {
+      setPtuPeriods([]);
+      setSelPtuPeriods([]);
+      return;
+    }
+    setLoadingPtuPeriods(true);
+    getAvailablePeriods(connId as number)
+      .then((rows) => {
+        setPtuPeriods(rows);
+        const current = rows[0]?.period;
+        setSelPtuPeriods(current ? [current] : []);
+      })
+      .catch(() => {
+        setPtuPeriods([]);
+        setSelPtuPeriods([]);
+      })
+      .finally(() => setLoadingPtuPeriods(false));
+  }, [connId, isAzurePtuSelected]);
 
   useEffect(() => {
     getConnections().then((list) => {
@@ -159,7 +192,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     finally { setScanning(false); }
   };
 
-  const doRun = async () => {
+  const doRun = async (mode: "incremental" | "period" | "backfill" = "incremental") => {
     if (!connId) return;
     setError(""); setTask(null);
     const visibleSelected = scanResult
@@ -167,7 +200,21 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       : Array.from(selectedPaths);
     const paths = visibleSelected.length > 0 ? visibleSelected : undefined;
     try {
-      const result = await runEtl({ connection_id: connId as number, selected_blobs: paths });
+      const body: Parameters<typeof runEtl>[0] = { connection_id: connId as number, selected_blobs: paths };
+      if (isAzurePtuSelected) {
+        if (mode === "period") {
+          if (selPtuPeriods.length === 0) {
+            setError("Selecione ao menos um mês para buscar métricas históricas.");
+            return;
+          }
+          body.force_periods = selPtuPeriods;
+        } else if (mode === "backfill") {
+          body.backfill = true;
+        } else if (mode === "incremental") {
+          body.lookback_hours = 3;
+        }
+      }
+      const result = await runEtl(body);
       if (result.task_id === 0) {
         setError(result.message || "ETL not available for this connector type");
         return;
@@ -438,6 +485,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
   const isTerminal = task?.status ? ["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELLED", "CANCELLING"].includes(task.status) : false;
   const isQueued = task?.status === "QUEUED";
+  const isPtuTask = isAzurePtuSelected || task?.connector_type === "azure_openai_ptu" || /azure ptu/i.test(task?.phase || "");
   const progress = task && task.total_blobs > 0
     ? isTerminal ? 100 : (task.processed_blobs / task.total_blobs) * 100
     : isTerminal ? 100 : 0;
@@ -496,14 +544,35 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           </Button>
         ) : (
           <>
-            <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
+            {!isAzurePtuSelected && <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
               {scanning ? "Escaneando..." : "Escanear"}
-            </Button>
-            <Button variant="contained" startIcon={<PlayArrow />} onClick={doRun}
+            </Button>}
+            <Button variant="contained" startIcon={<PlayArrow />} onClick={() => doRun("backfill")}
               disabled={isActive || !connId || !!task?.status?.includes("CANCELLING")}
-              color={hasSelection ? "success" : "primary"}>
-              {hasSelection ? `Importar ${visibleSelectedCount} selecionados` : "Importar Todos"}
+              color="primary">
+              {isAzurePtuSelected ? "Importar todos os dados disponíveis (~93 dias)" : (hasSelection ? `Importar ${visibleSelectedCount} selecionados` : "Importar Todos")}
             </Button>
+            {isAzurePtuSelected && (
+              <>
+                <Button
+                  variant="outlined"
+                  startIcon={<PlayArrow />}
+                  onClick={() => doRun("incremental")}
+                  disabled={isActive || !connId}
+                >
+                  Coletar recente (lookback 3h)
+                </Button>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={<PlayArrow />}
+                  onClick={() => doRun("period")}
+                  disabled={isActive || !connId || selPtuPeriods.length === 0 || loadingPtuPeriods}
+                >
+                  Buscar métricas do período
+                </Button>
+              </>
+            )}
             <Button variant="outlined" color="warning" startIcon={<DeleteForever />} onClick={doResetSource}
               disabled={isActive || !connId}>
               Reprocessar origem limpa
@@ -543,6 +612,37 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{sourceResetMessage}</Alert>}
 
+      {isAzurePtuSelected && connId && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            Azure Monitor retém métricas de plataforma por <strong>~93 dias</strong>. Use <strong>Importar todos os dados disponíveis</strong>
+            para carregar o histórico completo (~93 dias) em <code>dest_azure_ptu_metrics</code>, ou <strong>Buscar métricas do período</strong>
+            para um mês específico. O agendamento horário (:10) coleta apenas o lookback recente (~3h).
+          </Typography>
+          {loadingPtuPeriods ? (
+            <CircularProgress size={18} />
+          ) : ptuPeriods.length > 0 ? (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {ptuPeriods.map((p) => (
+                <Chip
+                  key={p.period}
+                  label={`${p.label || formatPtuPeriod(p.period)} (${p.blob_count} janelas)`}
+                  size="small"
+                  variant={selPtuPeriods.includes(p.period) ? "filled" : "outlined"}
+                  color={selPtuPeriods.includes(p.period) ? "primary" : "default"}
+                  onClick={() => setSelPtuPeriods(prev =>
+                    prev.includes(p.period) ? prev.filter(x => x !== p.period) : [...prev, p.period]
+                  )}
+                  sx={{ cursor: "pointer" }}
+                />
+              ))}
+            </Stack>
+          ) : (
+            <Typography variant="caption" color="text.secondary">Nenhum mês disponível dentro da retenção Monitor.</Typography>
+          )}
+        </Alert>
+      )}
+
       {extractableConnections.find(c => c.id === connId)?.connector_type === "oci" && (
         <Alert severity="info" sx={{ mb: 2 }}>
           <strong>Consolidação Inteligente OCI:</strong> Os dados da Oracle Cloud são agrupados e consolidados por dia e recurso para garantir alta performance e tabelas otimizadas, preservando 100% dos valores financeiros, quantidades e tags de negócio.
@@ -553,9 +653,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         <Box sx={{ display: "flex", alignItems: "center", gap: 2, my: 4, p: 3, bgcolor: "#f5f5f5", borderRadius: 2 }}>
           <CircularProgress size={28} />
           <Box>
-            <Typography variant="body1" fontWeight={500}>Escaneando blobs...</Typography>
+            <Typography variant="body1" fontWeight={500}>
+              {isAzurePtuSelected ? "Descobrindo deployments PTU..." : "Escaneando blobs..."}
+            </Typography>
             <Typography variant="caption" color="text.secondary">
-              Buscando arquivos disponiveis na fonte de dados
+              {isAzurePtuSelected
+                ? "Consulta ARM Resource Graph e deployments com SKU provisionado"
+                : "Buscando arquivos disponiveis na fonte de dados"}
             </Typography>
           </Box>
         </Box>
@@ -568,6 +672,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             <Typography variant="body2">
               {isQueued ? (
                 "Aguardando worker..."
+              ) : isPtuTask ? (
+                <>
+                  {task.total_blobs > 0
+                    ? `${task.processed_blobs} / ${task.total_blobs} janelas Monitor`
+                    : "Coleta ARM/Monitor em andamento"}
+                  {" | "}{(task.rows_destination ?? 0).toLocaleString()} registros Gold
+                </>
               ) : (
                 <>
                   {task.processed_blobs} / {task.total_blobs || "?"} blobs
@@ -579,14 +690,14 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             </Typography>
           </Box>
           <LinearProgress
-            variant={isQueued ? "indeterminate" : (task.total_blobs || isTerminal ? "determinate" : "indeterminate")}
+            variant={isQueued || (isPtuTask && !task.total_blobs && !isTerminal) ? "indeterminate" : (task.total_blobs || isTerminal ? "determinate" : "indeterminate")}
             value={isQueued ? 0 : progress}
             color={isQueued ? "warning" : (isTerminal && task.status !== "FAILED" ? "success" : "primary")}
             sx={{ mb: 1 }}
           />
 
           {/* Download status — only for RUNNING tasks with download data */}
-          {isRunning && (
+          {isRunning && !isPtuTask && (
             <Box sx={{ mb: 1 }}>
               {/* Per-blob download bar */}
               {task.current_blob && dlBlobSize > 0 && (
@@ -643,14 +754,15 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
               <Box sx={{ mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1, border: "1px solid #dbe3ef" }}>
                 <Typography variant="caption" fontWeight={700} sx={{ display: "block" }}>
-                  Importação para Iceberg
+                  {isPtuTask ? "Coleta operacional Azure PTU" : "Importação para Iceberg"}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                  O download concluído não significa que a importação terminou.
-                  A sequência é: Leitura CSV → Bronze → Silver/Gold → concluído.
+                  {isPtuTask
+                    ? "Sequência: descoberta ARM → Azure Monitor (janelas de até 30 dias) → persistência horária em dest_azure_ptu_metrics."
+                    : "O download concluído não significa que a importação terminou. A sequência é: Leitura CSV → Bronze → Silver/Gold → concluído."}
                 </Typography>
                 <Typography variant="caption" color="primary.main" sx={{ display: "block", mt: 0.25 }}>
-                  {task.phase || "Aguardando início da importação"}
+                  {task.phase || (isPtuTask ? "Aguardando início da coleta PTU" : "Aguardando início da importação")}
                 </Typography>
               </Box>
 

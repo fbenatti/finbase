@@ -38,6 +38,7 @@ from app.models.skipped_blob import SkippedBlob
 from app.models.fact_cost import FactCost
 from app.models.period_status import PeriodStatus
 from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun
+from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject
 from sqlalchemy import select, text
 
 POLL_INTERVAL = 2  # seconds between polls when idle
@@ -113,9 +114,18 @@ def main():
     try:
         # A process restart cannot resume a Python stack safely. Make stale
         # RUNNING rows visible as failures instead of leaving them hanging.
+        # Azure PTU extractions are re-queued so long Monitor backfills can resume.
+        from app.models.source_connection import SourceConnection as _StartupConnection
         stale = startup.execute(select(EtlTask).where(EtlTask.status == "RUNNING")).scalars().all()
         stale_forecast_run_ids: set[int] = set()
         for row in stale:
+            if row.task_type == "extraction" and row.connection_id:
+                conn = startup.get(_StartupConnection, row.connection_id)
+                if conn and conn.connector_type == "azure_openai_ptu":
+                    row.status = "QUEUED"
+                    row.phase = "Reenfileirado após reinício do worker"
+                    row.finished_at = None
+                    continue
             row.status = "FAILED"
             row.phase = "Worker reiniciado; tarefa RUNNING anterior foi encerrada"
             row.finished_at = datetime.now(timezone.utc)
@@ -272,6 +282,7 @@ def main():
 
                     # Mark as RUNNING so no other worker picks it up
                     task.status = "RUNNING"
+                    task_json = dict(task.result_json or {})
                     session.commit()
                     session.close()
 
@@ -279,34 +290,96 @@ def main():
                         from app.routers.etl import _reprocess_destination_sync
                         from app.routers.etl import _append_reprocess_log
                         from app.services.task_runner import _inmemory_tasks
+                        from app.models.source_connection import SourceConnection as _ReprocessConnection
 
-                        # Seed the in-memory task dict that _reprocess_destination_sync
-                        # uses for progress tracking and _sync_db back into the DB row.
-                        _inmemory_tasks[task_id] = {
-                            "id": task_id,
-                            "type": "reprocess",
-                            "status": "RUNNING",
-                            "task_type": "reprocess",
-                            "destination_table_id": dest_id,
-                            "connection_ids": conn_ids,
-                            "billing_periods": periods,
-                            "total_blobs": 0,
-                            "processed_blobs": 0,
-                            "rows_destination": 0,
-                            "current_blob": "inicializando",
-                            "table": "",
-                            "errors": [],
-                        }
-                        _append_reprocess_log(task_id, "Worker assumiu a tarefa da fila")
+                        ptu_session = SyncSession()
+                        try:
+                            conn_rows = [
+                                ptu_session.get(_ReprocessConnection, cid) for cid in conn_ids
+                            ]
+                            is_ptu_reprocess = bool(conn_ids) and all(
+                                row and row.connector_type == "azure_openai_ptu" for row in conn_rows
+                            )
+                        finally:
+                            ptu_session.close()
 
-                        result = _reprocess_destination_sync(
-                            task_id,
-                            dest_id,
-                            conn_ids,
-                            periods,
-                            replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
-                            publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
-                        )
+                        if is_ptu_reprocess:
+                            from app.services.azure_ptu_service import run_ptu_collection
+
+                            _inmemory_tasks[task_id] = {
+                                "id": task_id,
+                                "type": "reprocess",
+                                "status": "RUNNING",
+                                "task_type": "reprocess",
+                                "destination_table_id": dest_id,
+                                "connection_ids": conn_ids,
+                                "billing_periods": periods,
+                                "total_blobs": 0,
+                                "processed_blobs": 0,
+                                "rows_destination": 0,
+                                "current_blob": "Coleta histórica Azure PTU",
+                                "table": "",
+                                "errors": [],
+                            }
+                            _append_reprocess_log(task_id, "Worker assumiu coleta histórica Azure PTU")
+                            from app.services.azure_ptu_service import resolve_ptu_collection_params
+
+                            total_written = 0
+                            for conn in conn_rows:
+                                if not conn:
+                                    continue
+                                collect_session = SyncSession()
+                                try:
+                                    cfg = dict(conn.config_json or {})
+                                    params = resolve_ptu_collection_params(
+                                        task_json=task_json,
+                                        config=cfg,
+                                        billing_periods=periods,
+                                    )
+                                    payload = run_ptu_collection(
+                                        collect_session,
+                                        conn.id,
+                                        lookback_hours=params["lookback_hours"],
+                                        backfill_days=params["backfill_days"],
+                                        periods=params["periods"],
+                                        task_id=task_id,
+                                    )
+                                finally:
+                                    collect_session.close()
+                                total_written += int((payload.get("persisted") or {}).get("gold_metrics") or 0)
+                            result = {
+                                "success": True,
+                                "rows_written": total_written,
+                                "table": "dest_azure_ptu_metrics",
+                            }
+                        else:
+                            # Seed the in-memory task dict that _reprocess_destination_sync
+                            # uses for progress tracking and _sync_db back into the DB row.
+                            _inmemory_tasks[task_id] = {
+                                "id": task_id,
+                                "type": "reprocess",
+                                "status": "RUNNING",
+                                "task_type": "reprocess",
+                                "destination_table_id": dest_id,
+                                "connection_ids": conn_ids,
+                                "billing_periods": periods,
+                                "total_blobs": 0,
+                                "processed_blobs": 0,
+                                "rows_destination": 0,
+                                "current_blob": "inicializando",
+                                "table": "",
+                                "errors": [],
+                            }
+                            _append_reprocess_log(task_id, "Worker assumiu a tarefa da fila")
+
+                            result = _reprocess_destination_sync(
+                                task_id,
+                                dest_id,
+                                conn_ids,
+                                periods,
+                                replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
+                                publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
+                            )
                         print(f"Task {task_id} completed: {result}")
 
                         # Persist the terminal state explicitly.  The
@@ -450,6 +523,73 @@ def main():
                             "errors": [],
                         }
 
+                        # Azure PTU is collected from ARM/Monitor and does
+                        # not have blobs.  Keep it in the same extraction
+                        # queue so the UI can start/monitor it, while leaving
+                        # the existing blob ETL untouched.
+                        from app.database import SyncSession as _PtuSession
+                        _ptu_session = _PtuSession()
+                        try:
+                            from app.models.source_connection import SourceConnection as _PtuConnection
+                            _ptu_conn = _ptu_session.get(_PtuConnection, conn_id)
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_openai_ptu":
+                                from app.services.azure_ptu_service import run_ptu_collection, resolve_ptu_collection_params
+                                _ptu_task = _ptu_session.get(EtlTask, task_id)
+                                _task_json = (_ptu_task.result_json or {}) if _ptu_task else {}
+                                _cfg = dict(_ptu_conn.config_json or {})
+                                _params = resolve_ptu_collection_params(
+                                    task_json=_task_json,
+                                    config=_cfg,
+                                    billing_periods=periods or None,
+                                    session=_ptu_session,
+                                    connection_id=_ptu_conn.id,
+                                )
+                                _result = run_ptu_collection(
+                                    _ptu_session,
+                                    _ptu_conn.id,
+                                    lookback_hours=_params["lookback_hours"],
+                                    backfill_days=_params["backfill_days"],
+                                    periods=_params["periods"],
+                                    task_id=task_id,
+                                )
+                                _ptu_metrics = _result.get("metrics") or []
+                                _ptu_periods = _result.get("billing_periods") or []
+                                _persisted = _result.get("persisted") or {}
+                                _backfill_days = _params["backfill_days"]
+                                _selected_periods = _params["periods"]
+                                t2 = _ptu_session.get(EtlTask, task_id)
+                                if t2:
+                                    t2.status = "COMPLETED"
+                                    t2.phase = (
+                                        f"Azure PTU backfill: {len(_ptu_metrics)} registros"
+                                        if _backfill_days
+                                        else (
+                                            f"Azure PTU período: {len(_ptu_metrics)} registros"
+                                            if _selected_periods
+                                            else f"Azure PTU: {len(_ptu_metrics)} registros em {len(_ptu_periods)} mês(es)"
+                                        )
+                                    )
+                                    t2.billing_periods = _ptu_periods
+                                    t2.rows_raw = _persisted.get("bronze", 0)
+                                    t2.rows_destination = _persisted.get("gold_metrics", 0)
+                                    t2.errors = []
+                                    t2.result_json = {
+                                        "inventory": _result.get("inventory"),
+                                        "metrics_count": len(_ptu_metrics),
+                                        "source": _result.get("source"),
+                                        "billing_periods": _ptu_periods,
+                                        "persisted": _persisted,
+                                        "backfill_days": _backfill_days,
+                                        "periods": _selected_periods,
+                                    }
+                                    t2.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
+                        finally:
+                            _ptu_session.close()
+
                         _run_etl_sync(task_id, conn_id, selected or None, periods)
 
                         # Clean up in-memory entry
@@ -468,6 +608,7 @@ def main():
                                 t2.status = "FAILED"
                                 t2.phase = f"Erro: {e}"[:200]
                                 t2.current_blob = f"Erro: {e}"[:500]
+                                t2.finished_at = datetime.now(timezone.utc)
                                 s2.commit()
                         finally:
                             s2.close()

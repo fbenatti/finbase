@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, ai_cost_origin
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, ai_cost_origin, azure_ptu
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -26,7 +26,8 @@ async def lifespan(app: FastAPI):
         from app.models.planning import FinancialType, PlanningVersion, PlanningEntry  # noqa: F401
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
-        from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation  # noqa: F401
+        from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
+        from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
@@ -98,8 +99,18 @@ async def lifespan(app: FastAPI):
               created_at TIMESTAMPTZ DEFAULT now()
             )""",
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_provider ON ai_cost_link (provider)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS target_type VARCHAR(30) NOT NULL DEFAULT 'license_pool'",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS operational_connection_id INTEGER",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS department_id INTEGER",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS project_key VARCHAR(120)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS purchase_mode VARCHAR(30)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS deployment_type VARCHAR(40)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS cost_component VARCHAR(40)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS allocation_level VARCHAR(30)",
+            "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_target_type ON ai_cost_link (target_type)",
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_source_link ON ai_cost_link_source (link_id)",
-            "CREATE INDEX IF NOT EXISTS ix_ai_cost_allocation_link_period ON ai_cost_allocation (link_id, billing_period)",
+            "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS description TEXT",
+            "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS department_id INTEGER",
         ):
             await conn.execute(text(statement))
         await conn.execute(text("""
@@ -221,6 +232,7 @@ app.include_router(rules.router)
 app.include_router(periods.router)
 app.include_router(analysis.router)
 app.include_router(ai_dashboards.router)
+app.include_router(ai_copilot.router)
 app.include_router(destinations.router)
 app.include_router(schema.router)
 app.include_router(forecast.router)
@@ -229,6 +241,7 @@ app.include_router(planning.router)
 app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
 app.include_router(ai_cost_origin.router)
+app.include_router(azure_ptu.router)
 
 
 @app.get("/health")

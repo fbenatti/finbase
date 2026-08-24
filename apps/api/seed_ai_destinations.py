@@ -102,6 +102,7 @@ CONSUMPTION_COLUMNS = [
     ("CacheWriteTokens", "NUMERIC"),
     ("TotalTokens", "NUMERIC"),
     ("RequestCount", "NUMERIC"),
+    ("SourceKind", "TEXT"),
     # GitHub coding activity
     ("SuggestionsCount", "NUMERIC"),
     ("AcceptancesCount", "NUMERIC"),
@@ -135,6 +136,10 @@ CONSUMPTION_COLUMNS = [
     ("CostCurrency", "TEXT"),
     ("CurrencyConversionRate", "NUMERIC"),
     ("CreditsAmount", "NUMERIC"),
+    ("GrossAmount", "NUMERIC"),
+    ("DiscountAmount", "NUMERIC"),
+    ("NetAmount", "NUMERIC"),
+    ("BillingCurrency", "TEXT"),
     ("CostType", "TEXT"),
     ("ConsumedQuantity", "NUMERIC"),
     ("ConsumedUnit", "TEXT"),

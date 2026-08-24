@@ -43,6 +43,7 @@ export interface NotificationItem {
   rows: number;
   phase: string;
   current: string;
+  connectorType?: string;
   timestamp: number;
   read: boolean;
 }
@@ -66,11 +67,36 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
     : "Extração #" + String(task.connection_id || "?");
 }
 
+function isOperationalSource(task: TaskStatus): boolean {
+  if (task.connector_type === "azure_openai_ptu") return true;
+  const phase = String(task.phase || "");
+  return /azure ptu/i.test(phase) || /azure monitor/i.test(phase);
+}
+
 function progressFor(task: TaskStatus): number {
+  if (isOperationalSource(task)) {
+    if ((task.total_blobs || 0) > 0) {
+      return Math.round(((task.processed_blobs || 0) / task.total_blobs) * 100);
+    }
+    return task.status === "COMPLETED" ? 100 : 0;
+  }
   if ((task.total_blobs || 0) > 0) {
     return Math.round(((task.processed_blobs || 0) / task.total_blobs) * 100);
   }
   return 0;
+}
+
+function progressCaption(task: TaskStatus): string {
+  if (isOperationalSource(task)) {
+    const total = task.total_blobs || 0;
+    const processed = task.processed_blobs || 0;
+    const gold = (task.rows_destination || 0).toLocaleString("pt-BR");
+    if (total > 0) {
+      return `${processed}/${total} janelas Monitor · ${gold} registros Gold`;
+    }
+    return `${gold} registros Gold · ARM/Monitor`;
+  }
+  return `${(task.rows_destination || 0).toLocaleString("pt-BR")} linhas · ${task.processed_blobs}/${task.total_blobs || "?"}`;
 }
 
 interface NotificationContextValue {
@@ -119,6 +145,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       rows: task.rows_destination || 0,
       phase: task.phase || "",
       current: task.current_blob || "",
+      connectorType: task.connector_type,
       timestamp: Date.now(),
       read: false,
     }),
@@ -153,6 +180,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             rows: task.rows_destination || 0,
             phase: task.phase || "",
             current: task.current_blob || "",
+            connectorType: task.connector_type || existing.connectorType,
             read: existing.read && (task.status === "QUEUED" || task.status === "RUNNING") ? existing.read : false,
           };
           return next;
@@ -231,6 +259,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                     rows: task.rows_destination || 0,
                     phase: task.phase || "",
                     current: task.current_blob || "",
+                    connectorType: task.connector_type || i.connectorType,
                     read: i.read && (task.status === "QUEUED" || task.status === "RUNNING") ? i.read : false,
                   }
                 : i
@@ -369,7 +398,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                     />
                   )}
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                    {item.rows.toLocaleString()} linhas · {item.processed}/{item.total || "?"}
+                    {progressCaption({
+                      id: item.id,
+                      status: item.status,
+                      total_blobs: item.total,
+                      processed_blobs: item.processed,
+                      rows_destination: item.rows,
+                      phase: item.phase,
+                      connector_type: item.connectorType,
+                    } as TaskStatus)}
                   </Typography>
                 </Box>
               );

@@ -40,6 +40,7 @@ type Props = {
 
 const connectorLabels: Record<string, string> = {
   azure_blob: "Azure Blob Storage",
+  azure_openai_ptu: "Azure OpenAI PTU",
   gcp_bigquery: "GCP BigQuery",
   oci: "Oracle Cloud (OCI)",
   mongodb_atlas: "MongoDB Atlas",
@@ -78,6 +79,8 @@ export function getProviderLabel(scope: string | null): string {
 function getConnectionSummary(connection: SourceConnection): string {
   const config = connection.config_json as Record<string, string>;
   switch (connection.connector_type) {
+    case "azure_openai_ptu":
+      return [config.credential_profile || "azure-4p", "PTU operacional"].join(" · ");
     case "azure_blob": {
       const location = [config.storage_account, config.container_name].filter(Boolean).join(" / ");
       return location || "Storage e container não informados";

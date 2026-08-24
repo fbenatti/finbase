@@ -6,7 +6,7 @@ import {
   OutlinedInput, Paper, LinearProgress, Divider, FormControlLabel, Switch,
   TextField, InputAdornment,
 } from "@mui/material";
-import { Refresh, Stop, Search } from "@mui/icons-material";
+import { Refresh, Stop, Search, Replay } from "@mui/icons-material";
 import {
   getDestinationTables, DestinationTable,
   getConnectionsForDestination, MappedConnection,
@@ -132,7 +132,8 @@ export default function ReprocessDataTab() {
           .map(([period, blob_count]) => ({ period, blob_count } as AvailablePeriod))
           .sort((a, b) => b.period.localeCompare(a.period));
         setPeriods(sorted);
-        setSelPeriods(sorted.map(p => p.period));
+        const onlyPtu = selConnIds.every(id => mappedConns.find(c => c.id === id)?.connector_type === "azure_openai_ptu");
+        setSelPeriods(onlyPtu && sorted.length ? [sorted[0].period] : sorted.map(p => p.period));
       })
       .finally(() => setLoadingPeriods(false));
   }, [selConnIds]);
@@ -231,6 +232,76 @@ export default function ReprocessDataTab() {
     }
   };
 
+  const handleReprocessItem = async (item: ReprocessStatus) => {
+    const destId = item.destination_table_id || (destTables.find(t => t.name === item.table)?.id ?? (selDestId ? Number(selDestId) : undefined));
+    if (!destId) {
+      setResult({ type: "error", message: "Tabela de destino não identificada para este item." });
+      return;
+    }
+    if (!item.connection_ids || item.connection_ids.length === 0) {
+      setResult({ type: "error", message: "Conexões de origem não identificadas para este item." });
+      return;
+    }
+    setProcessing(true);
+    setResult(null);
+    try {
+      const res = await reprocessDest({
+        destination_table_id: Number(destId),
+        connection_ids: item.connection_ids,
+        billing_periods: item.billing_periods,
+        replace_existing: false,
+      });
+      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
+      setTaskId(res.task_id);
+      pollTask(res.task_ids || [res.task_id]);
+      historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
+    } catch (e: unknown) {
+      setResult({
+        type: "error",
+        message: e instanceof Error ? e.message : "Erro ao disparar reprocessamento",
+      });
+      setProcessing(false);
+    }
+  };
+
+  const failedItems = history.filter(h => h.status === "FAILED");
+
+  const handleReprocessAllFailed = async () => {
+    if (failedItems.length === 0) return;
+    setProcessing(true);
+    setResult(null);
+    try {
+      const allTaskIds: number[] = [];
+      for (const item of failedItems) {
+        const destId = item.destination_table_id || (destTables.find(t => t.name === item.table)?.id ?? (selDestId ? Number(selDestId) : undefined));
+        if (destId && item.connection_ids && item.connection_ids.length > 0) {
+          const res = await reprocessDest({
+            destination_table_id: Number(destId),
+            connection_ids: item.connection_ids,
+            billing_periods: item.billing_periods,
+            replace_existing: false,
+          });
+          await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
+          if (res.task_ids) allTaskIds.push(...res.task_ids);
+          else allTaskIds.push(res.task_id);
+        }
+      }
+      if (allTaskIds.length > 0) {
+        setTaskId(allTaskIds[0]);
+        pollTask(allTaskIds);
+        historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
+      } else {
+        setProcessing(false);
+      }
+    } catch (e: unknown) {
+      setResult({
+        type: "error",
+        message: e instanceof Error ? e.message : "Erro ao disparar reprocessamento das falhas",
+      });
+      setProcessing(false);
+    }
+  };
+
   const doCancel = async () => {
     if (!taskId) return;
     setCancelling(true);
@@ -240,6 +311,8 @@ export default function ReprocessDataTab() {
   };
 
   const selectedDestName = selDestId ? destTables.find(t => t.id === selDestId)?.name : null;
+  const selectedPtuConns = mappedConns.filter(c => selConnIds.includes(c.id) && c.connector_type === "azure_openai_ptu");
+  const isPtuReprocess = selectedPtuConns.length > 0 && selectedPtuConns.length === selConnIds.length;
 
   const togglePeriod = (p: string) => {
     setSelPeriods(prev =>
@@ -383,7 +456,7 @@ export default function ReprocessDataTab() {
           {periods.map(p => (
             <Chip
               key={p.period}
-              label={`${p.period} (${p.blob_count} blobs)`}
+              label={isPtuReprocess ? `${p.label || `${p.period.slice(4)}/${p.period.slice(0, 4)}`} (${p.blob_count} janelas)` : `${p.period} (${p.blob_count} blobs)`}
               size="small"
               variant={selPeriods.includes(p.period) ? "filled" : "outlined"}
               color={selPeriods.includes(p.period) ? "primary" : "default"}
@@ -392,6 +465,13 @@ export default function ReprocessDataTab() {
             />
           ))}
         </Box>
+      )}
+      {isPtuReprocess && selConnIds.length > 0 && !isRunning && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Fonte Azure PTU: selecione o mês (ex.: <strong>08/2026</strong>) e clique em Reprocessar para buscar
+          métricas horárias via Azure Monitor (janelas de até 30 dias) em <strong>dest_azure_ptu_metrics</strong>.
+          Sem mês selecionado, busca os últimos ~93 dias. Azure Monitor retém plataforma por ~93 dias — não usa blobs Bronze.
+        </Alert>
       )}
       {/* ── Andamento — movido para o ícone de notificações ── */}
       {(isRunning || isQueued) && (
@@ -410,13 +490,20 @@ export default function ReprocessDataTab() {
             {selConnIds.map(id => mappedConns.find(c => c.id === id)?.code || id).join(", ")}
             {" · "}
             <strong>Meses:</strong>{" "}
-            {selPeriods.length === 0
+            {isPtuReprocess
+              ? (selPeriods.length === 0 ? "coleta completa (93 dias)" : `${selPeriods.length} mês(es) selecionado(s)`)
+              : selPeriods.length === 0
               ? `todos (${periods.length} meses)`
               : selPeriods.length === periods.length && periods.length > 0
                 ? `todos (${periods.length} meses)`
                 : `${selPeriods.length} de ${periods.length}`}
             {" · "}
-            <strong>Total blobs:</strong> {totalBlobs}
+            <strong>{isPtuReprocess ? "Janelas Monitor:" : "Total blobs:"}</strong>{" "}
+            {isPtuReprocess
+              ? (selPeriods.length === 0
+                ? totalBlobs || "backfill ~93d"
+                : `${totalBlobs || selPeriods.reduce((sum, p) => sum + (periods.find(x => x.period === p)?.blob_count || 0), 0)} janelas`)
+              : totalBlobs}
           </Typography>
         </Paper>
       )}
@@ -434,26 +521,41 @@ export default function ReprocessDataTab() {
             <Typography variant="h6">Histórico de reprocessamentos</Typography>
             <Typography variant="caption" color="text.secondary">Últimas execuções e mensagens operacionais</Typography>
           </Box>
-          <TextField
-            size="small"
-            placeholder="Buscar no histórico…"
-            value={historySearch}
-            onChange={(e) => setHistorySearch(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search fontSize="small" />
-                </InputAdornment>
-              ),
-              sx: { height: 40 },
-            }}
-            sx={{ minWidth: 260 }}
-          />
+          <Box sx={{ display: "flex", gap: 1.5, alignItems: "center", flexWrap: "wrap" }}>
+            {failedItems.length > 0 && !isRunning && (
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<Replay />}
+                onClick={handleReprocessAllFailed}
+                disabled={processing || workerHealth?.status !== "ok"}
+              >
+                Reprocessar falhas ({failedItems.length})
+              </Button>
+            )}
+            <TextField
+              size="small"
+              placeholder="Buscar no histórico…"
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+                sx: { height: 40 },
+              }}
+              sx={{ minWidth: 260 }}
+            />
+          </Box>
         </Box>
         <ReprocessHistoryDataGrid
           rows={history}
           total={historyTotal}
           loading={historyLoading}
+          onReprocess={handleReprocessItem}
           onQuery={historyQuery}
         />
       </Paper>

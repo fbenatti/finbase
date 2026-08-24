@@ -13,6 +13,27 @@ from app.schemas.schemas import SourceConnectionCreate, SourceConnectionUpdate, 
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 
+_SECRET_CONFIG_KEYS = frozenset({
+    "client_secret", "secret", "private_key", "oci_private_key", "pat_token",
+    "gcp_token", "connection_string", "eventhub_connection_string",
+})
+
+
+def _sanitize_config(config_json: dict | None) -> dict:
+    cfg = dict(config_json or {})
+    for key in list(cfg):
+        if key in _SECRET_CONFIG_KEYS:
+            cfg.pop(key, None)
+    if any(k in (config_json or {}) for k in _SECRET_CONFIG_KEYS):
+        cfg["credentials_configured"] = True
+    return cfg
+
+
+def _connection_out(conn: SourceConnection) -> SourceConnectionOut:
+    out = SourceConnectionOut.model_validate(conn)
+    out.config_json = _sanitize_config(out.config_json)
+    return out
+
 
 GRID_FIELDS = {
     "name": SourceConnection.name,
@@ -28,6 +49,7 @@ GRID_FIELDS = {
 # Categorias da página de Conexões: provedores de nuvem, ferramentas (IA /
 # colaboração) e marketplace. Derivadas do connector_type — a UI filtra por elas.
 TOOL_CONNECTOR_TYPES = (
+    "azure_openai_ptu",
     "github_billing", "github_license", "github_token",
     "notebooklm_license", "notebooklm_token",
     "claude_license", "claude_token",
@@ -84,7 +106,7 @@ async def list_connections(
         )
     else:
         result = await db.execute(select(SourceConnection).order_by(SourceConnection.code))
-    return result.scalars().all()
+    return [_connection_out(conn) for conn in result.scalars().all()]
 
 
 @router.get("/grid")
@@ -159,7 +181,7 @@ async def list_connections_grid(
     result = await db.execute(
         select(SourceConnection).where(*where).order_by(ordering, SourceConnection.id).offset(offset).limit(limit)
     )
-    return {"items": result.scalars().all(), "total": total}
+    return {"items": [_connection_out(conn) for conn in result.scalars().all()], "total": total}
 
 
 @router.get("/{connection_id}", response_model=SourceConnectionOut)
@@ -170,7 +192,7 @@ async def get_connection(connection_id: int, db: AsyncSession = Depends(get_db))
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    return conn
+    return _connection_out(conn)
 
 
 @router.post("/", response_model=SourceConnectionOut, status_code=201)
@@ -185,7 +207,7 @@ async def create_connection(data: SourceConnectionCreate, db: AsyncSession = Dep
     db.add(conn)
     await db.commit()
     await db.refresh(conn)
-    return conn
+    return _connection_out(conn)
 
 
 @router.put("/{connection_id}", response_model=SourceConnectionOut)
@@ -204,7 +226,7 @@ async def update_connection(
         setattr(conn, key, value)
     await db.commit()
     await db.refresh(conn)
-    return conn
+    return _connection_out(conn)
 
 
 @router.delete("/{connection_id}", status_code=204)

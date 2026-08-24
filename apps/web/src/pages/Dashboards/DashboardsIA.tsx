@@ -120,11 +120,13 @@ export default function DashboardsIA() {
     }));
   }, [overview]);
 
-  const card = (label: string, value: number, color: string, suffix = "") => (
+  const card = (label: string, value: number, color: string, format?: "money" | "number" | string) => (
     <Card sx={{ flex: 1, minWidth: 170, borderTop: `3px solid ${color}` }}>
       <CardContent>
         <Typography variant="caption" color="text.secondary">{label}</Typography>
-        <Typography variant="h5" fontWeight={700}>{formatMetric(value, metric)}{suffix}</Typography>
+        <Typography variant="h5" fontWeight={700}>
+          {format === "money" ? money.format(value) : format === "number" ? value.toLocaleString("pt-BR") : formatMetric(value, metric)}
+        </Typography>
       </CardContent>
     </Card>
   );
@@ -362,11 +364,11 @@ export default function DashboardsIA() {
           ) : tab === 1 && licenses && consumption ? (
             <>
               <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-                {card("Nunca usaram", licenses.summary.never_used ?? 0, "#64748B")}
-                {card("Inativos 30d", licenses.summary.inactive_30d ?? 0, "#F59E0B")}
-                {card("Inativos 60d", licenses.summary.inactive_60d ?? 0, "#EA580C")}
-                {card("Inativos 90d", licenses.summary.inactive_90d ?? 0, "#EF4444")}
-                {card("Economia potencial", licenses.summary.reclaim_potential ?? 0, "#16A34A")}
+                {card("Nunca usaram", licenses.summary.never_used ?? 0, "#64748B", "number")}
+                {card("Inativos 30d", licenses.summary.inactive_30d ?? 0, "#F59E0B", "number")}
+                {card("Inativos 60d", licenses.summary.inactive_60d ?? 0, "#EA580C", "number")}
+                {card("Inativos 90d", licenses.summary.inactive_90d ?? 0, "#EF4444", "number")}
+                {card("Economia potencial", licenses.summary.reclaim_potential ?? 0, "#16A34A", "money")}
               </Stack>
 
               <Stack direction={{ xs: "column", md: "row" }} gap={2} mb={2}>
@@ -427,19 +429,6 @@ export default function DashboardsIA() {
                   />
                 </Paper>
               </Stack>
-
-              <Paper elevation={0} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
-                <Typography variant="h6">Candidatos a reclaim</Typography>
-                <DataGrid
-                  rows={(licenses.items ?? []).map((r, i) => ({ id: i, ...r }))}
-                  columns={reclaimColumns}
-                  autoHeight
-                  hideFooter
-                  density="compact"
-                  onRowClick={p => { setSelectedUser(String(p.row.user_email)); setTab(2); }}
-                  sx={{ mt: 1, cursor: "pointer" }}
-                />
-              </Paper>
             </>
           ) : tab === 2 ? (
             <>

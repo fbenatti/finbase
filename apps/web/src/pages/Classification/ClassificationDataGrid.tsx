@@ -211,7 +211,15 @@ export default function ClassificationDataGrid({
   const onFilter = (model: GridFilterModel) => {
     setFilterModel(model);
     const item = model.items.find((candidate) => candidate.value !== undefined && candidate.value !== "");
-    if (!item?.field) return;
+
+    // User cleared the filter chip — clear all active filters and reload.
+    if (!item?.field) {
+      setActiveFilters({});
+      setPaginationModel((current) => ({ ...current, page: 0 }));
+      query({ offset: 0, filters: [] });
+      return;
+    }
+
     setPaginationModel((current) => ({ ...current, page: 0 }));
     const value = item.value instanceof Date ? item.value.toISOString() : String(item.value);
     const filter: ClassificationGridFilter = { field: item.field, operator: "equals", value };

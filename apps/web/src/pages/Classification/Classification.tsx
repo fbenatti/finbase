@@ -409,6 +409,7 @@ export function ClassificationRulesTab() {
   const [cloudFilter, setCloudFilter] = useState<string>("every");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
   const [deletePending, setDeletePending] = useState<ClassificationRule | null>(null);
@@ -436,6 +437,8 @@ export function ClassificationRulesTab() {
     cloudOverride?: string,
     destOverride?: number | "",
   ) => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
     setLoading(true);
     try {
       const cloud = cloudOverride ?? cloudFilter;
@@ -451,10 +454,14 @@ export function ClassificationRulesTab() {
         search: search.trim() || undefined,
         destination_table_id: destId,
         cloud,
-      });
+      }, abortRef.current.signal);
       setRules(data.items);
       setTotal(data.total);
     } catch (e: unknown) {
+      if (e instanceof Error && e.name === "AbortError") {
+        // Request superseded by newer filter — silently ignore.
+        return;
+      }
       setError(e instanceof Error ? e.message : "Falha ao carregar classificações");
     } finally {
       setLoading(false);
@@ -467,7 +474,9 @@ export function ClassificationRulesTab() {
   };
 
   const changeFilters = (nextCloud: string, nextDest: number | "") => {
-    queryRef.current = { ...queryRef.current, offset: 0 };
+    // Primary filters changed — reset column filters/search so they don't apply to the new scope.
+    queryRef.current = { offset: 0, limit: queryRef.current.limit, filters: [] };
+    setSearch("");
     void load(queryRef.current, nextCloud, nextDest);
   };
 

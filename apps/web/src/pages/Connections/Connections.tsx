@@ -16,6 +16,7 @@ import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./
 
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
+  { value: "azure_openai_ptu", label: "Azure OpenAI PTU", scope: "azure" },
   { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
   { value: "oci", label: "Oracle Cloud (OCI)", scope: "oci" },
   { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
@@ -48,6 +49,7 @@ const CATEGORY_META: Record<ConnectionCategory, { icon: React.ReactNode; subtitl
 function categoryOfConnection(connection: { connector_type: string; cloud_scope?: string | null }): ConnectionCategory {
   if (connection.connector_type === "mongodb_atlas" || connection.cloud_scope === "atlas") return "marketplace";
   if (
+    connection.connector_type === "azure_openai_ptu" ||
     connection.connector_type.startsWith("github_") ||
     connection.connector_type.startsWith("notebooklm_") ||
     connection.connector_type.startsWith("gemini_") ||
@@ -87,6 +89,7 @@ const TOOL_LABELS: Record<string, string> = {
 const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: string; icon: React.ReactNode; color: string; category: ConnectionCategory; tool?: string }[] = [
   // Provedores Cloud
   { value: "azure_blob", label: "Azure", description: "Blob Storage", icon: <Cloud />, color: "#0078D4", category: "provedor" },
+  { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, color: "#0078D4", category: "ferramenta" },
   { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, color: "#4285F4", category: "provedor" },
   { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, color: "#F80000", category: "provedor" },
   // Ferramentas Cloud
@@ -132,6 +135,10 @@ const emptyForm = {
   github_extraction_type: "token" as "billing" | "license" | "token",
   gemini_extraction_type: "token" as "license" | "token",
   admin_email: "",
+  credential_profile: "",
+  eventhub_namespace: "",
+  eventhub_name: "",
+  eventhub_consumer_group: "openfinops-azure-ptu",
 };
 
 export default function Connections() {
@@ -309,6 +316,21 @@ export default function Connections() {
         container_name: cfg.container_name || "",
         blob_prefixes: (conn.blob_prefixes || []).join("\n"),
       });
+    } else if (conn.connector_type === "azure_openai_ptu") {
+      // The API deliberately omits secrets. Never repopulate the write-only field.
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "Azure-4P",
+        cloud_scope: conn.cloud_scope || "azure",
+        credential_profile: cfg.credential_profile || "azure-4p",
+        tenant_id: cfg.tenant_id || "",
+        client_id: cfg.client_id || "",
+        eventhub_namespace: (cfg.eventhub as any)?.namespace || "",
+        eventhub_name: (cfg.eventhub as any)?.eventhub_name || "",
+        eventhub_consumer_group: (cfg.eventhub as any)?.consumer_group || "openfinops-azure-ptu",
+      });
     } else if (conn.connector_type === "gcp_bigquery") {
       setForm({
         ...emptyForm,
@@ -455,6 +477,25 @@ export default function Connections() {
       if (form.client_secret) configJson.client_secret = form.client_secret;
       if (form.storage_account) configJson.storage_account = form.storage_account;
       if (form.container_name) configJson.container_name = form.container_name;
+    } else if (form.connector_type === "azure_openai_ptu") {
+      configJson.credential_profile = form.credential_profile || "azure-4p";
+      if (form.tenant_id) configJson.tenant_id = form.tenant_id;
+      if (form.client_id) configJson.client_id = form.client_id;
+      // Secret is write-only: only include it when explicitly entered.
+      if (form.client_secret) configJson.client_secret = form.client_secret;
+      configJson.metric_interval = "PT1M";
+      configJson.rollup_interval = "PT1H";
+      configJson.lookback_hours = 3;
+      configJson.backfill_days = 93;
+      configJson.discovery_mode = "selected_accounts";
+      configJson.subscription_ids = [];
+      configJson.account_resource_ids = [];
+      configJson.eventhub = {
+        namespace: form.eventhub_namespace || "",
+        eventhub_name: form.eventhub_name || "",
+        consumer_group: form.eventhub_consumer_group || "openfinops-azure-ptu",
+        credential_ref: "azure-4p",
+      };
     } else if (form.connector_type === "gcp_bigquery") {
       if (form.tenant_id) configJson.project_id = form.tenant_id;
       if (form.client_id) configJson.dataset_id = form.client_id;
@@ -856,6 +897,37 @@ export default function Connections() {
                 {CLOUD_SCOPES.map((s) => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
               </Select>
             </FormControl>
+
+            {form.connector_type === "azure_openai_ptu" && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>1. Identidade</Typography>
+                <Alert severity="info">A coleta usa somente recursos e métricas já existentes. Nenhum recurso Azure será criado. O secret nunca é devolvido pela API.</Alert>
+                <TextField label="Perfil de credencial" value={form.credential_profile || "azure-4p"}
+                  onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
+                  helperText="Perfil runtime (recomendado: azure-4p)" />
+                <TextField label="Tenant ID" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+                <TextField label="Client ID" value={form.client_id}
+                  onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+                <TextField label="Client Secret (somente para credencial nova)" type="password" value={form.client_secret}
+                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                  helperText="Deixe vazio para manter o segredo runtime existente." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>2. Escopo Azure</Typography>
+                <Alert severity="warning">Use Testar conexão / Scan para descobrir assinaturas, contas OpenAI e deployments PTU sem persistir métricas.</Alert>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Coleta</Typography>
+                <Typography variant="body2" color="text.secondary">PT1M → persistência horária UTC, atraso 10 min, lookback 3h, backfill 93 dias. Exibição America/Sao_Paulo.</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Mapeamento de projeto</Typography>
+                <Typography variant="body2" color="text.secondary">Após salvar, cadastre projetos em Azure PTU (reservation/ondemand, global/regional, vigência).</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>5. Telemetria de subprojetos (Event Hub)</Typography>
+                <TextField label="Event Hub namespace" value={form.eventhub_namespace}
+                  onChange={(e) => setForm({ ...form, eventhub_namespace: e.target.value })} />
+                <TextField label="Event Hub name" value={form.eventhub_name}
+                  onChange={(e) => setForm({ ...form, eventhub_name: e.target.value })} />
+                <TextField label="Consumer group" value={form.eventhub_consumer_group}
+                  onChange={(e) => setForm({ ...form, eventhub_consumer_group: e.target.value })}
+                  helperText="Padrão: openfinops-azure-ptu. Teste de partições via Testar conexão." />
+              </>
+            )}
 
             {form.connector_type === "azure_blob" && (
               <>

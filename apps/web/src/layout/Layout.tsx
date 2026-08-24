@@ -64,7 +64,7 @@ const menuGroups = [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Ações de saving", icon: <SavingsIcon /> },
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
-      { path: "/budgets", label: "Orçamentos", icon: <AccountBalanceIcon /> },
+      { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
   },
@@ -78,6 +78,9 @@ const menuGroups = [
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
       { path: "/expected-view", label: "Visão esperada", icon: <TimelineIcon /> },
       { path: "/dashboards-ia", label: "Dashboards IA", icon: <SmartToyIcon /> },
+      { path: "/azure-ptu", label: "Azure PTU", icon: <SmartToyIcon /> },
+      { path: "/azure-ptu-ops", label: "PTU Monitoramento", icon: <SmartToyIcon /> },
+      { path: "/github-copilot", label: "GitHub Copilot", icon: <SmartToyIcon /> },
     ],
   },
 ];
