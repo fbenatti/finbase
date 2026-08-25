@@ -3,11 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import Extraction from "../Extraction/Extraction";
 import ReprocessDataTab from "./ReprocessDataTab";
 import ReprocessForecastTab from "./ReprocessForecastTab";
+import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
 
 const TABS = [
   { id: "data", label: "Reprocessar dados" },
   { id: "forecast", label: "Forecast" },
+  { id: "accuracy", label: "Acurácia de Forecast" },
   { id: "shared", label: "Custo compartilhado" },
   { id: "extraction", label: "Extração & Monitoramento" },
 ] as const;
@@ -38,6 +40,7 @@ export default function Reprocess() {
         <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
           {tab === "data" && <ReprocessDataTab />}
           {tab === "forecast" && <ReprocessForecastTab />}
+          {tab === "accuracy" && <ReprocessAccuracyTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}
           {tab === "extraction" && <Extraction embedded />}
         </Paper>

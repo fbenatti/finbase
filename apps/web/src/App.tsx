@@ -14,6 +14,7 @@ import Relationship from "./pages/Relationship/Relationship";
 import Reprocess from "./pages/Reprocess/Reprocess";
 import Forecast from "./pages/Forecast/Forecast";
 import ForecastHistory from "./pages/Forecast/ForecastHistory";
+import ForecastAccuracy from "./pages/ForecastAccuracy/ForecastAccuracy";
 import SharedCostHistory from "./pages/Reprocess/SharedCostHistory";
 import CloneRules from "./pages/CloneRules/CloneRules";
 import Tables from "./pages/Tables/Tables";
@@ -53,6 +54,7 @@ function App() {
         <Route path="pipeline" element={<PipelineBuilder />} />
         <Route path="reprocess" element={<Reprocess />} />
         <Route path="forecast" element={<Forecast />} />
+        <Route path="forecast-accuracy" element={<ForecastAccuracy />} />
         <Route path="savings" element={<Savings />} />
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
         <Route path="reprocess/shared-cost/history/:runId" element={<SharedCostHistory />} />

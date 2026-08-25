@@ -795,7 +795,7 @@ def validate_config(config: Any, metadata: dict[str, Any]) -> list[str]:
     return errors
 
 
-async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progress=None, business_rules: list[Any] | None = None, result_table: str | None = None) -> dict[str, Any]:
+async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progress=None, business_rules: list[Any] | None = None, result_table: str | None = None, simulated_as_of: date | None = None) -> dict[str, Any]:
     table = config.destination_physical_name
     namespace = getattr(config, "source_namespace", "gold")
     dims = list(config.dimensions or [])
@@ -820,45 +820,52 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         _allocation_rules_from_business_rules(business_rules, cloud_col, id_col, config),
     )
     cloud_cutoffs: dict[str, date] = {}
-    if cloud_col:
-        cloud_cutoffs = await _fetch_cloud_cutoffs(
-            source=source,
-            type_filter=type_filter,
-            date_expr=date_expr,
-            cloud_col=cloud_col,
-            period_col=period,
-            excluded_days=excluded_days,
-        )
-        await _apply_interval_cloud_cutoff_overrides(
-            cloud_cutoffs,
-            allocation_rules=allocation_rules,
-            config=config,
-            source=source,
-            type_filter=type_filter,
-            period_col=period,
-            cloud_col=cloud_col,
-            id_col=id_col,
-            excluded_days=excluded_days,
-        )
-    if cloud_cutoffs:
-        collected_through = max(
-            cutoff + timedelta(days=excluded_days) for cutoff in cloud_cutoffs.values()
-        )
-        effective_cutoff = max(cloud_cutoffs.values())
+    if simulated_as_of is not None:
+        # Simulation ("como se estivéssemos no dia X"): no data after the
+        # simulated collection date may be used.  The cutoff is derived from
+        # the simulated date instead of the real Gold maximum.
+        collected_through = simulated_as_of
+        effective_cutoff = simulated_as_of - timedelta(days=excluded_days)
     else:
-        # Fallback when Gold has no cloud_origem populated.
-        latest_period_filter = (
-            f" AND CAST({_q(period)} AS VARCHAR) = (SELECT MAX(CAST({_q(period)} AS VARCHAR)) FROM {source} WHERE {type_filter})"
-            if period else ""
-        )
-        latest_sql = f"SELECT MAX({date_expr}) AS collected_through FROM {source} WHERE {type_filter}{latest_period_filter}"
-        latest_records = await trino_execute(latest_sql, timeout_s=120)
-        latest_value = latest_records[0].get("collected_through") if latest_records else None
-        collected_timestamp = pd.to_datetime(latest_value, errors="coerce")
-        if pd.isna(collected_timestamp):
-            raise ValueError("Não foi possível identificar a última data válida na Gold")
-        collected_through = collected_timestamp.date()
-        effective_cutoff = collected_through - timedelta(days=excluded_days)
+        if cloud_col:
+            cloud_cutoffs = await _fetch_cloud_cutoffs(
+                source=source,
+                type_filter=type_filter,
+                date_expr=date_expr,
+                cloud_col=cloud_col,
+                period_col=period,
+                excluded_days=excluded_days,
+            )
+            await _apply_interval_cloud_cutoff_overrides(
+                cloud_cutoffs,
+                allocation_rules=allocation_rules,
+                config=config,
+                source=source,
+                type_filter=type_filter,
+                period_col=period,
+                cloud_col=cloud_col,
+                id_col=id_col,
+                excluded_days=excluded_days,
+            )
+        if cloud_cutoffs:
+            collected_through = max(
+                cutoff + timedelta(days=excluded_days) for cutoff in cloud_cutoffs.values()
+            )
+            effective_cutoff = max(cloud_cutoffs.values())
+        else:
+            # Fallback when Gold has no cloud_origem populated.
+            latest_period_filter = (
+                f" AND CAST({_q(period)} AS VARCHAR) = (SELECT MAX(CAST({_q(period)} AS VARCHAR)) FROM {source} WHERE {type_filter})"
+                if period else ""
+            )
+            latest_sql = f"SELECT MAX({date_expr}) AS collected_through FROM {source} WHERE {type_filter}{latest_period_filter}"
+            latest_records = await trino_execute(latest_sql, timeout_s=120)
+            latest_value = latest_records[0].get("collected_through") if latest_records else None
+            collected_timestamp = pd.to_datetime(latest_value, errors="coerce")
+            if pd.isna(collected_timestamp):
+                raise ValueError("Não foi possível identificar a última data válida na Gold")
+            collected_through = collected_timestamp.date()
+            effective_cutoff = collected_through - timedelta(days=excluded_days)
     # The longest model uses 28 days and AUTO_BACKTEST reserves seven days for
     # validation. Keep the current month in full when it starts earlier.
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
@@ -967,6 +974,21 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         )
         series_context[_series_key(key_values, key_cols)] = _build_series_context(daily, series_cutoff)
         enabled_windows = [int(w) for w in config.enabled_windows or [7, 14, 28]]
+        # Séries de fatura mensal ("lump"): poucas cobranças no mês, valor alto.
+        # Tratar como taxa diária (fatura / dias do mês) evita tanto o
+        # zero-fill (MEAN_7 ≈ 0) quanto a multiplicação da fatura por 28-31
+        # dias quando o grid termina no dia da cobrança. Documentado no
+        # FORECAST.md como baseline MONTHLY_LUMP.
+        lump_daily_rate: float | None = None
+        nonzero_days = int((daily > 0).sum())
+        if nonzero_days <= 3 and len(daily) > 0:
+            monthly_lump = daily.groupby(daily.index.to_period("M")).sum()
+            charged_months = monthly_lump[monthly_lump > 0]
+            if len(charged_months) >= 1:
+                last_period = charged_months.index[-1]
+                last_total = float(charged_months.iloc[-1])
+                days_in_last_month = calendar.monthrange(last_period.year, last_period.month)[1]
+                lump_daily_rate = last_total / days_in_last_month
         candidates = []
         for window in enabled_windows:
             sample = daily.tail(window)
@@ -981,7 +1003,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
             extended_mean = float(daily.tail(extended_window).mean())
             weight = max(0.0, min(1.0, float(config.recent_weight or 0.7)))
             candidates.append((f"WEIGHTED_{recent_window}D_{extended_window}D", recent_mean * weight + extended_mean * (1.0 - weight)))
-        if config.model_mode == "AUTO_BACKTEST":
+        if lump_daily_rate is not None:
+            # A lump monthly bill is not a daily run-rate: force the monthly
+            # rate regardless of AUTO_BACKTEST or fixed-window model modes.
+            method, baseline = "MONTHLY_LUMP", lump_daily_rate
+        elif config.model_mode == "AUTO_BACKTEST":
             scored = []
             validation = daily.tail(7)
             train = daily.iloc[:-7] if len(daily) > 7 else daily.iloc[0:0]
@@ -1074,7 +1100,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     # so two executions on the same day can never overwrite each other.
     result_table = result_table or f"result_{config.id}_{int(cutoff.strftime('%Y%m%d'))}"
     iceberg.write_forecast_result(result_table, output)
-    planning_table = iceberg.write_forecast_planning(table, output, value_column=measure)
+    # Simulated runs must never overwrite the current planning snapshot; they
+    # are audit/backtest artifacts used only by the accuracy dashboard.
+    planning_table = None
+    if simulated_as_of is None:
+        planning_table = iceberg.write_forecast_planning(table, output, value_column=measure)
     return {
         "rows": len(output),
         "table": result_table,
@@ -1085,4 +1115,5 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         "collected_through": collected_through.isoformat(),
         "effective_cutoff": effective_cutoff.isoformat(),
         "cloud_cutoffs": {cloud: cutoff.isoformat() for cloud, cutoff in sorted(cloud_cutoffs.items())},
+        "simulated_as_of": simulated_as_of.isoformat() if simulated_as_of else None,
     }

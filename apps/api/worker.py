@@ -155,7 +155,7 @@ def main():
             task = session.execute(
                 select(EtlTask).where(
                     EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "shared_cost"]),
+                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "forecast_accuracy", "shared_cost"]),
                 )
                 .order_by(EtlTask.id)
                 .limit(1)
@@ -215,9 +215,13 @@ def main():
                         config.source_namespace = "gold"
                         config.gold_metadata = metadata
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
+                        simulated_as_of = None
+                        if (run.config_snapshot or {}).get("simulated_as_of"):
+                            simulated_as_of = date.fromisoformat(run.config_snapshot["simulated_as_of"])
                         result = asyncio.run(run_forecast(
                             config, adjustments, date.fromisoformat(run.cutoff_date),
                             business_rules=business_rules, result_table=f"result_run_{run.id}",
+                            simulated_as_of=simulated_as_of,
                         ))
                         run.status = "COMPLETED"
                         run.phase = "Forecast publicado"
@@ -262,6 +266,141 @@ def main():
                             run.phase = f"Falha no forecast: {error_message[:160]}"
                             run.error = error_message[:2000]
                             run.finished_at = datetime.now(timezone.utc)
+                        if task_row:
+                            task_row.status = "FAILED"
+                            task_row.phase = f"Erro: {error_message[:160]}"
+                            task_row.finished_at = datetime.now(timezone.utc)
+                        s.commit(); s.close()
+
+                elif task.task_type == "forecast_accuracy":
+                    # Batch "reprocess accuracy": regenerate the simulated
+                    # forecast snapshots (simulated_as_of = day 2 of each month)
+                    # so the accuracy dashboard reflects the current config.
+                    config_id = task.destination_table_id
+                    months = list((task.result_json or {}).get("months") or [])
+                    task.status = "RUNNING"
+                    task.phase = "Validando configuração"
+                    session.commit()
+                    session.close()
+                    try:
+                        from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun
+                        from app.models.destination import DestinationTable
+                        from app.services.forecast_service import fetch_metadata, validate_config, run_forecast
+                        import asyncio
+                        s = SyncSession()
+                        config = s.get(ForecastConfig, config_id)
+                        dest = s.get(DestinationTable, config.destination_table_id) if config else None
+                        task_row = s.get(EtlTask, task_id)
+                        if not config or not dest:
+                            raise RuntimeError("Configuração de forecast inválida")
+                        if task_row and task_row.status == "CANCELLED":
+                            task_row.phase = "Cancelado pelo usuário"
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            s.commit(); s.close()
+                            continue
+                        adjustments = s.query(ForecastAdjustment).filter(
+                            ForecastAdjustment.forecast_config_id == config_id,
+                            ForecastAdjustment.active == True,
+                        ).all()
+                        business_rules = s.query(ForecastBusinessRule).filter(
+                            ForecastBusinessRule.forecast_config_id == config_id,
+                            ForecastBusinessRule.active == True,
+                        ).all()
+                        metadata = asyncio.run(fetch_metadata(dest.physical_name))
+                        errors = validate_config(config, metadata)
+                        if errors:
+                            raise RuntimeError("; ".join(errors))
+                        config.destination_physical_name = dest.physical_name
+                        config.source_namespace = "gold"
+                        config.gold_metadata = metadata
+                        config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
+                        snapshot = {
+                            "config_id": config.id, "config_version": config.version,
+                            "destination_table_id": dest.id,
+                            "destination_physical_name": dest.physical_name,
+                            "source_namespace": "gold",
+                            "measure_column": config.measure_column, "date_column": config.date_column,
+                            "period_column": config.period_column, "type_column": config.type_column,
+                            "dimensions": list(config.dimensions or []), "currency_column": config.currency_column,
+                            "cutoff_days": config.cutoff_days, "horizon_months": config.horizon_months,
+                            "period_allocation": config.period_allocation,
+                            "charge_end_column": config.charge_end_column,
+                            "connection_allocation_rules": list(config.connection_allocation_rules or []),
+                            "null_dimension_label": getattr(config, "null_dimension_label", "Não classificado") or "Não classificado",
+                        }
+                        processed = 0
+                        failures: list[str] = []
+                        total = len(months)
+                        for month in months:
+                            if task_row and task_row.status == "CANCELLED":
+                                break
+                            try:
+                                as_of = date(int(month[:4]), int(month[4:6]), 2)
+                                run = ForecastRun(
+                                    forecast_config_id=config_id, config_version=config.version,
+                                    trigger_type="MANUAL", cutoff_date=as_of.isoformat(),
+                                    config_snapshot={**snapshot, "simulated_as_of": as_of.isoformat()},
+                                    destination_table_id_snapshot=dest.id,
+                                    destination_physical_name=dest.physical_name,
+                                    classification_version_id=None, status="RUNNING",
+                                    phase=f"Simulado {month}", started_at=datetime.now(timezone.utc),
+                                )
+                                s.add(run)
+                                s.flush()
+                                result = asyncio.run(run_forecast(
+                                    config, adjustments, as_of,
+                                    business_rules=business_rules,
+                                    result_table=f"result_run_{run.id}",
+                                    simulated_as_of=as_of,
+                                ))
+                                run.status = "COMPLETED"
+                                run.phase = "Forecast publicado"
+                                run.finished_at = datetime.now(timezone.utc)
+                                run.rows_written = result["rows"]
+                                run.total_series = result["series"]
+                                run.processed_series = result["series"]
+                                run.result_table = result["table"]
+                                run.cutoff_date = result["effective_cutoff"]
+                                run.selected_models = result["methods"]
+                                run.error_metrics = {}
+                                s.commit()
+                                processed += 1
+                                if task_row:
+                                    task_row.phase = f"Simulado {month} concluído (run {run.id})"
+                                    task_row.processed_blobs = processed
+                                    task_row.total_blobs = total
+                                    task_row.current_blob = month
+                                    s.commit()
+                            except Exception as exc:
+                                s.rollback()
+                                failures.append(f"{month}: {_format_task_error(exc)}")
+                                if task_row:
+                                    task_row.phase = f"Falha no simulado {month}"
+                                    s.commit()
+                        task_row = s.get(EtlTask, task_id)
+                        if task_row:
+                            if task_row.status == "CANCELLED":
+                                task_row.phase = "Cancelado pelo usuário"
+                            elif failures and processed == 0:
+                                task_row.status = "FAILED"
+                                task_row.phase = "Reprocessamento de acurácia falhou"
+                                task_row.errors = failures
+                            else:
+                                task_row.status = "COMPLETED"
+                                task_row.phase = (
+                                    f"Acurácia reprocessada: {processed}/{total} meses"
+                                    + (f"; falhas: {len(failures)}" if failures else "")
+                                )
+                                task_row.errors = failures
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            s.commit()
+                        s.close()
+                    except Exception as exc:
+                        import traceback
+                        traceback.print_exc()
+                        s = SyncSession()
+                        task_row = s.get(EtlTask, task_id)
+                        error_message = _format_task_error(exc)
                         if task_row:
                             task_row.status = "FAILED"
                             task_row.phase = f"Erro: {error_message[:160]}"

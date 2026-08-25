@@ -38,6 +38,17 @@ from app.services.azure_ptu_meters import (
     unused_capacity_pct,
 )
 from app.services.ai_cost_attribution import preview_ptu_pool_allocation, load_focus_schema
+from app.services.azure_ptu_ops import (
+    build_capacity_risk,
+    build_executive_summary,
+    build_ops_recommendations,
+    build_service_quality,
+    build_token_consumption,
+    metric_field_availability,
+    period_metadata,
+    peak_utilization_label,
+    weighted_utilization,
+)
 from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/azure-ptu", tags=["azure-ptu"])
@@ -341,13 +352,26 @@ def _aggregate_deployment_utilization(
         key = _deployment_key(row)
         bucket = buckets.setdefault(key, {
             "avg": [], "max": [], "p95": [],
+            "avg_weighted_num": 0.0, "avg_weighted_den": 0.0,
             "input": 0.0, "output": 0.0, "hours": 0.0,
-            "rpm": [], "ttr": [], "ttlb": [], "rate_limited": 0.0,
+            "rpm": [], "ttr": [], "ttlb": [], "ttft": [], "tbt": [],
+            "rate_limited": 0.0, "requests": 0.0,
+            "quality_anomaly": False,
+            "hours_80": 0, "hours_95": 0,
         })
-        if row.get("utilization_avg") is not None:
-            bucket["avg"].append(float(row["utilization_avg"]))
+        ptus = float(row.get("provisioned_ptus") or 0)
+        util_avg = row.get("utilization_avg")
+        if util_avg is not None and ptus > 0:
+            bucket["avg_weighted_num"] += float(util_avg) * ptus
+            bucket["avg_weighted_den"] += ptus
+        if util_avg is not None:
+            bucket["avg"].append(float(util_avg))
         if row.get("utilization_max") is not None:
             bucket["max"].append(float(row["utilization_max"]))
+            if float(row["utilization_max"]) >= 80:
+                bucket["hours_80"] += 1
+            if float(row["utilization_max"]) >= 95:
+                bucket["hours_95"] += 1
         if row.get("utilization_p95") is not None:
             bucket["p95"].append(float(row["utilization_p95"]))
         bucket["input"] += float(row.get("input_tokens_sum") or row.get("input_tokens") or 0)
@@ -359,18 +383,34 @@ def _aggregate_deployment_utilization(
             bucket["ttr"].append(float(row["time_to_response_avg_ms"]))
         if row.get("time_to_last_byte_avg_ms") is not None:
             bucket["ttlb"].append(float(row["time_to_last_byte_avg_ms"]))
+        if row.get("normalized_ttft_avg_ms") is not None:
+            bucket["ttft"].append(float(row["normalized_ttft_avg_ms"]))
+        if row.get("normalized_tbt_avg_ms") is not None:
+            bucket["tbt"].append(float(row["normalized_tbt_avg_ms"]))
         bucket["rate_limited"] += float(row.get("rate_limited_count") or 0)
+        bucket["requests"] += float(row.get("request_count") or 0)
+        if row.get("utilization_quality_anomaly"):
+            bucket["quality_anomaly"] = True
     output: list[dict[str, Any]] = []
     all_keys = sorted(set(buckets) | set(inv_by_name))
     for key in all_keys:
         inv = inv_by_name.get(key, {})
         vals = buckets.get(key, {
-            "avg": [], "max": [], "p95": [], "input": 0.0, "output": 0.0, "hours": 0.0,
-            "rpm": [], "ttr": [], "ttlb": [], "rate_limited": 0.0,
+            "avg": [], "max": [], "p95": [], "avg_weighted_num": 0.0, "avg_weighted_den": 0.0,
+            "input": 0.0, "output": 0.0, "hours": 0.0,
+            "rpm": [], "ttr": [], "ttlb": [], "ttft": [], "tbt": [],
+            "rate_limited": 0.0, "requests": 0.0, "quality_anomaly": False,
+            "hours_80": 0, "hours_95": 0,
         })
-        util_avg = sum(vals["avg"]) / len(vals["avg"]) if vals["avg"] else None
+        util_avg = (
+            vals["avg_weighted_num"] / vals["avg_weighted_den"]
+            if vals["avg_weighted_den"] else (sum(vals["avg"]) / len(vals["avg"]) if vals["avg"] else None)
+        )
         util_max = max(vals["max"]) if vals["max"] else None
-        util_p95 = metric_p95(vals["p95"]) if vals["p95"] else (metric_p95(vals["avg"]) if vals["avg"] else None)
+        peak, peak_label = peak_utilization_label([
+            {"utilization_max": v} for v in vals["max"]
+        ]) if vals["max"] else (None, "indisponível")
+        util_p95 = peak if peak_label == "P95" else (metric_p95(vals["p95"]) if vals["p95"] else peak)
         ptus = float(inv.get("ptus") or inv.get("provisioned_ptus") or 0)
         pricing = _pricing_from_inventory(inv)
         hours = float(vals["hours"] or 0)
@@ -386,9 +426,13 @@ def _aggregate_deployment_utilization(
             "utilization_avg": util_avg,
             "utilization_max": util_max,
             "utilization_p95": util_p95,
+            "utilization_peak_label": peak_label,
             "unused_capacity_pct": unused_capacity_pct(util_avg),
             "utilization_band": _util_band(util_avg),
             "peak_utilization": util_max,
+            "hours_at_or_above_80": vals["hours_80"],
+            "hours_at_or_above_95": vals["hours_95"],
+            "utilization_quality_anomaly": vals["quality_anomaly"],
             "input_tokens": vals["input"],
             "output_tokens": vals["output"],
             "input_tpm": observed_tpm(vals["input"], hours),
@@ -396,7 +440,11 @@ def _aggregate_deployment_utilization(
             "request_peak_per_minute": max(vals["rpm"]) if vals["rpm"] else None,
             "time_to_response_avg_ms": sum(vals["ttr"]) / len(vals["ttr"]) if vals["ttr"] else None,
             "time_to_last_byte_avg_ms": sum(vals["ttlb"]) / len(vals["ttlb"]) if vals["ttlb"] else None,
+            "normalized_ttft_avg_ms": sum(vals["ttft"]) / len(vals["ttft"]) if vals["ttft"] else None,
+            "normalized_tbt_avg_ms": sum(vals["tbt"]) / len(vals["tbt"]) if vals["tbt"] else None,
             "rate_limited_count": vals["rate_limited"] or None,
+            "request_count": vals["requests"] or None,
+            "risk_score": (vals["hours_95"] * 3) + (vals["hours_80"] * 1) + (vals["rate_limited"] / 10),
             "peak_concurrency_note": "Azure Monitor não expõe concorrência de sessão; usamos pico de requests/minuto.",
         })
     return output
@@ -531,7 +579,7 @@ def _build_metrics_coverage(metrics: list[dict[str, Any]], hours: int) -> dict[s
 
 
 def _build_utilization_series(metrics: list[dict[str, Any]], grain: str = "hour") -> list[dict[str, Any]]:
-    buckets: dict[str, dict[str, list[float]]] = {}
+    buckets: dict[str, dict[str, Any]] = {}
     for row in metrics:
         hour = str(row.get("metric_hour") or "")
         if not hour:
@@ -542,9 +590,14 @@ def _build_utilization_series(metrics: list[dict[str, Any]], grain: str = "hour"
             bucket_key = hour[:7]
         else:
             bucket_key = hour
-        slot = buckets.setdefault(bucket_key, {"avg": [], "max": [], "p95": []})
-        if row.get("utilization_avg") is not None:
-            slot["avg"].append(float(row["utilization_avg"]))
+        slot = buckets.setdefault(bucket_key, {"weighted_num": 0.0, "weighted_den": 0.0, "max": [], "p95": []})
+        ptus = float(row.get("provisioned_ptus") or 0)
+        util_avg = row.get("utilization_avg")
+        if util_avg is not None and ptus > 0:
+            slot["weighted_num"] += float(util_avg) * ptus
+            slot["weighted_den"] += ptus
+        elif util_avg is not None:
+            slot.setdefault("avg", []).append(float(util_avg))
         if row.get("utilization_max") is not None:
             slot["max"].append(float(row["utilization_max"]))
         if row.get("utilization_p95") is not None:
@@ -552,12 +605,19 @@ def _build_utilization_series(metrics: list[dict[str, Any]], grain: str = "hour"
     series = []
     for ts in sorted(buckets):
         vals = buckets[ts]
-        util_avg = sum(vals["avg"]) / len(vals["avg"]) if vals["avg"] else None
+        util_avg = (
+            vals["weighted_num"] / vals["weighted_den"]
+            if vals["weighted_den"] else (
+                sum(vals.get("avg", [])) / len(vals["avg"]) if vals.get("avg") else None
+            )
+        )
+        peak, peak_label = peak_utilization_label([{"utilization_max": v} for v in vals["max"]]) if vals["max"] else (None, "indisponível")
         series.append({
             "timestamp": ts,
             "utilization_avg": util_avg,
             "utilization_max": max(vals["max"]) if vals["max"] else None,
-            "utilization_p95": metric_p95(vals["p95"]) if vals["p95"] else (metric_p95(vals["avg"]) if vals["avg"] else None),
+            "utilization_p95": peak if peak_label == "P95" else (metric_p95(vals["p95"]) if vals["p95"] else peak),
+            "utilization_peak_label": peak_label,
             "band": _util_band(util_avg),
         })
     return series
@@ -691,12 +751,8 @@ def _enrich_kpis(
 
 def _enrich_ops_kpis(metrics: list[dict[str, Any]], inventory: list[dict[str, Any]]) -> dict[str, Any]:
     """Operational KPIs from Gold PTU only — no FOCUS/cost integration."""
-    avg_util_vals = [float(x["utilization_avg"]) for x in metrics if x.get("utilization_avg") is not None]
-    p95_util_vals = [float(x["utilization_p95"]) for x in metrics if x.get("utilization_p95") is not None]
-    max_util_vals = [float(x["utilization_max"]) for x in metrics if x.get("utilization_max") is not None]
-    util = (sum(avg_util_vals) / len(avg_util_vals)) if avg_util_vals else None
-    util_p95 = metric_p95(p95_util_vals) if p95_util_vals else (metric_p95(avg_util_vals) if avg_util_vals else None)
-    util_max = max(max_util_vals) if max_util_vals else None
+    util = weighted_utilization(metrics)
+    peak, peak_label = peak_utilization_label(metrics)
     total_tokens = sum(float(x.get("total_tokens") or x.get("total_tokens_sum") or 0) for x in metrics)
     input_tokens = sum(float(x.get("input_tokens") or x.get("input_tokens_sum") or 0) for x in metrics)
     output_tokens = sum(float(x.get("output_tokens") or x.get("output_tokens_sum") or 0) for x in metrics)
@@ -705,7 +761,10 @@ def _enrich_ops_kpis(metrics: list[dict[str, Any]], inventory: list[dict[str, An
     ondemand = sum(_inventory_ptus(x) for x in inventory) - reserved
     ttr_vals = [float(x["time_to_response_avg_ms"]) for x in metrics if x.get("time_to_response_avg_ms") is not None]
     ttlb_vals = [float(x["time_to_last_byte_avg_ms"]) for x in metrics if x.get("time_to_last_byte_avg_ms") is not None]
+    ttft_vals = [float(x["normalized_ttft_avg_ms"]) for x in metrics if x.get("normalized_ttft_avg_ms") is not None]
     rpm_vals = [float(x["request_peak_per_minute"]) for x in metrics if x.get("request_peak_per_minute") is not None]
+    hours_80 = sum(int(x.get("hours_at_or_above_80") or 0) for x in metrics)
+    hours_95 = sum(int(x.get("hours_at_or_above_95") or 0) for x in metrics)
     return {
         "total_ptus": sum(_inventory_ptus(x) for x in inventory),
         "reserved_ptus": reserved,
@@ -717,14 +776,29 @@ def _enrich_ops_kpis(metrics: list[dict[str, Any]], inventory: list[dict[str, An
         "input_tpm": observed_tpm(input_tokens, metric_hours),
         "output_tpm": observed_tpm(output_tokens, metric_hours),
         "utilization_avg": util,
-        "utilization_p95": util_p95,
-        "utilization_max": util_max,
-        "peak_utilization": util_max,
+        "utilization_p95": peak,
+        "utilization_peak_label": peak_label,
+        "utilization_max": (
+            max([float(x["utilization_max"]) for x in metrics if x.get("utilization_max") is not None])
+            if any(x.get("utilization_max") is not None for x in metrics) else None
+        ),
+        "peak_utilization": peak,
         "unused_capacity_pct": unused_capacity_pct(util),
+        "hours_at_or_above_80": hours_80,
+        "hours_at_or_above_95": hours_95,
         "rate_limited_count": sum(float(x.get("rate_limited_count") or 0) for x in metrics),
         "request_peak_per_minute": max(rpm_vals) if rpm_vals else None,
         "time_to_response_avg_ms": sum(ttr_vals) / len(ttr_vals) if ttr_vals else None,
         "time_to_last_byte_avg_ms": sum(ttlb_vals) / len(ttlb_vals) if ttlb_vals else None,
+        "normalized_ttft_avg_ms": sum(ttft_vals) / len(ttft_vals) if ttft_vals else None,
+        "availability_rate_avg": weighted_utilization([
+            {**m, "utilization_avg": m.get("availability_rate_avg"), "provisioned_ptus": m.get("provisioned_ptus") or 1}
+            for m in metrics if m.get("availability_rate_avg") is not None
+        ]),
+        "context_cache_match_rate_avg": weighted_utilization([
+            {**m, "utilization_avg": m.get("context_cache_match_rate_avg"), "provisioned_ptus": m.get("provisioned_ptus") or 1}
+            for m in metrics if m.get("context_cache_match_rate_avg") is not None
+        ]),
         "utilization_bands": {"30": 30, "80": 80, "95": 95, "100": 100},
     }
 
@@ -1265,6 +1339,11 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
     """Lightweight PTU operational dashboard — Gold metrics/capacity only, no FOCUS."""
     async with _ClientCancelScope(request) as scope:
         cancel = scope.cancel_event
+        date_from, date_to, _, _ = _dashboard_date_bounds(body)
+        effective_grain = body.grain if body.grain in {"hour", "day", "month"} else "day"
+        if effective_grain == "hour" and body.hours > 7 * 24:
+            effective_grain = "day"
+
         try:
             inventory, metrics, data_source, heatmap = await _load_operational_data(
                 body, db, dashboard_only=True, cancel_event=cancel,
@@ -1273,18 +1352,60 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
             logger.warning("Azure PTU ops operational data failed: %s", exc, exc_info=exc)
             inventory, metrics, data_source, heatmap = [], [], "stale", []
 
+        previous_metrics: list[dict[str, Any]] = []
+        try:
+            prev_body = OverviewRequest(
+                **{
+                    **body.model_dump(),
+                    "hours": body.hours,
+                    "date_to": date_from,
+                    "date_from": (
+                        datetime.fromisoformat(date_from + "T00:00:00+00:00") - timedelta(hours=body.hours)
+                    ).strftime("%Y-%m-%d"),
+                }
+            )
+            _, previous_metrics, _, _ = await _load_operational_data(
+                prev_body, db, dashboard_only=True, cancel_event=cancel,
+            )
+        except Exception:
+            previous_metrics = []
+
         deployment_stats = _aggregate_deployment_utilization(metrics, inventory)
         imbalance = _deployment_imbalance(deployment_stats)
-        utilization_series = _build_utilization_series(metrics, body.grain)
-        token_series = _build_token_series(metrics, body.grain)
-        latency_series = _build_latency_series(metrics, body.grain)
-        rate_limit_series = _build_rate_limit_series(metrics, body.grain)
+        utilization_series = _build_utilization_series(metrics, effective_grain)
+        token_series = _build_token_series(metrics, effective_grain)
+        latency_series = _build_latency_series(metrics, effective_grain)
+        rate_limit_series = _build_rate_limit_series(metrics, effective_grain)
         projects = _build_project_stats(inventory, metrics, deployment_stats)
         kpis = _enrich_ops_kpis(metrics, inventory)
-        recommendations = _build_recommendations(kpis, imbalance)
+        period = period_metadata(
+            hours=body.hours,
+            requested_grain=body.grain,
+            effective_grain=effective_grain,
+            metrics=metrics,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        executive_summary = build_executive_summary(
+            metrics, inventory, previous_metrics=previous_metrics, period=period,
+        )
+        recommendations = build_ops_recommendations(
+            metrics, deployment_stats, imbalance, period=period,
+        )
         coverage = _build_metrics_coverage(metrics, body.hours)
+        metric_availability = metric_field_availability(metrics)
 
         return {
+            "period": period,
+            "executive_summary": executive_summary,
+            "token_consumption": build_token_consumption(
+                metrics, deployment_stats, token_series, effective_grain,
+            ),
+            "capacity_risk": build_capacity_risk(
+                metrics, deployment_stats, utilization_series, heatmap, effective_grain,
+            ),
+            "service_quality": build_service_quality(metrics, latency_series, rate_limit_series),
+            "metric_availability": metric_availability,
             "inventory": inventory,
             "kpis": kpis,
             "projects": projects,

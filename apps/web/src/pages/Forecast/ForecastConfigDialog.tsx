@@ -48,10 +48,45 @@ const emptyState = {
   windows: [7, 14, 28] as number[],
   weight: 70,
   minDays: 7,
+  profile: "padrao" as string,
   chargeEndColumn: "",
   intervalConnections: [] as number[],
   mappedConnections: [] as MappedConnection[],
 };
+
+// Perfis de agressividade (FORECAST.md): vinculam método + crescimento.
+const PROFILES = [
+  { key: "custom", label: "Personalizada" },
+  { key: "conservador", label: "Conservador (MEAN_28 · 0,5%)" },
+  { key: "ponderado", label: "Ponderado (WEIGHTED · peso 70%)" },
+  { key: "padrao", label: "Padrão (AUTO_BACKTEST · 0,83%)" },
+  { key: "agressivo", label: "Agressivo (MEAN_7 · 1,5%)" },
+];
+
+const METHOD_LABELS: Record<string, string> = {
+  AUTO_BACKTEST: "AUTO_BACKTEST — melhor janela no backtest",
+  MEAN_7: "MEAN_7 — média dos últimos 7 dias",
+  MEAN_14: "MEAN_14 — média dos últimos 14 dias",
+  MEAN_28: "MEAN_28 — média dos últimos 28 dias",
+  WEIGHTED: "WEIGHTED — média ponderada (peso recente)",
+};
+
+const WINDOW_OPTIONS = [7, 14, 28];
+
+function detectProfile(model: string, growthPct: number, weight: number): string {
+  if (model === "MEAN_28" && Math.abs(growthPct - 0.5) < 0.001) return "conservador";
+  if (model === "AUTO_BACKTEST" && Math.abs(growthPct - 0.83) < 0.001) return "padrao";
+  if (model === "MEAN_7" && Math.abs(growthPct - 1.5) < 0.001) return "agressivo";
+  if (model === "WEIGHTED" && weight === 70) return "ponderado";
+  return "custom";
+}
+
+function applyProfile(key: string, setters: { setModel: (v: string) => void; setGrowth: (v: number) => void; setWeight: (v: number) => void }) {
+  if (key === "conservador") { setters.setModel("MEAN_28"); setters.setGrowth(0.5); }
+  else if (key === "padrao") { setters.setModel("AUTO_BACKTEST"); setters.setGrowth(0.83); }
+  else if (key === "agressivo") { setters.setModel("MEAN_7"); setters.setGrowth(1.5); }
+  else if (key === "ponderado") { setters.setModel("WEIGHTED"); setters.setWeight(70); }
+}
 
 export default function ForecastConfigDialog({ open, initial, tables, onClose, onSaved }: Props) {
   const [name, setName] = useState(emptyState.name);
@@ -67,6 +102,7 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
   const [windows, setWindows] = useState<number[]>(emptyState.windows);
   const [weight, setWeight] = useState(emptyState.weight);
   const [minDays, setMinDays] = useState(emptyState.minDays);
+  const [profile, setProfile] = useState(emptyState.profile);
   const [chargeEndColumn, setChargeEndColumn] = useState(emptyState.chargeEndColumn);
   const [intervalConnections, setIntervalConnections] = useState<number[]>(emptyState.intervalConnections);
   const [mappedConnections, setMappedConnections] = useState<MappedConnection[]>(emptyState.mappedConnections);
@@ -94,6 +130,11 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
       setHorizon(12);
       setCutoff(2);
       setGrowth(0.83);
+      setModel("AUTO_BACKTEST");
+      setWindows([7, 14, 28]);
+      setWeight(70);
+      setMinDays(7);
+      setProfile("padrao");
       setChargeEndColumn("");
       setIntervalConnections([]);
       setMappedConnections([]);
@@ -114,6 +155,7 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
       setWindows(config.enabled_windows || [7, 14, 28]);
       setWeight(Math.round(((config as any).recent_weight || 0.7) * 100));
       setMinDays((config as any).minimum_daily_points || 7);
+      setProfile(detectProfile(config.model_mode, config.growth_rate * 100, Math.round(((config as any).recent_weight || 0.7) * 100)));
       const rules = config.connection_allocation_rules?.length
         ? config.connection_allocation_rules
         : config.period_allocation === "charge_interval"
@@ -226,7 +268,54 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
               </FormControl>
               <TextField label="Horizonte" type="number" value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} />
               <TextField label="Cutoff D-n" type="number" value={cutoff} onChange={(e) => setCutoff(Number(e.target.value))} />
-              <TextField label="Crescimento %" type="number" value={growth} onChange={(e) => setGrowth(Number(e.target.value))} />
+              <FormControl sx={{ minWidth: 240 }}>
+                <InputLabel>Perfil</InputLabel>
+                <Select
+                  label="Perfil"
+                  value={profile}
+                  onChange={(e) => {
+                    const key = e.target.value as string;
+                    setProfile(key);
+                    applyProfile(key, { setModel, setGrowth, setWeight });
+                  }}
+                >
+                  {PROFILES.map((p) => <MenuItem key={p.key} value={p.key}>{p.label}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControl sx={{ minWidth: 280 }}>
+                <InputLabel>Método</InputLabel>
+                <Select label="Método" value={model} onChange={(e) => { setModel(e.target.value); setProfile("custom"); }}>
+                  {Object.entries(METHOD_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControl sx={{ minWidth: 180 }}>
+                <InputLabel>Janelas</InputLabel>
+                <Select
+                  multiple
+                  label="Janelas"
+                  value={windows}
+                  input={<OutlinedInput label="Janelas" />}
+                  onChange={(e) => { setWindows(e.target.value as number[]); setProfile("custom"); }}
+                  renderValue={(selected) => selected.length ? selected.join(", ") + " dias" : "nenhuma"}
+                >
+                  {WINDOW_OPTIONS.map((w) => <MenuItem key={w} value={w}>{w} dias</MenuItem>)}
+                </Select>
+              </FormControl>
+              <TextField label="Crescimento %" type="number" value={growth} onChange={(e) => { setGrowth(Number(e.target.value)); setProfile("custom"); }} />
+              <TextField
+                label="Peso recente %"
+                type="number"
+                value={weight}
+                onChange={(e) => { setWeight(Math.max(0, Math.min(100, Number(e.target.value)))); setProfile("custom"); }}
+                sx={{ width: 130 }}
+              />
+              <TextField
+                label="Mín. pontos diários"
+                type="number"
+                value={minDays}
+                onChange={(e) => { setMinDays(Number(e.target.value)); setProfile("custom"); }}
+                sx={{ width: 130 }}
+              />
               <FormControl sx={{ minWidth: 300 }}>
                 <InputLabel>Dimensões da série</InputLabel>
                 <Select

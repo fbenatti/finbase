@@ -36,6 +36,7 @@ import {
   Savings as SavingsIcon,
   CloudUpload as CloudUploadIcon,
   SmartToy as SmartToyIcon,
+  FactCheck as AccuracyIcon,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { NotificationBell } from "../context/NotificationContext";
@@ -62,6 +63,7 @@ const menuGroups = [
     background: "#f5f3ff",
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
+      { path: "/forecast-accuracy", label: "Acurácia de Forecast", icon: <AccuracyIcon /> },
       { path: "/savings", label: "Ações de saving", icon: <SavingsIcon /> },
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
       { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },

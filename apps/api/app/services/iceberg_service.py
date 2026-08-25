@@ -1442,11 +1442,16 @@ def upsert_azure_ptu_hourly(df: pd.DataFrame) -> int:
             "spillover_request_count", "time_to_response_avg_ms", "time_to_response_max_ms",
             "time_to_response_p95_ms", "time_to_last_byte_avg_ms", "normalized_ttft_avg_ms",
             "normalized_ttft_max_ms", "normalized_ttft_p95_ms", "normalized_tbt_avg_ms",
-            "normalized_tbt_max_ms", "normalized_tbt_p95_ms", "tokens_per_second_avg",
-            "tokens_per_second_max", "completeness_pct",
+            "normalized_tbt_max_ms", "normalized_tbt_p95_ms",             "tokens_per_second_avg", "tokens_per_second_max", "completeness_pct",
+            "context_cache_match_rate_avg", "availability_rate_avg",
+            "utilization_avg_raw", "utilization_max_raw",
+            "streaming_request_count", "non_streaming_request_count",
         )
     }
-    numeric_types.update({"connection_id": "BIGINT", "source_points": "BIGINT", "expected_points": "BIGINT"})
+    numeric_types.update({
+        "connection_id": "BIGINT", "source_points": "BIGINT", "expected_points": "BIGINT",
+        "utilization_quality_anomaly": "BOOLEAN",
+    })
     cat = _get_catalog()
     try:
         tbl = cat.load_table(tid)

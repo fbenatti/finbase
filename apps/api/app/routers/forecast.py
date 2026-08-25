@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -705,9 +705,15 @@ async def delete_adjustment(adjustment_id: int, db: AsyncSession = Depends(get_d
     await db.delete(row); await db.commit()
 
 @router.post("/runs", status_code=201)
-async def create_run(config_id: int, trigger_type: str = "MANUAL", db: AsyncSession = Depends(get_db)):
+async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_of: str | None = None, db: AsyncSession = Depends(get_db)):
     config = await db.get(ForecastConfig, config_id)
     if not config: raise HTTPException(404, "Configuração não encontrada")
+    simulated_date: date | None = None
+    if simulated_as_of:
+        try:
+            simulated_date = date.fromisoformat(simulated_as_of)
+        except ValueError:
+            raise HTTPException(422, "simulated_as_of deve estar no formato YYYY-MM-DD")
     active = (await db.execute(select(ForecastRun.id).where(ForecastRun.forecast_config_id == config_id, ForecastRun.status.in_(["QUEUED", "RUNNING"])))).scalar_one_or_none()
     if active: raise HTTPException(409, f"Já existe forecast ativo: {active}")
     heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
@@ -732,9 +738,11 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", db: AsyncSess
     snapshot = _config_snapshot(config, destination)
     source_name, source_namespace = destination.physical_name, "gold"
     snapshot.update(destination_physical_name=source_name, source_namespace=source_namespace)
+    if simulated_date is not None:
+        snapshot["simulated_as_of"] = simulated_date.isoformat()
     row = ForecastRun(
         forecast_config_id=config_id, config_version=config.version, trigger_type=trigger_type,
-        cutoff_date=date.today().isoformat(), config_snapshot=snapshot,
+        cutoff_date=(simulated_date or date.today()).isoformat(), config_snapshot=snapshot,
         destination_table_id_snapshot=destination.id, destination_physical_name=source_name,
         classification_version_id=None,
     )
@@ -746,7 +754,10 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", db: AsyncSess
 @router.get("/runs")
 async def list_runs(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(ForecastRun).order_by(ForecastRun.started_at.desc()).limit(100))).scalars().all()
-    return [_out(r) for r in rows]
+    items = [_out(r) for r in rows]
+    for item, run in zip(items, rows):
+        item["simulated_as_of"] = (run.config_snapshot or {}).get("simulated_as_of")
+    return items
 
 @router.get("/runs/grid")
 async def list_runs_grid(
@@ -847,6 +858,7 @@ async def list_runs_grid(
         "error": run.error or "",
         "started_at": run.started_at,
         "finished_at": run.finished_at,
+        "simulated_as_of": (run.config_snapshot or {}).get("simulated_as_of"),
     } for run, name in rows]
     return {"items": items, "total": total}
 
@@ -938,6 +950,290 @@ async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession
     except Exception as exc:
         raise HTTPException(503, f"Falha ao comparar forecast com Gold atual: {exc}")
     return {"run_id": run_id, "comparison": True, "rows": rows, "columns": columns, "records": records, "offset": body.offset, "limit": body.row_limit, "wape": (wape_result[0].get("wape") if wape_result else None), "compared_at": datetime.utcnow().isoformat() + "Z"}
+
+# ---------------------------------------------------------------------------
+# Acurácia de Forecast (snapshots simulados mês a mês)
+# ---------------------------------------------------------------------------
+
+def _month_after(as_of: date) -> str:
+    """First month projected by a simulation (the target month).
+
+    Convention: ``simulated_as_of`` is the day the snapshot is taken — day 2
+    of the target month (D-2).  The engine cutoff then lands on the last day
+    of the previous month, so the first projected month is the month of
+    ``as_of``.  The +1 day shift also covers the legacy convention where
+    ``as_of`` was the last day of the previous month.
+    """
+    target = as_of + timedelta(days=1)
+    return f"{target.year:04d}{target.month:02d}"
+
+
+def _accuracy_metrics(forecast_value: float | None, actual_value: float | None) -> dict[str, Any]:
+    forecast_value = float(forecast_value or 0)
+    actual_value = float(actual_value or 0)
+    variance = actual_value - forecast_value
+    variance_pct = (variance / forecast_value) if forecast_value else None
+    wape = (abs(variance) / actual_value) if actual_value else None
+    accuracy = (1.0 - wape) if wape is not None else None
+    bias = ((forecast_value - actual_value) / actual_value) if actual_value else None
+    return {
+        "forecast_value": forecast_value,
+        "actual_value": actual_value,
+        "variance": variance,
+        "variance_pct": variance_pct,
+        "wape": wape,
+        "accuracy": accuracy,
+        "bias": bias,
+    }
+
+
+def _accuracy_snapshot_context(run: ForecastRun, snapshot: dict[str, Any], schema: dict[str, str]) -> tuple[str, str, str, str, str | None, str]:
+    """Return (result_table, actual_source, date_expr, measure, type_col, type_filter)."""
+    if not snapshot.get("destination_physical_name") or not snapshot.get("measure_column") or not snapshot.get("date_column"):
+        raise HTTPException(422, "Snapshot sem contrato congelado; acurácia não disponível")
+    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
+    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
+    measure = snapshot["measure_column"]
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    return run.result_table, actual_source, date_expr, measure, type_col, type_filter
+
+
+async def _accuracy_totals(db: AsyncSession, run: ForecastRun, target_month: str) -> dict[str, Any]:
+    run, snapshot, schema = await _history_context(run.id, db)
+    table, actual_source, date_expr, measure, _, type_filter = _accuracy_snapshot_context(run, snapshot, schema)
+    period_col = snapshot.get("period_column")
+    month_filter = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target_month)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target_month)}"
+    )
+    try:
+        f_records = await trino_execute(
+            f'SELECT COALESCE(SUM(TRY_CAST("forecast_value" AS DOUBLE)),0) AS forecast_value, COUNT(*) AS rows FROM iceberg.forecast.{table} WHERE "forecast_month" = {_ql(target_month)}',
+            timeout_s=90,
+        )
+        a_records = await trino_execute(
+            f'SELECT COALESCE(SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)),0) AS actual_value FROM {actual_source} WHERE {month_filter}{type_filter}',
+            timeout_s=120,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao calcular acurácia: {exc}")
+    forecast_value = float(f_records[0].get("forecast_value") or 0) if f_records else 0.0
+    actual_value = float(a_records[0].get("actual_value") or 0) if a_records else 0.0
+    metrics = _accuracy_metrics(forecast_value, actual_value)
+    metrics["rows_forecast"] = int(f_records[0].get("rows") or 0) if f_records else 0
+    return metrics
+
+
+@router.get("/accuracy/months")
+async def accuracy_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    """Meses simulados: cada run COMPLETED com simulated_as_of vira um mês-alvo."""
+    stmt = select(ForecastRun).where(
+        ForecastRun.status == "COMPLETED",
+        ForecastRun.result_table.is_not(None),
+        ForecastRun.config_snapshot["simulated_as_of"].as_string() != "",
+    )
+    if config_id:
+        stmt = stmt.where(ForecastRun.forecast_config_id == config_id)
+    runs = (await db.execute(stmt.order_by(ForecastRun.started_at.asc()))).scalars().all()
+    items = []
+    for run in runs:
+        snapshot = dict(run.config_snapshot or {})
+        raw = snapshot.get("simulated_as_of")
+        if not raw:
+            continue
+        try:
+            as_of = date.fromisoformat(str(raw))
+        except ValueError:
+            continue
+        target = _month_after(as_of)
+        row = {
+            "run_id": run.id,
+            "config_id": run.forecast_config_id,
+            "simulated_as_of": as_of.isoformat(),
+            "target_month": target,
+            "cutoff_date": run.cutoff_date,
+            "result_table": run.result_table,
+            "started_at": run.started_at,
+            "closed": target < date.today().strftime("%Y%m"),
+        }
+        try:
+            metrics = await _accuracy_totals(db, run, target)
+            row.update(metrics)
+        except HTTPException:
+            row.update({"forecast_value": None, "actual_value": None, "wape": None, "accuracy": None})
+        items.append(row)
+    # Re-runs of the same month must replace the older simulated snapshot:
+    # keep the most recent run per target_month.
+    by_month: dict[str, dict[str, Any]] = {}
+    for item in items:
+        by_month[str(item["target_month"])] = item
+    return list(by_month.values())
+
+
+@router.get("/accuracy/summary")
+async def accuracy_summary(run_id: int, target_month: str | None = None, db: AsyncSession = Depends(get_db)):
+    run = await db.get(ForecastRun, run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    snapshot = dict(run.config_snapshot or {})
+    if not snapshot.get("simulated_as_of"):
+        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+    target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
+    metrics = await _accuracy_totals(db, run, target)
+    metrics.update({
+        "run_id": run.id,
+        "config_id": run.forecast_config_id,
+        "simulated_as_of": snapshot.get("simulated_as_of"),
+        "target_month": target,
+        "cutoff_date": run.cutoff_date,
+        "result_table": run.result_table,
+        "closed": target < date.today().strftime("%Y%m"),
+        "compared_at": datetime.utcnow().isoformat() + "Z",
+    })
+    return metrics
+
+
+@router.get("/accuracy/dimensions")
+async def accuracy_dimensions(run_id: int, target_month: str | None = None, dimension: str | None = None, db: AsyncSession = Depends(get_db)):
+    run = await db.get(ForecastRun, run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    run, snapshot, schema = await _history_context(run.id, db)
+    if not snapshot.get("simulated_as_of"):
+        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+    target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
+    table, actual_source, date_expr, measure, _, type_filter = _accuracy_snapshot_context(run, snapshot, schema)
+    available = [field for field in snapshot.get("dimensions", []) if field in schema]
+    dim = dimension or (available[0] if available else "cloud_origem")
+    if dim not in schema:
+        raise HTTPException(422, f"Dimensão inválida para este snapshot: {dim}")
+    period_col = snapshot.get("period_column")
+    month_filter = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+    )
+    null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
+    dim_expr = f"COALESCE(CAST({_qi(dim)} AS VARCHAR), {_ql(null_label)})"
+    sql = f"""
+      WITH f AS (
+        SELECT {dim_expr} AS dim_v, SUM(TRY_CAST("forecast_value" AS DOUBLE)) AS forecast_value
+        FROM iceberg.forecast.{table} WHERE "forecast_month" = {_ql(target)} GROUP BY {dim_expr}
+      ),
+      a AS (
+        SELECT {dim_expr} AS dim_v, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS actual_value
+        FROM {actual_source} WHERE {month_filter}{type_filter} GROUP BY {dim_expr}
+      )
+      SELECT COALESCE(f.dim_v, a.dim_v) AS dim_v,
+             COALESCE(f.forecast_value, 0) AS forecast_value,
+             COALESCE(a.actual_value, 0) AS actual_value,
+             COALESCE(a.actual_value, 0) - COALESCE(f.forecast_value, 0) AS variance
+      FROM f FULL OUTER JOIN a ON f.dim_v = a.dim_v
+    """
+    try:
+        records = await trino_execute(sql, timeout_s=120)
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao consultar dimensões de acurácia: {exc}")
+    out = []
+    for record in records:
+        dim_v = record.get("dim_v")
+        if dim_v is None or str(dim_v) == "":
+            dim_v = snapshot.get("null_dimension_label") or "Não classificado"
+        metrics = _accuracy_metrics(record.get("forecast_value"), record.get("actual_value"))
+        metrics["dimension_value"] = dim_v
+        out.append(metrics)
+    out.sort(key=lambda item: abs(item.get("variance") or 0), reverse=True)
+    return {"run_id": run.id, "target_month": target, "dimension": dim, "simulated_as_of": snapshot.get("simulated_as_of"), "records": out}
+
+
+@router.get("/accuracy/history")
+async def accuracy_history(config_id: int | None = None, dimension: str | None = None, db: AsyncSession = Depends(get_db)):
+    """Evolução da acurácia mês a mês sobre todos os simulados disponíveis."""
+    stmt = select(ForecastRun).where(
+        ForecastRun.status == "COMPLETED",
+        ForecastRun.result_table.is_not(None),
+        ForecastRun.config_snapshot["simulated_as_of"].as_string() != "",
+    )
+    if config_id:
+        stmt = stmt.where(ForecastRun.forecast_config_id == config_id)
+    runs = (await db.execute(stmt.order_by(ForecastRun.started_at.asc()))).scalars().all()
+    series = []
+    for run in runs:
+        snapshot = dict(run.config_snapshot or {})
+        raw = snapshot.get("simulated_as_of")
+        if not raw:
+            continue
+        try:
+            as_of = date.fromisoformat(str(raw))
+        except ValueError:
+            continue
+        target = _month_after(as_of)
+        try:
+            metrics = await _accuracy_totals(db, run, target)
+        except HTTPException:
+            continue
+        metrics.update({
+            "run_id": run.id,
+            "simulated_as_of": as_of.isoformat(),
+            "target_month": target,
+            "closed": target < date.today().strftime("%Y%m"),
+        })
+        series.append(metrics)
+    # Keep the most recent simulated run per month (re-runs replace older ones).
+    by_month: dict[str, dict[str, Any]] = {}
+    for item in series:
+        by_month[str(item["target_month"])] = item
+    return {"items": list(by_month.values())}
+
+
+class AccuracyReprocessIn(BaseModel):
+    config_id: int
+    months: list[str] = []
+
+
+@router.post("/accuracy/reprocess", status_code=202)
+async def accuracy_reprocess(body: AccuracyReprocessIn, db: AsyncSession = Depends(get_db)):
+    """Queue a batch that regenerates the simulated forecast snapshots for the
+    given months (simulated_as_of = day 2 of each month).  The accuracy
+    dashboard then picks the most recent run per month."""
+    config = await db.get(ForecastConfig, body.config_id)
+    if not config:
+        raise HTTPException(404, "Configuração não encontrada")
+    months = sorted({str(m) for m in body.months if len(str(m)) == 6 and str(m).isdigit()})
+    if not months:
+        raise HTTPException(422, "Informe ao menos um mês no formato YYYYMM")
+    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
+    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
+    try:
+        worker_pid = int(open(pid_file).read().strip()); os.kill(worker_pid, 0)
+        age = datetime.now().timestamp() - os.stat(heartbeat).st_mtime
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        age = 999
+    if age > 15:
+        raise HTTPException(503, "Worker ETL indisponível; reprocessamento não foi criado")
+    active = (await db.execute(
+        select(EtlTask.id).where(
+            EtlTask.task_type.in_(["forecast_accuracy", "forecast"]),
+            EtlTask.destination_table_id == config.id,
+            EtlTask.status.in_(["QUEUED", "RUNNING"]),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if active is not None:
+        raise HTTPException(409, f"Já existe reprocessamento de acurácia ativo: task {active}")
+    now = datetime.now(timezone.utc)
+    task = EtlTask(
+        task_type="forecast_accuracy", status="QUEUED", destination_table_id=config.id,
+        result_json={
+            "config_id": config.id, "months": months, "total_months": len(months),
+            "event_log": [{"at": now.isoformat(), "level": "INFO",
+                           "message": f"Reprocessar acurácia: {len(months)} meses ({months[0]}–{months[-1]})"}],
+        },
+        total_blobs=len(months), processed_blobs=0, errors=[], phase=f"Na fila: {len(months)} simulado(s)",
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return {"task_id": task.id, "status": task.status, "months": months}
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: int, db: AsyncSession = Depends(get_db)):

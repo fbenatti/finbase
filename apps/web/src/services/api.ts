@@ -423,6 +423,9 @@ export interface ReprocessStatus {
   id: number;
   status: string;
   phase: string;
+  current_blob?: string;
+  total_blobs?: number;
+  processed_blobs?: number;
   total_batches: number;
   completed_batches: number;
   progress: number;
@@ -911,6 +914,37 @@ export type HistorySort = { field: string; direction: "asc" | "desc" };
 export async function runForecastHistoryPivot(runId: number, body: { rows: string[]; columns: string[]; filters?: Record<string, HistoryFilter>; row_limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc" }): Promise<ForecastHistoryPivot> { const { data } = await api.post(`/forecast/runs/${runId}/history/pivot`, body); return data; }
 export async function compareForecastHistory(runId: number, body: { rows: string[]; columns: string[]; filters?: Record<string, HistoryFilter>; row_limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc" }): Promise<ForecastHistoryPivot> { const { data } = await api.post(`/forecast/runs/${runId}/history/comparison`, body); return data; }
 export async function getForecastBusinessRules(configId: number): Promise<ForecastBusinessRule[]> { const { data } = await api.get(`/forecast/configs/${configId}/business-rules`); return data; }
+
+// ── Acurácia de Forecast ──────────────────────────────────────────────────
+export interface ForecastAccuracyMonth {
+  run_id: number; config_id: number; simulated_as_of: string; target_month: string;
+  cutoff_date: string; result_table: string; started_at?: string; closed: boolean;
+  forecast_value?: number | null; actual_value?: number | null; wape?: number | null;
+  accuracy?: number | null; variance?: number | null; variance_pct?: number | null; bias?: number | null;
+}
+export interface ForecastAccuracySummary {
+  run_id: number; config_id: number; simulated_as_of: string; target_month: string;
+  cutoff_date: string; result_table: string; closed: boolean; compared_at?: string;
+  rows_forecast?: number; forecast_value?: number | null; actual_value?: number | null;
+  variance?: number | null; variance_pct?: number | null; wape?: number | null;
+  accuracy?: number | null; bias?: number | null;
+}
+export interface ForecastAccuracyDimensionRow {
+  dimension_value: string; forecast_value?: number | null; actual_value?: number | null;
+  variance?: number | null; variance_pct?: number | null; wape?: number | null; accuracy?: number | null; bias?: number | null;
+}
+export interface ForecastAccuracyDimensions { run_id: number; target_month: string; dimension: string; simulated_as_of: string; records: ForecastAccuracyDimensionRow[]; }
+export interface ForecastAccuracyHistory { items: ForecastAccuracySummary[]; }
+export async function getForecastAccuracyMonths(configId?: number): Promise<ForecastAccuracyMonth[]> { const { data } = await api.get("/forecast/accuracy/months", { params: configId ? { config_id: configId } : {} }); return data; }
+export async function getForecastAccuracySummary(runId: number, targetMonth?: string): Promise<ForecastAccuracySummary> { const { data } = await api.get("/forecast/accuracy/summary", { params: { run_id: runId, target_month: targetMonth } }); return data; }
+export async function getForecastAccuracyDimensions(runId: number, targetMonth?: string, dimension?: string): Promise<ForecastAccuracyDimensions> { const { data } = await api.get("/forecast/accuracy/dimensions", { params: { run_id: runId, target_month: targetMonth, dimension } }); return data; }
+export async function getForecastAccuracyHistory(configId?: number): Promise<ForecastAccuracyHistory> { const { data } = await api.get("/forecast/accuracy/history", { params: configId ? { config_id: configId } : {} }); return data; }
+export async function createSimulatedForecastRun(configId: number, simulatedAsOf: string): Promise<{ run_id: number; task_id: number; status: string }> { const { data } = await api.post(`/forecast/runs?config_id=${configId}&simulated_as_of=${simulatedAsOf}`); return data; }
+export interface ForecastAccuracyReprocessResult { task_id: number; status: string; months: string[]; }
+export async function reprocessForecastAccuracy(configId: number, months: string[]): Promise<ForecastAccuracyReprocessResult> {
+  const { data } = await api.post("/forecast/accuracy/reprocess", { config_id: configId, months });
+  return data;
+}
 export type ForecastGridParams = { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> };
 export interface ForecastConfigsGridResponse { items: ForecastConfig[]; total: number; }
 export async function getForecastConfigsGrid(params: ForecastGridParams = {}): Promise<ForecastConfigsGridResponse> {

@@ -203,7 +203,14 @@ e `warning_message` quando o mês corrente não pode alimentar realizado/forecas
 No motor de Forecast, cada série usa o próprio cutoff (última data observada
 da série), sem zero-fill até a data global de outra origem. Séries com totais
 mensais no dia 1 usam baseline `MONTHLY_LUMP` (média das taxas diárias de meses
-fechados), evitando MEAN_7 ≈ 0 por zero-fill entre meses.
+fechados), evitando `MEAN_7 ≈ 0` por zero-fill entre meses e também a
+multiplicação da fatura mensal por 28–31 dias quando o grid termina no dia da
+cobrança (o que inflava reservas e assinaturas mensais em ~4×).
+
+Detecção: quando a série tem ≤ 3 dias com cobrança na janela
+(`nonzero_days <= 3`), o baseline é `fatura do último mês com cobrança ÷ dias
+desse mês` e o método registrado é `MONTHLY_LUMP`. Séries diárias normais
+continuam nos métodos 7/14/28/WEIGHTED/AUTO_BACKTEST.
 
 Com regras por conexão (`charge_interval` só para IBM, etc.), totais mensais são
 rateados uniformemente entre `date_column` e `charge_end_column` (ou o último dia
@@ -334,6 +341,65 @@ Scan -> novos arquivos -> Bronze -> Gold -> Forecast
 ```
 
 O Forecast só é enfileirado quando existem novos dados, o reprocessamento Gold termina com sucesso, a configuração está ativa, o worker está saudável e não há execução concorrente.
+
+## Acurácia de Forecast (simulados mês a mês)
+
+O dashboard de acurácia responde a pergunta: *"o que eu projetava no início do
+mês está perto do que eu realmente realizei?"*
+
+### Simulado (snapshot imutável)
+
+Para cada mês-alvo M, uma execução de forecast roda **como se estivéssemos no
+dia 2 de M (D-2)** — o snapshot é tirado no início do mês com os dados do mês
+anterior fechado:
+
+```text
+POST /forecast/runs?config_id={id}&simulated_as_of=YYYY-MM-02
+```
+
+- `simulated_as_of` = dia 2 do mês-alvo (ex.: `2026-02-02` simula fevereiro;
+  `2026-07-02` simula julho). O cutoff efetivo vira `as_of - cutoff_days` =
+  último dia do mês anterior (ex.: 30/06 para o simulado de julho).
+- O motor ignora a descoberta real do cutoff, usa `as_of - cutoff_days` como
+  cutoff e limita a agregação a `<= as_of` — nenhum dado futuro vaza para o
+  snapshot.
+- O resultado é gravado como snapshot imutável no Iceberg
+  (`forecast.result_run_{id}`), com `simulated_as_of` congelado no
+  `config_snapshot` do `forecast_run`. **Nada é gravado no PostgreSQL**.
+- Runs simulados **não** sobrescrevem a tabela de planning corrente.
+- As **mesmas regras de negócio ativas** da configuração são aplicadas ao
+  valor projetado. Para que regras que identificam por `chargecategory`
+  tenham efeito, a coluna precisa estar entre as **dimensões** da
+  configuração (senão o motor registra "não aplicada: campo fora das
+  dimensões").
+
+### Métricas
+
+A comparação é feita sob demanda via Trino entre o snapshot congelado e a Gold
+realizada:
+
+```text
+projetado_mês = SUM(forecast_value) do snapshot para o mês-alvo
+realizado     = SUM(medida) da Gold para o mês-alvo (tipo = realizado)
+variance      = realizado - projetado
+variance_pct  = variance / projetado
+wape          = |variance| / realizado
+accuracy      = 1 - wape
+bias          = (projetado - realizado) / realizado   # > 0 => superestimou
+```
+
+### Endpoints
+
+```text
+GET /forecast/accuracy/months                            # meses simulados + run de referência
+GET /forecast/accuracy/summary?run_id=&target_month=     # KPIs do mês
+GET /forecast/accuracy/dimensions?run_id=&target_month=&dimension=  # breakdown
+GET /forecast/accuracy/history                           # evolução mês a mês
+```
+
+O frontend expõe a página **Acurácia de Forecast** (`/forecast-accuracy`) com
+KPIs, gráfico Projetado × Realizado por dimensão, detalhe por dimensão e a
+evolução mês a mês.
 
 ## APIs
 
