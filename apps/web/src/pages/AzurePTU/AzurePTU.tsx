@@ -290,11 +290,11 @@ export default function AzurePTU() {
                   <Typography variant="h6" gutterBottom>Série de utilização (média / P95 / pico)</Typography>
                   {utilizationSeries.length > 0 ? (
                     <Plot
-                      data={[
+                      data={([
                         { x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_avg), name: "Média", type: "scatter", mode: "lines", line: { color: "#2563EB" } },
                         { x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_p95), name: "P95", type: "scatter", mode: "lines", line: { color: "#7C3AED", dash: "dot" } },
                         { x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_max), name: "Pico", type: "scatter", mode: "lines", line: { color: "#DC2626", dash: "dash" } },
-                      ]}
+                      ] as any)}
                       layout={chartLayout("Utilização (%)")}
                       config={{ displayModeBar: false, responsive: true }}
                       style={{ width: "100%", height: 320 }}
@@ -311,7 +311,7 @@ export default function AzurePTU() {
                   <Typography variant="h6" gutterBottom>Custo PTU vs tokens (série histórica)</Typography>
                   {costSeries.length > 0 || tokenSeries.length > 0 ? (
                     <Plot
-                      data={[
+                      data={([
                         ...(costSeries.length > 0 ? [{
                           x: costSeries.map((r: { timestamp: string }) => r.timestamp),
                           y: costSeries.map((r: { realized_cost: number }) => r.realized_cost),
@@ -329,7 +329,7 @@ export default function AzurePTU() {
                           mode: "lines",
                           line: { color: "#2563EB" },
                         }] : []),
-                      ]}
+                      ] as any)}
                       layout={{
                         autosize: true,
                         margin: { l: 60, r: 60, t: 24, b: 60 },

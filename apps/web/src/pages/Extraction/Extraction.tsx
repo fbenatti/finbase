@@ -186,6 +186,11 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
   const doScan = async () => {
     if (!connId) return;
+    if (isAzurePtuSelected) {
+      setError("");
+      setScanResult({ connection_id: connId, total: 0, new: 0, changed: 0, unchanged: 0, items: [], persisted_metrics: false } as any);
+      return;
+    }
     setScanning(true); setError(""); setTask(null); setSelectedPaths(new Set()); setBlobFilter("");
     try { setScanResult(await scanBlobs(connId as number)); }
     catch (e: unknown) { setError(formatApiError(e, "Falha ao escanear")); }

@@ -692,6 +692,18 @@ def run_ptu_collection(
             current_blob=f"consultando Monitor · {done}/{total}",
         )
 
+    def _on_persist_start(index: int, total: int, period: str, chunk_size: int) -> None:
+        _persist_task_progress(
+            session,
+            task_id,
+            processed_blobs=max(0, index - 1),
+            rows_destination=total_gold,
+            phase=(
+                f"Persistindo Gold janela {index}/{total} ({period}) · {chunk_size} registros..."
+            )[:200],
+            current_blob=f"iceberg dest_azure_ptu_metrics · {chunk_size} rows",
+        )
+
     def _on_window_complete(
         index: int,
         total: int,
@@ -728,6 +740,7 @@ def run_ptu_collection(
                 backfill_days=backfill_days,
                 on_window_start=_on_window_start,
                 on_query_progress=_on_query_progress,
+                on_persist_start=_on_persist_start,
                 on_window_complete=_on_window_complete,
                 persist_fn=lambda chunk, cap: persist_hourly(
                     connection_id, inventory, chunk,
@@ -787,6 +800,7 @@ async def collect_monthly(
     on_window: Any | None = None,
     on_window_start: Any | None = None,
     on_query_progress: Any | None = None,
+    on_persist_start: Any | None = None,
     on_window_complete: Any | None = None,
     persist_fn: Any | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -815,6 +829,8 @@ async def collect_monthly(
             collected_periods.append(period)
         window_counts = {"bronze": 0, "gold_metrics": 0, "gold_capacity": 0}
         if persist_fn and chunk:
+            if on_persist_start:
+                on_persist_start(index, total, period, len(chunk))
             write_cap = index == total
             window_counts = persist_fn(chunk, write_cap)
         if on_window_complete:

@@ -35,6 +35,8 @@ const bandColor = (band?: string | null) => {
 };
 
 const lineTrace = (trace: Record<string, unknown>) => ({ ...trace, connectgaps: false });
+
+const chartLayout = (yTitle: string): Record<string, unknown> => ({
   autosize: true,
   margin: { l: 60, r: 24, t: 24, b: 60 },
   hovermode: "x unified",
@@ -186,6 +188,17 @@ export default function AzurePtuOps() {
         {TAB_LABELS.map(label => <Tab key={label} label={label} />)}
       </Tabs>
 
+      {coverage && coverage.missing_days > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Cobertura incompleta no Gold: {coverage.days_with_data}/{coverage.expected_days} dias
+          ({coverage.coverage_pct}%). Faltam {coverage.missing_days} dias
+          {coverage.missing_day_samples?.length
+            ? ` (ex.: ${coverage.missing_day_samples.slice(0, 5).join(", ")}${coverage.missing_days > 5 ? "…" : ""})`
+            : ""}.
+          Linhas do gráfico não conectam lacunas — reprocessar o mês em Extração.
+        </Alert>
+      )}
+
       {error && (
         <Alert severity="warning" sx={{ mb: 2 }}>{error} — exibindo último recorte disponível.</Alert>
       )}
@@ -224,9 +237,9 @@ export default function AzurePtuOps() {
               {utilizationSeries.length > 0 ? (
                 <Plot
                   data={[
-                    { x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_avg), name: "Média", type: "scatter", mode: "lines", line: { color: "#2563EB" } },
-                    { x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_p95), name: "P95", type: "scatter", mode: "lines", line: { color: "#7C3AED", dash: "dot" } },
-                    { x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_max), name: "Pico", type: "scatter", mode: "lines", line: { color: "#DC2626", dash: "dash" } },
+                    lineTrace({ x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_avg), name: "Média", type: "scatter", mode: "lines", line: { color: "#2563EB" } }),
+                    lineTrace({ x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_p95), name: "P95", type: "scatter", mode: "lines", line: { color: "#7C3AED", dash: "dot" } }),
+                    lineTrace({ x: utilizationSeries.map((r: any) => r.timestamp), y: utilizationSeries.map((r: any) => r.utilization_max), name: "Pico", type: "scatter", mode: "lines", line: { color: "#DC2626", dash: "dash" } }),
                   ]}
                   layout={chartLayout("Utilização (%)")}
                   config={{ displayModeBar: false, responsive: true }}
@@ -245,9 +258,9 @@ export default function AzurePtuOps() {
               {tokenSeries.length > 0 ? (
                 <Plot
                   data={[
-                    { x: tokenSeries.map((r: any) => r.timestamp), y: tokenSeries.map((r: any) => r.input_tokens), name: "Input", type: "scatter", mode: "lines", line: { color: "#2563EB" } },
-                    { x: tokenSeries.map((r: any) => r.timestamp), y: tokenSeries.map((r: any) => r.output_tokens), name: "Output", type: "scatter", mode: "lines", line: { color: "#059669" } },
-                    { x: tokenSeries.map((r: any) => r.timestamp), y: tokenSeries.map((r: any) => r.total_tokens), name: "Total", type: "scatter", mode: "lines", line: { color: "#7C3AED", dash: "dot" } },
+                    lineTrace({ x: tokenSeries.map((r: any) => r.timestamp), y: tokenSeries.map((r: any) => r.input_tokens), name: "Input", type: "scatter", mode: "lines", line: { color: "#2563EB" } }),
+                    lineTrace({ x: tokenSeries.map((r: any) => r.timestamp), y: tokenSeries.map((r: any) => r.output_tokens), name: "Output", type: "scatter", mode: "lines", line: { color: "#059669" } }),
+                    lineTrace({ x: tokenSeries.map((r: any) => r.timestamp), y: tokenSeries.map((r: any) => r.total_tokens), name: "Total", type: "scatter", mode: "lines", line: { color: "#7C3AED", dash: "dot" } }),
                   ]}
                   layout={{
                     autosize: true,
@@ -275,8 +288,8 @@ export default function AzurePtuOps() {
               {latencySeries.length > 0 ? (
                 <Plot
                   data={[
-                    { x: latencySeries.map((r: any) => r.timestamp), y: latencySeries.map((r: any) => r.time_to_response_avg_ms), name: "Time to response", type: "scatter", mode: "lines", line: { color: "#2563EB" } },
-                    { x: latencySeries.map((r: any) => r.timestamp), y: latencySeries.map((r: any) => r.time_to_last_byte_avg_ms), name: "Time to last byte", type: "scatter", mode: "lines", line: { color: "#059669" } },
+                    lineTrace({ x: latencySeries.map((r: any) => r.timestamp), y: latencySeries.map((r: any) => r.time_to_response_avg_ms), name: "Time to response", type: "scatter", mode: "lines", line: { color: "#2563EB" } }),
+                    lineTrace({ x: latencySeries.map((r: any) => r.timestamp), y: latencySeries.map((r: any) => r.time_to_last_byte_avg_ms), name: "Time to last byte", type: "scatter", mode: "lines", line: { color: "#059669" } }),
                   ]}
                   layout={{
                     autosize: true,
