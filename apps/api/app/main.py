@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, ai_cost_origin, azure_ptu
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, ai_cost_origin, azure_ptu, reservations
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
         # asyncpg executes prepared statements and rejects multi-command SQL,
         # so each migration operation must be sent independently.
         for statement in (
+            # reservation_collection (22 chars) excede o VARCHAR(20) original.
+            "ALTER TABLE etl_task ALTER COLUMN task_type TYPE VARCHAR(40)",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_status VARCHAR(30)",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_message VARCHAR(500)",
@@ -99,6 +101,7 @@ async def lifespan(app: FastAPI):
               created_at TIMESTAMPTZ DEFAULT now()
             )""",
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_provider ON ai_cost_link (provider)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS tool_connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS target_type VARCHAR(30) NOT NULL DEFAULT 'license_pool'",
             "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS operational_connection_id INTEGER",
             "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS department_id INTEGER",
@@ -107,6 +110,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS deployment_type VARCHAR(40)",
             "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS cost_component VARCHAR(40)",
             "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS allocation_level VARCHAR(30)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS materialization_table VARCHAR(120)",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS materialization_status VARCHAR(30) NOT NULL DEFAULT 'PENDING'",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS materialization_rows INTEGER",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS materialization_run_id INTEGER",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS materialized_at TIMESTAMPTZ",
+            "ALTER TABLE ai_cost_link ADD COLUMN IF NOT EXISTS materialization_error TEXT",
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_target_type ON ai_cost_link (target_type)",
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_source_link ON ai_cost_link_source (link_id)",
             "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS description TEXT",
@@ -242,6 +251,7 @@ app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
 app.include_router(ai_cost_origin.router)
 app.include_router(azure_ptu.router)
+app.include_router(reservations.router)
 
 
 @app.get("/health")

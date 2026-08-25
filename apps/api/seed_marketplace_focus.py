@@ -29,17 +29,22 @@ MARKETPLACE_COLUMNS = [
 GCP_CONNECTIONS = {
     3: "GCP-4P",
     4: "GCP-TI",
+    8: "GCP-TTECH",
 }
 
+# GCP BigQuery marks marketplace rows with transaction_type = THIRD_PARTY_RESELLER
+# (the ``invoice.publisher_type`` flag only exists in Azure).  The marketplace
+# product lives in ``service.description`` ("Denodo Enterprise Plus") and the
+# offer unit in ``usage.pricing_unit``.
 GCP_MARKETPLACE_MAPPINGS: list[dict] = [
     {
         "source_column": "sku",
         "destination_column": "MarketplaceProductName",
         "transform_type": "CONDITIONAL",
         "transform_config": {
-            "when_column": "invoice",
-            "when_path": "publisher_type",
+            "when_column": "transaction_type",
             "when_values": ["THIRD_PARTY_RESELLER"],
+            "then_source": "service",
             "then_type": "JSON_PATH",
             "then_config": {"path": "description"},
         },
@@ -49,11 +54,11 @@ GCP_MARKETPLACE_MAPPINGS: list[dict] = [
         "destination_column": "MarketplaceOfferUnit",
         "transform_type": "CONDITIONAL",
         "transform_config": {
-            "when_column": "invoice",
-            "when_path": "publisher_type",
+            "when_column": "transaction_type",
             "when_values": ["THIRD_PARTY_RESELLER"],
+            "then_source": "usage",
             "then_type": "JSON_PATH",
-            "then_config": {"path": "unit"},
+            "then_config": {"path": "pricing_unit"},
         },
     },
     {
@@ -61,8 +66,7 @@ GCP_MARKETPLACE_MAPPINGS: list[dict] = [
         "destination_column": "MarketplaceBillingModel",
         "transform_type": "CONDITIONAL",
         "transform_config": {
-            "when_column": "invoice",
-            "when_path": "publisher_type",
+            "when_column": "transaction_type",
             "when_values": ["THIRD_PARTY_RESELLER"],
             "then_type": "CONST",
             "then_config": {"value": "RECURRING"},

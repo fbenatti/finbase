@@ -101,3 +101,36 @@ class ForecastRun(Base):
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
     __table_args__ = (Index("ix_forecast_run_config_status", "forecast_config_id", "status"),)
+
+
+class ForecastAck(Base):
+    """User acknowledgement of a forecast deviation: the reason why a
+    department deviated from the month's simulated forecast.  Frozen metrics
+    (projetado/realizado/delta/acuracia) captured at ack time."""
+    __tablename__ = "forecast_ack"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, nullable=True, index=True)
+    target_month = Column(String(6), nullable=False, index=True)
+    department_path = Column(JSON, nullable=False, default=list)
+    department_name = Column(String(300), nullable=False)
+    forecast_value = Column(Float, nullable=False, default=0)
+    actual_value = Column(Float, nullable=False, default=0)
+    variance = Column(Float, nullable=False, default=0)
+    accuracy = Column(Float, nullable=True)
+    category = Column(String(80), nullable=False)
+    reason = Column(String(1000), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    __table_args__ = (Index("ix_forecast_ack_month_dept", "target_month", "department_name"),)
+
+
+class ForecastAckHistory(Base):
+    """Audit trail: every previous version of an Ack (category/reason) before
+    each edit, so the justificativa evolution is never lost."""
+    __tablename__ = "forecast_ack_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ack_id = Column(Integer, ForeignKey("forecast_ack.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String(80), nullable=False)
+    reason = Column(String(1000), nullable=False)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (Index("ix_forecast_ack_history_ack", "ack_id"),)

@@ -50,13 +50,15 @@ def weighted_utilization(metrics: list[dict[str, Any]]) -> float | None:
 
 
 def peak_utilization_label(metrics: list[dict[str, Any]]) -> tuple[float | None, str]:
-    """Return peak utilization and label (pico horário observado vs P95)."""
+    """Return the observed peak from hourly Gold rows.
+
+    Gold contains hourly aggregates, not the raw percentile distribution. Calling
+    a percentile over those aggregates would overstate the precision of the KPI.
+    """
     valid_max = [_valid_util(row.get("utilization_max")) for row in metrics]
     valid_max = [v for v in valid_max if v is not None]
     if not valid_max:
         return None, "indisponível"
-    if len(valid_max) >= P95_MIN_SAMPLES:
-        return metric_p95(valid_max), "P95"
     return max(valid_max), "pico horário observado"
 
 
@@ -279,6 +281,26 @@ def build_token_consumption(
         "grain": grain,
         "explanation": "Tokens agregados do Azure Monitor (ProcessedPromptTokens + GeneratedTokens / TokenTransaction).",
     }
+
+
+def build_token_heatmap(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate token demand by weekday/hour for the selected Gold window."""
+    buckets: dict[tuple[int, int], dict[str, float]] = {}
+    for row in metrics:
+        raw = str(row.get("metric_hour") or "")
+        if len(raw) < 13:
+            continue
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        key = (dt.weekday(), dt.hour)
+        slot = buckets.setdefault(key, {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "samples": 0.0})
+        slot["input_tokens"] += float(row.get("input_tokens_sum") or row.get("input_tokens") or 0)
+        slot["output_tokens"] += float(row.get("output_tokens_sum") or row.get("output_tokens") or 0)
+        slot["total_tokens"] += float(row.get("total_tokens_sum") or row.get("total_tokens") or 0)
+        slot["samples"] += 1
+    return [{"weekday": day, "hour": hour, **values} for (day, hour), values in sorted(buckets.items())]
 
 
 def build_capacity_risk(

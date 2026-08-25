@@ -617,36 +617,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{sourceResetMessage}</Alert>}
 
-      {isAzurePtuSelected && connId && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Typography variant="body2" sx={{ mb: 1 }}>
-            Azure Monitor retém métricas de plataforma por <strong>~93 dias</strong>. Use <strong>Importar todos os dados disponíveis</strong>
-            para carregar o histórico completo (~93 dias) em <code>dest_azure_ptu_metrics</code>, ou <strong>Buscar métricas do período</strong>
-            para um mês específico. O agendamento horário (:10) coleta apenas o lookback recente (~3h).
-          </Typography>
-          {loadingPtuPeriods ? (
-            <CircularProgress size={18} />
-          ) : ptuPeriods.length > 0 ? (
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {ptuPeriods.map((p) => (
-                <Chip
-                  key={p.period}
-                  label={`${p.label || formatPtuPeriod(p.period)} (${p.blob_count} janelas)`}
-                  size="small"
-                  variant={selPtuPeriods.includes(p.period) ? "filled" : "outlined"}
-                  color={selPtuPeriods.includes(p.period) ? "primary" : "default"}
-                  onClick={() => setSelPtuPeriods(prev =>
-                    prev.includes(p.period) ? prev.filter(x => x !== p.period) : [...prev, p.period]
-                  )}
-                  sx={{ cursor: "pointer" }}
-                />
-              ))}
-            </Stack>
-          ) : (
-            <Typography variant="caption" color="text.secondary">Nenhum mês disponível dentro da retenção Monitor.</Typography>
-          )}
-        </Alert>
-      )}
 
       {extractableConnections.find(c => c.id === connId)?.connector_type === "oci" && (
         <Alert severity="info" sx={{ mb: 2 }}>

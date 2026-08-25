@@ -22,9 +22,7 @@ from app.models.ai_cost import (
 )
 from app.models.destination import DestinationTable
 from app.services.ai_cost_attribution import (
-    apply_links,
     count_active_licenses,
-    link_applies,
     preview_source,
 )
 from app.services.manual_ai_cost_extractor import (
@@ -64,6 +62,7 @@ class LinkSourceOut(BaseModel):
 class LinkCreate(BaseModel):
     name: str
     provider: str
+    tool_connection_ids: list[int] = Field(default_factory=list)
     product_name: str
     target_type: Literal["license_pool", "ptu_pool", "payg_ai"] = "license_pool"
     operational_connection_id: int | None = None
@@ -87,6 +86,7 @@ class LinkCreate(BaseModel):
 class LinkUpdate(BaseModel):
     name: str | None = None
     provider: str | None = None
+    tool_connection_ids: list[int] | None = None
     product_name: str | None = None
     target_type: Literal["license_pool", "ptu_pool", "payg_ai"] | None = None
     operational_connection_id: int | None = None
@@ -111,6 +111,7 @@ class LinkOut(BaseModel):
     id: int
     name: str
     provider: str
+    tool_connection_ids: list[int] = Field(default_factory=list)
     product_name: str
     target_type: str = "license_pool"
     operational_connection_id: int | None = None
@@ -128,6 +129,12 @@ class LinkOut(BaseModel):
     distribution_basis: str | None
     distribution_user_key: str | None
     unit_cost: float | None = None
+    materialization_table: str | None = None
+    materialization_status: str | None = None
+    materialization_rows: int | None = None
+    materialization_run_id: int | None = None
+    materialized_at: str | None = None
+    materialization_error: str | None = None
     sources: list[LinkSourceOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
@@ -153,17 +160,12 @@ class ManualEntryRequest(BaseModel):
     trigger_reprocess: bool = True
 
 
-class ApplyRequest(BaseModel):
-    billing_period: str
-    link_ids: list[int] | None = None
-    dry_run: bool = False
-
-
 def _link_out(link: AiCostLink) -> LinkOut:
     return LinkOut(
         id=link.id,
         name=link.name,
         provider=link.provider,
+        tool_connection_ids=list(getattr(link, "tool_connection_ids", None) or []),
         product_name=link.product_name,
         target_type=getattr(link, "target_type", None) or "license_pool",
         operational_connection_id=getattr(link, "operational_connection_id", None),
@@ -181,6 +183,12 @@ def _link_out(link: AiCostLink) -> LinkOut:
         distribution_basis=link.distribution_basis,
         distribution_user_key=link.distribution_user_key,
         unit_cost=link.unit_cost,
+        materialization_table=getattr(link, "materialization_table", None),
+        materialization_status=getattr(link, "materialization_status", None),
+        materialization_rows=getattr(link, "materialization_rows", None),
+        materialization_run_id=getattr(link, "materialization_run_id", None),
+        materialized_at=link.materialized_at.isoformat() if getattr(link, "materialized_at", None) else None,
+        materialization_error=getattr(link, "materialization_error", None),
         sources=[LinkSourceOut.model_validate(source) for source in (link.sources or [])],
     )
 
@@ -236,6 +244,7 @@ async def create_link(data: LinkCreate, db: AsyncSession = Depends(get_db)):
     link = AiCostLink(
         name=data.name.strip(),
         provider=data.provider.strip(),
+        tool_connection_ids=list(data.tool_connection_ids or []),
         product_name=data.product_name.strip(),
         target_type=data.target_type,
         operational_connection_id=data.operational_connection_id,
@@ -255,6 +264,7 @@ async def create_link(data: LinkCreate, db: AsyncSession = Depends(get_db)):
         unit_cost=data.unit_cost,
     )
     _replace_sources(link, data.sources)
+    link.materialization_status = "PENDING"
     db.add(link)
     await db.commit()
     link = (await db.execute(
@@ -281,12 +291,14 @@ async def update_link(link_id: int, data: LinkUpdate, db: AsyncSession = Depends
     )).scalar_one_or_none()
     if not link:
         raise HTTPException(status_code=404, detail="Vínculo não encontrado")
-    for field in ("name", "provider", "product_name", "target_type", "operational_connection_id", "department_id", "project_key", "purchase_mode", "deployment_type", "cost_component", "allocation_level", "license_sku", "valid_from", "valid_until", "active", "distribution_enabled", "distribution_basis", "distribution_user_key", "unit_cost"):
+    for field in ("name", "provider", "product_name", "target_type", "operational_connection_id", "department_id", "project_key", "purchase_mode", "deployment_type", "cost_component", "allocation_level", "license_sku", "valid_from", "valid_until", "active", "distribution_enabled", "distribution_basis", "distribution_user_key", "unit_cost", "tool_connection_ids"):
         value = getattr(data, field)
         if value is not None:
             setattr(link, field, value.strip() if isinstance(value, str) else value)
     if data.sources is not None:
         _replace_sources(link, data.sources)
+    link.materialization_status = "PENDING"
+    link.materialization_error = None
     await db.commit()
     link = (await db.execute(
         select(AiCostLink).options(selectinload(AiCostLink.sources)).where(AiCostLink.id == link_id)
@@ -302,6 +314,10 @@ async def delete_link(link_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(delete(AiCostAllocation).where(AiCostAllocation.link_id == link_id))
     await db.delete(link)
     await db.commit()
+    # The physical Gold is owned exclusively by this relationship ID.
+    from app.services.ai_cost_materialization import drop_link_gold_table
+    import asyncio
+    await asyncio.get_running_loop().run_in_executor(None, drop_link_gold_table, link_id)
 
 
 @router.get("/unlinked")
@@ -620,46 +636,3 @@ async def create_manual_entry(body: ManualEntryRequest, db: AsyncSession = Depen
         },
         "reprocess_task_id": reprocess_task_id,
     }
-
-
-@router.post("/apply")
-async def apply_cost_links(body: ApplyRequest, db: AsyncSession = Depends(get_db)):
-    links = await _load_links(db, body.link_ids)
-    active_links = [link for link in links if link_applies(link, body.billing_period)]
-    if body.link_ids and not active_links:
-        raise HTTPException(status_code=404, detail="Nenhum vínculo aplicável encontrado")
-
-    from app.database import SyncSession
-
-    def _apply_sync() -> dict[str, Any]:
-        session = SyncSession()
-        try:
-            sync_links = session.query(AiCostLink).options(selectinload(AiCostLink.sources)).all()
-            if body.link_ids:
-                wanted = set(body.link_ids)
-                sync_links = [link for link in sync_links if link.id in wanted]
-            import asyncio
-            result = asyncio.run(apply_links(session, sync_links, body.billing_period, dry_run=body.dry_run))
-            if not body.dry_run:
-                session.commit()
-            else:
-                session.rollback()
-            return {
-                "billing_period": result.billing_period,
-                "links_processed": result.links_processed,
-                "total_cost": result.total_cost,
-                "allocations_written": result.allocations_written,
-                "conflicts": result.conflicts,
-                "unmapped_links": result.unmapped_links,
-                "dry_run": body.dry_run,
-            }
-        finally:
-            session.close()
-
-    import asyncio
-    loop = asyncio.get_running_loop()
-    try:
-        return await loop.run_in_executor(None, _apply_sync)
-    except Exception as exc:
-        logger.exception("Apply failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc

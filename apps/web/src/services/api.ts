@@ -13,11 +13,50 @@ export async function getAzurePtuOpsOverview(params: Record<string, unknown> = {
   const { data } = await api.post("/azure-ptu/dashboard/ops-overview", params, { signal });
   return data;
 }
+
+export async function getAzurePtuExecutiveOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.post("/azure-ptu/dashboard/executive-overview", params, { signal });
+  return data;
+}
 export async function getAzurePtuView(view: "projects"|"deployments"|"subprojects"|"trends"|"reconciliation"|"recommendations", params: Record<string, unknown> = {}, signal?: AbortSignal) {
   const { data } = await api.post(`/azure-ptu/dashboard/${view}`, params, { signal }); return data;
 }
 
-const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|azure-ptu\/dashboard)/;
+// ── Reservas Azure (RI + Savings Plans) ────────────────────────────────
+export async function getReservationSources(signal?: AbortSignal) {
+  const { data } = await api.get("/reservations/sources", { signal });
+  return data;
+}
+export async function testReservationConnection(connectionId: number) {
+  const { data } = await api.post(`/reservations/connections/${connectionId}/test`);
+  return data;
+}
+export async function collectReservations(connectionIds: number[] = []) {
+  const { data } = await api.post("/reservations/collect", { connection_ids: connectionIds });
+  return data;
+}
+export async function getReservationsDashboard(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.get("/reservations/dashboard", { params, signal });
+  return data;
+}
+export async function getReservationsCatalog(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.get("/reservations/catalog", { params, signal });
+  return data;
+}
+export async function getReservationsUtilization(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.get("/reservations/utilization", { params, signal });
+  return data;
+}
+export async function getReservationsAdvisor(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.get("/reservations/advisor", { params, signal });
+  return data;
+}
+export async function getReservationsRecommendations(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.get("/reservations/recommendations", { params, signal });
+  return data;
+}
+
+const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|azure-ptu\/dashboard|reservations\/dashboard)/;
 const pendingAnalysis = new Set<AbortController>();
 type ExpectedViewInflight = { count: number; controller: AbortController; promise: Promise<unknown>; abortTimer?: number };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
@@ -385,6 +424,16 @@ export async function getAvailablePeriods(connectionId: number): Promise<Availab
 
 export async function reprocessSharedCost(): Promise<{ task_id: number; status: string; message: string }> {
   const { data } = await api.post("/etl/reprocess-shared-cost");
+  return data;
+}
+
+export async function reprocessAICostRelationships(): Promise<{ task_id: number; status: string; message: string }> {
+  const { data } = await api.post("/etl/reprocess-ai-cost-relationships");
+  return data;
+}
+
+export async function getAICostRelationshipHistory(): Promise<Array<{ id: number; status: string; phase?: string; started_at?: string; finished_at?: string; rows_destination?: number }>> {
+  const { data } = await api.get("/etl/ai-cost-relationship-history");
   return data;
 }
 
@@ -935,12 +984,75 @@ export interface ForecastAccuracyDimensionRow {
 }
 export interface ForecastAccuracyDimensions { run_id: number; target_month: string; dimension: string; simulated_as_of: string; records: ForecastAccuracyDimensionRow[]; }
 export interface ForecastAccuracyHistory { items: ForecastAccuracySummary[]; }
-export async function getForecastAccuracyMonths(configId?: number): Promise<ForecastAccuracyMonth[]> { const { data } = await api.get("/forecast/accuracy/months", { params: configId ? { config_id: configId } : {} }); return data; }
-export async function getForecastAccuracySummary(runId: number, targetMonth?: string): Promise<ForecastAccuracySummary> { const { data } = await api.get("/forecast/accuracy/summary", { params: { run_id: runId, target_month: targetMonth } }); return data; }
-export async function getForecastAccuracyDimensions(runId: number, targetMonth?: string, dimension?: string): Promise<ForecastAccuracyDimensions> { const { data } = await api.get("/forecast/accuracy/dimensions", { params: { run_id: runId, target_month: targetMonth, dimension } }); return data; }
+export async function getForecastAccuracyMonths(configId?: number, department?: string, mode?: string): Promise<ForecastAccuracyMonth[]> { const { data } = await api.get("/forecast/accuracy/months", { params: { config_id: configId, department, mode } }); return data; }
+export async function getForecastAccuracySummary(runId: number, targetMonth?: string, department?: string, mode?: string): Promise<ForecastAccuracySummary> { const { data } = await api.get("/forecast/accuracy/summary", { params: { run_id: runId, target_month: targetMonth, department, mode } }); return data; }
+export async function getForecastAccuracyDimensions(runId: number, targetMonth?: string, dimension?: string, department?: string, mode?: string): Promise<ForecastAccuracyDimensions> { const { data } = await api.get("/forecast/accuracy/dimensions", { params: { run_id: runId, target_month: targetMonth, dimension, department, mode } }); return data; }
 export async function getForecastAccuracyHistory(configId?: number): Promise<ForecastAccuracyHistory> { const { data } = await api.get("/forecast/accuracy/history", { params: configId ? { config_id: configId } : {} }); return data; }
+export interface ForecastAccuracyDeltaRow {
+  name: string; subcategory?: string; path?: string[]; forecast_value?: number | null; actual_value?: number | null;
+  variance?: number | null; variance_pct?: number | null; wape?: number | null;
+  accuracy?: number | null; bias?: number | null;
+}
+export interface ForecastAccuracyDelta {
+  run_id: number; target_month: string; mode: string; department: string;
+  level: number; level_label: string; dimension: string; leaf?: boolean; records: ForecastAccuracyDeltaRow[];
+}
+export async function getForecastAccuracyDelta(runId: number, targetMonth?: string, mode?: string, department?: string): Promise<ForecastAccuracyDelta> {
+  const { data } = await api.get("/forecast/accuracy/delta", { params: { run_id: runId, target_month: targetMonth, mode, department } });
+  return data;
+}
+export interface ForecastAccuracyDeltaSeriesPoint {
+  day: number; actual: number; actual_cum: number; forecast_rate: number; forecast_cum: number;
+}
+export interface ForecastAccuracyDeltaSeries {
+  run_id: number; target_month: string; department: string; subcategory: string;
+  days_in_month: number; forecast_total: number; actual_total: number;
+  variance: number; variance_pct?: number | null; accuracy?: number | null;
+  deviation_day: number | null; daily_deviation_day?: number | null; points: ForecastAccuracyDeltaSeriesPoint[];
+}
+export async function getForecastAccuracyDeltaSeries(runId: number, targetMonth?: string, department?: string, subcategory?: string): Promise<ForecastAccuracyDeltaSeries> {
+  const { data } = await api.get("/forecast/accuracy/delta/series", { params: { run_id: runId, target_month: targetMonth, department, subcategory }, timeout: 60000 });
+  return data;
+}
+export interface ForecastDesvioItem {
+  path: string[]; name: string; forecast_value: number; actual_value: number;
+  variance: number; variance_pct?: number | null; accuracy?: number | null; wape?: number | null; bias?: number | null;
+}
+export interface ForecastDesvios { run_id: number; target_month: string; department: string; positive: ForecastDesvioItem[]; negative: ForecastDesvioItem[]; }
+export interface ForecastDesvioSubcat { subcategory: string; forecast_value: number; actual_value: number; variance: number; variance_pct?: number | null; accuracy?: number | null; }
+export interface ForecastAck {
+  id: number; run_id: number | null; target_month: string; department_path: string[]; department_name: string;
+  forecast_value: number; actual_value: number; variance: number; accuracy?: number | null;
+  category: string; reason: string; created_at: string;
+  history?: Array<{ id: number; category: string; reason: string; changed_at: string }>;
+}
+export async function getForecastAccuracyDesvios(runId: number, targetMonth?: string, department?: string): Promise<ForecastDesvios> {
+  const { data } = await api.get("/forecast/accuracy/desvios", { params: { run_id: runId, target_month: targetMonth, department }, timeout: 60000 });
+  return data;
+}
+export async function getForecastAccuracyDesviosSubcategories(runId: number, targetMonth?: string, department?: string, scope?: string): Promise<{ records: ForecastDesvioSubcat[] }> {
+  const { data } = await api.get("/forecast/accuracy/desvios/subcategories", { params: { run_id: runId, target_month: targetMonth, department, scope }, timeout: 45000 });
+  return data;
+}
+export async function createForecastAck(body: { run_id: number; target_month: string; department: string; category: string; reason: string }): Promise<ForecastAck> {
+  const { data } = await api.post("/forecast/accuracy/acks", body);
+  return data;
+}
+export async function updateForecastAck(ackId: number, body: { category: string; reason: string }): Promise<ForecastAck> {
+  const { data } = await api.put(`/forecast/accuracy/acks/${ackId}`, body);
+  return data;
+}
+export async function getForecastAcks(targetMonth?: string, department?: string): Promise<{ items: ForecastAck[] }> {
+  const { data } = await api.get("/forecast/accuracy/acks", { params: { target_month: targetMonth, department } });
+  return data;
+}
+export async function deleteForecastAck(ackId: number): Promise<void> { await api.delete(`/forecast/accuracy/acks/${ackId}`); }
 export async function createSimulatedForecastRun(configId: number, simulatedAsOf: string): Promise<{ run_id: number; task_id: number; status: string }> { const { data } = await api.post(`/forecast/runs?config_id=${configId}&simulated_as_of=${simulatedAsOf}`); return data; }
 export interface ForecastAccuracyReprocessResult { task_id: number; status: string; months: string[]; }
+export async function getForecastAccuracyAvailableMonths(configId?: number): Promise<string[]> {
+  const { data } = await api.get("/forecast/accuracy/available-months", { params: configId ? { config_id: configId } : {} });
+  return data.months;
+}
 export async function reprocessForecastAccuracy(configId: number, months: string[]): Promise<ForecastAccuracyReprocessResult> {
   const { data } = await api.post("/forecast/accuracy/reprocess", { config_id: configId, months });
   return data;
@@ -1368,8 +1480,11 @@ export async function searchPivotTable(destinationTableId: number, term: string,
 }
 
 
-export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; shared_value?: number | null; shared_received?: number | null; shared_given?: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
-export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; actual_value?: number; shared_value?: number; }
+export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; forecast_manual_value?: number | null; shared_value?: number | null; shared_received?: number | null; shared_given?: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
+export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; actual_value?: number; forecast_manual_value?: number; shared_value?: number; }
+// Pseudo-destination id for the operational Forecast manual (Planning) exposed in the pivot.
+export const FORECAST_MANUAL_PIVOT_ID = -1000000;
+
 type ExpectedViewResult = { director: string; department_id?: number; rows: ExpectedViewRow[]; drivers: ExpectedViewDriver[] };
 
 export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal, includeSharedCost = false): Promise<ExpectedViewResult> {
@@ -1686,6 +1801,7 @@ export interface AICostLink {
   id?: number;
   name: string;
   provider: string;
+  tool_connection_ids?: number[];
   product_name: string;
   target_type?: "license_pool" | "ptu_pool" | "payg_ai";
   operational_connection_id?: number | null;
@@ -1702,6 +1818,11 @@ export interface AICostLink {
   distribution_basis?: string | null;
   distribution_user_key?: "email" | "login" | null;
   unit_cost?: number | null;  // R$/licença/mês — custo unitário manual (ex.: Claude)
+  materialization_table?: string | null;
+  materialization_status?: "PENDING" | "UPDATED" | "EMPTY" | "FAILED" | string | null;
+  materialization_rows?: number | null;
+  materialized_at?: string | null;
+  materialization_error?: string | null;
   sources?: AICostLinkSource[];
 }
 
@@ -1753,6 +1874,7 @@ export async function saveAICostLink(link: Partial<AICostLink>): Promise<AICostL
   const body = {
     name: link.name,
     provider: link.provider,
+    tool_connection_ids: link.tool_connection_ids ?? [],
     product_name: link.product_name,
     target_type: link.target_type ?? "license_pool",
     operational_connection_id: link.operational_connection_id ?? null,
@@ -1826,14 +1948,6 @@ export async function previewAIManualEntry(body: {
     active_license_count: data.active_license_count,
     total_cost: data.total_cost,
   };
-}
-
-export async function applyAICostAllocation(body: { link_id: number; period: string }) {
-  const { data } = await api.post("/ai-cost-origin/apply", {
-    billing_period: body.period,
-    link_ids: [body.link_id],
-  });
-  return data;
 }
 
 export interface AICostPtuPreview {

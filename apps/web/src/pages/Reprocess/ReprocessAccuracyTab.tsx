@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress, FormControl, FormControlLabel,
@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import { PlayArrow, Visibility } from "@mui/icons-material";
 import {
-  ForecastConfig, getForecastConfigs, getReprocessStatus, reprocessForecastAccuracy,
+  ForecastConfig, getForecastAccuracyAvailableMonths, getForecastConfigs, getReprocessStatus, reprocessForecastAccuracy,
 } from "../../services/api";
 
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -48,25 +48,24 @@ export default function ReprocessAccuracyTab() {
     void loadConfigs();
   }, [loadConfigs]);
 
-  // Meses disponíveis: de 2026-02 (fevereiro, marco inicial do piloto) até o mês corrente.
-  const availableMonths = useMemo(() => {
-    const now = new Date();
-    const end = now.getFullYear() * 100 + (now.getMonth() + 1);
-    const out: string[] = [];
-    let cursor = 202602;
-    while (cursor <= end) {
-      out.push(String(cursor));
-      const year = Math.floor(cursor / 100);
-      const month = (cursor % 100) + 1;
-      cursor = month > 12 ? (year + 1) * 100 + 1 : year * 100 + month;
-    }
-    return out;
-  }, []);
-
+  // Meses disponíveis: vem da API (períodos com dados na Gold + simulados já criados).
+  // Nada chumbado — quando setembro/2026 tiver dados, aparece automaticamente aqui.
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   useEffect(() => {
-    setMonths(availableMonths);
-    setSelected(new Set(availableMonths));
-  }, [availableMonths]);
+    if (!configId) return;
+    let cancelled = false;
+    getForecastAccuracyAvailableMonths(Number(configId))
+      .then((list) => {
+        if (cancelled) return;
+        setAvailableMonths(list);
+        setMonths(list);
+        setSelected(new Set(list));
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Falha ao carregar meses disponíveis");
+      });
+    return () => { cancelled = true; };
+  }, [configId]);
 
   const pollTask = useCallback(async (id: number) => {
     try {

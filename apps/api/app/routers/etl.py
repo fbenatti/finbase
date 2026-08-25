@@ -814,12 +814,22 @@ def _select_reprocess_blobs(
             by_period.setdefault(str(period), []).append((blob_id, period, path, modified))
         selected: list[tuple[int, str, str]] = []
         for period, blobs in by_period.items():
+            # GCP keeps distinct export tables (current resource_v1 vs legacy v1)
+            # as separate blob paths per billing month.  The legacy v1 table
+            # holds THIRD_PARTY_RESELLER subscriptions (private marketplace,
+            # e.g. Denodo) that the resource export does not contain, so all
+            # distinct tables for the period must be reprocessed — never only
+            # the preferred table or Gold loses the marketplace rows.
             if preferred_table:
                 preferred = [b for b in blobs if preferred_table in str(b[2])]
+                rest = [b for b in blobs if preferred_table not in str(b[2])]
+                picked: list[tuple[int, str, str, object]] = []
                 if preferred:
-                    blob_id, period, path, _ = max(preferred, key=lambda b: b[3])
-                    selected.append((blob_id, period, path))
-                    continue
+                    picked.append(max(preferred, key=lambda b: b[3]))
+                for other in rest:
+                    picked.append(other)
+                selected.extend((blob_id, period, path) for blob_id, period, path, _ in picked)
+                continue
             blob_id, period, path, _ = max(blobs, key=lambda b: b[3])
             selected.append((blob_id, period, path))
         return selected
@@ -1941,6 +1951,60 @@ async def reprocess_shared_cost(db: AsyncSession = Depends(get_db)):
         "status": "QUEUED",
         "message": task.phase,
     }
+
+
+@router.post("/reprocess-ai-cost-relationships")
+async def reprocess_ai_cost_relationships(db: AsyncSession = Depends(get_db)):
+    """Queue one classified FOCUS pass that publishes one Gold per active rule."""
+    from app.models.etl_task import EtlTask
+    from app.models.ai_cost import AiCostLink
+    from app.services.ai_cost_attribution import load_focus_schema
+    from app.services.ai_cost_materialization import _normalized_conditions
+    from sqlalchemy.orm import selectinload
+
+    links = list((await db.execute(select(AiCostLink).options(selectinload(AiCostLink.sources)).where(AiCostLink.active == True))).scalars().all())  # noqa: E712
+    if not links:
+        raise HTTPException(status_code=422, detail="Nenhum relacionamento de custo IA ativo para reprocessar.")
+    schema = await load_focus_schema()
+    invalid_rules = []
+    for link in links:
+        for source in link.sources or []:
+            _, missing = _normalized_conditions(schema, (source.filter_json or {}).get("conditions") or [])
+            if missing:
+                invalid_rules.append(f"{link.name} (fonte {source.id}): {', '.join(missing)}")
+    if invalid_rules:
+        raise HTTPException(status_code=422, detail="Regras FOCUS inválidas: " + "; ".join(invalid_rules))
+    now = datetime.now(timezone.utc)
+    active = list((await db.execute(select(EtlTask).where(
+        EtlTask.task_type == "ai_cost_relationship_reprocess",
+        EtlTask.status.in_(["QUEUED", "RUNNING"]),
+    ))).scalars().all())
+    if active:
+        raise HTTPException(status_code=409, detail="Já existe um reprocessamento de relacionamentos IA em andamento.")
+    task = EtlTask(task_type="ai_cost_relationship_reprocess", status="QUEUED", errors=[])
+    task.phase = "Na fila: classificar FOCUS uma vez e publicar as Gold dos relacionamentos"
+    task.started_at = now
+    task.total_blobs = len(links)
+    task.processed_blobs = 0
+    task.rows_destination = 0
+    task.result_json = {"event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}]}
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return {"task_id": task.id, "status": task.status, "message": task.phase}
+
+
+@router.get("/ai-cost-relationship-history")
+async def ai_cost_relationship_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
+    from app.models.etl_task import EtlTask
+    rows = list((await db.execute(select(EtlTask).where(
+        EtlTask.task_type == "ai_cost_relationship_reprocess"
+    ).order_by(EtlTask.id.desc()).limit(min(max(limit, 1), 100)))).scalars().all())
+    return [{
+        "id": row.id, "status": row.status, "phase": row.phase, "started_at": row.started_at,
+        "finished_at": row.finished_at, "rows_destination": row.rows_destination,
+        "result_json": row.result_json or {}, "error": (row.errors or [None])[0],
+    } for row in rows]
 
 
 @router.get("/shared-cost-history")

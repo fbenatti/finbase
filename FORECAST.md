@@ -395,7 +395,29 @@ GET /forecast/accuracy/months                            # meses simulados + run
 GET /forecast/accuracy/summary?run_id=&target_month=     # KPIs do mês
 GET /forecast/accuracy/dimensions?run_id=&target_month=&dimension=  # breakdown
 GET /forecast/accuracy/history                           # evolução mês a mês
+GET /forecast/accuracy/delta?run_id=&target_month=&mode=showback&parents=[]  # drill-down de ofensores
+GET /forecast/accuracy/desvios?run_id=&target_month=&department=             # top 10 + / top 10 - no último nível
+GET /forecast/accuracy/desvios/subcategories?run_id=&target_month=&department=<folha>  # por ServiceSubcategory
+POST/GET /forecast/accuracy/acks · DELETE /forecast/accuracy/acks/{id}      # motivo do desvio (Ack)
 ```
+
+A **aba Desvios** lista os desvios do mês no último nível de cada departamento
+(top 10 positivos/subestimou e top 10 negativos/superestimou), respeitando o
+departamento e o mês; `[+] ÚLTIMO NÍVEL` expande o breakdown por
+`servicesubcategory` (a coluna precisa estar nas dimensões da configuração —
+snapshots regenerados) e **Ack** registra categoria + motivo do desvio. O
+widget **Motivos de desvio (Ack)** na Visão Esperada lista os acks do mês
+anterior (padrão) com seletor de histórico.
+
+O drill-down de ofensores (`/accuracy/delta`) mostra o **nível abaixo do
+departamento selecionado** — mesma semântica do ExpectedView
+(`driver = nível do caminho + 1`): `Consumo Cloud` → Ramo (Showback/Chargeback)
+→ Provedor → Diretoria (nivel 4) → Projeto (nivel 5). `department` é o caminho
+"N1 > N2 > ..." e `mode` = `showback` (exclui Chargeback, padrão) |
+`chargeback` | `all`. Todos os endpoints de acurácia aceitam `department` e
+`mode`, aplicando o filtro nos totais (KPIs, tendência, dimensões e ofensores).
+Os agregados Gold/forecast por departamento são cacheados em memória — a
+navegação por departamento não rescaneia a Gold.
 
 O frontend expõe a página **Acurácia de Forecast** (`/forecast-accuracy`) com
 KPIs, gráfico Projetado × Realizado por dimensão, detalhe por dimensão e a

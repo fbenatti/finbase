@@ -33,7 +33,13 @@ export default function Planning({ budgetMode = false }: { budgetMode?: boolean 
   const fileInput = useRef<HTMLInputElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [types, setTypes] = useState<FinancialType[]>([]);
-  const [type, setType] = useState("");
+  // Initializa com a aba da URL para a grade carregar imediatamente e o Tabs
+  // nunca receber um value inválido na primeira renderização.
+  const [type, setType] = useState<string>(() =>
+    budgetMode
+      ? (searchParams.get("tab") === "forecast-manual" ? "forecast-manual" : "orcamento")
+      : "",
+  );
   const [year, setYear] = useState(yearNow);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [rows, setRows] = useState<PlanningRow[]>([]);
@@ -244,8 +250,12 @@ export default function Planning({ budgetMode = false }: { budgetMode?: boolean 
     setSaving(true);
     setError("");
     try {
-      await savePlanningGrid(type, year, displayRows.map(r => ({ entity_type: "department" as const, department_id: r.department_id, department_levels: r.department_levels, values: r.values })));
-      setMessage("Alterações publicadas em um novo snapshot.");
+      const result = await savePlanningGrid(type, year, displayRows.map(r => ({ entity_type: "department" as const, department_id: r.department_id, department_levels: r.department_levels, values: r.values })));
+      const previous = versions.find(v => v.is_current);
+      setMessage(
+        "Alterações publicadas como v" + result.version.version + "." +
+        (previous ? " O snapshot anterior (v" + previous.version + ") foi preservado no histórico." : ""),
+      );
       await load();
     } catch (e) {
       setError(String(e));

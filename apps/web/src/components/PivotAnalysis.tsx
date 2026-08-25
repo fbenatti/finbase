@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView,
   deletePivotView, drillDownPivot, getPivotMetadata, getPivotViews, runPivot, runPivotUnion, savePivotView,
-  LakehouseSearchResult, searchPivotTable, formatApiError,
+  LakehouseSearchResult, searchPivotTable, formatApiError, FORECAST_MANUAL_PIVOT_ID,
 } from "../services/api";
 
 interface Props {
@@ -205,11 +205,14 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     getPivotMetadata(tableId).then(next => {
       setMeta(next);
       const dimensions = new Set(next.dimensions);
+      const isForecastManual = tableId === FORECAST_MANUAL_PIVOT_ID;
       const isPlanning = tableId < 0 && dimensions.has("period") && dimensions.has("tipo") && next.measures.includes("value");
       if (isPlanning) {
         // Planning is a compact monthly table, not the detailed Gold fact.
         // Its useful default is immediately comparable realized × forecast.
-        setRows(["tipo"]);
+        // Forecast manual is a single-tipo planning source: default to the
+        // department hierarchy × future periods instead of the tipo axis.
+        setRows(isForecastManual ? ["departamento"] : ["tipo"]);
         setCols(["period"]);
         setMeasures([{ column: "value", aggregation: "SUM" }]);
         return;
@@ -228,19 +231,31 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
 
   const execute = async () => {
     if (!tableId || !measures.length) return;
-    const known = new Set((meta?.columns || []).map(column => column.name));
+    // A single active source may be the planning pseudo-destination (negative
+    // id): pivot that table directly instead of the Gold table, otherwise a
+    // forecast-only view would query the realized Gold and never show forecast.
+    const pivotTarget = sourceIds.length === 1 ? sourceIds[0] : tableId;
+    let schema = meta;
+    if (pivotTarget !== tableId) {
+      try { schema = await getPivotMetadata(pivotTarget); } catch { schema = meta; }
+    }
+    const known = new Set((schema?.columns || []).map(column => column.name));
     const originAllowed = sourceIds.length > 1;
     const allowOrigin = (name: string) => known.has(name) || (originAllowed && isOriginDim(name));
-    const safeRows = known.size ? rows.filter(allowOrigin) : rows;
-    const safeCols = known.size ? cols.filter(allowOrigin) : cols;
-    const safeFilters = known.size ? filters.filter(item => known.has(item.column)) : filters;
+    // Planning tables expose the month as ``period`` while Gold uses
+    // ``_billing_period``; the backend aliases either spelling, so keep period
+    // names even when they are not in the target schema.
+    const isPeriodName = (name: string) => ["_billing_period", "period", "forecast_month"].includes((name || "").toLowerCase());
+    const safeRows = known.size ? rows.filter(name => allowOrigin(name) || isPeriodName(name)) : rows;
+    const safeCols = known.size ? cols.filter(name => allowOrigin(name) || isPeriodName(name)) : cols;
+    const safeFilters = known.size ? filters.filter(item => known.has(item.column) || isPeriodName(item.column)) : filters;
     const safeMeasures = known.size ? measures.filter(item => known.has(item.column)) : measures;
     if (!safeMeasures.length) return;
     setLoading(true); setError("");
     try {
       setResult(sourceIds.length > 1
         ? await runPivotUnion({ destination_table_ids: sourceIds, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, origin_column: "origem" })
-        : await runPivot({ destination_table_id: tableId, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true }));
+        : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true }));
     }
     catch (e: unknown) { setError(formatApiError(e, "Falha ao consultar o Trino")); }
     finally { setLoading(false); }
@@ -310,7 +325,9 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       else cellFilters[name] = colKey[index] as string;
     });
     const matched = result?.tables?.find(table => table.origin === originValue);
-    const destId = matched?.id ?? tableId;
+    // Without a union, the cell belongs to the single active source, which may
+    // be the planning pseudo-destination (negative id).
+    const destId = matched?.id ?? (sourceIds.length === 1 ? sourceIds[0] : tableId);
     const pagination = { page: 0, pageSize: 100 };
     setDrillQuery({ destId, cellFilters });
     setDrillPage(pagination);
@@ -374,7 +391,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Paper sx={{ p: 2, mb: 2 }}>
       <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
-        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{destinations.filter(d => d.id > 0).map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{[...destinations.filter(d => d.id > 0), ...destinations.filter(d => d.id <= 0)].map(d => <MenuItem key={d.id} value={d.id}>{d.name}{d.id < 0 ? " · análise" : ""}</MenuItem>)}</Select></FormControl>
         <Box sx={{ display: "flex", alignItems: "center", gap: .5, flexWrap: "wrap" }}>
           <Typography variant="caption" color="text.secondary">Origem:</Typography>
           {destinations.filter(d => d.id === tableId || d.id === -Math.abs(tableId)).map(d => <Chip key={d.id} label={d.id < 0 ? "Forecast" : "Realizado"} color={sourceIds.includes(d.id) ? "primary" : "default"} variant={sourceIds.includes(d.id) ? "filled" : "outlined"} onClick={() => setSourceIds(current => {

@@ -5,6 +5,7 @@ import { Alert, Box, Breadcrumbs, Button, Card, CardContent, Chip, CircularProgr
 import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { Department, formatApiError, getDepartments, getExpectedView, ExpectedViewDriver, ExpectedViewRow } from "../../services/api";
+import AcksWidget from "./AcksWidget";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const flattenDepartments = (nodes: Department[], parents: string[] = []): Array<Department & { path: string }> => nodes.flatMap(node => {
@@ -79,10 +80,11 @@ export default function ExpectedView() {
   const realizedOf = (row: ExpectedViewRow) => (
     row.actual_value == null ? 0 : Number(row.actual_value || 0) + (sharedOn ? sharedOf(row) : 0)
   );
+  const forecastManualOf = (row: ExpectedViewRow) => Number(row.forecast_manual_value || 0);
   const expectedOf = (row: ExpectedViewRow) => (
     row.actual_value != null
-      ? Number(row.actual_value || 0) + (sharedOn ? sharedOf(row) : 0)
-      : Number(row.forecast_value ?? 0) + (sharedOn ? sharedOf(row) : 0)
+      ? Number(row.actual_value || 0) + forecastManualOf(row) + (sharedOn ? sharedOf(row) : 0)
+      : Number(row.forecast_value ?? 0) + forecastManualOf(row) + (sharedOn ? sharedOf(row) : 0)
   );
   const labels = filteredRows.map(row => toDate(row.period));
   const actual = filteredRows.reduce((sum, row) => sum + realizedOf(row), 0);
@@ -105,6 +107,15 @@ export default function ExpectedView() {
       ? Math.max(0, Number(row.forecast_value || 0) + (sharedOn ? givenOf(row) : 0))
       : 0
   ));
+  // Forecast manual is its own stacked layer on top of the Gold forecast.
+  const forecastManualBars = filteredRows.map(row => (
+    row.actual_value == null ? Math.max(0, forecastManualOf(row)) : 0
+  ));
+  const forecastManualCumulative = filteredRows.map((_, index) => {
+    if (index < forecastStart) return null;
+    return filteredRows.slice(0, index + 1).reduce((sum, item) => sum + (item.actual_value == null ? forecastManualOf(item) : 0), 0);
+  });
+  const forecastManualFilled = forecastManualCumulative.slice(forecastStart);
   const receivedOnActual = filteredRows.map(row => sharedOn && row.actual_value != null ? Math.max(0, receivedOf(row)) : 0);
   const receivedOnForecast = filteredRows.map(row => sharedOn && row.actual_value == null ? Math.max(0, receivedOf(row)) : 0);
   const sharedLine = { color: "#EA580C", width: 3 };
@@ -127,11 +138,13 @@ export default function ExpectedView() {
           { x: forecastLabels, y: forecastFilled, type: "scatter", mode: "lines+markers", name: "Custo compartilhado", legendgroup: "shared", showlegend: false, fill: "tonexty", fillcolor: sharedFill, line: sharedLine, marker: { size: 6, color: "#EA580C" } },
         ] : []),
         { x: forecastLabels, y: forecastFilled, type: "scatter", mode: "lines+markers", name: "Forecast", fill: sharedOn ? "none" : "tozeroy", fillcolor: "rgba(34,197,94,.22)", line: { color: "#22C55E", width: 3 }, marker: { size: 6 } },
+        { x: forecastLabels, y: forecastManualFilled, type: "scatter", mode: "lines+markers", name: "Forecast manual", fill: "tonexty", fillcolor: "rgba(134,239,172,.30)", line: { color: "#4ADE80", width: 2 }, marker: { size: 5, color: "#86EFAC" } },
       ]
     : [
         { x: labels, y: filteredRows.map(consumptionOf), type: "bar", name: "Realizado", marker: { color: "#F2A900" } },
         ...(sharedOn ? [{ x: labels, y: receivedOnActual, type: "bar", name: "Custo compartilhado", legendgroup: "shared", marker: { color: "#EA580C" } }] : []),
         { x: labels, y: forecastBars, type: "bar", name: "Forecast", marker: { color: "#22C55E" } },
+        { x: labels, y: forecastManualBars, type: "bar", name: "Forecast manual", marker: { color: "#86EFAC" } },
         ...(sharedOn ? [{ x: labels, y: receivedOnForecast, type: "bar", name: "Custo compartilhado", legendgroup: "shared", showlegend: false, marker: { color: "#EA580C" } }] : []),
         { x: labels, y: filteredRows.map(row => Number(row.budget_value || 0)), type: "scatter", mode: "lines+markers", name: "Orçamento", line: { color: "#64748B", width: 3 }, marker: { size: 6 } },
       ];
@@ -410,6 +423,10 @@ export default function ExpectedView() {
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Orçamento anual carregado: {money.format(budget)}</Typography>
           )}
         </Paper>
+
+        <Box sx={{ mt: 2 }}>
+          <AcksWidget department={director} />
+        </Box>
       </Box>
     </Box>
   );

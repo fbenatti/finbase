@@ -1,5 +1,7 @@
 from __future__ import annotations
+import calendar
 import os
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,7 +12,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.destination import DestinationTable
-from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun
+from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun, ForecastAck, ForecastAckHistory
+from app.models.rules import Department
 from app.models.etl_task import EtlTask
 from app.services.forecast_service import fetch_metadata, gold_date_expr, validate_config
 from app.services.trino_service import execute as trino_execute
@@ -999,6 +1002,40 @@ def _accuracy_snapshot_context(run: ForecastRun, snapshot: dict[str, Any], schem
     return run.result_table, actual_source, date_expr, measure, type_col, type_filter
 
 
+def _department_scope_filter(department: str | None) -> str:
+    """AND-chain that matches the selected department path prefix against
+    departamento_nivel_{1..7} (children are included because deeper levels are
+    not constrained) — same semantics as the ExpectedView director filter."""
+    if not department or not str(department).strip():
+        return ""
+    parts = [part.strip() for part in str(department).split(">") if part.strip()]
+    if not parts:
+        return ""
+    checks = [
+        f"TRIM({_qi(f'departamento_nivel_{level}')}) = {_ql(name)}"
+        for level, name in enumerate(parts, start=1)
+        if level <= 7
+    ]
+    return (" AND " + " AND ".join(checks)) if checks else ""
+
+
+def _accuracy_mode_filter(mode: str) -> str:
+    """showback (default) excludes Chargeback; chargeback keeps only it."""
+    if mode == "chargeback":
+        return f" AND {_qi('departamento_nivel_2')} = 'Chargeback'"
+    if mode == "showback":
+        return (
+            f" AND ({_qi('departamento_nivel_2')} <> 'Chargeback'"
+            f" OR {_qi('departamento_nivel_2')} IS NULL"
+            f" OR {_qi('departamento_nivel_2')} = '')"
+        )
+    return ""
+
+
+def _driver_level(scope_path: list[str]) -> int:
+    return min(len(scope_path) + 1, 7)
+
+
 async def _accuracy_totals(db: AsyncSession, run: ForecastRun, target_month: str) -> dict[str, Any]:
     run, snapshot, schema = await _history_context(run.id, db)
     table, actual_source, date_expr, measure, _, type_filter = _accuracy_snapshot_context(run, snapshot, schema)
@@ -1025,8 +1062,17 @@ async def _accuracy_totals(db: AsyncSession, run: ForecastRun, target_month: str
     return metrics
 
 
+def _desvio_metrics(forecast_value: float | None, actual_value: float | None) -> dict[str, Any]:
+    """Delta na convenção unificada: realizado − projetado.
+    Positivo = realizou acima do projetado = subestimou (gastou mais) = vermelho;
+    negativo = superestimou (gastou menos) = verde."""
+    return _accuracy_metrics(forecast_value, actual_value)
+
+
 async def _accuracy_batch_totals(
     pairs: list[tuple[ForecastRun, str]],
+    department: str | None = None,
+    mode: str = "showback",
 ) -> tuple[dict[tuple[int, str], tuple[float, int]], dict[str, float]]:
     """Forecast + actual totals for many (run, target_month) pairs using exactly
     two Trino queries regardless of how many simulated runs exist: one UNION ALL
@@ -1041,18 +1087,20 @@ async def _accuracy_batch_totals(
     measure = snapshot["measure_column"]
     type_col = snapshot.get("type_column")
     type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    scope_filter = _department_scope_filter(department)
+    mode_filter = _accuracy_mode_filter(mode)
     periods = sorted({target for _, target in pairs})
+    period_col = snapshot.get("period_column")
+    month_expr = f"CAST({_qi(period_col)} AS VARCHAR)" if period_col else f"date_format({date_expr}, '%Y%m')"
+    period_in = ", ".join(_ql(p) for p in periods)
     unions = " UNION ALL ".join(
         f'SELECT {run.id} AS run_id, CAST("forecast_month" AS VARCHAR) AS fmonth, '
         f'SUM(TRY_CAST("forecast_value" AS DOUBLE)) AS fv, COUNT(*) AS n '
-        f'FROM iceberg.forecast.{run.result_table} GROUP BY "forecast_month"'
+        f'FROM iceberg.forecast.{run.result_table} '
+        f'WHERE "forecast_month" IN ({period_in}){scope_filter}{mode_filter} '
+        f'GROUP BY "forecast_month"'
         for run, _ in pairs
     )
-    period_col = snapshot.get("period_column")
-    if period_col:
-        month_expr = f"CAST({_qi(period_col)} AS VARCHAR)"
-    else:
-        month_expr = f"date_format({date_expr}, '%Y%m')"
     try:
         f_records = await trino_execute(
             f"SELECT run_id, fmonth, SUM(fv) AS fv, SUM(n) AS n FROM ({unions}) GROUP BY run_id, fmonth",
@@ -1060,7 +1108,7 @@ async def _accuracy_batch_totals(
         )
         a_records = await trino_execute(
             f"SELECT {month_expr} AS period, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
-            f"FROM {actual_source} WHERE {month_expr} IN ({', '.join(_ql(p) for p in periods)}){type_filter} "
+            f"FROM {actual_source} WHERE {month_expr} IN ({period_in}){type_filter}{scope_filter}{mode_filter} "
             f"GROUP BY {month_expr}",
             timeout_s=180,
         )
@@ -1092,10 +1140,17 @@ def _latest_simulated_runs(runs: list[ForecastRun]) -> list[tuple[ForecastRun, s
 
 
 _accuracy_months_cache: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
-_ACCURACY_CACHE_TTL = 60.0
+# Os dados só mudam quando um lote de simulados conclui ou a Gold é reprocessada —
+# 5 minutos evita recomputes frequentes (~10s) que parecem travamento.
+_ACCURACY_CACHE_TTL = 300.0
 
 
-async def _accuracy_months_items(config_id: int | None, db: AsyncSession) -> list[dict[str, Any]]:
+async def _accuracy_months_items(
+    config_id: int | None,
+    db: AsyncSession,
+    department: str | None = None,
+    mode: str = "showback",
+) -> list[dict[str, Any]]:
     """Latest simulated snapshot per month with only two Trino queries, cached
     briefly so dashboard reloads are instant (data changes only when a new
     simulated batch completes)."""
@@ -1110,11 +1165,16 @@ async def _accuracy_months_items(config_id: int | None, db: AsyncSession) -> lis
     pairs = _latest_simulated_runs(runs)
     if not pairs:
         return []
-    key = (config_id or 0, tuple((run.id, run.result_table, run.cutoff_date) for run, _ in pairs))
+    key = (
+        config_id or 0,
+        str(department or ""),
+        mode,
+        tuple((run.id, run.result_table, run.cutoff_date) for run, _ in pairs),
+    )
     cached = _accuracy_months_cache.get(key)
     if cached is not None and datetime.utcnow().timestamp() - cached[0] < _ACCURACY_CACHE_TTL:
         return cached[1]
-    fmap, amap = await _accuracy_batch_totals(pairs)
+    fmap, amap = await _accuracy_batch_totals(pairs, department=department, mode=mode)
     today = date.today().strftime("%Y%m")
     items = []
     for run, target in pairs:
@@ -1138,9 +1198,16 @@ async def _accuracy_months_items(config_id: int | None, db: AsyncSession) -> lis
 
 
 @router.get("/accuracy/months")
-async def accuracy_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
-    """Meses simulados: o snapshot mais recente por mês, com apenas duas queries Trino."""
-    return await _accuracy_months_items(config_id, db)
+async def accuracy_months(
+    config_id: int | None = None,
+    department: str | None = None,
+    mode: str = "showback",
+    db: AsyncSession = Depends(get_db),
+):
+    """Meses simulados: o snapshot mais recente por mês, com apenas duas queries Trino.
+    ``department`` (caminho "N1 > N2 > ...") e ``mode`` (showback/chargeback/all) filtram
+    os totais — mesma semântica do filtro de diretor da Visão Esperada."""
+    return await _accuracy_months_items(config_id, db, department=department, mode=mode)
 
 
 @router.get("/accuracy/summary")
@@ -1167,7 +1234,14 @@ async def accuracy_summary(run_id: int, target_month: str | None = None, db: Asy
 
 
 @router.get("/accuracy/dimensions")
-async def accuracy_dimensions(run_id: int, target_month: str | None = None, dimension: str | None = None, db: AsyncSession = Depends(get_db)):
+async def accuracy_dimensions(
+    run_id: int,
+    target_month: str | None = None,
+    dimension: str | None = None,
+    department: str | None = None,
+    mode: str = "showback",
+    db: AsyncSession = Depends(get_db),
+):
     run = await db.get(ForecastRun, run_id)
     if not run:
         raise HTTPException(404, "Execução não encontrada")
@@ -1185,16 +1259,18 @@ async def accuracy_dimensions(run_id: int, target_month: str | None = None, dime
         f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
         if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
     )
+    scope_filter = _department_scope_filter(department)
+    mode_filter = _accuracy_mode_filter(mode)
     null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
     dim_expr = f"COALESCE(CAST({_qi(dim)} AS VARCHAR), {_ql(null_label)})"
     sql = f"""
       WITH f AS (
         SELECT {dim_expr} AS dim_v, SUM(TRY_CAST("forecast_value" AS DOUBLE)) AS forecast_value
-        FROM iceberg.forecast.{table} WHERE "forecast_month" = {_ql(target)} GROUP BY {dim_expr}
+        FROM iceberg.forecast.{table} WHERE "forecast_month" = {_ql(target)} AND "tipo" = 'forecast'{scope_filter}{mode_filter} GROUP BY {dim_expr}
       ),
       a AS (
         SELECT {dim_expr} AS dim_v, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS actual_value
-        FROM {actual_source} WHERE {month_filter}{type_filter} GROUP BY {dim_expr}
+        FROM {actual_source} WHERE {month_filter}{type_filter}{scope_filter}{mode_filter} GROUP BY {dim_expr}
       )
       SELECT COALESCE(f.dim_v, a.dim_v) AS dim_v,
              COALESCE(f.forecast_value, 0) AS forecast_value,
@@ -1218,10 +1294,627 @@ async def accuracy_dimensions(run_id: int, target_month: str | None = None, dime
     return {"run_id": run.id, "target_month": target, "dimension": dim, "simulated_as_of": snapshot.get("simulated_as_of"), "records": out}
 
 
+@router.get("/accuracy/delta")
+async def accuracy_delta(
+    run_id: int,
+    target_month: str | None = None,
+    mode: str = "showback",
+    department: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Ofensores do desvio (projetado × realizado) no nível abaixo do departamento
+    selecionado — mesma semântica do ExpectedView (driver = nível do caminho + 1).
+    ``department`` é o caminho "N1 > N2 > ..." e ``mode`` filtra showback/chargeback."""
+    run = await db.get(ForecastRun, run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    snapshot = dict(run.config_snapshot or {})
+    if not snapshot.get("simulated_as_of"):
+        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+    target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
+    table, actual_source, date_expr, measure, _, type_filter = _accuracy_snapshot_context(run, snapshot, {})
+    scope_path = [part.strip() for part in (department or "").split(">") if part.strip()]
+    scope_filter = _department_scope_filter(department)
+    mode_filter = _accuracy_mode_filter(mode)
+
+    # Quando o departamento selecionado é o ÚLTIMO nível cadastrado (folha),
+    # não existe nível abaixo — o detalhe passa a ser por ServiceSubcategory.
+    leaf_mode = False
+    if scope_path:
+        departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
+        by_parent: dict[int | None, list[Department]] = defaultdict(list)
+        by_id: dict[int, Department] = {}
+        for d in departments:
+            by_id[d.id] = d
+            by_parent[d.parent_id].append(d)
+
+        def path_of(d: Department) -> list[str]:
+            parts: list[str] = []
+            cur: Department | None = d
+            seen: set[int] = set()
+            while cur and cur.id not in seen:
+                seen.add(cur.id)
+                parts.append((cur.name or "").strip())
+                cur = by_id.get(cur.parent_id) if cur.parent_id else None
+            return list(reversed(parts))
+
+        for d in departments:
+            if path_of(d) == scope_path:
+                leaf_mode = not by_parent.get(d.id)
+                break
+    if leaf_mode:
+        records = await _desvios_subcat(run, snapshot, target, scope_path, scope_path[:-1])
+        out = []
+        for r in records:
+            metrics = _accuracy_metrics(r["forecast_value"], r["actual_value"])
+            out.append({
+                "name": r["subcategory"], "subcategory": r["subcategory"], "path": [*scope_path, r["subcategory"]],
+                "forecast_value": r["forecast_value"], "actual_value": r["actual_value"],
+                "variance": metrics["variance"], "variance_pct": metrics["variance_pct"], "accuracy": metrics["accuracy"],
+                "wape": metrics.get("wape"), "bias": metrics.get("bias"),
+            })
+        out.sort(key=lambda item: abs(item.get("variance") or 0), reverse=True)
+        return {
+            "run_id": run.id, "target_month": target, "mode": mode,
+            "department": department or "", "level": 0, "leaf": True,
+            "level_label": "ServiceSubcategory", "dimension": "servicesubcategory", "records": out,
+        }
+
+    driver_level = _driver_level(scope_path)
+    dim = f"departamento_nivel_{driver_level}"
+    null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
+    dim_expr = f"COALESCE(CAST({_qi(dim)} AS VARCHAR), {_ql(null_label)})"
+    period_col = snapshot.get("period_column")
+    actual_month = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+    )
+    sql = f"""
+      WITH f AS (
+        SELECT {dim_expr} AS dim_v, SUM(TRY_CAST("forecast_value" AS DOUBLE)) AS forecast_value
+        FROM iceberg.forecast.{table}
+        WHERE "forecast_month" = {_ql(target)} AND "tipo" = 'forecast'{scope_filter}{mode_filter}
+        GROUP BY {dim_expr}
+      ),
+      a AS (
+        SELECT {dim_expr} AS dim_v, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS actual_value
+        FROM {actual_source}
+        WHERE {actual_month}{type_filter}{scope_filter}{mode_filter}
+        GROUP BY {dim_expr}
+      )
+      SELECT COALESCE(f.dim_v, a.dim_v) AS dim_v,
+             COALESCE(f.forecast_value, 0) AS forecast_value,
+             COALESCE(a.actual_value, 0) AS actual_value,
+             COALESCE(a.actual_value, 0) - COALESCE(f.forecast_value, 0) AS variance
+      FROM f FULL OUTER JOIN a ON f.dim_v = a.dim_v
+    """
+    try:
+        records = await trino_execute(sql, timeout_s=120)
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao consultar delta de acurácia: {exc}")
+    out = []
+    for record in records:
+        metrics = _accuracy_metrics(record.get("forecast_value"), record.get("actual_value"))
+        metrics["name"] = str(record.get("dim_v") or null_label)
+        metrics["path"] = [*scope_path, metrics["name"]]
+        out.append(metrics)
+    out.sort(key=lambda item: abs(item.get("variance") or 0), reverse=True)
+    level_labels = {
+        2: "Ramo (Showback/Chargeback)", 3: "Provedor", 4: "Diretoria (nivel 4)",
+        5: "Projeto (nivel 5)", 6: "Nível 6", 7: "Nível 7",
+    }
+    return {
+        "run_id": run.id,
+        "target_month": target,
+        "mode": mode,
+        "department": department or "",
+        "level": driver_level,
+        "level_label": level_labels.get(driver_level, f"Nível {driver_level}"),
+        "leaf": False,
+        "dimension": dim,
+        "records": out,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Desvios (último nível por departamento) + Acks (motivo do desvio)
+# ---------------------------------------------------------------------------
+
+_desvios_grain_cache: dict[tuple[Any, ...], tuple[float, dict[tuple[Any, ...], float]]] = {}
+_DESVIOS_GRAIN_TTL = 600.0
+
+
+def _leaf_paths(departments: list[Department], scope_path: list[str]) -> list[list[str]]:
+    """Active leaf departments (deepest level, no children) under the scope."""
+    by_parent: dict[int | None, list[Department]] = defaultdict(list)
+    by_id: dict[int, Department] = {}
+    for department in departments:
+        by_id[department.id] = department
+        by_parent[department.parent_id].append(department)
+
+    def path_of(department: Department) -> list[str]:
+        parts: list[str] = []
+        current: Department | None = department
+        seen: set[int] = set()
+        while current and current.id not in seen:
+            seen.add(current.id)
+            parts.append((current.name or "").strip())
+            current = by_id.get(current.parent_id) if current.parent_id else None
+        return list(reversed(parts))
+
+    leaves: list[list[str]] = []
+    for department in departments:
+        if by_parent.get(department.id):
+            continue
+        path = path_of(department)
+        if not path:
+            continue
+        if not scope_path or path[:len(scope_path)] == scope_path:
+            leaves.append(path)
+    return leaves
+
+
+def _grain_select(group_cols: list[str]) -> tuple[str, str]:
+    select = ", ".join(group_cols)
+    return select, select
+
+
+async def _desvios_grain(
+    run: ForecastRun,
+    snapshot: dict[str, Any],
+    target: str,
+    scope_path: list[str] | None = None,
+) -> tuple[dict[tuple[Any, ...], float], dict[tuple[Any, ...], float]]:
+    """(n1..n7) -> forecast/actual totals of one month, restricted to the scope
+    prefix when provided (faster scans for narrower department views)."""
+    scope_path = scope_path or []
+    cache_key = (run.result_table, target, "list", tuple(scope_path))
+    cached = _desvios_grain_cache.get(cache_key)
+    if cached is not None and datetime.utcnow().timestamp() - cached[0] < _DESVIOS_GRAIN_TTL:
+        return cached[1]
+    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
+    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
+    measure = snapshot["measure_column"]
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    period_col = snapshot.get("period_column")
+    actual_month = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+    )
+    scope_filter = "".join(
+        f" AND {_qi(f'departamento_nivel_{index + 1}')} = {_ql(name)}"
+        for index, name in enumerate(scope_path)
+        if index < 7
+    )
+    levels = ", ".join(_qi(f"departamento_nivel_{level}") for level in range(1, 8))
+    try:
+        a_records = await trino_execute(
+            f"SELECT {levels}, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
+            f"FROM {actual_source} WHERE {actual_month}{type_filter}{scope_filter} GROUP BY {levels}",
+            timeout_s=120,
+        )
+        f_records = await trino_execute(
+            f"SELECT {levels}, SUM(TRY_CAST(\"forecast_value\" AS DOUBLE)) AS fv "
+            f"FROM iceberg.forecast.{run.result_table} "
+            f"WHERE \"forecast_month\" = {_ql(target)} AND \"tipo\" = 'forecast'{scope_filter} GROUP BY {levels}",
+            timeout_s=120,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao agregar desvios: {exc}")
+
+    def key_of(row: dict[str, Any]) -> tuple[Any, ...]:
+        return tuple(row.get(f"departamento_nivel_{level}") for level in range(1, 8))
+
+    actual_grain = {key_of(r): float(r.get("av") or 0) for r in a_records}
+    forecast_grain = {key_of(r): float(r.get("fv") or 0) for r in f_records}
+    _desvios_grain_cache[cache_key] = (datetime.utcnow().timestamp(), (forecast_grain, actual_grain))
+    return forecast_grain, actual_grain
+
+
+def _leaf_totals(
+    leaf: list[str],
+    forecast_grain: dict[tuple[Any, ...], float],
+    actual_grain: dict[tuple[Any, ...], float],
+) -> tuple[float, float]:
+    """Forecast/actual totals for one leaf path (deeper levels empty)."""
+    depth = len(leaf)
+    forecast = 0.0
+    actual = 0.0
+    for levels, value in forecast_grain.items():
+        if tuple(leaf) == tuple(str(x or "") for x in levels[:depth]) and all(str(x or "") == "" for x in levels[depth:]):
+            forecast += value
+    for levels, value in actual_grain.items():
+        if tuple(leaf) == tuple(str(x or "") for x in levels[:depth]) and all(str(x or "") == "" for x in levels[depth:]):
+            actual += value
+    return forecast, actual
+
+
+async def _desvios_subcat_grain(
+    run: ForecastRun,
+    snapshot: dict[str, Any],
+    target: str,
+    scope_path: list[str],
+) -> tuple[dict[tuple[Any, ...], float], dict[tuple[Any, ...], float]]:
+    """(n1..n7, servicesubcategory) -> (forecast, actual) for one month,
+    restricted to the scope prefix.  Computed once per scope and cached, so all
+    leaf expansions inside that scope are instant."""
+    cache_key = (run.result_table, target, "subcat-grain", tuple(scope_path))
+    cached = _desvios_grain_cache.get(cache_key)
+    if cached is not None and datetime.utcnow().timestamp() - cached[0] < _DESVIOS_GRAIN_TTL:
+        return cached[1]
+    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
+    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
+    measure = snapshot["measure_column"]
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    period_col = snapshot.get("period_column")
+    actual_month = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+    )
+    scope_filter = "".join(
+        f" AND {_qi(f'departamento_nivel_{index + 1}')} = {_ql(name)}"
+        for index, name in enumerate(scope_path)
+        if index < 7
+    )
+    levels = ", ".join(_qi(f"departamento_nivel_{level}") for level in range(1, 8))
+    subcat = _qi("servicesubcategory")
+    try:
+        a_records = await trino_execute(
+            f"SELECT {levels}, {subcat} AS subcat, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
+            f"FROM {actual_source} WHERE {actual_month}{type_filter}{scope_filter} GROUP BY {levels}, {subcat}",
+            timeout_s=180,
+        )
+        f_records = await trino_execute(
+            f"SELECT {levels}, {subcat} AS subcat, SUM(TRY_CAST(\"forecast_value\" AS DOUBLE)) AS fv "
+            f"FROM iceberg.forecast.{run.result_table} "
+            f"WHERE \"forecast_month\" = {_ql(target)} AND \"tipo\" = 'forecast'{scope_filter} GROUP BY {levels}, {subcat}",
+            timeout_s=180,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao agregar subcategorias: {exc}")
+
+    def key_of(row: dict[str, Any]) -> tuple[Any, ...]:
+        return tuple(row.get(f"departamento_nivel_{level}") for level in range(1, 8)) + (row.get("subcat"),)
+
+    amap = {key_of(r): float(r.get("av") or 0) for r in a_records}
+    fmap = {key_of(r): float(r.get("fv") or 0) for r in f_records}
+    _desvios_grain_cache[cache_key] = (datetime.utcnow().timestamp(), (fmap, amap))
+    return fmap, amap
+
+
+async def _desvios_subcat(
+    run: ForecastRun,
+    snapshot: dict[str, Any],
+    target: str,
+    leaf: list[str],
+    scope_path: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Breakdown por ServiceSubcategory de UMA folha, extraído do grão do escopo."""
+    scope_path = scope_path or leaf[:-1]
+    depth = len(leaf)
+    fmap, amap = await _desvios_subcat_grain(run, snapshot, target, scope_path)
+    amap_sub: dict[str, float] = {}
+    fmap_sub: dict[str, float] = {}
+    for (*levels, subcat), value in fmap.items():
+        if tuple(leaf) == tuple(str(x or "") for x in levels[:depth]) and all(str(x or "") == "" for x in levels[depth:]):
+            fmap_sub[str(subcat or "")] = fmap_sub.get(str(subcat or ""), 0.0) + value
+    for (*levels, subcat), value in amap.items():
+        if tuple(leaf) == tuple(str(x or "") for x in levels[:depth]) and all(str(x or "") == "" for x in levels[depth:]):
+            amap_sub[str(subcat or "")] = amap_sub.get(str(subcat or ""), 0.0) + value
+    rows = []
+    for sub in set(amap_sub) | set(fmap_sub):
+        metrics = _desvio_metrics(fmap_sub.get(sub), amap_sub.get(sub))
+        rows.append({"subcategory": sub or "Não classificado", "forecast_value": fmap_sub.get(sub, 0.0), "actual_value": amap_sub.get(sub, 0.0), **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy")}})
+    rows.sort(key=lambda r: abs(r.get("variance") or 0), reverse=True)
+    return rows
+
+
+@router.get("/accuracy/desvios")
+async def accuracy_desvios(
+    run_id: int,
+    target_month: str | None = None,
+    department: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Desvios no último nível de cada departamento (folhas) dentro do escopo:
+    top 10 positivos (realizado acima do projetado) e top 10 negativos."""
+    run = await db.get(ForecastRun, run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    snapshot = dict(run.config_snapshot or {})
+    if not snapshot.get("simulated_as_of"):
+        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+    target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
+    scope_path = [part.strip() for part in (department or "").split(">") if part.strip()]
+    departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
+    leaves = _leaf_paths(departments, scope_path)
+    forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, scope_path)
+    items = []
+    for leaf in leaves:
+        forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
+        if forecast == 0 and actual == 0:
+            continue
+        metrics = _desvio_metrics(forecast, actual)
+        items.append({"path": leaf, "name": leaf[-1] if leaf else "", "forecast_value": forecast, "actual_value": actual, **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy", "wape", "bias")}})
+    positive = sorted((i for i in items if i["variance"] > 0), key=lambda i: -i["variance"])[:10]
+    negative = sorted((i for i in items if i["variance"] < 0), key=lambda i: i["variance"])[:10]
+    return {
+        "run_id": run.id,
+        "target_month": target,
+        "department": department or "",
+        "positive": positive,
+        "negative": negative,
+    }
+
+
+@router.get("/accuracy/desvios/subcategories")
+async def accuracy_desvios_subcategories(
+    run_id: int,
+    target_month: str | None = None,
+    department: str | None = None,
+    scope: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Breakdown por ServiceSubcategory do último nível (folha) selecionado.
+    ``scope`` (opcional) é o departamento atual da página — o grão é calculado
+    uma vez por escopo e todas as folhas dele expandem instantaneamente."""
+    run = await db.get(ForecastRun, run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    snapshot = dict(run.config_snapshot or {})
+    if not snapshot.get("simulated_as_of"):
+        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+    target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
+    leaf = [part.strip() for part in (department or "").split(">") if part.strip()]
+    if not leaf:
+        raise HTTPException(422, "Informe o caminho do último nível (department)")
+    scope_path = [part.strip() for part in (scope or "").split(">") if part.strip()]
+    rows = await _desvios_subcat(run, snapshot, target, leaf, scope_path)
+    return {"run_id": run.id, "target_month": target, "department": department or "", "records": rows}
+
+
+def _subcategory_filter(subcategory: str) -> str:
+    """servicesubcategory match: 'Não classificado' (frontend label) maps to
+    NULL/blank values, any other value matches the exact trimmed string."""
+    if not subcategory or subcategory == "Não classificado":
+        return (
+            " AND (COALESCE(TRIM(CAST(\"servicesubcategory\" AS VARCHAR)), '') = ''"
+            " OR \"servicesubcategory\" IS NULL)"
+        )
+    return f" AND TRIM(CAST(\"servicesubcategory\" AS VARCHAR)) = {_ql(subcategory)}"
+
+
+@router.get("/accuracy/delta/series")
+async def accuracy_delta_series(
+    run_id: int,
+    target_month: str | None = None,
+    department: str | None = None,
+    subcategory: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Série diária (acumulada) de Projetado × Realizado para UM ServiceSubcategory
+    de um departamento folha.  O projetado é o total mensal do snapshot imutável
+    distribuído por rate diário uniforme (mesma lógica MONTHLY_LUMP do engine);
+    o realizado vem do Gold agregado por dia.  ``deviation_day`` é o primeiro dia
+    em que o realizado acumulado ultrapassa o projetado acumulado (o desvio é
+    identificado a partir dali) — None quando nunca cruza (redução pura)."""
+    run = await db.get(ForecastRun, run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    snapshot = dict(run.config_snapshot or {})
+    if not snapshot.get("simulated_as_of"):
+        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+    if not subcategory:
+        raise HTTPException(422, "Informe o subcategory")
+    target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
+    leaf = [part.strip() for part in (department or "").split(">") if part.strip()]
+    if not leaf:
+        raise HTTPException(422, "Informe o departamento (caminho do último nível)")
+    year, month = int(target[:4]), int(target[4:6])
+    days_in_month = calendar.monthrange(year, month)[1]
+
+    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
+    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
+    measure = snapshot["measure_column"]
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    period_col = snapshot.get("period_column")
+    actual_month = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+    )
+    depth = len(leaf)
+    scope_filter = "".join(
+        f" AND TRIM({_qi(f'departamento_nivel_{index + 1}')}) = {_ql(name)}"
+        for index, name in enumerate(leaf)
+        if index < 7
+    )
+    # A folha não tem filhos: os níveis abaixo do caminho devem estar vazios,
+    # igual à semântica de _desvios_subcat.
+    deeper_filter = "".join(
+        f" AND TRIM(COALESCE(CAST({_qi(f'departamento_nivel_{level}')} AS VARCHAR), '')) = ''"
+        for level in range(depth + 1, 8)
+    )
+    subcat_filter = _subcategory_filter(subcategory)
+
+    try:
+        a_records = await trino_execute(
+            f"SELECT day({date_expr}) AS d, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
+            f"FROM {actual_source} WHERE {actual_month}{type_filter}{scope_filter}{deeper_filter}{subcat_filter} "
+            f"GROUP BY day({date_expr})",
+            timeout_s=180,
+        )
+        f_records = await trino_execute(
+            f"SELECT SUM(TRY_CAST(\"forecast_value\" AS DOUBLE)) AS fv "
+            f"FROM iceberg.forecast.{run.result_table} "
+            f"WHERE \"forecast_month\" = {_ql(target)} AND \"tipo\" = 'forecast'"
+            f"{scope_filter}{deeper_filter}{subcat_filter}",
+            timeout_s=180,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao consultar série diária: {exc}")
+
+    actual_by_day = {int(r.get("d") or 0): float(r.get("av") or 0) for r in a_records}
+    forecast_total = float(f_records[0].get("fv") or 0) if f_records else 0.0
+    actual_total = sum(actual_by_day.values())
+    forecast_rate = forecast_total / days_in_month if days_in_month else 0.0
+
+    points = []
+    actual_cum = 0.0
+    deviation_day: int | None = None   # acumulado cruza o projetado acumulado
+    daily_deviation_day: int | None = None  # diário: realizado do dia > rate projetado
+    for day in range(1, days_in_month + 1):
+        daily_actual = actual_by_day.get(day, 0.0)
+        actual_cum += daily_actual
+        forecast_cum = forecast_rate * day
+        if deviation_day is None and actual_cum > forecast_cum:
+            deviation_day = day
+        if daily_deviation_day is None and daily_actual > forecast_rate:
+            daily_deviation_day = day
+        points.append({
+            "day": day,
+            "actual": daily_actual,
+            "actual_cum": round(actual_cum, 4),
+            "forecast_rate": round(forecast_rate, 4),
+            "forecast_cum": round(forecast_cum, 4),
+        })
+
+    metrics = _accuracy_metrics(forecast_total, actual_total)
+    return {
+        "run_id": run.id,
+        "target_month": target,
+        "department": department or "",
+        "subcategory": subcategory,
+        "days_in_month": days_in_month,
+        "forecast_total": forecast_total,
+        "actual_total": actual_total,
+        "variance": metrics["variance"],
+        "variance_pct": metrics["variance_pct"],
+        "accuracy": metrics["accuracy"],
+        "deviation_day": deviation_day,
+        "daily_deviation_day": daily_deviation_day,
+        "points": points,
+    }
+
+
+class AckIn(BaseModel):
+    run_id: int
+    target_month: str | None = None
+    department: str
+    category: str
+    reason: str
+
+
+@router.post("/accuracy/acks", status_code=201)
+async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
+    """Registra o motivo do desvio (Ack) de um departamento do último nível."""
+    run = await db.get(ForecastRun, body.run_id)
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    snapshot = dict(run.config_snapshot or {})
+    target = body.target_month or (snapshot.get("simulated_as_of") and _month_after(date.fromisoformat(str(snapshot["simulated_as_of"]))))
+    if not target:
+        raise HTTPException(422, "target_month obrigatório")
+    leaf = [part.strip() for part in body.department.split(">") if part.strip()]
+    if not leaf:
+        raise HTTPException(422, "Informe o departamento (caminho do último nível)")
+    forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, leaf)
+    forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
+    metrics = _desvio_metrics(forecast, actual)
+    row = ForecastAck(
+        run_id=run.id, target_month=target, department_path=leaf,
+        department_name=leaf[-1], forecast_value=forecast, actual_value=actual,
+        variance=metrics["variance"], accuracy=metrics["accuracy"],
+        category=body.category.strip() or "Outro", reason=body.reason.strip(),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _out(row)
+
+
+@router.get("/accuracy/acks")
+async def list_acks(
+    target_month: str | None = None,
+    department: str | None = None,
+    config_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(ForecastAck).order_by(ForecastAck.created_at.desc())
+    if target_month:
+        stmt = stmt.where(ForecastAck.target_month == target_month)
+    rows = (await db.execute(stmt.limit(500))).scalars().all()
+    # ``department`` é o escopo (caminho) selecionado: filtra por prefixo para
+    # acompanhar o drill-down (diretória inclui os projetos abaixo dela).
+    if department:
+        scope = [part.strip() for part in department.split(">") if part.strip()]
+        if scope:
+            rows = [
+                row for row in rows
+                if list(row.department_path or [])[:len(scope)] == scope
+            ]
+    items = [_out(r) for r in rows]
+    if items:
+        history_rows = (await db.execute(
+            select(ForecastAckHistory).where(ForecastAckHistory.ack_id.in_([r.id for r in rows])).order_by(ForecastAckHistory.changed_at.asc())
+        )).scalars().all()
+        history_by_ack: dict[int, list[dict[str, Any]]] = {}
+        for h in history_rows:
+            history_by_ack.setdefault(h.ack_id, []).append(_out(h))
+        for item in items:
+            item["history"] = history_by_ack.get(item["id"], [])
+    return {"items": items}
+
+
+class AckUpdateIn(BaseModel):
+    category: str
+    reason: str
+
+
+@router.put("/accuracy/acks/{ack_id}")
+async def update_ack(ack_id: int, body: AckUpdateIn, db: AsyncSession = Depends(get_db)):
+    """Edita o Ack preservando o histórico da versão anterior."""
+    row = await db.get(ForecastAck, ack_id)
+    if not row:
+        raise HTTPException(404, "Ack não encontrado")
+    category = body.category.strip() or "Outro"
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(422, "Informe o motivo")
+    if row.category != category or row.reason != reason:
+        db.add(ForecastAckHistory(ack_id=row.id, category=row.category, reason=row.reason))
+        row.category = category
+        row.reason = reason
+        await db.commit()
+        await db.refresh(row)
+    out = _out(row)
+    history = (await db.execute(
+        select(ForecastAckHistory).where(ForecastAckHistory.ack_id == row.id).order_by(ForecastAckHistory.changed_at.asc())
+    )).scalars().all()
+    out["history"] = [_out(h) for h in history]
+    return out
+
+
+@router.delete("/accuracy/acks/{ack_id}", status_code=204)
+async def delete_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
+    row = await db.get(ForecastAck, ack_id)
+    if not row:
+        raise HTTPException(404, "Ack não encontrado")
+    await db.delete(row)
+    await db.commit()
+
+
 @router.get("/accuracy/history")
-async def accuracy_history(config_id: int | None = None, dimension: str | None = None, db: AsyncSession = Depends(get_db)):
+async def accuracy_history(
+    config_id: int | None = None,
+    department: str | None = None,
+    mode: str = "showback",
+    db: AsyncSession = Depends(get_db),
+):
     """Evolução da acurácia mês a mês (derivada do mesmo cálculo cacheado de /months)."""
-    items = await _accuracy_months_items(config_id, db)
+    items = await _accuracy_months_items(config_id, db, department=department, mode=mode)
     return {"items": [
         {key: item[key] for key in (
             "run_id", "simulated_as_of", "target_month", "closed",
@@ -1235,6 +1928,52 @@ async def accuracy_history(config_id: int | None = None, dimension: str | None =
 class AccuracyReprocessIn(BaseModel):
     config_id: int
     months: list[str] = []
+
+
+@router.get("/accuracy/available-months")
+async def accuracy_available_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    """Períodos com dados na Gold para a configuração — os meses que podem ser
+    simulados (nunca chumbado: quando setembro/2026 tiver dados, aparece aqui).
+    Lê apenas o metadata de partição (rápido) e une com os meses já simulados."""
+    if config_id:
+        config = await db.get(ForecastConfig, config_id)
+        if not config:
+            raise HTTPException(404, "Configuração não encontrada")
+        dest = await db.get(DestinationTable, config.destination_table_id) if config.destination_table_id else None
+    else:
+        config = None
+        dest = None
+    months: set[str] = set()
+    if dest:
+        safe_name = dest.physical_name.replace('"', '""')
+        period_col = config.period_column or "_billing_period"
+        try:
+            records = await trino_execute(
+                f"SELECT DISTINCT CAST({_qi(period_col)} AS VARCHAR) AS period "
+                f"FROM iceberg.gold.\"{safe_name}\" WHERE CAST({_qi(period_col)} AS VARCHAR) <> ''",
+                timeout_s=90,
+            )
+            months.update(
+                str(r.get("period") or "") for r in records
+                if len(str(r.get("period") or "")) == 6 and str(r.get("period")).isdigit()
+            )
+        except Exception:
+            # Gold indisponível: os simulados existentes ainda definem o que é possível.
+            pass
+    stmt = select(ForecastRun).where(
+        ForecastRun.status == "COMPLETED",
+        ForecastRun.config_snapshot["simulated_as_of"].as_string() != "",
+    )
+    if config_id:
+        stmt = stmt.where(ForecastRun.forecast_config_id == config_id)
+    for run in (await db.execute(stmt)).scalars().all():
+        raw = (run.config_snapshot or {}).get("simulated_as_of")
+        if raw:
+            try:
+                months.add(_month_after(date.fromisoformat(str(raw))))
+            except ValueError:
+                continue
+    return {"months": sorted(months)}
 
 
 @router.post("/accuracy/reprocess", status_code=202)

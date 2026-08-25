@@ -145,7 +145,7 @@ export default function Connections() {
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connectionCatalog, setConnectionCatalog] = useState<SourceConnection[]>([]);
   const [gridTotal, setGridTotal] = useState(0);
-  const [gridLoading, setGridLoading] = useState(false);
+  const [gridLoading, setGridLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [testMsgs, setTestMsgs] = useState<Record<number, ConnectionTestMessage>>({});
@@ -153,8 +153,9 @@ export default function Connections() {
   const [activeCategory, setActiveCategory] = useState<"all" | ConnectionCategory>("all");
   const [activeProvider, setActiveProvider] = useState("all");
   const [search, setSearch] = useState("");
-  const initializedCategoryTab = useRef(false);
+  const [tabsReady, setTabsReady] = useState(false);
   const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
+  const gridRequestId = useRef(0);
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
   const [toolSubPicker, setToolSubPicker] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -202,37 +203,31 @@ export default function Connections() {
   // Inicializa somente após o catálogo carregar, selecionando a primeira
   // categoria com conexões e o primeiro provedor dentro dela (nunca cai em "Todas").
   useEffect(() => {
-    if (loading) return;
-    if (!initializedCategoryTab.current) {
-      initializedCategoryTab.current = true;
-      const firstCategory = categoryTabs.find((category) => category.count > 0);
-      if (firstCategory) {
-        setActiveCategory(firstCategory.value);
-        const firstProvider = providerTabsFor(firstCategory.value);
-        if (firstProvider.length) setActiveProvider(firstProvider[0]);
-      } else {
-        setActiveCategory("all");
-        setActiveProvider("all");
-      }
-      return;
+    if (loading || tabsReady) return;
+    const firstCategory = categoryTabs.find((category) => category.count > 0);
+    if (firstCategory) {
+      setActiveCategory(firstCategory.value);
+      const firstProvider = providerTabsFor(firstCategory.value);
+      setActiveProvider(firstProvider.length ? firstProvider[0] : "all");
+    } else {
+      setActiveCategory("all");
+      setActiveProvider("all");
     }
-    if (activeCategory !== "all" && !CATEGORY_TABS.some((category) => category.value === activeCategory)) setActiveCategory("all");
-  }, [activeCategory, categoryTabs, loading]);
+    setTabsReady(true);
+  }, [categoryTabs, loading, tabsReady]);
 
-  // Ao trocar de categoria, seleciona o primeiro provedor da nova categoria.
-  // Em "Todas", mostra todos os provedores (sem filtro de provider).
-  useEffect(() => {
-    if (loading || !initializedCategoryTab.current) return;
-    if (activeCategory === "all") {
+  const selectCategory = (category: "all" | ConnectionCategory) => {
+    setActiveCategory(category);
+    if (category === "all") {
       setActiveProvider("all");
       return;
     }
-    const providers = providerTabsFor(activeCategory);
+    const providers = providerTabsFor(category);
     setActiveProvider(providers.length ? providers[0] : "all");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCategory, loading]);
+  };
 
   const loadGrid = async (query = gridQuery.current) => {
+    const requestId = ++gridRequestId.current;
     try {
       setGridLoading(true);
       const data = await getConnectionsGrid({
@@ -245,19 +240,22 @@ export default function Connections() {
         sort_direction: query.sort?.direction,
         filters: query.filters,
       });
+      if (requestId !== gridRequestId.current) return;
       setConnections(data.items);
       setGridTotal(data.total);
     } catch (gridError: unknown) {
+      if (requestId !== gridRequestId.current) return;
       setError(gridError instanceof Error ? gridError.message : "Falha ao carregar conexões");
     } finally {
-      setGridLoading(false);
+      if (requestId === gridRequestId.current) setGridLoading(false);
     }
   };
 
   useEffect(() => {
+    if (!tabsReady) return;
     gridQuery.current = { offset: 0, limit: gridQuery.current.limit, filters: [] };
     void loadGrid(gridQuery.current);
-  }, [activeCategory, activeProvider, search]);
+  }, [activeCategory, activeProvider, search, tabsReady]);
 
   const openNew = (connectorType = "azure_blob") => {
     setEditing(null);
@@ -661,7 +659,7 @@ export default function Connections() {
     ? (activeProvider === "all" ? "Conexões configuradas para ingestão de dados." : "Conexões configuradas para este provedor.")
     : (activeProvider === "all" ? activeCategoryMeta?.subtitle : "Conexões configuradas para este provedor.");
 
-  if (loading) return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
+  if (loading || !tabsReady) return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
 
   return (
     <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
@@ -677,7 +675,7 @@ export default function Connections() {
 
         <Tabs
           value={activeCategory}
-          onChange={(_, value: string) => setActiveCategory(value as "all" | ConnectionCategory)}
+          onChange={(_, value: string) => selectCategory(value as "all" | ConnectionCategory)}
           aria-label="Filtrar conexões por categoria"
           sx={{ mb: 1.5, minHeight: 44 }}
         >

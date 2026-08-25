@@ -5,12 +5,14 @@ import ReprocessDataTab from "./ReprocessDataTab";
 import ReprocessForecastTab from "./ReprocessForecastTab";
 import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
+import ReprocessAICostRelationshipsTab from "./ReprocessAICostRelationshipsTab";
 
 const TABS = [
   { id: "data", label: "Reprocessar dados" },
   { id: "forecast", label: "Forecast" },
   { id: "accuracy", label: "Acurácia de Forecast" },
   { id: "shared", label: "Custo compartilhado" },
+  { id: "ai-cost", label: "Relacionamentos IA" },
   { id: "extraction", label: "Extração & Monitoramento" },
 ] as const;
 
@@ -42,6 +44,7 @@ export default function Reprocess() {
           {tab === "forecast" && <ReprocessForecastTab />}
           {tab === "accuracy" && <ReprocessAccuracyTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}
+          {tab === "ai-cost" && <ReprocessAICostRelationshipsTab />}
           {tab === "extraction" && <Extraction embedded />}
         </Paper>
       </Box>

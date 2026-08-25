@@ -135,6 +135,67 @@ def _azure_ptu_eventhub_job() -> None:
         logger.warning("Azure PTU Event Hub poll failed: %s", exc)
 
 
+def _queue_reservation_collections() -> None:
+    """Queue a reservation_collection task for every Azure connection with the flag.
+
+    Reservas (RI + Savings Plans) são uma camada bronze SEPARADA da mesma
+    conexão: o task dedicado não re-dispara o ETL de blobs de custo.
+    """
+    from sqlalchemy import insert, select
+    from app.database import SyncSession
+    from app.models.source_connection import SourceConnection
+    from app.models.etl_task import EtlTask
+
+    session = SyncSession()
+    try:
+        conns = session.execute(
+            select(SourceConnection).where(
+                SourceConnection.connector_type.in_(["azure_blob"]),
+                SourceConnection.config_json["collect_reservations"].astext == "true",
+            )
+        ).scalars().all()
+        queued = 0
+        for conn in conns:
+            active = session.execute(
+                select(EtlTask.id).where(
+                    EtlTask.connection_id == conn.id,
+                    EtlTask.task_type == "reservation_collection",
+                    EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                ).limit(1)
+            ).scalar_one_or_none()
+            if active:
+                logger.info("Reservation collection skipped for connection %d — task %s already active", conn.id, active)
+                continue
+            session.execute(insert(EtlTask).values(
+                task_type="reservation_collection",
+                status="QUEUED",
+                connection_id=conn.id,
+                connection_ids=[conn.id],
+                billing_periods=[],
+                selected_blobs=[],
+                total_blobs=0,
+                processed_blobs=0,
+                rows_raw=0,
+                rows_normalized=0,
+                rows_destination=0,
+                errors=[],
+                phase="Coleta diária de reservas Azure",
+                result_json={"collect_reservations": True},
+            ))
+            queued += 1
+        session.commit()
+        logger.info("Queued Azure reservation collection for %d/%d connections", queued, len(conns))
+    except Exception as exc:
+        logger.warning("Azure reservation schedule queue failed: %s", exc)
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _azure_reservations_daily_job() -> None:
+    _queue_reservation_collections()
+
+
 def _auto_reprocess_destinations(connection_id: int, sync_session=None) -> int:
     """Reprocess destination tables for a connection after ETL completes.
     Only runs if active SourceDestinationMappings exist."""
@@ -281,6 +342,7 @@ async def start_scheduler():
         _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
         _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
+        _scheduler.add_job(_azure_reservations_daily_job, "cron", hour=3, minute=45, id="azure_reservations_daily", replace_existing=True)
         logger.info("Scheduler started with %d active schedules", count)
     except Exception as e:
         logger.error("Failed to start scheduler: %s", e)

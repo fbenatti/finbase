@@ -126,6 +126,16 @@ def main():
                     row.phase = "Reenfileirado após reinício do worker"
                     row.finished_at = None
                     continue
+            if row.task_type == "reservation_collection":
+                row.status = "QUEUED"
+                row.phase = "Reenfileirado após reinício do worker"
+                row.finished_at = None
+                continue
+            if row.task_type == "ai_cost_relationship_reprocess":
+                row.status = "QUEUED"
+                row.phase = "Reenfileirado após reinício do worker"
+                row.finished_at = None
+                continue
             row.status = "FAILED"
             row.phase = "Worker reiniciado; tarefa RUNNING anterior foi encerrada"
             row.finished_at = datetime.now(timezone.utc)
@@ -155,7 +165,7 @@ def main():
             task = session.execute(
                 select(EtlTask).where(
                     EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "forecast_accuracy", "shared_cost"]),
+                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "forecast_accuracy", "shared_cost", "ai_cost_relationship_reprocess", "reservation_collection"]),
                 )
                 .order_by(EtlTask.id)
                 .limit(1)
@@ -407,6 +417,43 @@ def main():
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
+                elif task.task_type == "ai_cost_relationship_reprocess":
+                    task.status = "RUNNING"
+                    task.phase = "Classificando FOCUS em passagem única para publicar as Gold"
+                    session.commit()
+                    session.close()
+                    try:
+                        import asyncio
+                        from app.services.ai_cost_materialization import materialize_ai_cost_relationships
+                        s = SyncSession()
+                        task_row = s.get(EtlTask, task_id)
+                        def progress(done, total, name):
+                            current = s.get(EtlTask, task_id)
+                            if current:
+                                current.processed_blobs = done
+                                current.total_blobs = total
+                                current.phase = f"Materializando {done}/{total}: {name}"
+                                s.commit()
+                        result = asyncio.run(materialize_ai_cost_relationships(s, run_id=task_id, progress=progress))
+                        task_row = s.get(EtlTask, task_id)
+                        if task_row:
+                            task_row.status = "COMPLETED"
+                            task_row.phase = f"Gold individual publicada: {result.get('rows', 0)} linhas"
+                            task_row.rows_destination = int(result.get("rows") or 0)
+                            task_row.processed_blobs = int(result.get("links") or 0)
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            task_row.result_json = {**(task_row.result_json or {}), **result}
+                        s.commit(); s.close()
+                    except Exception as exc:
+                        s = SyncSession()
+                        task_row = s.get(EtlTask, task_id)
+                        if task_row:
+                            task_row.status = "FAILED"
+                            task_row.phase = f"Erro: {_format_task_error(exc)[:160]}"
+                            task_row.errors = [str(exc)]
+                            task_row.finished_at = datetime.now(timezone.utc)
+                        s.commit(); s.close()
+
                 elif task.task_type == "reprocess":
                     dest_id = task.destination_table_id
                     conn_ids = task.connection_ids or []
@@ -617,6 +664,68 @@ def main():
                                 t2.status = "FAILED"
                                 t2.phase = f"Erro: {exc}"[:200]
                                 t2.current_blob = f"Erro: {exc}"[:500]
+                                t2.finished_at = datetime.now(timezone.utc)
+                                s2.commit()
+                        finally:
+                            s2.close()
+
+                elif task.task_type == "reservation_collection":
+                    # Coleta EXCLUSIVA de benefícios Azure (RI + Savings Plans) via
+                    # ARM → Bronze. NÃO toca nos blobs de custo: reservas vivem em
+                    # outra camada bronze da mesma conexão e não devem re-disparar
+                    # o ETL de custo já ingerido.
+                    conn_id = task.connection_id
+                    print(
+                        f"Picked up reservation_collection task {task_id}:"
+                        f" connection={conn_id}"
+                    )
+                    task.status = "RUNNING"
+                    session.commit()
+                    session.close()
+                    try:
+                        from app.database import SyncSession as _ResSession
+                        from app.services.azure_reservation_service import run_reservation_collection
+                        _res_session = _ResSession()
+                        try:
+                            result = run_reservation_collection(
+                                _res_session, conn_id, task_id=task_id
+                            )
+                            counts = result.get("counts") or {}
+                            persisted = result.get("persisted") or {}
+                            t2 = _res_session.get(EtlTask, task_id)
+                            if t2:
+                                t2.status = "COMPLETED"
+                                t2.phase = (
+                                    f"Reservas Azure concluído: {counts.get('benefits_total', 0)} benefícios "
+                                    f"({counts.get('reserved_instances', 0)} RI · "
+                                    f"{counts.get('savings_plans', 0)} SP)"
+                                )[:200]
+                                t2.rows_raw = int(result.get("catalog_rows") or 0)
+                                t2.rows_destination = int(persisted.get("catalog") or 0) + int(persisted.get("utilization") or 0)
+                                t2.errors = []
+                                t2.result_json = {
+                                    "counts": counts,
+                                    "persisted": persisted,
+                                    "discovery": result.get("discovery", []),
+                                    "source": result.get("source"),
+                                    "collection_period": result.get("collection_period"),
+                                }
+                                t2.finished_at = datetime.now(timezone.utc)
+                                _res_session.commit()
+                        finally:
+                            _res_session.close()
+                        print(f"Task {task_id} (reservation_collection) completed: {result}")
+                    except Exception as e:
+                        print(f"Reservation collection task {task_id} FAILED: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        s2 = SyncSession()
+                        try:
+                            t2 = s2.get(EtlTask, task_id)
+                            if t2:
+                                t2.status = "FAILED"
+                                t2.phase = f"Erro: {e}"[:200]
+                                t2.current_blob = f"Erro: {e}"[:500]
                                 t2.finished_at = datetime.now(timezone.utc)
                                 s2.commit()
                         finally:

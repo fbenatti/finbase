@@ -382,8 +382,7 @@ export default function Forecast() {
                 runningConfigId={runningConfigId}
                 onQuery={handleConfigsGridQuery}
                 onEdit={(config) => {
-                  const full = configs.find((item) => item.id === config.id);
-                  setConfigDialog({ open: true, initial: full ?? config });
+                  setConfigDialog({ open: true, initial: config });
                 }}
                 onRun={(config) => void runConfig(config)}
                 onDelete={setDeleteConfigPending}

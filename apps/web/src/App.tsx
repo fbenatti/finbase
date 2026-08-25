@@ -23,8 +23,9 @@ import DashboardsIA from "./pages/Dashboards/DashboardsIA";
 import GitHubCopilotDashboard from "./pages/GitHubCopilotDashboard/GitHubCopilotDashboard";
 import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
-import AzurePTU from "./pages/AzurePTU/AzurePTU";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
+import AzurePtuExecutive from "./pages/AzurePTU/AzurePtuExecutive";
+import Reservations from "./pages/Reservations/Reservations";
 function App() {
   return (
     <Routes>
@@ -47,8 +48,9 @@ function App() {
         <Route path="analysis" element={<Analysis />} />
         <Route path="expected-view" element={<ExpectedView />} />
         <Route path="dashboards-ia" element={<DashboardsIA />} />
-        <Route path="azure-ptu" element={<AzurePTU />} />
+        <Route path="azure-ptu" element={<AzurePtuExecutive />} />
         <Route path="azure-ptu-ops" element={<AzurePtuOps />} />
+        <Route path="reservations" element={<Reservations />} />
         <Route path="github-copilot" element={<GitHubCopilotDashboard />} />
         <Route path="ai-cost-origin" element={<Navigate to="/tables?tab=ai-cost-relationship" replace />} />
         <Route path="pipeline" element={<PipelineBuilder />} />

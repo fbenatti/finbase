@@ -1313,6 +1313,9 @@ async def load_gold_heatmap(
                / SUM(TRY_CAST(provisioned_ptus AS DOUBLE))
           ELSE AVG(TRY_CAST(utilization_avg AS DOUBLE))
         END AS utilization_avg,
+        COALESCE(SUM(TRY_CAST(input_tokens_sum AS DOUBLE)), 0) AS input_tokens,
+        COALESCE(SUM(TRY_CAST(output_tokens_sum AS DOUBLE)), 0) AS output_tokens,
+        COALESCE(SUM(TRY_CAST(total_tokens_sum AS DOUBLE)), 0) AS total_tokens,
         COUNT(*) AS samples
       FROM iceberg.gold.dest_azure_ptu_metrics
       WHERE {hour_filter}{conn_filter}{project_filter}
@@ -1327,6 +1330,9 @@ async def load_gold_heatmap(
                 "weekday": int(row.get("weekday") or 0),
                 "hour": int(row.get("hour") or 0),
                 "utilization_avg": float(row.get("utilization_avg") or 0),
+                "input_tokens": float(row.get("input_tokens") or 0),
+                "output_tokens": float(row.get("output_tokens") or 0),
+                "total_tokens": float(row.get("total_tokens") or 0),
                 "samples": int(row.get("samples") or 0),
             }
             for row in (rows or [])

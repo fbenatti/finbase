@@ -272,7 +272,29 @@ async def _gold_from(
     return f"iceberg.gold.{table_name}"
 
 
+# Forecast manual lives in the operational PostgreSQL database, not in
+# Trino. It is exposed to the pivot through a synthetic pseudo-destination
+# resolved by ``_pivot_table_context`` and served by ``_run_forecast_manual_pivot``.
+FORECAST_MANUAL_PIVOT_ID = -1000000
+_FORECAST_MANUAL_PIVOT_NAME = "forecast_manual_planning"
+_FORECAST_MANUAL_SCHEMA = {
+    "period": "varchar",
+    "tipo": "varchar",
+    "departamento": "varchar",
+    "departamento_nivel_1": "varchar",
+    "departamento_nivel_2": "varchar",
+    "departamento_nivel_3": "varchar",
+    "departamento_nivel_4": "varchar",
+    "departamento_nivel_5": "varchar",
+    "departamento_nivel_6": "varchar",
+    "departamento_nivel_7": "varchar",
+    "value": "double",
+}
+
+
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
+    if destination_table_id == FORECAST_MANUAL_PIVOT_ID:
+        return _FORECAST_MANUAL_PIVOT_NAME, dict(_FORECAST_MANUAL_SCHEMA)
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
@@ -325,10 +347,23 @@ def _validate_pivot_request(req: PivotRequest, schema: dict[str, str]) -> tuple[
 
 
 def _canonicalize_request(req: PivotRequest, schema: dict[str, str]) -> None:
-    """Accept UI-friendly casing while emitting the exact Trino identifiers."""
+    """Accept UI-friendly casing while emitting the exact Trino identifiers.
+
+    Planning tables expose the monthly bucket as ``period`` while Gold uses
+    ``_billing_period``; both carry YYYYMM. A view saved against one spelling
+    keeps working against the other by aliasing any period name onto the
+    physical column the target table actually exposes (mirrors the union's
+    ``period_source`` alignment).
+    """
     by_lower = {name.lower(): name for name in schema}
+    schema_period = _schema_period_column(schema)
     def canonical(name: str) -> str:
-        return by_lower.get(name.lower(), name)
+        exact = by_lower.get(name.lower())
+        if exact:
+            return exact
+        if schema_period and name.lower() in _PERIOD_NAMES_LOWER:
+            return schema_period
+        return name
     req.rows = [canonical(name) for name in req.rows]
     req.columns = [canonical(name) for name in req.columns]
     req.measures = [measure.model_copy(update={"column": canonical(measure.column)}) for measure in req.measures]
@@ -926,9 +961,124 @@ async def run_pivot(req: PivotRequest, request: Request, db: AsyncSession = Depe
             raise _cancelled_http()
 
 
+async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
+    """Return Gold billing periods that already hold realized data."""
+    try:
+        rows = await trino_execute(
+            "SELECT DISTINCT _billing_period FROM iceberg.gold.dest_modelo_focus",
+            **trino_kwargs,
+        )
+        return {str(row.get("_billing_period") or "") for row in rows if row.get("_billing_period")}
+    except Exception:
+        return set()
+
+
+async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Serve the forecast-manual pseudo-destination from the operational DB.
+
+    Only future periods are exposed: once a month has realized data in Gold,
+    the manual forecast for that month is considered consumed and disappears.
+    """
+    schema = dict(_FORECAST_MANUAL_SCHEMA)
+    _canonicalize_request(req, schema)
+    rows, columns, measures = _validate_pivot_request(req, schema)
+    dimensions = [*rows, *columns]
+    for measure in measures:
+        if measure.column != "value":
+            raise HTTPException(422, "O pivot de forecast manual usa apenas a medida value")
+
+    versions = (
+        await db.execute(
+            select(PlanningVersion)
+            .join(FinancialType, FinancialType.id == PlanningVersion.financial_type_id)
+            .where(
+                FinancialType.code == "forecast-manual",
+                PlanningVersion.is_current == True,
+            )
+            .order_by(PlanningVersion.year.desc())
+        )
+    ).scalars().all()
+    if not versions:
+        return _build_pivot_result([], rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
+
+    version_ids = [version.id for version in versions]
+    entries = (
+        await db.execute(
+            select(PlanningEntry).where(
+                PlanningEntry.planning_version_id.in_(version_ids),
+                PlanningEntry.entity_type == "department",
+            )
+        )
+    ).scalars().all()
+    if not entries:
+        return _build_pivot_result([], rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
+
+    departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
+    department_map = {department.id: department for department in departments}
+
+    def levels_of(dept_id: int | None) -> list[str]:
+        chain: list[str] = []
+        current = department_map.get(dept_id) if dept_id else None
+        seen: set[int] = set()
+        while current and current.id not in seen:
+            seen.add(current.id)
+            chain.append(current.name or "")
+            current = department_map.get(current.parent_id) if current.parent_id else None
+        return list(reversed(chain))
+
+    year_by_version = {version.id: int(version.year or 0) for version in versions}
+    realized = await _fetch_realized_periods(trino_kwargs)
+    grouped: dict[tuple[Any, ...], list[float]] = {}
+    for entry in entries:
+        month = int(entry.month or 0)
+        if month < 1 or month > 12:
+            continue
+        entry_year = year_by_version.get(entry.planning_version_id, 0)
+        if not entry_year:
+            continue
+        period = f"{entry_year:04d}{month:02d}"
+        # Manual forecast is only meaningful for months that have not realized yet.
+        if period in realized:
+            continue
+        value = float(entry.value or 0)
+        if abs(value) < 1e-12:
+            continue
+        levels = levels_of(entry.department_id)
+        record: dict[str, Any] = {
+            "period": period,
+            "tipo": "forecast-manual",
+            "departamento": levels[-1] if levels else "",
+        }
+        for index, name in enumerate(levels, 1):
+            record[f"departamento_nivel_{index}"] = name
+        key = tuple(record.get(name) for name in dimensions)
+        bucket = grouped.setdefault(key, [0.0] * len(measures))
+        for measure_index, measure in enumerate(measures):
+            bucket[measure_index] += value
+
+    records: list[dict[str, Any]] = []
+    for key, values in grouped.items():
+        record: dict[str, Any] = {f"d{i}": key[i] for i in range(len(dimensions))}
+        for measure_index, value in enumerate(values):
+            record[f"m{measure_index}"] = value
+        records.append(record)
+
+    result = _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
+    result["period_auto_applied"] = "Somente períodos futuros (sem realizado na Gold)"
+    return result
+
+
 async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
+    if req.destination_table_id == FORECAST_MANUAL_PIVOT_ID:
+        return await _run_forecast_manual_pivot_core(req, db, trino_kwargs)
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     _canonicalize_request(req, schema)
+    # Planning pseudo-destinations hold the monthly forecast snapshot (tipo
+    # forecast/realizado/rateio). A single-table pivot over them should behave
+    # like the union's forecast side: only the forecast rows, unless the user
+    # already constrained tipo themselves.
+    if req.destination_table_id < 0 and "tipo" in schema and not any(f.column == "tipo" for f in req.filters):
+        req.filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
     rows, columns, measures = _validate_pivot_request(req, schema)
     req.filters, auto_period = await _inject_latest_period_filter(
         "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
@@ -1403,6 +1553,10 @@ async def query_dashboard_widget(body: WidgetQueryRequest, http_request: Request
                     measures=pivot_request.measures, filters=pivot_request.filters, row_limit=pivot_request.row_limit,
                     column_limit=pivot_request.column_limit, include_totals=True), db, scope.trino_kwargs)
             else:
+                # A single active source may be the planning pseudo-destination
+                # (negative id). Pivot that table directly, not the Gold table the
+                # view was saved against, so forecast-only widgets show forecast.
+                pivot_request.destination_table_id = source_ids[0]
                 result = await _run_pivot_core(pivot_request, db, scope.trino_kwargs)
         except TrinoCancelled:
             raise _cancelled_http()
@@ -1689,8 +1843,49 @@ async def _expected_view_core(
                 path = entry.department_levels or []
             driver = str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
             budget_by_driver[driver] = budget_by_driver.get(driver, 0.0) + float(entry.value or 0)
+
+    # Forecast manual is composed on top of the realized/forecast series using
+    # the exact same aggregation rules as the orçamento (per department and its
+    # descendants). Only future months surface here: periods that already have
+    # realized data in Gold drop their manual forecast.
+    forecast_manual_entries = (await db.execute(
+        select(PlanningEntry).join(PlanningVersion).join(FinancialType).where(
+            FinancialType.code == "forecast-manual",
+            PlanningVersion.year == budget_year,
+            PlanningVersion.is_current == True,
+            PlanningEntry.entity_type == "department",
+        )
+    )).scalars().all()
+    realized_periods = await _fetch_realized_periods({})
+    forecast_manual_by_period: dict[str, float] = {}
+    forecast_manual_by_driver: dict[str, float] = {}
+    for entry in forecast_manual_entries:
+        legacy_match = bool(entry.department_levels and entry.department_levels[:len(scope_path)] == scope_path)
+        if (selected and entry.department_id in selected_ids) or (not selected and legacy_match):
+            period = f"{budget_year:04d}{entry.month:02d}"
+            if period in realized_periods:
+                continue
+            value = float(entry.value or 0)
+            if abs(value) < 1e-12:
+                continue
+            forecast_manual_by_period[period] = forecast_manual_by_period.get(period, 0.0) + value
+            if selected and entry.department_id:
+                path = []
+                cursor = department_map.get(entry.department_id)
+                while cursor:
+                    path.append(cursor.name)
+                    cursor = department_map.get(cursor.parent_id) if cursor.parent_id else None
+                path.reverse()
+            else:
+                path = entry.department_levels or []
+            driver = str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
+            forecast_manual_by_driver[driver] = forecast_manual_by_driver.get(driver, 0.0) + value
     by_period = {str(row["period"]): dict(row) for row in fact_rows}
     for period in budget_by_period:
+        by_period.setdefault(period, {"period": period, "actual_value": None, "forecast_value": None})
+    # Forecast manual may exist for months without any Gold forecast (e.g. the
+    # tail of a year beyond the planning horizon) — surface those periods too.
+    for period in forecast_manual_by_period:
         by_period.setdefault(period, {"period": period, "actual_value": None, "forecast_value": None})
     rows: list[dict[str, Any]] = []
     cumulative = 0.0
@@ -1702,16 +1897,19 @@ async def _expected_view_core(
         received = float(row.get("shared_received") or 0)
         given = float(row.get("shared_given") or 0)
         budget = budget_by_period.get(period, 0.0)
+        forecast_manual = forecast_manual_by_period.get(period, 0.0)
         # Realizado from Gold wins for closed/collected months; forecast fills
         # open and future months from the planning table. Shared cost is a
-        # separate stack on top of that base, not mixed into Gold.
+        # separate stack on top of that base, not mixed into Gold. Manual
+        # forecast composes on top of the future forecast as its own layer.
         base = actual if actual is not None else (forecast if forecast is not None else budget)
-        expected = float(base or 0) + shared
+        expected = float(base or 0) + forecast_manual + shared
         cumulative += expected
         rows.append({
             "period": period,
             "actual_value": actual,
             "forecast_value": forecast,
+            "forecast_manual_value": forecast_manual if abs(forecast_manual) >= 1e-12 else 0.0,
             "shared_value": shared if abs(shared) >= 1e-12 else 0.0,
             "shared_received": received if abs(received) >= 1e-12 else 0.0,
             "shared_given": given if abs(given) >= 1e-12 else 0.0,
@@ -1720,13 +1918,15 @@ async def _expected_view_core(
             "cumulative_value": cumulative,
         })
     composed_forecast_by_driver = {
-        name: actual_by_driver.get(name, 0.0) + forecast_by_driver.get(name, 0.0) + shared_by_driver.get(name, 0.0)
-        for name in set(actual_by_driver) | set(forecast_by_driver) | set(shared_by_driver)
+        name: actual_by_driver.get(name, 0.0) + forecast_by_driver.get(name, 0.0)
+        + forecast_manual_by_driver.get(name, 0.0) + shared_by_driver.get(name, 0.0)
+        for name in set(actual_by_driver) | set(forecast_by_driver) | set(forecast_manual_by_driver) | set(shared_by_driver)
     }
     drivers = [
         {"name": name, "budget_value": budget_by_driver.get(name, 0.0),
          "actual_value": actual_by_driver.get(name, 0.0),
          "shared_value": shared_by_driver.get(name, 0.0),
+         "forecast_manual_value": forecast_manual_by_driver.get(name, 0.0),
          "forecast_value": composed_forecast_by_driver.get(name, 0.0),
          "variance": budget_by_driver.get(name, 0.0) - composed_forecast_by_driver.get(name, 0.0)}
         for name in sorted(set(budget_by_driver) | set(composed_forecast_by_driver))
@@ -2079,6 +2279,43 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
                 })
         except Exception:
             pass
+
+    # Forecast manual (operational planning, PostgreSQL) as an analysis-only
+    # pseudo-destination. Expose it once when a current version exists.
+    try:
+        fm_exists = await db.execute(text(
+            "SELECT 1 FROM planning_version pv JOIN financial_type ft ON ft.id = pv.financial_type_id "
+            "WHERE ft.code = 'forecast-manual' AND pv.is_current = true LIMIT 1"
+        ))
+        if fm_exists.scalar_one_or_none():
+            fm_counts = await db.execute(text(
+                "SELECT pv.year, COUNT(pe.id) AS n "
+                "FROM planning_version pv JOIN financial_type ft ON ft.id = pv.financial_type_id "
+                "JOIN planning_entry pe ON pe.planning_version_id = pv.id "
+                "WHERE ft.code = 'forecast-manual' AND pv.is_current = true "
+                "GROUP BY pv.year ORDER BY pv.year DESC LIMIT 20"
+            ))
+            fm_periods = [
+                {"period": f"{row[0]:04d}01", "count": row[1]}
+                for row in fm_counts.all()
+            ]
+            fm_total = sum(row[0] for row in (await db.execute(text(
+                "SELECT COUNT(pe.id) FROM planning_version pv "
+                "JOIN financial_type ft ON ft.id = pv.financial_type_id "
+                "JOIN planning_entry pe ON pe.planning_version_id = pv.id "
+                "WHERE ft.code = 'forecast-manual' AND pv.is_current = true"
+            ))).all())
+            result.append({
+                "id": FORECAST_MANUAL_PIVOT_ID,
+                "name": "Forecast manual",
+                "physical_name": _FORECAST_MANUAL_PIVOT_NAME,
+                "description": "Projeções manuais de forecast cadastradas por departamento (apenas períodos futuros, sem realizado na Gold)",
+                "row_count": int(fm_total or 0),
+                "periods": fm_periods,
+                "analysis_only": True,
+            })
+    except Exception as exc:
+        logger.exception("Falha ao expor Forecast manual como destino: %s", exc)
     return result
 
 

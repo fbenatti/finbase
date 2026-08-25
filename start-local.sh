@@ -117,7 +117,7 @@ is_openfinops_cmd() {
 
 is_openfinops_api_cmd() {
   local cmd="$1"
-  [[ "$cmd" == *uvicorn* && "$cmd" == *app.main:app* ]] && is_openfinops_cmd "$cmd"
+  [[ "$cmd" == *uvicorn* && "$cmd" == *app.main:app* && "$cmd" == *"port 8001"* ]]
 }
 
 is_openfinops_web_cmd() {
@@ -222,9 +222,19 @@ free_listeners_on_port() {
   fi
   leftover="$(non_docker_listeners_on_port "$port" | tr '\n' ' ' | sed 's/ $//')"
   if [[ -n "$leftover" ]]; then
-    echo "Porta $port ainda com listeners fora do Docker ($leftover); não forçando kill de processos do Docker Desktop."
+    echo "Liberando porta $port ($label, listeners restantes:$leftover)"
+    kill_pids "$leftover"
   fi
   wait_for_port_free "$port" 20
+}
+
+kill_orphan_api() {
+  local api_pids
+  api_pids="$(pgrep -f "uvicorn app.main:app.*port 8001" 2>/dev/null || true)"
+  if [[ -n "$api_pids" ]]; then
+    echo "Encerrando API uvicorn órfã (PIDs:$(echo "$api_pids" | tr '\n' ' ' | sed 's/ $//'))"
+    kill_pids "$api_pids"
+  fi
 }
 
 kill_orphan_workers() {
@@ -256,6 +266,7 @@ free_stale_processes() {
   stop_compose_dev_conflicts
   stop_pid_files
 
+  kill_orphan_api
   free_listeners_on_port 8001 "API local" uvicorn app.main:app
   # 8000 is the compose API mapping. Only stop the container (above); never kill Docker's proxy.
   pids_8000="$(collect_pids_on_port 8000 uvicorn app.main:app)"
@@ -470,16 +481,31 @@ stop_backend_processes() {
 }
 
 start_api_process() {
-  (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload) \
-    >"$LOG_DIR/api.log" 2>&1 &
-  api_pid=$!
-  write_pid_file api "$api_pid"
-  sleep 0.5
-  if ! kill -0 "$api_pid" 2>/dev/null; then
+  local attempt
+  for attempt in 1 2; do
+    if (( attempt > 1 )); then
+      echo "Reiniciando API após liberar porta 8001 (tentativa $attempt)..."
+      kill_orphan_api
+      free_listeners_on_port 8001 "API local" uvicorn app.main:app
+    fi
+    : >"$LOG_DIR/api.log"
+    (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload) \
+      >>"$LOG_DIR/api.log" 2>&1 &
+    api_pid=$!
+    write_pid_file api "$api_pid"
+    sleep 0.5
+    if kill -0 "$api_pid" 2>/dev/null; then
+      sync_api_pid_from_port || true
+      return 0
+    fi
+    if (( attempt == 1 )) && grep -q "Address already in use" "$LOG_DIR/api.log" 2>/dev/null; then
+      continue
+    fi
     echo "ERRO: processo da API encerrou ao iniciar; veja $LOG_DIR/api.log" >&2
     return 1
-  fi
-  sync_api_pid_from_port || true
+  done
+  echo "ERRO: processo da API encerrou ao iniciar; veja $LOG_DIR/api.log" >&2
+  return 1
 }
 
 start_worker_process() {

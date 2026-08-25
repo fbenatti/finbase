@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import json
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -53,6 +55,12 @@ from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/azure-ptu", tags=["azure-ptu"])
 logger = logging.getLogger(__name__)
+
+# The dashboard is read-only and the Gold tables are batch-fed. A short cache
+# prevents React remounts/filter redraws from issuing the same four Trino
+# queries repeatedly while keeping the view fresh for operators.
+_OPS_OVERVIEW_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_OPS_OVERVIEW_CACHE_TTL_S = 30.0
 
 
 class _ClientCancelScope:
@@ -367,10 +375,14 @@ def _aggregate_deployment_utilization(
         if util_avg is not None:
             bucket["avg"].append(float(util_avg))
         if row.get("utilization_max") is not None:
-            bucket["max"].append(float(row["utilization_max"]))
-            if float(row["utilization_max"]) >= 80:
+            max_value = float(row["utilization_max"])
+            if max_value > 100:
+                bucket["quality_anomaly"] = True
+            elif max_value >= 0:
+                bucket["max"].append(max_value)
+            if max_value <= 100 and max_value >= 80:
                 bucket["hours_80"] += 1
-            if float(row["utilization_max"]) >= 95:
+            if max_value <= 100 and max_value >= 95:
                 bucket["hours_95"] += 1
         if row.get("utilization_p95") is not None:
             bucket["p95"].append(float(row["utilization_p95"]))
@@ -605,9 +617,13 @@ def _build_utilization_series(metrics: list[dict[str, Any]], grain: str = "hour"
         elif util_avg is not None:
             slot.setdefault("avg", []).append(float(util_avg))
         if row.get("utilization_max") is not None:
-            slot["max"].append(float(row["utilization_max"]))
+            max_value = float(row["utilization_max"])
+            if 0 <= max_value <= 100:
+                slot["max"].append(max_value)
         if row.get("utilization_p95") is not None:
-            slot["p95"].append(float(row["utilization_p95"]))
+            p95_value = float(row["utilization_p95"])
+            if 0 <= p95_value <= 100:
+                slot["p95"].append(p95_value)
     series = []
     for ts in sorted(buckets):
         vals = buckets[ts]
@@ -1345,6 +1361,10 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
     """Lightweight PTU operational dashboard — Gold metrics/capacity only, no FOCUS."""
     async with _ClientCancelScope(request) as scope:
         cancel = scope.cancel_event
+        cache_key = json.dumps(body.model_dump(mode="json"), sort_keys=True, default=str)
+        cached = _OPS_OVERVIEW_CACHE.get(cache_key)
+        if cached and time.monotonic() - cached[0] < _OPS_OVERVIEW_CACHE_TTL_S:
+            return cached[1]
         date_from, date_to, _, _ = _dashboard_date_bounds(body)
         effective_grain = body.grain if body.grain in {"hour", "day", "month"} else "day"
         if effective_grain == "hour" and body.hours > 7 * 24:
@@ -1370,8 +1390,17 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
                     ).strftime("%Y-%m-%d"),
                 }
             )
-            _, previous_metrics, _, _ = await _load_operational_data(
-                prev_body, db, dashboard_only=True, cancel_event=cancel,
+            # Comparison needs only metrics. Avoid re-querying inventory and the
+            # hourly heatmap; those are already loaded for the current window.
+            connections = (await db.execute(
+                select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")
+            )).scalars().all()
+            previous_metrics = await load_gold_metrics(
+                hours=prev_body.hours,
+                connection_ids=[c.id for c in connections],
+                project_hints=prev_body.project_keys or None,
+                grain=effective_grain,
+                timeout_s=DASHBOARD_TRINO_TIMEOUT_S,
             )
         except Exception:
             previous_metrics = []
@@ -1401,12 +1430,22 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
         coverage = _build_metrics_coverage(metrics, body.hours)
         metric_availability = metric_field_availability(metrics)
 
-        return {
+        response_payload = {
             "period": period,
             "executive_summary": executive_summary,
             "token_consumption": build_token_consumption(
                 metrics, deployment_stats, token_series, effective_grain,
             ),
+            # The shared hourly heatmap query contains both utilization and tokens;
+            # reuse it so the dashboard does not issue one Trino query per widget.
+            "token_heatmap": [
+                {"weekday": cell["weekday"], "hour": cell["hour"],
+                 "input_tokens": cell.get("input_tokens", 0),
+                 "output_tokens": cell.get("output_tokens", 0),
+                 "total_tokens": cell.get("total_tokens", 0),
+                 "samples": cell.get("samples", 0)}
+                for cell in heatmap
+            ],
             "capacity_risk": build_capacity_risk(
                 metrics, deployment_stats, utilization_series, heatmap, effective_grain,
             ),
@@ -1428,6 +1467,19 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
             "data_coverage": coverage,
             "filters": body.model_dump(),
         }
+        _OPS_OVERVIEW_CACHE[cache_key] = (time.monotonic(), response_payload)
+        # Bound memory if many project/date combinations are explored.
+        if len(_OPS_OVERVIEW_CACHE) > 64:
+            oldest = sorted(_OPS_OVERVIEW_CACHE.items(), key=lambda item: item[1][0])[:16]
+            for key, _ in oldest:
+                _OPS_OVERVIEW_CACHE.pop(key, None)
+        return response_payload
+
+
+@router.post("/dashboard/executive-overview")
+async def dashboard_executive_overview(body: OverviewRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Independent operational payload. Cost joins are defined separately over Gold layers."""
+    return await dashboard_ops_overview(body, request, db)
 
 
 async def _dashboard_data(body: DashboardFilter, db: AsyncSession) -> dict[str, Any]:

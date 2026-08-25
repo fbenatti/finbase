@@ -37,6 +37,7 @@ import {
   CloudUpload as CloudUploadIcon,
   SmartToy as SmartToyIcon,
   FactCheck as AccuracyIcon,
+  CalendarMonth as CalendarMonthIcon,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { NotificationBell } from "../context/NotificationContext";
@@ -63,7 +64,6 @@ const menuGroups = [
     background: "#f5f3ff",
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
-      { path: "/forecast-accuracy", label: "Acurácia de Forecast", icon: <AccuracyIcon /> },
       { path: "/savings", label: "Ações de saving", icon: <SavingsIcon /> },
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
       { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },
@@ -79,9 +79,11 @@ const menuGroups = [
       { path: "/pipeline", label: "Pipeline do dado", icon: <AccountTreeIcon /> },
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
       { path: "/expected-view", label: "Visão esperada", icon: <TimelineIcon /> },
+      { path: "/forecast-accuracy", label: "Acurácia de Forecast", icon: <AccuracyIcon /> },
       { path: "/dashboards-ia", label: "Dashboards IA", icon: <SmartToyIcon /> },
       { path: "/azure-ptu", label: "Azure PTU", icon: <SmartToyIcon /> },
       { path: "/azure-ptu-ops", label: "PTU Monitoramento", icon: <SmartToyIcon /> },
+      { path: "/reservations", label: "Reservas Azure", icon: <CalendarMonthIcon /> },
       { path: "/github-copilot", label: "GitHub Copilot", icon: <SmartToyIcon /> },
     ],
   },

@@ -822,6 +822,7 @@ def write_destination_staged(
     partition_col: str = "_billing_period",
     column_types: Optional[dict[str, str]] = None,
     namespace: str = "gold",
+    add_tipo: bool = True,
 ) -> str:
     """Write a destination DataFrame to a temporary Iceberg table (staged).
 
@@ -850,7 +851,7 @@ def write_destination_staged(
     df = df.copy()
     # Every row written to a destination Gold is historical realized data.
     # Forecast projections are published separately in *_planning.
-    if "tipo" not in df.columns:
+    if add_tipo and "tipo" not in df.columns:
         df["tipo"] = "realizado"
     if partition_col not in df.columns:
         df[partition_col] = "unknown"
@@ -1599,3 +1600,85 @@ def write_azure_ptu_usage_events(df: pd.DataFrame) -> int:
 
 def write_azure_ptu_subproject_usage(df: pd.DataFrame) -> int:
     return _append_or_create_table("gold", "dest_azure_ptu_subproject_usage", df, "_billing_period")
+
+
+def write_bronze_catalog(
+    table_name: str,
+    df: pd.DataFrame,
+    collection_period: str,
+    *,
+    column_types: Optional[dict[str, str]] = None,
+) -> int:
+    """Append benefit catalog/utilization rows to a dedicated Bronze table.
+
+    Reservations/Savings Plans são coletados via ARM e gravados no Bronze sem
+    normalização FOCUS (por ora). A tabela é particionada por
+    ``_billing_period`` (mês de coleta, ex. 202602) e evolui o schema por nome
+    quando novas colunas chegam — mesmo contrato do write_bronze.
+
+    O catálogo é um snapshot completo do estado dos benefícios: para a mesma
+    conexão + mês de coleta, a fatia anterior é substituída (delete + append)
+    para que cada coleta reflita o estado atual e não acumule duplicatas.
+    """
+    if df is None or df.empty:
+        return 0
+    from pyiceberg.expressions import And, EqualTo
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+
+    _ensure_namespace("bronze")
+    tid = _table_id("bronze", table_name)
+    frame = df.copy()
+    if "_billing_period" not in frame.columns:
+        frame["_billing_period"] = str(collection_period)
+    if "_ingested_at" not in frame.columns:
+        frame["_ingested_at"] = pd.Timestamp.utcnow().isoformat()
+
+    cat = _get_catalog()
+    try:
+        tbl = cat.load_table(tid)
+    except Exception:
+        return _append_or_create_table("bronze", table_name, frame, "_billing_period")
+
+    # Remove snapshot anterior da mesma conexão + mês (idempotência de catálogo).
+    try:
+        conn_ids = sorted({int(x) for x in frame["connection_id"].dropna().unique()})
+        for conn_id in conn_ids:
+            tbl.delete(And(
+                EqualTo("_billing_period", str(collection_period)),
+                EqualTo("connection_id", conn_id),
+            ))
+    except Exception as exc:
+        logger.warning("Bronze %s delete-slice falhou (seguindo com append): %s", table_name, exc)
+        tbl = cat.load_table(tid)
+
+    incoming = _df_to_arrow(frame, column_types=column_types)
+    incoming_schema = pyarrow_to_schema(incoming.schema)
+    existing_names = {field.name for field in tbl.schema().fields}
+    incoming_names = {field.name for field in incoming_schema.fields}
+    if not incoming_names.issubset(existing_names):
+        with tbl.update_schema() as schema_update:
+            for field in incoming_schema.fields:
+                if field.name not in existing_names:
+                    schema_update.add_column(field.name, field.field_type)
+        tbl = cat.load_table(tid)
+
+    target_types: dict[str, str] = {}
+    for field in tbl.schema().fields:
+        field_type = str(field.field_type).lower()
+        if "double" in field_type or "float" in field_type or "decimal" in field_type:
+            target_types[field.name] = "DOUBLE"
+        elif "long" in field_type or "int" in field_type:
+            target_types[field.name] = "BIGINT"
+        elif "bool" in field_type:
+            target_types[field.name] = "BOOLEAN"
+        else:
+            target_types[field.name] = "TEXT"
+
+    periods = sorted({str(x) for x in frame["_billing_period"].dropna().unique()})
+    for period in periods:
+        subset = frame[frame["_billing_period"].astype(str) == period]
+        if subset.empty:
+            continue
+        tbl.append(_df_to_arrow(subset, column_types=target_types, target_schema=tbl.schema()))
+    logger.info("Bronze %s: appended %d rows (collection %s)", table_name, len(frame), collection_period)
+    return len(frame)
