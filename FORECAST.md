@@ -401,6 +401,22 @@ O frontend expõe a página **Acurácia de Forecast** (`/forecast-accuracy`) com
 KPIs, gráfico Projetado × Realizado por dimensão, detalhe por dimensão e a
 evolução mês a mês.
 
+### Reprocessamento de acurácia
+
+Para regenerar os simulados (após mudanças de configuração/regras), use a aba
+**Acurácia de Forecast** da página **Reprocessar** (`/reprocess?tab=accuracy`)
+ou a API:
+
+```text
+POST /forecast/accuracy/reprocess
+{"config_id": 9, "months": ["202602", "202603"]}
+```
+
+O worker processa um lote (`task_type = forecast_accuracy`), criando um
+snapshot imutável por mês (`simulated_as_of = dia 2 do mês`). O dashboard usa
+automaticamente o snapshot mais recente de cada mês. O andamento aparece na
+própria aba (meses concluídos × total).
+
 ## APIs
 
 ```text

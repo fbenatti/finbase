@@ -355,7 +355,7 @@ def _aggregate_deployment_utilization(
             "avg_weighted_num": 0.0, "avg_weighted_den": 0.0,
             "input": 0.0, "output": 0.0, "hours": 0.0,
             "rpm": [], "ttr": [], "ttlb": [], "ttft": [], "tbt": [],
-            "rate_limited": 0.0, "requests": 0.0,
+            "rate_limited": 0.0, "server_errors": 0.0, "client_errors": 0.0, "success": 0.0, "requests": 0.0,
             "quality_anomaly": False,
             "hours_80": 0, "hours_95": 0,
         })
@@ -388,6 +388,9 @@ def _aggregate_deployment_utilization(
         if row.get("normalized_tbt_avg_ms") is not None:
             bucket["tbt"].append(float(row["normalized_tbt_avg_ms"]))
         bucket["rate_limited"] += float(row.get("rate_limited_count") or 0)
+        bucket["server_errors"] += float(row.get("server_error_count") or 0)
+        bucket["client_errors"] += float(row.get("client_error_count") or 0)
+        bucket["success"] += float(row.get("success_count") or 0)
         bucket["requests"] += float(row.get("request_count") or 0)
         if row.get("utilization_quality_anomaly"):
             bucket["quality_anomaly"] = True
@@ -399,7 +402,7 @@ def _aggregate_deployment_utilization(
             "avg": [], "max": [], "p95": [], "avg_weighted_num": 0.0, "avg_weighted_den": 0.0,
             "input": 0.0, "output": 0.0, "hours": 0.0,
             "rpm": [], "ttr": [], "ttlb": [], "ttft": [], "tbt": [],
-            "rate_limited": 0.0, "requests": 0.0, "quality_anomaly": False,
+            "rate_limited": 0.0, "server_errors": 0.0, "client_errors": 0.0, "success": 0.0, "requests": 0.0, "quality_anomaly": False,
             "hours_80": 0, "hours_95": 0,
         })
         util_avg = (
@@ -444,6 +447,9 @@ def _aggregate_deployment_utilization(
             "normalized_tbt_avg_ms": sum(vals["tbt"]) / len(vals["tbt"]) if vals["tbt"] else None,
             "rate_limited_count": vals["rate_limited"] or None,
             "request_count": vals["requests"] or None,
+            "throttle_rate_pct": (vals["rate_limited"] / vals["requests"] * 100) if vals["requests"] else None,
+            "server_error_rate_pct": (vals["server_errors"] / vals["requests"] * 100) if vals["requests"] else None,
+            "client_error_rate_pct": (vals["client_errors"] / vals["requests"] * 100) if vals["requests"] else None,
             "risk_score": (vals["hours_95"] * 3) + (vals["hours_80"] * 1) + (vals["rate_limited"] / 10),
             "peak_concurrency_note": "Azure Monitor não expõe concorrência de sessão; usamos pico de requests/minuto.",
         })

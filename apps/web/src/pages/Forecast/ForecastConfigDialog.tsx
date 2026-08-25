@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   InputLabel,
   MenuItem,
@@ -21,6 +23,7 @@ import {
   ForecastMetadata,
   MappedConnection,
   createForecastConfig,
+  formatApiError,
   getConnectionsForDestination,
   getForecastMetadata,
   updateForecastConfig,
@@ -30,8 +33,9 @@ type Props = {
   open: boolean;
   initial: ForecastConfig | null;
   tables: DestinationTable[];
+  usedDestinationTableIds: number[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedName: string) => void | Promise<void>;
 };
 
 const emptyState = {
@@ -73,6 +77,14 @@ const METHOD_LABELS: Record<string, string> = {
 
 const WINDOW_OPTIONS = [7, 14, 28];
 
+function normalizeWindows(raw: unknown): number[] {
+  if (!Array.isArray(raw) || !raw.length) return [...emptyState.windows];
+  const parsed = raw
+    .map((value) => Number(value))
+    .filter((value) => WINDOW_OPTIONS.includes(value));
+  return parsed.length ? parsed : [...emptyState.windows];
+}
+
 function detectProfile(model: string, growthPct: number, weight: number): string {
   if (model === "MEAN_28" && Math.abs(growthPct - 0.5) < 0.001) return "conservador";
   if (model === "AUTO_BACKTEST" && Math.abs(growthPct - 0.83) < 0.001) return "padrao";
@@ -88,7 +100,19 @@ function applyProfile(key: string, setters: { setModel: (v: string) => void; set
   else if (key === "ponderado") { setters.setModel("WEIGHTED"); setters.setWeight(70); }
 }
 
-export default function ForecastConfigDialog({ open, initial, tables, onClose, onSaved }: Props) {
+function safeInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function safeFloat(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+export default function ForecastConfigDialog({ open, initial, tables, usedDestinationTableIds, onClose, onSaved }: Props) {
   const [name, setName] = useState(emptyState.name);
   const [tableId, setTableId] = useState<number | "">(emptyState.tableId);
   const [meta, setMeta] = useState<ForecastMetadata | null>(emptyState.meta);
@@ -148,14 +172,16 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
       setMeasure(config.measure_column);
       setDateColumn(config.date_column);
       setDimensions(config.dimensions || []);
-      setHorizon(config.horizon_months);
-      setCutoff(config.cutoff_days);
-      setGrowth(config.growth_rate * 100);
+      setHorizon(safeInt(config.horizon_months, emptyState.horizon, 1, 36));
+      setCutoff(safeInt(config.cutoff_days, emptyState.cutoff, 0, 31));
+      const growthPct = safeFloat(config.growth_rate, emptyState.growth / 100, 0, 1) * 100;
+      const recentWeightPct = Math.round(safeFloat((config as ForecastConfig & { recent_weight?: number }).recent_weight, 0.7, 0, 1) * 100);
+      setGrowth(growthPct);
       setModel(config.model_mode);
-      setWindows(config.enabled_windows || [7, 14, 28]);
-      setWeight(Math.round(((config as any).recent_weight || 0.7) * 100));
-      setMinDays((config as any).minimum_daily_points || 7);
-      setProfile(detectProfile(config.model_mode, config.growth_rate * 100, Math.round(((config as any).recent_weight || 0.7) * 100)));
+      setWindows(normalizeWindows(config.enabled_windows));
+      setWeight(recentWeightPct);
+      setMinDays(safeInt((config as ForecastConfig & { minimum_daily_points?: number }).minimum_daily_points, emptyState.minDays, 1, 365));
+      setProfile(detectProfile(config.model_mode, growthPct, recentWeightPct));
       const rules = config.connection_allocation_rules?.length
         ? config.connection_allocation_rules
         : config.period_allocation === "charge_interval"
@@ -200,6 +226,16 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
         period_allocation: "charge_interval" as const,
         charge_end_column: chargeEndColumn || null,
       }));
+    const horizonMonths = safeInt(horizon, emptyState.horizon, 1, 36);
+    const cutoffDays = safeInt(cutoff, emptyState.cutoff, 0, 31);
+    const growthRate = safeFloat(growth, emptyState.growth, 0, 100) / 100;
+    const recentWeight = safeFloat(weight, emptyState.weight, 0, 100) / 100;
+    const minimumDailyPoints = safeInt(minDays, emptyState.minDays, 1, 365);
+    const selectedWindows = normalizeWindows(windows);
+    if (!selectedWindows.length) {
+      setError("Selecione ao menos uma janela (7, 14 ou 28 dias).");
+      return;
+    }
     const body = {
       name,
       destination_table_id: tableId,
@@ -208,13 +244,13 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
       period_column: meta?.default_period,
       type_column: "tipo",
       dimensions,
-      horizon_months: horizon,
-      cutoff_days: cutoff,
-      growth_rate: growth / 100,
+      horizon_months: horizonMonths,
+      cutoff_days: cutoffDays,
+      growth_rate: growthRate,
       model_mode: model,
-      enabled_windows: windows,
-      recent_weight: weight / 100,
-      minimum_daily_points: minDays,
+      enabled_windows: selectedWindows,
+      recent_weight: recentWeight,
+      minimum_daily_points: minimumDailyPoints,
       period_allocation: "none",
       charge_end_column: null,
       connection_allocation_rules: connectionRules,
@@ -225,26 +261,40 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
     try {
       if (initial) await updateForecastConfig(initial.id, body);
       else await createForecastConfig(body);
-      onSaved();
+      await onSaved(name.trim() || "Configuração");
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao salvar a configuração");
+      setError(formatApiError(e, "Falha ao salvar a configuração"));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>{initial ? "Editar Forecast" : "Nova configuração de Forecast"}</DialogTitle>
-      <DialogContent sx={{
-        "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
-        "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
-      }}>
+      <DialogContent dividers sx={{ pt: 2 }}>
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-        <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start" sx={{ mt: 1 }}>
-          <TextField label="Nome" value={name} onChange={(e) => setName(e.target.value)} />
-          <FormControl sx={{ minWidth: 240 }}>
+
+        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Identificação
+        </Typography>
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+            gap: 2,
+            mb: 3,
+          }}
+        >
+          <TextField
+            fullWidth
+            size="small"
+            label="Nome"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <FormControl fullWidth size="small">
             <InputLabel>Tabela Gold</InputLabel>
             <Select label="Tabela Gold" value={tableId} onChange={(e) => void selectTable(Number(e.target.value))}>
               {tables.map((t) => (
@@ -254,21 +304,56 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
           </FormControl>
           {meta && (
             <>
-              <FormControl sx={{ minWidth: 160 }}>
+              <FormControl fullWidth size="small">
                 <InputLabel>Medida</InputLabel>
                 <Select label="Medida" value={measure} onChange={(e) => setMeasure(e.target.value)}>
                   {meta.measures.map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>)}
                 </Select>
               </FormControl>
-              <FormControl sx={{ minWidth: 160 }}>
+              <FormControl fullWidth size="small">
                 <InputLabel>Data</InputLabel>
                 <Select label="Data" value={dateColumn} onChange={(e) => setDateColumn(e.target.value)}>
                   {[...meta.date_columns, ...meta.period_columns].map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Horizonte" type="number" value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} />
-              <TextField label="Cutoff D-n" type="number" value={cutoff} onChange={(e) => setCutoff(Number(e.target.value))} />
-              <FormControl sx={{ minWidth: 240 }}>
+            </>
+          )}
+        </Box>
+
+        {meta && (
+          <>
+            <Divider sx={{ mb: 2 }} />
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Parâmetros de projeção
+            </Typography>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr", md: "1fr 1fr 1fr" },
+                gap: 2,
+                mb: 3,
+              }}
+            >
+              <TextField
+                fullWidth
+                size="small"
+                label="Horizonte (meses)"
+                type="number"
+                value={horizon}
+                slotProps={{ htmlInput: { min: 1, max: 36 } }}
+                onChange={(e) => setHorizon(safeInt(e.target.value, emptyState.horizon, 1, 36))}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Cutoff D-n"
+                type="number"
+                value={cutoff}
+                helperText="Dias excluídos do realizado (0–31)"
+                slotProps={{ htmlInput: { min: 0, max: 31 } }}
+                onChange={(e) => setCutoff(safeInt(e.target.value, emptyState.cutoff, 0, 31))}
+              />
+              <FormControl fullWidth size="small">
                 <InputLabel>Perfil</InputLabel>
                 <Select
                   label="Perfil"
@@ -282,60 +367,93 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
                   {PROFILES.map((p) => <MenuItem key={p.key} value={p.key}>{p.label}</MenuItem>)}
                 </Select>
               </FormControl>
-              <FormControl sx={{ minWidth: 280 }}>
+              <FormControl fullWidth size="small" sx={{ gridColumn: { md: "span 2" } }}>
                 <InputLabel>Método</InputLabel>
                 <Select label="Método" value={model} onChange={(e) => { setModel(e.target.value); setProfile("custom"); }}>
                   {Object.entries(METHOD_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
                 </Select>
               </FormControl>
-              <FormControl sx={{ minWidth: 180 }}>
+              <FormControl fullWidth size="small">
                 <InputLabel>Janelas</InputLabel>
                 <Select
                   multiple
                   label="Janelas"
                   value={windows}
                   input={<OutlinedInput label="Janelas" />}
-                  onChange={(e) => { setWindows(e.target.value as number[]); setProfile("custom"); }}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const next = typeof raw === "string" ? raw.split(",").map(Number) : raw.map(Number);
+                    setWindows(normalizeWindows(next));
+                    setProfile("custom");
+                  }}
                   renderValue={(selected) => selected.length ? selected.join(", ") + " dias" : "nenhuma"}
                 >
                   {WINDOW_OPTIONS.map((w) => <MenuItem key={w} value={w}>{w} dias</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Crescimento %" type="number" value={growth} onChange={(e) => { setGrowth(Number(e.target.value)); setProfile("custom"); }} />
               <TextField
+                fullWidth
+                size="small"
+                label="Crescimento %"
+                type="number"
+                value={growth}
+                onChange={(e) => { setGrowth(Number(e.target.value)); setProfile("custom"); }}
+              />
+              <TextField
+                fullWidth
+                size="small"
                 label="Peso recente %"
                 type="number"
                 value={weight}
                 onChange={(e) => { setWeight(Math.max(0, Math.min(100, Number(e.target.value)))); setProfile("custom"); }}
-                sx={{ width: 130 }}
               />
               <TextField
+                fullWidth
+                size="small"
                 label="Mín. pontos diários"
                 type="number"
                 value={minDays}
                 onChange={(e) => { setMinDays(Number(e.target.value)); setProfile("custom"); }}
-                sx={{ width: 130 }}
               />
-              <FormControl sx={{ minWidth: 300 }}>
-                <InputLabel>Dimensões da série</InputLabel>
-                <Select
-                  multiple
-                  value={dimensions}
-                  input={<OutlinedInput label="Dimensões da série" />}
-                  onChange={(e) => setDimensions(e.target.value as string[])}
-                >
-                  {meta.dimensions.map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </>
-          )}
-        </Stack>
+            </Box>
 
-        <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>
+            <Divider sx={{ mb: 2 }} />
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Dimensões da série
+            </Typography>
+            <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+              <InputLabel>Dimensões</InputLabel>
+              <Select
+                multiple
+                label="Dimensões"
+                value={dimensions}
+                input={<OutlinedInput label="Dimensões" />}
+                onChange={(e) => setDimensions(e.target.value as string[])}
+                renderValue={(selected) => selected.join(", ")}
+              >
+                {meta.dimensions.map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>)}
+              </Select>
+            </FormControl>
+            {!!dimensions.length && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: -2, mb: 3 }}>
+                Séries por: {dimensions.join(" · ")}. Inclua cloud_origem para separar azure-4p, azure-ti, gcp-4p e gcp-ti.
+              </Typography>
+            )}
+          </>
+        )}
+
+        <Divider sx={{ mb: 2 }} />
+        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
           Conexões com rateio por intervalo
         </Typography>
-        <Stack direction="row" gap={1.5} flexWrap="wrap">
-          <FormControl sx={{ minWidth: 360 }} disabled={!tableId}>
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+            gap: 2,
+          }}
+        >
+          <FormControl fullWidth size="small" disabled={!tableId}>
             <InputLabel>Conexões com rateio</InputLabel>
             <Select
               multiple
@@ -353,7 +471,7 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
             </Select>
           </FormControl>
           {intervalConnections.length > 0 && meta && (
-            <FormControl sx={{ minWidth: 220 }}>
+            <FormControl fullWidth size="small">
               <InputLabel>Fim do intervalo</InputLabel>
               <Select
                 label="Fim do intervalo"
@@ -370,32 +488,29 @@ export default function ForecastConfigDialog({ open, initial, tables, onClose, o
               </Select>
             </FormControl>
           )}
-        </Stack>
+        </Box>
 
-        {!tableId && (
-          <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-            Selecione uma tabela Gold para escolher conexões com rateio.
+        <Stack spacing={0.5} sx={{ mt: 2 }}>
+          {!tableId && (
+            <Typography variant="caption" color="text.secondary">
+              Selecione uma tabela Gold para escolher conexões com rateio.
+            </Typography>
+          )}
+          {tableId && mappedConnections.length === 0 && (
+            <Typography variant="caption" color="text.secondary">
+              Nenhuma conexão mapeada para esta Gold. Configure o relacionamento origem → destino primeiro.
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            Demais conexões usam série diária padrão (sem rateio). IBM manual_csv costuma precisar de rateio entre
+            ChargePeriodStart e ChargePeriodEnd; Azure/GCP permanecem diários.
           </Typography>
-        )}
-        {tableId && mappedConnections.length === 0 && (
-          <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-            Nenhuma conexão mapeada para esta Gold. Configure o relacionamento origem → destino primeiro.
-          </Typography>
-        )}
-        <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-          Demais conexões usam série diária padrão (sem rateio). IBM manual_csv costuma precisar de rateio entre
-          ChargePeriodStart e ChargePeriodEnd; Azure/GCP permanecem diários.
-        </Typography>
-        {intervalConnections.length > 0 && meta && (
-          <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-            Rateio uniforme entre a coluna de data e a coluna de fim (ou o último dia do período de faturamento).
-          </Typography>
-        )}
-        {!!dimensions.length && (
-          <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-            Séries por: {dimensions.join(" · ")}. Inclua cloud_origem para separar azure-4p, azure-ti, gcp-4p e gcp-ti.
-          </Typography>
-        )}
+          {intervalConnections.length > 0 && meta && (
+            <Typography variant="caption" color="text.secondary">
+              Rateio uniforme entre a coluna de data e a coluna de fim (ou o último dia do período de faturamento).
+            </Typography>
+          )}
+        </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose}>Cancelar</Button>

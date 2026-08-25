@@ -330,8 +330,8 @@ def build_service_quality(metrics: list[dict[str, Any]], latency_series: list[di
             "server_error": server_err or None,
             "rate_limited": rate_limited or None,
             "spillover": spillover or None,
-            "success_rate_pct": round((success / request_total) * 100, 2) if request_total else None,
-            "throttle_rate_pct": round((rate_limited / request_total) * 100, 2) if request_total else None,
+            "success_rate_pct": round((success / request_total) * 100, 2) if request_total and (success or client_err or server_err or rate_limited) else None,
+            "throttle_rate_pct": round((rate_limited / request_total) * 100, 2) if request_total and (rate_limited or success or client_err or server_err) else None,
         },
     }
 

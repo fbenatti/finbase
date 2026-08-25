@@ -100,8 +100,10 @@ export default function ForecastConfigsDataGrid({
       renderHeader: () => filteredHeader("Nome", "name"),
       minWidth: 220,
       flex: 1.2,
+      align: "left",
+      headerAlign: "left",
       renderCell: ({ row }: { row: ForecastConfig }) => (
-        <Stack justifyContent="center" sx={{ minWidth: 0, height: "100%" }}>
+        <Stack justifyContent="center" sx={{ minWidth: 0, height: "100%", width: "100%" }}>
           <Typography variant="body2" fontWeight={700} noWrap>{row.name}</Typography>
           <Typography variant="caption" color="text.secondary" noWrap>{row.measure_column} · {row.model_mode}</Typography>
         </Stack>
@@ -113,11 +115,15 @@ export default function ForecastConfigsDataGrid({
       renderHeader: () => filteredHeader("Tabela Gold", "table_name"),
       minWidth: 180,
       flex: 1,
+      align: "left",
+      headerAlign: "left",
       valueGetter: (_: unknown, row: ForecastConfig) => row.table_name || "—",
       renderCell: ({ row }: { row: ForecastConfig }) => (
-        <Tooltip title={row.table_name || "—"}>
-          <Typography variant="body2" noWrap>{row.table_name || "—"}</Typography>
-        </Tooltip>
+        <Stack justifyContent="center" sx={{ minWidth: 0, height: "100%", width: "100%" }}>
+          <Tooltip title={row.table_name || "—"}>
+            <Typography variant="body2" noWrap>{row.table_name || "—"}</Typography>
+          </Tooltip>
+        </Stack>
       ),
     },
     {
@@ -125,12 +131,16 @@ export default function ForecastConfigsDataGrid({
       headerName: "Medida",
       renderHeader: () => filteredHeader("Medida", "measure_column"),
       minWidth: 120,
+      align: "left",
+      headerAlign: "left",
     },
     {
       field: "horizon_months",
       headerName: "Horizonte",
       renderHeader: () => filteredHeader("Horizonte", "horizon_months"),
       minWidth: 100,
+      align: "left",
+      headerAlign: "left",
       valueFormatter: (value: unknown) => Number(value || 0) + " meses",
     },
     {
@@ -139,9 +149,13 @@ export default function ForecastConfigsDataGrid({
       minWidth: 170,
       sortable: false,
       filterable: false,
+      align: "left",
+      headerAlign: "left",
       valueGetter: (_, row: ForecastConfig) => rateioLabel(row),
       renderCell: ({ row }: { row: ForecastConfig }) => (
-        <Chip label={rateioLabel(row)} size="small" variant="outlined" />
+        <Stack justifyContent="center" sx={{ height: "100%", width: "100%" }}>
+          <Chip label={rateioLabel(row)} size="small" variant="outlined" />
+        </Stack>
       ),
     },
     {
@@ -149,14 +163,20 @@ export default function ForecastConfigsDataGrid({
       headerName: "Versão",
       renderHeader: () => filteredHeader("Versão", "version"),
       minWidth: 90,
+      align: "left",
+      headerAlign: "left",
     },
     {
       field: "active",
       headerName: "Ativa",
       renderHeader: () => filteredHeader("Ativa", "active"),
       minWidth: 90,
+      align: "left",
+      headerAlign: "left",
       renderCell: ({ row }: { row: ForecastConfig }) => (
-        <Chip size="small" label={row.active ? "Sim" : "Não"} color={row.active ? "success" : "default"} />
+        <Stack justifyContent="center" sx={{ height: "100%", width: "100%" }}>
+          <Chip size="small" label={row.active ? "Sim" : "Não"} color={row.active ? "success" : "default"} />
+        </Stack>
       ),
     },
     {
@@ -165,6 +185,8 @@ export default function ForecastConfigsDataGrid({
       renderHeader: () => filteredHeader("Atualizado em", "updated_at"),
       minWidth: 165,
       type: "dateTime",
+      align: "left",
+      headerAlign: "left",
       valueGetter: (_, row: ForecastConfig) => (row.updated_at ? new Date(row.updated_at) : null),
       valueFormatter: (value) => formatDateTime(value),
     },
@@ -364,6 +386,11 @@ export default function ForecastConfigsDataGrid({
             borderRadius: 2,
             bgcolor: "background.paper",
             "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc", borderBottomColor: "divider" },
+            "& .MuiDataGrid-cell": { display: "flex", alignItems: "center" },
+            "& .MuiDataGrid-cell[data-field='actions']": { justifyContent: "center" },
+            "& .MuiDataGrid-columnHeader[data-field='actions']": { justifyContent: "center" },
+            "& .MuiDataGrid-cell:not([data-field='actions'])": { justifyContent: "flex-start" },
+            "& .MuiDataGrid-columnHeader:not([data-field='actions'])": { justifyContent: "flex-start" },
             "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus": { outline: "none" },
           }}
         />

@@ -227,8 +227,31 @@ free_listeners_on_port() {
   wait_for_port_free "$port" 20
 }
 
+kill_orphan_workers() {
+  local worker_pids zombie_pids
+  worker_pids="$(pgrep -f "$ROOT_DIR/.venv/bin/python -u worker.py" 2>/dev/null || true)"
+  if [[ -z "$worker_pids" ]]; then
+    worker_pids="$(pgrep -f "$ROOT_DIR/apps/api/worker.py" 2>/dev/null || true)"
+  fi
+  if [[ -n "$worker_pids" ]]; then
+    echo "Encerrando worker ETL órfão (PIDs:$(echo "$worker_pids" | tr '\n' ' ' | sed 's/ $//'))"
+    kill_pids "$worker_pids"
+  fi
+
+  # Limpa processos filho spawn_main/heartbeat do worker que ficam vivos após crash no macOS.
+  # Esses filhos herdam o file descriptor do flock e impedem reinicialização com
+  # "Another FinOps Worker already owns the worker lock".
+  zombie_pids="$(pgrep -f "multiprocessing.spawn import spawn_main" 2>/dev/null || true)"
+  if [[ -n "$zombie_pids" ]]; then
+    echo "Encerrando processos filho zumbis do worker (spawn_main, PIDs:$(echo "$zombie_pids" | tr '\n' ' ' | sed 's/ $//'))"
+    kill -9 $zombie_pids 2>/dev/null || true
+    sleep 1
+  fi
+  rm -f /tmp/openfinops-worker.lock /tmp/openfinops-worker.pid /tmp/openfinops-worker.heartbeat
+}
+
 free_stale_processes() {
-  local worker_pids pids_8000
+  local pids_8000
 
   stop_compose_dev_conflicts
   stop_pid_files
@@ -242,26 +265,7 @@ free_stale_processes() {
   fi
   free_listeners_on_port 5173 "frontend Vite" vite
 
-  worker_pids="$(pgrep -f "$ROOT_DIR/.venv/bin/python -u worker.py" 2>/dev/null || true)"
-  if [[ -z "$worker_pids" ]]; then
-    worker_pids="$(pgrep -f "$ROOT_DIR/apps/api/worker.py" 2>/dev/null || true)"
-  fi
-  if [[ -n "$worker_pids" ]]; then
-    echo "Encerrando worker ETL legado (PIDs:$(echo "$worker_pids" | tr '\n' ' ' | sed 's/ $//'))"
-    kill_pids "$worker_pids"
-  fi
-
-  # Limpa processos filho spawn_main/heartbeat do worker que ficam vivos após crash no macOS.
-  # Esses filhos herdam o file descriptor do flock e impedem reinicialização com
-  # "Another FinOps Worker already owns the worker lock".
-  zombie_pids="$(pgrep -f "multiprocessing.spawn import spawn_main" 2>/dev/null || true)"
-  if [[ -n "$zombie_pids" ]]; then
-    echo "Encerrando processos filho zumbis do worker (spawn_main, PIDs:$(echo "$zombie_pids" | tr '\n' ' ' | sed 's/ $//'))"
-    kill -9 $zombie_pids 2>/dev/null || true
-    sleep 1
-  fi
-  # Remove o lock file para garantir que o próximo worker possa adquirir o lock
-  rm -f /tmp/openfinops-worker.lock
+  kill_orphan_workers
 
 
   if [[ -n "$(non_docker_listeners_on_port 8001)" ]]; then
@@ -447,6 +451,62 @@ wait_for_backend() {
   echo " OK"
 }
 
+stop_backend_processes() {
+  local process_pid
+  for process_pid in "$worker_pid" "$api_pid"; do
+    if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then
+      kill "$process_pid" 2>/dev/null || true
+    fi
+  done
+  sleep 1
+  for process_pid in "$worker_pid" "$api_pid"; do
+    if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then
+      kill -9 "$process_pid" 2>/dev/null || true
+    fi
+  done
+  rm -f "$LOG_DIR/api.pid" "$LOG_DIR/worker.pid"
+  api_pid=""
+  worker_pid=""
+}
+
+start_api_process() {
+  (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload) \
+    >"$LOG_DIR/api.log" 2>&1 &
+  api_pid=$!
+  write_pid_file api "$api_pid"
+  sleep 0.5
+  if ! kill -0 "$api_pid" 2>/dev/null; then
+    echo "ERRO: processo da API encerrou ao iniciar; veja $LOG_DIR/api.log" >&2
+    return 1
+  fi
+  sync_api_pid_from_port || true
+}
+
+start_worker_process() {
+  (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -u worker.py) \
+    >"$LOG_DIR/worker.log" 2>&1 &
+  worker_pid=$!
+  write_pid_file worker "$worker_pid"
+}
+
+wait_for_backend_with_retry() {
+  if wait_for_backend; then
+    return 0
+  fi
+  echo "Reiniciando API/Worker após limpar workers órfãos e processos travados..."
+  stop_backend_processes
+  free_listeners_on_port 8001 "API local" uvicorn app.main:app
+  kill_orphan_workers
+  sleep 1
+  start_api_process || return 1
+  start_worker_process
+  if wait_for_backend; then
+    return 0
+  fi
+  echo "ERRO: API e Worker ETL não ficaram disponíveis após retry." >&2
+  return 1
+}
+
 cleanup() {
   trap - INT TERM EXIT
   rm -f "$LOCK_FILE" "$LOG_DIR/start-local.pid" "$LOG_DIR/api.pid" "$LOG_DIR/worker.pid" "$LOG_DIR/web.pid"
@@ -468,29 +528,15 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-(cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload) \
-  >"$LOG_DIR/api.log" 2>&1 &
-api_pid=$!
-write_pid_file api "$api_pid"
-
-sleep 0.5
-if ! kill -0 "$api_pid" 2>/dev/null; then
-  echo "ERRO: processo da API encerrou ao iniciar; veja $LOG_DIR/api.log" >&2
-  exit 1
-fi
-sync_api_pid_from_port || true
-
-(cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -u worker.py) \
-  >"$LOG_DIR/worker.log" 2>&1 &
-worker_pid=$!
-write_pid_file worker "$worker_pid"
+start_api_process || exit 1
+start_worker_process
 
 (cd "$ROOT_DIR/apps/web" && exec npm run dev -- --host 0.0.0.0) \
   >"$LOG_DIR/web.log" 2>&1 &
 web_pid=$!
 write_pid_file web "$web_pid"
 
-wait_for_backend || exit 1
+wait_for_backend_with_retry || exit 1
 
 echo "OpenFinops completo iniciado: API $API_URL | Web http://localhost:5173 | Worker ETL ativo"
 echo "Logs: $LOG_DIR"

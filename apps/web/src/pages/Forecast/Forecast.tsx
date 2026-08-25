@@ -380,7 +380,10 @@ export default function Forecast() {
                 search={configsSearch}
                 runningConfigId={runningConfigId}
                 onQuery={handleConfigsGridQuery}
-                onEdit={(config) => setConfigDialog({ open: true, initial: config })}
+                onEdit={(config) => {
+                  const full = configs.find((item) => item.id === config.id);
+                  setConfigDialog({ open: true, initial: full ?? config });
+                }}
                 onRun={(config) => void runConfig(config)}
                 onDelete={setDeleteConfigPending}
               />
@@ -525,9 +528,11 @@ export default function Forecast() {
         initial={configDialog.initial}
         tables={tables}
         onClose={() => setConfigDialog({ open: false, initial: null })}
-        onSaved={() => {
-          void load();
-          void loadConfigsGrid(configsQueryRef.current);
+        onSaved={async (savedName) => {
+          setError("");
+          setMessage(`Configuração "${savedName}" salva com sucesso.`);
+          await load();
+          await loadConfigsGrid(configsQueryRef.current);
         }}
       />
       {ruleDialog.open && rulesConfig && (

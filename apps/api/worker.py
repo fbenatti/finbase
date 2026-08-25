@@ -171,7 +171,7 @@ def main():
                     session.commit()
                     session.close()
                     try:
-                        from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastRun
+                        from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun
                         from app.models.destination import DestinationTable
                         from app.services.forecast_service import fetch_metadata, validate_config, run_forecast
                         from types import SimpleNamespace
