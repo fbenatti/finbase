@@ -1025,9 +1025,80 @@ async def _accuracy_totals(db: AsyncSession, run: ForecastRun, target_month: str
     return metrics
 
 
-@router.get("/accuracy/months")
-async def accuracy_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
-    """Meses simulados: cada run COMPLETED com simulated_as_of vira um mês-alvo."""
+async def _accuracy_batch_totals(
+    pairs: list[tuple[ForecastRun, str]],
+) -> tuple[dict[tuple[int, str], tuple[float, int]], dict[str, float]]:
+    """Forecast + actual totals for many (run, target_month) pairs using exactly
+    two Trino queries regardless of how many simulated runs exist: one UNION ALL
+    over the immutable result tables and one partitioned Gold aggregation."""
+    if not pairs:
+        return {}, {}
+    snapshot = dict(pairs[0][0].config_snapshot or {})
+    if not snapshot.get("destination_physical_name") or not snapshot.get("measure_column"):
+        raise HTTPException(422, "Snapshot sem contrato congelado; acurácia não disponível")
+    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
+    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
+    measure = snapshot["measure_column"]
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    periods = sorted({target for _, target in pairs})
+    unions = " UNION ALL ".join(
+        f'SELECT {run.id} AS run_id, CAST("forecast_month" AS VARCHAR) AS fmonth, '
+        f'SUM(TRY_CAST("forecast_value" AS DOUBLE)) AS fv, COUNT(*) AS n '
+        f'FROM iceberg.forecast.{run.result_table} GROUP BY "forecast_month"'
+        for run, _ in pairs
+    )
+    period_col = snapshot.get("period_column")
+    if period_col:
+        month_expr = f"CAST({_qi(period_col)} AS VARCHAR)"
+    else:
+        month_expr = f"date_format({date_expr}, '%Y%m')"
+    try:
+        f_records = await trino_execute(
+            f"SELECT run_id, fmonth, SUM(fv) AS fv, SUM(n) AS n FROM ({unions}) GROUP BY run_id, fmonth",
+            timeout_s=90,
+        )
+        a_records = await trino_execute(
+            f"SELECT {month_expr} AS period, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
+            f"FROM {actual_source} WHERE {month_expr} IN ({', '.join(_ql(p) for p in periods)}){type_filter} "
+            f"GROUP BY {month_expr}",
+            timeout_s=180,
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao calcular acurácia: {exc}")
+    fmap: dict[tuple[int, str], tuple[float, int]] = {}
+    for record in f_records:
+        fmap[(int(record.get("run_id") or 0), str(record.get("fmonth") or ""))] = (
+            float(record.get("fv") or 0),
+            int(record.get("n") or 0),
+        )
+    amap = {str(record.get("period") or ""): float(record.get("av") or 0) for record in a_records}
+    return fmap, amap
+
+
+def _latest_simulated_runs(runs: list[ForecastRun]) -> list[tuple[ForecastRun, str]]:
+    """Keep only the most recent simulated run per target month (no Trino)."""
+    best: dict[str, ForecastRun] = {}
+    for run in runs:
+        raw = (run.config_snapshot or {}).get("simulated_as_of")
+        if not raw:
+            continue
+        try:
+            as_of = date.fromisoformat(str(raw))
+        except ValueError:
+            continue
+        best[_month_after(as_of)] = run  # later runs win
+    return [(run, target) for target, run in sorted(best.items())]
+
+
+_accuracy_months_cache: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
+_ACCURACY_CACHE_TTL = 60.0
+
+
+async def _accuracy_months_items(config_id: int | None, db: AsyncSession) -> list[dict[str, Any]]:
+    """Latest simulated snapshot per month with only two Trino queries, cached
+    briefly so dashboard reloads are instant (data changes only when a new
+    simulated batch completes)."""
     stmt = select(ForecastRun).where(
         ForecastRun.status == "COMPLETED",
         ForecastRun.result_table.is_not(None),
@@ -1036,18 +1107,22 @@ async def accuracy_months(config_id: int | None = None, db: AsyncSession = Depen
     if config_id:
         stmt = stmt.where(ForecastRun.forecast_config_id == config_id)
     runs = (await db.execute(stmt.order_by(ForecastRun.started_at.asc()))).scalars().all()
+    pairs = _latest_simulated_runs(runs)
+    if not pairs:
+        return []
+    key = (config_id or 0, tuple((run.id, run.result_table, run.cutoff_date) for run, _ in pairs))
+    cached = _accuracy_months_cache.get(key)
+    if cached is not None and datetime.utcnow().timestamp() - cached[0] < _ACCURACY_CACHE_TTL:
+        return cached[1]
+    fmap, amap = await _accuracy_batch_totals(pairs)
+    today = date.today().strftime("%Y%m")
     items = []
-    for run in runs:
-        snapshot = dict(run.config_snapshot or {})
-        raw = snapshot.get("simulated_as_of")
-        if not raw:
-            continue
-        try:
-            as_of = date.fromisoformat(str(raw))
-        except ValueError:
-            continue
-        target = _month_after(as_of)
-        row = {
+    for run, target in pairs:
+        as_of = date.fromisoformat(str((run.config_snapshot or {}).get("simulated_as_of")))
+        forecast_value, rows_forecast = fmap.get((run.id, target), (0.0, 0))
+        metrics = _accuracy_metrics(forecast_value, amap.get(target))
+        metrics["rows_forecast"] = rows_forecast
+        items.append({
             "run_id": run.id,
             "config_id": run.forecast_config_id,
             "simulated_as_of": as_of.isoformat(),
@@ -1055,20 +1130,17 @@ async def accuracy_months(config_id: int | None = None, db: AsyncSession = Depen
             "cutoff_date": run.cutoff_date,
             "result_table": run.result_table,
             "started_at": run.started_at,
-            "closed": target < date.today().strftime("%Y%m"),
-        }
-        try:
-            metrics = await _accuracy_totals(db, run, target)
-            row.update(metrics)
-        except HTTPException:
-            row.update({"forecast_value": None, "actual_value": None, "wape": None, "accuracy": None})
-        items.append(row)
-    # Re-runs of the same month must replace the older simulated snapshot:
-    # keep the most recent run per target_month.
-    by_month: dict[str, dict[str, Any]] = {}
-    for item in items:
-        by_month[str(item["target_month"])] = item
-    return list(by_month.values())
+            "closed": target < today,
+            **metrics,
+        })
+    _accuracy_months_cache[key] = (datetime.utcnow().timestamp(), items)
+    return items
+
+
+@router.get("/accuracy/months")
+async def accuracy_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    """Meses simulados: o snapshot mais recente por mês, com apenas duas queries Trino."""
+    return await _accuracy_months_items(config_id, db)
 
 
 @router.get("/accuracy/summary")
@@ -1148,42 +1220,16 @@ async def accuracy_dimensions(run_id: int, target_month: str | None = None, dime
 
 @router.get("/accuracy/history")
 async def accuracy_history(config_id: int | None = None, dimension: str | None = None, db: AsyncSession = Depends(get_db)):
-    """Evolução da acurácia mês a mês sobre todos os simulados disponíveis."""
-    stmt = select(ForecastRun).where(
-        ForecastRun.status == "COMPLETED",
-        ForecastRun.result_table.is_not(None),
-        ForecastRun.config_snapshot["simulated_as_of"].as_string() != "",
-    )
-    if config_id:
-        stmt = stmt.where(ForecastRun.forecast_config_id == config_id)
-    runs = (await db.execute(stmt.order_by(ForecastRun.started_at.asc()))).scalars().all()
-    series = []
-    for run in runs:
-        snapshot = dict(run.config_snapshot or {})
-        raw = snapshot.get("simulated_as_of")
-        if not raw:
-            continue
-        try:
-            as_of = date.fromisoformat(str(raw))
-        except ValueError:
-            continue
-        target = _month_after(as_of)
-        try:
-            metrics = await _accuracy_totals(db, run, target)
-        except HTTPException:
-            continue
-        metrics.update({
-            "run_id": run.id,
-            "simulated_as_of": as_of.isoformat(),
-            "target_month": target,
-            "closed": target < date.today().strftime("%Y%m"),
-        })
-        series.append(metrics)
-    # Keep the most recent simulated run per month (re-runs replace older ones).
-    by_month: dict[str, dict[str, Any]] = {}
-    for item in series:
-        by_month[str(item["target_month"])] = item
-    return {"items": list(by_month.values())}
+    """Evolução da acurácia mês a mês (derivada do mesmo cálculo cacheado de /months)."""
+    items = await _accuracy_months_items(config_id, db)
+    return {"items": [
+        {key: item[key] for key in (
+            "run_id", "simulated_as_of", "target_month", "closed",
+            "forecast_value", "actual_value", "variance", "variance_pct",
+            "wape", "accuracy", "bias",
+        ) if key in item}
+        for item in items
+    ]}
 
 
 class AccuracyReprocessIn(BaseModel):

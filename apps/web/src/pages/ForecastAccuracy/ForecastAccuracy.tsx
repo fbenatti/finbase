@@ -6,8 +6,8 @@ import {
   TableRow, Typography,
 } from "@mui/material";
 import {
-  ForecastAccuracyMonth, ForecastAccuracySummary, ForecastAccuracyDimensions, ForecastAccuracyHistory,
-  getForecastAccuracyMonths, getForecastAccuracySummary, getForecastAccuracyDimensions, getForecastAccuracyHistory,
+  ForecastAccuracyMonth, ForecastAccuracyDimensions,
+  getForecastAccuracyMonths, getForecastAccuracyDimensions,
 } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
@@ -33,26 +33,29 @@ function KpiCard({ label, value, hint, color }: { label: string; value: string; 
 
 export default function ForecastAccuracy() {
   const [months, setMonths] = useState<ForecastAccuracyMonth[]>([]);
-  const [summary, setSummary] = useState<ForecastAccuracySummary | null>(null);
+  const [summary, setSummary] = useState<ForecastAccuracyMonth | null>(null);
   const [dimensions, setDimensions] = useState<ForecastAccuracyDimensions | null>(null);
-  const [history, setHistory] = useState<ForecastAccuracyHistory | null>(null);
   const [selectedMonth, setSelectedMonth] = useState("");
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
   const [selectedDim, setSelectedDim] = useState("cloud_origem");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // /accuracy/months já traz, para o snapshot mais recente de cada mês, todos os
+  // KPIs (projetado, realizado, variação, acurácia, wape, bias, cutoff, run).
+  // A tendência (history) e o resumo do mês selecionado são derivados dele —
+  // nenhuma query Trino extra no carregamento.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getForecastAccuracyMonths(), getForecastAccuracyHistory()])
-      .then(([monthsList, historyData]) => {
+    getForecastAccuracyMonths()
+      .then((monthsList) => {
         if (cancelled) return;
         setMonths(monthsList);
-        setHistory(historyData);
         const first = monthsList[0];
         if (first && !selectedMonth) {
           setSelectedMonth(first.target_month);
           setSelectedRun(first.run_id);
+          setSummary(first);
         }
       })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
@@ -66,19 +69,17 @@ export default function ForecastAccuracy() {
     let cancelled = false;
     setLoading(true);
     setError("");
-    Promise.all([
-      getForecastAccuracySummary(selectedRun, selectedMonth || undefined),
-      getForecastAccuracyDimensions(selectedRun, selectedMonth || undefined, selectedDim),
-    ])
-      .then(([summaryData, dimsData]) => {
+    const monthEntry = months.find(item => item.target_month === selectedMonth);
+    if (monthEntry) setSummary(monthEntry);
+    getForecastAccuracyDimensions(selectedRun, selectedMonth || undefined, selectedDim)
+      .then((dimsData) => {
         if (cancelled) return;
-        setSummary(summaryData);
         setDimensions(dimsData);
       })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedRun, selectedMonth, selectedDim]);
+  }, [selectedRun, selectedMonth, selectedDim, months]);
 
   const handleMonthChange = (month: string) => {
     setSelectedMonth(month);
@@ -218,7 +219,7 @@ export default function ForecastAccuracy() {
               <Grid item xs={12} lg={5}>
                 <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
                   <Typography variant="h6" sx={{ mb: 1 }}>Evolução da acurácia</Typography>
-                  {history && history.items.length > 0 ? (
+                  {months.length > 0 ? (
                     <TableContainer>
                       <Table size="small">
                         <TableHead>
@@ -230,7 +231,7 @@ export default function ForecastAccuracy() {
                           </TableRow>
                         </TableHead>
                         <TableBody>
-                          {history.items.map(item => (
+                          {months.map(item => (
                             <TableRow key={item.target_month}>
                               <TableCell>{prettyMonth(item.target_month)}</TableCell>
                               <TableCell align="right">{money.format(Number(item.forecast_value || 0))}</TableCell>

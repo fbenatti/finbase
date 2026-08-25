@@ -297,6 +297,7 @@ export default function Forecast() {
   };
 
   return (
+    <>
     <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
       {/* Faixa de contexto branca */}
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
@@ -521,12 +522,14 @@ export default function Forecast() {
           </Paper>
         )}
       </Box>
+    </Box>
 
-      {/* Diálogos de edição no padrão Connections */}
+      {/* Diálogos fora da área com CSS de toolbar compacta (40px) */}
       <ForecastConfigDialog
         open={configDialog.open}
         initial={configDialog.initial}
         tables={tables}
+        usedDestinationTableIds={configs.map((item) => item.destination_table_id)}
         onClose={() => setConfigDialog({ open: false, initial: null })}
         onSaved={async (savedName) => {
           setError("");
@@ -542,7 +545,11 @@ export default function Forecast() {
           config={rulesConfig}
           meta={rulesMeta}
           onClose={() => setRuleDialog({ open: false, initial: null })}
-          onSaved={() => void loadRulesGrid(rulesConfigId, rulesQueryRef.current)}
+          onSaved={async (savedName) => {
+            setError("");
+            setMessage(`Regra "${savedName}" salva com sucesso.`);
+            await loadRulesGrid(rulesConfigId, rulesQueryRef.current);
+          }}
         />
       )}
 
@@ -599,6 +606,6 @@ export default function Forecast() {
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </>
   );
 }
