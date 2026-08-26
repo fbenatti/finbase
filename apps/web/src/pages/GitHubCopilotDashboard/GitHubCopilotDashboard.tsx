@@ -13,8 +13,23 @@ import {
 import Plot from "react-plotly.js";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const moneyUSD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const num = new Intl.NumberFormat("pt-BR");
+
+/** "202608" -> "ago/2026" (rótulo de mês para os eixos dos gráficos). */
+const periodLabel = (p: string) => {
+  if (!p || p.length !== 6) return p;
+  const d = new Date(Number(p.slice(0, 4)), Number(p.slice(4, 6)) - 1, 1);
+  return d.toLocaleDateString("pt-BR", { month: "short", year: "numeric" }).replace(/\./g, "");
+};
+
+/** Números grandes sumarizados: 1.234.567 -> "1,2 Mi"; 174.899.376.089 -> "174,9 Bi". */
+const compact = (n: number) => {
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return (n / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " Bi";
+  if (abs >= 1e6) return (n / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " Mi";
+  if (abs >= 1e4) return (n / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " K";
+  return Math.round(n).toLocaleString("pt-BR");
+};
 
 interface CopilotMetrics {
   lines_accepted: number;
@@ -28,6 +43,9 @@ interface CopilotMetrics {
   cloud_cost: number;
   cloud_cost_usd: number;
   cost_period_label?: string;
+  current_period?: string;
+  current_realized_brl?: number;
+  projected_cost_brl?: number;
   license_cost: number;
   total_cost: number;
   inactive_30: number;
@@ -102,6 +120,23 @@ interface UserModelDetail {
   share_pct: number;
   primary_editor: string;
   primary_language: string;
+  total_tokens?: number;
+  token_source?: string; // "real" (relatório financeiro) | "estimado" (linhas × 7)
+}
+
+interface CostEvolutionSegment {
+  subcategory: string;
+  realized: number;
+}
+
+interface CostEvolution {
+  period: string;
+  total_realized: number;
+  segments: CostEvolutionSegment[];
+  is_current_month?: boolean;
+  is_forecast?: boolean;
+  projected_total?: number;
+  forecast_remainder?: number;
 }
 
 interface UserModelDetailsResponse {
@@ -132,6 +167,12 @@ interface CopilotModel {
   acceptances_count: number;
   suggestions_count: number;
   total_credits: number;
+  total_tokens?: number;
+  token_source?: string; // "real" | "estimado"
+  cost_usd?: number;
+  cost_brl?: number;
+  cost_per_million_tokens_usd?: number | null;
+  cost_per_million_tokens_brl?: number | null;
   credit_share_pct: number;
 }
 
@@ -147,6 +188,8 @@ interface CopilotHistory {
   total_cost: number;
   active_licenses: number;
   included_credits_pool: number;
+  overage_usd?: number;
+  overage_credits?: number;
 }
 
 interface FinancialInsightRow {
@@ -163,7 +206,7 @@ interface FinancialInsights {
   github: FinancialInsightRow[];
   github_alerts?: FinancialInsightRow[];
   azure: Array<{ meter_subcategory: string; meter_name: string; product_name: string; cost_category: string; usage_start_date?: string; usage_end_date?: string; quantity: number; unit_cost_brl: number | null; cost_brl: number; cost_usd: number; rows: number }>;
-  totals?: { github_total_tokens: number; github_cost_per_million_tokens: number | null; azure_cost_brl: number; reconciliation_delta_brl: number };
+  totals?: { github_total_tokens: number; github_cost_per_million_tokens: number | null; github_cost_per_million_tokens_market_usd?: number | null; github_cost_per_million_tokens_market_brl?: number | null; github_credits?: number; azure_cost_brl: number; reconciliation_delta_brl: number; reconciliation_market_vs_paid_brl?: number; github_market_cost_brl?: number; current_period?: string; current_realized_brl?: number; current_projection_brl?: number; current_projection_total_brl?: number };
 }
 
 const AVAILABLE_PERIODS = [
@@ -181,6 +224,7 @@ export default function GitHubCopilotDashboard() {
   const [metrics, setMetrics] = useState<CopilotMetrics | null>(null);
   const [models, setModels] = useState<CopilotModel[]>([]);
   const [history, setHistory] = useState<CopilotHistory[]>([]);
+  const [costEvolution, setCostEvolution] = useState<CostEvolution[]>([]);
   const [financialInsights, setFinancialInsights] = useState<FinancialInsights | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("202608");
@@ -219,6 +263,7 @@ export default function GitHubCopilotDashboard() {
         if (ovRes.metrics) setMetrics(ovRes.metrics);
         if (mdRes.models) setModels(mdRes.models);
         if (hsRes.history) setHistory(hsRes.history);
+        if (hsRes.cost_evolution) setCostEvolution(hsRes.cost_evolution);
         // A consulta financeira varre a Bronze; executá-la depois das métricas
         // principais evita cinco consultas pesadas simultâneas no Trino.
         const fiRes = await fetch("/api/ai-copilot/financial-insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json());
@@ -310,57 +355,128 @@ export default function GitHubCopilotDashboard() {
         <>
           <Stack direction="row" gap={2} flexWrap="wrap" mb={4}>
             {card("Licenças Ativas", `${metrics?.active_licenses || 0}`, "#64748B")}
-            {card("Linhas Aceitas", num.format(metrics?.lines_accepted || 0), "#2563EB")}
-            {card("Interações", num.format(metrics?.chat_turns || 0), "#0284C7")}
-            {card("Créditos de IA", `${num.format(Math.round(metrics?.total_credits || 0))}`, "#F59E0B")}
-            {card("Custo (USD)", moneyUSD.format(metrics?.cloud_cost_usd || 0), "#059669")}
-            {card("Custo (BRL)", money.format(metrics?.cloud_cost || 0), "#16A34A")}
+            {card("Linhas Aceitas", compact(metrics?.lines_accepted || 0), "#2563EB")}
+            {card("Interações", compact(metrics?.chat_turns || 0), "#0284C7")}
+            {card("Créditos de IA", `${compact(metrics?.total_credits || 0)}`, "#F59E0B")}
+            {card("Custo realizado (BRL)", money.format(metrics?.cloud_cost || 0), "#16A34A")}
+            {metrics?.current_period && (metrics?.projected_cost_brl || 0) > 0 && (
+              <Card sx={{ flex: 1, minWidth: 170, borderTop: "3px solid #0284C7" }}>
+                <CardContent>
+                  <Typography variant="caption" color="text.secondary">Projeção {periodLabel(metrics.current_period)}</Typography>
+                  <Typography variant="h5" fontWeight={700}>{money.format(metrics?.projected_cost_brl || 0)}</Typography>
+                  <Typography variant="caption" color="text.secondary">realizado parcial + forecast</Typography>
+                </CardContent>
+              </Card>
+            )}
           </Stack>
 
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, mb: 4 }}>
             <Typography variant="h5" fontWeight="bold" color="primary.main" mb={1}>FinOps: GitHub × Azure</Typography>
             <Typography variant="body2" color="text.secondary" mb={2}>
-              Os custos são reconciliados por SKU. O custo por MM só aparece quando o relatório financeiro fornece tokens detalhados.
+              Custos reconciliados por SKU (Dimon <b>dest_dm_cost_copilot_custo</b>). A Microsoft concedeu créditos extras até
+              setembro/2026 — o líquido faturado fica ~0; o <b>custo de mercado</b> (US$ 0,01/crédito, derivado do relatório de AI Credits)
+              reflete o valor real consumido.
             </Typography>
+
+            <Stack direction={{ xs: "column", md: "row" }} gap={2} mb={3}>
+              <Box sx={{ flex: 1, p: 2, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">Custo por MM de tokens (mercado)</Typography>
+                <Typography variant="h5" fontWeight={800} color="primary.main">
+                  {financialInsights?.totals?.github_cost_per_million_tokens_market_brl == null
+                    ? "Não disponível"
+                    : money.format(financialInsights.totals.github_cost_per_million_tokens_market_brl)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  US$ {financialInsights?.totals?.github_cost_per_million_tokens_market_usd?.toLocaleString("pt-BR", { style: "currency", currency: "USD" }) ?? "—"}/MM · líquido faturado {money.format(financialInsights?.totals?.github_cost_per_million_tokens || 0)} (promo)
+                </Typography>
+              </Box>
+              <Box sx={{ flex: 1, p: 2, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">Tokens processados</Typography>
+                <Typography variant="h5" fontWeight={800}>{compact(financialInsights?.totals?.github_total_tokens || 0)}</Typography>
+                <Typography variant="caption" color="text.secondary">input + output + cache (relatório financeiro)</Typography>
+              </Box>
+              <Box sx={{ flex: 1, p: 2, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">Créditos de IA consumidos</Typography>
+                <Typography variant="h5" fontWeight={800}>{compact(financialInsights?.totals?.github_credits || 0)}</Typography>
+                <Typography variant="caption" color="text.secondary">relatório real de AI Credits · 1 crédito ≈ US$ 0,01</Typography>
+              </Box>
+            </Stack>
+
             <Stack direction={{ xs: "column", md: "row" }} gap={3}>
               <Box flex={1}>
-                <Typography variant="subtitle2" fontWeight={700}>Custo líquido por MM de tokens</Typography>
-                <Typography variant="h5" fontWeight={700}>
-                  {financialInsights?.totals?.github_cost_per_million_tokens == null ? "Não disponível" : money.format(financialInsights.totals.github_cost_per_million_tokens)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">Tokens processados: {num.format(financialInsights?.totals?.github_total_tokens || 0)}</Typography>
-              </Box>
-              <Box flex={1}>
-                <Typography variant="subtitle2" fontWeight={700}>Licenças fixas Azure</Typography>
-                {financialInsights?.azure?.filter((row) => row.cost_category === "fixed_license").map((row) => (
-                  <Box key={`${row.meter_name}-${row.product_name}`} display="flex" justifyContent="space-between" gap={2}>
-                    <Typography variant="body2">{row.meter_name}: {num.format(Math.round(row.quantity || 0))} un.</Typography>
-                    <Typography variant="body2" fontWeight={600}>{money.format(row.cost_brl || 0)}</Typography>
-                  </Box>
-                ))}
-                {financialInsights?.azure?.[0]?.usage_end_date && <Typography variant="caption" color="text.secondary">Cobertura Azure até {financialInsights.azure[0].usage_end_date}; mês parcial não é custo realizado.</Typography>}
-              </Box>
-              <Box flex={1}>
-                <Typography variant="subtitle2" fontWeight={700}>Consumo variável Azure</Typography>
-                {financialInsights?.azure?.filter((row) => row.cost_category === "variable_consumption").map((row) => (
-                  <Box key={`${row.meter_name}-${row.product_name}`} display="flex" justifyContent="space-between" gap={2}>
-                    <Typography variant="body2">{row.meter_name}: {num.format(Math.round(row.quantity || 0))}</Typography>
-                    <Typography variant="body2" fontWeight={600}>{money.format(row.cost_brl || 0)}</Typography>
-                  </Box>
-                ))}
-                {!financialInsights?.azure?.some((row) => row.cost_category === "variable_consumption") && <Typography variant="body2" color="text.secondary">Nenhum consumo variável faturado.</Typography>}
-                {financialInsights?.azure?.filter((row) => row.cost_category === "outside_copilot").map((row) => (
-                  <Typography key={`${row.meter_name}-${row.meter_subcategory}`} variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
-                    Fora de Copilot: {row.meter_subcategory} — {money.format(row.cost_brl || 0)}
+                <Typography variant="subtitle2" fontWeight={700} mb={1}>Custos Azure por SKU</Typography>
+                <TableContainer sx={{ border: "1px solid #e2e8f0", borderRadius: 1.5 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ "& th": { bgcolor: "#f8fafc", fontWeight: 700 } }}>
+                        <TableCell>SKU</TableCell><TableCell align="right">Qtde</TableCell><TableCell align="right">R$</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {(financialInsights?.azure || []).length === 0 && (
+                        <TableRow><TableCell colSpan={3}><Typography color="text.secondary">Sem custos Azure no período.</Typography></TableCell></TableRow>
+                      )}
+                      {(financialInsights?.azure || []).map((row) => (
+                        <TableRow key={`${row.meter_name}-${row.meter_subcategory}`}>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={600}>{row.meter_name}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {row.meter_subcategory} · {row.cost_category === "fixed_license" ? "Licença fixa" : row.cost_category === "variable_consumption" ? "Consumo variável" : "Fora de Copilot"}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">{num.format(Math.round(row.quantity || 0))}</TableCell>
+                          <TableCell align="right"><Typography variant="body2" fontWeight={600}>{money.format(row.cost_brl || 0)}</Typography></TableCell>
+                        </TableRow>
+                      ))}
+                      {(financialInsights?.totals?.current_projection_brl || 0) > 0 && (
+                        <>
+                          <TableRow>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight={600} color="text.secondary">Projeção (restante do mês)</Typography>
+                              <Typography variant="caption" color="text.secondary">realizado + forecast da Dimon</Typography>
+                            </TableCell>
+                            <TableCell align="right">—</TableCell>
+                            <TableCell align="right"><Typography variant="body2" fontWeight={600}>{money.format(Math.max(0, (financialInsights?.totals?.current_projection_brl || 0) - (financialInsights?.totals?.azure_cost_brl || 0)))}</Typography></TableCell>
+                          </TableRow>
+                          <TableRow sx={{ bgcolor: "#f8fafc" }}>
+                            <TableCell><Typography variant="body2" fontWeight={700}>Total projetado (mês corrente)</Typography></TableCell>
+                            <TableCell align="right" />
+                            <TableCell align="right"><Typography variant="body2" fontWeight={800}>{money.format(financialInsights?.totals?.current_projection_brl || 0)}</Typography></TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                {financialInsights?.azure?.[0]?.usage_end_date && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                    Cobertura Azure: {financialInsights.azure[0].usage_start_date} a {financialInsights.azure[0].usage_end_date} — mês parcial não é custo realizado.
                   </Typography>
-                ))}
-                <Typography variant="subtitle2" fontWeight={700} sx={{ mt: 1.5 }}>Alertas de qualidade</Typography>
+                )}
+              </Box>
+              <Box flex={1}>
+                <Typography variant="subtitle2" fontWeight={700} mb={1}>Alertas de qualidade</Typography>
                 {(financialInsights?.github_alerts || financialInsights?.github?.filter((r) => r.adoption_signal === "financial_without_token_telemetry") || []).slice(0, 3).map((row, i) => (
                   <Alert key={`${row.user_login}-${row.model}-${i}`} severity="warning" sx={{ py: 0, mb: 0.5 }}>
                     {row.user_login || "usuário"}: custo sem tokens detalhados
                   </Alert>
                 ))}
-                {!(financialInsights?.github_alerts || financialInsights?.github?.filter((r) => r.adoption_signal === "financial_without_token_telemetry") || []).length && <Typography variant="body2" color="text.secondary">Nenhum alerta no período.</Typography>}
+                {!(financialInsights?.github_alerts || financialInsights?.github?.filter((r) => r.adoption_signal === "financial_without_token_telemetry") || []).length && (
+                  <Typography variant="body2" color="text.secondary">Nenhum alerta no período (tokens detalhados disponíveis).</Typography>
+                )}
+                <Alert severity="info" sx={{ mt: 1.5, borderRadius: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} mb={0.5}>Conciliação GitHub × Azure</Typography>
+                  <Box display="flex" justifyContent="space-between"><Typography variant="body2">Custo de mercado GitHub (R$)</Typography><Typography variant="body2" fontWeight={600}>{money.format(financialInsights?.totals?.github_market_cost_brl || 0)}</Typography></Box>
+                  <Box display="flex" justifyContent="space-between"><Typography variant="body2">Azure realizado parcial (R$)</Typography><Typography variant="body2" fontWeight={600}>{money.format(financialInsights?.totals?.azure_cost_brl || 0)}</Typography></Box>
+                  <Box display="flex" justifyContent="space-between"><Typography variant="body2">Projeção ago/2026 (projetado + realizado)</Typography><Typography variant="body2" fontWeight={700}>{money.format(financialInsights?.totals?.current_projection_total_brl || 0)}</Typography></Box>
+                  <Box display="flex" justifyContent="space-between" sx={{ borderTop: "1px dashed #cbd5e1", mt: 0.5, pt: 0.5 }}>
+                    <Typography variant="body2" fontWeight={700}>Δ valor de mercado − (projetado + realizado)</Typography>
+                    <Typography variant="body2" fontWeight={800} color="warning.main">{money.format(financialInsights?.totals?.reconciliation_market_vs_paid_brl || 0)}</Typography>
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                    Projeção ago/2026 = projeção do mês (realizado + forecast) + Azure realizado parcial. Δ = valor de mercado do consumo − projeção total.
+                  </Typography>
+                </Alert>
               </Box>
             </Stack>
           </Paper>
@@ -428,14 +544,14 @@ export default function GitHubCopilotDashboard() {
                 <Box>🔴 Sem uso: 0 interações</Box>
               </Stack>
               <Typography variant="caption" display="block" sx={{ mt: 1.5 }} color="text.secondary">
-                Governança individual: Business recebe 1.900 créditos/mês por licença. Créditos consumidos vêm do relatório financeiro; qualquer consumo acima desse limite é sinalizado mesmo que o billing coletivo o cubra.
+                Governança individual: franquia documentada pelo GitHub — Business 1.900 AI credits/mês/licença, Enterprise 3.900. Os créditos consumidos vêm do relatório real de AI Credits (ai_usage_report); consumo acima da franquia individual é sinalizado mesmo que o billing coletivo o cubra.
                 {creditPeriod?.end ? ` Dados disponíveis até ${creditPeriod.end}.` : ""}
               </Typography>
             </Alert>
 
             {(poolBenchmark?.covered_consumption_above_standard || 0) > 0 && (
               <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-                Consumo coletivo acima da franquia contratual padrão: {num.format(Math.round(poolBenchmark?.covered_consumption_above_standard || 0))} créditos.
+                Consumo coletivo acima da franquia contratual padrão: {compact(poolBenchmark?.covered_consumption_above_standard || 0)} créditos.
                 O dashboard não distribui essa diferença entre usuários até que a fonte informe a origem do crédito adicional.
               </Alert>
             )}
@@ -475,7 +591,7 @@ export default function GitHubCopilotDashboard() {
                         </TableCell>
                         <TableCell align="right">
                           <Typography variant="body2" fontWeight={700}>
-                            {num.format(Math.round(u.total_credits))}
+                            {compact(u.total_credits)}
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
@@ -492,8 +608,8 @@ export default function GitHubCopilotDashboard() {
                                 : "Dentro do limite"}
                           </Typography>
                         </TableCell>
-                        <TableCell align="right">{num.format(u.lines_accepted)}</TableCell>
-                        <TableCell align="right">{num.format(u.total_interactions)}</TableCell>
+                        <TableCell align="right">{compact(u.lines_accepted)}</TableCell>
+                        <TableCell align="right">{compact(u.total_interactions)}</TableCell>
                         <TableCell align="center">
                           {u.consumption_signal === "alto_consumo_baixa_telemetria" ? (
                             <Chip size="small" label="Alto custo / baixa telemetria" color="error" />
@@ -527,7 +643,7 @@ export default function GitHubCopilotDashboard() {
                   <Alert severity="info" sx={{ borderRadius: 2 }}>
                     <Typography variant="subtitle2" fontWeight={700}>Conta de Faturamento Corporativo / Infraestrutura</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                      Origem: <strong>{userDetails.billing_origin}</strong>. Registro referente ao rateio contábil da fatura corporativa (<strong>{num.format(Math.round(userDetails.contractual_invoice_credits || 0))}</strong> créditos alocados na fatura institucional).
+                      Origem: <strong>{userDetails.billing_origin}</strong>. Registro referente ao rateio contábil da fatura corporativa (<strong>{compact(userDetails.contractual_invoice_credits || 0)}</strong> créditos alocados na fatura institucional).
                     </Typography>
                     <Typography variant="caption" sx={{ display: "block", mt: 0.5, fontWeight: 600, color: "success.main" }}>
                       ✓ Uso Operacional de IA: 0 créditos (Sem Overage de Uso de Desenvolvedor)
@@ -539,27 +655,52 @@ export default function GitHubCopilotDashboard() {
                   <Box display="flex" justifyContent="space-between" mb={1}>
                     <Typography variant="subtitle2" fontWeight={700} color="primary.main">Consumo financeiro no pool compartilhado</Typography>
                   </Box>
-                  <Typography variant="h4" fontWeight={800}>{num.format(Math.round(selectedUser.total_credits))} <Typography component="span" variant="body2">créditos de IA no mês</Typography></Typography>
+                  <Typography variant="h4" fontWeight={800}>{compact(selectedUser.total_credits)} <Typography component="span" variant="body2">créditos de IA no mês</Typography></Typography>
                   <Typography variant="caption" color="text.secondary">Não é possível inferir excedente individual: as licenças contribuem para uma franquia compartilhada.</Typography>
                 </Paper>
 
                 <Paper elevation={0} sx={{ p: 2, border: "1px solid #e2e8f0", borderRadius: 2 }}>
                   <Typography variant="subtitle1" fontWeight={700} mb={1}>Motores e Modelos Utilizados (LLMs)</Typography>
                   {drawerLoading ? <CircularProgress size={24} /> : userDetails?.models && userDetails.models.length > 0 ? (
-                    <Table size="small">
-                      <TableHead><TableRow><TableCell>Modelo</TableCell><TableCell align="right">Linhas</TableCell><TableCell align="right">Chats</TableCell><TableCell align="right">Share %</TableCell><TableCell>Linguagem</TableCell></TableRow></TableHead>
-                      <TableBody>
-                        {userDetails.models.map((m, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell>{m.model_name}</TableCell>
-                            <TableCell align="right">{num.format(m.lines_accepted)}</TableCell>
-                            <TableCell align="right">{num.format(m.acceptances_count)}</TableCell>
-                            <TableCell align="right">{m.share_pct}%</TableCell>
-                            <TableCell>{m.primary_language}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <>
+                    <TableContainer sx={{ overflowX: "auto", "& table": { minWidth: 560 } }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead><TableRow sx={{ "& th": { bgcolor: "#f8fafc", fontWeight: 700 } }}>
+                          <TableCell>Modelo</TableCell>
+                          <TableCell align="right">Linhas</TableCell>
+                          <TableCell align="right">Chats</TableCell>
+                          <TableCell align="right">Tokens</TableCell>
+                          <TableCell align="right">Share %</TableCell>
+                          <TableCell>Linguagem</TableCell>
+                        </TableRow></TableHead>
+                        <TableBody>
+                          {userDetails.models.map((m, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>{m.model_name}</TableCell>
+                              <TableCell align="right">{compact(m.lines_accepted)}</TableCell>
+                              <TableCell align="right">{compact(m.acceptances_count)}</TableCell>
+                              <TableCell align="right">
+                                <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                  <Typography variant="body2" fontWeight={m.token_source === "real" ? 700 : 400}>
+                                    {compact(m.total_tokens || 0)}
+                                  </Typography>
+                                  {m.token_source === "estimado" && (
+                                    <Chip size="small" label="estimado" variant="outlined" sx={{ height: 18, fontSize: "0.65rem" }} />
+                                  )}
+                                </Box>
+                              </TableCell>
+                              <TableCell align="right">{m.share_pct}%</TableCell>
+                              <TableCell>{m.primary_language}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                      Tokens reais vêm do relatório financeiro de AI Credits (input + output + cache) quando disponíveis;
+                      os demais são estimados por linhas aceitas × 7 tokens.
+                    </Typography>
+                    </>
                   ) : (
                     <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
                       {userDetails?.is_billing_account 
@@ -573,24 +714,128 @@ export default function GitHubCopilotDashboard() {
           </Drawer>
 
           {history.length > 0 && (
-            <Stack direction={{ xs: "column", lg: "row" }} gap={3} mb={4}>
-              <Paper elevation={0} sx={{ flex: 1, p: 3, border: "1px solid #e2e8f0", borderRadius: 2 }}>
-                <Typography variant="h6" mb={2}>Evolução de Consumo (USD)</Typography>
-                <Plot data={[{ x: history.map(h => h.period), y: history.map(h => h.cost_usd), type: "scatter", mode: "lines+markers" }]} layout={{ autosize: true, height: 320, margin: { l: 50, r: 20, b: 40, t: 20 } }} useResizeHandler style={{ width: "100%" }} />
-              </Paper>
-              <Paper elevation={0} sx={{ flex: 1, p: 3, border: "1px solid #e2e8f0", borderRadius: 2 }}>
-                <Typography variant="h6" mb={2}>Evolução de Créditos (Consumo vs Franquia)</Typography>
-                <Plot data={[{ x: history.map(h => h.period), y: history.map(h => h.total_credits), type: "bar", name: "Consumidos" }, { x: history.map(h => h.period), y: history.map(h => h.included_credits_pool), type: "scatter", mode: "lines+markers", name: "Franquia" }]} layout={{ autosize: true, height: 320, barmode: "overlay", margin: { l: 60, r: 20, b: 40, t: 20 } }} useResizeHandler style={{ width: "100%" }} />
-              </Paper>
-            </Stack>
+            <Paper elevation={0} sx={{ p: 3, border: "1px solid #e2e8f0", borderRadius: 2, mb: 4 }}>
+              <Typography variant="h6" mb={0.5}>Evolução de Créditos (Consumo vs Franquia)</Typography>
+              <Typography variant="caption" color="text.secondary" display="block" mb={2}>
+                Últimos 12 meses. Desde junho/2026 a Microsoft/GitHub alterou o formato de cobrança do Copilot para AI Credits
+                (por token) — o consumo mensal de créditos passou a existir a partir daí; meses anteriores aparecem zerados.
+                Consumo = relatório real de AI Credits (ai_usage_report). Franquia = licenças × 1.900/3.900 créditos
+                (franquia documentada pelo GitHub para Business/Enterprise).
+              </Typography>
+              <Plot
+                data={[
+                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => Math.max(0, (h.total_credits || 0) - (h.overage_credits || 0))), type: "bar" as const, name: "Consumidos (dentro da franquia)", marker: { color: "#2563eb" } },
+                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => h.overage_credits || 0), type: "bar" as const, name: "Overage pago (extra)", marker: { color: "#dc2626" } },
+                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => h.included_credits_pool), type: "scatter" as const, mode: "lines+markers" as const, name: "Franquia (recebida)", line: { color: "#d97706", width: 2 } },
+                ]}
+                layout={{ autosize: true, height: 340, barmode: "stack", margin: { l: 70, r: 20, b: 40, t: 20 }, hovermode: "x unified", yaxis: { tickformat: ",.2s" } }}
+                useResizeHandler
+                style={{ width: "100%" }}
+              />
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
+                {(() => {
+                  const last = history[history.length - 1];
+                  const totalConsumed = history.reduce((s, h) => s + (h.total_credits || 0), 0);
+                  const totalOverage = history.reduce((s, h) => s + (h.overage_credits || 0), 0);
+                  return (
+                    <>
+                      <Box sx={{ flex: 1, p: 1.5, border: "1px solid #e2e8f0", borderRadius: 1.5, bgcolor: "#eff6ff" }}>
+                        <Typography variant="caption" color="text.secondary">Crédito real consumido</Typography>
+                        <Typography variant="h6" fontWeight={700}>{compact(totalConsumed)}</Typography>
+                        <Typography variant="caption" color="text.secondary">últimos 12 meses</Typography>
+                      </Box>
+                      <Box sx={{ flex: 1, p: 1.5, border: "1px solid #e2e8f0", borderRadius: 1.5, bgcolor: "#fffbeb" }}>
+                        <Typography variant="caption" color="text.secondary">Crédito recebido (franquia)</Typography>
+                        <Typography variant="h6" fontWeight={700}>{compact(last?.included_credits_pool || 0)}</Typography>
+                        <Typography variant="caption" color="text.secondary">mês atual · licenças × franquia</Typography>
+                      </Box>
+                      <Box sx={{ flex: 1, p: 1.5, border: "1px solid #e2e8f0", borderRadius: 1.5, bgcolor: "#fef2f2" }}>
+                        <Typography variant="caption" color="text.secondary">Overage pago (consumo extra)</Typography>
+                        <Typography variant="h6" fontWeight={700}>{compact(totalOverage)}</Typography>
+                        <Typography variant="caption" color="text.secondary">créditos excedentes faturados (net_amount ÷ US$ 0,01)</Typography>
+                      </Box>
+                    </>
+                  );
+                })()}
+              </Stack>
+            </Paper>
+          )}
+
+          {costEvolution.length > 0 && (
+            <Paper elevation={0} sx={{ p: 3, border: "1px solid #e2e8f0", borderRadius: 2, mb: 4 }}>
+              <Typography variant="h6" mb={0.5}>Evolução do Custo Realizado — GitHub (PricingCategory = GitHub)</Typography>
+              <Typography variant="body2" color="text.secondary" mb={2}>
+                Total mensal = soma do realizado da Dimon <b>dest_dm_cost_copilot_custo</b> (classificação PricingCategory=GitHub, mesma usada na criação da Dimon). Julho ≈ 190 mil BRL.
+                {" "}<b>Mês corrente (agosto): realizado parcial + projeção do restante</b>; meses futuros = projeção (forecast da Dimon) até o fim do horizonte — padrão FinOps de mês em andamento.
+              </Typography>
+              <Plot
+                data={[
+                  ...[...new Set(costEvolution.flatMap(e => e.segments.map(s => s.subcategory)))].map((sub, i) => ({
+                    x: costEvolution.map(e => periodLabel(e.period)),
+                    y: costEvolution.map(e => (e.segments.find(s => s.subcategory === sub) || { realized: 0 }).realized || 0),
+                    type: "bar" as const,
+                    name: sub,
+                    marker: {
+                      color: sub.startsWith("Projeção")
+                        ? "rgba(148, 163, 184, 0.55)"
+                        : ["#2563eb", "#059669", "#d97706", "#7c3aed", "#dc2626"][i % 5],
+                    },
+                  })),
+                  {
+                    x: costEvolution.map(e => periodLabel(e.period)),
+                    y: costEvolution.map(e => (e.is_current_month || e.is_forecast ? e.projected_total : e.total_realized) || 0),
+                    type: "scatter" as const,
+                    mode: "lines+markers" as const,
+                    name: "Total",
+                    line: { color: "#0f172a", width: 2 },
+                  },
+                ]}
+                layout={{
+                  autosize: true,
+                  height: 360,
+                  barmode: "stack",
+                  margin: { l: 70, r: 20, b: 40, t: 20 },
+                  hovermode: "x unified",
+                  yaxis: { tickformat: ",.2s" },
+                }}
+                useResizeHandler
+                style={{ width: "100%" }}
+              />
+            </Paper>
           )}
 
           <Paper elevation={0} sx={{ p: 3, border: "1px solid #e2e8f0", borderRadius: 2, mb: 4 }}>
-            <Typography variant="h6" mb={2}>Engajamento por Modelo de IA</Typography>
+            <Typography variant="h6" mb={0.5}>Engajamento e Custo por Modelo de IA</Typography>
+            <Typography variant="caption" color="text.secondary" display="block" mb={2}>
+              Custo por MM de tokens = créditos reais do modelo × preço de mercado do crédito (derivado do relatório de AI Credits:
+              gross_amount ÷ ai_credits ≈ US$ 0,01/crédito) ÷ tokens do modelo (input+output+cache; "estimado" = linhas × 7 quando o
+              relatório não traz tokens). A Microsoft concedeu créditos extras até setembro/2026 — consumidores intensos usam o pool
+              compartilhado (créditos de quem não consome); o preço de mercado reflete o valor real do consumo extra.
+            </Typography>
             <Box sx={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead><tr style={{ borderBottom: "2px solid #e2e8f0" }}><th style={{ padding: "10px" }}>Modelo</th><th style={{ padding: "10px" }}>Devs</th><th style={{ padding: "10px" }}>Share %</th></tr></thead>
-                <tbody>{models.map((m, i) => <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}><td style={{ padding: "10px" }}>{m.model_name}</td><td style={{ padding: "10px" }}>{m.active_users}</td><td style={{ padding: "10px" }}>{m.credit_share_pct}%</td></tr>)}</tbody>
+                <thead><tr style={{ borderBottom: "2px solid #e2e8f0" }}>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Modelo</th>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Devs</th>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Tokens</th>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Créditos</th>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Custo / MM tokens</th>
+                  <th style={{ padding: "10px", textAlign: "left" }}>Share %</th>
+                </tr></thead>
+                <tbody>{models.map((m, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "10px", textAlign: "left" }}>{m.model_name}</td>
+                    <td style={{ padding: "10px", textAlign: "left" }}>{m.active_users}</td>
+                    <td style={{ padding: "10px", textAlign: "left" }}>
+                      {compact(m.total_tokens || 0)}
+                      {m.token_source === "estimado" && <span style={{ color: "#b45309", fontSize: "0.72rem" }}> est.</span>}
+                    </td>
+                    <td style={{ padding: "10px", textAlign: "left" }}>{compact(m.total_credits)}</td>
+                    <td style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>
+                      {m.cost_per_million_tokens_brl == null ? "—" : money.format(m.cost_per_million_tokens_brl)}
+                    </td>
+                    <td style={{ padding: "10px", textAlign: "left" }}>{m.credit_share_pct}%</td>
+                  </tr>))}</tbody>
               </table>
             </Box>
           </Paper>

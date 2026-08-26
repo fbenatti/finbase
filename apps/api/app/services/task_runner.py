@@ -38,6 +38,7 @@ from app.services.claude_token_extractor import ClaudeTokenExtractor
 from app.services.gemini_license_extractor import GeminiLicenseExtractor
 from app.services.gemini_token_extractor import GeminiTokenExtractor
 from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
+from app.services.databricks_extractor import DatabricksExtractor
 from app.services.expression_engine import (
     evaluate_expression,
     evaluate_conditional,
@@ -351,6 +352,56 @@ def _resolve_scope_filter(
     }
 
 
+def _business_rule_meta(rule: BusinessRule) -> dict:
+    """Metadata persisted on the Gold ``business_rule`` envelope for one rule."""
+    return {
+        "id": rule.id,
+        "name": rule.name,
+        "scope": rule.cloud_scope,
+        "conditions": rule.conditions or [],
+        "priority": rule.priority,
+    }
+
+
+def _changed_nonnull(df: pd.DataFrame, col: str, before: "pd.Series | None") -> pd.Series:
+    """Rows where applying a rule actually wrote a value into ``col``.
+
+    ``before`` is the column snapshot taken before the rule ran (None when the
+    column did not exist yet). A row counts only when it changed from its prior
+    value AND is now non-null — this mirrors the first-match-wins semantics of
+    the rule engine, so a rule that lost to a higher-priority rule is never
+    attributed to the row.
+    """
+    if col not in df.columns:
+        return pd.Series(False, index=df.index)
+    after = df[col]
+    if before is None:
+        return after.notna()
+    a = before.fillna("").astype(str)
+    b = after.fillna("").astype(str)
+    return (b != a) & after.notna()
+
+
+def _record_financial_rule(df: pd.DataFrame, mask: pd.Series, rule: BusinessRule) -> None:
+    """Append a financial BusinessRule to the ``business_rule`` envelope of affected rows."""
+    import json as _json
+
+    if mask is None or not mask.any():
+        return
+    if "business_rule" not in df.columns:
+        df["business_rule"] = None
+    meta = _business_rule_meta(rule)
+
+    def _append(value):
+        if value is None or (isinstance(value, float) and value != value):
+            return _json.dumps({"financial": [meta]}, ensure_ascii=False, default=str)
+        parsed = _json.loads(value) if isinstance(value, str) else dict(value)
+        parsed.setdefault("financial", []).append(meta)
+        return _json.dumps(parsed, ensure_ascii=False, default=str)
+
+    df.loc[mask, "business_rule"] = df.loc[mask, "business_rule"].map(_append)
+
+
 def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_period: str) -> None:
     """Synchronous business-rule application."""
     if rule.valid_from and billing_period < rule.valid_from:
@@ -368,6 +419,19 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
         df,
         _resolve_scope_filter(by_lower, cfg.get("scope_filter")),
     )
+
+    # ── Auditoria: colunas que esta regra pode escrever (snapshot antes/depois) ──
+    if rule.rule_type == "CONDITIONAL" and rule.conditions:
+        _written: list[str] = []
+        for original in rule.conditions:
+            _field = original.get("then_field", target_column) if isinstance(original, dict) else target_column
+            _resolved = by_lower.get(str(_field or "").lower(), _field)
+            if _resolved:
+                _written.append(_resolved)
+        written_cols = list(dict.fromkeys(_written)) or ([target_column] if target_column else [])
+    else:
+        written_cols = [target_column] if target_column else []
+    before_snapshot = {col: df[col].copy() for col in written_cols if col in df.columns}
 
     if rule.rule_type == "EXPRESSION" and rule.expression:
         expression = str(rule.expression)
@@ -450,6 +514,15 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
         else:
             df[target_column] = status.where(scope_mask, np.nan)
 
+    # ── Auditoria: grava a regra financeira nas linhas onde ela efetivamente
+    # gravou valor (first-match-wins: regra que perdeu para outra de maior
+    # prioridade nao e atribuida a linha). ──
+    if written_cols:
+        affected = pd.Series(False, index=df.index)
+        for _col in written_cols:
+            affected = affected | _changed_nonnull(df, _col, before_snapshot.get(_col))
+        _record_financial_rule(df, affected, rule)
+
 
 def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[ClassificationRule], session: Session | None = None,
                                dept_map: dict | None = None,
@@ -525,7 +598,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                 'departamento_nivel_1', 'departamento_nivel_2',
                 'departamento_nivel_3', 'departamento_nivel_4',
                 'departamento_nivel_5', 'departamento_nivel_6',
-                'departamento_nivel_7']:
+                'departamento_nivel_7', 'business_rule']:
         if col not in df.columns:
             df[col] = None
 
@@ -605,6 +678,28 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                         df['custom_fields'] = None
                     import json
                     df.loc[effective_mask, 'custom_fields'] = json.dumps(merged_custom_fields, default=str, ensure_ascii=False)
+
+        # ── Auditoria: registra a regra que DEU MATCH nesta linha
+        # (first-match-wins) no envelope business_rule da Gold. A Fase 2
+        # (regras financeiras) roda antes e já pode ter preenchido
+        # business_rule.financial — aqui apenas acrescentamos classification. ──
+        import json
+        if "business_rule" not in df.columns:
+            df["business_rule"] = None
+        classification_meta = {
+            "id": rule.id,
+            "name": rule.name,
+            "scope": rule.cloud_scope,
+            "conditions": normalize_rule_conditions(rule),
+            "priority": rule.priority,
+        }
+
+        def _merge_classification(value):
+            parsed = json.loads(value) if isinstance(value, str) and value else {}
+            parsed["classification"] = classification_meta
+            return json.dumps(parsed, ensure_ascii=False, default=str)
+
+        df.loc[effective_mask, "business_rule"] = df.loc[effective_mask, "business_rule"].map(_merge_classification)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -793,6 +888,110 @@ def _process_gcp_month_sync(
     _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", rows_written, rows_written)
     _persist_download_progress(task_id, phase="Carga Bronze concluída; origem sem transformação")
     return rows_written, 0, 0, errors
+
+
+def _process_databricks_month_sync(
+    session: Session,
+    extractor: DatabricksExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    last_modified,
+    content_length,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Ingest one Databricks billing month into Bronze."""
+    errors: list[str] = []
+    conn = extractor.connection
+    try:
+        month = extractor.parse_blob_path(blob_path)
+    except ValueError as exc:
+        return 0, 0, 0, [str(exc)]
+
+    _persist_download_progress(
+        task_id,
+        current_blob=blob_path,
+        current_blob_size=0,
+        download_bytes=0,
+        phase=f"Databricks: {extractor.table_name} {month}",
+    )
+    _persist_download_blob(task_id, blob_path, "QUERYING", 0, 0)
+
+    existing = session.execute(
+        select(IngestedBlob).where(
+            IngestedBlob.connection_id == conn.id,
+            IngestedBlob.blob_path == blob_path,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+
+    try:
+        iceberg.delete_bronze_slice(conn.code, blob_path=blob_path, billing_period=month)
+        rows_written, ingest_errors = extractor.ingest_month(month, blob_path)
+        errors.extend(ingest_errors)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Databricks ingest failed for {blob_path}: {exc}")
+        return 0, 0, 0, errors
+
+    ingested = IngestedBlob(
+        connection_id=conn.id,
+        blob_path=blob_path,
+        blob_prefix=blob_prefix,
+        billing_period=month,
+        last_modified=last_modified or datetime.now(timezone.utc),
+        etag="",
+        content_length=rows_written,
+        row_count=rows_written,
+        status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", rows_written, rows_written)
+    _persist_download_progress(task_id, phase=f"Carga Bronze Databricks ({month}) concluída com {rows_written} linhas")
+    return rows_written, 0, 0, errors
+
+
+def _process_databricks_month_sync_worker(
+    task_id: int,
+    item,
+    extractor: DatabricksExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    _persist_download_progress(task_id, active_downloads=EtlTask.active_downloads + 1)
+    if task_id in _inmemory_tasks:
+        _inmemory_tasks[task_id]["active_downloads"] = _inmemory_tasks[task_id].get("active_downloads", 0) + 1
+    session = WorkerSync()
+    try:
+        result = _process_databricks_month_sync(
+            session,
+            extractor,
+            item.blob_path,
+            item.blob_prefix,
+            item.last_modified,
+            item.content_length,
+            task_id,
+        )
+        session.commit()
+        return result
+    finally:
+        session.close()
+        try:
+            s = WorkerSync()
+            s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(
+                active_downloads=EtlTask.active_downloads - 1,
+                download_bytes=0,
+                current_blob_size=0,
+            ))
+            s.commit()
+            s.close()
+            if task_id in _inmemory_tasks:
+                _inmemory_tasks[task_id]["active_downloads"] = max(0, _inmemory_tasks[task_id].get("active_downloads", 1) - 1)
+        except Exception:
+            pass
 
 
 def _process_oci_blob_sync(
@@ -2472,7 +2671,7 @@ def _run_etl_sync(
             status["status"] = "COMPLETED"
             return
 
-        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
+        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -2532,6 +2731,11 @@ def _run_etl_sync(
             extractor = GeminiNotebookLMExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_gemini_notebooklm_sync_worker
+        elif conn.connector_type == "databricks":
+            extractor = DatabricksExtractor(conn)
+            scan_result = extractor._scan_sync(session)
+            scan_items = scan_result.items
+            worker_fn = _process_databricks_month_sync_worker
         else:
             extractor = GcpBigQueryExtractor(conn)
             scan_result = extractor._scan_sync(session)
@@ -2588,7 +2792,7 @@ def _run_etl_sync(
 
         # Para OCI, GCP BigQuery, MongoDB, GitHub, NotebookLM e Claude, usar 1 worker por vez para evitar
         # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
-        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm") else 2
+        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks") else 2
 
 
 

@@ -3,6 +3,7 @@ import {
   Alert, Box, Card, CardContent, Chip, Grid, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
+import { PtuFinanceViews } from "./AzurePtuFinance";
 
 /** Descrições ("dados de info") de cada indicador — usadas nos tooltips da tela e no relatório PDF. */
 export const widgetHelp: Record<string, string> = {
@@ -22,6 +23,10 @@ export const widgetHelp: Record<string, string> = {
   "Horas ≥95%": "Quantidade de horas Gold em que o pico válido atingiu pelo menos 95%. É evidência de proximidade do limite, não confirmação de indisponibilidade ou custo adicional.",
   "Pico observado": "Maior utilização válida encontrada nas agregações horárias do período. Não é P95 bruto; o Gold histórico não contém toda a distribuição de pontos de minuto.",
   "Cache match": "Percentual de tokens de contexto atendidos pelo cache, quando o deployment expõe essa métrica. Maior valor pode indicar reaproveitamento de contexto.",
+  "Custo PTU mensal": "Soma do custo realizado da reserva de capacidade (Microsoft.Capacity, 100 PTUs) e da PTU on-demand (Provisioned Throughput Units · 1/Month, 100 PTUs), no mês de referência da Gold FOCUS. Quando o on-demand do mês corrente ainda não foi lançado, usa o forecast (ou o último realizado) marcado como previsto.",
+  "PTUs (reserva + on-demand)": "Capacidade PTU do mês de referência: 100 PTUs de reserva (Microsoft.Capacity · Purchase) + 100 PTUs on-demand (Provisioned Throughput Units · 1/Month). Quando a linha on-demand do mês ainda não foi lançada na Gold, a quantidade é mantida em 100 PTUs (compra mensal fixa) marcada como prevista.",
+  "On-demand vs reserva": "Diferença percentual entre o custo por PTU on-demand e o custo por PTU da reserva no mês de referência. O delta esperado entre reserva e on-demand é de no máximo ~20%. Quando o on-demand do mês corrente não foi lançado, usa o forecast (ou o último realizado) marcado como previsto.",
+  "Custo por milhão de tokens": "Custo da capacidade PTU (reserva + on-demand) no mês de referência dividido pelos tokens consumidos nos últimos 30 dias (Azure Monitor), multiplicado por 1 milhão. É o custo efetivo de cada milhão de tokens dado o gasto fixo mensal de capacidade.",
 };
 
 /** Escala de verde para heatmaps (portal e PDF): uso baixo = verde fraco, uso alto = verde forte. */
@@ -156,7 +161,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
         <p><strong>Recorte:</strong> {periodInfo.start || "—"} → {periodInfo.end || "—"} · última amostra: {periodInfo.last_sample || "—"} · cobertura: {pct(periodInfo.coverage_pct ?? coverage.coverage_pct)} · {c.deployment_count ?? deps.length} deployments / {n(c.total_ptus ?? data.kpis?.total_ptus)} PTUs</p>
         {mixReserved != null && <p><strong>Composição de capacidade:</strong> Reserva: {n(mixReserved)} PTUs · OnDemand: {n(mixOnDemand)} PTUs</p>}
         <p><strong>Exportado em:</strong> {meta.exportedAt}</p>
-        <p style={{ marginTop: 8, fontStyle: "italic" }}>Relatório consolidado com todos os painéis da tela Azure PTU — Operação: resumo executivo, consumo de tokens, capacidade/operação e recomendações. Todos os valores refletem exclusivamente o período e os filtros selecionados.</p>
+        <p style={{ marginTop: 8, fontStyle: "italic" }}>Relatório consolidado com todos os painéis da tela Azure PTU — Operação: resumo executivo, consumo de tokens, capacidade/operação, financeiro (Dimon) e recomendações. Todos os valores refletem exclusivamente o período e os filtros selecionados.</p>
       </Box>
 
       {coverage.complete === false && <Alert severity="warning" sx={{ mb: 2 }}>Cobertura parcial: {coverage.days_with_data}/{coverage.expected_days} dias; lacunas não significam consumo zero.</Alert>}
@@ -265,14 +270,20 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
         </Stack>
       </Section>
 
-      {/* ── 05 · Notas metodológicas ──────────────────────────────────── */}
-      <Section index="05" title="Notas metodológicas" subtitle="Definições e ressalvas sobre cada indicador deste relatório.">
+      {/* ── 05 · Financeiro (Gold) ───────────────────────────────────── */}
+      <Section index="05" title="Financeiro (Gold)" subtitle="Custos financeiros dos projetos Vivo Mais e Aura Brain a partir da Gold FOCUS (dest_modelo_focus + planejamento): reserva de capacidade PTU (Microsoft.Capacity, 100 PTUs) e PTU on-demand (Provisioned Throughput Units · 1/Month, 100 PTUs) por projeto. A Gold é mensal; o mês de referência é o período de faturamento que contém o fim da janela selecionada.">
+        <PtuFinanceViews costs={data.costs} tokenData={data.token_consumption} aiDemand={data.executive_summary?.ai_demand} />
+      </Section>
+
+      {/* ── 06 · Notas metodológicas ──────────────────────────────────── */}
+      <Section index="06" title="Notas metodológicas" subtitle="Definições e ressalvas sobre cada indicador deste relatório.">
         <Stack gap={1}>
           {Object.entries(widgetHelp).map(([label, help]) => (
             <Typography key={label} variant="body2"><strong>{label}:</strong> {help}</Typography>
           ))}
           <Typography variant="body2" sx={{ mt: 1 }}><strong>Horas ≥80%/≥95%:</strong> horas Gold observadas que cruzaram esses limiares; são fatos do recorte, não previsão nem confirmação de cobrança.</Typography>
           <Typography variant="body2"><strong>Heatmaps:</strong> a escala de verde vai de uso baixo (verde fraco) a uso alto (verde forte), aplicada igualmente no portal e neste relatório.</Typography>
+          <Typography variant="body2"><strong>Financeiro (Gold):</strong> valores em BRL (realizado) da Gold FOCUS. Reserva = Microsoft.Capacity (100 PTUs/mês, Vivo Mais); on-demand = Provisioned Throughput Units · 1/Month (100 PTUs/mês, Aura Brain); uso horário da capacidade = meter Provisioned Managed (1/Hour, informativo). Classificação por departamento_nivel_5 (projeto).</Typography>
         </Stack>
       </Section>
 

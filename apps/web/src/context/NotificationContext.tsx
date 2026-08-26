@@ -52,7 +52,7 @@ function kindOf(task: TaskStatus): NotificationKind {
   const type = String(task.task_type || task.type || "");
   if (type === "forecast") return "forecast";
   if (type === "shared_cost") return "shared_cost";
-  if (type === "ai_cost_relationship_reprocess") return "reprocess";
+  if (type === "dimon_reprocess" || type === "ai_cost_relationship_reprocess") return "reprocess";
   if (type === "reprocess" || (!task.connection_id && task.destination_table_id && type !== "extraction")) return "reprocess";
   return "extraction";
 }
@@ -61,6 +61,9 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   const k = kindOf(task);
   if (k === "shared_cost") return "Custo compartilhado";
   if (k === "forecast") return "Forecast";
+  if (String(task.task_type || task.type || "") === "dimon_reprocess") {
+    return "Dimon (custo pré-agregado) #" + task.id;
+  }
   if (String(task.task_type || task.type || "") === "ai_cost_relationship_reprocess") {
     return "Relacionamentos de custo IA #" + task.id;
   }
@@ -114,6 +117,7 @@ interface NotificationContextValue {
   clearAll: () => void;
   snackbar: { open: boolean; message: string; severity: AlertColor };
   closeSnackbar: () => void;
+  enqueueSnackbar: (message: string, severity?: AlertColor) => void;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -344,8 +348,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       clearAll,
       snackbar,
       closeSnackbar,
+      enqueueSnackbar,
     }),
-    [items, unreadCount, dialogOpen, openDialog, closeDialog, addTaskById, remove, clearAll, snackbar, closeSnackbar]
+    [items, unreadCount, dialogOpen, openDialog, closeDialog, addTaskById, remove, clearAll, snackbar, closeSnackbar, enqueueSnackbar]
   );
 
   return (

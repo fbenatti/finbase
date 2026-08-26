@@ -20,6 +20,7 @@ import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   getExtractionHistory, ExtractionHistoryItem,
   getAvailablePeriods, AvailablePeriod,
+  getSourcePreview, SourcePreview,
   ScheduledTask,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
   SCANNABLE_CONNECTOR_TYPES, formatApiError,
@@ -87,6 +88,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   const [schedRunning, setSchedRunning] = useState<Set<number>>(new Set());
   const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
 
+  // ── Databricks preview (header + amostra) state ──
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<SourcePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadHistory = useCallback(async () => {
@@ -122,6 +129,10 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   );
   const isAzurePtuSelected = useMemo(
     () => extractableConnections.some((c) => c.id === connId && c.connector_type === "azure_openai_ptu"),
+    [extractableConnections, connId],
+  );
+  const isDatabricksSelected = useMemo(
+    () => extractableConnections.some((c) => c.id === connId && c.connector_type === "databricks"),
     [extractableConnections, connId],
   );
   const [ptuPeriods, setPtuPeriods] = useState<AvailablePeriod[]>([]);
@@ -195,6 +206,21 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try { setScanResult(await scanBlobs(connId as number)); }
     catch (e: unknown) { setError(formatApiError(e, "Falha ao escanear")); }
     finally { setScanning(false); }
+  };
+
+  const doPreview = async () => {
+    if (!connId) return;
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewOpen(true);
+    setPreviewData(null);
+    try {
+      setPreviewData(await getSourcePreview(connId as number, 20));
+    } catch (e: unknown) {
+      setPreviewError(formatApiError(e, "Falha ao obter preview do Databricks"));
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const doRun = async (mode: "incremental" | "period" | "backfill" = "incremental") => {
@@ -552,6 +578,11 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             {!isAzurePtuSelected && <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
               {scanning ? "Escaneando..." : "Escanear"}
             </Button>}
+            {isDatabricksSelected && (
+              <Button variant="outlined" color="inherit" startIcon={previewLoading ? <CircularProgress size={18} /> : <Visibility />} onClick={() => void doPreview()} disabled={previewLoading || !connId}>
+                {previewLoading ? "Carregando header..." : "Ver header / preview"}
+              </Button>
+            )}
             <Button variant="contained" startIcon={<PlayArrow />} onClick={() => doRun("backfill")}
               disabled={isActive || !connId || !!task?.status?.includes("CANCELLING")}
               color="primary">
@@ -1257,6 +1288,71 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           connectionName={uploadConn.name}
         />
       )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/*  PREVIEW DATABRICKS (header + amostra)                         */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="lg" fullWidth>
+        <DialogTitle>Pré-visualização Databricks</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {previewLoading && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2, p: 3 }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2" color="text.secondary">Consultando o SQL Warehouse...</Typography>
+            </Box>
+          )}
+          {!previewLoading && previewError && (
+            <Alert severity="error" sx={{ m: 2 }} onClose={() => setPreviewError("")}>{previewError}</Alert>
+          )}
+          {!previewLoading && previewData && (
+            <Box sx={{ p: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                Header ({previewData.columns.length} colunas) — amostra de {previewData.rows.length} linha(s). Use este schema para decidir a normalização/mapping (Silver/Gold).
+              </Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 2 }}>
+                {previewData.columns.map((column) => (
+                  <Chip key={column} size="small" variant="outlined" label={column} sx={{ fontFamily: "monospace" }} />
+                ))}
+              </Box>
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      {previewData.columns.map((column) => (
+                        <TableCell key={column} sx={{ fontWeight: 700, fontFamily: "monospace", bgcolor: "#f8fafc" }}>{column}</TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {previewData.rows.map((row, index) => (
+                      <TableRow key={index} hover>
+                        {previewData.columns.map((column) => {
+                          const value = row[column];
+                          return (
+                            <TableCell key={column} sx={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {value === null || value === undefined ? "—" : String(value)}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                    {previewData.rows.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={previewData.columns.length} align="center" sx={{ py: 4, color: "text.secondary" }}>
+                          Nenhuma linha retornada pela query.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPreviewOpen(false)}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
         </>
       )}
 

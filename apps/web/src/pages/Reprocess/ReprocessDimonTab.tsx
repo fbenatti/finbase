@@ -1,0 +1,86 @@
+import { useEffect, useState } from "react";
+import { Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import { PlayArrow, Refresh } from "@mui/icons-material";
+import { DimonHistoryItem, DimonRule, formatApiError, getDimonHistory, getDimonRules, reprocessDimons } from "../../services/api";
+
+export default function ReprocessDimonTab() {
+  const [rules, setRules] = useState<DimonRule[]>([]);
+  const [selectedId, setSelectedId] = useState<number | "">("");
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState<DimonHistoryItem[]>([]);
+
+  const load = async () => {
+    const [ruleList, hist] = await Promise.all([
+      getDimonRules().catch(() => [] as DimonRule[]),
+      getDimonHistory().catch(() => [] as DimonHistoryItem[]),
+    ]);
+    setRules(ruleList);
+    setHistory(hist);
+    if (selectedId !== "" && !ruleList.some(r => r.id === selectedId)) setSelectedId("");
+  };
+  useEffect(() => { void load(); }, [selectedId]);
+
+  const startAll = async () => {
+    setRunning(true); setError("");
+    try { await reprocessDimons([]); await load(); }
+    catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
+    finally { setRunning(false); }
+  };
+
+  const startSelected = async () => {
+    if (selectedId === "") return;
+    setRunning(true); setError("");
+    try { await reprocessDimons([selectedId]); await load(); }
+    catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
+    finally { setRunning(false); }
+  };
+
+  const statusChip = (r: DimonRule) => {
+    const s = r.materialization_status || "PENDING";
+    const label = s === "UPDATED" ? "Atualizada" : s === "EMPTY" ? "Sem dados" : s === "ERROR" ? "Com erro" : "Pendente";
+    const color = s === "UPDATED" ? "success" : s === "ERROR" ? "error" : "warning";
+    return <Chip size="small" label={label} color={color as any} />;
+  };
+
+  return <Stack spacing={2}>
+    <Typography variant="h6">Camada Dimon de Custo</Typography>
+    <Typography color="text.secondary">Lê as Golds (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica a tabela pré-agregada dest_dm_cost_&lt;code&gt; no namespace iceberg.dimon. Escolha reprocessar <b>todas (full)</b> ou apenas uma regra/fonte.</Typography>
+    {error && <Alert severity="error">{error}</Alert>}
+
+    {/* Regras ativas com status */}
+    <Box>
+      <Typography variant="subtitle2" mb={1}>Regras Dimon ({rules.length})</Typography>
+      {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra criada — use o editor em Relacionamentos de custo IA.</Typography> : <Stack spacing={1}>
+        {rules.map(r => <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, border: "1px solid", borderColor: "divider", borderRadius: 1, bgcolor: selectedId === r.id ? "action.selected" : "transparent" }}>
+          <input type="radio" name="dimon-rule" checked={selectedId === r.id} onChange={() => setSelectedId(selectedId === r.id ? "" : r.id!)} />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" fontWeight={600} noWrap>{r.name}</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>{r.code} · {r.materialization_table || "Pendente"} · {r.materialization_rows ?? 0} linhas</Typography>
+          </Box>
+          {statusChip(r)}
+        </Box>)}
+      </Stack>}
+    </Box>
+
+    <Stack direction="row" gap={1} flexWrap="wrap">
+      <Button variant="contained" startIcon={running ? <CircularProgress size={16} color="inherit" /> : <Refresh />} disabled={running} onClick={startAll}>Reprocessar todas (Full)</Button>
+      <Button variant="outlined" startIcon={<PlayArrow />} disabled={running || selectedId === ""} onClick={startSelected}>Reprocessar selecionada</Button>
+    </Stack>
+
+    <Typography variant="subtitle2">Histórico recente</Typography>
+    {history.length === 0 ? <Typography color="text.secondary">Nenhuma execução registrada.</Typography> : history.map(item => {
+      const failed = item.result_json?.failed || [];
+      return <Box key={item.id}>
+        <Alert severity={item.status === "FAILED" ? "error" : item.status === "COMPLETED" ? (failed.length ? "warning" : "success") : "info"}>
+          #{item.id} · {item.status} · {item.phase || "Sem detalhe"}{item.rows_destination != null ? ` · ${item.rows_destination} linhas` : ""}
+        </Alert>
+        {failed.length > 0 && <Box sx={{ mt: 0.5, ml: 2 }}>
+          {failed.map((f, index) => <Typography key={`f-${index}`} variant="caption" display="block" color="error.main">
+            ✕ {f.code || `Regra #${f.rule_id}`}: {f.error || "erro"}
+          </Typography>)}
+        </Box>}
+      </Box>;
+    })}
+  </Stack>;
+}

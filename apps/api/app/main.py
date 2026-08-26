@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, ai_cost_origin, azure_ptu, reservations
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
+        from app.models.dimon_rule import DimonRule, DimonRuleSource  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
@@ -120,6 +121,36 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_source_link ON ai_cost_link_source (link_id)",
             "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS description TEXT",
             "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS department_id INTEGER",
+            """CREATE TABLE IF NOT EXISTS dimon_rule (
+              id SERIAL PRIMARY KEY,
+              code VARCHAR(120) NOT NULL UNIQUE,
+              name VARCHAR(200) NOT NULL,
+              description TEXT,
+              active BOOLEAN NOT NULL DEFAULT TRUE,
+              valid_from VARCHAR(6),
+              valid_until VARCHAR(6),
+              materialization_table VARCHAR(140),
+              materialization_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+              materialization_rows INTEGER,
+              materialization_run_id INTEGER,
+              materialized_at TIMESTAMPTZ,
+              materialization_error TEXT,
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            """CREATE TABLE IF NOT EXISTS dimon_rule_source (
+              id SERIAL PRIMARY KEY,
+              rule_id INTEGER NOT NULL REFERENCES dimon_rule(id) ON DELETE CASCADE,
+              gold_table VARCHAR(140) NOT NULL,
+              filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+              value_column VARCHAR(50) NOT NULL DEFAULT 'realizado',
+              percent DOUBLE PRECISION NOT NULL DEFAULT 100.0,
+              created_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_dimon_rule_source_rule ON dimon_rule_source (rule_id)",
+            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE dimon_rule_source ADD COLUMN IF NOT EXISTS gold_tables JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS measure_columns JSONB NOT NULL DEFAULT '[]'::jsonb",
         ):
             await conn.execute(text(statement))
         await conn.execute(text("""
@@ -249,7 +280,7 @@ app.include_router(clone_rules.router)
 app.include_router(planning.router)
 app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
-app.include_router(ai_cost_origin.router)
+app.include_router(dimon.router)
 app.include_router(azure_ptu.router)
 app.include_router(reservations.router)
 

@@ -3,21 +3,22 @@ import Plot from "react-plotly.js";
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
+  TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
-import { Add, Edit, Remove } from "@mui/icons-material";
+import { Add, Block, Edit, Remove } from "@mui/icons-material";
 import {
   ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvios, ForecastDesvioSubcat,
-  createForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories,
+  createForecastAck, deactivateForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories,
   getForecastAcks, updateForecastAck,
 } from "../../services/api";
+import AckRegisterDialog from "./AckRegisterDialog";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const pct = (value: number | null | undefined) => value == null ? "—" : (value * 100).toFixed(1) + "%";
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
 
 function DesvioTable({
-  title, items, color, expanded, onToggle, subcats, subcatLoading, onAck, ackByPath, onSubcatSeries,
+  title, items, color, expanded, onToggle, subcats, subcatLoading, onAck, ackByPath, onSubcatSeries, onDeactivateAck,
 }: {
   title: string; items: ForecastDesvioItem[]; color: string;
   expanded: string | null; onToggle: (path: string) => void;
@@ -25,6 +26,7 @@ function DesvioTable({
   subcatLoading: boolean; onAck: (item: ForecastDesvioItem) => void;
   ackByPath: Map<string, ForecastAck>;
   onSubcatSeries: (item: ForecastDesvioItem, sub: ForecastDesvioSubcat) => void;
+  onDeactivateAck: (ack: ForecastAck) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -51,7 +53,8 @@ function DesvioTable({
               return (
                 <FragmentRow key={key} item={item} color={color} open={open} ack={ack}
                   onToggle={() => onToggle(key)} subcats={subcats[key]} subcatLoading={subcatLoading && open}
-                  onAck={() => onAck(item)} onSubcatSeries={sub => onSubcatSeries(item, sub)} />
+                  onAck={() => onAck(item)} onSubcatSeries={sub => onSubcatSeries(item, sub)}
+                  onDeactivateAck={() => ack && onDeactivateAck(ack)} />
               );
             })}
           </TableBody>
@@ -61,10 +64,11 @@ function DesvioTable({
   );
 }
 
-function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAck, ack, onSubcatSeries }: {
+function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAck, ack, onSubcatSeries, onDeactivateAck }: {
   item: ForecastDesvioItem; color: string; open: boolean; onToggle: () => void;
   subcats: ForecastDesvioSubcat[] | undefined; subcatLoading: boolean; onAck: () => void;
   ack: ForecastAck | undefined; onSubcatSeries: (sub: ForecastDesvioSubcat) => void;
+  onDeactivateAck: () => void;
 }) {
   return (
     <>
@@ -90,15 +94,29 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
         <TableCell align="right">{pct(item.variance_pct)}</TableCell>
         <TableCell align="right">{pct(item.accuracy)}</TableCell>
         <TableCell align="center">
-          <Button
-            size="small"
-            variant={ack ? "outlined" : "contained"}
-            color={ack ? "info" : "primary"}
-            startIcon={ack ? <Edit fontSize="small" /> : undefined}
-            onClick={event => { event.stopPropagation(); onAck(); }}
-          >
-            {ack ? "Editar Ack" : "Ack"}
-          </Button>
+          {ack ? (
+            <Stack direction="row" alignItems="center" justifyContent="center">
+              <Tooltip title="Editar Ack">
+                <IconButton size="small" aria-label={`Editar Ack de ${item.name}`} onClick={event => { event.stopPropagation(); onAck(); }}>
+                  <Edit fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Desativar Ack">
+                <IconButton size="small" color="error" aria-label={`Desativar Ack de ${item.name}`} onClick={event => { event.stopPropagation(); onDeactivateAck(); }}>
+                  <Block fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          ) : (
+            <Button
+              size="small"
+              variant="contained"
+              color="primary"
+              onClick={event => { event.stopPropagation(); onAck(); }}
+            >
+              Ack
+            </Button>
+          )}
         </TableCell>
       </TableRow>
       {open && (
@@ -162,6 +180,32 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
   const [message, setMessage] = useState("");
   // Dialog com o gráfico acumulado do período para um ServiceSubcategory.
   const [seriesDialog, setSeriesDialog] = useState<{ subcategory: string; data: ForecastAccuracyDeltaSeries | null; loading: boolean; error: string } | null>(null);
+  // Cadastro livre de um item (Ack) com departamento + data (pode ser futura).
+  const [registerOpen, setRegisterOpen] = useState(false);
+  // Confirmação de desativação de Ack.
+  const [deactivateTarget, setDeactivateTarget] = useState<ForecastAck | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
+
+  const confirmDeactivate = async () => {
+    if (!deactivateTarget) return;
+    setDeactivating(true);
+    setError("");
+    try {
+      await deactivateForecastAck(deactivateTarget.id);
+      setMessage(`Ack de ${deactivateTarget.department_name} desativado — não aparece mais nos dashboards.`);
+      setDeactivateTarget(null);
+      await loadAcks(targetMonth);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao desativar o Ack");
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const onRegisterSaved = async (monthKey: string, departmentName: string) => {
+    setMessage(`Item cadastrado para ${departmentName} (mês ${monthKey}).`);
+    await loadAcks(targetMonth);
+  };
 
   const openSubcatSeries = (item: ForecastDesvioItem, sub: ForecastDesvioSubcat) => {
     if (runId == null) return;
@@ -253,12 +297,17 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
     <Box>
       {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{message}</Alert>}
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Desvios do mês selecionado no último nível de cada departamento, respeitando o departamento filtrado.
-        <Box component="span" sx={{ color: "#DC2626" }}> Vermelho = subestimou</Box> (realizado acima do projetado — gastou mais) ·{" "}
-        <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (realizado abaixo do projetado — gastou menos). Use o <b>+</b> à esquerda do nome
-        para detalhar por ServiceSubcategory e o botão <b>Ack</b> para justificar o desvio.
-      </Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }} gap={1} flexWrap="wrap">
+        <Typography variant="body2" color="text.secondary">
+          Desvios do mês selecionado no último nível de cada departamento, respeitando o departamento filtrado.
+          <Box component="span" sx={{ color: "#DC2626" }}> Vermelho = subestimou</Box> (realizado acima do projetado — gastou mais) ·{" "}
+          <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (realizado abaixo do projetado — gastou menos). Use o <b>+</b> à esquerda do nome
+          para detalhar por ServiceSubcategory e o botão <b>Ack</b> para justificar o desvio.
+        </Typography>
+        <Button variant="outlined" size="small" startIcon={<Add fontSize="small" />} onClick={() => setRegisterOpen(true)}>
+          Cadastrar item
+        </Button>
+      </Stack>
       {loading && !data ? (
         <Box sx={{ py: 6, display: "flex", justifyContent: "center" }}><CircularProgress /></Box>
       ) : runId == null ? (
@@ -269,9 +318,9 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
       ) : data ? (
         <>
           <DesvioTable title={`Top 10 positivos (subestimou) · ${data.positive.length}`} items={data.positive} color="#DC2626"
-            expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} />
+            expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
           <DesvioTable title={`Top 10 negativos (superestimou) · ${data.negative.length}`} items={data.negative} color="#16A34A"
-            expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} />
+            expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
           {data.positive.length === 0 && data.negative.length === 0 && (
             <Typography variant="body2" color="text.secondary">Sem desvios para o mês/departamento selecionados.</Typography>
           )}
@@ -419,6 +468,29 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
             </DialogContent>
           </>
         )}
+      </Dialog>
+
+      <AckRegisterDialog
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        defaultDepartment={department}
+        onSaved={(monthKey, departmentName) => void onRegisterSaved(monthKey, departmentName)}
+      />
+
+      <Dialog open={deactivateTarget !== null} onClose={() => { if (!deactivating) setDeactivateTarget(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle>Desativar Ack?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Desativar o Ack de <strong>{deactivateTarget?.department_name}</strong>? Ele deixará de aparecer nos
+            dashboards (Ex.: Visão Esperada) sem perder o registro nem o histórico.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button disabled={deactivating} onClick={() => setDeactivateTarget(null)}>Cancelar</Button>
+          <Button variant="contained" color="error" disabled={deactivating} onClick={() => void confirmDeactivate()}>
+            {deactivating ? "Desativando..." : "Desativar"}
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/connections", tags=["connections"])
 _SECRET_CONFIG_KEYS = frozenset({
     "client_secret", "secret", "private_key", "oci_private_key", "pat_token",
     "gcp_token", "connection_string", "eventhub_connection_string",
+    "access_token", "token",
 })
 
 
@@ -54,6 +55,7 @@ TOOL_CONNECTOR_TYPES = (
     "notebooklm_license", "notebooklm_token",
     "claude_license", "claude_token",
     "gemini_license", "gemini_token", "gemini_notebooklm",
+    "databricks",
 )
 MARKETPLACE_CONNECTOR_TYPES = ("mongodb_atlas",)
 
@@ -69,6 +71,7 @@ GRID_FILTER_VALUES = {
         "notebooklm": "notebooklm",
         "gemini": "gemini",
         "claude": "claude",
+        "databricks": "databricks",
     },
     "connector_type": {
         "azure blob storage": "azure_blob",
@@ -86,6 +89,7 @@ GRID_FILTER_VALUES = {
         "gemini licenças": "gemini_license",
         "gemini tokens": "gemini_token",
         "gemini notebooklm": "gemini_notebooklm",
+        "databricks (sql warehouse)": "databricks",
         "custo manual de ia": "manual_ai_cost",
     },
 }

@@ -1,0 +1,13 @@
+{
+  "product": "FinOps Intelligence Platform",
+  "frozen_version": "2.5.3",
+  "status": "FROZEN",
+  "codename": "Trend Ranking Functional Fix",
+  "frozen_date": "2026-08-20",
+  "html": "finops_decision_layer_v2_5_3_trend_ranking_fix.html",
+  "documentation": [
+    "FinOps_Platform_v2.5.3_Guia_Funcional_Metricas_e_Leitura.docx",
+    "FinOps_Platform_v2.5.3_Guia_Funcional_Metricas_e_Leitura.pdf"
+  ],
+  "rule": "All future evolution must branch from v2.5.3 and create a new version."
+}

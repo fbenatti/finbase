@@ -58,6 +58,9 @@ for env_basename, mapping in [
         "taxa_pro": "ATLAS_PRO_TAX_RATE",
         "taxa_enterprise": "ATLAS_ENTERPRISE_TAX_RATE",
     }),
+    (".env-databriks", {
+        "token": "DATABRICKS_TOKEN",
+    }),
 ]:
     env_data = _load_env_file(_project_root / env_basename)
     for legacy_key, std_key in mapping.items():
@@ -177,6 +180,9 @@ class Settings(BaseSettings):
     atlas_enterprise_usd_to_brl: float = float(os.getenv("ATLAS_ENTERPRISE_USD_TO_BRL", "6.20"))
     atlas_pro_tax_rate: float = float(os.getenv("ATLAS_PRO_TAX_RATE", "0.0"))
     atlas_enterprise_tax_rate: float = float(os.getenv("ATLAS_ENTERPRISE_TAX_RATE", "0.0"))
+
+    # --- Databricks (loaded from .env-databriks via mapping above) ---
+    databricks_token: str = os.getenv("DATABRICKS_TOKEN", "")
 
     model_config = {
         "env_file": ".env",

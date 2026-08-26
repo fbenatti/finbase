@@ -119,8 +119,8 @@ export default function ReprocessAccuracyTab() {
   return (
     <Box>
       <Alert severity="info" sx={{ mb: 2 }}>
-        Regenera os snapshots simulados de forecast (simulado em 02/MM, cutoff D-2) para os meses selecionados. O
-        dashboard de acurácia usa automaticamente o snapshot mais recente de cada mês.
+        Exibe apenas meses com realizado no mês e no mês anterior, necessário para o forecast simulado em 02/MM
+        (cutoff D-2). O dashboard de acurácia usa automaticamente o snapshot mais recente de cada mês.
       </Alert>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{message}</Alert>}
@@ -143,6 +143,11 @@ export default function ReprocessAccuracyTab() {
           </Stack>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>Meses (simulado em 02/MM, cutoff = último dia do mês anterior)</Typography>
           <Paper variant="outlined" sx={{ p: 1.5, mb: 2, display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+            {months.length === 0 && (
+              <Typography variant="body2" color="text.secondary">
+                Nenhum mês elegível: é necessário haver realizado no mês e no mês anterior.
+              </Typography>
+            )}
             {months.map((month) => (
               <FormControlLabel
                 key={month}
@@ -193,7 +198,7 @@ export default function ReprocessAccuracyTab() {
         </Card>
       )}
 
-      {taskId && !isActive(task?.status) && (
+      {taskId && task?.status === "COMPLETED" && (
         <Alert severity="info" sx={{ mt: 2 }}>
           Task {taskId} finalizada. Os snapshots novos já estão disponíveis no dashboard de acurácia.
         </Alert>

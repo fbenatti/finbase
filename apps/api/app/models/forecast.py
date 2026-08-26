@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, ForeignKey, Float, func, Index
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, ForeignKey, Float, Date, func, Index
 from app.database import Base
 
 class ForecastConfig(Base):
@@ -119,6 +119,8 @@ class ForecastAck(Base):
     accuracy = Column(Float, nullable=True)
     category = Column(String(80), nullable=False)
     reason = Column(String(1000), nullable=False)
+    registered_at = Column(Date, nullable=True)
+    active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     __table_args__ = (Index("ix_forecast_ack_month_dept", "target_month", "department_name"),)

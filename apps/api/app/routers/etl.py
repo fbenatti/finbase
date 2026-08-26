@@ -147,6 +147,10 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
         extractor = GeminiNotebookLMExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "databricks":
+        from app.services.databricks_extractor import DatabricksExtractor
+        extractor = DatabricksExtractor(conn)
+        return await extractor.scan(db)
     if conn.connector_type == "azure_openai_ptu":
         from app.services.azure_ptu_service import discover, resolve_config
         inventory = await discover(resolve_config(conn.config_json))
@@ -176,6 +180,33 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
             "persisted_metrics": False,
         }
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
+
+
+@router.get("/connections/{connection_id}/preview")
+async def preview_source(
+    connection_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the raw header (columns) plus a sample of rows from a connector.
+
+    Currently implemented for Databricks: lets the user see the source schema
+    before deciding on normalization/mapping (Silver/Gold).
+    """
+    result = await db.execute(
+        select(SourceConnection).where(SourceConnection.id == connection_id)
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if conn.connector_type != "databricks":
+        raise HTTPException(status_code=400, detail=f"Preview not supported for {conn.connector_type}")
+    from app.services.databricks_extractor import DatabricksExtractor
+    try:
+        return DatabricksExtractor(conn).preview(limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Databricks preview failed for connection %s: %s", connection_id, exc)
+        raise HTTPException(status_code=502, detail=f"Falha ao consultar o Databricks: {str(exc)[:300]}") from exc
 
 
 @router.get("/blobs/", response_model=list[IngestedBlobOut])
@@ -413,7 +444,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         # PTU is an operational source, not an Azure Blob export.  It is
         # executed by the worker through the PTU collector below.
         pass
-    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm"):
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -738,6 +769,13 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         try:
             from app.services.gemini_notebooklm_extractor import GeminiNotebookLMExtractor
             return GeminiNotebookLMExtractor(conn).test_connection()
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "databricks":
+        try:
+            from app.services.databricks_extractor import DatabricksExtractor
+            return DatabricksExtractor(conn).test_connection()
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
 
@@ -1127,6 +1165,7 @@ def _reprocess_destination_sync(
     from app.models.etl_task import EtlTask
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
+    from app.services import dimon_builder
     from app.services.task_runner import _inmemory_tasks, _check_cancelled
     from app.services.cloud_scope import (
         rule_matches_cloud,
@@ -1169,6 +1208,9 @@ def _reprocess_destination_sync(
                     "table": status.get("table", ""),
                     "rows_written": status.get("rows_destination", 0),
                     "error": status.get("error", ""),
+                    "dimon_table": status.get("dimon_table"),
+                    "dimon_rows": status.get("dimon_rows"),
+                    "dimon_error": status.get("dimon_error"),
                 }
                 if status.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
                     row.finished_at = func.now()
@@ -1189,6 +1231,14 @@ def _reprocess_destination_sync(
             (dest_info.name or "").strip().upper() == "MODELO FOCUS"
             or (phys_name or "").strip().lower() == "dest_modelo_focus"
         )
+        # A Dimon agregada é gerada ao final do reprocess SOMENTE para o
+        # destino MODELO FOCUS, reutilizando os DataFrames em memória (não
+        # varre a Gold de milhões de linhas).
+        # Estrutura Dimon única = regras (dimon_rule + dimon_materialization),
+        # geradas sob demanda via /dimon/reprocess. A geração automática
+        # paralela (dimon_builder -> dest_dm_cost_focus) foi desativada.
+        enable_dimon = False
+        dimon_chunks: list = []
 
         all_mappings = []
         for cid in connection_ids:
@@ -1284,6 +1334,11 @@ def _reprocess_destination_sync(
             "source_connection_id": "BIGINT",
             "_billing_period": "TEXT",
             "tipo": "TEXT",
+            # Auditoria: envelope JSON com a regra de classificacao que deu
+            # match na linha (classification) e as regras financeiras aplicadas
+            # (financial). Fica na Gold como texto JSON (mesmo padrao de
+            # custom_fields), mas registrado como JSONB no catalogo.
+            "business_rule": "JSONB",
         }
         internal_cols_all = list(internal_col_types)
         dest_col_types.update(internal_col_types)
@@ -1475,6 +1530,16 @@ def _reprocess_destination_sync(
         def _stage_frame(frame: pd.DataFrame) -> None:
             """Append one completed blob to the temporary Iceberg table."""
             nonlocal temp_name, staged_rows
+            if enable_dimon:
+                # Reaproveita o frame em memória: acumula a agregação Dimon
+                # (principais colunas, mensal, SUM quantity/realizado/billedcost)
+                # sem reler a Gold publicada.
+                try:
+                    dimon_agg = dimon_builder.aggregate_frame(frame)
+                    if dimon_agg is not None and not dimon_agg.empty:
+                        dimon_chunks.append(dimon_agg)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Agregação Dimon falhou (Gold segue normal): %s", exc)
             prepared = _prepare_for_stage(frame)
             for start in range(0, len(prepared), 100_000):
                 chunk = prepared.iloc[start:start + 100_000]
@@ -1686,12 +1751,55 @@ def _reprocess_destination_sync(
                 iceberg.cleanup_staged_table(temp_name)
             raise stage_err
 
+        # ── Dimon agregada (só MODELO FOCUS): publica a pré-agregação mensal
+        # gerada dos frames em memória. Se falhar, reconstrói da Gold (fallback)
+        # para manter consistência; a Gold já publicada permanece a fonte da
+        # verdade e o erro fica auditável no resultado da tarefa.
+        dimon_rows = 0
+        dimon_error = None
+        if enable_dimon:
+            try:
+                dimon_rows = dimon_builder.publish_dimons(dimon_chunks)
+                status["dimon_rows"] = dimon_rows
+                status["dimon_table"] = dimon_builder.DIMON_TABLE
+                status["current_blob"] = (
+                    f"Concluido: {total_written} linhas na Gold, "
+                    f"{dimon_rows:,} linhas na Dimon ({dimon_builder.DIMON_TABLE})"
+                )
+                _append_reprocess_log(
+                    task_id,
+                    f"Dimon publicada: {dimon_rows:,} linhas agregadas",
+                    details={"dimon_table": dimon_builder.DIMON_TABLE, "dimon_rows": dimon_rows},
+                )
+            except Exception as exc:  # noqa: BLE001
+                dimon_error = str(exc)
+                try:
+                    dimon_rows = dimon_builder.rebuild_dimons_from_gold()
+                    dimon_error = None
+                    status["dimon_rows"] = dimon_rows
+                    status["dimon_table"] = dimon_builder.DIMON_TABLE
+                    _append_reprocess_log(
+                        task_id,
+                        f"Dimon reconstruída da Gold (fallback): {dimon_rows:,} linhas",
+                        details={"dimon_table": dimon_builder.DIMON_TABLE, "dimon_rows": dimon_rows},
+                    )
+                except Exception as exc2:  # noqa: BLE001
+                    dimon_error = f"{dimon_error} | rebuild: {exc2}"
+                    status["dimon_error"] = dimon_error
+                    status["dimon_rows"] = 0
+                    _append_reprocess_log(task_id, f"Dimon falhou: {dimon_error}", level="ERROR")
+            _sync_db()
+
         status["status"] = "COMPLETED"
         status["rows_destination"] = total_written
-        status["current_blob"] = f"Concluido: {total_written} linhas, {len(all_blobs)} blobs processados"
+        if not status.get("current_blob"):
+            status["current_blob"] = f"Concluido: {total_written} linhas, {len(all_blobs)} blobs processados"
         _sync_db()
         _append_reprocess_log(task_id, "Reprocessamento concluído e Gold publicada", details={"rows_written": total_written, "blobs_processed": len(all_blobs), "table": dest_info.name})
-        return {"success": True, "rows_written": total_written, "table": dest_info.name}
+        return {"success": True, "rows_written": total_written, "table": dest_info.name,
+                "dimon_table": dimon_builder.DIMON_TABLE if enable_dimon else None,
+                "dimon_rows": dimon_rows if enable_dimon else None,
+                "dimon_error": dimon_error}
 
     except Exception as e:
         import traceback

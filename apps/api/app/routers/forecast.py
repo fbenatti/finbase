@@ -904,12 +904,17 @@ async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession
     series_dims = [field for field in snapshot.get("dimensions", []) if field in schema]
     measure, date_col = snapshot["measure_column"], snapshot["date_column"]
     period_col = snapshot.get("period_column")
-    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    date_expr = gold_date_expr(date_col, period_col)
+    actual_source, dimon_date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
+    # Dimon já resolve date_expr/type_filter (sem chargeperiodstart); a Gold
+    # legada usa date_col original e o filtro com prefixo WHERE.
+    if "dest_dm_cost_" in actual_source:
+        date_expr = dimon_date_expr
+    else:
+        date_expr = gold_date_expr(date_col, period_col)
+        type_col = snapshot.get("type_column")
+        type_filter = f" WHERE ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
     actual_dims = ", ".join(_qi(field) for field in series_dims)
     actual_group = (actual_dims + ", ") if actual_dims else ""
-    type_col = snapshot.get("type_column")
-    type_filter = f" WHERE ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
     # Union forecast with realized aggregates, then aggregate again at the
     # requested Pivot axes.  This prevents join/null mismatch errors.
     f_dims = ", ".join(_qi(field) for field in series_dims)
@@ -990,15 +995,41 @@ def _accuracy_metrics(forecast_value: float | None, actual_value: float | None) 
     }
 
 
+def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, str | None, str]:
+    """Resolve the 'actual' side of forecast accuracy.
+
+    Reads the pre-aggregated Dimon (dest_dm_cost_*) instead of the 31M-row
+    Gold when the snapshot targets the FOCUS table: the Dimon carries the
+    same tipo/realizado grain at a fraction of the scan cost.
+    Returns (actual_source, date_expr, measure, type_col, type_filter).
+    """
+    dest = str(snapshot.get("destination_physical_name") or "")
+    dimon = "dest_dm_cost_visao_completa"
+    if dest.replace("-", "_").replace(".", "_").lower() == "dest_modelo_focus":
+        actual_source = f"iceberg.dimon.{dimon}"
+        # Dimon não tem chargeperiodstart: o mês vive em _billing_period /
+        # period (YYYYMM). O date_expr precisa derivar da própria coluna de
+        # período, senão a query referencia uma coluna inexistente.
+        period_col = snapshot.get("period_column") or "_billing_period"
+        date_expr = gold_date_expr(period_col, period_col)
+        measure = snapshot.get("measure_column") or "realizado"
+        type_col = "tipo"
+        # Dimon only stores tipo='realizado' rows for realized facts.
+        type_filter = " AND lower(CAST(\"tipo\" AS VARCHAR)) = 'realizado'"
+        return actual_source, date_expr, measure, type_col, type_filter
+    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{dest}"
+    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
+    measure = snapshot.get("measure_column") or "realizado"
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    return actual_source, date_expr, measure, type_col, type_filter
+
+
 def _accuracy_snapshot_context(run: ForecastRun, snapshot: dict[str, Any], schema: dict[str, str]) -> tuple[str, str, str, str, str | None, str]:
     """Return (result_table, actual_source, date_expr, measure, type_col, type_filter)."""
     if not snapshot.get("destination_physical_name") or not snapshot.get("measure_column") or not snapshot.get("date_column"):
         raise HTTPException(422, "Snapshot sem contrato congelado; acurácia não disponível")
-    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
-    measure = snapshot["measure_column"]
-    type_col = snapshot.get("type_column")
-    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     return run.result_table, actual_source, date_expr, measure, type_col, type_filter
 
 
@@ -1082,11 +1113,7 @@ async def _accuracy_batch_totals(
     snapshot = dict(pairs[0][0].config_snapshot or {})
     if not snapshot.get("destination_physical_name") or not snapshot.get("measure_column"):
         raise HTTPException(422, "Snapshot sem contrato congelado; acurácia não disponível")
-    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
-    measure = snapshot["measure_column"]
-    type_col = snapshot.get("type_column")
-    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     scope_filter = _department_scope_filter(department)
     mode_filter = _accuracy_mode_filter(mode)
     periods = sorted({target for _, target in pairs})
@@ -1472,11 +1499,7 @@ async def _desvios_grain(
     cached = _desvios_grain_cache.get(cache_key)
     if cached is not None and datetime.utcnow().timestamp() - cached[0] < _DESVIOS_GRAIN_TTL:
         return cached[1]
-    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
-    measure = snapshot["measure_column"]
-    type_col = snapshot.get("type_column")
-    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     period_col = snapshot.get("period_column")
     actual_month = (
         f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
@@ -1543,11 +1566,7 @@ async def _desvios_subcat_grain(
     cached = _desvios_grain_cache.get(cache_key)
     if cached is not None and datetime.utcnow().timestamp() - cached[0] < _DESVIOS_GRAIN_TTL:
         return cached[1]
-    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
-    measure = snapshot["measure_column"]
-    type_col = snapshot.get("type_column")
-    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     period_col = snapshot.get("period_column")
     actual_month = (
         f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
@@ -1715,11 +1734,7 @@ async def accuracy_delta_series(
     year, month = int(target[:4]), int(target[4:6])
     days_in_month = calendar.monthrange(year, month)[1]
 
-    actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{snapshot['destination_physical_name']}"
-    date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
-    measure = snapshot["measure_column"]
-    type_col = snapshot.get("type_column")
-    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     period_col = snapshot.get("period_column")
     actual_month = (
         f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
@@ -1800,34 +1815,62 @@ async def accuracy_delta_series(
 
 
 class AckIn(BaseModel):
-    run_id: int
+    run_id: int | None = None
     target_month: str | None = None
     department: str
     category: str
     reason: str
+    registered_at: str | None = None
 
 
 @router.post("/accuracy/acks", status_code=201)
 async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
-    """Registra o motivo do desvio (Ack) de um departamento do último nível."""
-    run = await db.get(ForecastRun, body.run_id)
-    if not run:
-        raise HTTPException(404, "Execução não encontrada")
-    snapshot = dict(run.config_snapshot or {})
-    target = body.target_month or (snapshot.get("simulated_as_of") and _month_after(date.fromisoformat(str(snapshot["simulated_as_of"]))))
-    if not target:
-        raise HTTPException(422, "target_month obrigatório")
+    """Registra o motivo do desvio (Ack) de um departamento.
+
+    O cadastro livre (sem ``run_id``) aceita uma ``registered_at`` (data de
+    referência, inclusive futura) e deriva o ``target_month`` dela — o mês
+    segue a mesma regra do mês realizado (YYYYMM).  Sem run simulado não há
+    snapshot congelado, então projetado/realizado ficam zerados até o mês
+    existir."""
     leaf = [part.strip() for part in body.department.split(">") if part.strip()]
     if not leaf:
         raise HTTPException(422, "Informe o departamento (caminho do último nível)")
-    forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, leaf)
-    forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
-    metrics = _desvio_metrics(forecast, actual)
+
+    registered_date: date | None = None
+    if body.registered_at:
+        try:
+            registered_date = date.fromisoformat(str(body.registered_at)[:10])
+        except ValueError:
+            raise HTTPException(422, "registered_at deve ser uma data ISO (YYYY-MM-DD)")
+        if not body.target_month:
+            body.target_month = f"{registered_date.year:04d}{registered_date.month:02d}"
+
+    forecast = 0.0
+    actual = 0.0
+    metrics = _accuracy_metrics(0.0, 0.0)
+    run: ForecastRun | None = None
+    if body.run_id is not None:
+        run = await db.get(ForecastRun, body.run_id)
+        if not run:
+            raise HTTPException(404, "Execução não encontrada")
+        snapshot = dict(run.config_snapshot or {})
+        target = body.target_month or (snapshot.get("simulated_as_of") and _month_after(date.fromisoformat(str(snapshot["simulated_as_of"]))))
+        if not target:
+            raise HTTPException(422, "target_month obrigatório")
+        body.target_month = target
+        forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, leaf)
+        forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
+        metrics = _desvio_metrics(forecast, actual)
+
+    if not body.target_month:
+        raise HTTPException(422, "Informe o target_month ou a registered_at")
+
     row = ForecastAck(
-        run_id=run.id, target_month=target, department_path=leaf,
+        run_id=body.run_id, target_month=body.target_month, department_path=leaf,
         department_name=leaf[-1], forecast_value=forecast, actual_value=actual,
         variance=metrics["variance"], accuracy=metrics["accuracy"],
         category=body.category.strip() or "Outro", reason=body.reason.strip(),
+        registered_at=registered_date,
     )
     db.add(row)
     await db.commit()
@@ -1840,11 +1883,14 @@ async def list_acks(
     target_month: str | None = None,
     department: str | None = None,
     config_id: int | None = None,
+    active: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(ForecastAck).order_by(ForecastAck.created_at.desc())
     if target_month:
         stmt = stmt.where(ForecastAck.target_month == target_month)
+    if active is not None:
+        stmt = stmt.where(ForecastAck.active == active)
     rows = (await db.execute(stmt.limit(500))).scalars().all()
     # ``department`` é o escopo (caminho) selecionado: filtra por prefixo para
     # acompanhar o drill-down (diretória inclui os projetos abaixo dela).
@@ -1897,6 +1943,31 @@ async def update_ack(ack_id: int, body: AckUpdateIn, db: AsyncSession = Depends(
     return out
 
 
+@router.post("/accuracy/acks/{ack_id}/deactivate")
+async def deactivate_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
+    """Desativa (soft-delete) um Ack: deixa de aparecer nos widgets/dashboards
+    sem perder o registro nem o histórico de edições."""
+    row = await db.get(ForecastAck, ack_id)
+    if not row:
+        raise HTTPException(404, "Ack não encontrado")
+    row.active = False
+    await db.commit()
+    await db.refresh(row)
+    return _out(row)
+
+
+@router.post("/accuracy/acks/{ack_id}/activate")
+async def activate_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
+    """Reativa um Ack desativado."""
+    row = await db.get(ForecastAck, ack_id)
+    if not row:
+        raise HTTPException(404, "Ack não encontrado")
+    row.active = True
+    await db.commit()
+    await db.refresh(row)
+    return _out(row)
+
+
 @router.delete("/accuracy/acks/{ack_id}", status_code=204)
 async def delete_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastAck, ack_id)
@@ -1930,11 +2001,47 @@ class AccuracyReprocessIn(BaseModel):
     months: list[str] = []
 
 
+def _previous_month(month: str) -> str:
+    """Return the YYYYMM immediately before a valid YYYYMM value."""
+    year, number = int(month[:4]), int(month[4:])
+    if number == 1:
+        return f"{year - 1:04d}12"
+    return f"{year:04d}{number - 1:02d}"
+
+
+async def _accuracy_eligible_months(config: ForecastConfig, dest: DestinationTable) -> set[str]:
+    """Months that have both the actual to compare and the prior-month
+    history required by the simulated forecast cutoff (D-2)."""
+    safe_name = dest.physical_name.replace('"', '""')
+    period_col = config.period_column or "_billing_period"
+    type_filter = (
+        f"({_qi(config.type_column)} = 'realizado' OR {_qi(config.type_column)} IS NULL)"
+        if config.type_column else "TRUE"
+    )
+    records = await trino_execute(
+        f"SELECT DISTINCT CAST({_qi(period_col)} AS VARCHAR) AS period "
+        f"FROM iceberg.gold.\"{safe_name}\" "
+        f"WHERE {type_filter} AND CAST({_qi(period_col)} AS VARCHAR) <> ''",
+        timeout_s=90,
+    )
+    actual_months = {
+        str(record.get("period") or "") for record in records
+        if len(str(record.get("period") or "")) == 6
+        and str(record.get("period")).isdigit()
+        and 1 <= int(str(record.get("period"))[4:]) <= 12
+    }
+    # A forecast for MM is produced with data available through the end of
+    # MM-1.  Without that prior realized month, regenerating it would fail.
+    return {month for month in actual_months if _previous_month(month) in actual_months}
+
+
 @router.get("/accuracy/available-months")
 async def accuracy_available_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
-    """Períodos com dados na Gold para a configuração — os meses que podem ser
-    simulados (nunca chumbado: quando setembro/2026 tiver dados, aparece aqui).
-    Lê apenas o metadata de partição (rápido) e une com os meses já simulados."""
+    """Months eligible for accuracy reprocessing.
+
+    Each month must have realized values to compare and realized data in the
+    preceding month, which is the data available at the simulated D-2 cutoff.
+    """
     if config_id:
         config = await db.get(ForecastConfig, config_id)
         if not config:
@@ -1945,34 +2052,12 @@ async def accuracy_available_months(config_id: int | None = None, db: AsyncSessi
         dest = None
     months: set[str] = set()
     if dest:
-        safe_name = dest.physical_name.replace('"', '""')
-        period_col = config.period_column or "_billing_period"
         try:
-            records = await trino_execute(
-                f"SELECT DISTINCT CAST({_qi(period_col)} AS VARCHAR) AS period "
-                f"FROM iceberg.gold.\"{safe_name}\" WHERE CAST({_qi(period_col)} AS VARCHAR) <> ''",
-                timeout_s=90,
-            )
-            months.update(
-                str(r.get("period") or "") for r in records
-                if len(str(r.get("period") or "")) == 6 and str(r.get("period")).isdigit()
-            )
+            months = await _accuracy_eligible_months(config, dest)
         except Exception:
-            # Gold indisponível: os simulados existentes ainda definem o que é possível.
-            pass
-    stmt = select(ForecastRun).where(
-        ForecastRun.status == "COMPLETED",
-        ForecastRun.config_snapshot["simulated_as_of"].as_string() != "",
-    )
-    if config_id:
-        stmt = stmt.where(ForecastRun.forecast_config_id == config_id)
-    for run in (await db.execute(stmt)).scalars().all():
-        raw = (run.config_snapshot or {}).get("simulated_as_of")
-        if raw:
-            try:
-                months.add(_month_after(date.fromisoformat(str(raw))))
-            except ValueError:
-                continue
+            # Do not expose a stale simulated month when Gold cannot confirm
+            # the actual and the prior-cutoff history.
+            months = set()
     return {"months": sorted(months)}
 
 
@@ -1987,6 +2072,20 @@ async def accuracy_reprocess(body: AccuracyReprocessIn, db: AsyncSession = Depen
     months = sorted({str(m) for m in body.months if len(str(m)) == 6 and str(m).isdigit()})
     if not months:
         raise HTTPException(422, "Informe ao menos um mês no formato YYYYMM")
+    dest = await db.get(DestinationTable, config.destination_table_id) if config.destination_table_id else None
+    if not dest:
+        raise HTTPException(422, "Tabela de destino da configuração não encontrada")
+    try:
+        eligible_months = await _accuracy_eligible_months(config, dest)
+    except Exception as exc:
+        raise HTTPException(503, f"Não foi possível validar os meses elegíveis na Gold: {exc}")
+    unavailable = sorted(set(months) - eligible_months)
+    if unavailable:
+        raise HTTPException(
+            422,
+            "Meses sem realizado no próprio mês ou no mês anterior (cutoff do forecast): "
+            + ", ".join(unavailable),
+        )
     heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
     pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
     try:

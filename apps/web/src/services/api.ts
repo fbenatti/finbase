@@ -91,7 +91,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "databricks"]);
 
 export function formatApiError(error: unknown, fallback = "Request failed"): string {
   if (axios.isAxiosError(error)) {
@@ -296,6 +296,17 @@ export async function deleteConnection(id: number): Promise<void> {
 // Scan & ETL
 export async function scanBlobs(connectionId: number): Promise<BlobScanResult> {
   const { data } = await api.post(`/etl/connections/${connectionId}/scan`);
+  return data;
+}
+
+/** Raw source preview (header + sample rows). Currently Databricks only. */
+export interface SourcePreview {
+  columns: string[];
+  rows: Record<string, unknown>[];
+}
+
+export async function getSourcePreview(connectionId: number, limit = 20): Promise<SourcePreview> {
+  const { data } = await api.get(`/etl/connections/${connectionId}/preview`, { params: { limit } });
   return data;
 }
 
@@ -1037,7 +1048,7 @@ export interface ForecastDesvioSubcat { subcategory: string; forecast_value: num
 export interface ForecastAck {
   id: number; run_id: number | null; target_month: string; department_path: string[]; department_name: string;
   forecast_value: number; actual_value: number; variance: number; accuracy?: number | null;
-  category: string; reason: string; created_at: string;
+  category: string; reason: string; registered_at?: string | null; active?: boolean; created_at: string;
   history?: Array<{ id: number; category: string; reason: string; changed_at: string }>;
 }
 export async function getForecastAccuracyDesvios(runId: number, targetMonth?: string, department?: string): Promise<ForecastDesvios> {
@@ -1048,7 +1059,7 @@ export async function getForecastAccuracyDesviosSubcategories(runId: number, tar
   const { data } = await api.get("/forecast/accuracy/desvios/subcategories", { params: { run_id: runId, target_month: targetMonth, department, scope }, timeout: 45000 });
   return data;
 }
-export async function createForecastAck(body: { run_id: number; target_month: string; department: string; category: string; reason: string }): Promise<ForecastAck> {
+export async function createForecastAck(body: { run_id?: number | null; target_month?: string; department: string; category: string; reason: string; registered_at?: string }): Promise<ForecastAck> {
   const { data } = await api.post("/forecast/accuracy/acks", body);
   return data;
 }
@@ -1056,8 +1067,16 @@ export async function updateForecastAck(ackId: number, body: { category: string;
   const { data } = await api.put(`/forecast/accuracy/acks/${ackId}`, body);
   return data;
 }
-export async function getForecastAcks(targetMonth?: string, department?: string): Promise<{ items: ForecastAck[] }> {
-  const { data } = await api.get("/forecast/accuracy/acks", { params: { target_month: targetMonth, department } });
+export async function getForecastAcks(targetMonth?: string, department?: string, active?: boolean): Promise<{ items: ForecastAck[] }> {
+  const { data } = await api.get("/forecast/accuracy/acks", { params: { target_month: targetMonth, department, active } });
+  return data;
+}
+export async function deactivateForecastAck(ackId: number): Promise<ForecastAck> {
+  const { data } = await api.post(`/forecast/accuracy/acks/${ackId}/deactivate`);
+  return data;
+}
+export async function activateForecastAck(ackId: number): Promise<ForecastAck> {
+  const { data } = await api.post(`/forecast/accuracy/acks/${ackId}/activate`);
   return data;
 }
 export async function deleteForecastAck(ackId: number): Promise<void> { await api.delete(`/forecast/accuracy/acks/${ackId}`); }
@@ -1284,6 +1303,7 @@ export interface TrinoTableList {
   bronze: string[];
   silver: string[];
   gold: string[];
+  dimon: string[];
 }
 
 export interface TrinoQueryResult {
@@ -1802,202 +1822,150 @@ export async function getAIDashboardUser(
   return postAIDashboard("user", body, signal);
 }
 
-// ── AI Cost Origin ──
-export interface AICostLinkSource {
+// ── Dimon (pre-aggregated cost mart) ──
+export interface DimonRuleSource {
   id?: number;
-  connection_id?: number | null;
+  gold_table?: string | null;
+  gold_tables?: string[];
   filter_json: Array<{ column: string; operator: string; values: string[] }>;
   value_column: string;
   percent: number;
 }
 
-export interface AICostLink {
+export interface DimonRule {
   id?: number;
+  code: string;
   name: string;
-  provider: string;
-  tool_connection_ids?: number[];
-  product_name: string;
-  target_type?: "license_pool" | "ptu_pool" | "payg_ai";
-  operational_connection_id?: number | null;
-  project_key?: string | null;
-  purchase_mode?: string | null;
-  deployment_type?: string | null;
-  cost_component?: string | null;
-  allocation_level?: string | null;
-  license_sku?: string | null;
-  valid_from?: string | null;
-  valid_until?: string | null;
+  description?: string | null;
   active?: boolean;
-  distribution_enabled?: boolean;
-  distribution_basis?: string | null;
-  distribution_user_key?: "email" | "login" | null;
-  unit_cost?: number | null;  // R$/licença/mês — custo unitário manual (ex.: Claude)
+  dimensions?: string[];
+  measure_columns?: string[];
   materialization_table?: string | null;
-  materialization_status?: "PENDING" | "UPDATED" | "EMPTY" | "FAILED" | string | null;
+  materialization_status?: "PENDING" | "UPDATED" | "EMPTY" | "ERROR" | string | null;
   materialization_rows?: number | null;
   materialized_at?: string | null;
   materialization_error?: string | null;
-  sources?: AICostLinkSource[];
+  sources?: DimonRuleSource[];
 }
 
-export interface AIUnlinkedLicense {
-  provider: string;
-  product_name: string;
-  license_sku?: string | null;
-  billing_period?: string;
-  license_count: number;
-  has_link: boolean;
+export interface GoldTable { id: number; name: string; physical_name: string }
+
+export interface DimonHistoryItem {
+  id: number;
+  status: string;
+  phase?: string;
+  rows_destination?: number;
+  errors?: string[];
+  result_json?: { failed?: Array<{ rule_id: number; code?: string; error?: string }> };
 }
 
-function mapLinkSources(sources: AICostLinkSource[] = []) {
-  return sources.map(source => ({
-    connection_id: source.connection_id ?? null,
-    filter_json: source.filter_json,
-    value_column: source.value_column,
-    percent: source.percent,
-  }));
+export async function getDimonRules(): Promise<DimonRule[]> {
+  const { data } = await api.get("/dimon/rules");
+  return data;
 }
 
-/** Normaliza o filter_json que vem do backend como {conditions:[...]} para um array plano. */
-function normalizeFilterJson(raw: unknown): Array<{ column: string; operator: string; values: string[] }> {
-  if (Array.isArray(raw)) return raw as Array<{ column: string; operator: string; values: string[] }>;
-  if (raw && typeof raw === "object" && "conditions" in raw) {
-    const conds = (raw as { conditions: unknown }).conditions;
-    if (Array.isArray(conds)) return conds as Array<{ column: string; operator: string; values: string[] }>;
-  }
-  return [{ column: "ServiceName", operator: "CONTAINS", values: [""] }];
-}
-
-/** Normaliza os sources recebidos do backend para o formato esperado pelo frontend. */
-function normalizeSources(sources: AICostLinkSource[] = []): AICostLinkSource[] {
-  return sources.map(s => ({
-    ...s,
-    filter_json: normalizeFilterJson(s.filter_json),
-  }));
-}
-
-export async function getAICostLinks(): Promise<AICostLink[]> {
-  const { data } = await api.get("/ai-cost-origin/links");
-  return (data as AICostLink[]).map(link => ({
-    ...link,
-    sources: normalizeSources(link.sources),
-  }));
-}
-
-export async function saveAICostLink(link: Partial<AICostLink>): Promise<AICostLink> {
+export async function saveDimonRule(rule: Partial<DimonRule>): Promise<DimonRule> {
   const body = {
-    name: link.name,
-    provider: link.provider,
-    tool_connection_ids: link.tool_connection_ids ?? [],
-    product_name: link.product_name,
-    target_type: link.target_type ?? "license_pool",
-    operational_connection_id: link.operational_connection_id ?? null,
-    project_key: link.project_key ?? null,
-    purchase_mode: link.purchase_mode ?? null,
-    deployment_type: link.deployment_type ?? null,
-    cost_component: link.cost_component ?? null,
-    allocation_level: link.allocation_level ?? null,
-    license_sku: link.license_sku,
-    valid_from: link.valid_from,
-    valid_until: link.valid_until,
-    active: link.active ?? true,
-    distribution_enabled: link.distribution_enabled ?? false,
-    distribution_basis: link.distribution_basis,
-    distribution_user_key: link.distribution_user_key,
-    unit_cost: link.unit_cost ?? null,
-    sources: mapLinkSources(link.sources),
+    code: rule.code,
+    name: rule.name,
+    description: rule.description ?? null,
+    active: rule.active ?? true,
+    dimensions: rule.dimensions ?? [],
+    measure_columns: rule.measure_columns ?? [],
+    sources: (rule.sources || []).map(s => {
+      const golds = (s.gold_tables && s.gold_tables.length ? s.gold_tables : (s.gold_table ? [s.gold_table] : []));
+      return {
+        gold_tables: golds,
+        gold_table: golds[0] || null,
+        filter_json: Array.isArray(s.filter_json) ? { conditions: s.filter_json } : s.filter_json,
+        value_column: s.value_column,
+        percent: s.percent ?? 100,
+      };
+    }),
   };
-  if (link.id) {
-    const { data } = await api.put(`/ai-cost-origin/links/${link.id}`, body);
-    return { ...data, sources: normalizeSources(data.sources) };
+  if (rule.id) {
+    const { data } = await api.put(`/dimon/rules/${rule.id}`, body);
+    return data;
   }
-  const { data } = await api.post("/ai-cost-origin/links", body);
-  return { ...data, sources: normalizeSources(data.sources) };
-}
-
-export async function getAIUnlinkedLicenses(period?: string): Promise<AIUnlinkedLicense[]> {
-  const { data } = await api.get("/ai-cost-origin/unlinked", { params: period ? { billing_period: period } : undefined });
-  return [...(data.unlinked || []), ...(data.linked || [])].map((item: AIUnlinkedLicense & { has_link?: boolean }) => ({
-    ...item,
-    has_link: item.has_link ?? false,
-  }));
-}
-
-export async function previewAICostFilter(body: {
-  period: string;
-  sources: AICostLinkSource[];
-}): Promise<{ matched_rows: number; total_value: number }> {
-  let matched_rows = 0;
-  let total_value = 0;
-  for (const source of body.sources) {
-    const filter_json = source.filter_json?.length ? { conditions: source.filter_json } : {};
-    const { data } = await api.post("/ai-cost-origin/preview", {
-      billing_period: body.period,
-      filter_json,
-      value_column: source.value_column,
-      connection_id: source.connection_id,
-      percent: source.percent,
-    });
-    matched_rows += Number(data.matched_rows || 0);
-    total_value += Number(data.total_value || 0);
-  }
-  return { matched_rows, total_value };
-}
-
-export async function previewAIManualEntry(body: {
-  provider: string;
-  product_name: string;
-  period: string;
-  unit_cost: number;
-  license_sku?: string;
-}): Promise<{ active_license_count: number; total_cost: number }> {
-  const { data } = await api.post("/ai-cost-origin/manual-entry/preview", {
-    provider: body.provider,
-    product_name: body.product_name,
-    billing_period: body.period,
-    unit_price: body.unit_cost,
-    license_sku: body.license_sku,
-  });
-  return {
-    active_license_count: data.active_license_count,
-    total_cost: data.total_cost,
-  };
-}
-
-export interface AICostPtuPreview {
-  focus: { matched_rows: number; realized_cost: number; meters: string[] };
-  operational: { deployments: number | null; ptus: number | null; tokens: number | null; utilization_avg: number | null };
-  reconciliation: {
-    status: string;
-    financial_cost: number;
-    operational_ptus: number | null;
-    operational_utilization_avg: number | null;
-    difference_ptus: number | null;
-    conflicts: string[];
-  };
-  pool_allocations: Array<{ project_key?: string; deployment_key?: string; allocated_amount: number; allocation_basis: string }>;
-}
-
-export async function previewAICostPtu(body: {
-  period: string;
-  sources: AICostLinkSource[];
-  project_key?: string;
-  purchase_mode?: string;
-  deployment_type?: string;
-  operational_ptus?: number;
-}): Promise<AICostPtuPreview> {
-  const { data } = await api.post("/ai-cost-origin/preview-ptu", {
-    billing_period: body.period,
-    sources: mapLinkSources(body.sources),
-    project_key: body.project_key,
-    purchase_mode: body.purchase_mode,
-    deployment_type: body.deployment_type,
-    operational_ptus: body.operational_ptus,
-  });
+  const { data } = await api.post("/dimon/rules", body);
   return data;
 }
 
-export async function getAICostPtuConflicts(): Promise<{ conflicts: Array<{ link_id: number; name: string; project_key?: string; conflicts: string[]; meters: string[] }>; count: number }> {
-  const { data } = await api.get("/ai-cost-origin/ptu-conflicts");
+export async function getDimonGoldTables(): Promise<GoldTable[]> {
+  const { data } = await api.get("/dimon/gold-tables");
+  return data.tables || [];
+}
+
+export async function deleteDimonRule(ruleId: number): Promise<void> {
+  await api.delete("/dimon/rules/" + ruleId);
+}
+
+export async function deleteDimonTable(tableName: string): Promise<void> {
+  await api.delete("/dimon/tables/" + encodeURIComponent(tableName));
+}
+
+export async function reprocessDimons(ruleIds: number[] = []): Promise<{ task_id: number; status: string; message: string; rules: number }> {
+  const { data } = await api.post("/dimon/reprocess", { rule_ids: ruleIds });
   return data;
 }
+
+export async function getDimonHistory(): Promise<DimonHistoryItem[]> {
+  const { data } = await api.get("/dimon/history");
+  return data;
+}
+
+// ── Dimon — leitura para dashboards (tabelas dest_dm_cost_*) ──
+export interface DimonQueryMeasure {
+  column: string;
+  aggregation?: "SUM" | "COUNT";
+}
+
+export interface DimonQueryFilter {
+  column: string;
+  operator?: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS";
+  values: (string | number)[];
+}
+
+export interface DimonQueryResult {
+  table: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+}
+
+export interface DimonInfo {
+  table: string;
+  row_count: number;
+  period_count: number;
+  periods: string[];
+  columns: Array<{ name: string; type: string }>;
+  dimensions: string[];
+  measures: string[];
+}
+
+export async function queryDimonTable(body: {
+  table: string;
+  rows?: string[];
+  measures?: DimonQueryMeasure[];
+  filters?: DimonQueryFilter[];
+  row_limit?: number;
+  sort_column?: string | null;
+  sort_direction?: "asc" | "desc";
+}): Promise<DimonQueryResult> {
+  const { data } = await api.post("/dimon/query", body, { timeout: 180000 });
+  return data;
+}
+
+export async function getDimonInfo(table: string): Promise<DimonInfo> {
+  const { data } = await api.get("/dimon/info", { params: { table } });
+  return data;
+}
+
+
+export interface DimonGoldColumn { name: string; type: string }
+
+export async function getDimonGoldSchema(goldTable: string): Promise<DimonGoldColumn[]> {
+  const { data } = await api.get("/dimon/gold-schema", { params: { gold_table: goldTable } });
+  return data.columns || [];
+}
+

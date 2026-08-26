@@ -29,6 +29,7 @@ const CONNECTOR_TYPES = [
   { value: "gemini_token", label: "Gemini Tokens", scope: "gemini" },
   { value: "claude_license", label: "Claude Licenças (Enterprise)", scope: "claude" },
   { value: "claude_token", label: "Claude Tokens (Enterprise)", scope: "claude" },
+  { value: "databricks", label: "Databricks (SQL Warehouse)", scope: "databricks" },
 ];
 
 // Categorias da página de Conexões.
@@ -50,6 +51,7 @@ function categoryOfConnection(connection: { connector_type: string; cloud_scope?
   if (connection.connector_type === "mongodb_atlas" || connection.cloud_scope === "atlas") return "marketplace";
   if (
     connection.connector_type === "azure_openai_ptu" ||
+    connection.connector_type === "databricks" ||
     connection.connector_type.startsWith("github_") ||
     connection.connector_type.startsWith("notebooklm_") ||
     connection.connector_type.startsWith("gemini_") ||
@@ -97,6 +99,7 @@ const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: str
   { value: "notebooklm", label: "NotebookLM", description: "Licenças / Tokens", icon: <MenuBook />, color: "#4285F4", category: "ferramenta", tool: "notebooklm" },
   { value: "gemini", label: "Gemini", description: "Licenças / Tokens", icon: <AutoAwesome />, color: "#8E24AA", category: "ferramenta", tool: "gemini" },
   { value: "claude", label: "Claude", description: "Claude.ai / Anthropic", icon: <Psychology />, color: "#D97757", category: "ferramenta", tool: "claude" },
+  { value: "databricks", label: "Databricks", description: "Consumo do Workspace (SQL)", icon: <Storage />, color: "#FF3621", category: "ferramenta" },
   // Marketplace
   { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, color: "#13AA52", category: "marketplace" },
 ];
@@ -122,6 +125,7 @@ const CLOUD_SCOPES = [
   { value: "notebooklm", label: "NotebookLM" },
   { value: "gemini", label: "Google Gemini AI" },
   { value: "claude", label: "Claude (Anthropic)" },
+  { value: "databricks", label: "Databricks" },
   { value: "other", label: "Outra / Desconhecida" },
 ];
 
@@ -139,6 +143,12 @@ const emptyForm = {
   eventhub_namespace: "",
   eventhub_name: "",
   eventhub_consumer_group: "openfinops-azure-ptu",
+  databricks_server_hostname: "",
+  databricks_http_path: "",
+  databricks_table_name: "system.billing.usage",
+  databricks_query: "SELECT * FROM system.billing.usage",
+  databricks_month_column: "usage_date",
+  databricks_token: "",
 };
 
 export default function Connections() {
@@ -455,6 +465,20 @@ export default function Connections() {
         tenant_id: cfg.org_id || "telefonica",
         client_secret: cfg.api_token || cfg.api_key || cfg.client_secret || "",
       });
+    } else if (conn.connector_type === "databricks") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "databricks",
+        cloud_scope: conn.cloud_scope || "databricks",
+        databricks_server_hostname: cfg.server_hostname || "",
+        databricks_http_path: cfg.http_path || "",
+        databricks_table_name: cfg.table_name || "system.billing.usage",
+        databricks_query: cfg.query || "SELECT * FROM system.billing.usage",
+        databricks_month_column: cfg.month_column || "usage_date",
+        databricks_token: "",
+      });
     } else {
       setForm({
         ...emptyForm,
@@ -539,6 +563,14 @@ export default function Connections() {
       if (form.tenant_id) configJson.org_id = form.tenant_id;
       if (form.client_secret) configJson.api_token = form.client_secret;
       configJson.ai_product = "claude_enterprise";
+    } else if (form.connector_type === "databricks") {
+      if (form.databricks_server_hostname) configJson.server_hostname = form.databricks_server_hostname;
+      if (form.databricks_http_path) configJson.http_path = form.databricks_http_path;
+      if (form.databricks_table_name) configJson.table_name = form.databricks_table_name;
+      if (form.databricks_query) configJson.query = form.databricks_query;
+      if (form.databricks_month_column) configJson.month_column = form.databricks_month_column;
+      // Token é write-only e opcional: por padrão o runtime lê de .env-databriks (DATABRICKS_TOKEN).
+      if (form.databricks_token) configJson.token = form.databricks_token;
     }
 
     return {
@@ -554,6 +586,10 @@ export default function Connections() {
 
   const save = async () => {
     try {
+      if (form.connector_type === "databricks" && form.databricks_server_hostname.trim().toLowerCase().startsWith("dapi")) {
+        setError("O token foi preenchido no campo Server Hostname. Server Hostname é o endereço do workspace (ex: adb-7405612109211710.10.azuredatabricks.net). O token vai em .env-databriks (DATABRICKS_TOKEN) ou no campo Access Token.");
+        return;
+      }
       const body = buildConnectionBody();
       if (editing) await updateConnection(editing.id, body);
       else await createConnection(body);
@@ -1153,6 +1189,30 @@ export default function Connections() {
                 <TextField label="API Token / Admin API Key" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Admin API Key com read:members (licenças) e api:admin (consumo/tokens). Sem api:admin a licença funciona e o token falha. O arquivo .env-cloude local não alimenta a conexão — cole aqui e salve." />
+              </>
+            )}
+
+            {form.connector_type === "databricks" && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "#FF3621" }}>Configuração Databricks (SQL Warehouse)</Typography>
+                <TextField label="Server Hostname" value={form.databricks_server_hostname}
+                  onChange={(e) => setForm({ ...form, databricks_server_hostname: e.target.value })}
+                  helperText="Endereço do workspace (NÃO é o token). Ex: adb-7405612109211710.10.azuredatabricks.net" />
+                <TextField label="HTTP Path" value={form.databricks_http_path}
+                  onChange={(e) => setForm({ ...form, databricks_http_path: e.target.value })}
+                  helperText="Ex: /sql/1.0/warehouses/26efc2a4526c691f" />
+                <TextField label="Access Token (opcional)" type="password" value={form.databricks_token}
+                  onChange={(e) => setForm({ ...form, databricks_token: e.target.value })}
+                  helperText="Opcional — token específico desta conexão (write-only). Por padrão usa DATABRICKS_TOKEN do .env-databriks." />
+                <TextField label="Tabela / alias lógico" value={form.databricks_table_name}
+                  onChange={(e) => setForm({ ...form, databricks_table_name: e.target.value })}
+                  helperText="Usado no blob path (ex: system.billing.usage)" />
+                <TextField label="Query de consumo" multiline rows={4} value={form.databricks_query}
+                  onChange={(e) => setForm({ ...form, databricks_query: e.target.value })}
+                  helperText="SQL do consumo do Workspace. Padrão: SELECT * FROM system.billing.usage. Pode apontar para outra tabela/visão (ex: system.billing.list_purchases)." />
+                <TextField label="Coluna de data (mês)" value={form.databricks_month_column}
+                  onChange={(e) => setForm({ ...form, databricks_month_column: e.target.value })}
+                  helperText="Coluna usada para derivar o billing period (padrão: usage_date)" />
               </>
             )}
 

@@ -36,7 +36,6 @@ import {
   Savings as SavingsIcon,
   CloudUpload as CloudUploadIcon,
   SmartToy as SmartToyIcon,
-  FactCheck as AccuracyIcon,
   CalendarMonth as CalendarMonthIcon,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
@@ -79,8 +78,8 @@ const menuGroups = [
       { path: "/pipeline", label: "Pipeline do dado", icon: <AccountTreeIcon /> },
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
       { path: "/expected-view", label: "Visão esperada", icon: <TimelineIcon /> },
-      { path: "/forecast-accuracy", label: "Acurácia de Forecast", icon: <AccuracyIcon /> },
       { path: "/dashboards-ia", label: "Dashboards IA", icon: <SmartToyIcon /> },
+      { path: "/dimon-dashboard", label: "Dashboard FinOps (Dimon)", icon: <BarChartIcon /> },
       { path: "/azure-ptu", label: "Azure PTU", icon: <SmartToyIcon /> },
       { path: "/azure-ptu-ops", label: "PTU Monitoramento", icon: <SmartToyIcon /> },
       { path: "/reservations", label: "Reservas Azure", icon: <CalendarMonthIcon /> },

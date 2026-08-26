@@ -55,6 +55,7 @@ const connectorLabels: Record<string, string> = {
   gemini_license: "Gemini Licenças",
   gemini_token: "Gemini Tokens",
   gemini_notebooklm: "Gemini NotebookLM",
+  databricks: "Databricks (SQL Warehouse)",
 };
 
 const providerLabels: Record<string, string> = {
@@ -69,6 +70,7 @@ const providerLabels: Record<string, string> = {
   notebooklm: "NotebookLM",
   gemini: "Gemini",
   claude: "Claude",
+  databricks: "Databricks",
 };
 
 export function getProviderLabel(scope: string | null): string {
@@ -110,6 +112,8 @@ function getConnectionSummary(connection: SourceConnection): string {
     case "claude_license":
     case "claude_token":
       return [config.org_id, config.org_name].filter(Boolean).join(" · ") || "Org não informada";
+    case "databricks":
+      return [config.server_hostname, config.table_name].filter(Boolean).join(" · ") || "Host não informado";
     default:
       return connection.cloud_name || "Configuração disponível ao editar";
   }

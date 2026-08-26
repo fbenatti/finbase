@@ -127,6 +127,11 @@ def _ensure_namespace(namespace: str) -> None:
     _initialized_namespaces.add(namespace)
 
 
+def ensure_namespace(namespace: str) -> None:
+    """Public wrapper: create an Iceberg namespace if it does not exist."""
+    _ensure_namespace(namespace)
+
+
 def _table_id(namespace: str, table: str) -> tuple:
     """Build a table identifier tuple e.g. ('gold', 'dest_modelo_focus')."""
     return (namespace, table.replace("-", "_").replace(".", "_"))

@@ -9,11 +9,12 @@ import {
 } from "@mui/material";
 import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
 import DesviosTab from "./DesviosTab";
+import AcksRegisteredTab from "./AcksRegisteredTab";
 import {
   Department, ForecastAccuracyMonth, ForecastAccuracyDimensions, ForecastAccuracyDelta, ForecastAccuracyDeltaRow,
-  ForecastAccuracyDeltaSeries, ForecastDesvioSubcat,
+  ForecastAccuracyDeltaSeries, ForecastAck, ForecastDesvioSubcat,
   getDepartments, getForecastAccuracyMonths, getForecastAccuracyDimensions, getForecastAccuracyDelta,
-  getForecastAccuracyDeltaSeries, getForecastAccuracyDesviosSubcategories,
+  getForecastAccuracyDeltaSeries, getForecastAccuracyDesviosSubcategories, getForecastAcks,
 } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
@@ -48,9 +49,9 @@ function KpiCard({ label, value, hint, color }: { label: string; value: string; 
   );
 }
 
-export default function ForecastAccuracy() {
+export default function ForecastAccuracy({ embedded = false }: { embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
-  const [tab, setTabState] = useState(params.get("aba") === "desvios" ? "desvios" : "visao");
+  const [tab, setTabState] = useState(params.get("aba") === "desvios" ? "desvios" : params.get("aba") === "acks" ? "acks" : "visao");
   const [months, setMonths] = useState<ForecastAccuracyMonth[]>([]);
   const [summary, setSummary] = useState<ForecastAccuracyMonth | null>(null);
   const [dimensions, setDimensions] = useState<ForecastAccuracyDimensions | null>(null);
@@ -75,6 +76,8 @@ export default function ForecastAccuracy() {
   const [offenderSubcatLoading, setOffenderSubcatLoading] = useState(false);
   // Dialog com o gráfico acumulado do período para um ServiceSubcategory.
   const [seriesDialog, setSeriesDialog] = useState<{ subcategory: string; data: ForecastAccuracyDeltaSeries | null; loading: boolean; error: string } | null>(null);
+  // Acks (motivos de desvio) do mês selecionado — exibidos no Top 5 ofensores.
+  const [acks, setAcks] = useState<ForecastAck[]>([]);
   const openSeriesDialog = (row: ForecastAccuracyDeltaRow) => {
     if (selectedRun == null) return;
     const subcategory = row.subcategory || row.name;
@@ -107,10 +110,12 @@ export default function ForecastAccuracy() {
     if (dim) next.set("dim", dim); else next.delete("dim");
     setParams(next, { replace: true });
   };
-  const setTab = (next: "visao" | "desvios") => {
+  const setTab = (next: "visao" | "desvios" | "acks") => {
     setTabState(next);
     const url = new URLSearchParams(params);
-    if (next === "desvios") url.set("aba", "desvios"); else url.delete("aba");
+    if (next === "desvios") url.set("aba", "desvios");
+    else if (next === "acks") url.set("aba", "acks");
+    else url.delete("aba");
     setParams(url, { replace: true });
   };
 
@@ -187,6 +192,29 @@ export default function ForecastAccuracy() {
       .finally(() => { if (!cancelled) { setDimsLoading(false); setDeltaLoading(false); } });
     return () => { cancelled = true; };
   }, [selectedRun, selectedMonth, selectedDim, department, tab]);
+
+  // Carrega os Acks do mês selecionado (motivos de desvio) para o Top 5.
+  useEffect(() => {
+    if (!selectedMonth) { setAcks([]); return; }
+    let cancelled = false;
+    getForecastAcks(selectedMonth, department || undefined)
+      .then(result => { if (!cancelled) setAcks(result.items); })
+      .catch(() => { if (!cancelled) setAcks([]); });
+    return () => { cancelled = true; };
+  }, [selectedMonth, department]);
+
+  // Motivos de desvio que se aplicam a uma linha do Top 5: Ack exato no caminho
+  // da linha ou Ack de um descendente (ex.: linha "DIR DADOS..." mostra o Ack do
+  // projeto "Invoice" abaixo dela). Merge direto com os desvios identificados.
+  const acksForRow = (item: ForecastAccuracyDeltaRow): ForecastAck[] => {
+    if (acks.length === 0 || !deltaData) return [];
+    const rowPath = item.path && item.path.length
+      ? item.path.join(" > ")
+      : [deltaData.department, item.name].filter(Boolean).join(" > ");
+    const exact = acks.filter(ack => ack.department_path.join(" > ") === rowPath);
+    const descendants = acks.filter(ack => ack.department_path.join(" > ").startsWith(rowPath + " > "));
+    return [...exact, ...descendants.filter(ack => !exact.includes(ack))];
+  };
 
   const handleMonthChange = (month: string) => {
     const match = months.find(item => item.target_month === month);
@@ -327,11 +355,13 @@ export default function ForecastAccuracy() {
   };
 
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
-      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+    <Box sx={embedded
+      ? { pb: 3 }
+      : { mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider", borderRadius: embedded ? "12px 12px 0 0" : 0 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2, flexWrap: "wrap" }}>
           <Box>
-            <Typography variant="h4">Acurácia de Forecast</Typography>
+            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Acurácia" : "Acurácia de Forecast"}</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
               O que foi projetado no início do mês × o que realmente foi realizado — snapshot imutável no Iceberg por mês simulado.
             </Typography>
@@ -387,9 +417,10 @@ export default function ForecastAccuracy() {
           </Stack>
         </Box>
 
-        <Tabs value={tab} onChange={(_, value) => setTab(value as "visao" | "desvios")} sx={{ mb: 0, minHeight: 42 }} aria-label="Seções da acurácia">
+        <Tabs value={tab} onChange={(_, value) => setTab(value as "visao" | "desvios" | "acks")} sx={{ mb: 0, minHeight: 42 }} aria-label="Seções da acurácia">
           <Tab value="visao" label="Visão" sx={{ minHeight: 42 }} />
           <Tab value="desvios" label="Desvios" sx={{ minHeight: 42 }} />
+          <Tab value="acks" label="Ack Registrados" sx={{ minHeight: 42 }} />
         </Tabs>
 
         {pathParts.length > 0 && (
@@ -411,6 +442,10 @@ export default function ForecastAccuracy() {
         {tab === "desvios" ? (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
             <DesviosTab runId={selectedRun} targetMonth={selectedMonth} department={department} />
+          </Paper>
+        ) : tab === "acks" ? (
+          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+            <AcksRegisteredTab defaultMonth={selectedMonth ? `${selectedMonth.slice(0, 4)}-${selectedMonth.slice(4, 6)}-01` : ""} department={department} />
           </Paper>
         ) : (
         <>
@@ -513,6 +548,7 @@ export default function ForecastAccuracy() {
                           <TableCell align="right">Delta (R$)</TableCell>
                           <TableCell align="right">Delta (%)</TableCell>
                           <TableCell align="right">Acurácia</TableCell>
+                          <TableCell>Ack</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -520,6 +556,7 @@ export default function ForecastAccuracy() {
                           const rowPath = item.path && item.path.length ? item.path.join(" > ") : [deltaData.department, item.name].filter(Boolean).join(" > ");
                           const subcatOpen = offenderSubcatOpen === rowPath;
                           const subcats = offenderSubcats[rowPath];
+                          const rowAcks = acksForRow(item);
                           return (
                             <Fragment key={item.name}>
                               <TableRow
@@ -552,10 +589,27 @@ export default function ForecastAccuracy() {
                                 </TableCell>
                                 <TableCell align="right">{pct(item.variance_pct)}</TableCell>
                                 <TableCell align="right" sx={{ color: accuracyColor(item.accuracy) }}>{pct(item.accuracy)}</TableCell>
+                                <TableCell>
+                                  {rowAcks.length === 0 ? (
+                                    <Typography variant="caption" color="text.disabled">—</Typography>
+                                  ) : (
+                                    <Stack spacing={0.5} sx={{ maxWidth: 360 }}>
+                                      <Chip size="small" color="info" label={`✓ Ack${rowAcks.length > 1 ? ` (${rowAcks.length})` : ""}: ${rowAcks[0].category}`} />
+                                      {rowAcks.slice(0, 3).map(ack => (
+                                        <Typography key={ack.id} variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                          {ack.reason}
+                                        </Typography>
+                                      ))}
+                                      {rowAcks.length > 3 && (
+                                        <Typography variant="caption" color="text.secondary">+{rowAcks.length - 3} acks…</Typography>
+                                      )}
+                                    </Stack>
+                                  )}
+                                </TableCell>
                               </TableRow>
                               {isOffenderLeaf(item) && subcatOpen && (
                                 <TableRow>
-                                  <TableCell colSpan={6} sx={{ bgcolor: "#f8fafc" }}>
+                                  <TableCell colSpan={7} sx={{ bgcolor: "#f8fafc" }}>
                                     {offenderSubcatLoading && !subcats ? (
                                       <LinearProgress sx={{ m: 1 }} />
                                     ) : subcats && subcats.length > 0 ? (

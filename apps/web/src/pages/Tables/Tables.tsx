@@ -3,20 +3,21 @@ import { useSearchParams } from "react-router-dom";
 import Destinations from "../Destinations/Destinations";
 import CloneRules from "../CloneRules/CloneRules";
 import Relationship from "../Relationship/Relationship";
-import AICostOrigin from "../AICostOrigin/AICostOrigin";
+import Dimon from "../Dimon/Dimon";
 
 const TABS = [
   { id: "destinations", label: "Tabelas de destino" },
   { id: "clone-rules", label: "Regras de clonagem" },
   { id: "relationship", label: "Relacionamentos" },
-  { id: "ai-cost-relationship", label: "Relacionamento Origem de Custo IA" },
+  { id: "cost-relationship", label: "Camada Dimon de Custo" },
 ] as const;
 
 export default function Tables() {
   const [params, setParams] = useSearchParams();
-  const activeTab = TABS.some((t) => t.id === params.get("tab"))
-    ? params.get("tab")!
-    : "destinations";
+  // Legacy tab id redirect: ai-cost-relationship -> cost-relationship.
+  const rawTab = params.get("tab");
+  const normalized = rawTab === "ai-cost-relationship" ? "cost-relationship" : rawTab;
+  const activeTab = TABS.some((t) => t.id === normalized) ? normalized! : "destinations";
 
   const setTab = (next: string) => {
     const updated = new URLSearchParams(params);
@@ -67,7 +68,7 @@ export default function Tables() {
           {activeTab === "destinations" && <Destinations embedded />}
           {activeTab === "clone-rules" && <CloneRules embedded />}
           {activeTab === "relationship" && <Relationship embedded />}
-          {activeTab === "ai-cost-relationship" && <AICostOrigin embedded />}
+          {activeTab === "cost-relationship" && <Dimon embedded />}
         </Paper>
       </Box>
     </Box>

@@ -51,6 +51,7 @@ from app.services.azure_ptu_ops import (
     peak_utilization_label,
     weighted_utilization,
 )
+from app.services.azure_ptu_cost import load_dimon_ptu_costs
 from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/azure-ptu", tags=["azure-ptu"])
@@ -1370,6 +1371,16 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
         if effective_grain == "hour" and body.hours > 7 * 24:
             effective_grain = "day"
 
+        # Enriquecimento financeiro via Dimon (compras mensais de PTU e custos
+        # dos projetos). Roda em paralelo com a carga operacional para não
+        # adicionar latência perceptível; nunca derruba o endpoint.
+        cost_task = asyncio.create_task(load_dimon_ptu_costs(
+            date_from=date_from,
+            date_to=date_to,
+            project_keys=body.project_keys or None,
+            cancel_event=cancel,
+        ))
+
         try:
             inventory, metrics, data_source, heatmap = await _load_operational_data(
                 body, db, dashboard_only=True, cancel_event=cancel,
@@ -1429,10 +1440,12 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
         )
         coverage = _build_metrics_coverage(metrics, body.hours)
         metric_availability = metric_field_availability(metrics)
+        costs = await cost_task
 
         response_payload = {
             "period": period,
             "executive_summary": executive_summary,
+            "costs": costs,
             "token_consumption": build_token_consumption(
                 metrics, deployment_stats, token_series, effective_grain,
             ),

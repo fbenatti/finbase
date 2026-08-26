@@ -44,6 +44,7 @@ import EmptyState from "../../components/EmptyState";
 import ForecastConfigsDataGrid from "./ForecastConfigsDataGrid";
 import ForecastRulesDataGrid from "./ForecastRulesDataGrid";
 import ForecastHistoryDataGrid from "./ForecastHistoryDataGrid";
+import ForecastAccuracy from "../ForecastAccuracy/ForecastAccuracy";
 import ForecastConfigDialog from "./ForecastConfigDialog";
 import ForecastRuleDialog from "./ForecastRuleDialog";
 
@@ -307,10 +308,16 @@ export default function Forecast() {
             Projeções de custo sobre as tabelas Gold, com regras de negócio e rateio por intervalo.
           </Typography>
         </Box>
-        <Tabs value={tab} onChange={(_, value: string) => setTab(value)} aria-label="Seções do Forecast" sx={{ mb: 0, minHeight: 42 }}>
+        <Tabs value={tab} onChange={(_, value: string) => {
+          setTab(value);
+          const url = new URLSearchParams(searchParams);
+          url.set("tab", value);
+          navigate(`/forecast?${url.toString()}`, { replace: true });
+        }} aria-label="Seções do Forecast" sx={{ mb: 0, minHeight: 42 }}>
           <Tab value="config" label="Configurações e execução" sx={{ minHeight: 42 }} />
           <Tab value="rules" label="Regras de negócio" sx={{ minHeight: 42 }} />
           <Tab value="history" label="Histórico e resultados" sx={{ minHeight: 42 }} />
+          <Tab value="accuracy" label="Acurácia" sx={{ minHeight: 42 }} />
         </Tabs>
       </Box>
 
@@ -520,6 +527,8 @@ export default function Forecast() {
             )}
           </Paper>
         )}
+
+        {tab === "accuracy" && <ForecastAccuracy embedded />}
       </Box>
     </Box>
 

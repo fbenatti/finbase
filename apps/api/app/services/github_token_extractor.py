@@ -48,6 +48,9 @@ CANONICAL_COLUMNS = (
     "output_tokens",
     "cache_read_tokens",
     "cache_write_tokens",
+    # Franquia mensal de AI Credits do usuário informada pelo relatório financeiro
+    # (total_monthly_quota) — usada para validar a franquia documentada (1.900/3.900).
+    "monthly_quota",
 )
 
 
@@ -196,6 +199,7 @@ class GithubTokenExtractor:
                     "output_tokens": str(row.get("output") or row.get("output_tokens") or ""),
                     "cache_read_tokens": str(row.get("cache_read") or row.get("cache_read_tokens") or ""),
                     "cache_write_tokens": str(row.get("cache_write") or row.get("cache_write_tokens") or ""),
+                    "monthly_quota": str(row.get("total_monthly_quota") or ""),
                 }
             )
         return pd.DataFrame(records).fillna("")
@@ -258,6 +262,7 @@ class GithubTokenExtractor:
                         "output_tokens": cls._metric(item.get("output_tokens")),
                         "cache_read_tokens": cls._metric(item.get("cache_read_tokens")),
                         "cache_write_tokens": cls._metric(item.get("cache_write_tokens")),
+                        "monthly_quota": "",
                     }
                 )
             return records

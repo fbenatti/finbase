@@ -144,21 +144,6 @@ export default function ForecastConfigsDataGrid({
       valueFormatter: (value: unknown) => Number(value || 0) + " meses",
     },
     {
-      field: "rateio",
-      headerName: "Rateio",
-      minWidth: 170,
-      sortable: false,
-      filterable: false,
-      align: "left",
-      headerAlign: "left",
-      valueGetter: (_, row: ForecastConfig) => rateioLabel(row),
-      renderCell: ({ row }: { row: ForecastConfig }) => (
-        <Stack justifyContent="center" sx={{ height: "100%", width: "100%" }}>
-          <Chip label={rateioLabel(row)} size="small" variant="outlined" />
-        </Stack>
-      ),
-    },
-    {
       field: "version",
       headerName: "Versão",
       renderHeader: () => filteredHeader("Versão", "version"),

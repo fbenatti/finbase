@@ -131,7 +131,7 @@ def main():
                 row.phase = "Reenfileirado após reinício do worker"
                 row.finished_at = None
                 continue
-            if row.task_type == "ai_cost_relationship_reprocess":
+            if row.task_type in ("ai_cost_relationship_reprocess", "dimon_reprocess"):
                 row.status = "QUEUED"
                 row.phase = "Reenfileirado após reinício do worker"
                 row.finished_at = None
@@ -165,7 +165,7 @@ def main():
             task = session.execute(
                 select(EtlTask).where(
                     EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "forecast_accuracy", "shared_cost", "ai_cost_relationship_reprocess", "reservation_collection"]),
+                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "forecast_accuracy", "shared_cost", "ai_cost_relationship_reprocess", "dimon_reprocess", "reservation_collection"]),
                 )
                 .order_by(EtlTask.id)
                 .limit(1)
@@ -417,14 +417,14 @@ def main():
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
-                elif task.task_type == "ai_cost_relationship_reprocess":
+                elif task.task_type in ("ai_cost_relationship_reprocess", "dimon_reprocess"):
                     task.status = "RUNNING"
-                    task.phase = "Classificando FOCUS em passagem única para publicar as Gold"
+                    task.phase = "Agregando Golds e publicando as tabelas Dimon"
                     session.commit()
                     session.close()
                     try:
                         import asyncio
-                        from app.services.ai_cost_materialization import materialize_ai_cost_relationships
+                        from app.services.dimon_materialization import materialize_dimons
                         s = SyncSession()
                         task_row = s.get(EtlTask, task_id)
                         def progress(done, total, name):
@@ -434,25 +434,25 @@ def main():
                                 current.total_blobs = total
                                 current.phase = f"Materializando {done}/{total}: {name}"
                                 s.commit()
-                        result = asyncio.run(materialize_ai_cost_relationships(s, run_id=task_id, progress=progress))
+                        rule_ids = list((task_row.result_json or {}).get("rule_ids") or []) if task_row else []
+                        result = asyncio.run(materialize_dimons(s, run_id=task_id, progress=progress, rule_ids=rule_ids or None))
                         task_row = s.get(EtlTask, task_id)
                         if task_row:
                             failed = list(result.get("failed") or [])
                             rows = int(result.get("rows") or 0)
                             if failed and rows == 0 and not result.get("details"):
-                                # Nothing could be published — surface the rule errors.
                                 task_row.status = "FAILED"
-                                task_row.phase = "Nenhuma Gold publicada: " + "; ".join(
-                                    f"{f.get('name', f.get('link_id'))}: {f.get('error', 'erro')}" for f in failed
+                                task_row.phase = "Nenhuma Dimon publicada: " + "; ".join(
+                                    f"{f.get('code', f.get('rule_id'))}: {f.get('error', 'erro')}" for f in failed
                                 )[:160]
                                 task_row.errors = [f.get("error", "") for f in failed]
                             else:
                                 task_row.status = "COMPLETED"
-                                task_row.phase = f"Gold individual publicada: {rows} linhas" + (
+                                task_row.phase = f"Dimon publicada: {rows} linhas" + (
                                     f" · {len(failed)} regra(s) com erro" if failed else ""
                                 )
                                 task_row.rows_destination = rows
-                                task_row.processed_blobs = int(result.get("links") or 0)
+                                task_row.processed_blobs = int(result.get("rules") or 0)
                                 task_row.errors = [f.get("error", "") for f in failed] or None
                             task_row.finished_at = datetime.now(timezone.utc)
                             task_row.result_json = {**(task_row.result_json or {}), **result}
