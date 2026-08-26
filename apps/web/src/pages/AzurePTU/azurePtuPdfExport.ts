@@ -1,7 +1,7 @@
 /** Gera nome sugerido para salvar o PDF (Chrome usa document.title como padrão). */
 export function azurePtuPdfFilename(periodId: string): string {
   const date = new Date().toISOString().slice(0, 10);
-  return `azure-ptu-${periodId}-${date}`;
+  return `visoes-consumo-ia-${periodId}-${date}`;
 }
 
 export type AzurePtuPrintMeta = {

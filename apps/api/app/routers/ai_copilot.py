@@ -283,7 +283,8 @@ async def copilot_financial_insights(
         proj_row = proj_rows[0] if proj_rows else {}
         current_realized_brl = float(proj_row.get("realized_brl") or 0)
         current_forecast_brl = float(proj_row.get("forecast_brl") or 0)
-        current_projection_brl = current_forecast_brl if current_forecast_brl > current_realized_brl else current_realized_brl
+        # Projeção do mês corrente = realizado parcial + forecast do restante.
+        current_projection_brl = current_realized_brl + current_forecast_brl
         for row in github_rows:
             token_total = sum(float(row.get(key) or 0) for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"))
             net = float(row.get("net_amount") or 0)
@@ -520,10 +521,10 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
         inactive_90 = int(l_row.get("inactive_90") or 0)
         potential_savings = float(l_row.get("potential_savings") or (inactive_30 * 39.0 * 5.14))
 
-        # Projeção do mês corrente (realizado parcial + forecast do restante).
+        # Projeção do mês corrente = realizado parcial + forecast do restante.
         current_realized = float(proj_row.get("realized_brl") or 0)
         current_forecast = float(proj_row.get("forecast_brl") or 0)
-        projected_brl = current_forecast if current_forecast > current_realized else current_realized
+        projected_brl = current_realized + current_forecast
 
         high_usage = int(u_row.get("high_usage") or 0)
         low_usage = int(u_row.get("low_usage") or 0)

@@ -54,7 +54,7 @@ from app.services.azure_ptu_ops import (
 from app.services.azure_ptu_cost import load_dimon_ptu_costs
 from app.services.trino_service import execute as trino_execute
 
-router = APIRouter(prefix="/azure-ptu", tags=["azure-ptu"])
+router = APIRouter(prefix="/visoes-consumo-ia", tags=["visoes-consumo-ia"])
 logger = logging.getLogger(__name__)
 
 # The dashboard is read-only and the Gold tables are batch-fed. A short cache

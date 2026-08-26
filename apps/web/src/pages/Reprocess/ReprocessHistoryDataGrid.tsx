@@ -358,6 +358,7 @@ export default function ReprocessHistoryDataGrid({
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
+          localeText={{ noRowsLabel: "Nenhum reprocessamento encontrado." }}
           onPaginationModelChange={onPagination}
           onSortModelChange={onSort}
           onFilterModelChange={onFilter}

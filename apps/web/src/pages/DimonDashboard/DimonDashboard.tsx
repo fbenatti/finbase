@@ -308,10 +308,11 @@ export default function DimonDashboard() {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2} mb={2}>
         <Box>
-          <Typography variant="h4">Dashboard FinOps — Camada Dimon</Typography>
+          <Typography variant="h4">FinOps Intelligence</Typography>
           <Typography color="text.secondary">Cockpit executivo pré-agregado (mensal) · Fonte: <b>{table}</b> · {info ? `${info.row_count.toLocaleString("pt-BR")} linhas agregadas · ${info.period_count} competências` : "carregando…"}</Typography>
           {!availableTables.includes(DEFAULT_TABLE) && (
             <Alert severity="info" sx={{ mt: 1, fontSize: 12 }}>
@@ -329,6 +330,9 @@ export default function DimonDashboard() {
           <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => setRefreshTick(t => t + 1)}>Atualizar</Button>
         </Stack>
       </Stack>
+      </Box>
+      <Box sx={{ p: 3 }}>
+        <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -382,6 +386,8 @@ export default function DimonDashboard() {
       {tab === "investigacao" && <Investigacao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "drilldown" && <Drilldown table={table} filters={filters} filterKey={filterKey} />}
       {tab === "tabela" && <TabelaTab table={table} filters={filters} filterKey={filterKey} exportRows={exportRows} setFilters={setFilters} options={options} periodPreset={periodPreset} applyPreset={applyPreset} />}
+        </Paper>
+      </Box>
     </Box>
   );
 }

@@ -6,20 +6,20 @@ const api = axios.create({
 });
 
 export async function getAzurePtuOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/azure-ptu/dashboard/overview", params, { signal });
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/overview", params, { signal });
   return data;
 }
 export async function getAzurePtuOpsOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/azure-ptu/dashboard/ops-overview", params, { signal });
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/ops-overview", params, { signal });
   return data;
 }
 
 export async function getAzurePtuExecutiveOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/azure-ptu/dashboard/executive-overview", params, { signal });
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/executive-overview", params, { signal });
   return data;
 }
 export async function getAzurePtuView(view: "projects"|"deployments"|"subprojects"|"trends"|"reconciliation"|"recommendations", params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post(`/azure-ptu/dashboard/${view}`, params, { signal }); return data;
+  const { data } = await api.post(`/visoes-consumo-ia/dashboard/${view}`, params, { signal }); return data;
 }
 
 // ── Reservas Azure (RI + Savings Plans) ────────────────────────────────
@@ -56,7 +56,7 @@ export async function getReservationsRecommendations(params: Record<string, unkn
   return data;
 }
 
-const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|azure-ptu\/dashboard|reservations\/dashboard)/;
+const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|visoes-consumo-ia\/dashboard|reservations\/dashboard)/;
 const pendingAnalysis = new Set<AbortController>();
 type ExpectedViewInflight = { count: number; controller: AbortController; promise: Promise<unknown>; abortTimer?: number };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
@@ -1820,6 +1820,116 @@ export async function getAIDashboardUser(
   signal?: AbortSignal,
 ): Promise<AIUserResult> {
   return postAIDashboard("user", body, signal);
+}
+
+// ── Visões por provedor de IA (Anthropic Claude / Google NotebookLM) ──
+export type AIProviderId = "anthropic" | "notebooklm";
+
+export interface AIProviderOverviewResult {
+  provider: AIProviderId;
+  provider_label: string;
+  provider_color: string;
+  primary_metric: "tokens" | "cost";
+  period: {
+    date_from: string;
+    date_to: string;
+    data_min_day: string;
+    data_max_day: string;
+    billing_period: string | null;
+    license_period: string | null;
+    period_count: number;
+  };
+  kpis: {
+    total_tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    source_total_tokens: number;
+    total_requests: number;
+    consumption_users: number;
+    total_licenses: number;
+    active_licenses: number;
+    logged_in: number;
+    never_used: number;
+    inactive_30d: number;
+    inactive_60d: number;
+    inactive_90d: number;
+    total_cost: number;
+    cost_per_million_tokens: number;
+    tokens_per_request: number;
+    tokens_per_user: number;
+  };
+  daily_series: Array<{
+    date: string;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    requests: number;
+    cost: number;
+    users: number;
+  }>;
+  model_breakdown: Array<{
+    model_name: string;
+    record_type: string;
+    rows: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    requests: number;
+    cost: number;
+    share_pct: number;
+  }>;
+  user_ranking: Array<{
+    user_email: string;
+    user_name: string;
+    input_tokens: number;
+    output_tokens: number;
+    tokens: number;
+    requests: number;
+    cost: number;
+    last_activity_at: string | null;
+    days_since_activity: number | null;
+    activity_status: string;
+    logged_in: boolean;
+  }>;
+  license_table: Array<{
+    user_email: string;
+    user_name: string;
+    user_role: string;
+    license_status: string;
+    activity_status: string;
+    last_activity_at: string | null;
+    days_since_activity: number | null;
+    license_sku: string;
+    organization_id: string;
+    logged_in: boolean;
+  }>;
+  adoption_funnel: { assigned: number; logged_in: number; used: number; healthy: number };
+  data_quality: {
+    consumption_rows: number;
+    consumption_with_user: number;
+    consumption_with_tokens: number;
+    consumption_with_cost: number | null;
+    license_rows: number;
+    license_period: string | null;
+    primary_metric: "tokens" | "cost";
+    notes: string[];
+  };
+}
+
+export interface AIProviderOverviewFilter {
+  provider: AIProviderId;
+  date_from?: string;
+  date_to?: string;
+  days?: number;
+  billing_period?: string;
+}
+
+export async function getAIProviderOverview(
+  body: AIProviderOverviewFilter,
+  signal?: AbortSignal,
+): Promise<AIProviderOverviewResult> {
+  const { data } = await api.post("/visoes-consumo-ia/provider/overview", body, { signal, timeout: 120000 });
+  return data;
 }
 
 // ── Dimon (pre-aggregated cost mart) ──

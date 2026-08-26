@@ -144,10 +144,23 @@ def _filter_clause(schema: dict[str, str], conditions: list[dict[str, Any]]) -> 
     return " AND ".join(clauses) if clauses else "1=1"
 
 
-def _source_clause(schema: dict[str, str], source: DimonRuleSource) -> str:
+def _source_clause(schema: dict[str, str], source: DimonRuleSource, gold_table: str | None = None) -> str:
     conditions, missing = _normalized_conditions(schema, (source.filter_json or {}).get("conditions") or [])
     if missing:
-        raise RuntimeError(f"Campos inexistentes na fonte {source.id} ({source.gold_table}): {', '.join(missing)}")
+        gold = gold_table or source.gold_table or "?"
+        # Sugere colunas equivalentes que a Gold realmente possui, para o usuário
+        # ajustar o filtro ou a regra (ex.: planning tem subaccountname, não subaccountid).
+        existing = sorted({m.lower(): schema.get(m.lower()) for m in missing if m.lower() in schema})
+        hints = [f"'{m}' existe como '{schema.get(m.lower())}'" for m in missing if m.lower() in schema]
+        others = [f"'{m}' (a Gold tem: {', '.join(sorted(schema)[:6])}...)" for m in missing if m.lower() not in schema]
+        detail = "; ".join(hints + others)
+        raise RuntimeError(
+            f"Filtro da regra não aplicável à Gold '{gold}' (fonte #{source.id}): "
+            f"campo(s) {', '.join(missing)} não existe(m) nessa tabela. "
+            f"O filtro vale para TODAS as Golds unidas na fonte — se a coluna só existe na "
+            f"FOCUS (ex.: subaccountid), a planning/espelho precisa dela ou o filtro deve "
+            f"usar uma coluna comum (ex.: subaccountname). Detalhe: {detail}."
+        )
     return _filter_clause(schema, conditions)
 
 
@@ -355,7 +368,7 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
             if schema is None:
                 schema = await load_gold_schema(gold)
                 schema_by_gold[gold] = schema
-            where = _source_clause(schema, source)
+            where = _source_clause(schema, source, gold_table=gold)
             percent = float(source.percent or 100) / 100.0
             select_exprs = _side_select(gold, schema, dims, measure_aliases, percent, period_physical)
             parts.append(f"SELECT {select_exprs} FROM iceberg.gold.{gold} WHERE {where}")

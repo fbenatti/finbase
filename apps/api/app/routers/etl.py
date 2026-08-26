@@ -2168,6 +2168,8 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
             "phase": EtlTask.phase,
             "started_at": EtlTask.started_at,
             "finished_at": EtlTask.finished_at,
+            # `table` vive em result_json; comparar pela coluna JSON extraída (texto).
+            "table": EtlTask.result_json.op("->>")("table"),
         }
         conditions = [EtlTask.task_type == "reprocess"]
         if search:
@@ -2187,7 +2189,7 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
             value = str(spec.get("value", ""))
             op = str(spec.get("operator", "equals"))
             column = fields.get(field)
-            if not column or not value:
+            if column is None or not value:
                 continue
             if field in ("started_at", "finished_at"):
                 try:
@@ -2206,7 +2208,13 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
                 except ValueError:
                     continue
             else:
-                expr = column == value
+                # Mesmo padrão do grid de Connections: comparar como texto,
+                # com NULL incluído no notEquals.
+                if op == "notEquals":
+                    conditions.append(or_(column.is_(None), cast(column, String) != value))
+                else:
+                    conditions.append(cast(column, String) == value)
+                continue
             conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
         sort = fields.get(sort_field, EtlTask.started_at)
         ordering = sort.desc() if sort_direction == "desc" else sort.asc()

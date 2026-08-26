@@ -54,6 +54,7 @@ const menuGroups = [
       { path: "/connections", label: "Fontes de dados", icon: <CloudIcon /> },
       { path: "/tables", label: "Tabelas", icon: <TableChartIcon /> },
       { path: "/reprocess", label: "Reprocessar", icon: <RefreshIcon /> },
+      { path: "/pipeline", label: "Pipeline do dado", icon: <AccountTreeIcon /> },
     ],
   },
   {
@@ -75,15 +76,11 @@ const menuGroups = [
     color: "#0f766e",
     background: "#f0fdfa",
     items: [
-      { path: "/pipeline", label: "Pipeline do dado", icon: <AccountTreeIcon /> },
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
-      { path: "/expected-view", label: "Visão esperada", icon: <TimelineIcon /> },
-      { path: "/dashboards-ia", label: "Dashboards IA", icon: <SmartToyIcon /> },
-      { path: "/dimon-dashboard", label: "Dashboard FinOps (Dimon)", icon: <BarChartIcon /> },
-      { path: "/azure-ptu", label: "Azure PTU", icon: <SmartToyIcon /> },
-      { path: "/azure-ptu-ops", label: "PTU Monitoramento", icon: <SmartToyIcon /> },
+      { path: "/expected-view", label: "Visão executiva", icon: <TimelineIcon /> },
+      { path: "/dimon-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
+      { path: "/visoes-consumo-ia", label: "Visões consumo IA", icon: <SmartToyIcon /> },
       { path: "/reservations", label: "Reservas Azure", icon: <CalendarMonthIcon /> },
-      { path: "/github-copilot", label: "GitHub Copilot", icon: <SmartToyIcon /> },
     ],
   },
 ];

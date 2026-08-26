@@ -76,6 +76,28 @@ aparência ou criar um `DataGrid` básico.
 > obrigatório em outro módulo, usar MUI X Pro/Premium ou uma solução explicitamente
 > aprovada antes de implementar.
 
+## Dashboards (páginas de visualização)
+
+Dashboards — páginas cujo objetivo é **resumir e comparar** (KPIs, gráficos,
+tabelas agregadas), como FinOps Intelligence, Visões consumo IA e GitHub Copilot —
+**não precisam aplicar as regras do DataGrid operacional** (paginação/ordenação/
+filtros server-side, menus de coluna, exportação contextual). Essas regras valem
+para listas de registros gerenciáveis (conexões, reprocessamentos, regras), não
+para painéis de visualização.
+
+Ainda assim, dashboards devem manter a **estrutura visual** do padrão:
+
+1. Faixa branca com título e descrição de uma linha (e abas de contexto quando
+   fizer sentido — ex.: abas irmãs no topo).
+2. Área de trabalho neutra `#f8fafc`.
+3. Painel branco com borda discreta (`Paper elevation={0}` + `border: 1px solid
+   divider`) contendo o conteúdo.
+
+E devem **converter valores para unidades de fácil leitura** (Mi / Bi / Tr com
+mínimo de 2 casas decimais), como já é feito em GitHub Copilot (`compact()`) e em
+Visões consumo IA (`tokensLabel`). Números brutos gigantes (ex.: `22540265578`)
+não devem aparecer em dashboards.
+
 ## Formulários, diálogos e feedback
 
 - A ação principal abre primeiro um diálogo amplo de escolha de fonte; só então

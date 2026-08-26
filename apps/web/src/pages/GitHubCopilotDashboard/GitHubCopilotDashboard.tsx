@@ -220,7 +220,7 @@ const AVAILABLE_PERIODS = [
   { value: "202601", label: "Janeiro / 2026" },
 ];
 
-export default function GitHubCopilotDashboard() {
+export default function GitHubCopilotDashboard({ embedded = false }: { embedded?: boolean }) {
   const [metrics, setMetrics] = useState<CopilotMetrics | null>(null);
   const [models, setModels] = useState<CopilotModel[]>([]);
   const [history, setHistory] = useState<CopilotHistory[]>([]);
@@ -332,12 +332,22 @@ export default function GitHubCopilotDashboard() {
   );
 
   return (
-    <Box p={3}>
-      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} gap={2} mb={3}>
-        <Box>
-          <Typography variant="h4" fontWeight="bold" color="primary.main">GitHub Copilot — Dashboard</Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>Métricas de adoção, governança de licenças e consumo financeiro de IA por desenvolvedor.</Typography>
+    <Box sx={embedded ? { p: 0 } : { mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      {!embedded && (
+        <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+          <Typography variant="h4">GitHub Copilot — Dashboard</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>Métricas de adoção, governança de licenças e consumo financeiro de IA por desenvolvedor.</Typography>
         </Box>
+      )}
+      <Box sx={embedded ? undefined : { p: 3 }}>
+        <Paper elevation={0} sx={embedded ? undefined : { p: 2.5, borderRadius: 2, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent={embedded ? "space-between" : "flex-end"} alignItems={{ xs: "flex-start", sm: "center" }} gap={2} sx={embedded ? { mb: 3 } : { mb: 2 }}>
+        {embedded && (
+          <Box>
+            <Typography variant="h4" fontWeight="bold" color="primary.main">GitHub Copilot — Dashboard</Typography>
+            <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>Métricas de adoção, governança de licenças e consumo financeiro de IA por desenvolvedor.</Typography>
+          </Box>
+        )}
         <FormControl size="small" sx={{ minWidth: 220, bgcolor: "background.paper" }}>
           <InputLabel id="copilot-period-label">Período / Mês de Referência</InputLabel>
           <Select labelId="copilot-period-label" value={period} onChange={(e) => setPeriod(e.target.value)}>
@@ -841,6 +851,8 @@ export default function GitHubCopilotDashboard() {
           </Paper>
         </>
       )}
+        </Paper>
+      </Box>
     </Box>
   );
 }

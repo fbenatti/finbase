@@ -283,7 +283,7 @@ export default function ExpectedView() {
       {/* Faixa de contexto branca */}
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Visão esperada</Typography>
+          <Typography variant="h4">Visão executiva</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
             Realizado × forecast × orçamento por departamento, com rateio de custo compartilhado.
           </Typography>

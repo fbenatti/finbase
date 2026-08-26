@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -273,6 +273,7 @@ app.include_router(periods.router)
 app.include_router(analysis.router)
 app.include_router(ai_dashboards.router)
 app.include_router(ai_copilot.router)
+app.include_router(ai_provider_dashboards.router)
 app.include_router(destinations.router)
 app.include_router(schema.router)
 app.include_router(forecast.router)

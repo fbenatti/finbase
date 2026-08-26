@@ -458,8 +458,9 @@ export function ClassificationRulesTab() {
       setRules(data.items);
       setTotal(data.total);
     } catch (e: unknown) {
-      if (e instanceof Error && e.name === "AbortError") {
-        // Request superseded by newer filter — silently ignore.
+      // Axios aborts throw CanceledError (code ERR_CANCELED, message "canceled"),
+      // not AbortError — treat both as "superseded by newer filter" and stay silent.
+      if (e instanceof Error && (e.name === "AbortError" || (e as { code?: string }).code === "ERR_CANCELED")) {
         return;
       }
       setError(e instanceof Error ? e.message : "Falha ao carregar classificações");
