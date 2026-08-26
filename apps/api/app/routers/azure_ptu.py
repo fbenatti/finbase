@@ -1442,13 +1442,48 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
         metric_availability = metric_field_availability(metrics)
         costs = await cost_task
 
+        # ── Tokens dos últimos 30 dias (base fixa do custo por milhão) ──────
+        # A compra de PTU é mensal (a cada 30 dias); o custo por milhão de
+        # tokens deve ser balizado sempre pelos últimos 30 dias, independente
+        # da janela selecionada (7d/30d/90d) na tela.
+        tokens_30d_by_project: dict[str, float] = {}
+        if body.hours == 720:
+            metrics_30d = metrics
+        else:
+            try:
+                conns_30d = (await db.execute(
+                    select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")
+                )).scalars().all()
+                metrics_30d = await load_gold_metrics(
+                    hours=720,
+                    connection_ids=[c.id for c in conns_30d],
+                    project_hints=body.project_keys or None,
+                    grain="day",
+                    timeout_s=DASHBOARD_TRINO_TIMEOUT_S,
+                )
+            except Exception:
+                logger.warning("Azure PTU 30d tokens load failed: %s", exc_info=True)
+                metrics_30d = []
+        for _row in metrics_30d:
+            _key = str(_row.get("project_key") or _row.get("project_hint") or "unattributed")
+            tokens_30d_by_project[_key] = tokens_30d_by_project.get(_key, 0.0) + float(
+                _row.get("total_tokens_sum") or _row.get("total_tokens") or 0
+            )
+        tokens_30d_total = sum(tokens_30d_by_project.values())
+
+        token_consumption = build_token_consumption(
+            metrics, deployment_stats, token_series, effective_grain,
+        )
+        token_consumption["tokens_last_30d"] = {
+            "total": tokens_30d_total,
+            "by_project": tokens_30d_by_project,
+        }
+
         response_payload = {
             "period": period,
             "executive_summary": executive_summary,
             "costs": costs,
-            "token_consumption": build_token_consumption(
-                metrics, deployment_stats, token_series, effective_grain,
-            ),
+            "token_consumption": token_consumption,
             # The shared hourly heatmap query contains both utilization and tokens;
             # reuse it so the dashboard does not issue one Trino query per widget.
             "token_heatmap": [

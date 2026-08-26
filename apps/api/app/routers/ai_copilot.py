@@ -201,6 +201,12 @@ async def copilot_financial_insights(
         currency_expr = "''"
         if "billing_currency" in columns:
             currency_expr = "COALESCE(NULLIF(billing_currency, ''), '')"
+        # Só as linhas financeiras (ai_usage_report/billing_report) têm créditos e
+        # tokens; as ~53K linhas de métricas da IDE por mês são zero e não entram
+        # nesta agregação — restringir o scan reduz ~3x o tempo da query.
+        github_source_filter = ""
+        if "source_kind" in columns:
+            github_source_filter = "AND source_kind IN ('ai_usage_report', 'billing_report')"
 
         github_sql = f"""
         SELECT
@@ -215,10 +221,10 @@ async def copilot_financial_insights(
           SUM({financial_exprs['input']}) AS input_tokens,
           SUM({financial_exprs['output']}) AS output_tokens,
           SUM({financial_exprs['cache_read']}) AS cache_read_tokens,
-          SUM({financial_exprs['cache_write']}) AS cache_write_tokens,
-          SUM(CASE WHEN {credit_model_condition} THEN 0 ELSE COALESCE(TRY_CAST(total_lines_accepted AS DOUBLE), 0) END) AS lines_accepted
+          SUM({financial_exprs['cache_write']}) AS cache_write_tokens
         FROM iceberg.bronze.raw_github_token
         WHERE {period_filter} AND assignee_login IS NOT NULL AND assignee_login <> ''
+          {github_source_filter}
         GROUP BY 1,2,3,4
         ORDER BY credits DESC, net_amount DESC
         """
@@ -786,6 +792,20 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         year_filter = f"CAST(\"_billing_period\" AS VARCHAR) LIKE '{body.year}%'" if body.year else "1=1"
         dept_sql = _dept_filter(scope_path)
 
+        # Corte de partição: sem ano informado, limita o histórico aos últimos
+        # 12 meses a partir do período selecionado. Evita varrer as ~681K linhas
+        # de dest_consumo_ia e as ~600K de raw_github_token inteiras.
+        history_period_cutoff = "1=1"
+        if not body.year:
+            base = str(body.period or "")
+            if len(base) == 6:
+                y, m = int(base[:4]), int(base[4:6])
+                m -= 11
+                while m <= 0:
+                    m += 12
+                    y -= 1
+                history_period_cutoff = f"\"_billing_period\" >= '{y:04d}{m:02d}'"
+
         # Créditos reais vêm do relatório financeiro (ai_usage_report); o modelo
         # 'copilot_ai_credit' (legado) não existe nas linhas atuais.
         history_token_columns = await _raw_token_columns(scope.trino_kwargs)
@@ -805,6 +825,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         FROM iceberg.gold.{LIC_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {year_filter} AND {dept_sql}
+          AND {history_period_cutoff}
         GROUP BY 1
         ORDER BY 1
         """
@@ -831,6 +852,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         FROM iceberg.gold.{CONS_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {year_filter} AND {dept_sql}
+          AND {history_period_cutoff}
         GROUP BY 1
         ORDER BY 1
         """
@@ -844,6 +866,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         FROM iceberg.bronze.raw_github_token
         WHERE {history_credit_measure_filter.replace('AND ', '', 1)}
           AND {year_filter.replace('"_billing_period"', '"_billing_period"')}
+          AND {history_period_cutoff}
         GROUP BY 1
         ORDER BY 1
         """

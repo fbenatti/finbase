@@ -4,6 +4,7 @@ import {
   TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
 import { PtuFinanceViews } from "./AzurePtuFinance";
+import { tokensLabel } from "./AzurePtuFormat";
 
 /** Descrições ("dados de info") de cada indicador — usadas nos tooltips da tela e no relatório PDF. */
 export const widgetHelp: Record<string, string> = {
@@ -158,17 +159,18 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
       <Box className="azure-ptu-print-meta">
         <h1>Azure PTU — Relatório Operacional Completo</h1>
         <p><strong>Período:</strong> {meta.periodLabel} · <strong>Projeto:</strong> {meta.projectLabel} · <strong>Granularidade:</strong> {meta.grainLabel} · <strong>Fonte:</strong> {sourceLabel}</p>
-        <p><strong>Recorte:</strong> {periodInfo.start || "—"} → {periodInfo.end || "—"} · última amostra: {periodInfo.last_sample || "—"} · cobertura: {pct(periodInfo.coverage_pct ?? coverage.coverage_pct)} · {c.deployment_count ?? deps.length} deployments / {n(c.total_ptus ?? data.kpis?.total_ptus)} PTUs</p>
+        <p><strong>Recorte:</strong> {periodInfo.start || "—"} → {periodInfo.end || "—"} · última amostra: {periodInfo.last_sample || "—"} · cobertura: {pct(periodInfo.coverage_pct ?? coverage.coverage_pct)}{periodInfo.sample_unit ? ` (${periodInfo.sample_count}/${periodInfo.expected_count} ${periodInfo.sample_unit === "hour" ? "horas" : periodInfo.sample_unit === "day" ? "dias" : "meses"})` : ""} · {c.deployment_count ?? deps.length} deployments / {n(c.total_ptus ?? data.kpis?.total_ptus)} PTUs</p>
         {mixReserved != null && <p><strong>Composição de capacidade:</strong> Reserva: {n(mixReserved)} PTUs · OnDemand: {n(mixOnDemand)} PTUs</p>}
         <p><strong>Exportado em:</strong> {meta.exportedAt}</p>
-        <p style={{ marginTop: 8, fontStyle: "italic" }}>Relatório consolidado com todos os painéis da tela Azure PTU — Operação: resumo executivo, consumo de tokens, capacidade/operação, financeiro (Dimon) e recomendações. Todos os valores refletem exclusivamente o período e os filtros selecionados.</p>
+        <p style={{ marginTop: 8, fontStyle: "italic" }}>Relatório consolidado com todos os painéis da tela Azure PTU — Operação: resumo executivo (inclui financeiro Gold), consumo de tokens, capacidade/operação e recomendações. Todos os valores refletem exclusivamente o período e os filtros selecionados.</p>
       </Box>
 
       {coverage.complete === false && <Alert severity="warning" sx={{ mb: 2 }}>Cobertura parcial: {coverage.days_with_data}/{coverage.expected_days} dias; lacunas não significam consumo zero.</Alert>}
 
       {/* ── 01 · Resumo executivo ─────────────────────────────────────── */}
-      <Section index="01" title="Resumo executivo" subtitle="Visão consolidada de capacidade, demanda e experiência no período selecionado.">
-        <Typography variant="h6" sx={{ mt: 1.5, mb: 1 }}>Capacidade e decisão</Typography>
+      <Section index="01" title="Resumo executivo" subtitle="Visão consolidada de capacidade, demanda, experiência e financeiro no período selecionado.">
+        <PtuFinanceViews costs={data.costs} tokenData={data.token_consumption} aiDemand={data.executive_summary?.ai_demand} />
+        <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Capacidade e decisão</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Utilização PTU é a capacidade consumida dividida pela capacidade provisionada. 100% significa que o deployment atingiu o limite observado; acima de 100% é tratado como anomalia de métrica/rollup e não como “overage” faturável.</Typography>
         <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
           <KpiCard label="PTUs provisionados" value={n(c.total_ptus ?? data.kpis?.total_ptus)} hint={`${c.deployment_count ?? deps.length} deployments`} />
@@ -180,9 +182,9 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
 
         <Typography variant="h6" sx={{ mt: 1.5, mb: 1 }}>Demanda de IA no período selecionado</Typography>
         <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
-          <KpiCard label="Tokens totais" value={n(total)} hint="Azure Monitor" />
-          <KpiCard label="Input tokens" value={n(input)} hint={total ? `${pct(input / total * 100)} do total` : "—"} />
-          <KpiCard label="Output tokens" value={n(output)} hint={total ? `${pct(output / total * 100)} do total` : "—"} />
+          <KpiCard label="Tokens totais" value={tokensLabel(total)} hint="Azure Monitor" />
+          <KpiCard label="Input tokens" value={tokensLabel(input)} hint={total ? `${pct(input / total * 100)} do total` : "—"} />
+          <KpiCard label="Output tokens" value={tokensLabel(output)} hint={total ? `${pct(output / total * 100)} do total` : "—"} />
           <KpiCard label="Tokens por request" value={n(d.tokens_per_request)} hint={s.period_comparison?.tokens_delta_pct == null ? "comparativo indisponível" : `${s.period_comparison.tokens_delta_pct >= 0 ? "+" : ""}${n(s.period_comparison.tokens_delta_pct)}% vs período anterior`} />
         </Grid>
 
@@ -211,7 +213,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
                 <TableCell>{x.deployment_name}</TableCell>
                 <TableCell>{x.model_name || "—"}{x.model_version ? ` / ${x.model_version}` : ""}</TableCell>
                 <TableCell>{n(x.ptus)}</TableCell>
-                <TableCell>{n(tokens)}</TableCell>
+                <TableCell>{tokensLabel(tokens)}</TableCell>
                 <TableCell>{total ? pct(tokens / total * 100) : "—"}</TableCell>
                 <TableCell>{n(requests || null)}</TableCell>
                 <TableCell>{requests ? n(tokens / requests) : "—"}</TableCell>
@@ -241,7 +243,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
               <TableCell>{x.model_name || "—"}{x.region ? ` / ${x.region}` : ""}</TableCell>
               <TableCell>{x.sku_name || "—"}</TableCell>
               <TableCell>{n(x.ptus)}</TableCell>
-              <TableCell>{n(Number(x.input_tokens || 0) + Number(x.output_tokens || 0))}</TableCell>
+              <TableCell>{tokensLabel(Number(x.input_tokens || 0) + Number(x.output_tokens || 0))}</TableCell>
               <TableCell>{n(x.request_count || null)}</TableCell>
               <TableCell>{n(x.hours_at_or_above_80 ?? x.hours_80)}</TableCell>
               <TableCell>{n(x.hours_at_or_above_95 ?? x.hours_95)}</TableCell>
@@ -270,13 +272,8 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
         </Stack>
       </Section>
 
-      {/* ── 05 · Financeiro (Gold) ───────────────────────────────────── */}
-      <Section index="05" title="Financeiro (Gold)" subtitle="Custos financeiros dos projetos Vivo Mais e Aura Brain a partir da Gold FOCUS (dest_modelo_focus + planejamento): reserva de capacidade PTU (Microsoft.Capacity, 100 PTUs) e PTU on-demand (Provisioned Throughput Units · 1/Month, 100 PTUs) por projeto. A Gold é mensal; o mês de referência é o período de faturamento que contém o fim da janela selecionada.">
-        <PtuFinanceViews costs={data.costs} tokenData={data.token_consumption} aiDemand={data.executive_summary?.ai_demand} />
-      </Section>
-
-      {/* ── 06 · Notas metodológicas ──────────────────────────────────── */}
-      <Section index="06" title="Notas metodológicas" subtitle="Definições e ressalvas sobre cada indicador deste relatório.">
+      {/* ── 05 · Notas metodológicas ──────────────────────────────────── */}
+      <Section index="05" title="Notas metodológicas" subtitle="Definições e ressalvas sobre cada indicador deste relatório.">
         <Stack gap={1}>
           {Object.entries(widgetHelp).map(([label, help]) => (
             <Typography key={label} variant="body2"><strong>{label}:</strong> {help}</Typography>

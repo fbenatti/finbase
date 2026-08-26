@@ -2,6 +2,7 @@ import {
   Alert, Box, Card, CardContent, Chip, Grid, Stack, Tooltip, Typography,
 } from "@mui/material";
 import { widgetHelp } from "./AzurePtuOpsReport";
+import { tokensLabel } from "./AzurePtuFormat";
 
 /**
  * Resumo executivo financeiro do Azure PTU Ops alimentado pela Gold FOCUS
@@ -19,22 +20,10 @@ import { widgetHelp } from "./AzurePtuOpsReport";
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const brl2 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
 const fmt = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
-const fmtCompact = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const n = (v: any) => (v == null ? "—" : fmt.format(Number(v)));
 const money = (v: any) => (v == null || isNaN(Number(v)) ? "—" : brl.format(Number(v)));
 const money2 = (v: any) => (v == null || isNaN(Number(v)) ? "—" : brl2.format(Number(v)));
 const pct = (v: any) => (v == null || isNaN(Number(v)) ? "—" : `${fmt.format(Number(v))}%`);
-
-/** Formata volumes grandes em unidades compactas: 1 Mi, 1 Bi, 1 Tr (mín. 2 casas). */
-const tokensLabel = (v: any) => {
-  const value = Number(v || 0);
-  if (!isFinite(value)) return "—";
-  const abs = Math.abs(value);
-  if (abs >= 1e12) return `${fmtCompact.format(value / 1e12)} Tr`;
-  if (abs >= 1e9) return `${fmtCompact.format(value / 1e9)} Bi`;
-  if (abs >= 1e6) return `${fmtCompact.format(value / 1e6)} Mi`;
-  return fmtCompact.format(value);
-};
 
 const PROJECT_COLORS: Record<string, string> = {
   "Vivo Mais": "#2563EB",
@@ -82,13 +71,24 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand }: { costs: any; to
     : null;
 
   // ── Tokens dos últimos 30 dias e custo por milhão de tokens ─────────────
+  // A compra de PTU é mensal; o custo/milhão usa SEMPRE os últimos 30 dias
+  // (backend envia tokens_last_30d), independente da janela selecionada.
+  const last30d = tokenData?.tokens_last_30d;
   const seriesTokens = (tokenData?.series || []).reduce((s: number, r: any) => s + Number(r.total_tokens || 0), 0);
-  const totalTokens = Number(aiDemand?.total_tokens || seriesTokens || 0);
+  const totalTokens = Number(last30d?.total || aiDemand?.total_tokens || seriesTokens || 0);
   const tokensByProject: Record<string, number> = {};
-  (tokenData?.deployment_rankings || []).forEach((r: any) => {
-    const key = PROJECT_KEY_LABEL[r.project_key] || r.project_key || "—";
-    tokensByProject[key] = (tokensByProject[key] || 0) + Number(r.input_tokens || 0) + Number(r.output_tokens || 0);
-  });
+  const last30dByProject: Record<string, any> = last30d?.by_project || {};
+  if (Object.keys(last30dByProject).length) {
+    Object.entries(last30dByProject).forEach(([k, v]) => {
+      const key = PROJECT_KEY_LABEL[k] || k || "—";
+      tokensByProject[key] = (tokensByProject[key] || 0) + Number(v || 0);
+    });
+  } else {
+    (tokenData?.deployment_rankings || []).forEach((r: any) => {
+      const key = PROJECT_KEY_LABEL[r.project_key] || r.project_key || "—";
+      tokensByProject[key] = (tokensByProject[key] || 0) + Number(r.input_tokens || 0) + Number(r.output_tokens || 0);
+    });
+  }
   const cpm = (cost: number, tokens: number) => (tokens > 0 ? (cost / tokens) * 1e6 : null);
   const cpmTotal = cpm(ptuMonthlyCost, totalTokens);
   const cpmByProject = (project: string) => {
@@ -106,7 +106,7 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand }: { costs: any; to
       </Alert>
       {notes.map((note: string, i: number) => <Alert key={i} severity="warning" sx={{ mb: 0.5 }}>{note}</Alert>)}
 
-      <Typography variant="h6" gutterBottom>Resumo executivo — {costs.current_label}</Typography>
+      <Typography variant="h6" gutterBottom>Financeiro (Gold) — {costs.current_label}</Typography>
 
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6} md={3}><Kpi label="Custo PTU mensal" value={money(ptuMonthlyCost)} hint={`reserva ${money(totals.reservation_cost)} + on-demand ${money(totals.ondemand_cost)}${ondemandEstimated ? " (previsto)" : ""}`} /></Grid>

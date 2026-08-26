@@ -255,18 +255,18 @@ export default function GitHubCopilotDashboard() {
       setLoading(true);
       try {
         const payload = { period: period, year: 0, department_id: null, department_path: "" };
-        const [ovRes, mdRes, hsRes] = await Promise.all([
+        // As consultas foram otimizadas (Dimon pré-agregada + filtro de partição);
+        // agora podem rodar em paralelo para reduzir o tempo de carregamento.
+        const [ovRes, mdRes, hsRes, fiRes] = await Promise.all([
           fetch("/api/ai-copilot/overview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
           fetch("/api/ai-copilot/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
           fetch("/api/ai-copilot/history", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
+          fetch("/api/ai-copilot/financial-insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
         ]);
         if (ovRes.metrics) setMetrics(ovRes.metrics);
         if (mdRes.models) setModels(mdRes.models);
         if (hsRes.history) setHistory(hsRes.history);
         if (hsRes.cost_evolution) setCostEvolution(hsRes.cost_evolution);
-        // A consulta financeira varre a Bronze; executá-la depois das métricas
-        // principais evita cinco consultas pesadas simultâneas no Trino.
-        const fiRes = await fetch("/api/ai-copilot/financial-insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json());
         if (fiRes.github || fiRes.azure) setFinancialInsights(fiRes);
       } catch (err) { console.error(err); } finally { setLoading(false); }
     }

@@ -138,6 +138,20 @@ def period_metadata(
     hours_list = sorted({str(m.get("metric_hour") or "") for m in metrics if m.get("metric_hour")})
     last_sample = hours_list[-1] if hours_list else None
     expected_hours = max(1, int((end - start).total_seconds() // 3600))
+
+    # Cobertura na granularidade efetiva: compara amostras com a expectativa na
+    # mesma unidade (hora/dia/mês). Antes, com grain=day, as ~31 amostras
+    # diárias eram divididas pelas 720 horas esperadas, mostrando ~4%.
+    if effective_grain == "hour":
+        sample_count = len(hours_list)
+        expected_count = expected_hours
+    elif effective_grain == "day":
+        sample_count = len({str(m.get("metric_hour") or "")[:10] for m in metrics if m.get("metric_hour")})
+        expected_count = max(1, (end.date() - start.date()).days + 1)
+    else:  # month
+        sample_count = len({str(m.get("metric_hour") or "")[:7] for m in metrics if m.get("metric_hour")})
+        expected_count = max(1, (end.year - start.year) * 12 + (end.month - start.month) + 1)
+
     return {
         "start": start.strftime("%Y-%m-%dT%H:00:00Z"),
         "end": end.strftime("%Y-%m-%dT%H:00:00Z"),
@@ -146,7 +160,10 @@ def period_metadata(
         "last_sample": last_sample,
         "sample_hours": len(hours_list),
         "expected_hours": expected_hours,
-        "coverage_pct": round((len(hours_list) / expected_hours) * 100, 1) if expected_hours else None,
+        "sample_count": sample_count,
+        "expected_count": expected_count,
+        "sample_unit": effective_grain,
+        "coverage_pct": round((sample_count / expected_count) * 100, 1) if expected_count else None,
     }
 
 
