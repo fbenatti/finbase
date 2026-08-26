@@ -91,6 +91,84 @@ body {
     padding: 4px 6px;
   }
 
+  /* ── Relatório PDF — Azure PTU Operação (todos os painéis) ─────────── */
+  body.azure-ptu-print-mode .azure-ptu-ops-report {
+    font-size: 11px;
+    color: #111827;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report h6,
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiTypography-h6 {
+    font-size: 12px;
+    margin-top: 0;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-section {
+    margin-bottom: 20px;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 20px 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e5e7eb;
+    page-break-after: avoid;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-section-head .MuiTypography-root {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-kpi-note {
+    display: block;
+    margin-top: 4px;
+    font-size: 8px;
+    line-height: 1.35;
+    color: #6b7280;
+    font-style: italic;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report table thead {
+    display: table-header-group;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiTableRow-root {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiTableRow-root:nth-of-type(even) {
+    background: #f9fafb;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiAlert-root {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    font-size: 10px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiAlert-message {
+    font-size: 10px;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiAlert-message .MuiTypography-root {
+    font-size: 10px;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiGrid-container {
+    margin-top: 0 !important;
+  }
+
+  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiCardContent-root {
+    padding: 10px 12px;
+  }
+
   @page {
     margin: 10mm;
     size: A4 landscape;

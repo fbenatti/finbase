@@ -1508,7 +1508,7 @@ def _reprocess_destination_sync(
         errors: list[str] = []
         processed = 0
         import psutil
-        memory_limit = int(os.getenv("REPROCESS_MEMORY_LIMIT_MB", "4096")) * 1024 * 1024
+        memory_limit = int(os.getenv("REPROCESS_MEMORY_LIMIT_MB", "6144")) * 1024 * 1024
 
         def _memory_exceeded() -> bool:
             return psutil.Process(os.getpid()).memory_info().rss >= memory_limit
@@ -1972,8 +1972,6 @@ async def reprocess_ai_cost_relationships(db: AsyncSession = Depends(get_db)):
             _, missing = _normalized_conditions(schema, (source.filter_json or {}).get("conditions") or [])
             if missing:
                 invalid_rules.append(f"{link.name} (fonte {source.id}): {', '.join(missing)}")
-    if invalid_rules:
-        raise HTTPException(status_code=422, detail="Regras FOCUS inválidas: " + "; ".join(invalid_rules))
     now = datetime.now(timezone.utc)
     active = list((await db.execute(select(EtlTask).where(
         EtlTask.task_type == "ai_cost_relationship_reprocess",
@@ -1982,16 +1980,25 @@ async def reprocess_ai_cost_relationships(db: AsyncSession = Depends(get_db)):
     if active:
         raise HTTPException(status_code=409, detail="Já existe um reprocessamento de relacionamentos IA em andamento.")
     task = EtlTask(task_type="ai_cost_relationship_reprocess", status="QUEUED", errors=[])
-    task.phase = "Na fila: classificar FOCUS uma vez e publicar as Gold dos relacionamentos"
+    # A rule with FOCUS fields absent from the current Gold is flagged and
+    # skipped by the worker (per-rule isolation) instead of blocking the
+    # whole batch. Surface the warnings on the queued task for visibility.
+    task.phase = (
+        "Na fila: classificar FOCUS uma vez e publicar as Gold dos relacionamentos"
+        + (f" · {len(invalid_rules)} regra(s) com campo(s) inválido(s)" if invalid_rules else "")
+    )
     task.started_at = now
     task.total_blobs = len(links)
     task.processed_blobs = 0
     task.rows_destination = 0
-    task.result_json = {"event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}]}
+    task.result_json = {
+        "event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}],
+        "warnings": invalid_rules,
+    }
     db.add(task)
     await db.commit()
     await db.refresh(task)
-    return {"task_id": task.id, "status": task.status, "message": task.phase}
+    return {"task_id": task.id, "status": task.status, "message": task.phase, "warnings": invalid_rules}
 
 
 @router.get("/ai-cost-relationship-history")

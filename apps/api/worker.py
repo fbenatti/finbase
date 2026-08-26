@@ -437,10 +437,23 @@ def main():
                         result = asyncio.run(materialize_ai_cost_relationships(s, run_id=task_id, progress=progress))
                         task_row = s.get(EtlTask, task_id)
                         if task_row:
-                            task_row.status = "COMPLETED"
-                            task_row.phase = f"Gold individual publicada: {result.get('rows', 0)} linhas"
-                            task_row.rows_destination = int(result.get("rows") or 0)
-                            task_row.processed_blobs = int(result.get("links") or 0)
+                            failed = list(result.get("failed") or [])
+                            rows = int(result.get("rows") or 0)
+                            if failed and rows == 0 and not result.get("details"):
+                                # Nothing could be published — surface the rule errors.
+                                task_row.status = "FAILED"
+                                task_row.phase = "Nenhuma Gold publicada: " + "; ".join(
+                                    f"{f.get('name', f.get('link_id'))}: {f.get('error', 'erro')}" for f in failed
+                                )[:160]
+                                task_row.errors = [f.get("error", "") for f in failed]
+                            else:
+                                task_row.status = "COMPLETED"
+                                task_row.phase = f"Gold individual publicada: {rows} linhas" + (
+                                    f" · {len(failed)} regra(s) com erro" if failed else ""
+                                )
+                                task_row.rows_destination = rows
+                                task_row.processed_blobs = int(result.get("links") or 0)
+                                task_row.errors = [f.get("error", "") for f in failed] or None
                             task_row.finished_at = datetime.now(timezone.utc)
                             task_row.result_json = {**(task_row.result_json or {}), **result}
                         s.commit(); s.close()

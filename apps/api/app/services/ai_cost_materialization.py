@@ -152,37 +152,60 @@ async def materialize_ai_cost_relationships(session: Any, *, run_id: int, progre
     links = session.query(AiCostLink).options(selectinload(AiCostLink.sources)).filter(AiCostLink.active == True).all()  # noqa: E712
     schema = await load_focus_schema()
     periods = await _focus_periods(schema)
-    errors = await validate_active_relationship_rules(session)
-    if errors:
-        raise RuntimeError("Regras FOCUS inválidas: " + "; ".join(
-            f"{x['link_name']} (fonte {x['source_id']}): {', '.join(x['missing_fields'])}" for x in errors
-        ))
+
+    # Per-rule fault isolation: a relationship whose FOCUS filters reference
+    # fields absent from the current Gold is marked ERROR and skipped, while
+    # the remaining relationships still publish their individual Golds.
+    valid_links: list[AiCostLink] = []
+    failed: list[dict[str, Any]] = []
+    for link in links:
+        try:
+            _link_clause(link, schema)
+            valid_links.append(link)
+        except Exception as exc:
+            failed.append({"link_id": link.id, "name": link.name, "error": str(exc)})
+            link.materialization_table = link_gold_table_name(link.id)
+            link.materialization_status = "ERROR"
+            link.materialization_error = str(exc)
+            link.materialization_run_id = run_id
+            link.materialized_at = datetime.now(timezone.utc)
 
     routed = f"dest_ai_cost_route_stg_{run_id}_{time.time_ns()}"
     created = False
     written, details = 0, []
     try:
-        created = await _build_routed_staging(links, schema, periods, routed, progress)
+        created = await _build_routed_staging(valid_links, schema, periods, routed, progress)
         now = datetime.now(timezone.utc)
-        for index, link in enumerate(links, start=1):
+        for index, link in enumerate(valid_links, start=1):
             if progress:
                 progress(index - 1, len(links), f"Publicando {link.name} do staging classificado")
-            rows = await _publish_link(link, schema, routed) if created else 0
-            link.materialization_table = link_gold_table_name(link.id)
-            link.materialization_rows = rows
-            link.materialization_status = link.materialization_status if created else "EMPTY"
+            try:
+                rows = await _publish_link(link, schema, routed) if created else 0
+                link.materialization_status = link.materialization_status if created else "EMPTY"
+                link.materialization_error = None
+                details.append({"link_id": link.id, "name": link.name, "table": link_gold_table_name(link.id), "rows_read": rows})
+                written += rows
+            except Exception as exc:
+                failed.append({"link_id": link.id, "name": link.name, "error": str(exc)})
+                link.materialization_status = "ERROR"
+                link.materialization_error = str(exc)
+                details.append({"link_id": link.id, "name": link.name, "table": link_gold_table_name(link.id), "rows_read": 0, "error": str(exc)})
             link.materialization_run_id = run_id
             link.materialized_at = now
-            link.materialization_error = None
-            details.append({"link_id": link.id, "name": link.name, "table": link_gold_table_name(link.id), "rows_read": rows})
-            written += rows
             if progress:
-                progress(index, len(links), f"{link.name} — publicada")
+                progress(index, len(links), f"{link.name} — {'publicada' if link.materialization_status != 'ERROR' else 'com erro'}")
         session.commit()
     finally:
         if created:
             iceberg.cleanup_staged_table(routed)
-    return {"links": len(links), "periods": periods, "rows": written, "details": details, "conflicts": []}
+    return {
+        "links": len(links),
+        "periods": periods,
+        "rows": written,
+        "details": details,
+        "failed": failed,
+        "conflicts": [],
+    }
 
 
 def materialize_ai_cost_relationships_sync(session: Any, *, run_id: int, progress: Any | None = None) -> dict[str, Any]:

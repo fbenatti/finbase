@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 TRINO_URL = os.getenv("TRINO_URL", "http://localhost:8080")
 TRINO_USER = os.getenv("TRINO_USER", "finops")
 TRINO_CATALOG = os.getenv("TRINO_CATALOG", "iceberg")
-TRINO_TRANSPORT_RETRIES = max(1, int(os.getenv("TRINO_TRANSPORT_RETRIES", "8")))
-TRINO_READY_WAIT_S = max(5.0, float(os.getenv("TRINO_READY_WAIT_S", "60")))
+TRINO_TRANSPORT_RETRIES = max(1, int(os.getenv("TRINO_TRANSPORT_RETRIES", "12")))
+TRINO_READY_WAIT_S = max(5.0, float(os.getenv("TRINO_READY_WAIT_S", "120")))
 
 _RETRYABLE_MARKERS = (
     "still initializing",
@@ -40,6 +40,10 @@ _RETRYABLE_MARKERS = (
     "503",
     "502",
     "starting",
+    # HTTP 200 with a non-JSON body — the coordinator is mid-restart and
+    # answers the statement endpoint with an HTML/empty page. Transient.
+    "resposta inválida do coordinator",
+    "invalid response from coordinator",
 )
 
 
@@ -104,8 +108,10 @@ async def execute(
     for attempt in range(attempts):
         try:
             if wait_for_coordinator:
-                remaining = max(5.0, TRINO_READY_WAIT_S - 5.0 * attempt)
-                await wait_until_ready(timeout_s=remaining)
+                # Give the coordinator a full, constant readiness window on
+                # every retry instead of shrinking it — a restart can take
+                # several minutes, and a shrinking budget wastes retries.
+                await wait_until_ready(timeout_s=TRINO_READY_WAIT_S)
             return await _execute_once(sql, catalog, timeout_s, cancel_event)
         except TrinoCancelled:
             raise

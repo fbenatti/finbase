@@ -427,12 +427,26 @@ export async function reprocessSharedCost(): Promise<{ task_id: number; status: 
   return data;
 }
 
-export async function reprocessAICostRelationships(): Promise<{ task_id: number; status: string; message: string }> {
+export async function reprocessAICostRelationships(): Promise<{ task_id: number; status: string; message: string; warnings?: string[] }> {
   const { data } = await api.post("/etl/reprocess-ai-cost-relationships");
   return data;
 }
 
-export async function getAICostRelationshipHistory(): Promise<Array<{ id: number; status: string; phase?: string; started_at?: string; finished_at?: string; rows_destination?: number }>> {
+export interface AICostRelationshipHistoryItem {
+  id: number;
+  status: string;
+  phase?: string;
+  started_at?: string;
+  finished_at?: string;
+  rows_destination?: number;
+  errors?: string[];
+  result_json?: {
+    failed?: Array<{ link_id: number; name?: string; error?: string }>;
+    warnings?: string[];
+  };
+}
+
+export async function getAICostRelationshipHistory(): Promise<AICostRelationshipHistoryItem[]> {
   const { data } = await api.get("/etl/ai-cost-relationship-history");
   return data;
 }
