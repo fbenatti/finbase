@@ -146,7 +146,7 @@ async def _validate_connection(connection_id: int, db: AsyncSession) -> SourceCo
     conn = await db.get(SourceConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Conexão não encontrada")
-    allowed_connectors = {"manual_csv", "azure_blob", "gcp_bigquery"}
+    allowed_connectors = {"manual_csv", "azure_blob", "gcp_bigquery", "azure_automation_jobs"}
     if conn.connector_type not in allowed_connectors:
         raise HTTPException(
             status_code=400,

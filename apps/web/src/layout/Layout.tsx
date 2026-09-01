@@ -64,7 +64,7 @@ const menuGroups = [
     background: "#f5f3ff",
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
-      { path: "/savings", label: "Ações de saving", icon: <SavingsIcon /> },
+      { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
       { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
@@ -77,10 +77,8 @@ const menuGroups = [
     background: "#f0fdfa",
     items: [
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
-      { path: "/expected-view", label: "Visão executiva", icon: <TimelineIcon /> },
       { path: "/dimon-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
-      { path: "/visoes-consumo-ia", label: "Visões consumo IA", icon: <SmartToyIcon /> },
-      { path: "/reservations", label: "Reservas Azure", icon: <CalendarMonthIcon /> },
+      { path: "/visoes-consumo-ia", label: "Dados e IA", icon: <SmartToyIcon /> },
     ],
   },
 ];

@@ -81,7 +81,11 @@ class ForecastRun(Base):
     config_version = Column(Integer, nullable=False, default=1)
     trigger_type = Column(String(30), nullable=False, default="MANUAL")
     source_etl_task_id = Column(Integer, ForeignKey("etl_task.id"), nullable=True)
-    cutoff_date = Column(String(10), nullable=False)
+    # Data-driven cutoff (MAX data collected − cutoff_days) computed by the
+    # forecast engine and persisted after execution. NULL until the run
+    # executes — never stamp today's date here, or a delayed report would make
+    # "hoje" look like the calculation base of the remaining-days forecast.
+    cutoff_date = Column(String(10), nullable=True)
     status = Column(String(30), nullable=False, default="QUEUED")
     phase = Column(String(200), nullable=True)
     total_series = Column(Integer, nullable=False, default=0)
@@ -119,6 +123,10 @@ class ForecastAck(Base):
     accuracy = Column(Float, nullable=True)
     category = Column(String(80), nullable=False)
     reason = Column(String(1000), nullable=False)
+    # Severidade do desvio para highlights: Informação | Perigo | Crítico | Sucesso.
+    severity = Column(String(20), nullable=False, default="Informação")
+    # Ordem manual do highlight (menor = aparece primeiro); default pela severidade.
+    ordem = Column(Integer, nullable=False, default=0)
     registered_at = Column(Date, nullable=True)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -27,46 +27,92 @@ def _get_sync_session():
     return SyncSession()
 
 
-def _run_etl_job(connection_id: int, schedule_id: int, schedule_name: str) -> None:
-    """Run the ETL for a connection synchronously (called from APScheduler)."""
-    from app.services.task_runner import _run_etl_sync
+def _queue_extraction_sync(connection_id: int, session, *, phase: str | None = None,
+                          result_json: dict | None = None) -> int:
+    """Insert a QUEUED extraction task for the worker to pick up (sync session).
 
-    logger.info("Scheduled ETL [%s] starting for connection %d", schedule_name, connection_id)
+    Returns the new task id. The worker executes the full ETL pipeline,
+    including operational collectors (PTU, Automation, Resource Graph).
+    """
+    from sqlalchemy import insert
+    from app.models.etl_task import EtlTask
+    new_id = session.execute(
+        insert(EtlTask).values(
+            task_type="extraction",
+            status="QUEUED",
+            connection_id=connection_id,
+            destination_table_id=None,
+            connection_ids=[connection_id],
+            billing_periods=[],
+            selected_blobs=[],
+            total_blobs=0,
+            processed_blobs=0,
+            rows_raw=0,
+            rows_normalized=0,
+            rows_destination=0,
+            errors=[],
+            phase=phase,
+            result_json=result_json,
+        ).returning(EtlTask.id)
+    )
+    task_id = new_id.scalar_one()
 
-    # Create a minimal EtlTask record
+    from app.services.task_runner import _inmemory_tasks
+    _inmemory_tasks[task_id] = {
+        "id": task_id,
+        "connection_id": connection_id,
+        "status": "QUEUED",
+        "task_type": "extraction",
+        "total_blobs": 0,
+        "processed_blobs": 0,
+        "rows_raw": 0,
+        "rows_normalized": 0,
+        "rows_destination": 0,
+        "current_blob": None,
+        "current_blob_size": 0,
+        "download_bytes": 0,
+        "downloaded_bytes_total": 0,
+        "total_download_bytes": 0,
+        "active_downloads": 0,
+        "errors": [],
+    }
+    return task_id
+
+
+def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
+    """Queue ETL extraction for one or more connections (called from APScheduler).
+
+    ``connection_ids`` may be a single int (legacy schedules) or a list of
+    connection ids (multi-connection schedules such as "all cloud sources").
+    Tasks are enqueued as QUEUED and executed by the worker process, which
+    already handles every connector type (incl. PTU/Automation/Resource Graph).
+    """
+    if isinstance(connection_ids, int):
+        connection_ids = [connection_ids]
+
+    logger.info("Scheduled ETL [%s] queuing extraction for connections %s", schedule_name, connection_ids)
+
     session = _get_sync_session()
     try:
-        from app.models.etl_task import EtlTask
-        task = EtlTask(connection_id=connection_id, status="RUNNING")
-        session.add(task)
-        session.flush()
-        task_id = task.id
-
-        # Update last_run_at on schedule
         from app.models.scheduled_task import ScheduledTask
         sched = session.get(ScheduledTask, schedule_id)
         if sched:
             sched.last_run_at = datetime.now(timezone.utc)
         session.commit()
 
-        # Run the ETL synchronously
-        _run_etl_sync(task_id, connection_id, None, None)
-
-        session.refresh(task)
-
-        # ── Auto-reprocess destination tables ──
-        if sched and sched.destination_reprocess:
-            _auto_reprocess_destinations(connection_id, session)
-            # Gold was just refreshed; update any active savings immediately.
-            from app.services.saving_service import refresh_actions
-            refresh_actions(session)
-            forecast_config_id = (sched.config_json or {}).get("forecast_config_id") if sched else None
-            run_forecast_after = bool((sched.config_json or {}).get("forecast_after_ingestion")) if sched else False
-            if run_forecast_after and forecast_config_id and (task.rows_raw or 0) > 0:
-                _queue_forecast_run(int(forecast_config_id), task.id, session)
-
+        queued = []
+        for connection_id in connection_ids:
+            task_id = _queue_extraction_sync(
+                connection_id, session,
+                phase=f"Agendado: {schedule_name}",
+                result_json={"schedule_id": schedule_id, "schedule_name": schedule_name},
+            )
+            queued.append(task_id)
+        session.commit()
+        logger.info("Scheduled ETL [%s] queued tasks %s", schedule_name, queued)
     except Exception as e:
         logger.error("Scheduled ETL [%s] failed: %s", schedule_name, e)
+        session.rollback()
     finally:
         session.close()
 
@@ -133,6 +179,23 @@ def _azure_ptu_eventhub_job() -> None:
         logger.info("Azure PTU Event Hub poll: %d connections", len(results))
     except Exception as exc:
         logger.warning("Azure PTU Event Hub poll failed: %s", exc)
+
+
+def _oci_operational_hourly_job() -> None:
+    """Refresh OCI AI/GPU telemetry for explicitly configured compartments."""
+    session = _get_sync_session()
+    try:
+        from app.models.source_connection import SourceConnection
+        from app.services.oci_operational_monitoring import collect, configured_compartments
+        conns = session.query(SourceConnection).filter(SourceConnection.connector_type == "oci").all()
+        for conn in conns:
+            if configured_compartments(conn):
+                result = collect(conn, hours=3, persist=True)
+                logger.info("OCI operational refresh %s: inventory=%d metrics=%d errors=%d", conn.code, len(result.get("inventory", [])), len(result.get("metrics", [])), len(result.get("errors", [])))
+    except Exception as exc:
+        logger.warning("OCI operational hourly collection failed: %s", exc, exc_info=True)
+    finally:
+        session.close()
 
 
 def _queue_reservation_collections() -> None:
@@ -260,7 +323,7 @@ def _queue_forecast_run(config_id: int, source_task_id: int, session) -> int | N
     if active:
         logger.info("Forecast %s already active; scheduled trigger skipped", active)
         return active
-    run = ForecastRun(forecast_config_id=config_id, config_version=config.version, trigger_type="POST_INGESTION", source_etl_task_id=source_task_id, cutoff_date=datetime.now(timezone.utc).date().isoformat())
+    run = ForecastRun(forecast_config_id=config_id, config_version=config.version, trigger_type="POST_INGESTION", source_etl_task_id=source_task_id, cutoff_date=None)
     session.add(run)
     session.flush()
     task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id, result_json={"forecast_run_id": run.id, "source_etl_task_id": source_task_id}, errors=[])
@@ -268,6 +331,14 @@ def _queue_forecast_run(config_id: int, source_task_id: int, session) -> int | N
     session.commit()
     logger.info("Queued forecast run %d after ETL task %d", run.id, source_task_id)
     return run.id
+
+
+def _schedule_connection_ids(schedule_row) -> list[int]:
+    """Resolve the connections covered by a schedule row."""
+    ids = list(schedule_row.connection_ids or []) if schedule_row.connection_ids else []
+    if not ids and schedule_row.connection_id:
+        ids = [schedule_row.connection_id]
+    return ids
 
 
 def _register_schedule(scheduler: AsyncIOScheduler, schedule_row, sync_session) -> bool:
@@ -284,17 +355,41 @@ def _register_schedule(scheduler: AsyncIOScheduler, schedule_row, sync_session) 
         job = scheduler.add_job(
             _run_etl_job,
             trigger=trigger,
-            args=[schedule_row.connection_id, schedule_row.id, schedule_row.name],
+            args=[_schedule_connection_ids(schedule_row), schedule_row.id, schedule_row.name],
             id=f"sched_{schedule_row.id}",
             name=schedule_row.name,
             replace_existing=True,
         )
 
-        # Update next_run_at (safe access for APScheduler 3.x)
+        # Update next_run_at (safe access for APScheduler 3.x). During
+        # startup the scheduler has not started yet, so job.next_run_time is
+        # None even though the trigger is valid — compute it via croniter.
         try:
             schedule_row.next_run_at = job.next_run_time
         except AttributeError:
             schedule_row.next_run_at = getattr(job, 'next_run_time', None)
+        if schedule_row.next_run_at is None:
+            try:
+                from croniter import croniter
+                from datetime import datetime as _dt
+                base = _dt.now().astimezone()
+                tz = schedule_row.timezone or "America/Sao_Paulo"
+                try:
+                    from zoneinfo import ZoneInfo
+                    base = _dt.now(ZoneInfo(tz))
+                except Exception:
+                    pass
+                itr = croniter(schedule_row.cron_expression, base)
+                schedule_row.next_run_at = itr.get_next(_dt)
+            except Exception as exc:
+                logger.warning("Could not compute next_run_at for schedule %d: %s", schedule_row.id, exc)
+        # Persist on the sync session's own object: the row passed in may
+        # belong to the async session (POST /etl/schedules), whose changes
+        # this commit would silently ignore.
+        from app.models.scheduled_task import ScheduledTask as _SchedModel
+        persisted = sync_session.get(_SchedModel, schedule_row.id)
+        if persisted is not None:
+            persisted.next_run_at = schedule_row.next_run_at
         sync_session.commit()
 
         next_str = str(schedule_row.next_run_at) if schedule_row.next_run_at else "N/A"
@@ -342,6 +437,7 @@ async def start_scheduler():
         _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
         _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
+        _scheduler.add_job(_oci_operational_hourly_job, "cron", minute=18, id="oci_operational_hourly", replace_existing=True)
         _scheduler.add_job(_azure_reservations_daily_job, "cron", hour=3, minute=45, id="azure_reservations_daily", replace_existing=True)
         logger.info("Scheduler started with %d active schedules", count)
     except Exception as e:
@@ -443,7 +539,21 @@ async def run_etl_and_reprocess(connection_id: int) -> int:
         "download_bytes": 0,
         "downloaded_bytes_total": 0,
         "total_download_bytes": 0,
+        "active_downloads": 0,
         "errors": [],
     }
 
     return task_id
+
+
+async def run_schedule_now(connection_ids) -> list[int]:
+    """Queue an extraction task for every connection covered by a schedule.
+
+    Returns the list of queued task ids (one per connection).
+    """
+    if isinstance(connection_ids, int):
+        connection_ids = [connection_ids]
+    task_ids = []
+    for connection_id in connection_ids:
+        task_ids.append(await run_etl_and_reprocess(connection_id))
+    return task_ids

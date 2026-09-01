@@ -58,6 +58,23 @@ function formatDateTime(value: string | Date | null | undefined): string {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
+function formatConditions(rule: ClassificationRule): string {
+  const raw = rule.conditions;
+  if (!raw || !Array.isArray(raw) || raw.length === 0) {
+    return rule.pattern || "—";
+  }
+  const parts = raw.map((c) => {
+    const cond = c as Record<string, unknown>;
+    const field = String(cond.field ?? "").trim();
+    const operator = String(cond.operator ?? "=");
+    const values = Array.isArray(cond.values)
+      ? (cond.values as unknown[]).map(String).join(" | ")
+      : String(cond.values ?? "");
+    return `${field} ${operator} ${values}`.trim();
+  });
+  return parts.filter(Boolean).join(" ; ");
+}
+
 export default function ClassificationDataGrid({
   rows,
   total,
@@ -98,6 +115,33 @@ export default function ClassificationDataGrid({
           <Typography variant="body2" fontWeight={700} noWrap>{row.name}</Typography>
         </Stack>
       ),
+    },
+    {
+      field: "conditions",
+      headerName: "Condições",
+      renderHeader: () => filteredHeader("Condições", "conditions"),
+      minWidth: 320,
+      flex: 2,
+      sortable: false,
+      filterable: false,
+      renderCell: ({ row }: { row: ClassificationRule }) => {
+        const text = formatConditions(row);
+        return (
+          <Tooltip title={text} placement="top">
+            <Typography
+              variant="body2"
+              noWrap
+              sx={{
+                fontFamily: 'Consolas, "Fira Code", Monaco, "Courier New", Courier, monospace',
+                fontSize: "0.78rem",
+                color: "text.primary",
+              }}
+            >
+              {text}
+            </Typography>
+          </Tooltip>
+        );
+      },
     },
     {
       field: "department_name",
@@ -184,12 +228,7 @@ export default function ClassificationDataGrid({
     });
   };
 
-  const firstSearch = useRef(true);
   useEffect(() => {
-    if (firstSearch.current) {
-      firstSearch.current = false;
-      return;
-    }
     setPaginationModel((current) => ({ ...current, page: 0 }));
     query({ offset: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,11 +324,12 @@ export default function ClassificationDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["Nome", "Departamento", "Cloud", "Prioridade", "Ativa", "Atualizado em"];
+    const header = ["Nome", "Condições", "Departamento", "Cloud", "Prioridade", "Ativa", "Atualizado em"];
     const lines = [
       header.join(";"),
       ...rows.map((row) => [
         row.name,
+        formatConditions(row),
         row.department_name || "",
         cloudLabel(row.cloud_scope),
         row.priority,
@@ -310,7 +350,7 @@ export default function ClassificationDataGrid({
 
   return (
     <>
-      <Box sx={{ height: 520, width: "100%" }} onContextMenu={onCellContextMenu}>
+      <Box sx={{ width: "100%" }} onContextMenu={onCellContextMenu}>
         <DataGrid
           apiRef={apiRef}
           rows={rows}
@@ -319,6 +359,7 @@ export default function ClassificationDataGrid({
           rowCount={total}
           getRowId={(row) => row.id}
           disableRowSelectionOnClick
+          autoHeight
           pagination
           paginationMode="server"
           sortingMode="server"

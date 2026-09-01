@@ -20,6 +20,7 @@ import logging
 import re
 import os
 import time
+from datetime import datetime, timezone
 import pandas as pd
 from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -106,6 +107,32 @@ class QueryResponse(BaseModel):
     columns: list[str]
     rows: list[dict[str, Any]]
     row_count: int
+
+
+_STAGING_TABLE_RE = re.compile(
+    r"^(?P<base>[a-z0-9_]+)_stg_(?P<timestamp>\d{16,20})$"
+)
+
+
+def _staging_table_parts(table_name: str) -> tuple[str, int] | None:
+    """Return the generated staging base name and time_ns suffix."""
+    match = _STAGING_TABLE_RE.fullmatch(table_name)
+    if not match:
+        return None
+    return match.group("base"), int(match.group("timestamp"))
+
+
+async def _staging_base_has_active_reprocess(db: AsyncSession, base_name: str) -> bool:
+    row = (await db.execute(text("""
+        SELECT 1
+          FROM etl_task t
+          JOIN destination_table d ON d.id = t.destination_table_id
+         WHERE t.task_type = 'reprocess'
+           AND t.status IN ('QUEUED', 'RUNNING')
+           AND replace(replace(d.physical_name, '-', '_'), '.', '_') = :base_name
+         LIMIT 1
+    """), {"base_name": base_name})).first()
+    return row is not None
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +262,15 @@ class ExpectedViewRequest(BaseModel):
     include_shared_cost: bool = False
     # Nome físico da Dimon pré-agregada que alimenta a Visão Esperada.
     # Default: a regra visao-completa (dest_dm_cost_visao_completa).
+    dimon_table: str = "dest_dm_cost_visao_completa"
+
+
+class ExpectedViewPeriodDetailRequest(BaseModel):
+    """Dinâmica de um mês: departamentos de todos os níveis dentro do escopo."""
+    director: str = "DIR DADOS E INTELIGENCIA ARTIFICIAL"
+    department_id: int | None = None
+    period: str  # YYYYMM
+    tipo: str = "realizado"  # realizado | forecast
     dimon_table: str = "dest_dm_cost_visao_completa"
 
 
@@ -1632,6 +1668,114 @@ async def expected_view(body: ExpectedViewRequest, request: Request, db: AsyncSe
             raise _cancelled_http()
 
 
+async def _expected_view_period_detail_core(
+    body: ExpectedViewPeriodDetailRequest,
+    db: AsyncSession,
+    interactive: dict[str, Any],
+) -> dict[str, Any]:
+    """Dinâmica de um mês: valor realizado ou forecast de cada departamento,
+    de todos os níveis (1..7), dentro do escopo selecionado."""
+    await wait_until_ready(timeout_s=20)
+    table = body.dimon_table.strip().replace('"', "")
+    schema = await _describe_gold_schema(table, max_retries=2, namespace="dimon")
+    columns = {name.lower(): name for name in schema}
+    for required in ("period", "realizado", "tipo", "departamento_nivel_1"):
+        if required not in columns:
+            raise HTTPException(status_code=422, detail=f"A tabela Dimon não possui a coluna {required}")
+    period_col = _quote_ident(columns.get("_billing_period") or columns["period"])
+    value_col = _quote_ident(columns["realizado"])
+    type_col = _quote_ident(columns["tipo"])
+
+    departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
+    department_map = {department.id: department for department in departments}
+    selected = department_map.get(body.department_id) if body.department_id is not None else None
+    if body.department_id is not None and not selected:
+        raise HTTPException(status_code=422, detail="Departamento selecionado não existe ou está inativo")
+    if selected:
+        scope_path: list[str] = []
+        current: Department | None = selected
+        seen: set[int] = set()
+        while current and current.id not in seen:
+            seen.add(current.id)
+            scope_path.append((current.name or "").strip())
+            current = department_map.get(current.parent_id) if current.parent_id else None
+        scope_path.reverse()
+    else:
+        scope_path = [body.director]
+    if len(scope_path) > 7:
+        raise HTTPException(status_code=422, detail="A Visão Esperada suporta até 7 níveis")
+
+    def scope_filter() -> str:
+        checks: list[str] = []
+        for level, name in enumerate(scope_path, start=1):
+            key = f"departamento_nivel_{level}"
+            if key not in columns:
+                raise HTTPException(status_code=422, detail=f"A tabela não possui {key}")
+            checks.append(f"TRIM(CAST({_quote_ident(columns[key])} AS VARCHAR)) = {_quote_literal(name.strip())}")
+        return " AND ".join(checks)
+
+    tipo = str(body.tipo or "realizado").lower()
+    if tipo not in ("realizado", "forecast"):
+        raise HTTPException(status_code=422, detail="tipo deve ser realizado ou forecast")
+    if tipo == "realizado":
+        tipo_sql = f"({type_col} IS NULL OR lower(CAST({type_col} AS VARCHAR)) IN ('realizado', ''))"
+    else:
+        tipo_sql = f"lower(CAST({type_col} AS VARCHAR)) = 'forecast'"
+
+    level_cols = [f"departamento_nivel_{level}" for level in range(1, 8)]
+    group_cols = [_quote_ident(columns[col]) for col in level_cols if col in columns]
+    cloud_filter = _expected_view_cloud_filter(scope_path, selected, columns)
+    sql = f"""
+      SELECT {', '.join(group_cols)}, SUM(COALESCE(TRY_CAST({value_col} AS DOUBLE), 0)) AS value
+      FROM iceberg.dimon.{table}
+      WHERE {scope_filter()}{cloud_filter}
+        AND {period_col} = {_quote_literal(body.period)}
+        AND {tipo_sql}
+      GROUP BY {', '.join(group_cols)}
+    """
+    try:
+        leaf_rows = await trino_execute(sql, **interactive)
+    except TrinoCancelled:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Falha ao consultar a dinâmica do mês: {exc}")
+
+    # Acumula o valor de cada folha em todos os ancestrais (rollup por nível).
+    nodes: dict[tuple[str, ...], dict[str, Any]] = {}
+    total = 0.0
+    for row in leaf_rows:
+        path: list[str] = []
+        value = float(row.get("value") or 0)
+        total += value
+        for level in range(1, 8):
+            name = str(row.get(f"departamento_nivel_{level}") or "").strip()
+            if not name:
+                break
+            path.append(name)
+            key = tuple(path)
+            node = nodes.setdefault(key, {"nivel": level, "name": name, "path": list(path), "value": 0.0})
+            node["value"] = float(node["value"] or 0) + value
+    rows = sorted(nodes.values(), key=lambda node: (node["nivel"], -float(node["value"] or 0)))
+    return {
+        "period": body.period,
+        "tipo": tipo,
+        "scope_path": scope_path,
+        "total": round(total, 2),
+        "rows": [{**node, "value": round(float(node["value"] or 0), 2)} for node in rows],
+    }
+
+
+@router.post("/expected-view/period-detail")
+async def expected_view_period_detail(body: ExpectedViewPeriodDetailRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Dinâmica de um mês selecionado (clique na coluna): departamentos de
+    todos os níveis, realizado ou forecast, no escopo do departamento."""
+    async with _ClientCancelScope(request, timeout_s=120) as scope:
+        try:
+            return await _expected_view_period_detail_core(body, db, scope.trino_kwargs)
+        except TrinoCancelled:
+            raise _cancelled_http()
+
+
 async def _expected_view_core(
     body: ExpectedViewRequest,
     db: AsyncSession,
@@ -1694,10 +1838,18 @@ async def _expected_view_core(
     forecast_scope_filter = scope_filter(forecast_columns)
     actual_cloud_filter = _expected_view_cloud_filter(scope_path, selected, actual_columns)
     forecast_cloud_filter = _expected_view_cloud_filter(scope_path, selected, forecast_columns)
-    year_start = _quote_literal(f"{body.year:04d}01")
-    year_end = _quote_literal(f"{body.year + 1:04d}01")
-    actual_year_filter = f"{actual_period} >= {year_start} AND {actual_period} < {year_end}"
-    forecast_year_filter = f"{forecast_period} >= {year_start} AND {forecast_period} < {year_end}"
+    # year <= 0 = "todos os períodos": sem recorte de ano — traz todo o
+    # realizado e todo o forecast disponível na Dimon, inclusive meses futuros.
+    all_periods = body.year <= 0
+    year_start = _quote_literal(f"{max(body.year, 1):04d}01")
+    year_end = _quote_literal(f"{max(body.year, 1) + 1:04d}01")
+    actual_year_clause = "" if all_periods else f" AND {actual_period} >= {year_start} AND {actual_period} < {year_end}"
+    forecast_year_clause = "" if all_periods else f" AND {forecast_period} >= {year_start} AND {forecast_period} < {year_end}"
+    # O mês corrente é aberto: a planning carrega só o forecast do restante
+    # (baseline × dias restantes), aditivo sobre o realizado parcial da Gold.
+    # Por isso ele precisa ser empilhado — mesma semântica da projeção do
+    # ai-copilot (realizado parcial + forecast do restante).
+    current_month_key = datetime.now().strftime("%Y%m")
     tipo_actual = ""
     if "tipo" in actual_columns:
         tipo_col = _quote_ident(actual_columns["tipo"])
@@ -1708,7 +1860,7 @@ async def _expected_view_core(
             SELECT MIN({forecast_period}) AS period
             FROM iceberg.dimon.{forecast_name}
             WHERE {forecast_scope_filter}{forecast_cloud_filter}
-              AND {forecast_year_filter}
+              {forecast_year_clause}
               AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
             """,
             **interactive,
@@ -1735,7 +1887,7 @@ async def _expected_view_core(
              SUM(COALESCE(TRY_CAST({actual_value} AS DOUBLE), 0)) AS actual_value
       FROM {actual_from}
       WHERE {actual_scope_filter}{actual_cloud_filter}
-        AND {actual_year_filter}
+        {actual_year_clause}
         {tipo_actual}
       GROUP BY 1, 2
     """
@@ -1745,7 +1897,7 @@ async def _expected_view_core(
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
       FROM iceberg.dimon.{forecast_name}
       WHERE {forecast_scope_filter}{forecast_cloud_filter}
-        AND {forecast_year_filter}
+        {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
         {forecast_from}
       GROUP BY 1, 2
@@ -1778,7 +1930,10 @@ async def _expected_view_core(
         # forecast on the row for the chart, but do not add it to the year
         # forecast / waterfall — otherwise the donor still shows the full
         # condomínio forecast after rateio has zeroed the actual.
-        if current.get("actual_value") is None:
+        # Exception: the current (open) month carries only the remaining-days
+        # projection (baseline × dias restantes), which is additive on top of
+        # the partial realized — so it must count toward the driver forecast.
+        if current.get("actual_value") is None or period == current_month_key:
             forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
     if body.include_shared_cost:
         medida_col = forecast_columns.get("rateio_medida")
@@ -1790,7 +1945,7 @@ async def _expected_view_core(
                  SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
           FROM iceberg.dimon.{forecast_name}
           WHERE {forecast_scope_filter}{forecast_cloud_filter}
-            AND {forecast_year_filter}
+            {forecast_year_clause}
             AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
           GROUP BY 1, 2{', 3' if medida_col else ''}
         """
@@ -1818,7 +1973,10 @@ async def _expected_view_core(
         apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_value")
         apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_value")
     fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
-    budget_year = body.year
+    # Em "todos os períodos" o orçamento/forecast manual continua ancorado no
+    # ano corrente (planejamento anual), enquanto a série de realizado/forecast
+    # da Dimon cobre todos os meses disponíveis.
+    budget_year = body.year if body.year > 0 else datetime.now().year
     budget_entries = (await db.execute(
         select(PlanningEntry).join(PlanningVersion).join(FinancialType).where(
             FinancialType.code == "orcamento",
@@ -1917,6 +2075,11 @@ async def _expected_view_core(
         # separate stack on top of that base, not mixed into Gold. Manual
         # forecast composes on top of the future forecast as its own layer.
         base = actual if actual is not None else (forecast if forecast is not None else budget)
+        # Current (open) month: the planning forecast is the remaining-days
+        # projection and never overlaps the partial realized — stack it so the
+        # expected total reflects the full-month estimate.
+        if actual is not None and forecast is not None and period == current_month_key:
+            base = float(base) + float(forecast)
         expected = float(base or 0) + forecast_manual + shared
         cumulative += expected
         rows.append({
@@ -1960,6 +2123,59 @@ async def get_tables():
         except Exception as e:
             result[layer] = [f"error: {e}"]
     return result
+
+
+@router.get("/staging-tables")
+async def get_staging_tables(db: AsyncSession = Depends(get_db)):
+    """List generated Gold staging tables and protect active reprocesses."""
+    catalog = get_catalog()
+    rows: list[dict[str, Any]] = []
+    for table_name in sorted(list_tables("gold")):
+        parts = _staging_table_parts(str(table_name))
+        if not parts:
+            continue
+        base_name, timestamp_ns = parts
+        active = await _staging_base_has_active_reprocess(db, base_name)
+        row_count: int | None = None
+        try:
+            table = catalog.load_table(("gold", table_name))
+            row_count = sum(task.file.record_count for task in table.scan().plan_files())
+        except Exception as exc:
+            logger.warning("Could not inspect staging table gold.%s: %s", table_name, exc)
+        rows.append({
+            "table_name": table_name,
+            "base_table": base_name,
+            "created_at": datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=timezone.utc).isoformat(),
+            "row_count": row_count,
+            "protected": active,
+            "status": "ACTIVE_REPROCESS" if active else "ORPHANED",
+        })
+    return {"tables": rows}
+
+
+@router.delete("/staging-tables/{table_name}")
+async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_db)):
+    """Drop only a system-generated, inactive Gold staging table."""
+    parts = _staging_table_parts(table_name)
+    if not parts:
+        raise HTTPException(status_code=422, detail="Nome de tabela staging inválido")
+    base_name, _ = parts
+    if table_name not in set(list_tables("gold")):
+        raise HTTPException(status_code=404, detail="Tabela staging não encontrada")
+    if await _staging_base_has_active_reprocess(db, base_name):
+        raise HTTPException(
+            status_code=409,
+            detail="A tabela pertence a um destino com reprocessamento ativo e não pode ser excluída",
+        )
+    try:
+        await trino_execute(
+            f'DROP TABLE iceberg.gold.{_quote_ident(table_name)}',
+            timeout_s=90,
+            max_retries=1,
+        )
+    except (TrinoError, ConnectionError) as exc:
+        raise HTTPException(status_code=503, detail=f"Falha ao excluir staging no Iceberg: {exc}")
+    return {"deleted": True, "table_name": table_name}
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -2294,42 +2510,6 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
         except Exception:
             pass
 
-    # Forecast manual (operational planning, PostgreSQL) as an analysis-only
-    # pseudo-destination. Expose it once when a current version exists.
-    try:
-        fm_exists = await db.execute(text(
-            "SELECT 1 FROM planning_version pv JOIN financial_type ft ON ft.id = pv.financial_type_id "
-            "WHERE ft.code = 'forecast-manual' AND pv.is_current = true LIMIT 1"
-        ))
-        if fm_exists.scalar_one_or_none():
-            fm_counts = await db.execute(text(
-                "SELECT pv.year, COUNT(pe.id) AS n "
-                "FROM planning_version pv JOIN financial_type ft ON ft.id = pv.financial_type_id "
-                "JOIN planning_entry pe ON pe.planning_version_id = pv.id "
-                "WHERE ft.code = 'forecast-manual' AND pv.is_current = true "
-                "GROUP BY pv.year ORDER BY pv.year DESC LIMIT 20"
-            ))
-            fm_periods = [
-                {"period": f"{row[0]:04d}01", "count": row[1]}
-                for row in fm_counts.all()
-            ]
-            fm_total = sum(row[0] for row in (await db.execute(text(
-                "SELECT COUNT(pe.id) FROM planning_version pv "
-                "JOIN financial_type ft ON ft.id = pv.financial_type_id "
-                "JOIN planning_entry pe ON pe.planning_version_id = pv.id "
-                "WHERE ft.code = 'forecast-manual' AND pv.is_current = true"
-            ))).all())
-            result.append({
-                "id": FORECAST_MANUAL_PIVOT_ID,
-                "name": "Forecast manual",
-                "physical_name": _FORECAST_MANUAL_PIVOT_NAME,
-                "description": "Projeções manuais de forecast cadastradas por departamento (apenas períodos futuros, sem realizado na Gold)",
-                "row_count": int(fm_total or 0),
-                "periods": fm_periods,
-                "analysis_only": True,
-            })
-    except Exception as exc:
-        logger.exception("Falha ao expor Forecast manual como destino: %s", exc)
     return result
 
 

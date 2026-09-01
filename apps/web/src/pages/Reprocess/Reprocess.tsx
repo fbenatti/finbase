@@ -1,11 +1,15 @@
 import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import Extraction from "../Extraction/Extraction";
+import SchedulesPanel from "../Extraction/SchedulesPanel";
 import ReprocessDataTab from "./ReprocessDataTab";
 import ReprocessForecastTab from "./ReprocessForecastTab";
 import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
 import ReprocessDimonTab from "./ReprocessDimonTab";
+import { useEffect, useState } from "react";
+import { getConnections, SourceConnection, formatApiError } from "../../services/api";
+import { Alert } from "@mui/material";
 
 const TABS = [
   { id: "data", label: "Reprocessar dados" },
@@ -14,11 +18,22 @@ const TABS = [
   { id: "shared", label: "Custo compartilhado" },
   { id: "dimon", label: "Dimon (Custo pré-agregado)" },
   { id: "extraction", label: "Extração & Monitoramento" },
+  { id: "schedules", label: "Agendamentos" },
 ] as const;
 
 export default function Reprocess() {
   const [params, setParams] = useSearchParams();
+  const [connections, setConnections] = useState<SourceConnection[]>([]);
+  const [schedulesError, setSchedulesError] = useState("");
   const tab = TABS.some(item => item.id === params.get("tab")) ? params.get("tab")! : "data";
+
+  useEffect(() => {
+    if (tab === "schedules") {
+      getConnections()
+        .then(setConnections)
+        .catch((e) => setSchedulesError(formatApiError(e, "Falha ao carregar conexões")));
+    }
+  }, [tab]);
 
   const setTab = (next: string) => {
     const updated = new URLSearchParams(params);
@@ -46,6 +61,17 @@ export default function Reprocess() {
           {tab === "shared" && <ReprocessSharedCostTab />}
           {tab === "dimon" && <ReprocessDimonTab />}
           {tab === "extraction" && <Extraction embedded />}
+          {tab === "schedules" && (
+            <>
+              <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>Agendamentos</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Coleta automática diária de dados de cloud e ferramentas. Cada agendamento pode cobrir várias
+                conexões e dispara a extração na fila do worker.
+              </Typography>
+              {schedulesError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setSchedulesError("")}>{schedulesError}</Alert>}
+              <SchedulesPanel connections={connections} />
+            </>
+          )}
         </Paper>
       </Box>
     </Box>

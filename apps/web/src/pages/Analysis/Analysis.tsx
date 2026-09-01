@@ -9,7 +9,7 @@ import {
 } from "@mui/material";
 import {
   Storage, AttachMoney, PlayArrow, Refresh, Delete,
-  Schema as SchemaIcon, Tune, BarChart, Terminal, Search as SearchIcon,
+  Schema as SchemaIcon, Tune, BarChart, Terminal, Search as SearchIcon, DeleteSweep,
 } from "@mui/icons-material";
 import {
   getAnalysisHealth, getAnalysisTables, runAnalysisQuery,
@@ -19,6 +19,7 @@ import {
   SourceAnalysis, SourceDataResult,
   DestinationAnalysis, DestinationDataResult,
   formatApiError, PivotFilter, deleteDimonTable,
+  AnalysisStagingTable, getAnalysisStagingTables, deleteAnalysisStagingTable,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import PivotAnalysis from "../../components/PivotAnalysis";
@@ -37,7 +38,7 @@ function filtersFromSearch(params: URLSearchParams): PivotFilter[] {
   return filters;
 }
 
-type AnalysisTab = "destino" | "fontes" | "iceberg" | "pivot" | "busca";
+type AnalysisTab = "destino" | "fontes" | "iceberg" | "staging" | "pivot" | "busca";
 
 // Pre-built queries by layer
 const PREBUILT: Record<string, { label: string; sql: string }[]> = {
@@ -75,6 +76,8 @@ export default function Analysis() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [stagingTables, setStagingTables] = useState<AnalysisStagingTable[]>([]);
+  const [stagingLoading, setStagingLoading] = useState(false);
 
   // ─── Fontes (Sources) state ───
   const [sources, setSources] = useState<SourceAnalysis[]>([]);
@@ -94,14 +97,41 @@ export default function Analysis() {
     getAnalysisTables().then(setTables).catch(() => {});
     getAnalysisSources().then(setSources).catch(() => {});
     getAnalysisDestinations().then(setDestinations).catch(() => {});
+    getAnalysisStagingTables().then(setStagingTables).catch(() => {});
   }, []);
 
   const refreshLakehouse = async () => {
     try {
       const next = await getAnalysisDestinations();
       setDestinations(next);
+      const [nextTables, nextStaging] = await Promise.all([
+        getAnalysisTables(), getAnalysisStagingTables(),
+      ]);
+      setTables(nextTables);
+      setStagingTables(nextStaging);
     } catch (e: unknown) {
       setError(formatApiError(e, "Falha ao atualizar o Data Lakehouse"));
+    }
+  };
+
+  const removeStagingTable = async (item: AnalysisStagingTable) => {
+    if (item.protected) return;
+    if (!window.confirm(
+      `Excluir permanentemente a staging ${item.table_name}?\n\n` +
+      "A ação remove somente a tabela temporária; a Gold publicada não será alterada."
+    )) return;
+    setStagingLoading(true); setError("");
+    try {
+      await deleteAnalysisStagingTable(item.table_name);
+      const [nextStaging, nextTables] = await Promise.all([
+        getAnalysisStagingTables(), getAnalysisTables(),
+      ]);
+      setStagingTables(nextStaging);
+      setTables(nextTables);
+    } catch (e: unknown) {
+      setError(formatApiError(e, "Não foi possível excluir a tabela staging"));
+    } finally {
+      setStagingLoading(false);
     }
   };
 
@@ -246,6 +276,7 @@ export default function Analysis() {
           <Tab label="Tabela Destino" value="destino" icon={<AttachMoney />} iconPosition="start" sx={{ minHeight: 42 }} />
           <Tab label="Fontes de Origem" value="fontes" icon={<Storage />} iconPosition="start" sx={{ minHeight: 42 }} />
           <Tab label="Iceberg / Trino" value="iceberg" icon={<Terminal />} iconPosition="start" sx={{ minHeight: 42 }} />
+          <Tab label={`Staging (${stagingTables.length})`} value="staging" icon={<DeleteSweep />} iconPosition="start" sx={{ minHeight: 42 }} />
           <Tab label="Pivot" value="pivot" icon={<BarChart />} iconPosition="start" sx={{ minHeight: 42 }} />
           <Tab label="Busca na Fonte" value="busca" icon={<SearchIcon />} iconPosition="start" sx={{ minHeight: 42 }} />
         </Tabs>
@@ -563,6 +594,84 @@ export default function Analysis() {
                 component="div" count={filteredRows.length} page={page}
                 onPageChange={(_, p) => setPage(p)} rowsPerPage={PAGE_SIZE} rowsPerPageOptions={[PAGE_SIZE]} />
             </>
+          )}
+        </>
+      )}
+
+      {/* ================================================================ */}
+      {/* TAB: STAGING MAINTENANCE                                         */}
+      {/* ================================================================ */}
+      {tab === "staging" && (
+        <>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
+            <Box>
+              <Typography variant="h6">Tabelas temporárias de reprocessamento</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Stagings órfãs podem ser removidas sem alterar a Gold publicada. Tabelas de destinos com reprocessamento ativo ficam protegidas.
+              </Typography>
+            </Box>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={stagingLoading ? <CircularProgress size={16} /> : <Refresh />}
+              disabled={stagingLoading}
+              onClick={async () => {
+                setStagingLoading(true); setError("");
+                try { setStagingTables(await getAnalysisStagingTables()); }
+                catch (e: unknown) { setError(formatApiError(e, "Falha ao listar tabelas staging")); }
+                finally { setStagingLoading(false); }
+              }}
+            >
+              Atualizar
+            </Button>
+          </Box>
+
+          {stagingTables.length === 0 ? (
+            <Alert severity="success">Nenhuma tabela staging pendente de limpeza.</Alert>
+          ) : (
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Tabela</TableCell>
+                    <TableCell>Destino</TableCell>
+                    <TableCell>Criada em</TableCell>
+                    <TableCell align="right">Linhas</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell align="right">Ação</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {stagingTables.map((item) => (
+                    <TableRow key={item.table_name} hover>
+                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{item.table_name}</TableCell>
+                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{item.base_table}</TableCell>
+                      <TableCell>{new Date(item.created_at).toLocaleString("pt-BR")}</TableCell>
+                      <TableCell align="right">{item.row_count == null ? "—" : item.row_count.toLocaleString("pt-BR")}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={item.protected ? "Reprocessamento ativo" : "Órfã"}
+                          color={item.protected ? "warning" : "default"}
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          color="error"
+                          startIcon={<Delete />}
+                          disabled={stagingLoading || item.protected}
+                          onClick={() => void removeStagingTable(item)}
+                        >
+                          Excluir
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           )}
         </>
       )}

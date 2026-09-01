@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Any
 
@@ -491,16 +491,24 @@ class DestinationTableDetailOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DimonChainOption(BaseModel):
+    """Optional Dimon materialization enqueued after the reprocess completes."""
+    enabled: bool = False
+    rule_ids: list[int] = Field(default_factory=list)
+
+
 class ReprocessRequest(BaseModel):
     destination_table_id: int
     connection_ids: list[int]
     billing_periods: list[str] = []
     replace_existing: bool = False
+    chain_dimons: DimonChainOption = Field(default_factory=DimonChainOption)
 
 
 class ScheduledTaskCreate(BaseModel):
     name: str
     connection_id: int
+    connection_ids: list[int] = []  # multi-connection scope; falls back to [connection_id]
     cron_expression: str  # e.g. "0 3 * * *"
     timezone: str = "America/Sao_Paulo"
     destination_reprocess: bool = True
@@ -510,6 +518,8 @@ class ScheduledTaskCreate(BaseModel):
 
 class ScheduledTaskUpdate(BaseModel):
     name: str | None = None
+    connection_id: int | None = None
+    connection_ids: list[int] | None = None
     cron_expression: str | None = None
     timezone: str | None = None
     destination_reprocess: bool | None = None
@@ -521,6 +531,7 @@ class ScheduledTaskOut(BaseModel):
     id: int
     name: str
     connection_id: int
+    connection_ids: list[int] = []
     cron_expression: str
     timezone: str
     destination_reprocess: bool

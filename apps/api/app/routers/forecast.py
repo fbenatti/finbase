@@ -650,7 +650,7 @@ async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncS
             raise HTTPException(422, "CHARGE_INTERVAL exige identificação ou escopo (ex.: cloud_origem=ibm-ti)")
     elif not has_identity:
         raise HTTPException(422, "Informe identification_clauses, identification_values ou escopo")
-    allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL"}
+    allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL", "SOURCE_EXCLUDE_PREFIX"}
     if body.behavior not in allowed: raise HTTPException(422, "Comportamento de forecast inválido")
     if len(body.start_period) != 6 or not body.start_period.isdigit(): raise HTTPException(422, "start_period deve estar em YYYYMM")
     if body.end_period and (len(body.end_period) != 6 or not body.end_period.isdigit()): raise HTTPException(422, "end_period deve estar em YYYYMM")
@@ -745,7 +745,12 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
         snapshot["simulated_as_of"] = simulated_date.isoformat()
     row = ForecastRun(
         forecast_config_id=config_id, config_version=config.version, trigger_type=trigger_type,
-        cutoff_date=(simulated_date or date.today()).isoformat(), config_snapshot=snapshot,
+        # The cutoff is a data-driven value (MAX data collected − cutoff_days)
+        # computed by the engine and persisted after execution. Simulated runs
+        # anchor on the simulated date; real runs start NULL — never "today",
+        # which would misrepresent a delayed report as the calculation base.
+        cutoff_date=(simulated_date.isoformat() if simulated_date is not None else None),
+        config_snapshot=snapshot,
         destination_table_id_snapshot=destination.id, destination_physical_name=source_name,
         classification_version_id=None,
     )
@@ -1020,6 +1025,26 @@ def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, s
     actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{dest}"
     date_expr = gold_date_expr(snapshot["date_column"], snapshot.get("period_column"))
     measure = snapshot.get("measure_column") or "realizado"
+    type_col = snapshot.get("type_column")
+    type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
+    return actual_source, date_expr, measure, type_col, type_filter
+
+
+def _daily_gold_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, str | None, str]:
+    """Resolve the non-aggregated Gold source used by the daily drill-down.
+
+    Accuracy totals may use Dimon for the FOCUS model because its monthly grain
+    makes those queries much cheaper.  A day-by-day chart cannot use that
+    aggregate: its period-derived date maps every value to day 1.  Keep this
+    path explicitly on the original Gold table and its configured date column.
+    """
+    dest = str(snapshot.get("destination_physical_name") or "")
+    date_col = str(snapshot.get("date_column") or "")
+    measure = str(snapshot.get("measure_column") or "realizado")
+    if not dest or not date_col:
+        raise HTTPException(422, "Snapshot sem origem Gold ou coluna de data para o detalhamento diário")
+    actual_source = f"iceberg.gold.{dest}"
+    date_expr = gold_date_expr(date_col, snapshot.get("period_column"))
     type_col = snapshot.get("type_column")
     type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
     return actual_source, date_expr, measure, type_col, type_filter
@@ -1734,7 +1759,15 @@ async def accuracy_delta_series(
     year, month = int(target[:4]), int(target[4:6])
     days_in_month = calendar.monthrange(year, month)[1]
 
-    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
+    # Dimon is monthly and intentionally used by the summary tables.  The
+    # expanded series must instead retain Gold's real charge date so each day
+    # is displayed where the resource was actually consumed.
+    actual_source, date_expr, measure, type_col, type_filter = _daily_gold_actual_context(snapshot)
+    # The selected billing period is the source of truth for inclusion (and
+    # allows Iceberg partition pruning). Gold's charge date only positions the
+    # included value on its actual day. Some providers legitimately retain a
+    # charge date outside the billing period, which must not make its value
+    # disappear from the same delta total shown in the expanded row.
     period_col = snapshot.get("period_column")
     actual_month = (
         f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
@@ -1820,7 +1853,16 @@ class AckIn(BaseModel):
     department: str
     category: str
     reason: str
+    severity: str = "Informação"
+    ordem: int | None = None
     registered_at: str | None = None
+
+
+def _severity_rank(severity: str | None) -> int:
+    """Ranking padrão da severidade: Crítico=0, Perigo=1, Informação=2, Sucesso=3."""
+    return {
+        "crítico": 0, "critico": 0, "perigo": 1, "informação": 2, "informacao": 2, "sucesso": 3,
+    }.get(str(severity or "").strip().lower(), 2)
 
 
 @router.post("/accuracy/acks", status_code=201)
@@ -1870,6 +1912,8 @@ async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
         department_name=leaf[-1], forecast_value=forecast, actual_value=actual,
         variance=metrics["variance"], accuracy=metrics["accuracy"],
         category=body.category.strip() or "Outro", reason=body.reason.strip(),
+        severity=body.severity.strip() or "Informação",
+        ordem=body.ordem if body.ordem is not None else _severity_rank(body.severity),
         registered_at=registered_date,
     )
     db.add(row)
@@ -1917,6 +1961,9 @@ async def list_acks(
 class AckUpdateIn(BaseModel):
     category: str
     reason: str
+    severity: str | None = None
+    ordem: int | None = None
+    registered_at: str | None = None
 
 
 @router.put("/accuracy/acks/{ack_id}")
@@ -1935,6 +1982,25 @@ async def update_ack(ack_id: int, body: AckUpdateIn, db: AsyncSession = Depends(
         row.reason = reason
         await db.commit()
         await db.refresh(row)
+    if body.severity and body.severity.strip() and row.severity != body.severity.strip():
+        row.severity = body.severity.strip()
+        if body.ordem is None:
+            row.ordem = _severity_rank(body.severity)
+        await db.commit()
+        await db.refresh(row)
+    if body.ordem is not None and row.ordem != body.ordem:
+        row.ordem = body.ordem
+        await db.commit()
+        await db.refresh(row)
+    if body.registered_at:
+        try:
+            registered_date = date.fromisoformat(str(body.registered_at)[:10])
+        except ValueError:
+            raise HTTPException(422, "registered_at deve ser uma data ISO (YYYY-MM-DD)")
+        if row.registered_at != registered_date:
+            row.registered_at = registered_date
+            await db.commit()
+            await db.refresh(row)
     out = _out(row)
     history = (await db.execute(
         select(ForecastAckHistory).where(ForecastAckHistory.ack_id == row.id).order_by(ForecastAckHistory.changed_at.asc())

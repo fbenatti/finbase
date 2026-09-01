@@ -46,6 +46,7 @@ from app.services.expression_engine import (
 )
 from app.services import iceberg_service as iceberg
 from app.services.classification_field_values import enrich_from_dataframe
+from app.services.cloud_scope import rule_matches_cloud, rule_matches_connection, rule_matches_destination
 
 logger = logging.getLogger(__name__)
 
@@ -244,10 +245,17 @@ def _process_blob_sync(
         ).scalars().all()
         class_rules = session.execute(
             select(ClassificationRule).where(
-                ClassificationRule.destination_table_id == destination_id,
                 ClassificationRule.active == True,
-            ).order_by(ClassificationRule.priority)
+            ).order_by(ClassificationRule.priority, ClassificationRule.id)
         ).scalars().all()
+        # A connection-specific classification must never leak into another
+        # tenant. Keep this selection aligned with Azure tag-policy export.
+        is_focus_destination = physical_name.strip().lower() == "dest_modelo_focus"
+        class_rules = [rule for rule in class_rules if
+                       rule_matches_connection(rule.connection_id, conn.id) and
+                       rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name) and
+                       rule_matches_destination(rule.destination_table_id, destination_id,
+                                                is_focus_destination=is_focus_destination)]
         for rule in rules:
             _apply_business_rule_sync(target, rule, billing_period or "")
         _apply_classifications_sync(target, class_rules, session)
@@ -2671,7 +2679,7 @@ def _run_etl_sync(
             status["status"] = "COMPLETED"
             return
 
-        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
+        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)

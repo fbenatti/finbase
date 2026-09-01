@@ -109,6 +109,16 @@ def _activity_status_expr(alias: str = "") -> str:
     return f"UPPER(TRIM(COALESCE(CAST({prefix}\"ActivityStatus\" AS VARCHAR), '')))"
 
 
+def _cost_expr(alias: str = "") -> str:
+    """Custo normalizado: AllocatedCost (alocação do portal) > realizado > BilledCost."""
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"COALESCE(TRY_CAST({prefix}\"AllocatedCost\" AS DOUBLE), "
+        f"TRY_CAST({prefix}\"realizado\" AS DOUBLE), "
+        f"TRY_CAST({prefix}\"BilledCost\" AS DOUBLE), 0)"
+    )
+
+
 async def _run_query(sql: str, interactive: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         return await trino_execute(sql, **interactive)
@@ -146,7 +156,6 @@ def _str(value: Any) -> str:
 
 def _resolve_window(body: ProviderIaRequest, rows: list[dict[str, Any]]) -> tuple[str, str]:
     """Resolve date_from/date_to a partir do corpo + range real dos dados."""
-    scope = _provider_scope(body.provider)
     dates = [r for r in rows if r.get("day")]
     if not dates:
         dates = [{"day": datetime.now().strftime("%Y-%m-%d")}]
@@ -215,12 +224,12 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
               COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS consumption_users,
               SUM(CASE WHEN COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0) > 0 THEN 1 ELSE 0 END) AS rows_with_tokens,
               SUM(CASE WHEN COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0) + COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0) > 0 THEN 1 ELSE 0 END) AS rows_with_io_tokens,
-              SUM(CASE WHEN COALESCE(TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0) > 0 THEN 1 ELSE 0 END) AS rows_with_cost,
+              SUM(CASE WHEN {_cost_expr()} > 0 THEN 1 ELSE 0 END) AS rows_with_cost,
               SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
               SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
               SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS total_requests,
-              SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0)) AS total_cost
+              SUM({_cost_expr()}) AS total_cost
             FROM iceberg.gold.{CONS_TABLE}
             WHERE {scope} AND {date_filter}
             """
@@ -246,7 +255,7 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
               SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
               SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
-              SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0)) AS cost,
+              SUM({_cost_expr()}) AS cost,
               COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS users
             FROM iceberg.gold.{CONS_TABLE}
             WHERE {scope} AND {date_filter}
@@ -277,7 +286,7 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
               SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
               SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
-              SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0)) AS cost
+              SUM({_cost_expr()}) AS cost
             FROM iceberg.gold.{CONS_TABLE}
             WHERE {scope} AND {date_filter}
             GROUP BY 1, 2
@@ -355,34 +364,52 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             inactive_60 = sum(1 for u in license_table if u["days_since_activity"] and u["days_since_activity"] >= 60)
             inactive_90 = sum(1 for u in license_table if u["days_since_activity"] and u["days_since_activity"] >= 90)
 
-            # 6) Ranking de usuários — consumo (quando há e-mail) + atividade de licença
+            # 6) Ranking de usuários — FULL JOIN consumo (tokens/custo) + licença (logon/atividade),
+            #    inclui quem consumiu sem licença atribuída no snapshot.
             ranking_sql = f"""
-            SELECT
-              COALESCE(NULLIF(TRIM(CAST(c."UserEmail" AS VARCHAR)), ''), l."UserEmail") AS user_email,
-              COALESCE(NULLIF(TRIM(CAST(l."UserName" AS VARCHAR)), ''), '') AS user_name,
-              SUM(COALESCE(TRY_CAST(c."InputTokens" AS DOUBLE), 0)) AS input_tokens,
-              SUM(COALESCE(TRY_CAST(c."OutputTokens" AS DOUBLE), 0)) AS output_tokens,
-              SUM(COALESCE(TRY_CAST(c."RequestCount" AS DOUBLE), 0)) AS requests,
-              SUM(COALESCE(TRY_CAST(c."realizado" AS DOUBLE), TRY_CAST(c."BilledCost" AS DOUBLE), 0)) AS cost,
-              MAX(l."LastActivityAt") AS last_activity_at,
-              MAX(l."DaysSinceLastActivity") AS days_since_activity,
-              MAX({_activity_status_expr('l')}) AS activity_status
-            FROM iceberg.gold.{LIC_TABLE} l
-            LEFT JOIN (
-              SELECT "UserEmail", "InputTokens", "OutputTokens", "RequestCount", "realizado", "BilledCost"
+            WITH cons AS (
+              SELECT
+                lower(TRIM(CAST("UserEmail" AS VARCHAR))) AS user_email,
+                SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
+                SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
+                SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
+                SUM({_cost_expr()}) AS cost
               FROM iceberg.gold.{CONS_TABLE}
               WHERE {scope} AND {date_filter}
                 AND NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '') IS NOT NULL
-            ) c
-              ON lower(TRIM(CAST(l."UserEmail" AS VARCHAR))) = lower(TRIM(CAST(c."UserEmail" AS VARCHAR)))
-            WHERE {scope}
-              AND l."_billing_period" = (
-                SELECT MAX("_billing_period") FROM iceberg.gold.{LIC_TABLE} WHERE {scope}
-              )
-            GROUP BY 1, 2
-            ORDER BY
-              SUM(COALESCE(TRY_CAST(c."realizado" AS DOUBLE), TRY_CAST(c."BilledCost" AS DOUBLE), 0)) DESC,
-              SUM(COALESCE(TRY_CAST(c."InputTokens" AS DOUBLE), 0) + COALESCE(TRY_CAST(c."OutputTokens" AS DOUBLE), 0)) DESC,
+              GROUP BY 1
+            ),
+            lic AS (
+              SELECT
+                lower(TRIM(CAST("UserEmail" AS VARCHAR))) AS user_email,
+                MAX(NULLIF(TRIM(CAST("UserName" AS VARCHAR)), '')) AS user_name,
+                MAX("LastActivityAt") AS last_activity_at,
+                MAX("DaysSinceLastActivity") AS days_since_activity,
+                MAX({_activity_status_expr()}) AS activity_status,
+                MAX(NULLIF(TRIM(CAST("LicenseStatus" AS VARCHAR)), '')) AS license_status
+              FROM iceberg.gold.{LIC_TABLE}
+              WHERE {scope}
+                AND "_billing_period" = (
+                  SELECT MAX("_billing_period") FROM iceberg.gold.{LIC_TABLE} WHERE {scope}
+                )
+              GROUP BY 1
+            )
+            SELECT
+              COALESCE(c.user_email, l.user_email) AS user_email,
+              COALESCE(NULLIF(TRIM(CAST(l.user_name AS VARCHAR)), ''), '') AS user_name,
+              COALESCE(c.input_tokens, 0) AS input_tokens,
+              COALESCE(c.output_tokens, 0) AS output_tokens,
+              COALESCE(c.requests, 0) AS requests,
+              COALESCE(c.cost, 0) AS cost,
+              l.last_activity_at,
+              l.days_since_activity,
+              l.activity_status,
+              l.license_status
+            FROM cons c
+            FULL OUTER JOIN lic l ON c.user_email = l.user_email
+            WHERE COALESCE(c.user_email, l.user_email) IS NOT NULL
+            ORDER BY COALESCE(c.cost, 0) DESC,
+              COALESCE(c.input_tokens, 0) + COALESCE(c.output_tokens, 0) DESC,
               1
             LIMIT 500
             """
@@ -399,7 +426,10 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
                     "last_activity_at": r.get("last_activity_at"),
                     "days_since_activity": _num(r.get("days_since_activity")) if r.get("last_activity_at") is not None else None,
                     "activity_status": _str(r.get("activity_status")),
+                    "license_status": _str(r.get("license_status")),
                     "logged_in": r.get("last_activity_at") is not None,
+                    "has_consumption": _num(r.get("input_tokens")) + _num(r.get("output_tokens")) + _num(r.get("requests")) + _num(r.get("cost")) > 0,
+                    "has_license": _str(r.get("license_status")) != "",
                 }
                 for r in ranking_rows
             ]
@@ -408,11 +438,16 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             notes: list[str] = []
             if meta["primary_metric"] == "tokens":
                 notes.append(
-                    "Consumo com tokens por usuário/modelo/dia. " 
+                    "Consumo com tokens por usuário/modelo/dia. "
                     "Na fonte normalizada, TotalTokens espelha InputTokens; o total executivo usa input+output."
                 )
                 if total_cost <= 0:
-                    notes.append("Sem custo (BilledCost/realizado) no recorte — o consumo é medido em tokens.")
+                    notes.append("Sem custo no recorte (AllocatedCost/realizado/BilledCost vazios) — o consumo é medido em tokens.")
+                else:
+                    notes.append(
+                        f"Custo no recorte: {total_cost:,.2f} — alocado (AllocatedCost) ou faturado (realizado/BilledCost). "
+                        "Atenção: AllocatedCost pode ser repartição igualitária da assinatura, não faturamento por token."
+                    )
             else:
                 notes.append(
                     "Consumo é billing GCP (custo por serviço) sem e-mail/tokens por usuário — " 
@@ -423,6 +458,28 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             if _int(kpi.get("rows_with_io_tokens")) == 0 and _int(kpi.get("rows_with_tokens")) == 0 and meta["primary_metric"] == "tokens":
                 notes.append("Recorte sem tokens: verifique o período ou a ingestão do conector.")
 
+            # Divergências licença × consumo: LastActivityAt do snapshot só cobre atividade
+            # recente (janela do período corrente + API), então consumo antigo pode aparecer
+            # como NUNCA_USOU. O consumo é a evidência mais confiável de uso.
+            consumption_but_never = [
+                u for u in user_ranking
+                if u["has_consumption"] and u["activity_status"].upper() == "NUNCA_USOU"
+            ]
+            consumption_without_license = [
+                u for u in user_ranking if u["has_consumption"] and not u["has_license"]
+            ]
+            if consumption_but_never:
+                notes.append(
+                    f"{len(consumption_but_never)} usuário(s) com consumo no recorte, mas a licença "
+                    "marca NUNCA_USOU (LastActivityAt do snapshot não cobre atividade anterior à "
+                    "janela do snapshot). O consumo de tokens é a evidência de uso mais confiável."
+                )
+            if consumption_without_license:
+                notes.append(
+                    f"{len(consumption_without_license)} usuário(s) consumiram sem licença atribuída "
+                    "no snapshot — verifique atribuição/remoção de assentos."
+                )
+
             data_quality = {
                 "consumption_rows": consumption_rows,
                 "consumption_with_user": _int(kpi.get("consumption_users")),
@@ -431,6 +488,8 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
                 "license_rows": len(license_table),
                 "license_period": license_period,
                 "primary_metric": meta["primary_metric"],
+                "consumption_but_license_never": len(consumption_but_never),
+                "consumption_without_license": len(consumption_without_license),
                 "notes": notes,
             }
 

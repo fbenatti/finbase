@@ -52,6 +52,10 @@ from app.services.azure_ptu_ops import (
     weighted_utilization,
 )
 from app.services.azure_ptu_cost import load_dimon_ptu_costs
+from app.services.aura_brain_vivo_mais import load_project_cost_dashboard
+from app.services.sinfonia_dashboard import load_sinfonia_dashboard
+from app.services.datamesh_dashboard import load_datamesh_dashboard
+from app.services.wisper_dashboard import load as load_wisper_dashboard
 from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/visoes-consumo-ia", tags=["visoes-consumo-ia"])
@@ -1528,6 +1532,63 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
 async def dashboard_executive_overview(body: OverviewRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Independent operational payload. Cost joins are defined separately over Gold layers."""
     return await dashboard_ops_overview(body, request, db)
+
+
+class ProjectCostRequest(BaseModel):
+    project_key: str = Field(..., pattern="^(aura-brain|vivo-mais)$")
+    period_range: str = Field("current_year", pattern="^(current_year|all)$")
+
+
+@router.post("/dashboard/project-costs")
+async def dashboard_project_costs(body: ProjectCostRequest, request: Request):
+    """Dashboard executivo de custo de um projeto (Aura Brain | Vivo Mais).
+
+    Lê a Dimon ``dest_dm_cost_custo_aura_brain_vivo_mais`` e decompõe o custo
+    mensal em PTUs (compra mensal: realizada se existir, senão forecast),
+    tokens on-demand e infra (por servicesubcategory), com a série mensal
+    realizado + forecast e a distribuição por subconta. O consumo diário/horário
+    de capacidade (Provisioned Managed*, 1/Hour) é excluído — já está na compra.
+    """
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await load_project_cost_dashboard(
+                project_key=body.project_key,
+                period_range=body.period_range,
+                cancel_event=scope.cancel_event,
+            )
+        except Exception as exc:
+            logger.warning("Project cost dashboard failed (%s): %s", body.project_key, exc, exc_info=exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Falha ao consultar o custo do projeto {body.project_key}: {exc}",
+            ) from exc
+
+
+@router.post("/dashboard/sinfonia")
+async def dashboard_sinfonia(request: Request):
+    """Visão executiva consolidada IBM + Azure/Fábrica de Agentes."""
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await load_sinfonia_dashboard(cancel_event=scope.cancel_event)
+        except Exception as exc:
+            logger.warning("Sinfonia dashboard failed: %s", exc, exc_info=exc)
+            raise HTTPException(status_code=502, detail=f"Falha ao consultar o dashboard Sinfonia: {exc}") from exc
+
+
+@router.post("/dashboard/datamesh")
+async def dashboard_datamesh(request: Request):
+    """Visão executiva Datamesh: Databricks, dados associados e infraestrutura."""
+    async with _ClientCancelScope(request) as scope:
+        try:
+            return await load_datamesh_dashboard(cancel_event=scope.cancel_event)
+        except Exception as exc:
+            logger.warning("Datamesh dashboard failed: %s", exc, exc_info=exc)
+            raise HTTPException(status_code=502, detail=f"Falha ao consultar o dashboard Datamesh: {exc}") from exc
+
+@router.post("/dashboard/wisper")
+async def dashboard_wisper(request: Request):
+    async with _ClientCancelScope(request) as scope:
+        return await load_wisper_dashboard(cancel_event=scope.cancel_event)
 
 
 async def _dashboard_data(body: DashboardFilter, db: AsyncSession) -> dict[str, Any]:

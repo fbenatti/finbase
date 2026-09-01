@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, TableCell, Paper, Chip, LinearProgress,
-  Alert, Select, MenuItem, FormControl, InputLabel, Checkbox,
+  Alert, Select, MenuItem, FormControl, InputLabel, Checkbox, FormHelperText,
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   FormControlLabel, Switch, IconButton, Tabs, Tab, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
@@ -17,17 +17,16 @@ import {
   getSkippedBlobs, skipBlob as apiSkipBlob, unskipBlob as apiUnskipBlob,
   clearSkippedBlobs,
   processDestinationTables,
-  getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   getExtractionHistory, ExtractionHistoryItem,
   getAvailablePeriods, AvailablePeriod,
   getSourcePreview, SourcePreview,
-  ScheduledTask,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
   SCANNABLE_CONNECTOR_TYPES, formatApiError,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
 import ManualCsvUploadDialog from "../Connections/ManualCsvUploadDialog";
+import SchedulesPanel from "./SchedulesPanel";
 
 const STATUS_COLORS: Record<string, "success" | "warning" | "error" | "info" | "default"> = {
   NEW: "success", CHANGED: "warning", UNCHANGED: "default", SKIPPED: "default",
@@ -76,16 +75,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   const [historyList, setHistoryList] = useState<ExtractionHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // ── Schedules state ──
-  const [schedules, setSchedules] = useState<ScheduledTask[]>([]);
-  const [schedDialogOpen, setSchedDialogOpen] = useState(false);
-  const [schedEditing, setSchedEditing] = useState<ScheduledTask | null>(null);
-  const [schedForm, setSchedForm] = useState({
-    name: "", connection_id: 0, cron_expression: "0 3 * * *",
-    timezone: "America/Sao_Paulo", destination_reprocess: true, active: true,
-    forecast_after_ingestion: false, forecast_config_id: "",
-  });
-  const [schedRunning, setSchedRunning] = useState<Set<number>>(new Set());
   const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
 
   // ── Databricks preview (header + amostra) state ──
@@ -124,7 +113,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     [connections, extractableConnectorTypes],
   );
   const isManualCsvSelected = useMemo(
-    () => !!uploadConn || extractableConnections.some((c) => c.id === connId && c.connector_type === "manual_csv"),
+    () => !!uploadConn || extractableConnections.some((c) => c.id === connId && ["manual_csv", "azure_automation_jobs"].includes(c.connector_type)),
     [extractableConnections, connId, uploadConn],
   );
   const isAzurePtuSelected = useMemo(
@@ -170,12 +159,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       const extractable = list.filter((c) => extractableConnectorTypes.has(c.connector_type));
       if (extractable.length === 1) setConnId(extractable[0].id);
     }).catch((e) => setError(formatApiError(e, "Falha ao carregar conexoes")));
-    loadSchedules();
   }, [extractableConnectorTypes]);
-
-  const loadSchedules = () => {
-    getSchedules().then(setSchedules).catch(() => {});
-  };
 
   const loadBlobs = useCallback(async () => {
     if (!connId) return;
@@ -291,74 +275,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       setProcessingDest(false);
     }
   };
-
-  // ── Schedule handlers ──
-  const openNewSched = () => {
-    setSchedEditing(null);
-    setSchedForm({ name: "", connection_id: connId as number || 0, cron_expression: "0 3 * * *", timezone: "America/Sao_Paulo", destination_reprocess: true, active: true, forecast_after_ingestion: false, forecast_config_id: "" });
-    setSchedDialogOpen(true);
-  };
-
-  const openEditSched = (s: ScheduledTask) => {
-    setSchedEditing(s);
-    const cfg = s.config_json || {};
-    setSchedForm({ name: s.name, connection_id: s.connection_id, cron_expression: s.cron_expression, timezone: s.timezone, destination_reprocess: s.destination_reprocess, active: s.active, forecast_after_ingestion: Boolean(cfg.forecast_after_ingestion), forecast_config_id: String(cfg.forecast_config_id || "") });
-    setSchedDialogOpen(true);
-  };
-
-  const saveSched = async () => {
-    try {
-      if (schedEditing) {
-        await updateSchedule(schedEditing.id, { ...schedForm, config_json: { forecast_after_ingestion: schedForm.forecast_after_ingestion, forecast_config_id: schedForm.forecast_config_id ? Number(schedForm.forecast_config_id) : null } });
-      } else {
-        await createSchedule({ ...schedForm, config_json: { forecast_after_ingestion: schedForm.forecast_after_ingestion, forecast_config_id: schedForm.forecast_config_id ? Number(schedForm.forecast_config_id) : null } });
-      }
-      setSchedDialogOpen(false);
-      loadSchedules();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to save schedule");
-    }
-  };
-
-  const deleteSched = async (id: number) => {
-    if (!confirm("Remover agendamento?")) return;
-    try { await deleteSchedule(id); loadSchedules(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to delete");
-    }
-  };
-
-  const runSchedNow = async (id: number) => {
-    setSchedRunning(prev => new Set(prev).add(id));
-    try {
-      await runScheduleNow(id);
-      setError("");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to run schedule");
-    } finally {
-      setSchedRunning(prev => { const n = new Set(prev); n.delete(id); return n; });
-    }
-  };
-
-  const formatNextRun = (s: ScheduledTask): string => {
-    if (!s.next_run_at) return "—";
-    const d = new Date(s.next_run_at);
-    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-  };
-
-  const formatLastRun = (s: ScheduledTask): string => {
-    if (!s.last_run_at) return "Nunca";
-    const d = new Date(s.last_run_at);
-    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-  };
-
-  const cronPresets = [
-    { label: "Diário 03:00", value: "0 3 * * *" },
-    { label: "Diário 06:00", value: "0 6 * * *" },
-    { label: "Semanal (seg 03:00)", value: "0 3 * * 1" },
-    { label: "Mensal (dia 1 03:00)", value: "0 3 1 * *" },
-    { label: "A cada 12h", value: "0 */12 * * *" },
-    { label: "A cada 6h", value: "0 */6 * * *" },
-  ];
 
   const pollTask = (taskId: number) => {
     stopPolling();
@@ -1023,187 +939,9 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       {!connId && <EmptyState message="Selecione uma conexao para visualizar os blobs e executar o ETL." />}
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/*  AGENDAMENTOS                                                */}
+      {/*  AGENDAMENTOS (painel dedicado, independente da conexão)       */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {connId && (
-        <Box sx={{ mt: 4 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-            <Typography variant="h5" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Schedule /> Agendamentos
-            </Typography>
-            <Button size="small" variant="outlined" startIcon={<Add />} onClick={openNewSched}>
-              Novo Agendamento
-            </Button>
-          </Box>
-
-          {schedules.length === 0 ? (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Nenhum agendamento configurado. Clique em "Novo Agendamento" para automatizar a extração e o reprocessamento da tabela destino.
-            </Alert>
-          ) : (
-            <SortableTable
-              data={schedules}
-              getRowKey={(s) => s.id}
-              defaultSortKey="created_at"
-              defaultSortDir="desc"
-              columns={[
-                {
-                  key: "name", label: "Nome",
-                  render: (s: ScheduledTask) => (
-                    <Box>
-                      <Typography variant="body2" fontWeight={500}>{s.name}</Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                        {s.cron_expression}
-                      </Typography>
-                    </Box>
-                  ),
-                },
-                {
-                  key: "connection_id", label: "Conexao", width: 150,
-                  render: (s: ScheduledTask) => {
-                    const c = connections.find(c => c.id === s.connection_id);
-                    return c?.code || `ID ${s.connection_id}`;
-                  },
-                },
-                {
-                  key: "_frequency", label: "Frequencia", width: 130,
-                  render: (s: ScheduledTask) => {
-                    const preset = cronPresets.find(p => p.value === s.cron_expression);
-                    return preset?.label || s.cron_expression;
-                  },
-                },
-                {
-                  key: "next_run_at", label: "Proxima", width: 130,
-                  render: (s: ScheduledTask) => (
-                    <Chip
-                      label={formatNextRun(s)}
-                      size="small"
-                      color={s.active ? "primary" : "default"}
-                      variant={s.active ? "filled" : "outlined"}
-                    />
-                  ),
-                },
-                {
-                  key: "last_run_at", label: "Ultima", width: 130,
-                  render: (s: ScheduledTask) => formatLastRun(s),
-                },
-                {
-                  key: "active", label: "Status", width: 80,
-                  render: (s: ScheduledTask) => (
-                    <Chip
-                      label={s.active ? "Ativo" : "Inativo"}
-                      size="small"
-                      color={s.active ? "success" : "default"}
-                    />
-                  ),
-                },
-                {
-                  key: "destination_reprocess", label: "Reprocessar", width: 110,
-                  render: (s: ScheduledTask) => (
-                    <Chip
-                      label={s.destination_reprocess ? "Sim" : "Nao"}
-                      size="small"
-                      variant="outlined"
-                      color={s.destination_reprocess ? "info" : "default"}
-                    />
-                  ),
-                },
-                {
-                  key: "_actions", label: "Acoes", width: 140, sortable: false,
-                  render: (s: ScheduledTask) => (
-                    <Box sx={{ display: "flex", gap: 0.5 }}>
-                      <Tooltip title="Executar agora">
-                        <IconButton
-                          size="small" color="primary"
-                          onClick={() => runSchedNow(s.id)}
-                          disabled={schedRunning.has(s.id)}
-                        >
-                          {schedRunning.has(s.id) ? <CircularProgress size={16} /> : <PlayArrow fontSize="small" />}
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Editar">
-                        <IconButton size="small" onClick={() => openEditSched(s)}>
-                          <Edit fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Remover">
-                        <IconButton size="small" color="error" onClick={() => deleteSched(s.id)}>
-                          <Delete fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  ),
-                },
-              ]}
-            />
-          )}
-        </Box>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/*  SCHEDULE DIALOG                                              */}
-      {/* ═══════════════════════════════════════════════════════════ */}
-      <Dialog open={schedDialogOpen} onClose={() => setSchedDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{schedEditing ? "Editar" : "Novo"} Agendamento</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-            <TextField label="Nome" value={schedForm.name}
-              onChange={e => setSchedForm({ ...schedForm, name: e.target.value })} />
-            <FormControl size="small">
-              <InputLabel>Conexao</InputLabel>
-              <Select value={schedForm.connection_id} label="Conexao"
-                onChange={e => setSchedForm({ ...schedForm, connection_id: e.target.value as number })}>
-                {connections.map(c => (
-                  <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <Typography variant="subtitle2" sx={{ mt: 1 }}>Expressao Cron</Typography>
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-              {cronPresets.map(p => (
-                <Chip
-                  key={p.value}
-                  label={p.label}
-                  size="small"
-                  variant={schedForm.cron_expression === p.value ? "filled" : "outlined"}
-                  color={schedForm.cron_expression === p.value ? "primary" : "default"}
-                  onClick={() => setSchedForm({ ...schedForm, cron_expression: p.value })}
-                  sx={{ cursor: "pointer" }}
-                />
-              ))}
-            </Box>
-            <TextField label="Expressao Cron (custom)" value={schedForm.cron_expression}
-              onChange={e => setSchedForm({ ...schedForm, cron_expression: e.target.value })}
-              helperText="Formato: minuto hora dia mes dia_semana. Ex: 0 3 * * * (diario as 3h)" />
-
-            <FormControlLabel
-              control={<Switch checked={schedForm.destination_reprocess}
-                onChange={e => setSchedForm({ ...schedForm, destination_reprocess: e.target.checked })} />}
-              label="Auto-reprocessar tabela destino apos extracao"
-            />
-            <FormControlLabel
-              control={<Switch checked={schedForm.forecast_after_ingestion}
-                onChange={e => setSchedForm({ ...schedForm, forecast_after_ingestion: e.target.checked })} />}
-              label="Executar Forecast após ingestão e reprocessamento"
-            />
-            {schedForm.forecast_after_ingestion && <TextField label="ID da configuração Forecast" type="number" value={schedForm.forecast_config_id}
-              onChange={e => setSchedForm({ ...schedForm, forecast_config_id: e.target.value })}
-              helperText="Crie a configuração no menu Forecast e informe o ID exibido." />}
-            <FormControlLabel
-              control={<Switch checked={schedForm.active}
-                onChange={e => setSchedForm({ ...schedForm, active: e.target.checked })} />}
-              label="Ativo"
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSchedDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={saveSched} variant="contained" disabled={!schedForm.name || !schedForm.connection_id}>
-            Salvar
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {!embedded && <SchedulesPanel connections={connections} />}
 
       {blobs.length > 0 && (
         <Box sx={{ mt: 4 }}>

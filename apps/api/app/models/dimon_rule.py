@@ -41,6 +41,15 @@ class DimonRule(Base):
     materialization_run_id = Column(Integer, nullable=True)
     materialized_at = Column(DateTime(timezone=True), nullable=True)
     materialization_error = Column(Text, nullable=True)
+    # SQL custom (optional): when present, bypasses the pivot builder and uses
+    # this query to materialize the Dimon table. The query MUST produce a result
+    # named with the same dimensions + measures the UI expects.
+    sql_template = Column(Text, nullable=True)
+    # Snapshot mode: quando ativo, a materialização NÃO substitui a tabela;
+    # adiciona uma cópia datada (coluna _snapshot_date) preservando o histórico,
+    # permitindo comparar snapshots (ex.: delta de tags shutdown=auto entre dias).
+    snapshot_mode = Column(Boolean, nullable=False, default=False)
+    snapshot_col = Column(String(50), nullable=False, default="_snapshot_date")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

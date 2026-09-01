@@ -444,7 +444,7 @@ async def list_classifications_grid(
     """
     import json
     from datetime import datetime as _dt
-    from sqlalchemy import or_, func
+    from sqlalchemy import or_, func, cast, String
 
     dept = Department
     stmt = select(ClassificationRule, dept.name).outerjoin(dept, dept.id == ClassificationRule.department_id)
@@ -456,13 +456,30 @@ async def list_classifications_grid(
             conditions.append(ClassificationRule.cloud_scope.is_(None))
         else:
             conditions.append(ClassificationRule.cloud_scope == cloud)
-    if search and search.strip():
-        needle = f"%{search.strip()}%"
+    # Busca global: qualquer campo textual/numerico da regra, incluindo o
+    # JSON de condições. Quando o valor é apagado, não adiciona predicado e a
+    # consulta volta naturalmente para todos os registros do escopo.
+    search_value = (search or "").strip()
+    if search_value:
+        needle = f"%{search_value}%"
         conditions.append(or_(
-            ClassificationRule.name.ilike(needle),
+            cast(ClassificationRule.id, String).ilike(needle),
+            cast(ClassificationRule.connection_id, String).ilike(needle),
+            cast(ClassificationRule.destination_table_id, String).ilike(needle),
+            cast(ClassificationRule.department_id, String).ilike(needle),
             dept.name.ilike(needle),
+            ClassificationRule.name.ilike(needle),
+            ClassificationRule.source_field.ilike(needle),
             ClassificationRule.pattern.ilike(needle),
+            ClassificationRule.pattern_type.ilike(needle),
             ClassificationRule.match_value.ilike(needle),
+            ClassificationRule.target_field.ilike(needle),
+            cast(ClassificationRule.conditions, String).ilike(needle),
+            cast(ClassificationRule.priority, String).ilike(needle),
+            ClassificationRule.cloud_scope.ilike(needle),
+            cast(ClassificationRule.active, String).ilike(needle),
+            cast(ClassificationRule.created_at, String).ilike(needle),
+            cast(ClassificationRule.updated_at, String).ilike(needle),
         ))
     fields = {
         "id": ClassificationRule.id,
@@ -1399,3 +1416,22 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
         await db.commit()
 
     return result
+
+
+@router.post("/departments/azure-active-classifications-sync")
+async def sync_azure_active_classifications(
+    apply: bool = Query(False, description="When true, persist departments and classification rules"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview or apply Azure classification metadata for RGs with recent consumption.
+
+    Gold is never reprocessed here.  Callers must review the returned audit and
+    start a reprocess explicitly after the metadata has been approved.
+    """
+    from app.services.azure_active_classification_sync import sync_active_azure_classifications
+
+    try:
+        report = await sync_active_azure_classifications(db, apply=apply)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"mode": "apply" if apply else "preview", **report.as_dict()}

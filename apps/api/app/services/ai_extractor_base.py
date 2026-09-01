@@ -389,14 +389,16 @@ class GitHubEnterpriseClient:
             for line in text.splitlines():
                 line = line.strip()
                 if line:
-                    rows.append(json.loads(line))
+                    parsed = json.loads(line)
+                    if isinstance(parsed, dict):
+                        rows.append(parsed)
             return rows
         if isinstance(payload, list):
-            return payload
+            return [item for item in payload if isinstance(item, dict)]
         if isinstance(payload, dict):
             day_totals = payload.get("day_totals")
             if isinstance(day_totals, list):
-                return day_totals
+                return [item for item in day_totals if isinstance(item, dict)]
             return [payload]
         return []
 
@@ -414,9 +416,19 @@ class GitHubEnterpriseClient:
                     f"GitHub Copilot usage report failed ({resp.status_code}) "
                     f"for {report_kind} {day}: {resp.text[:500]}"
                 )
-            links = resp.json().get("download_links") or []
+            try:
+                payload = resp.json()
+            except ValueError:
+                return []
+            if not isinstance(payload, dict):
+                # Some proxies return a bare string/array body on 200; there is
+                # no download link to follow in that case.
+                return []
+            links = payload.get("download_links") or []
             rows: list[dict[str, Any]] = []
             for link in links:
+                if not isinstance(link, str):
+                    continue
                 dl = client.get(link, follow_redirects=True)
                 if dl.status_code != 200:
                     continue

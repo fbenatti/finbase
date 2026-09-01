@@ -13,16 +13,24 @@ const flattenDepartments = (nodes: Department[], parents: string[] = []): Array<
   return [{ ...node, path: path.join(" > ") }, ...flattenDepartments(node.children || [], path)];
 });
 
-export default function ExpectedView() {
+export default function ExpectedView({
+  embedded = false,
+  director: externalDirector,
+  departmentId: externalDepartmentId,
+}: { embedded?: boolean; director?: string; departmentId?: number } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [rows, setRows] = useState<ExpectedViewRow[]>([]);
   const [drivers, setDrivers] = useState<ExpectedViewDriver[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [director, setDirector] = useState("Consumo Cloud");
+  const [director, setDirector] = useState(externalDirector || "Consumo Cloud");
   const [departmentOptions, setDepartmentOptions] = useState<Array<Department & { path: string }>>([]);
-  const [departmentId, setDepartmentId] = useState<number | undefined>();
+  const [departmentId, setDepartmentId] = useState<number | undefined>(externalDepartmentId);
+  // Filtro global de departamento: quando o pai (FinOps Intelligence) muda o
+  // escopo, sincroniza e recarrega os dados.
+  useEffect(() => { if (externalDirector) setDirector(externalDirector); }, [externalDirector]);
+  useEffect(() => { setDepartmentId(externalDepartmentId); }, [externalDepartmentId]);
   const [organizationLoaded, setOrganizationLoaded] = useState(false);
   const [organization, setOrganization] = useState<Department[]>([]);
   const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
@@ -40,7 +48,7 @@ export default function ExpectedView() {
       setDepartmentOptions(flat);
       setOrganization(departments);
       const cloud = flat.find(department => department.name === "Consumo Cloud" && department.parent_id === null);
-      if (cloud) {
+      if (!embedded && cloud) {
         setDepartmentId(cloud.id);
         setDirector(cloud.path);
         setExpandedNodes(new Set([cloud.id]));
@@ -59,7 +67,9 @@ export default function ExpectedView() {
     setLoading(true);
     setError("");
     const selectedId = departmentOptions.find(department => department.path === director)?.id;
-    const year = periodFilter === "all" || periodFilter === "current" ? new Date().getFullYear() : Number(periodFilter);
+    // "Todos os períodos" envia year=0: o backend remove o recorte de ano e
+    // traz todo o realizado + forecast disponível (inclusive meses futuros).
+    const year = periodFilter === "all" ? 0 : periodFilter === "current" ? new Date().getFullYear() : Number(periodFilter);
     getExpectedView(director, year, departmentId ?? selectedId, controller.signal, includeSharedCost).then(result => { setRows(result.rows); setDrivers(result.drivers); }).catch(e => {
       if ((e as { code?: string }).code === "ERR_CANCELED" || controller.signal.aborted) return;
       setError(formatApiError(e, "Não foi possível carregar a Visão Esperada"));
@@ -69,6 +79,14 @@ export default function ExpectedView() {
   const years = [...new Set(rows.map(row => row.period.slice(0, 4)))].sort();
   const filteredRows = periodFilter === "all" ? rows : periodFilter === "current" ? rows.filter(row => row.period.startsWith(String(new Date().getFullYear()))) : rows.filter(row => row.period.startsWith(periodFilter));
   const toDate = (period: string) => period.length === 6 ? `${period.slice(0, 4)}-${period.slice(4, 6)}-01` : period;
+  // The current (open) month carries both partial realized and the
+  // remaining-days forecast (baseline × dias restantes). Those two never
+  // overlap, so the forecast must be stacked on top of the realized bar —
+  // otherwise the current month shows only the partial spend and the
+  // remaining projection disappears from the chart, cards and cumulative.
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const isCurrentMonth = (row: ExpectedViewRow) => row.period === currentMonthKey;
   const sharedOn = includeSharedCost;
   const sharedOf = (row: ExpectedViewRow) => Number(row.shared_value || 0);
   const receivedOf = (row: ExpectedViewRow) => Number(row.shared_received || 0);
@@ -83,7 +101,7 @@ export default function ExpectedView() {
   const forecastManualOf = (row: ExpectedViewRow) => Number(row.forecast_manual_value || 0);
   const expectedOf = (row: ExpectedViewRow) => (
     row.actual_value != null
-      ? Number(row.actual_value || 0) + forecastManualOf(row) + (sharedOn ? sharedOf(row) : 0)
+      ? Number(row.actual_value || 0) + (isCurrentMonth(row) ? Number(row.forecast_value || 0) : 0) + forecastManualOf(row) + (sharedOn ? sharedOf(row) : 0)
       : Number(row.forecast_value ?? 0) + forecastManualOf(row) + (sharedOn ? sharedOf(row) : 0)
   );
   const labels = filteredRows.map(row => toDate(row.period));
@@ -92,18 +110,33 @@ export default function ExpectedView() {
   const forecast = filteredRows.reduce((sum, row) => sum + expectedOf(row), 0);
   const variance = budget - forecast;
   const actualEnd = filteredRows.reduce((last, row, index) => row.actual_value == null ? last : index, -1);
-  const consumptionCumulative = filteredRows.map((_, index) => index <= actualEnd ? filteredRows.slice(0, index + 1).reduce((sum, item) => sum + consumptionOf(item), 0) : null);
-  const actualCumulative = filteredRows.map((_, index) => index <= actualEnd ? filteredRows.slice(0, index + 1).reduce((sum, item) => sum + realizedOf(item), 0) : null);
+  // Mês corrente aberto: no acumulado, a linha de Realizado termina no último
+  // mês FECHADO (julho) e o Forecast assume a partir do mês corrente tratando
+  // o mês inteiro como forecast — a transição vira um passo mensal normal,
+  // sem ponto duplicado nem quebra.
+  const currentOpen = actualEnd >= 0 && isCurrentMonth(filteredRows[actualEnd]) && Number(filteredRows[actualEnd].forecast_value || 0) > 0;
+  const realizedEnd = currentOpen ? actualEnd - 1 : actualEnd;
+  const consumptionCumulative = filteredRows.map((_, index) => index <= realizedEnd ? filteredRows.slice(0, index + 1).reduce((sum, item) => sum + consumptionOf(item), 0) : null);
+  const actualCumulative = filteredRows.map((_, index) => index <= realizedEnd ? filteredRows.slice(0, index + 1).reduce((sum, item) => sum + realizedOf(item), 0) : null);
   const forecastCumulative = filteredRows.map((_, index) => {
     if (index < actualEnd) return null;
     return filteredRows.slice(0, index + 1).reduce((sum, item) => sum + expectedOf(item), 0);
   });
   const forecastStart = actualEnd >= 0 ? actualEnd : 0;
-  const forecastLabels = labels.slice(forecastStart);
-  const forecastFilled = forecastCumulative.slice(forecastStart);
+  // Ponte: a linha de Forecast parte do ÚLTIMO PONTO do Realizado (último mês
+  // fechado) para não deixar buraco entre a amarela e a verde no eixo x; o mês
+  // corrente entra no acumulado como forecast (realizado parcial + restante).
+  const bridge = currentOpen && realizedEnd >= 0 && consumptionCumulative[realizedEnd] != null
+    ? { x: labels[realizedEnd], y: consumptionCumulative[realizedEnd] }
+    : null;
+  const forecastLabels = bridge ? [bridge.x, ...labels.slice(forecastStart)] : labels.slice(forecastStart);
+  const forecastFilled = bridge ? [bridge.y, ...forecastCumulative.slice(forecastStart)] : forecastCumulative.slice(forecastStart);
   const budgetCumulative = filteredRows.map((_, index) => filteredRows.slice(0, index + 1).reduce((sum, item) => sum + Number(item.budget_value || 0), 0));
+  // Future months carry the full-month forecast; the current (open) month
+  // carries the remaining-days forecast, stacked on top of its partial
+  // realized. Closed months have no meaningful forecast (zeroed by the engine).
   const forecastBars = filteredRows.map(row => (
-    row.actual_value == null
+    row.actual_value == null || isCurrentMonth(row)
       ? Math.max(0, Number(row.forecast_value || 0) + (sharedOn ? givenOf(row) : 0))
       : 0
   ));
@@ -115,7 +148,7 @@ export default function ExpectedView() {
     if (index < forecastStart) return null;
     return filteredRows.slice(0, index + 1).reduce((sum, item) => sum + (item.actual_value == null ? forecastManualOf(item) : 0), 0);
   });
-  const forecastManualFilled = forecastManualCumulative.slice(forecastStart);
+  const forecastManualFilled = bridge ? [0, ...forecastManualCumulative.slice(forecastStart)] : forecastManualCumulative.slice(forecastStart);
   const receivedOnActual = filteredRows.map(row => sharedOn && row.actual_value != null ? Math.max(0, receivedOf(row)) : 0);
   const receivedOnForecast = filteredRows.map(row => sharedOn && row.actual_value == null ? Math.max(0, receivedOf(row)) : 0);
   const sharedLine = { color: "#EA580C", width: 3 };
@@ -123,11 +156,11 @@ export default function ExpectedView() {
   const forecastBaseCumulative = filteredRows.map((_, index) => {
     if (index < actualEnd) return null;
     return filteredRows.slice(0, index + 1).reduce((sum, item) => {
-      if (item.actual_value != null) return sum + consumptionOf(item);
+      if (item.actual_value != null) return sum + consumptionOf(item) + (isCurrentMonth(item) ? Number(item.forecast_value || 0) : 0);
       return sum + Number(item.forecast_value || 0) + (sharedOn ? givenOf(item) : 0);
     }, 0);
   });
-  const forecastBaseFilled = forecastBaseCumulative.slice(forecastStart);
+  const forecastBaseFilled = bridge ? [bridge.y, ...forecastBaseCumulative.slice(forecastStart)] : forecastBaseCumulative.slice(forecastStart);
   const chartData: any[] = cumulative
     ? [
         { x: labels, y: consumptionCumulative, type: "scatter", mode: "lines+markers", name: "Realizado", fill: "tozeroy", fillcolor: "rgba(242,169,0,.22)", line: { color: "#F2A900", width: 3 }, marker: { size: 6 } },
@@ -168,9 +201,9 @@ export default function ExpectedView() {
   const pathParts = director.split(" > ").filter(Boolean);
   const childLevel = Math.min(pathParts.length + 1, 7);
   const waterfallLayout: any = sharedOn && stackedDrivers.length > 0
-    ? { autosize: true, barmode: "relative", margin: { l: 82, r: 20, t: 25, b: 120 }, yaxis: { title: { text: "Consumo e rateio", standoff: 12 }, side: "left", showticklabels: true, tickprefix: "$", tickformat: ".2s" }, xaxis: { type: "category", title: { text: `Departamento nível ${childLevel} · clique para abrir`, standoff: 18 }, side: "bottom", showticklabels: true, tickangle: -35, automargin: true }, legend: { orientation: "h", y: -0.28 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }
+    ? { autosize: true, barmode: "stack", hovermode: "x unified", margin: { l: 82, r: 20, t: 25, b: 120 }, yaxis: { title: { text: "Consumo e rateio", standoff: 12 }, side: "left", showticklabels: true, tickprefix: "$", tickformat: ".2s" }, xaxis: { type: "category", title: { text: `Departamento nível ${childLevel} · clique para abrir`, standoff: 18 }, side: "bottom", showticklabels: true, tickangle: -35, automargin: true }, legend: { orientation: "h", y: -0.28 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }
     : { autosize: true, margin: { l: 82, r: 20, t: 25, b: 120 }, yaxis: { title: { text: "Variação", standoff: 12 }, side: "left", showticklabels: true, tickprefix: "$", tickformat: ".2s" }, xaxis: { type: "category", title: { text: `Departamento nível ${childLevel} · clique para abrir`, standoff: 18 }, side: "bottom", showticklabels: true, tickangle: -35, automargin: true }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" };
-  const card = (label: string, value: number, color: string, onOpen?: () => void) => (
+  const card = (label: string, value: number, color: string, onOpen?: () => void, caption?: string) => (
     <Card
       onClick={onOpen}
       sx={{ flex: 1, minWidth: 190, borderTop: `3px solid ${color}`, cursor: onOpen ? "pointer" : "default", "&:hover": onOpen ? { boxShadow: 3 } : undefined }}
@@ -178,7 +211,7 @@ export default function ExpectedView() {
       <CardContent>
         <Typography variant="caption" color="text.secondary">{label}</Typography>
         <Typography variant="h5" fontWeight={700}>{money.format(value)}</Typography>
-        <Typography variant="caption">{onOpen ? "Clique para ver o detalhe do consumo" : "Current Year"}</Typography>
+        <Typography variant="caption">{caption ?? (onOpen ? "Clique para ver o detalhe do consumo" : "Current Year")}</Typography>
       </CardContent>
     </Card>
   );
@@ -210,6 +243,21 @@ export default function ExpectedView() {
     const query = new URLSearchParams({ tab: "pivot", measure: "realizado", path: director, tipo: "realizado" });
     if (year) query.set("year", year);
     navigate(`/analysis?${query.toString()}`);
+  };
+  // Clique na coluna do gráfico: abre o pivot (análise) no mesmo formato
+  // do exemplo — mês clicado como ano-mês (o pivot filtra _billing_period
+  // por CONTAINS, então year=YYYYMM restringe ao mês), escopo do departamento
+  // e medida realizado.
+  const openMonthPivot = (period: string) => {
+    const query = new URLSearchParams({ tab: "pivot", measure: "realizado", path: director, tipo: "realizado", year: period });
+    navigate(`/analysis?${query.toString()}`);
+  };
+  const onMainChartClick = (event: any) => {
+    const x = event?.points?.[0]?.x;
+    if (x == null) return;
+    const date = new Date(x);
+    if (Number.isNaN(date.getTime())) return;
+    openMonthPivot(`${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`);
   };
   const openDriver = (name: string) => {
     if (!name || ["Orçamento", "Forecast", "Outros", "Realizado", "Custo compartilhado"].includes(name)) return;
@@ -278,25 +326,12 @@ export default function ExpectedView() {
       <ListItemText primary={department.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
     </ListItemButton><Collapse in={expanded} timeout="auto" unmountOnExit>{children.map(child => renderOrganizationNode(child, depth + 1))}</Collapse></Box>;
   };
-  return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
-      {/* Faixa de contexto branca */}
-      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Visão executiva</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Realizado × forecast × orçamento por departamento, com rateio de custo compartilhado.
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* Área de trabalho com campos simples de 40px */}
-      <Box sx={{
-        p: 3,
-        "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
-        "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
-      }}>
-        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+  const workspaceSx: Record<string, unknown> = {
+    "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
+    "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
+  };
+  const body = (
+    <>
           <Breadcrumbs separator=">" sx={{ mb: 1.5, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}>
             <Typography color="text.secondary">Visão esperada</Typography>
             <Typography color="text.secondary">Variância de Forecast</Typography>
@@ -312,13 +347,17 @@ export default function ExpectedView() {
           <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={2}>
             <Typography variant="subtitle2" color="text.secondary">Variância de forecast</Typography>
             <Stack direction="row" gap={1} flexWrap="wrap">
-              <Button variant="outlined" size="small" onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 320, justifyContent: "flex-start", textTransform: "none" }}>
-                {director || "Consumo Cloud"}
-              </Button>
-              <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Selecione um nível para consolidar todos os seus filhos</Typography>
-                <List dense disablePadding>{organization.filter(department => department.active).map(department => renderOrganizationNode(department))}</List>
-              </Menu>
+              {!embedded && (
+                <>
+                  <Button variant="outlined" size="small" onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 320, justifyContent: "flex-start", textTransform: "none" }}>
+                    {director || "Consumo Cloud"}
+                  </Button>
+                  <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Selecione um nível para consolidar todos os seus filhos</Typography>
+                    <List dense disablePadding>{organization.filter(department => department.active).map(department => renderOrganizationNode(department))}</List>
+                  </Menu>
+                </>
+              )}
               <FormControl sx={{ minWidth: 170 }}>
                 <InputLabel>Período</InputLabel>
                 <Select label="Período" value={periodFilter} onChange={e => setPeriodFilter(String(e.target.value))}>
@@ -331,7 +370,7 @@ export default function ExpectedView() {
             </Stack>
           </Stack>
 
-          <Alert severity="info" sx={{ mb: 2 }}>Forecast = realizado dos meses fechados + forecast dos meses futuros. Variação = orçamento menos forecast. Com o interruptor ligado, o custo compartilhado aparece empilhado em laranja sobre o consumo real — não mistura as duas barras. O card Realizado soma os dois.</Alert>
+          <Alert severity="info" sx={{ mb: 2 }}>Forecast = realizado dos meses fechados + no mês corrente, realizado parcial com o forecast do restante empilhado + forecast dos meses futuros. Variação = orçamento menos forecast. Com o interruptor ligado, o custo compartilhado aparece empilhado em laranja sobre o consumo real — não mistura as duas barras. O card Realizado soma os dois.</Alert>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}<Button size="small" sx={{ ml: 1 }} onClick={() => setReloadNonce(n => n + 1)}>Tentar de novo</Button></Alert>}
 
           {loading ? (
@@ -341,7 +380,7 @@ export default function ExpectedView() {
               <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
                 {card("Realizado", actual, "#F2A900", openActualDetails)}
                 {card("Orçamento", budget, "#64748B")}
-                {card("Forecast", forecast, "#16A34A")}
+                {card("Total projetado", forecast, "#16A34A", undefined, "Realizado + Forecast")}
                 {card("Variação", variance, variance >= 0 ? "#16A34A" : "#EF4444")}
               </Stack>
               <Grid container spacing={2}>
@@ -350,11 +389,11 @@ export default function ExpectedView() {
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Box>
                         <Typography variant="h6">Gasto ao longo do tempo</Typography>
-                        <Typography variant="caption" color="text.secondary">{cumulative ? (sharedOn ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast" : "Acumulado · Realizado, orçamento e forecast") : (sharedOn ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento" : "Mensal · Realizado e forecast empilhados; orçamento em linha")}</Typography>
+                        <Typography variant="caption" color="text.secondary">{cumulative ? (sharedOn ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast" : "Acumulado · Realizado, orçamento e forecast") : (sharedOn ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento" : "Mensal · Realizado e forecast empilhados (mês corrente: parcial + restante); orçamento em linha")}</Typography>
                       </Box>
                       <FormControlLabel control={<Switch checked={cumulative} onChange={(_, checked) => setCumulative(checked)} />} label="Acumulado" />
                     </Stack>
-                    <Plot useResizeHandler style={{ width: "100%", height: 420 }} data={chartData} layout={chartLayout} config={{ responsive: true, displaylogo: false }} onClick={event => { if (String(event.points?.[0]?.data?.name ?? "") === "Realizado") openActualDetails(); }} />
+                    <Plot useResizeHandler style={{ width: "100%", height: 420, cursor: "pointer" }} data={chartData} layout={chartLayout} config={{ responsive: true, displaylogo: false }} onClick={onMainChartClick} />
                   </Paper>
                 </Grid>
                 <Grid item xs={12} md={5}>
@@ -422,11 +461,33 @@ export default function ExpectedView() {
           {!loading && filteredRows.length > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Orçamento anual carregado: {money.format(budget)}</Typography>
           )}
-        </Paper>
-
-        <Box sx={{ mt: 2 }}>
-          <AcksWidget department={director} />
+    </>
+  );
+  const acksBox = (
+    <Box sx={{ mt: 2 }}>
+      <AcksWidget department={director} />
+    </Box>
+  );
+  return embedded ? (
+    <Box sx={workspaceSx}>
+      {body}
+      {acksBox}
+    </Box>
+  ) : (
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h4">Visão executiva</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+            Realizado × forecast × orçamento por departamento, com rateio de custo compartilhado.
+          </Typography>
         </Box>
+      </Box>
+      <Box sx={{ p: 3, ...workspaceSx }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+          {body}
+        </Paper>
+        {acksBox}
       </Box>
     </Box>
   );

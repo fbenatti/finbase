@@ -92,6 +92,88 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    if conn.connector_type == "azure_automation_jobs":
+        # Azure Automation: o "scan" descobre as Automation Accounts nas
+        # subscriptions configuradas. A coleta de jobs/schedules acontece no
+        # worker quando a extração é executada (/etl/run).
+        try:
+            from app.services.azure_automation_service import discover_accounts
+            accounts = await discover_accounts(dict(conn.config_json or {}))
+            return {
+                "connection_id": connection_id,
+                "total": len(accounts),
+                "new": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "items": [
+                    {
+                        "blob_path": f"automation/{a['account_name'] or '?'}",
+                        "billing_period": None,
+                        "last_modified": None,
+                        "etag": "",
+                        "content_length": 0,
+                        "status": "NEW",
+                    }
+                    for a in accounts
+                ],
+                "message": (
+                    f"Azure Automation: {len(accounts)} conta(s) encontrada(s) nas subscriptions. "
+                    "Execute a extração para coletar jobs e schedules."
+                ),
+            }
+        except Exception as exc:
+            return {
+                "connection_id": connection_id,
+                "total": 0,
+                "new": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "items": [],
+                "message": f"Falha ao descobrir Automation Accounts: {str(exc)[:400]}",
+            }
+    if conn.connector_type == "azure_resource_graph":
+        # Azure Resource Graph: o "scan" valida a credencial e lista as
+        # subscriptions acessíveis com a contagem de recursos. A coleta de
+        # inventário/órfãos acontece no worker quando a extração é executada.
+        try:
+            from app.services.azure_resource_graph_service import discover_scope
+            subs = await discover_scope(dict(conn.config_json or {}))
+            return {
+                "connection_id": connection_id,
+                "total": len(subs),
+                "new": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "items": [
+                    {
+                        "blob_path": f"arg/subscription/{s['subscription_id']}",
+                        "billing_period": None,
+                        "last_modified": None,
+                        "etag": "",
+                        "content_length": 0,
+                        "status": "NEW",
+                        "subscription_id": s["subscription_id"],
+                        "subscription_name": s["subscription_name"],
+                        "resource_count": s["resource_count"],
+                    }
+                    for s in subs
+                ],
+                "message": (
+                    f"Azure Resource Graph: {len(subs)} subscription(s) acessíveis "
+                    f"({sum(s['resource_count'] for s in subs)} recursos). "
+                    "Execute a extração para coletar inventário e recursos órfãos."
+                ),
+            }
+        except Exception as exc:
+            return {
+                "connection_id": connection_id,
+                "total": 0,
+                "new": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "items": [],
+                "message": f"Falha ao consultar Azure Resource Graph: {str(exc)[:400]}",
+            }
     if conn.connector_type == "azure_blob":
         extractor = AzureExtractor(conn)
         return await extractor.scan(db)
@@ -291,9 +373,6 @@ async def _purge_gold_if_period_empty(
         )
     if conn.connector_type == "manual_csv":
         conn.config_json = _drop_manual_period_meta(conn.config_json, billing_period)
-    if conn.connector_type == "manual_ai_cost":
-        from app.services.manual_ai_cost_extractor import drop_manual_period_meta
-        conn.config_json = drop_manual_period_meta(conn.config_json, billing_period)
 
 
 @router.delete("/blobs/{blob_id}", status_code=204)
@@ -444,7 +523,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         # PTU is an operational source, not an Azure Blob export.  It is
         # executed by the worker through the PTU collector below.
         pass
-    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -640,6 +719,37 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         except Exception as e:
             return {"status": "FAILED", "message": f"Azure PTU: {str(e)[:450]}"}
 
+    if conn.connector_type == "azure_automation_jobs":
+        try:
+            from app.services.azure_automation_service import discover_accounts
+            accounts = await discover_accounts(config)
+            return {
+                "status": "OK" if accounts else "PENDING",
+                "message": (
+                    f"Azure Automation validado: {len(accounts)} conta(s) nas subscriptions"
+                    if accounts
+                    else "Azure Automation conectado, mas nenhuma Automation Account encontrada nas subscriptions."
+                ),
+            }
+        except Exception as e:
+            return {"status": "FAILED", "message": f"Azure Automation: {str(e)[:450]}"}
+
+    if conn.connector_type == "azure_resource_graph":
+        try:
+            from app.services.azure_resource_graph_service import discover_scope
+            subs = await discover_scope(config)
+            total_resources = sum(s.get("resource_count") or 0 for s in subs)
+            return {
+                "status": "OK" if subs else "PENDING",
+                "message": (
+                    f"Azure Resource Graph validado: {len(subs)} subscription(s) / {total_resources} recursos"
+                    if subs
+                    else "Azure Resource Graph conectado, mas nenhuma subscription acessível com a credencial."
+                ),
+            }
+        except Exception as e:
+            return {"status": "FAILED", "message": f"Azure Resource Graph: {str(e)[:450]}"}
+
     if conn.connector_type == "azure_blob":
         try:
             extractor = AzureExtractor(conn)
@@ -778,12 +888,6 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
             return DatabricksExtractor(conn).test_connection()
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
-
-    if conn.connector_type == "manual_ai_cost":
-        return {
-            "status": "OK",
-            "message": "Conexão de custo manual de IA — lançamentos via POST /ai-cost-origin/manual-entry",
-        }
 
     return {
         "status": "NOT_IMPLEMENTED",
@@ -1277,6 +1381,16 @@ def _reprocess_destination_sync(
                 q = q.where(IngestedBlob.billing_period.in_(billing_periods))
             q = q.order_by(IngestedBlob.billing_period)
             candidates = session.execute(q).all()
+            # Azure Automation: a Bronze mistura jobs e schedules; cada destino
+            # reprocessa apenas a fatia correspondente (por prefixo do blob).
+            if phys_name.lower() == "dest_modelo_automation":
+                candidates = [c for c in candidates if c[2].startswith("automation/jobs/")]
+            elif phys_name.lower() == "dest_modelo_automation_schedule":
+                candidates = [c for c in candidates if c[2].startswith("automation/schedules/")]
+            elif phys_name.lower() == "dest_cloud_resource_inventory":
+                candidates = [c for c in candidates if c[2].startswith("arg/inventory/")]
+            elif phys_name.lower() == "dest_cloud_orphan_resources":
+                candidates = [c for c in candidates if c[2].startswith("arg/orphans/")]
             for blob_id, period, path in _select_reprocess_blobs(
                 candidates,
                 connector_type=connector_type,
@@ -1391,11 +1505,16 @@ def _reprocess_destination_sync(
             _crules = [
                 rule for rule in session.execute(
                     select(ClassificationRule).where(
-                        ClassificationRule.destination_table_id == destination_table_id,
                         ClassificationRule.active == True,
                     ).order_by(ClassificationRule.priority, ClassificationRule.id)
                 ).scalars().all()
-                if rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
+                if rule_matches_connection(rule.connection_id, cid)
+                and rule_matches_destination(
+                    rule.destination_table_id,
+                    destination_table_id,
+                    is_focus_destination=is_focus_destination,
+                )
+                and rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
             ]
 
             # Business rules may create arbitrary destination columns (for
@@ -1906,6 +2025,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                         "replace_existing": False,
                         "backfill": not periods,
                         **details,
+                        "chain_dimons": body.chain_dimons.model_dump() if body.chain_dimons else {},
                         "event_log": [{
                             "at": datetime.now(timezone.utc).isoformat(),
                             "level": "INFO",
@@ -1978,7 +2098,9 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                 connection_ids=[connection_id], billing_periods=[period],
                 # Each child replaces only its own source/month. ``replace_existing``
                 # must never erase the other queued months.
-                result_json={"replace_existing": False, **details, "event_log": [{
+                result_json={"replace_existing": False, **details,
+                             "chain_dimons": body.chain_dimons.model_dump() if body.chain_dimons else {},
+                             "event_log": [{
                     "at": datetime.now(timezone.utc).isoformat(), "level": "INFO",
                     "message": f"Fila {position}/{len(ordered_pairs)}: fonte {connection_id}, mês {period}",
                     "details": details,
@@ -2458,6 +2580,7 @@ async def create_schedule(body: ScheduledTaskCreate, db: AsyncSession = Depends(
     sched = ScheduledTask(
         name=body.name,
         connection_id=body.connection_id,
+        connection_ids=body.connection_ids or [body.connection_id],
         cron_expression=body.cron_expression,
         timezone=body.timezone,
         destination_reprocess=body.destination_reprocess,
@@ -2517,7 +2640,7 @@ async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/schedules/{schedule_id}/run")
 async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db)):
-    """Manually trigger a scheduled ETL task right now."""
+    """Manually trigger a scheduled ETL task right now (all connections in scope)."""
     result = await db.execute(
         select(ScheduledTask).where(ScheduledTask.id == schedule_id)
     )
@@ -2525,8 +2648,13 @@ async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db))
     if not sched:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    task_id = await scheduler_service.run_etl_and_reprocess(sched.connection_id)
-    return {"task_id": task_id, "connection_id": sched.connection_id, "schedule_name": sched.name}
+    connection_ids = list(sched.connection_ids or []) or [sched.connection_id]
+    task_ids = await scheduler_service.run_schedule_now(connection_ids)
+    return {
+        "task_ids": task_ids,
+        "connection_ids": connection_ids,
+        "schedule_name": sched.name,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════

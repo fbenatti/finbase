@@ -9,6 +9,10 @@ class ScheduledTask(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
     connection_id = Column(Integer, nullable=False)
+    # Multi-connection schedules: when non-empty, the schedule covers every
+    # connection in this list (e.g. all cloud sources, all tool sources).
+    # Falls back to [connection_id] when empty for backward compatibility.
+    connection_ids = Column(JSON, nullable=False, default=list)
     destination_reprocess = Column(Boolean, nullable=False, default=True)
     cron_expression = Column(String(100), nullable=False)  # e.g. "0 3 * * *" (daily at 3am)
     timezone = Column(String(50), nullable=False, default="America/Sao_Paulo")

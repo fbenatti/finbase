@@ -1,84 +1,58 @@
+"""Compile classification rules into non-overlapping Azure tag policies.
+
+The billing classifier is first-match-wins (priority, id). Azure Policy has no
+such ordering guarantee for overlapping ``modify`` effects, so this service
+turns every lower-priority selector into an explicit decision region: selector
+AND NOT(all earlier eligible selectors). This is deliberately direct tagging;
+the broad RG inheritance policy cannot represent resource-level exceptions.
 """
-Azure Tag Policy Service — generate Azure Policy definitions (and deployment
-scripts) from the current classification business rules.
-
-The classification rules reference FOCUS (Gold) columns such as `ResourceId`,
-`resourceGroupName`, `source_resource_group_name`, `subscriptionName`,
-`SubAccountName`, `ResourceName`, `ResourceType`, `SkuMeter`, and `RegionName`.
-An Azure Policy evaluates ARM aliases/fields such as `name`, `type`, `location`
-and `Microsoft.Compute/virtualMachines/sku.name`.
-
-This module performs reverse mapping and semantic classification (FOCUS -> Azure ARM),
-emitting compact policies grouped into:
-  1. Resource-group inheritance (built-in "Inherit a tag from the resource group").
-  2. Resource Group tag policies (exact lists grouped by identical tag sets + wildcard patterns).
-  3. Individual resource patterns (name / SKU / VM size family / region / subscription).
-
-Policies are grouped per Azure tenant (each `azure-*` source connection).
-"""
-
 from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.destination import DestinationTable, SourceDestinationMapping
 from app.models.rules import ClassificationRule, Department
-from app.models.destination import SourceDestinationMapping
 from app.models.source_connection import SourceConnection
-from app.services.cloud_scope import resolve_connection_scope
+from app.services.classification_engine import normalize_rule_conditions
+from app.services.cloud_scope import (
+    resolve_connection_scope, rule_matches_cloud, rule_matches_connection,
+    rule_matches_destination,
+)
 
 logger = logging.getLogger("openfinops.azure_tag_policy")
 
-# Semantic field scopes
 SCOPE_RG = "RESOURCE_GROUP"
-SCOPE_RESOURCE = "RESOURCE_NAME"
+SCOPE_RESOURCE = "RESOURCE"
 SCOPE_SUBSCRIPTION = "SUBSCRIPTION"
 SCOPE_TYPE = "RESOURCE_TYPE"
 SCOPE_SKU = "SKU"
 SCOPE_LOCATION = "LOCATION"
-SCOPE_UNKNOWN = "UNKNOWN"
+SCOPE_UNSUPPORTED = "UNSUPPORTED"
 
-# Map normalized field names to their semantic scope and default ARM field/alias
+# Only selectors observable by ARM are allowed into a tag policy. Cost-line
+# fields are intentionally absent: Purchase/Return/reservation classifications
+# have no stable Azure resource to tag.
 SEMANTIC_FIELD_MAP: dict[str, tuple[str, str]] = {
-    # Resource Group
     "sourceresourcegroupname": (SCOPE_RG, "name"),
     "resourcegroupname": (SCOPE_RG, "name"),
     "resourcegroup": (SCOPE_RG, "name"),
-    "resource_group_name": (SCOPE_RG, "name"),
-    "resource_group": (SCOPE_RG, "name"),
-
-    # Individual Resource
     "resourcename": (SCOPE_RESOURCE, "name"),
-    "resource_name": (SCOPE_RESOURCE, "name"),
-    "resourceid": (SCOPE_RESOURCE, "name"),
-    "id": (SCOPE_RESOURCE, "name"),
-
-    # Subscription
+    "resourceid": (SCOPE_RESOURCE, "id"),
+    "id": (SCOPE_RESOURCE, "id"),
     "subaccountname": (SCOPE_SUBSCRIPTION, "subscriptionId"),
     "subscriptionname": (SCOPE_SUBSCRIPTION, "subscriptionId"),
     "subaccountid": (SCOPE_SUBSCRIPTION, "subscriptionId"),
     "subscriptionid": (SCOPE_SUBSCRIPTION, "subscriptionId"),
-
-    # Resource Type
     "resourcetype": (SCOPE_TYPE, "type"),
-    "resource_type": (SCOPE_TYPE, "type"),
     "servicename": (SCOPE_TYPE, "type"),
-    "servicecategory": (SCOPE_TYPE, "type"),
-
-    # SKU / Pricing / VM Family
     "sku": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
     "skumeter": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
-    "skuid": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
-    "servicesubcategory": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
-    "pricingcategory": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
-    "chargecategory": (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name"),
-
-    # Location
     "regionname": (SCOPE_LOCATION, "location"),
     "regionid": (SCOPE_LOCATION, "location"),
     "resourcelocation": (SCOPE_LOCATION, "location"),
@@ -86,399 +60,464 @@ SEMANTIC_FIELD_MAP: dict[str, tuple[str, str]] = {
 }
 
 TAG_CONTRIBUTOR_ROLE = "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
-CONTRIBUTOR_ROLE = "/providers/microsoft.authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c"
-INHERIT_TAG_POLICY_DEFINITION_ID = "/providers/Microsoft.Authorization/policyDefinitions/cd3aa116-8754-49c9-a813-ad46512ece54"
-
-# Standard department hierarchy and organizational tags
 TAG_KEYS = [
-    "departamento_nivel_1",
-    "departamento_nivel_2",
-    "departamento_nivel_3",
-    "departamento_nivel_4",
-    "departamento_nivel_5",
-    "centro_custo",
-    "ambiente",
+    "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3",
+    "departamento_nivel_4", "departamento_nivel_5", "centro_custo", "ambiente",
 ]
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+UUID_ANY_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.I)
+# Keep generated definitions comfortably below Azure Policy payload limits. A
+# blocked rule is safer than emitting a definition Azure will reject or truncate.
+MAX_CONDITION_BYTES = 64_000
 
 
-def format_wildcard(v: str) -> str:
-    """Ensure a search term is properly formatted for Azure Policy 'like' operator."""
-    s = v.strip()
-    if not s:
-        return "*"
-    if "*" in s or "?" in s:
-        return s
-    return f"*{s}*"
+def _norm(value: str) -> str:
+    return str(value or "").lower().replace("_", "").replace("-", "").strip()
+
+
+def _wildcard(value: str) -> str:
+    value = value.strip()
+    return value if "*" in value else f"*{value}*"
+
+
+def _condition(field: str, operator: str, values: list[str]) -> dict | None:
+    """Build a Policy condition with OR within a classification condition."""
+    if not values:
+        return None
+    if operator == "=":
+        return {"field": field, "equals": values[0]} if len(values) == 1 else {"field": field, "in": values}
+    if operator == "!=":
+        return {"field": field, "notEquals": values[0]} if len(values) == 1 else {"field": field, "notIn": values}
+    if operator == "~":
+        # Azure Policy like permits one wildcard. contains is safer for IDs.
+        op = "contains" if field == "id" else "like"
+        formatted = values if op == "contains" else [_wildcard(value) for value in values]
+        return {"field": field, op: formatted[0]} if len(formatted) == 1 else {
+            "anyOf": [{"field": field, op: value} for value in formatted]
+        }
+    return None
 
 
 class AzureTagPolicyService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    # ── Loading ──────────────────────────────────────────────────────────
-
     async def list_azure_tenants(self) -> list[dict]:
-        """Return the Azure source connections that carry a tenant_id."""
-        result = await self.db.execute(
-            select(SourceConnection).where(SourceConnection.connector_type == "azure_blob")
-        )
-        tenants: list[dict] = []
-        for conn in result.scalars().all():
-            cfg = conn.config_json or {}
-            tenant_id = cfg.get("tenant_id")
-            if tenant_id:
-                tenants.append({
-                    "connection_id": conn.id,
-                    "code": conn.code,
-                    "name": conn.name,
-                    "tenant_id": tenant_id,
-                })
-        return tenants
+        rows = await self.db.execute(select(SourceConnection).where(SourceConnection.connector_type == "azure_blob"))
+        return [{"connection_id": c.id, "code": c.code, "name": c.name,
+                 "tenant_id": (c.config_json or {}).get("tenant_id")}
+                for c in rows.scalars().all() if (c.config_json or {}).get("tenant_id")]
 
     async def _load_departments(self) -> dict[int, Department]:
-        result = await self.db.execute(select(Department).where(Department.active == True))
-        return {d.id: d for d in result.scalars().all()}
+        rows = await self.db.execute(select(Department).where(Department.active == True))
+        return {row.id: row for row in rows.scalars().all()}
 
-    async def _load_reverse_mapping(self, connection_id: int) -> dict[str, str]:
-        """Build destination_column -> source_column for a connection (reverse)."""
-        result = await self.db.execute(
-            select(SourceDestinationMapping).where(
-                SourceDestinationMapping.source_connection_id == connection_id,
-                SourceDestinationMapping.active == True,
-            )
-        )
-        mapping: dict[str, str] = {}
-        for m in result.scalars().all():
-            mapping.setdefault(m.destination_column.lower().replace("_", ""), m.source_column)
-        return mapping
+    async def _connection_destinations(self, connection_id: int) -> list[tuple[int, bool]]:
+        result = await self.db.execute(select(SourceDestinationMapping.destination_table_id).where(
+            SourceDestinationMapping.source_connection_id == connection_id,
+            SourceDestinationMapping.active == True,
+        ).distinct())
+        ids = [row[0] for row in result.all()]
+        if not ids:
+            return []
+        tables = (await self.db.execute(select(DestinationTable).where(DestinationTable.id.in_(ids)))).scalars().all()
+        return [(table.id, (table.name or "").strip().upper() == "MODELO FOCUS" or
+                (table.physical_name or "").strip().lower() == "dest_modelo_focus") for table in tables]
 
-    async def _load_classification_rules(self, connection_id: int) -> list[ClassificationRule]:
-        result = await self.db.execute(
-            select(ClassificationRule)
-            .where(
-                ClassificationRule.active == True,
-                ClassificationRule.department_id.isnot(None),
-            )
-            .order_by(ClassificationRule.priority)
-        )
-        rules = list(result.scalars().all())
-        filtered = []
-        for rule in rules:
-            scope = rule.cloud_scope
-            if scope and scope.lower() != "azure":
+    async def _load_classification_rules(self, conn: SourceConnection) -> list[ClassificationRule]:
+        destinations = await self._connection_destinations(conn.id)
+        rows = await self.db.execute(select(ClassificationRule).where(
+            ClassificationRule.active == True,
+            ClassificationRule.department_id.isnot(None),
+        ).order_by(ClassificationRule.priority, ClassificationRule.id))
+        out: list[ClassificationRule] = []
+        for rule in rows.scalars().all():
+            if not rule_matches_connection(rule.connection_id, conn.id):
                 continue
-            filtered.append(rule)
-        return filtered
+            if not rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name):
+                continue
+            if not any(rule_matches_destination(rule.destination_table_id, dest_id, is_focus_destination=is_focus)
+                       for dest_id, is_focus in destinations):
+                continue
+            out.append(rule)
+        return out
 
-    # ── Hierarchy resolution ─────────────────────────────────────────────
-
-    def _hierarchy(self, dept: Department, dept_map: dict[int, Department]) -> dict[str, str]:
-        """Walk root->leaf and materialize departamento_nivel_* + centro_custo + ambiente."""
-        chain: list[Department] = []
-        cur: Department | None = dept
-        seen: set[int] = set()
-        while cur and cur.id not in seen:
-            seen.add(cur.id)
-            chain.append(cur)
-            cur = dept_map.get(cur.parent_id) if cur.parent_id else None
-        chain.reverse()  # root -> leaf
-
-        tags: dict[str, str] = {}
-        for i, d in enumerate(chain[:5], start=1):
-            if d.name:
-                tags[f"departamento_nivel_{i}"] = d.name
-
-        centro = next((d.centro_custo for d in reversed(chain) if d.centro_custo), None)
-        ambiente = next((d.ambiente for d in reversed(chain) if d.ambiente), None)
-        if centro:
-            tags["centro_custo"] = centro
-        if ambiente:
-            tags["ambiente"] = ambiente
+    def _hierarchy(self, dept: Department, departments: dict[int, Department]) -> dict[str, str]:
+        chain, seen = [], set()
+        current: Department | None = dept
+        while current and current.id not in seen:
+            seen.add(current.id); chain.append(current)
+            current = departments.get(current.parent_id) if current.parent_id else None
+        chain.reverse()
+        tags = {f"departamento_nivel_{i}": item.name for i, item in enumerate(chain[:5], 1) if item.name}
+        centro = next((item.centro_custo for item in reversed(chain) if item.centro_custo), None)
+        ambiente = next((item.ambiente for item in reversed(chain) if item.ambiente), None)
+        if centro: tags["centro_custo"] = centro
+        if ambiente: tags["ambiente"] = ambiente
         return tags
 
-    def _resolve_tags(self, rule: ClassificationRule, dept_map: dict[int, Department]) -> dict[str, str]:
-        dept = dept_map.get(rule.department_id)
-        if not dept:
-            return {}
-        return self._hierarchy(dept, dept_map)
+    async def _subscription_catalog(self, conn: SourceConnection) -> tuple[dict[str, list[str]], list[str], str | None]:
+        """Resolve name -> subscription GUID, without making an unsafe guess."""
+        configured = [str(v).strip() for v in ((conn.config_json or {}).get("subscription_ids") or []) if str(v).strip()]
+        catalog: dict[str, list[str]] = defaultdict(list)
+        ids = [value for value in configured if UUID_RE.match(value)]
+        try:
+            from app.services.azure_resource_graph_service import discover_scope
+            discovered = await discover_scope(dict(conn.config_json or {}))
+            for item in discovered:
+                sid = str(item.get("subscription_id") or "").strip()
+                name = str(item.get("subscription_name") or "").strip()
+                if sid:
+                    ids.append(sid)
+                    catalog[name.casefold()].append(sid)
+        except Exception as exc:  # ResourceId/RG exports remain useful.
+            message = f"Não foi possível consultar Azure Resource Graph: {str(exc)[:180]}"
+            logger.warning("Azure tag policy subscription discovery for %s: %s", conn.code, message)
+            return catalog, sorted(set(ids)), message
+        return catalog, sorted(set(ids)), None
 
-    # ── Semantic field resolution ────────────────────────────────────────
+    async def _observed_project_scopes(self, conn: SourceConnection, catalog: dict[str, list[str]]) -> tuple[dict[str, list[str]], str | None]:
+        """Resolve the subscriptions actually classified in the Dimon cost view.
 
-    def _classify_field(self, raw_field: str, reverse_map: dict[str, str]) -> tuple[str, str]:
+        Azure credentials can see subscriptions with no OpenFinops business rule.
+        They are never a safe default policy scope, so this query is the scope
+        source for RG/name/resource rules that do not contain an explicit GUID.
         """
-        Identify the semantic scope and ARM alias for a classification condition field.
-        Returns: (scope, arm_field)
+        safe_code = (conn.code or "").replace("'", "''")
+        try:
+            from app.services.trino_service import execute as trino_execute
+            rows = await trino_execute(f"""
+                SELECT lower(trim(departamento)) AS department_name,
+                       lower(trim(subaccountname)) AS subscription_name
+                FROM iceberg.dimon.dest_dm_cost_visao_completa
+                WHERE cloud_origem = '{safe_code}'
+                  AND CAST(source_connection_id AS bigint) = {int(conn.id)}
+                  AND departamento IS NOT NULL AND trim(departamento) <> ''
+                  AND subaccountname IS NOT NULL AND trim(subaccountname) <> ''
+                GROUP BY 1, 2
+            """, timeout_s=60)
+        except Exception as exc:
+            message = f"Não foi possível consultar as subscriptions classificadas no Dimon: {str(exc)[:180]}"
+            logger.warning("Azure tag policy Dimon scope for %s: %s", conn.code, message)
+            return {}, message
+        scopes: dict[str, set[str]] = defaultdict(set)
+        for row in rows:
+            department_name = str(row.get("department_name") or "").strip().casefold()
+            subscription_name = str(row.get("subscription_name") or "").strip().casefold()
+            if department_name:
+                scopes[department_name].update(catalog.get(subscription_name, []))
+        return {name: sorted(ids) for name, ids in scopes.items()}, None
+
+    @staticmethod
+    def _explicit_scope_subscriptions(terms: list[dict]) -> list[str]:
+        ids: set[str] = set()
+        for term in terms:
+            if term["scope"] == SCOPE_SUBSCRIPTION:
+                ids.update(term["values"])
+            elif term["scope"] == SCOPE_RESOURCE and term["field"] == "id":
+                for value in term["values"]:
+                    ids.update(UUID_ANY_RE.findall(value))
+        return sorted(ids)
+
+    def _field_scope(self, field: str) -> tuple[str, str]:
+        return SEMANTIC_FIELD_MAP.get(_norm(field), (SCOPE_UNSUPPORTED, ""))
+
+    def _translate_conditions(self, rule: ClassificationRule, catalog: dict[str, list[str]], diagnostics: list[dict]) -> list[dict] | None:
+        translated: list[dict] = []
+        for cond in normalize_rule_conditions(rule):
+            scope, arm_field = self._field_scope(str(cond.get("field") or ""))
+            values = [str(value).strip() for value in cond.get("values", []) if str(value).strip()]
+            operator = str(cond.get("operator") or "=")
+            if scope == SCOPE_UNSUPPORTED:
+                diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "not_deployable",
+                                    "reason": f"Campo financeiro ou não mapeável para ARM: {cond.get('field')}"})
+                return None
+            if operator not in {"=", "~", "!="}:
+                diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "not_deployable",
+                                    "reason": f"Operador não suportado pela Azure Policy: {operator}"})
+                return None
+            if scope == SCOPE_SUBSCRIPTION:
+                resolved: list[str] = []
+                for value in values:
+                    if UUID_RE.match(value):
+                        resolved.append(value)
+                    elif operator == "=":
+                        matches = catalog.get(value.casefold(), [])
+                        if len(matches) == 1:
+                            resolved.append(matches[0])
+                        else:
+                            diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                                "reason": "Assinatura não encontrada ou ambígua", "value": value, "matches": matches})
+                            return None
+                    else:
+                        diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                            "reason": "Assinatura por nome exige igualdade exata", "value": value})
+                        return None
+                values = resolved
+            translated.append({"scope": scope, "field": arm_field, "operator": operator, "values": values})
+        if not translated:
+            diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "not_deployable",
+                                "reason": "Regra sem condições ARM válidas"})
+            return None
+        return translated
+
+    def _selector(self, terms: list[dict], target: str) -> dict | None:
+        resource_only = {SCOPE_RESOURCE, SCOPE_TYPE, SCOPE_SKU, SCOPE_LOCATION}
+        if target == "resource_group" and any(term["scope"] in resource_only for term in terms):
+            return None
+        clauses: list[dict] = [{"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+                               if target == "resource_group" else
+                               {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"}]
+        for term in terms:
+            if term["scope"] == SCOPE_RG and target == "resource":
+                raw = _condition("name", term["operator"], term["values"])
+                if raw is None: return None
+                if "anyOf" in raw:
+                    # ``value`` is a condition leaf, not a container for
+                    # ``anyOf``. Convert every RG-name alternative to its own
+                    # value expression so the emitted policy is valid JSON.
+                    part = {"anyOf": [
+                        {"value": "[resourceGroup().name]", **{key: value for key, value in option.items() if key != "field"}}
+                        for option in raw["anyOf"]
+                    ]}
+                else:
+                    raw.pop("field", None)
+                    part = {"value": "[resourceGroup().name]", **raw}
+            else:
+                part = _condition("name" if term["scope"] == SCOPE_RG else term["field"], term["operator"], term["values"])
+            if part is None: return None
+            clauses.append(part)
+        return clauses[0] if len(clauses) == 1 else {"allOf": clauses}
+
+    @staticmethod
+    def _effective(selector: dict, previous: list[dict]) -> dict:
+        if not previous:
+            return selector
+        exclusions = {"anyOf": previous} if len(previous) > 1 else previous[0]
+        return {"allOf": [selector, {"not": exclusions}]}
+
+    @staticmethod
+    def _scopes_disjoint(scope_a: list[str], scope_b: list[str]) -> bool:
+        """Retorna True se ambos os escopos são não-vazios e não se intersectam.
+
+        Se algum escopo estiver vazio (regra sem dados Dimon / escopo desconhecido),
+        não podemos provar disjunção — retorna False (conservador).
         """
-        norm = raw_field.lower().replace("_", "").replace("-", "").strip()
-        # Check reverse mapping if available
-        if norm in reverse_map:
-            mapped = reverse_map[norm]
-            mapped_norm = mapped.lower().replace("_", "").replace("-", "").strip()
-            if mapped_norm in SEMANTIC_FIELD_MAP:
-                return SEMANTIC_FIELD_MAP[mapped_norm]
+        if not scope_a or not scope_b:
+            return False
+        return not bool(set(scope_a) & set(scope_b))
 
-        if norm in SEMANTIC_FIELD_MAP:
-            return SEMANTIC_FIELD_MAP[norm]
+    @staticmethod
+    def _is_disjoint_term_pair(left: dict, right: dict) -> bool:
+        """Verifica se dois termos no mesmo campo ARM são provadamente disjuntos.
 
-        # Fallback heuristics
-        if "group" in norm or "rg" in norm:
-            return (SCOPE_RG, "name")
-        if "sub" in norm or "account" in norm:
-            return (SCOPE_SUBSCRIPTION, "subscriptionId")
-        if "location" in norm or "region" in norm:
-            return (SCOPE_LOCATION, "location")
-        if "sku" in norm or "meter" in norm:
-            return (SCOPE_SKU, "Microsoft.Compute/virtualMachines/sku.name")
-        if "type" in norm:
-            return (SCOPE_TYPE, "type")
+        Tabela de decisão:
+          = vs =   : disjunto se valores não se intersectam
+          = vs ~   : disjunto se NENHUM literal em vals_left contém qualquer fragmento em vals_right
+          ~ vs =   : disjunto se NENHUM literal em vals_right contém qualquer fragmento em vals_left
+          = vs !=  : disjunto se TODOS os valores exatos estão listados no notEquals
+          != vs =  : simétrico ao anterior
+          qualquer outro : conservador — assume sobreposição
+        """
+        lop = left["operator"]
+        rop = right["operator"]
+        lvals = [v.casefold() for v in left["values"] if v]
+        rvals = [v.casefold() for v in right["values"] if v]
+        if not lvals or not rvals:
+            return False
 
-        return (SCOPE_RESOURCE, "name")
+        if lop == "=" and rop == "=":
+            # Exato vs Exato: disjunto se conjuntos não se intersectam
+            return not bool(set(lvals) & set(rvals))
 
-    # ── Policy emission ──────────────────────────────────────────────────
+        if lop == "=" and rop == "~":
+            # Exato vs Contém: disjunto se nenhum literal contém o fragmento
+            # Ex: 'rg-azmig-terra-production' contains 'DTMN'? → não → disjunto
+            return not any(frag in val for val in lvals for frag in rvals)
 
-    def _inheritance_policies(self) -> list[dict]:
-        """Return the built-in inheritance policy assignments for all 7 organizational tags."""
-        policies = []
-        for key in TAG_KEYS:
-            policies.append({
-                "name": f"Inherit {key} from resource group",
-                "tag_name": key,
-                "policyDefinitionId": INHERIT_TAG_POLICY_DEFINITION_ID,
-                "parameters": {"tagName": {"value": key}},
-                "note": "Aplica a tag automaticamente em todos os recursos filhos dentro do Resource Group.",
-            })
-        return policies
+        if lop == "~" and rop == "=":
+            # Contém vs Exato: simétrico
+            return not any(frag in val for frag in lvals for val in rvals)
 
-    def _build_rg_condition(self, operator: str, values: list[str]) -> dict | None:
-        """Build ARM if-condition for Resource Groups."""
-        if not values:
-            return None
+        if lop == "=" and rop == "!=":
+            # Exato vs NotEquals: disjunto se todos os valores exatos estão no notEquals
+            return all(v in set(rvals) for v in lvals)
 
-        rg_type_cond = {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+        if lop == "!=" and rop == "=":
+            # NotEquals vs Exato: simétrico
+            return all(v in set(lvals) for v in rvals)
 
-        if operator == "~":
-            if len(values) == 1:
-                name_cond = {"field": "name", "like": format_wildcard(values[0])}
-            else:
-                name_cond = {"anyOf": [{"field": "name", "like": format_wildcard(v)} for v in values]}
-        else:
-            # Exact match (=)
-            if len(values) == 1:
-                name_cond = {"field": "name", "equals": values[0]}
-            else:
-                name_cond = {"field": "name", "in": values}
+        # ~ vs ~, != vs !=, etc. → conservador, não pode provar disjunção
+        return False
 
-        return {"allOf": [rg_type_cond, name_cond]}
+    @classmethod
+    def _is_disjoint_by_arm_terms(cls, current: list[dict], previous: list[dict]) -> bool:
+        """Retorna True se os termos ARM garantem que as regras NUNCA classificam
+        o mesmo recurso Azure.
 
-    def _build_resource_condition(
-        self,
-        conditions: list[dict],
-        reverse_map: dict[str, str]
-    ) -> dict | None:
-        """Build ARM if-condition for individual resources, types, SKUs or locations."""
-        all_of: list[dict] = []
+        Estratégia: para cada dimensão ARM compartilhada (mesmo scope + field),
+        verifica se os valores são provadamente disjuntos. Se qualquer dimensão
+        compartilhada for disjunta, as regras inteiras são disjuntas (AND semântico).
 
-        has_resource_scope = False
+        Se não há dimensões compartilhadas, retorna False (conservador) — as regras
+        operam em dimensões diferentes e podem coexistir no mesmo recurso.
+        """
+        curr_by_dim: dict[tuple, list[dict]] = {}
+        for t in current:
+            curr_by_dim.setdefault((t["scope"], t["field"]), []).append(t)
 
-        for cond in conditions:
-            field_name = cond.get("field", "")
-            operator = cond.get("operator", "=")
-            values = cond.get("values") or []
-            if not values:
-                continue
+        prev_by_dim: dict[tuple, list[dict]] = {}
+        for t in previous:
+            prev_by_dim.setdefault((t["scope"], t["field"]), []).append(t)
 
-            scope, arm_field = self._classify_field(field_name, reverse_map)
+        shared_dims = set(curr_by_dim.keys()) & set(prev_by_dim.keys())
+        if not shared_dims:
+            # Sem dimensão compartilhada → conservador
+            return False
 
-            if scope == SCOPE_RESOURCE:
-                has_resource_scope = True
-                if operator == "~":
-                    if len(values) == 1:
-                        all_of.append({"field": arm_field, "like": format_wildcard(values[0])})
-                    else:
-                        all_of.append({"anyOf": [{"field": arm_field, "like": format_wildcard(v)} for v in values]})
-                else:
-                    if len(values) == 1:
-                        all_of.append({"field": arm_field, "equals": values[0]})
-                    else:
-                        all_of.append({"field": arm_field, "in": values})
+        for dim in shared_dims:
+            for ct in curr_by_dim[dim]:
+                for pt in prev_by_dim[dim]:
+                    if cls._is_disjoint_term_pair(ct, pt):
+                        logger.debug(
+                            "Disjunção ARM provada na dimensão %s: %s%s vs %s%s",
+                            dim, ct["operator"], ct["values"], pt["operator"], pt["values"],
+                        )
+                        return True
+        return False
 
-            elif scope == SCOPE_SKU:
-                if operator == "~" or any(not v.startswith("Microsoft.") for v in values):
-                    if len(values) == 1:
-                        all_of.append({"field": arm_field, "like": format_wildcard(values[0])})
-                    else:
-                        all_of.append({"anyOf": [{"field": arm_field, "like": format_wildcard(v)} for v in values]})
-                else:
-                    if len(values) == 1:
-                        all_of.append({"field": arm_field, "equals": values[0]})
-                    else:
-                        all_of.append({"field": arm_field, "in": values})
-
-            elif scope == SCOPE_TYPE:
-                if len(values) == 1:
-                    all_of.append({"field": "type", "equals": values[0]})
-                else:
-                    all_of.append({"field": "type", "in": values})
-
-            elif scope == SCOPE_LOCATION:
-                if len(values) == 1:
-                    all_of.append({"field": "location", "equals": values[0]})
-                else:
-                    all_of.append({"field": "location", "in": values})
-
-            elif scope == SCOPE_SUBSCRIPTION:
-                # Subscription-level filtering
-                if operator == "~":
-                    if len(values) == 1:
-                        all_of.append({"field": "subscriptionId", "like": format_wildcard(values[0])})
-                    else:
-                        all_of.append({"anyOf": [{"field": "subscriptionId", "like": format_wildcard(v)} for v in values]})
-                else:
-                    if len(values) == 1:
-                        all_of.append({"field": "subscriptionId", "equals": values[0]})
-                    else:
-                        all_of.append({"field": "subscriptionId", "in": values})
-
-        if not all_of:
-            return None
-
-        # If matching by resource name, ensure we don't accidentally match resource groups
-        if has_resource_scope:
-            all_of.insert(0, {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"})
-
-        return {"allOf": all_of} if len(all_of) > 1 else all_of[0]
-
-    def _build_policies(
-        self,
-        rules: list[ClassificationRule],
-        dept_map: dict[int, Department],
-        reverse_map: dict[str, str],
-    ) -> dict:
-        """Emit the layers of Azure Tag policies."""
-        inherit = self._inheritance_policies()
-
-        # Group exact RG rules by unique tag set: tag_sig -> {tags, names: set(), rule_names: set()}
-        rg_exact_groups: dict[str, dict] = {}
-
-        # RG wildcard pattern policies
-        rg_pattern_groups: dict[str, dict] = {}
-
-        # Resource / SKU / Location pattern policies
-        resource_pattern_groups: dict[str, dict] = {}
-
-        for rule in rules:
-            tags = self._resolve_tags(rule, dept_map)
-            if not tags:
-                continue
-
-            tag_sig = json.dumps(tags, sort_keys=True, ensure_ascii=False)
-            conditions = rule.conditions or []
-
-            # Check if this rule applies to Resource Groups
-            is_rg_rule = any(
-                self._classify_field(c.get("field", ""), reverse_map)[0] == SCOPE_RG
-                for c in conditions
-            )
-
-            if is_rg_rule:
-                for c in conditions:
-                    scope, _ = self._classify_field(c.get("field", ""), reverse_map)
-                    if scope != SCOPE_RG:
-                        continue
-                    operator = c.get("operator", "=")
-                    values = [str(v).strip() for v in (c.get("values") or []) if str(v).strip()]
-                    if not values:
-                        continue
-
-                    if operator == "=":
-                        # Group exact RGs by tag signature
-                        bucket = rg_exact_groups.setdefault(tag_sig, {
-                            "tags": tags,
-                            "names": [],
-                            "rule_names": [],
-                        })
-                        for val in values:
-                            if val not in bucket["names"]:
-                                bucket["names"].append(val)
-                        if rule.name not in bucket["rule_names"]:
-                            bucket["rule_names"].append(rule.name)
-                    else:
-                        # Wildcard / nomenclature RG rule
-                        cond = self._build_rg_condition(operator, values)
-                        if cond:
-                            cond_sig = json.dumps(cond, sort_keys=True, ensure_ascii=False)
-                            key = f"{tag_sig}|{cond_sig}"
-                            bucket = rg_pattern_groups.setdefault(key, {
-                                "tags": tags,
-                                "condition": cond,
-                                "patterns": values,
-                                "rule_names": [],
-                            })
-                            if rule.name not in bucket["rule_names"]:
-                                bucket["rule_names"].append(rule.name)
-            else:
-                # Individual resource / SKU / location / subscription rule
-                cond = self._build_resource_condition(conditions, reverse_map)
-                if cond:
-                    cond_sig = json.dumps(cond, sort_keys=True, ensure_ascii=False)
-                    key = f"{tag_sig}|{cond_sig}"
-                    bucket = resource_pattern_groups.setdefault(key, {
-                        "tags": tags,
-                        "condition": cond,
-                        "rule_names": [],
-                    })
-                    if rule.name not in bucket["rule_names"]:
-                        bucket["rule_names"].append(rule.name)
-
-        # Convert exact RG groups into formatted policies
-        rg_exact_list = []
-        for grp in rg_exact_groups.values():
-            rg_names = grp["names"]
-            if not rg_names:
-                continue
-            cond = {
-                "allOf": [
-                    {"field": "type", "equals": "Microsoft.Resources/resourceGroups"},
-                    {"field": "name", "in": rg_names} if len(rg_names) > 1 else {"field": "name", "equals": rg_names[0]},
-                ]
-            }
-            rg_exact_list.append({
-                "tags": grp["tags"],
-                "names": rg_names,
-                "rule_names": grp["rule_names"],
-                "condition": cond,
-            })
-
-        return {
-            "inheritance": inherit,
-            "resource_groups": rg_exact_list,
-            "rg_patterns": list(rg_pattern_groups.values()),
-            "patterns": list(resource_pattern_groups.values()),
-        }
-
-    # ── Public API ───────────────────────────────────────────────────────
-
-    async def generate_tenant_policy(self, connection_id: int) -> dict | None:
-        """Generate complete Azure Tag Policy documents for a single Azure tenant."""
+    async def generate_tenant_policy(self, connection_id: int, department_id: int | None = None) -> dict | None:
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or resolve_connection_scope(conn.cloud_scope, conn.cloud_name) != "azure":
             return None
+        departments = await self._load_departments()
+        rules = await self._load_classification_rules(conn)
+        catalog, deployment_subscriptions, catalog_error = await self._subscription_catalog(conn)
+        observed_scopes, dimon_scope_error = await self._observed_project_scopes(conn, catalog)
+        diagnostics: list[dict] = []
+        if catalog_error:
+            diagnostics.append({"status": "warning", "reason": catalog_error})
+        if dimon_scope_error:
+            diagnostics.append({"status": "warning", "reason": dimon_scope_error})
+        compiled: list[dict] = []
+        for rule in rules:
+            terms = self._translate_conditions(rule, catalog, diagnostics)
+            department = departments.get(rule.department_id)
+            if terms and department:
+                explicit_scopes = self._explicit_scope_subscriptions(terms)
+                scopes = explicit_scopes or observed_scopes.get(department.name.casefold(), [])
+                if not scopes:
+                    diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                        "reason": "Sem subscription observada no Dimon ou GUID explícito na regra"})
+                compiled.append({"rule": rule, "tags": self._hierarchy(department, departments), "terms": terms,
+                                 "scope_subscriptions": scopes})
 
-        dept_map = await self._load_departments()
-        reverse_map = await self._load_reverse_mapping(connection_id)
-        rules = await self._load_classification_rules(connection_id)
+        layers = {"resource_groups": [], "resources": []}
+        previous: dict[str, list[dict]] = {"resource_group": [], "resource": []}
+        for item in compiled:
+            rule: ClassificationRule = item["rule"]
+            for target, layer in (("resource_group", "resource_groups"), ("resource", "resources")):
+                selector = self._selector(item["terms"], target)
+                # Uma regra sem subscription comprovada é somente diagnóstico.
+                # Ela não pode virar exceção e abrir um buraco na policy
+                # principal se sua própria policy não pode ser atribuída.
+                if not selector or not item["scope_subscriptions"]:
+                    continue
 
-        policies = self._build_policies(rules, dept_map, reverse_map)
+                # Calcular candidatos a exceção e registrar os descartados para diagnóstico.
+                # Ordem de verificação (curto-circuito mais barato primeiro):
+                #   1. Disjunção por scope de assinaturas (GUIDs) — O(1)
+                #   2. Disjunção sintática avançada dos termos ARM — O(n²) mas conjunto pequeno
+                overlapping: list[dict] = []
+                pruned: list[dict] = []
+                for entry in previous[target]:
+                    if entry["tags"] == item["tags"]:
+                        pruned.append({
+                            "rule_id": entry["rule_id"],
+                            "rule_name": entry["rule_name"],
+                            "department_name": entry["department_name"],
+                            "prune_reason": "same_classification",
+                        })
+                    elif self._scopes_disjoint(item["scope_subscriptions"], entry["scope_subscriptions"]):
+                        pruned.append({
+                            "rule_id": entry["rule_id"],
+                            "rule_name": entry["rule_name"],
+                            "department_name": entry["department_name"],
+                            "prune_reason": "scope_disjoint",
+                        })
+                        logger.debug(
+                            "Excluindo exceção dispensável (scope disjunto): regra #%s vs #%s",
+                            rule.id, entry["rule_id"],
+                        )
+                    elif self._is_disjoint_by_arm_terms(item["terms"], entry["terms"]):
+                        pruned.append({
+                            "rule_id": entry["rule_id"],
+                            "rule_name": entry["rule_name"],
+                            "department_name": entry["department_name"],
+                            "prune_reason": "arm_terms_disjoint",
+                        })
+                        logger.debug(
+                            "Excluindo exceção dispensável (termos ARM disjuntos): regra #%s vs #%s",
+                            rule.id, entry["rule_id"],
+                        )
+                    else:
+                        overlapping.append(entry)
 
-        return {
-            "tenant_id": (conn.config_json or {}).get("tenant_id"),
-            "connection_code": conn.code,
-            "connection_name": conn.name,
-            "rule_count": len(rules),
-            "layers": policies,
-        }
+                effective = self._effective(selector, [entry["selector"] for entry in overlapping])
+                previous[target].append({
+                    "selector": selector, "terms": item["terms"],
+                    "rule_id": rule.id, "rule_name": rule.name,
+                    "department_id": rule.department_id,
+                    "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
+                    "scope_subscriptions": item["scope_subscriptions"],
+                    "tags": item["tags"],
+                })
+                if department_id is not None and rule.department_id != department_id:
+                    continue
+                condition_bytes = len(json.dumps(effective, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                if condition_bytes > MAX_CONDITION_BYTES:
+                    diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                        "reason": f"Condição efetiva excede {MAX_CONDITION_BYTES} bytes; reduza exceções sobrepostas",
+                                        "condition_bytes": condition_bytes})
+                    continue
+                if pruned:
+                    logger.info(
+                        "Regra #%s (%s): %d exceção(ões) dispensável(is) removida(s): %s",
+                        rule.id, rule.name, len(pruned),
+                        [(p["rule_id"], p["prune_reason"]) for p in pruned],
+                    )
+                layers[layer].append({
+                    "rule_id": rule.id, "rule_name": rule.name,
+                    "department_id": rule.department_id, "tags": item["tags"],
+                    "condition": effective,
+                    "scope_subscriptions": item["scope_subscriptions"],
+                    "excludes_rule_ids": [entry["rule_id"] for entry in overlapping],
+                    "exclusions": [
+                        {
+                            "rule_id": entry["rule_id"],
+                            "rule_name": entry["rule_name"],
+                            "department_id": entry["department_id"],
+                            "department_name": entry["department_name"],
+                        }
+                        for entry in overlapping
+                    ],
+                    "pruned_exclusions": pruned,
+                })
+
+        selected = departments.get(department_id) if department_id else None
+        emitted_scopes = sorted({subscription for values in layers.values() for item in values
+                                 for subscription in item["scope_subscriptions"]})
+        return {"tenant_id": (conn.config_json or {}).get("tenant_id"), "connection_code": conn.code,
+                "connection_name": conn.name, "rule_count": len(rules), "department_id": department_id,
+                "department_name": selected.name if selected else None,
+                "deployment_subscriptions": emitted_scopes,
+                "subscription_catalog": [{"name": name, "ids": ids} for name, ids in sorted(catalog.items())],
+                "layers": layers,
+                "coverage": {"eligible_rules": len(compiled),
+                             "emitted_policies": sum(len(values) for values in layers.values()),
+                             "diagnostics": diagnostics}}
 
 
 def slugify(value: str) -> str:
-    out = "".join(c if c.isalnum() else "-" for c in str(value).lower()).strip("-")
+    out = "".join(char if char.isalnum() else "-" for char in str(value).lower()).strip("-")
     return out or "policy"

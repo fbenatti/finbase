@@ -1,11 +1,17 @@
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
+import VisaoContabil, { EMPTY_FILTERS } from "../DimonDashboard/VisaoContabil";
+import CloneRules from "../CloneRules/CloneRules";
+import Dimon from "../Dimon/Dimon";
 
 const TABS = [
   { id: "rules", label: "Regras financeiras" },
   { id: "classification", label: "Classificar Departamentos" },
+  { id: "clone-rules", label: "Regras de clonagem" },
+  { id: "cost-relationship", label: "Camada Dimon de Custo" },
+  { id: "visao-contabil", label: "Visão Contábil" },
   { id: "tags", label: "Tags Automatizadas" },
 ] as const;
 
@@ -14,6 +20,9 @@ type TabId = (typeof TABS)[number]["id"];
 export default function Governance() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("tab");
+  if (requested === "desligue" || requested === "orfaos") {
+    return <Navigate to={`/savings?tab=${requested}`} replace />;
+  }
   const tab: TabId = TABS.some((item) => item.id === requested) ? (requested as TabId) : "rules";
 
   const setTab = (value: TabId) => {
@@ -27,7 +36,7 @@ export default function Governance() {
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Governança</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Regras de negócio, classificação organizacional e políticas de tags sobre os dados de custo.
+            Regras de negócio, clonagem, classificação organizacional, políticas de tags e visão contábil.
           </Typography>
         </Box>
         <Tabs value={tab} onChange={(_, value: TabId) => setTab(value)} aria-label="Governança" sx={{ mb: 0, minHeight: 42 }}>
@@ -53,9 +62,24 @@ export default function Governance() {
             <ClassificationRulesTab />
           </Paper>
         )}
+        {tab === "clone-rules" && (
+          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+            <CloneRules embedded />
+          </Paper>
+        )}
+        {tab === "cost-relationship" && (
+          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+            <Dimon embedded />
+          </Paper>
+        )}
         {tab === "tags" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <TagsTab />
+          </Paper>
+        )}
+        {tab === "visao-contabil" && (
+          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+            <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="governance" />
           </Paper>
         )}
       </Box>

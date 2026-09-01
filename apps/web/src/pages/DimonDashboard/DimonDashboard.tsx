@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Paper, Grid, Chip, Alert, CircularProgress, Button,
   FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Stack, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Divider, Tooltip, LinearProgress,
+  Divider, Tooltip, LinearProgress, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
 } from "@mui/material";
-import { Refresh, FileDownload, ContentCopy, FilterAltOff, Search } from "@mui/icons-material";
+import { Refresh, ContentCopy, FilterAltOff, ExpandMore, ChevronRight, Business, FileDownload } from "@mui/icons-material";
 import Plot from "react-plotly.js";
 // Wrapper: react-plotly.js Data/DataTitle typings são excessivamente rígidos
 // para traces com name/text customizados; mantém o restante tipado.
@@ -13,15 +14,20 @@ function Chart(props: any) {
   return <Plot {...props} />;
 }
 import {
-  queryDimonTable, getDimonInfo, getAnalysisTables,
+  queryDimonTable, getDimonInfo, getAnalysisTables, getDepartments,
   DimonQueryFilter, DimonQueryMeasure, DimonQueryResult, DimonInfo,
-  formatApiError,
+  formatApiError, Department,
+  getForecastAccuracyMonths, runForecastHistoryPivot,
+  ForecastAccuracyMonth, HistoryFilter,
 } from "../../services/api";
+import ExpectedView from "../Dashboards/ExpectedView";
+import * as XLSX from "xlsx";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constantes e formatadores
 // ─────────────────────────────────────────────────────────────────────
 const DEFAULT_TABLE = "dest_dm_cost_visao_completa";
+const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
 const PURPLE = "#660099", ORANGE = "#ff7a00", BLUE = "#155eef",
       GREEN = "#10b981", RED = "#ef4444", YELLOW = "#f59e0b", INK = "#0f172a", MUT = "#64748b";
 
@@ -71,6 +77,8 @@ function pct(v: unknown, digits = 1): string {
   return `${n.toLocaleString("pt-BR", { maximumFractionDigits: digits })}%`;
 }
 function esc(s: unknown): string { return String(s ?? "Não informado"); }
+/** Compact BRL (mesmo formato de money, para valores monetários do cockpit de decisão). */
+function compact(v: unknown): string { return money(v, "BRL"); }
 
 function monthLabel(m: string): string {
   const t = String(m ?? "");
@@ -107,9 +115,16 @@ type Filters = {
   depts: string[];
   servicos: string[];
   cats: string[];
+  // Escopo global de departamento: caminho da árvore (ex.: Consumo Cloud > Showback > Azure)
+  // e o id do departamento selecionado (quando for um nó real do organograma).
+  path: string[];
+  deptId: number | null;
+  // Filtros adicionais por coluna (ex.: contexto aplicado pela árvore de decomposição
+  // em dimensões que não são níveis de departamento — servicename, servicecategory, ...).
+  extra: Record<string, string[]>;
 };
 
-const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [] };
+const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, extra: {} };
 
 function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter[] {
   const out: DimonQueryFilter[] = [...extra];
@@ -119,6 +134,19 @@ function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter
   if (f.depts.length) out.push({ column: "departamento_nivel_5", operator: "IN", values: f.depts });
   if (f.servicos.length) out.push({ column: "servicename", operator: "IN", values: f.servicos });
   if (f.cats.length) out.push({ column: "servicecategory", operator: "IN", values: f.cats });
+  // Filtro global de departamento: cada nível do caminho restringe a coluna
+  // correspondente (departamento_nivel_1..N), herdado por todas as abas.
+  if (f.path.length) {
+    f.path.forEach((segment, index) => {
+      out.push({ column: `departamento_nivel_${index + 1}`, operator: "IN", values: [segment] });
+    });
+  }
+  // Filtros extras por coluna (contexto da árvore de decomposição, etc.).
+  if (f.extra) {
+    Object.entries(f.extra).forEach(([column, values]) => {
+      if (values && values.length) out.push({ column, operator: "IN", values });
+    });
+  }
   return out;
 }
 
@@ -231,19 +259,93 @@ function monthlySeries(r: DimonQueryResult | null | undefined, measure: string) 
 // ─────────────────────────────────────────────────────────────────────
 // Página principal
 // ─────────────────────────────────────────────────────────────────────
-type TabId = "geral" | "evolucao" | "organizacao" | "servicos" | "investigacao" | "drilldown" | "tabela";
+type TabId = "visao-executiva" | "geral" | "evolucao" | "organizacao" | "servicos" | "investigacao" | "decisao" | "drilldown";
 
 export default function DimonDashboard() {
+  const [params] = useSearchParams();
   const [table, setTable] = useState(DEFAULT_TABLE);
   const [availableTables, setAvailableTables] = useState<string[]>([]);
   const [info, setInfo] = useState<DimonInfo | null>(null);
-  const [tab, setTab] = useState<TabId>("geral");
+  // A aba pode vir da URL (?tab=...) — padrão: Visão Executiva.
+  const urlTab = params.get("tab");
+  const initialTab: TabId = urlTab && (["visao-executiva", "geral", "evolucao", "organizacao", "servicos", "investigacao", "decisao", "drilldown"] as TabId[]).includes(urlTab as TabId)
+    ? urlTab as TabId
+    : "visao-executiva";
+  const [tab, setTab] = useState<TabId>(initialTab);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
   const [periodPreset, setPeriodPreset] = useState("all");
-  const [options, setOptions] = useState<Record<string, string[]>>({});
   const [error, setError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
+  // Árvore do organograma para o filtro global de departamento.
+  const [organization, setOrganization] = useState<Department[]>([]);
+  const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
+  const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    getDepartments().then(departments => {
+      setOrganization(departments);
+      const savedId = Number(window.localStorage.getItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY));
+      if (!Number.isInteger(savedId) || savedId <= 0) return;
+
+      const findDepartment = (nodes: Department[], parentPath: string[] = []): { department: Department; path: string[] } | undefined => {
+        for (const department of nodes) {
+          const path = [...parentPath, department.name];
+          if (department.id === savedId && department.active) return { department, path };
+          const found = findDepartment(department.children || [], path);
+          if (found) return found;
+        }
+        return undefined;
+      };
+      const savedDepartment = findDepartment(departments);
+      if (savedDepartment) {
+        setFilters(current => ({ ...current, path: savedDepartment.path, deptId: savedDepartment.department.id }));
+      } else {
+        // Do not keep a stale reference after an organogram change.
+        window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+      }
+    }).catch(() => setOrganization([]));
+  }, []);
+
+  const toggleOrgNode = (id: number) => setExpandedNodes(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  // The organization endpoint is a nested tree.  Carry its path while
+  // rendering instead of trying to find parents only among root nodes: the
+  // latter truncated selections such as Azure > DIR DADOS..., causing the
+  // executive widgets to query a different (empty) scope.
+  const renderOrgNode = (node: Department, depth = 0, parentPath: string[] = []): React.ReactNode => {
+    const children = (node.children || []).filter(child => child.active);
+    const expanded = expandedNodes.has(node.id);
+    const path = [...parentPath, node.name];
+    return (
+      <Box key={node.id}>
+        <ListItemButton
+          sx={{ pl: 1 + depth * 2, py: 0.25 }}
+          onClick={() => {
+            setFilters(f => ({ ...f, path, deptId: node.id }));
+            window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(node.id));
+            setOrganizationAnchor(null);
+          }}
+        >
+          <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
+            {children.length > 0 && (
+              <IconButton size="small" onClick={event => { event.stopPropagation(); toggleOrgNode(node.id); }}>
+                {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
+              </IconButton>
+            )}
+          </Box>
+          <ListItemText primary={node.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
+        </ListItemButton>
+        <Collapse in={expanded} timeout="auto" unmountOnExit>
+          {children.map(child => renderOrgNode(child, depth + 1, path))}
+        </Collapse>
+      </Box>
+    );
+  };
+  const globalDirector = filters.path.length ? filters.path.join(" > ") : undefined;
 
   // ── carrega tabelas disponíveis (namespace dimon) ──
   useEffect(() => {
@@ -263,21 +365,6 @@ export default function DimonDashboard() {
     return () => { alive = false; };
   }, [table]);
 
-  // ── opções de filtro (distinct por dimensão) ──
-  useEffect(() => {
-    if (!table) return;
-    let alive = true;
-    const dims = ["cloud_origem", "departamento_nivel_4", "departamento_nivel_5", "servicename", "servicecategory"];
-    Promise.all(dims.map(d => queryDimonTable({ table, rows: [d], measures: [{ column: "realizado", aggregation: "SUM" }], row_limit: 500 }).catch(() => null)))
-      .then(list => {
-        if (!alive) return;
-        const next: Record<string, string[]> = {};
-        dims.forEach((d, i) => { next[d] = (list[i]?.rows ?? []).map(r => esc(r[d])).filter(v => v !== "Não informado"); });
-        setOptions(next);
-      });
-    return () => { alive = false; };
-  }, [table]);
-
   const applyPreset = (preset: string) => {
     setPeriodPreset(preset);
     if (preset === "all") { setFilters(f => ({ ...f, months: [] })); return; }
@@ -289,22 +376,15 @@ export default function DimonDashboard() {
   const filterKey = JSON.stringify([filters, tab, refreshTick]);
   const setFilter = (key: keyof Filters, values: string[]) => setFilters(f => ({ ...f, [key]: values }));
 
-  const clearFilters = () => { setFilters(EMPTY_FILTERS); setPeriodPreset("all"); };
+  const clearFilters = () => {
+    window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+    setFilters(EMPTY_FILTERS);
+    setPeriodPreset("all");
+  };
 
   const [copied, setCopied] = useState(false);
   const copyEmail = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
-  };
-
-  const exportRows = (rows: Record<string, any>[], filename: string) => {
-    if (!rows.length) return;
-    const headers = Object.keys(rows[0]);
-    const lines = [headers.join(";"), ...rows.map(r => headers.map(h => `"${String(r[h] ?? "").replace(/"/g, '""')}"`).join(";"))];
-    const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = filename; a.style.display = "none";
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
   };
 
   return (
@@ -313,20 +393,9 @@ export default function DimonDashboard() {
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2} mb={2}>
         <Box>
           <Typography variant="h4">FinOps Intelligence</Typography>
-          <Typography color="text.secondary">Cockpit executivo pré-agregado (mensal) · Fonte: <b>{table}</b> · {info ? `${info.row_count.toLocaleString("pt-BR")} linhas agregadas · ${info.period_count} competências` : "carregando…"}</Typography>
-          {!availableTables.includes(DEFAULT_TABLE) && (
-            <Alert severity="info" sx={{ mt: 1, fontSize: 12 }}>
-              A tabela <b>{DEFAULT_TABLE}</b> ainda não foi gerada. Ela é criada automaticamente ao reprocessar o destino <b>MODELO FOCUS</b>. Selecionando outra Dimon existente você vê o mesmo dashboard com os dados disponíveis.
-            </Alert>
-          )}
+          <Typography color="text.secondary">Cockpit executivo pré-agregado (mensal)</Typography>
         </Box>
         <Stack direction="row" gap={1} alignItems="center">
-          <FormControl size="small" sx={{ minWidth: 260 }}>
-            <InputLabel>Tabela Dimon</InputLabel>
-            <Select label="Tabela Dimon" value={table} onChange={e => setTable(e.target.value)}>
-              {[...new Set([DEFAULT_TABLE, ...availableTables])].map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
-            </Select>
-          </FormControl>
           <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => setRefreshTick(t => t + 1)}>Atualizar</Button>
         </Stack>
       </Stack>
@@ -349,17 +418,15 @@ export default function DimonDashboard() {
               <MenuItem value="last12">Últimos 12 meses</MenuItem>
             </Select>
           </FormControl>
-          {(["cloud_origem", "departamento_nivel_4", "departamento_nivel_5", "servicename", "servicecategory"] as const).map(dim => (
-            <FormControl key={dim} size="small" sx={{ minWidth: 180 }}>
-              <InputLabel>{DIM_LABELS[dim] || dim}</InputLabel>
-              <Select multiple label={DIM_LABELS[dim] || dim}
-                value={filters[dim === "cloud_origem" ? "clouds" : dim === "departamento_nivel_4" ? "dirs" : dim === "departamento_nivel_5" ? "depts" : dim === "servicename" ? "servicos" : "cats"]}
-                onChange={e => setFilter(dim === "cloud_origem" ? "clouds" : dim === "departamento_nivel_4" ? "dirs" : dim === "departamento_nivel_5" ? "depts" : dim === "servicename" ? "servicos" : "cats", e.target.value as string[])}
-                renderValue={sel => sel.length ? `${sel.length} selecionado(s)` : "Todos"}>
-                {(options[dim] || []).map(v => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-              </Select>
-            </FormControl>
-          ))}
+          <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
+            {filters.path.length ? filters.path.join(" > ") : "Todos os departamentos"}
+          </Button>
+          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Selecione um departamento — todas as abas respeitam este filtro.</Typography>
+            <List dense disablePadding>
+              {organization.filter(department => department.active).map(node => renderOrgNode(node))}
+            </List>
+          </Menu>
           <Button size="small" startIcon={<FilterAltOff />} onClick={clearFilters}>Limpar</Button>
         </Stack>
         {filters.months.length > 0 && (
@@ -370,22 +437,24 @@ export default function DimonDashboard() {
       </Paper>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
+        <Tab value="visao-executiva" label="Visão Executiva" />
         <Tab value="geral" label="Visão Geral" />
         <Tab value="evolucao" label="Evolução" />
         <Tab value="organizacao" label="Organização" />
         <Tab value="servicos" label="Serviços & Regiões" />
         <Tab value="investigacao" label="Investigação" />
+        <Tab value="decisao" label="Decisão" />
         <Tab value="drilldown" label="Drilldown" />
-        <Tab value="tabela" label="Tabela & Export" />
       </Tabs>
 
+      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} />}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "servicos" && <Servicos table={table} filters={filters} filterKey={filterKey} />}
       {tab === "investigacao" && <Investigacao table={table} filters={filters} filterKey={filterKey} />}
+      {tab === "decisao" && <Decisao table={table} filters={filters} filterKey={filterKey} setFilters={setFilters} />}
       {tab === "drilldown" && <Drilldown table={table} filters={filters} filterKey={filterKey} />}
-      {tab === "tabela" && <TabelaTab table={table} filters={filters} filterKey={filterKey} exportRows={exportRows} setFilters={setFilters} options={options} periodPreset={periodPreset} applyPreset={applyPreset} />}
         </Paper>
       </Box>
     </Box>
@@ -913,6 +982,1060 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // ═══════════════════════════════════════════════════════════════════
 // Aba 6 — Drilldown (navegação hierárquica)
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// Aba 7 — Decisão (Decision Intelligence)
+// Widgets portados do cockpit de referência (ABRIR_FINOPS.html):
+// Executive Pulse, Risk Index, Prioritization Matrix, Waterfall executivo,
+// Financial Variance Bridge, Attention, Cost Drivers, Anomaly, Forecast Bias,
+// v42 (Run Rate/Reliability/Opportunity), Governance/Data Quality,
+// Comparator e Decomposição hierárquica encadeada.
+// ═══════════════════════════════════════════════════════════════════
+
+// Dimensões disponíveis para os widgets de decisão (colunas válidas da Dimon).
+const DECISAO_DIMS: Array<{ field: string; label: string }> = [
+  { field: "cloud_origem", label: "Cloud" },
+  { field: "departamento_nivel_3", label: "Plataforma" },
+  { field: "departamento_nivel_4", label: "Diretoria" },
+  { field: "departamento_nivel_5", label: "Departamento" },
+  { field: "servicename", label: "Serviço" },
+  { field: "servicecategory", label: "Categoria" },
+  { field: "subaccountname", label: "Subconta" },
+];
+
+// Cadeia da decomposição hierárquica encadeada (níveis de detalhe).
+const DECOMP_CHAIN: Array<{ field: string; label: string }> = [
+  { field: "cloud_origem", label: "Cloud" },
+  { field: "departamento_nivel_1", label: "Segmento" },
+  { field: "departamento_nivel_2", label: "Modelo" },
+  { field: "departamento_nivel_3", label: "Plataforma" },
+  { field: "departamento_nivel_4", label: "Diretoria" },
+  { field: "departamento_nivel_5", label: "Departamento" },
+  { field: "servicename", label: "Serviço" },
+  { field: "servicecategory", label: "Categoria" },
+  { field: "servicesubcategory", label: "Subcategoria" },
+  { field: "subaccountname", label: "Subconta" },
+];
+
+// ── helpers de dados (séries mensais por chave × tipo) ──
+type DimRow = Record<string, any>;
+
+function isMissingValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  const s = String(v).trim();
+  if (!s) return true;
+  const low = s.toLowerCase();
+  return low === "não informado" || low === "nao informado" || low === "n/a" || low === "-" || low === "none" || low === "null";
+}
+
+/** Séries mensais {chave → {mês → valor}} restritas a um tipo (realizado/forecast). */
+function monthlyByKey(rows: DimRow[], keyField: string, tipo: string): Map<string, Map<string, number>> {
+  const map = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    if (String(r.tipo ?? "") !== tipo) continue;
+    const k = String(r[keyField] ?? "Não informado");
+    const m = String(r._billing_period ?? "");
+    if (!m) continue;
+    if (!map.has(k)) map.set(k, new Map());
+    const mm = map.get(k)!;
+    mm.set(m, (mm.get(m) || 0) + Number(r.realizado ?? 0));
+  }
+  return map;
+}
+
+function monthTotals(rows: DimRow[], tipo: string): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of rows) {
+    if (String(r.tipo ?? "") !== tipo) continue;
+    const k = String(r._billing_period ?? "");
+    if (!k) continue;
+    m.set(k, (m.get(k) || 0) + Number(r.realizado ?? 0));
+  }
+  return m;
+}
+
+function severityChip(sev: "P1" | "P2" | "P3") {
+  const color = sev === "P1" ? RED : sev === "P2" ? YELLOW : GREEN;
+  return <Box component="span" sx={{ display: "inline-block", px: 0.8, py: 0.2, borderRadius: 99, bgcolor: color, color: "#fff", fontSize: 10, fontWeight: 950, lineHeight: 1.4 }}>{sev}</Box>;
+}
+
+function SectionPanel({ title, subtitle, right, children }: {
+  title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={1} mb={1}>
+        <Box>
+          <Typography variant="subtitle1" sx={{ fontWeight: 950, color: INK }}>{title}</Typography>
+          {subtitle && <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>{subtitle}</Typography>}
+        </Box>
+        {right}
+      </Stack>
+      {children}
+    </Paper>
+  );
+}
+
+function Decisao({ table, filters, filterKey, setFilters }: {
+  table: string; filters: Filters; filterKey: string;
+  setFilters: React.Dispatch<React.SetStateAction<Filters>>;
+}) {
+  const [dim, setDim] = useState("departamento_nivel_4");
+  const [treePath, setTreePath] = useState<Array<{ field: string; value: string }>>([]);
+  const [compA, setCompA] = useState("");
+  const [compB, setCompB] = useState("");
+  const dimLabel = DECISAO_DIMS.find(d => d.field === dim)?.label || dim;
+
+  // ── consultas base (independentes da árvore) ──
+  const baseDefs = useMemo<QueryDef[]>(() => {
+    const global = filtersOf(filters);
+    const realiz = [...global, { column: "tipo", operator: "IN" as const, values: ["realizado"] }];
+    return [
+      { id: "pulse", rows: ["_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 400 },
+      { id: "dim", rows: [dim, "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 10000 },
+      { id: "dimCloud", rows: ["cloud_origem", "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 2000 },
+      { id: "dimServ", rows: ["servicename", "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 10000 },
+      { id: "gov1", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+      { id: "gov2", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+      { id: "gov3", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+      { id: "gov4", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+      { id: "gov5", rows: ["subaccountname"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+      { id: "gov6", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, dim]);
+  const { results: base, loading: baseLoading } = useTabQueries(table, baseDefs, "decisao-base-" + filterKey + dim);
+
+  // ── consultas da árvore de decomposição (v233: spine do caminho + branch de filhos) ──
+  const treeStart = treePath.length;
+  const treeDefs = useMemo<QueryDef[]>(() => {
+    const global = filtersOf(filters);
+    const pathFilters = (n: number) => treePath.slice(0, n).map(p => ({ column: p.field, operator: "IN" as const, values: [p.value] }));
+    const defs: QueryDef[] = [];
+    // spine: custo total de cada nó do caminho (índice 0 = TOTAL/global)
+    for (let i = 0; i <= treeStart; i++) {
+      defs.push({ id: `spine${i}`, measures: [{ column: "realizado", aggregation: "SUM" }], filters: [...global, ...pathFilters(i)], row_limit: 5 });
+    }
+    // branch: filhos do próximo nível com série mensal (para MoM)
+    if (treeStart < DECOMP_CHAIN.length) {
+      defs.push({
+        id: `tree${treeStart}`,
+        rows: [DECOMP_CHAIN[treeStart].field, "_billing_period", "tipo"],
+        measures: [{ column: "realizado", aggregation: "SUM" }],
+        filters: [...global, ...pathFilters(treeStart)],
+        row_limit: 10000,
+      });
+    }
+    return defs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, treePath]);
+  const { results: treeResults, loading: treeLoading } = useTabQueries(table, treeDefs, "decisao-tree-" + filterKey + JSON.stringify(treePath));
+
+  // ── séries mensais globais ──
+  const pulseRows = rowsOf(base.pulse);
+  const realizByMonth = useMemo(() => monthTotals(pulseRows, "realizado"), [base.pulse]);
+  const fcByMonth = useMemo(() => monthTotals(pulseRows, "forecast"), [base.pulse]);
+  const realizMonths = useMemo(() => [...realizByMonth.keys()].sort(), [realizByMonth]);
+  const latestMonth = realizMonths[realizMonths.length - 1];
+  const prevMonth = realizMonths[realizMonths.length - 2];
+  const latestReal = latestMonth ? (realizByMonth.get(latestMonth) || 0) : 0;
+  const prevReal = prevMonth ? (realizByMonth.get(prevMonth) || 0) : 0;
+  const momPct = prevReal ? ((latestReal - prevReal) / Math.abs(prevReal)) * 100 : null;
+  const fcMonths = useMemo(() => [...fcByMonth.keys()].sort(), [fcByMonth]);
+  const latestFc = fcMonths.length ? (fcByMonth.get(fcMonths[fcMonths.length - 1]) || 0) : 0;
+  const gap = latestFc - latestReal;
+  const gapPct = latestReal ? (gap / Math.abs(latestReal)) * 100 : 0;
+  let globalAcc: number | null = null;
+  for (let i = realizMonths.length - 1; i >= 0; i--) {
+    const fc = fcByMonth.get(realizMonths[i]) || 0;
+    if (fc > 0) { globalAcc = Math.max(0, 100 - (Math.abs(fc - (realizByMonth.get(realizMonths[i]) || 0)) / Math.abs(fc)) * 100); break; }
+  }
+
+  const dimRowsAll = rowsOf(base.dim);
+  const cloudRowsAll = rowsOf(base.dimCloud);
+  const servRowsAll = rowsOf(base.dimServ);
+
+  // ── concentração Top 5 (dimensão selecionada, última competência) ──
+  const top5Pct = useMemo(() => {
+    if (!latestMonth) return 0;
+    const byKey = monthlyByKey(dimRowsAll, dim, "realizado");
+    const vals = [...byKey.values()].map(m => m.get(latestMonth) || 0).sort((a, b) => Math.abs(b) - Math.abs(a));
+    const total = vals.reduce((s, v) => s + Math.abs(v), 0);
+    return total ? (vals.slice(0, 5).reduce((s, v) => s + Math.abs(v), 0) / total) * 100 : 0;
+  }, [dimRowsAll, dim, latestMonth]);
+
+  // ── governança / qualidade de dados ──
+  const govDims = [
+    { id: "gov1", field: "departamento_nivel_3", label: "Plataforma" },
+    { id: "gov2", field: "departamento_nivel_4", label: "Diretoria" },
+    { id: "gov3", field: "servicename", label: "Serviço" },
+    { id: "gov4", field: "servicecategory", label: "Categoria" },
+    { id: "gov5", field: "subaccountname", label: "Subconta" },
+    { id: "gov6", field: "cloud_origem", label: "Cloud" },
+  ];
+  const gov = useMemo(() => {
+    const rowsPer = govDims.map(g => {
+      const rows = rowsOf(base[g.id]);
+      let spend = 0, missingSpend = 0, missingRows = 0, cnt = 0;
+      for (const r of rows) {
+        const v = Math.abs(Number(r.realizado || 0));
+        spend += v; cnt++;
+        if (isMissingValue(r[g.field])) { missingSpend += v; missingRows++; }
+      }
+      return { ...g, spend, missingSpend, missingRows, spendPct: spend ? (missingSpend / spend) * 100 : 0, rowPct: cnt ? (missingRows / cnt) * 100 : 0 };
+    });
+    const score = 100 - rowsPer.reduce((s, x) => s + x.spendPct, 0) / Math.max(1, rowsPer.length);
+    return { score, rowsPer: [...rowsPer].sort((a, b) => b.spendPct - a.spendPct) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base.gov1, base.gov2, base.gov3, base.gov4, base.gov5, base.gov6]);
+  const govScore = gov.score;
+
+  // ── custo de IA (heurística por nome de serviço) ──
+  const aiCost = useMemo(() => {
+    let s = 0;
+    for (const r of rowsOf(base.gov3)) {
+      if (/openai|gpt|copilot|machine learning|cognitive|bedrock|anthropic|azure ai/i.test(String(r.servicename || ""))) s += Math.abs(Number(r.realizado || 0));
+    }
+    return s;
+  }, [base.gov3]);
+
+  // ── risk index ──
+  const riskIndex = Math.round((100 - (globalAcc ?? 100)) * 0.4 + (100 - govScore) * 0.25 + top5Pct * 0.2 + (aiCost > 0 ? 15 : 5));
+  const riskStatus = riskIndex > 60 ? "red" : riskIndex > 30 ? "yellow" : "green";
+  const riskHex = riskStatus === "red" ? RED : riskStatus === "yellow" ? YELLOW : GREEN;
+  const riskLabel = riskStatus === "red" ? "AÇÃO IMEDIATA" : riskStatus === "yellow" ? "MONITORAR" : "CONTROLADO";
+  const riskShort = riskStatus === "red" ? "ALTO" : riskStatus === "yellow" ? "MÉDIO" : "BAIXO";
+
+  // ── prioritization matrix ──
+  const matrix = useMemo(() => {
+    if (!latestMonth) return { pts: [], mc: 0, mg: 0 };
+    const byKey = monthlyByKey(dimRowsAll, dim, "realizado");
+    const pts: Array<{ key: string; cost: number; growth: number; cur: number }> = [];
+    for (const [key, months] of byKey) {
+      const cur = months.get(latestMonth) || 0;
+      const prev = prevMonth ? (months.get(prevMonth) || 0) : 0;
+      pts.push({ key, cost: Math.abs(cur), growth: prev ? ((cur - prev) / Math.abs(prev)) * 100 : 0, cur });
+    }
+    pts.sort((a, b) => b.cost - a.cost);
+    const costs = pts.map(p => p.cost).sort((a, b) => a - b);
+    const growths = pts.map(p => p.growth).sort((a, b) => a - b);
+    const med = (a: number[]) => (a.length ? a[Math.floor(a.length / 2)] : 0);
+    return { pts: pts.slice(0, 30), mc: med(costs), mg: med(growths) };
+  }, [dimRowsAll, dim, latestMonth, prevMonth]);
+  const qColor = (cost: number, growth: number) =>
+    cost >= matrix.mc && growth >= matrix.mg ? "#dc2626" :
+    cost < matrix.mc && growth >= matrix.mg ? "#d97706" :
+    cost >= matrix.mc ? "#2563eb" : "#64748b";
+
+  // ── waterfall executivo de variação ──
+  const waterfall = useMemo(() => {
+    if (!latestMonth || !prevMonth) return [];
+    const byKey = monthlyByKey(dimRowsAll, dim, "realizado");
+    const deltas: Array<{ key: string; delta: number }> = [];
+    for (const [key, months] of byKey) {
+      const cur = months.get(latestMonth) || 0;
+      const prev = months.get(prevMonth) || 0;
+      const d = cur - prev;
+      if (Math.abs(d) > 1e-9) deltas.push({ key, delta: d });
+    }
+    deltas.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    const top = deltas.slice(0, 7);
+    const topSum = top.reduce((s, x) => s + x.delta, 0);
+    const totalDelta = latestReal - prevReal;
+    const other = totalDelta - topSum;
+    const steps: Array<{ key: string; value: number; kind: "total" | "inc" | "dec"; contrib?: number }> = [
+      { key: prevMonth, value: prevReal, kind: "total" },
+      ...top.map(x => ({ key: x.key, value: x.delta, kind: (x.delta >= 0 ? "inc" : "dec") as "inc" | "dec", contrib: totalDelta ? (x.delta / totalDelta) * 100 : 0 })),
+    ];
+    if (Math.abs(other) > 1e-9) steps.push({ key: "Outros drivers", value: other, kind: other >= 0 ? "inc" : "dec" });
+    steps.push({ key: latestMonth, value: latestReal, kind: "total" });
+    return steps;
+  }, [dimRowsAll, dim, latestMonth, prevMonth, latestReal, prevReal]);
+
+  // ── attention ──
+  const attention = useMemo(() => {
+    const items: Array<{ sev: "P1" | "P2" | "P3"; title: string; desc: string; impact: string }> = [];
+    if (globalAcc != null && globalAcc < 85) items.push({ sev: globalAcc < 70 ? "P1" : "P2", title: "Confiabilidade do Forecast", desc: `Confiabilidade global abaixo de 85% (${pct(globalAcc)}).`, impact: pct(globalAcc) });
+    if (momPct != null && Math.abs(momPct) >= 15) items.push({ sev: Math.abs(momPct) >= 25 ? "P1" : "P2", title: "Mudança mensal material", desc: `Última competência (${monthLabel(latestMonth)}) variou ${pct(momPct)} contra a anterior.`, impact: compact(Math.abs(latestReal - prevReal)) });
+    if (top5Pct > 70) items.push({ sev: "P2", title: "Concentração Financeira", desc: `Top 5 de ${dimLabel} concentram ${pct(top5Pct)} do custo.`, impact: "Top 5" });
+    if (govScore < 90) items.push({ sev: govScore < 75 ? "P1" : "P2", title: "Governance Completeness", desc: "Classificação incompleta reduz rastreabilidade executiva.", impact: pct(govScore) });
+    const totalDelta = latestReal - prevReal;
+    const growth = waterfall.find(s => s.kind === "inc" && s.contrib != null && s.contrib > 35 && s.key !== "Outros drivers");
+    if (growth && totalDelta > 0) items.push({ sev: (growth.contrib || 0) > 55 ? "P1" : "P2", title: `Driver de crescimento: ${growth.key}`, desc: `${dimLabel} responde por ${pct(growth.contrib || 0)} do aumento mensal.`, impact: compact(growth.value) });
+    return items.sort((a, b) => a.sev.localeCompare(b.sev)).slice(0, 10);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dimRowsAll, dim, latestMonth, prevMonth, top5Pct, govScore, globalAcc, momPct, waterfall, latestReal, prevReal]);
+
+  // ── cost drivers ──
+  function driversOf(rows: DimRow[], field: string) {
+    const byKey = monthlyByKey(rows, field, "realizado");
+    const items: Array<{ key: string; cur: number; prev: number; delta: number; share: number; contrib: number }> = [];
+    for (const [key, months] of byKey) {
+      const cur = months.get(latestMonth) || 0;
+      const prev = prevMonth ? (months.get(prevMonth) || 0) : 0;
+      items.push({ key, cur, prev, delta: cur - prev, share: 0, contrib: 0 });
+    }
+    items.sort((a, b) => Math.abs(b.cur) - Math.abs(a.cur));
+    const totalCur = items.reduce((s, x) => s + Math.abs(x.cur), 0) || 1;
+    const totalDelta = items.reduce((s, x) => s + x.delta, 0);
+    return items.slice(0, 7).map(x => ({ ...x, share: (Math.abs(x.cur) / totalCur) * 100, contrib: totalDelta ? (x.delta / totalDelta) * 100 : 0 }));
+  }
+  const driversDim = useMemo(() => driversOf(dimRowsAll, dim), [dimRowsAll, dim, latestMonth, prevMonth]);
+  const driversCloud = useMemo(() => driversOf(cloudRowsAll, "cloud_origem"), [cloudRowsAll, latestMonth, prevMonth]);
+
+  // ── anomalia & aceleração ──
+  const anomaly = useMemo(() => {
+    if (!latestMonth) return { anomalyList: [], accelList: [] };
+    const byKey = monthlyByKey(dimRowsAll, dim, "realizado");
+    const all: Array<{ key: string; z: number; current: number; acceleration: number }> = [];
+    for (const [key, months] of byKey) {
+      const series = [...months.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      if (series.length < 4) continue;
+      const hist = series.slice(0, -1).map(x => x[1]);
+      const mean = hist.reduce((s, v) => s + v, 0) / hist.length;
+      const std = Math.sqrt(hist.reduce((s, v) => s + (v - mean) ** 2, 0) / hist.length) || 0;
+      const last = series[series.length - 1][1];
+      const z = std ? (last - mean) / std : 0;
+      const m1 = last, m2 = series[series.length - 2]?.[1] ?? m1, m3 = series[series.length - 3]?.[1] ?? m2;
+      all.push({ key, z, current: last, acceleration: (m1 - m2) - (m2 - m3) });
+    }
+    return {
+      anomalyList: all.filter(x => Math.abs(x.z) >= 2).sort((a, b) => Math.abs(b.z) - Math.abs(a.z)).slice(0, 10),
+      accelList: [...all].sort((a, b) => Math.abs(b.acceleration) - Math.abs(a.acceleration)).slice(0, 8),
+    };
+  }, [dimRowsAll, dim, latestMonth, prevMonth]);
+
+  // ── forecast bias & reliability ──
+  const biasRows = useMemo(() => {
+    const real = monthlyByKey(dimRowsAll, dim, "realizado");
+    const fc = monthlyByKey(dimRowsAll, dim, "forecast");
+    const out: Array<{ key: string; accuracy: number; bias: number; over: number; under: number; absErr: number; n: number }> = [];
+    for (const [key, fcMonths] of fc) {
+      const realMonths = real.get(key);
+      if (!realMonths) continue;
+      let accSum = 0, biasSum = 0, over = 0, under = 0, absErr = 0, n = 0;
+      for (const [m, fcv] of fcMonths) {
+        const rev = realMonths.get(m);
+        if (rev == null || fcv === 0) continue;
+        const err = fcv - rev;
+        accSum += Math.max(0, 100 - (Math.abs(err) / Math.abs(fcv)) * 100);
+        biasSum += err / Math.abs(fcv);
+        if (err >= 0) over++; else under++;
+        absErr += Math.abs(err);
+        n++;
+      }
+      if (n) out.push({ key, accuracy: accSum / n, bias: (biasSum / n) * 100, over, under, absErr, n });
+    }
+    return out.sort((a, b) => a.accuracy - b.accuracy).slice(0, 10);
+  }, [dimRowsAll, dim]);
+
+  // ── opportunity gap (forecast - realizado por entidade) ──
+  function oppOf(rows: DimRow[], field: string) {
+    const real = monthlyByKey(rows, field, "realizado");
+    const fc = monthlyByKey(rows, field, "forecast");
+    const out: Array<{ key: string; gap: number; forecast: number }> = [];
+    for (const [key, fcMonths] of fc) {
+      const realMonths = real.get(key);
+      if (!realMonths) continue;
+      let sr = 0, sf = 0;
+      for (const [m, v] of realMonths) if (fcMonths.has(m)) sr += v;
+      for (const [m, v] of fcMonths) if (realMonths.has(m)) sf += v;
+      out.push({ key, gap: sf - sr, forecast: sf });
+    }
+    return out.filter(x => x.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 8);
+  }
+  const oppDim = useMemo(() => oppOf(dimRowsAll, dim), [dimRowsAll, dim]);
+  const oppServ = useMemo(() => oppOf(servRowsAll, "servicename"), [servRowsAll]);
+
+  // ── run rate ──
+  const runRate = useMemo(() => {
+    const vals = realizMonths.map(m => realizByMonth.get(m) || 0);
+    const avg = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+    return { avgReal: avg, annualized: avg * 12, meses: vals.length };
+  }, [realizMonths, realizByMonth]);
+
+  // ── comparator ──
+  const entities = useMemo(() => {
+    if (!latestMonth) return [];
+    const byKey = monthlyByKey(dimRowsAll, dim, "realizado");
+    return [...byKey.entries()]
+      .map(([key, months]) => ({ key, latest: months.get(latestMonth) || 0, series: [...months.entries()].sort((a, b) => a[0].localeCompare(b[0])) }))
+      .sort((a, b) => b.latest - a.latest)
+      .slice(0, 30);
+  }, [dimRowsAll, dim, latestMonth]);
+  const aKey = compA || entities[0]?.key || "";
+  const bKey = compB || (entities[1] && entities[1].key !== aKey ? entities[1].key : entities[2]?.key || entities[0]?.key || "") || "";
+  const entA = entities.find(e => e.key === aKey);
+  const entB = entities.find(e => e.key === bKey);
+  const compMetric = (e: { key: string; latest: number; series: Array<[string, number]> } | undefined) => {
+    if (!e) return null;
+    const last = e.series[e.series.length - 1];
+    const prev = e.series[e.series.length - 2];
+    const mom = prev ? ((last[1] - prev[1]) / Math.abs(prev[1])) * 100 : null;
+    const share = latestReal ? (Math.abs(last[1]) / Math.abs(latestReal)) * 100 : 0;
+    return { mom, share };
+  };
+  const mA = compMetric(entA);
+  const mB = compMetric(entB);
+
+  // ── decomposição hierárquica (v233: spine do caminho + branch de filhos) ──
+  const [treeMetric, setTreeMetric] = useState<"cost" | "share" | "mom">("cost");
+  const spineCosts = useMemo(() => {
+    const arr: number[] = [];
+    for (let i = 0; i <= treeStart; i++) {
+      arr.push(rowsOf(treeResults[`spine${i}`]).reduce((s, r) => s + Number(r.realizado || 0), 0));
+    }
+    return arr;
+  }, [treeResults, treeStart]);
+  const totalAll = spineCosts[0] || 0;
+  const nodeTotal = spineCosts[treeStart] || 0;
+  const pathNodes = useMemo(() => {
+    const out: Array<{ label: string; dim: string; cost: number }> = [{ label: "TOTAL", dim: "TOTAL", cost: totalAll }];
+    treePath.forEach((p, i) => {
+      out.push({ label: p.value, dim: DECOMP_CHAIN.find(c => c.field === p.field)?.label || p.field, cost: spineCosts[i + 1] || 0 });
+    });
+    return out;
+  }, [treePath, spineCosts, totalAll]);
+  const treeChildren = useMemo(() => {
+    if (treeStart >= DECOMP_CHAIN.length) return [];
+    const rows = rowsOf(treeResults[`tree${treeStart}`]);
+    const field = DECOMP_CHAIN[treeStart].field;
+    const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
+    for (const r of rows) {
+      const k = String(r[field] ?? "Não informado");
+      if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
+      const o = map.get(k)!;
+      const v = Number(r.realizado || 0);
+      if (String(r.tipo ?? "") === "realizado") {
+        o.cost += v;
+        const m = String(r._billing_period || "");
+        if (m) o.byMonth.set(m, (o.byMonth.get(m) || 0) + v);
+      }
+    }
+    const items: Array<{ key: string; cost: number; mom: number | null; __other?: boolean }> = [...map.entries()]
+      .map(([key, o]) => {
+        const months = [...o.byMonth.keys()].sort();
+        const cur = months.length ? o.byMonth.get(months[months.length - 1]) || 0 : 0;
+        const prev = months.length > 1 ? o.byMonth.get(months[months.length - 2]) || 0 : 0;
+        return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null };
+      })
+      .sort((a, b) => Math.abs(b.cost) - Math.abs(a.cost));
+    const top = items.slice(0, 7);
+    const rest = items.slice(7);
+    if (rest.length) top.push({ key: "Outros", cost: rest.reduce((s, x) => s + x.cost, 0), mom: null, __other: true });
+    return top;
+  }, [treeResults, treeStart]);
+  const nextField = treeStart < DECOMP_CHAIN.length ? DECOMP_CHAIN[treeStart].field : null;
+  const nextLabel = treeStart < DECOMP_CHAIN.length ? DECOMP_CHAIN[treeStart].label : null;
+  const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
+  const top3Share = nodeTotal ? (treeChildren.slice(0, 3).reduce((s, x) => s + Math.abs(x.cost), 0) / Math.abs(nodeTotal)) * 100 : 0;
+  const shareTotal = totalAll ? (Math.abs(nodeTotal) / Math.abs(totalAll)) * 100 : 0;
+  const treeMetricText = (item: { cost: number; mom: number | null }, parentTotal: number) => {
+    if (treeMetric === "share") return pct(parentTotal ? (Math.abs(item.cost) / Math.abs(parentTotal)) * 100 : 0);
+    if (treeMetric === "mom") return item.mom == null ? "N/A" : `${item.mom >= 0 ? "+" : ""}${pct(item.mom)}`;
+    return compact(item.cost || 0);
+  };
+  const selectTreeNode = (idx: number, field: string, value: string) => {
+    setTreePath([...treePath.slice(0, idx), { field, value }]);
+  };
+  const applyTreeContext = () => {
+    const extra: Record<string, string[]> = {};
+    const path: string[] = [];
+    for (const p of treePath) {
+      const m = p.field.match(/^departamento_nivel_(\d+)$/);
+      if (m) path[Number(m[1]) - 1] = p.value;
+      else extra[p.field] = [p.value];
+    }
+    setFilters(f => ({ ...f, path: path.filter(Boolean), deptId: null, extra }));
+  };
+
+  // ── ações do risk board ──
+  const actions: Array<[string, string, string, string]> = [];
+  if (Math.abs(gapPct) > 10) actions.push(["Forecast x Realizado", compact(gap), `Desvio de ${pct(gapPct)}`, "Revisar premissas e Top Desvios."]);
+  if (top5Pct > 50) actions.push(["Concentração Top 5", pct(top5Pct), "Dependência financeira relevante", "Priorizar governança dos maiores itens."]);
+  if (aiCost > 0) actions.push(["IA Cost", compact(aiCost), "Consumo de IA identificado", "Validar ROI e tendência."]);
+
+  const bridgeSteps = [
+    { key: "Realizado", value: latestReal, kind: "total" as const },
+    { key: "Forecast (Δ)", value: latestFc - latestReal, kind: (latestFc - latestReal >= 0 ? "inc" : "dec") as "inc" | "dec" },
+    { key: "Forecast", value: latestFc, kind: "total" as const },
+  ];
+
+  const riskCards = [
+    ["Forecast Accuracy", globalAcc != null ? pct(globalAcc) : "N/A", globalAcc == null ? "green" : globalAcc < 85 ? "red" : globalAcc < 95 ? "yellow" : "green"],
+    ["Governança", pct(govScore), govScore < 70 ? "red" : govScore < 90 ? "yellow" : "green"],
+    ["Concentração", pct(top5Pct), top5Pct > 70 ? "red" : top5Pct > 50 ? "yellow" : "green"],
+    ["IA Cost", aiCost > 0 ? compact(aiCost) : "—", aiCost > 0 ? "yellow" : "green"],
+  ] as Array<[string, string, "red" | "yellow" | "green"]>;
+  const riskColorOf = (c: "red" | "yellow" | "green") => (c === "red" ? RED : c === "yellow" ? YELLOW : GREEN);
+
+  return (
+    <Box>
+      <LoadingBlock loading={baseLoading || treeLoading}>
+        <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center" sx={{ mb: 2 }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel>Dimensão de análise</InputLabel>
+            <Select label="Dimensão de análise" value={dim} onChange={e => { setDim(e.target.value); setCompA(""); setCompB(""); }}>
+              {DECISAO_DIMS.map(d => <MenuItem key={d.field} value={d.field}>{d.label}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <Typography variant="caption" sx={{ color: MUT, fontWeight: 800 }}>
+            Escopo: {filters.path.length ? filters.path.join(" > ") : "Portfólio completo"}{Object.keys(filters.extra).length ? " · contexto da árvore" : ""} · {monthLabel(latestMonth) || "—"} vs {monthLabel(prevMonth) || "—"}
+          </Typography>
+        </Stack>
+
+        {!latestMonth ? (
+          <Alert severity="info">Sem competências de Realizado no escopo filtrado. Ajuste os filtros globais (período/departamento) ou clique em “Limpar”.</Alert>
+        ) : (
+        <>
+        {/* 01 · Executive Pulse */}
+        <SectionPanel title="Situação financeira agora" subtitle={`Executive Pulse · Realizado ${monthLabel(latestMonth) || "—"} · Forecast horizonte ${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`}>
+          <Grid container spacing={1.5}>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado" value={compact(latestReal)} sub={`${monthLabel(latestMonth)} · ${momPct == null ? "sem base" : `${momPct >= 0 ? "+" : ""}${pct(momPct)} MoM`}`} color={PURPLE} full={moneyFull(latestReal)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Forecast" value={compact(latestFc)} sub={`${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`} color={ORANGE} full={moneyFull(latestFc)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Gap Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={latestReal ? `${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do Realizado` : "sem base"} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Tendência mensal" value={momPct == null ? "N/A" : `${momPct >= 0 ? "+" : ""}${pct(momPct)}`} sub="última vs anterior" color={BLUE} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Concentração Top 5" value={pct(top5Pct)} sub={dimLabel} color="#8b5cf6" /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Forecast Accuracy" value={globalAcc != null ? pct(globalAcc) : "N/A"} sub="global (último mês com ambos)" color={globalAcc != null && globalAcc < 85 ? RED : GREEN} /></Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 02 · FinOps Risk Index + Executive Action Center */}
+        <SectionPanel title="FinOps Risk Index & Executive Action Center" subtitle="Índice executivo: Confiabilidade 40% · Governança 25% · Concentração 20% · IA 15%">
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={4}>
+              <Box sx={{ borderRadius: 2, p: 2, color: "#fff", background: `radial-gradient(circle at 50% 40%, #9b22ff 0%, #5d00d2 40%, #160040 90%)`, textAlign: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 900, opacity: 0.85 }}>FINOPS RISK INDEX</Typography>
+                <Typography variant="h3" sx={{ fontWeight: 950, mt: 0.5 }}>{riskIndex}<Typography component="span" variant="body2" sx={{ fontWeight: 900, opacity: 0.7 }}>/100</Typography></Typography>
+                <Box component="span" sx={{ display: "inline-block", mt: 1, px: 1.4, py: 0.4, borderRadius: 99, bgcolor: riskHex, fontWeight: 950, fontSize: 12 }}>{riskShort} · {riskLabel}</Box>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={8}>
+              <Grid container spacing={1}>
+                {riskCards.map((c, i) => (
+                  <Grid item xs={6} sm={3} key={i}>
+                    <Paper variant="outlined" sx={{ p: 1.4, borderTop: `3px solid ${riskColorOf(c[2])}` }}>
+                      <Typography variant="caption" sx={{ fontWeight: 950, color: MUT, textTransform: "uppercase", fontSize: 10 }}>{c[0]}</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 950, color: INK }}>{c[1]}</Typography>
+                    </Paper>
+                  </Grid>
+                ))}
+              </Grid>
+              <Box sx={{ mt: 1 }}>
+                {actions.length ? actions.slice(0, 3).map((a, i) => (
+                  <Box key={i} sx={{ display: "flex", gap: 1, alignItems: "flex-start", borderLeft: `4px solid ${i === 0 ? RED : YELLOW}`, bgcolor: "#f8fafc", borderRadius: 1, p: 1, mb: 0.6 }}>
+                    <Box component="span" sx={{ bgcolor: i === 0 ? RED : YELLOW, color: "#fff", borderRadius: 99, px: 0.9, py: 0.15, fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{i === 0 ? "AÇÃO IMEDIATA" : "MONITORAR"}</Box>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 950, color: INK }}>{a[0]} · {a[1]}</Typography>
+                      <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>{a[2]} — <b>Ação:</b> {a[3]}</Typography>
+                    </Box>
+                  </Box>
+                )) : <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>Nenhum alerta crítico no escopo filtrado.</Typography>}
+              </Box>
+            </Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 03 · O que merece atenção agora? */}
+        <SectionPanel title="O que merece atenção agora?" subtitle="Motor de atenção: sinais priorizados P1 (ação imediata) → P3 (monitorar)">
+          <Stack spacing={0.8}>
+            {attention.length ? attention.map((a, i) => {
+              const sevColor = a.sev === "P1" ? RED : a.sev === "P2" ? YELLOW : GREEN;
+              return (
+                <Box key={i} sx={{ display: "flex", gap: 1, alignItems: "flex-start", border: `1px solid ${sevColor}55`, borderRadius: 1.5, p: 1, bgcolor: `${sevColor}0d` }}>
+                  {severityChip(a.sev)}
+                  <Box flex={1}>
+                    <Typography variant="body2" sx={{ fontWeight: 900, color: INK }}>{a.title}</Typography>
+                    <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>{a.desc}</Typography>
+                  </Box>
+                  <Typography variant="body2" sx={{ fontWeight: 950, color: sevColor, whiteSpace: "nowrap" }}>{a.impact}</Typography>
+                </Box>
+              );
+            }) : <Typography variant="body2" color="text.secondary">Nenhum alerta material no escopo filtrado.</Typography>}
+          </Stack>
+        </SectionPanel>
+
+        {/* 04 · Prioritization Matrix */}
+        <SectionPanel title="Prioritization Matrix" subtitle={`Quadrante Custo × Crescimento por ${dimLabel} (última competência vs anterior) — medianas como corte de priorização relativa`}>
+          {matrix.pts.length < 2 ? <Typography variant="body2" color="text.secondary">São necessárias duas competências de Realizado para a matriz.</Typography> : (
+            <Chart
+              data={[{
+                type: "scatter", mode: "markers+text",
+                x: matrix.pts.map(p => p.cost),
+                y: matrix.pts.map(p => p.growth),
+                text: matrix.pts.slice(0, 8).map(p => p.key),
+                textposition: "top center",
+                textfont: { size: 10 },
+                marker: { size: matrix.pts.map(p => (p.cost >= matrix.mc && p.growth >= matrix.mg ? 9 : 7)), color: matrix.pts.map(p => qColor(p.cost, p.growth)), opacity: 0.85 },
+                customdata: matrix.pts.map(p => `${p.key}<br>${moneyFull(p.cur)} · ${pct(p.growth)} MoM`),
+                hovertemplate: "%{customdata}<extra></extra>",
+              }]}
+              layout={{
+                height: 430, margin: { l: 58, r: 24, t: 30, b: 46 },
+                xaxis: { title: { text: "Custo realizado (última competência)" }, gridcolor: "#eef0f6" },
+                yaxis: { title: { text: "Crescimento MoM (%)" }, gridcolor: "#eef0f6" },
+                showlegend: false,
+                shapes: [
+                  { type: "line", xref: "x", x0: matrix.mc, x1: matrix.mc, yref: "paper", y0: 0, y1: 1, line: { color: "#94a3b8", dash: "dot" } },
+                  { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: matrix.mg, y1: matrix.mg, line: { color: "#94a3b8", dash: "dot" } },
+                ],
+                annotations: [
+                  { xref: "paper", yref: "paper", x: 0.99, y: 0.99, xanchor: "right", yanchor: "top", text: "ALTO CUSTO / ALTO CRESCIMENTO", font: { size: 10, color: "#991b1b" }, showarrow: false },
+                  { xref: "paper", yref: "paper", x: 0.01, y: 0.99, xanchor: "left", yanchor: "top", text: "BAIXO CUSTO / ALTO CRESCIMENTO", font: { size: 10, color: "#b45309" }, showarrow: false },
+                  { xref: "paper", yref: "paper", x: 0.99, y: 0.01, xanchor: "right", yanchor: "bottom", text: "ALTO CUSTO / BAIXO CRESCIMENTO", font: { size: 10, color: "#475569" }, showarrow: false },
+                  { xref: "paper", yref: "paper", x: 0.01, y: 0.01, xanchor: "left", yanchor: "bottom", text: "BAIXA PRIORIDADE", font: { size: 10, color: "#64748b" }, showarrow: false },
+                ],
+              }}
+              config={{ displayModeBar: false }} style={{ width: "100%" }} />
+          )}
+          <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 0.5 }}>
+            Vermelho = crítico (alto custo e crescimento), âmbar = risco emergente, azul = alto custo/baixo crescimento, cinza = baixa prioridade. Mediana como corte relativo, não threshold absoluto.
+          </Typography>
+        </SectionPanel>
+
+        {/* 05 · Waterfall executivo de variação */}
+        <SectionPanel title="Waterfall executivo de variação" subtitle={`${monthLabel(prevMonth)} → ${monthLabel(latestMonth)} por ${dimLabel} (top drivers por variação absoluta)`}>
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={8}>
+              {waterfall.length < 2 ? <Typography variant="body2" color="text.secondary">Sem variação para o escopo.</Typography> : (
+                <Chart
+                  data={[{
+                    type: "waterfall",
+                    x: waterfall.map(s => s.key),
+                    y: waterfall.map(s => s.value),
+                    measure: waterfall.map(s => (s.kind === "total" ? "absolute" : "relative")),
+                    increasing: { marker: { color: "#d92d20" } },
+                    decreasing: { marker: { color: "#0b9f6e" } },
+                    totals: { marker: { color: "#344054" } },
+                    connector: { line: { color: "#cbd5e1", dash: "dot" } },
+                    text: waterfall.map(s => compact(s.value)),
+                    textposition: "outside",
+                    customdata: waterfall.map(s => s.contrib != null ? `Contribuição: ${pct(s.contrib)} do MoM` : ""),
+                    hovertemplate: "%{x}<br>%{y}<br>%{customdata}<extra></extra>",
+                  }]}
+                  layout={{ height: 360, margin: { l: 66, r: 20, t: 20, b: 110 }, xaxis: { tickangle: -30, automargin: true }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, showlegend: false }}
+                  config={{ displayModeBar: false }} style={{ width: "100%" }} />
+              )}
+              <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>“Outros drivers” reconcilia a diferença residual entre os top 7 e a variação total — não é uma categoria real da fonte.</Typography>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Stack spacing={1}>
+                <KpiCard label="Mês anterior" value={compact(prevReal)} sub={monthLabel(prevMonth)} color={INK} full={moneyFull(prevReal)} />
+                <KpiCard label="Variação líquida" value={`${momPct == null ? "—" : `${momPct >= 0 ? "+" : ""}${compact(latestReal - prevReal)} (${momPct >= 0 ? "+" : ""}${pct(momPct)})`}`} sub="MoM" color={momPct != null && momPct >= 0 ? RED : GREEN} full={moneyFull(latestReal - prevReal)} />
+                <KpiCard label="Mês atual" value={compact(latestReal)} sub={monthLabel(latestMonth)} color={PURPLE} full={moneyFull(latestReal)} />
+              </Stack>
+            </Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 06 · Financial Variance Bridge */}
+        <SectionPanel title="Financial Variance Bridge" subtitle="Realizado → Forecast → Gap (ponte financeira do escopo filtrado)">
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={8}>
+              <Chart
+                data={[{
+                  type: "waterfall",
+                  x: bridgeSteps.map(s => s.key),
+                  y: bridgeSteps.map(s => s.value),
+                  measure: bridgeSteps.map(s => (s.kind === "total" ? "absolute" : "relative")),
+                  increasing: { marker: { color: ORANGE } },
+                  decreasing: { marker: { color: RED } },
+                  totals: { marker: { color: INK } },
+                  connector: { line: { color: "#cbd5e1", dash: "dot" } },
+                  text: bridgeSteps.map(s => compact(s.value)),
+                  textposition: "outside",
+                }]}
+                layout={{ height: 300, margin: { l: 66, r: 20, t: 20, b: 40 }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, showlegend: false }}
+                config={{ displayModeBar: false }} style={{ width: "100%" }} />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Stack spacing={1}>
+                <KpiCard label="Gap Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={`${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do Realizado`} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} />
+                <KpiCard label="Run Rate Executivo" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12 · ${runRate.meses} mês(es) realizado`} color={BLUE} full={moneyFull(runRate.annualized)} />
+              </Stack>
+            </Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 07 · Cost Drivers & Contribution to Growth */}
+        <SectionPanel title="Cost Drivers & Contribution to Growth" subtitle={`Top drivers por ${dimLabel} e por Cloud — custo, share, Δ e contribuição na variação mensal`}>
+          <Grid container spacing={1.5}>
+            {[
+              { title: dimLabel, rows: driversDim },
+              { title: "Cloud", rows: driversCloud },
+            ].map((card, ci) => (
+              <Grid item xs={12} md={6} key={ci}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead><TableRow>
+                      {[card.title, "Custo", "Share", "Δ", "Contrib."].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                    </TableRow></TableHead>
+                    <TableBody>
+                      {card.rows.map((x, i) => (
+                        <TableRow key={i}>
+                          <TableCell sx={{ fontSize: 12, fontWeight: 850 }}>{x.key}</TableCell>
+                          <TableCell sx={{ fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{money(x.cur)}</TableCell>
+                          <TableCell sx={{ fontSize: 12 }}>{pct(x.share)}</TableCell>
+                          <TableCell sx={{ fontSize: 12, fontWeight: 900, color: x.delta >= 0 ? RED : GREEN, whiteSpace: "nowrap" }}>{x.delta >= 0 ? "+" : ""}{compact(x.delta)}</TableCell>
+                          <TableCell sx={{ fontSize: 12, color: MUT }}>{pct(x.contrib)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {!card.rows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary", py: 2 }}>Sem dados.</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Grid>
+            ))}
+          </Grid>
+        </SectionPanel>
+
+        {/* 08 · Anomaly & Cost Acceleration */}
+        <SectionPanel title="Anomaly & Cost Acceleration" subtitle={`Detecção simples por ${dimLabel}: |Z| ≥ 2 vs histórico anterior; aceleração = variação da velocidade nos últimos 3 meses`}>
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Anomalias (|Z| ≥ 2)</Typography>
+              <Table size="small">
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Z</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo atual</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {anomaly.anomalyList.map((x, i) => (
+                    <TableRow key={i}>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 850 }}>{x.key}</TableCell>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 950, color: Math.abs(x.z) >= 2.5 ? RED : YELLOW }}>Z {x.z.toFixed(1)}</TableCell>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{money(x.current)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!anomaly.anomalyList.length && <TableRow><TableCell colSpan={3} align="center" sx={{ color: "text.secondary", py: 2 }}>Nenhuma anomalia material detectada.</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Cost Acceleration (top mudanças)</Typography>
+              <Table size="small">
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Aceleração (BRL)</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {anomaly.accelList.map((x, i) => (
+                    <TableRow key={i}>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 850 }}>{x.key}</TableCell>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 900, color: x.acceleration >= 0 ? RED : GREEN }}>{x.acceleration >= 0 ? "+" : ""}{compact(x.acceleration)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!anomaly.accelList.length && <TableRow><TableCell colSpan={2} align="center" sx={{ color: "text.secondary", py: 2 }}>Sem séries suficientes.</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 09 · Forecast Bias & Reliability */}
+        <SectionPanel title="Forecast Bias & Reliability" subtitle={`Ranking por ${dimLabel}: confiabilidade média (Forecast vs Realizado), bias e erro acumulado`}>
+          <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+            <Grid item xs={6} sm={3}><KpiCard label="Entidades avaliadas" value={String(biasRows.length)} sub="com pares Forecast/Realizado" color={BLUE} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Pior accuracy" value={biasRows[0] ? pct(biasRows[0].accuracy) : "—"} sub={biasRows[0]?.key || "N/A"} color={biasRows[0] && biasRows[0].accuracy < 70 ? RED : GREEN} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Bias (pior)" value={biasRows[0] ? `${biasRows[0].bias >= 0 ? "+" : ""}${pct(biasRows[0].bias)}` : "—"} sub="+ over / − under forecast" color={ORANGE} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Erro absoluto (top)" value={biasRows[0] ? compact(biasRows[0].absErr) : "—"} sub={biasRows[0]?.key || "N/A"} color={PURPLE} /></Grid>
+          </Grid>
+          <TableContainer>
+            <Table size="small">
+              <TableHead><TableRow>
+                {[dimLabel, "Accuracy", "Bias médio", "Over", "Under", "Erro R$"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+              </TableRow></TableHead>
+              <TableBody>
+                {biasRows.map((x, i) => (
+                  <TableRow key={i}>
+                    <TableCell sx={{ fontSize: 12, fontWeight: 850 }}>{x.key}</TableCell>
+                    <TableCell sx={{ fontSize: 12 }}><Box component="span" sx={{ px: 0.8, py: 0.15, borderRadius: 99, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN, color: "#fff", fontSize: 11, fontWeight: 950 }}>{pct(x.accuracy)}</Box></TableCell>
+                    <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{x.bias >= 0 ? "+" : ""}{pct(x.bias)}</TableCell>
+                    <TableCell sx={{ fontSize: 12 }}>{x.over}</TableCell>
+                    <TableCell sx={{ fontSize: 12 }}>{x.under}</TableCell>
+                    <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{compact(x.absErr)}</TableCell>
+                  </TableRow>
+                ))}
+                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares Forecast/Realizado suficientes por {dimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </SectionPanel>
+
+        {/* 10 · v42: Forecast Reliability / Opportunity Gap / Run Rate */}
+        <SectionPanel title="Prioridade financeira preliminar" subtitle="Confiabilidade, gaps positivos de Forecast e ritmo anualizado — indicação para direcionar investigação, não economia garantida">
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Maiores gaps por {dimLabel}</Typography>
+              {oppDim.length ? oppDim.map((x, i) => (
+                <Box key={i} sx={{ mb: 0.6 }}>
+                  <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: ORANGE }}>Gap {compact(x.gap)}</Typography></Stack>
+                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#eef0f6", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, (Math.abs(x.gap) / Math.max(1, Math.abs(oppDim[0].gap))) * 100))}%`, bgcolor: i < 3 ? ORANGE : PURPLE }} /></Box>
+                </Box>
+              )) : <Typography variant="body2" color="text.secondary">Nenhum gap positivo no escopo.</Typography>}
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5, mt: 2 }}>Maiores gaps por Serviço</Typography>
+              {oppServ.length ? oppServ.map((x, i) => (
+                <Stack key={i} direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: BLUE }}>Gap {compact(x.gap)}</Typography></Stack>
+              )) : <Typography variant="body2" color="text.secondary">Nenhum gap positivo por serviço.</Typography>}
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Confiabilidade do Forecast (piores)</Typography>
+              {biasRows.slice(0, 5).map((x, i) => (
+                <Box key={i} sx={{ mb: 0.6 }}>
+                  <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }}>{pct(x.accuracy)} · erro {compact(x.absErr)}</Typography></Stack>
+                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#eef0f6", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, 100 - x.accuracy))}%`, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }} /></Box>
+                </Box>
+              ))}
+              {!biasRows.length && <Typography variant="body2" color="text.secondary">Sem pares Forecast/Realizado.</Typography>}
+              <Box sx={{ mt: 1.5 }}>
+                <KpiCard label="Run Rate Executivo" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12`} color={BLUE} full={moneyFull(runRate.annualized)} />
+              </Box>
+            </Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 11 · Governance / Data Quality */}
+        <SectionPanel title="Governance Completeness & Data Quality" subtitle="Completude ponderada pelo custo realizado — registros ausentes (nulos/vazios) reduzem o score proporcionalmente à materialidade">
+          <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+            <Grid item xs={6} sm={3}><KpiCard label="Data Quality Score" value={pct(Math.max(0, govScore))} sub="média de completude ponderada pelo custo" color={govScore >= 90 ? GREEN : govScore >= 80 ? YELLOW : RED} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Pior dimensão" value={gov.rowsPer[0]?.label || "—"} sub={gov.rowsPer[0] ? `${pct(gov.rowsPer[0].spendPct)} do custo sem classificação` : ""} color={gov.rowsPer[0] && gov.rowsPer[0].spendPct >= 20 ? RED : YELLOW} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Custo exposto (pior)" value={compact(gov.rowsPer[0]?.missingSpend || 0)} sub="na pior dimensão de qualidade" color={ORANGE} full={moneyFull(gov.rowsPer[0]?.missingSpend || 0)} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Critérios críticos" value={String(gov.rowsPer.filter(x => x.spendPct >= 20).length)} sub="dimensões com ≥20% do custo sem classificação" color={gov.rowsPer.filter(x => x.spendPct >= 20).length ? RED : GREEN} /></Grid>
+          </Grid>
+          <TableContainer>
+            <Table size="small">
+              <TableHead><TableRow>
+                {["Dimensão", "Severidade", "% registros", "% custo", "Custo material", "Materialidade"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+              </TableRow></TableHead>
+              <TableBody>
+                {gov.rowsPer.map((x, i) => {
+                  const sev = x.spendPct >= 20 ? "critical" : x.spendPct >= 5 ? "high" : x.spendPct >= 1 ? "medium" : "low";
+                  const sevColor = sev === "critical" ? RED : sev === "high" ? YELLOW : sev === "medium" ? ORANGE : GREEN;
+                  return (
+                    <TableRow key={i}>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{x.label}</TableCell>
+                      <TableCell sx={{ fontSize: 12 }}><Box component="span" sx={{ px: 0.8, py: 0.15, borderRadius: 99, bgcolor: sevColor, color: "#fff", fontSize: 10, fontWeight: 950 }}>{sev.toUpperCase()}</Box></TableCell>
+                      <TableCell sx={{ fontSize: 12 }}>{pct(x.rowPct)}</TableCell>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{pct(x.spendPct)}</TableCell>
+                      <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{money(x.missingSpend)}</TableCell>
+                      <TableCell sx={{ minWidth: 120 }}><Box sx={{ height: 8, borderRadius: 99, bgcolor: "#eef0f6", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, x.spendPct)}%`, bgcolor: sevColor }} /></Box></TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </SectionPanel>
+
+        {/* 12 · Comparator */}
+        <SectionPanel title="Compare duas entidades no mesmo contexto" subtitle={`Selecione duas entidades de ${dimLabel} e compare trajetória, participação e variação mensal`}
+          right={
+            <Stack direction="row" gap={1} flexWrap="wrap">
+              <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Entidade A</InputLabel>
+                <Select label="Entidade A" value={aKey} onChange={e => setCompA(e.target.value)}>
+                  {entities.map(e => <MenuItem key={e.key} value={e.key}>{e.key}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Entidade B</InputLabel>
+                <Select label="Entidade B" value={bKey} onChange={e => setCompB(e.target.value)}>
+                  {entities.map(e => <MenuItem key={e.key} value={e.key}>{e.key}</MenuItem>)}
+                </Select>
+              </FormControl>
+            </Stack>
+          }>
+          <Grid container spacing={1.5}>
+            <Grid item xs={12} md={4}>
+              <Stack spacing={1}>
+                <KpiCard label={aKey || "A"} value={entA ? compact(entA.latest) : "—"} sub={mA ? `${mA.mom == null ? "sem base" : `${mA.mom >= 0 ? "▲ " : "▼ "}${pct(Math.abs(mA.mom))} MoM`} · share ${pct(mA.share)}` : ""} color="#5b00cb" full={entA ? moneyFull(entA.latest) : ""} />
+                <KpiCard label={bKey || "B"} value={entB ? compact(entB.latest) : "—"} sub={mB ? `${mB.mom == null ? "sem base" : `${mB.mom >= 0 ? "▲ " : "▼ "}${pct(Math.abs(mB.mom))} MoM`} · share ${pct(mB.share)}` : ""} color="#155eef" full={entB ? moneyFull(entB.latest) : ""} />
+                <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>A comparação evidencia trajetória e participação — não afirma eficiência ou desperdício apenas pela diferença de custo.</Typography>
+              </Stack>
+            </Grid>
+            <Grid item xs={12} md={8}>
+              {entA && entB ? (
+                <Chart
+                  data={[
+                    { x: entA.series.map(s => monthLabel(s[0])), y: entA.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: aKey, line: { color: "#5b00cb", width: 3 }, marker: { size: 4 } },
+                    { x: entB.series.map(s => monthLabel(s[0])), y: entB.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: bKey, line: { color: "#155eef", width: 3 }, marker: { size: 4 } },
+                  ]}
+                  layout={{ height: 300, margin: { l: 60, r: 20, t: 12, b: 36 }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, legend: { orientation: "h", y: 1.05 } }}
+                  config={{ displayModeBar: false }} style={{ width: "100%" }} />
+              ) : <Typography variant="body2" color="text.secondary">Sem entidades disponíveis no escopo.</Typography>}
+            </Grid>
+          </Grid>
+        </SectionPanel>
+
+        {/* 13 · Decomposição hierárquica encadeada (v233 — árvore de fluxo interativa) */}
+        <SectionPanel title="Decomposição hierárquica encadeada" subtitle={`Navegue do custo total para ${DECOMP_CHAIN.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}
+          right={
+            <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
+              <Box sx={{ display: "inline-flex", border: "1px solid #d8dce7", borderRadius: 1.5, p: 0.3, bgcolor: "#f8fafc" }}>
+                {(["cost", "share", "mom"] as const).map(m => (
+                  <Button key={m} size="small" onClick={() => setTreeMetric(m)}
+                    sx={{ minWidth: 0, px: 1.2, py: 0.4, borderRadius: 1.2, fontWeight: 950, fontSize: 11, textTransform: "none", color: treeMetric === m ? "#fff" : "#667085", bgcolor: treeMetric === m ? "#111827" : "transparent", "&:hover": { bgcolor: treeMetric === m ? "#111827" : "#eef0f4" } }}>
+                    {m === "cost" ? "Custo" : m === "share" ? "Share" : "MoM"}
+                  </Button>
+                ))}
+              </Box>
+              <Button size="small" variant="outlined" onClick={() => setTreePath([])}>Resetar</Button>
+              {treePath.length > 0 && <Button size="small" variant="contained" onClick={applyTreeContext}>Aplicar contexto</Button>}
+            </Stack>
+          }>
+          <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2.5, overflow: "hidden", bgcolor: "#fff" }}>
+            {/* topo: caminho de investigação */}
+            <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1.5, alignItems: "flex-start", p: 1.6, borderBottom: "1px solid", borderColor: "divider", background: "linear-gradient(135deg, rgba(91,0,203,.06), rgba(110,0,167,.015))", flexWrap: "wrap" }}>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 1, color: "#6b7280", mb: 0.6 }}>Caminho de investigação</Typography>
+                <Stack direction="row" gap={0.5} alignItems="center" flexWrap="wrap">
+                  <Chip size="small" label="TOTAL" onClick={() => setTreePath([])} color={treePath.length === 0 ? "primary" : "default"} sx={{ fontWeight: 950 }} />
+                  {treePath.map((p, i) => (
+                    <Box key={i} display="flex" alignItems="center" gap={0.5}>
+                      <Typography sx={{ color: "#8b5cf6", fontWeight: 950 }}>›</Typography>
+                      <Chip size="small" label={`${DECOMP_CHAIN.find(c => c.field === p.field)?.label || p.field}: ${p.value}`} color={i === treePath.length - 1 ? "primary" : "default"} onClick={() => setTreePath(treePath.slice(0, i + 1))} sx={{ fontWeight: 900, maxWidth: 240 }} />
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+            </Box>
+            {/* ribbon: 4 cartões */}
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4,1fr)" }, gap: 1, p: 1.6, borderBottom: "1px solid", borderColor: "divider" }}>
+              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
+                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Custo no nó atual</Typography>
+                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{compact(nodeTotal)}</Typography>
+                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treePath.length ? treePath[treePath.length - 1].value : "TOTAL"}</Typography>
+              </Box>
+              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
+                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Share do total</Typography>
+                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827" }}>{pct(shareTotal)}</Typography>
+                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800 }}>participação no contexto global</Typography>
+              </Box>
+              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
+                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Maior filho</Typography>
+                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treeChildren[0] ? treeChildren[0].key : "N/A"}</Typography>
+                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800 }}>{treeChildren[0] ? `${pct(topShare)} do nó atual` : "sem próximo nível"}</Typography>
+              </Box>
+              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
+                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Concentração Top 3</Typography>
+                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827" }}>{pct(top3Share)}</Typography>
+                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800 }}>{nextLabel || "fim da hierarquia"}</Typography>
+              </Box>
+            </Box>
+            {/* canvas SVG */}
+            <Box sx={{ overflow: "auto", px: 1, pt: 1, background: "radial-gradient(circle at 10% 0%, rgba(91,0,203,.045), transparent 30%), linear-gradient(180deg,#fff,#fbfcff)" }}>
+              {(() => {
+                const nodeW = 205, nodeH = 62, stageGap = 54, left = 28, top = 50;
+                const pathCount = pathNodes.length;
+                const branchX = left + pathCount * (nodeW + stageGap);
+                const childGap = 74;
+                const childCount = Math.max(treeChildren.length, 1);
+                const H = Math.max(420, top + childCount * childGap + 40);
+                const W = Math.max(1060, branchX + nodeW + 80);
+                const pathY = Math.max(96, H / 2 - 31);
+                const spineLinks = pathNodes.slice(1).map((n, i) => {
+                  const px = left + i * (nodeW + stageGap) + nodeW, py = pathY + nodeH / 2;
+                  const cx = left + (i + 1) * (nodeW + stageGap), cy = pathY + nodeH / 2;
+                  const parent = pathNodes[i].cost;
+                  const shr = parent ? (Math.abs(n.cost) / Math.abs(parent)) * 100 : 0;
+                  const sw = Math.max(3, Math.min(16, 3 + shr / 8));
+                  return (
+                    <path key={`sl${i}`} d={`M ${px} ${py} C ${px + 25} ${py}, ${cx - 25} ${cy}, ${cx} ${cy}`} stroke="url(#v233PathGradient)" strokeWidth={sw} fill="none" strokeLinecap="round" opacity={0.88}>
+                      <title>{`${pct(shr)} do pai`}</title>
+                    </path>
+                  );
+                });
+                const branchLinks = treeChildren.map((it, idx) => {
+                  const y = top + idx * childGap, cy = y + nodeH / 2;
+                  const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
+                  const sw = Math.max(2, Math.min(15, 2 + share / 7));
+                  const col = it.mom == null ? "#7c3aed" : it.mom >= 0 ? "#dc2626" : "#059669";
+                  return (
+                    <path key={`bl${idx}`} d={`M ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW} ${pathY + nodeH / 2} C ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW + 34} ${pathY + nodeH / 2}, ${branchX - 34} ${cy}, ${branchX} ${cy}`} stroke={col} strokeWidth={sw} fill="none" strokeLinecap="round" opacity={0.42}>
+                      <title>{`${it.key} · ${pct(share)} do nó atual`}</title>
+                    </path>
+                  );
+                });
+                const emptyBranch = treeStart >= DECOMP_CHAIN.length && (
+                  <text x={branchX} y={pathY + 20} fontSize={12} fontWeight={850} fill="#94a3b8">Fim da hierarquia disponível</text>
+                );
+                return (
+                  <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Árvore interativa de decomposição de custo" style={{ width: "100%", minWidth: 1050, height: "auto", display: "block" }}>
+                    <defs>
+                      <linearGradient id="v233BarGradient" x1="0" x2="1"><stop offset="0%" stopColor="#7c3aed" /><stop offset="100%" stopColor="#5b00cb" /></linearGradient>
+                      <linearGradient id="v233PathGradient" x1="0" x2="1"><stop offset="0%" stopColor="#a78bfa" /><stop offset="100%" stopColor="#5b00cb" /></linearGradient>
+                    </defs>
+                    {/* labels dos estágios */}
+                    {pathNodes.map((n, i) => (
+                      <text key={`st${i}`} x={left + i * (nodeW + stageGap)} y={28} fontSize={9} fontWeight={950} letterSpacing={0.8} fill="#7c3aed">{n.dim}</text>
+                    ))}
+                    {nextLabel && <text x={branchX} y={28} fontSize={9} fontWeight={950} letterSpacing={0.8} fill="#7c3aed">{nextLabel}</text>}
+                    {spineLinks}
+                    {branchLinks}
+                    {/* nós do spine */}
+                    {pathNodes.map((n, i) => {
+                      const x = left + i * (nodeW + stageGap), y = pathY;
+                      const parent = i ? pathNodes[i - 1].cost : totalAll;
+                      const shr = i === 0 ? 100 : parent ? (Math.abs(n.cost) / Math.abs(parent)) * 100 : 0;
+                      const click = i === 0 ? () => setTreePath([]) : () => setTreePath(treePath.slice(0, i));
+                      return (
+                        <g key={`pn${i}`} className="node" style={{ cursor: "pointer" }} onClick={click}>
+                          <rect className="nodeBg" x={x} y={y} width={nodeW} height={nodeH} rx={14} fill={i === 0 ? "#160d35" : "#f5f0ff"} stroke={i === 0 ? "#5b00cb" : "#8b5cf6"} strokeWidth={i === 0 ? 1 : 1.4} />
+                          <text x={x + 13} y={y + 21} fontSize={11} fontWeight={900} fill={i === 0 ? "#fff" : "#1f2937"}>{String(n.label).slice(0, 28)}</text>
+                          <text x={x + 13} y={y + 41} fontSize={10} fontWeight={800} fill={i === 0 ? "#d8ccff" : "#64748b"}>{compact(n.cost)}</text>
+                          <text x={x + nodeW - 12} y={y + 41} fontSize={10} fontWeight={950} textAnchor="end" fill={i === 0 ? "#c4b5fd" : "#5b00cb"}>{pct(shr)}</text>
+                          <title>{`${n.label} · ${compact(n.cost)} · ${pct(shr)} do pai`}</title>
+                        </g>
+                      );
+                    })}
+                    {/* nós da branch */}
+                    {treeChildren.map((it, idx) => {
+                      const x = branchX, y = top + idx * childGap;
+                      const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
+                      const barW = Math.max(3, (nodeW - 26) * Math.min(1, share / Math.max(topShare, 1)));
+                      const clickable = !(it as any).__other;
+                      const metric = treeMetricText(it, nodeTotal);
+                      const metricColor = treeMetric === "mom" && it.mom != null ? (it.mom >= 0 ? "#dc2626" : "#059669") : "#5b00cb";
+                      return (
+                        <g key={`cn${idx}`} className="node" style={{ cursor: clickable ? "pointer" : "default" }} onClick={clickable ? () => selectTreeNode(treeStart, nextField!, it.key) : undefined}>
+                          <rect x={x} y={y} width={nodeW} height={nodeH} rx={14} fill="#fff" stroke="#e5e7eb" strokeWidth={1} />
+                          <text x={x + 13} y={y + 20} fontSize={11} fontWeight={900} fill="#1f2937">{String(it.key).slice(0, 28)}</text>
+                          <text x={x + 13} y={y + 40} fontSize={10} fontWeight={800} fill="#64748b">{compact(it.cost)}</text>
+                          <text x={x + nodeW - 12} y={y + 40} fontSize={10} fontWeight={950} textAnchor="end" fill={metricColor}>{metric}</text>
+                          <rect x={x + 13} y={y + 50} width={nodeW - 26} height={5} rx={3} fill="#eef2f7" />
+                          <rect x={x + 13} y={y + 50} width={barW} height={5} rx={3} fill="url(#v233BarGradient)" />
+                          <title>{`${it.key} · custo ${compact(it.cost)} · share ${pct(share)}${it.mom == null ? "" : ` · MoM ${it.mom >= 0 ? "+" : ""}${pct(it.mom)}`}`}</title>
+                        </g>
+                      );
+                    })}
+                    {emptyBranch}
+                  </svg>
+                );
+              })()}
+            </Box>
+            {/* legenda */}
+            <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="center" flexWrap="wrap" sx={{ px: 1.6, py: 1.2, color: "#667085", fontSize: 10, fontWeight: 750 }}>
+              <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar.</Box>
+              <Stack direction="row" gap={1.5} alignItems="center">
+                <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#7c3aed", mr: 0.6 }} />estrutura / share</Box>
+                <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#dc2626", mr: 0.6 }} />MoM positivo</Box>
+                <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#059669", mr: 0.6 }} />MoM negativo</Box>
+              </Stack>
+            </Stack>
+          </Box>
+          <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 1 }}>“Outros” agrupa os filhos restantes além do top 7 (não clicável). “Aplicar contexto” transforma a trilha em filtros globais do cockpit.</Typography>
+        </SectionPanel>
+        </>
+        )}
+      </LoadingBlock>
+    </Box>
+  );
+}
+
+/** Converte os filtros globais do cockpit em filtros do pivot do snapshot de forecast. */
+function pivotFiltersFrom(filters: Filters): Record<string, HistoryFilter> {
+  const out: Record<string, HistoryFilter> = {};
+  if (filters.clouds.length) out.cloud_origem = { operator: "in", value: filters.clouds };
+  if (filters.dirs.length) out.departamento_nivel_4 = { operator: "in", value: filters.dirs };
+  if (filters.depts.length) out.departamento_nivel_5 = { operator: "in", value: filters.depts };
+  if (filters.servicos.length) out.servicename = { operator: "in", value: filters.servicos };
+  if (filters.cats.length) out.servicecategory = { operator: "in", value: filters.cats };
+  if (filters.path.length) filters.path.forEach((seg, i) => { if (seg) out[`departamento_nivel_${i + 1}`] = { operator: "in", value: [seg] }; });
+  Object.entries(filters.extra || {}).forEach(([col, vals]) => { if (vals && vals.length) out[col] = { operator: "in", value: vals }; });
+  return out;
+}
+
 const DRILL_CHAIN: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
   { field: "departamento_nivel_4", label: "Diretoria" },
@@ -1016,80 +2139,5 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
         </>
       )}
     </Grid>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Aba 7 — Tabela & Export
-// ═══════════════════════════════════════════════════════════════════
-function TabelaTab({ table, filters, filterKey, exportRows, setFilters, options, periodPreset, applyPreset }: {
-  table: string; filters: Filters; filterKey: string;
-  exportRows: (rows: Record<string, any>[], filename: string) => void;
-  setFilters: React.Dispatch<React.SetStateAction<Filters>>;
-  options: Record<string, string[]>;
-  periodPreset: string;
-  applyPreset: (p: string) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const defs = useMemo<QueryDef[]>(() => [
-    { id: "grid", rows: ["_billing_period", "cloud_origem", "departamento_nivel_4", "departamento_nivel_5", "servicename", "servicecategory", "regionname"], measures: [{ column: "quantity", aggregation: "SUM" }, { column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 500 },
-  ], [filterKey]);
-  const { results, loading } = useTabQueries(table, defs, filterKey);
-
-  const rows = useMemo(() => {
-    const all = rowsOf(results.grid);
-    const q = query.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter(r => Object.values(r).some(v => String(v ?? "").toLowerCase().includes(q)));
-  }, [results.grid, query]);
-
-  return (
-    <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} mb={1.5}>
-        <Stack direction="row" gap={1} alignItems="center">
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Período</InputLabel>
-            <Select label="Período" value={periodPreset} onChange={e => applyPreset(e.target.value)}>
-              <MenuItem value="all">Todos os meses</MenuItem>
-              <MenuItem value="last1">Último mês</MenuItem>
-              <MenuItem value="last3">Últimos 3 meses</MenuItem>
-              <MenuItem value="last6">Últimos 6 meses</MenuItem>
-              <MenuItem value="last12">Últimos 12 meses</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField size="small" placeholder="Buscar na tabela…" value={query} onChange={e => setQuery(e.target.value)} InputProps={{ startAdornment: <Search fontSize="small" sx={{ mr: 0.5, color: MUT }} /> }} />
-        </Stack>
-        <Button size="small" variant="contained" startIcon={<FileDownload />} onClick={() => exportRows(rows, `dimon_${table}.csv`)}>Exportar CSV</Button>
-      </Stack>
-      <LoadingBlock loading={loading}>
-        <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 560 }}>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                {["Mês", "Cloud", "Diretoria", "Departamento", "Serviço", "Categoria", "Região", "Quantidade", "Realizado", "Billed Cost"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11, whiteSpace: "nowrap" }}>{h}</TableCell>)}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {rows.map((r, i) => (
-                <TableRow key={i} hover>
-                  <TableCell sx={{ fontSize: 12 }}>{monthLabel(String(r._billing_period))}</TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>{esc(r.cloud_origem)}</TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_4)}</TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_5)}</TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>{esc(r.servicename)}</TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>{esc(r.servicecategory)}</TableCell>
-                  <TableCell sx={{ fontSize: 12 }}>{esc(r.regionname)}</TableCell>
-                  <TableCell sx={{ fontSize: 12, whiteSpace: "nowrap" }}>{num(r.quantity)}</TableCell>
-                  <TableCell sx={{ fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{money(r.realizado)}</TableCell>
-                  <TableCell sx={{ fontSize: 12, whiteSpace: "nowrap" }}>{money(r.billedcost, "USD")}</TableCell>
-                </TableRow>
-              ))}
-              {!rows.length && <TableRow><TableCell colSpan={10} align="center" sx={{ color: "text.secondary", py: 3 }}>Sem dados para o escopo filtrado.</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Exibindo {rows.length} de {results.grid?.row_count ?? 0} linhas (top 500 por Realizado). A Dimon já é pré-agregada mensal — aqui você audita a granularidade agregada.</Typography>
-      </LoadingBlock>
-    </Box>
   );
 }

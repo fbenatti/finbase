@@ -4,6 +4,23 @@ export function azurePtuPdfFilename(periodId: string): string {
   return `visoes-consumo-ia-${periodId}-${date}`;
 }
 
+/** Abre o dashboard visível no diálogo de impressão para salvá-lo como PDF. */
+export function exportDashboardPdf(dashboardId: string): void {
+  const previousTitle = document.title;
+  const date = new Date().toISOString().slice(0, 10);
+  document.title = `visoes-consumo-ia-${dashboardId}-${date}`;
+  document.body.classList.add("azure-ptu-print-mode");
+
+  const cleanup = () => {
+    document.body.classList.remove("azure-ptu-print-mode");
+    document.title = previousTitle;
+    window.removeEventListener("afterprint", cleanup);
+  };
+
+  window.addEventListener("afterprint", cleanup);
+  window.setTimeout(() => window.print(), 300);
+}
+
 export type AzurePtuPrintMeta = {
   periodId: string;
   periodLabel: string;

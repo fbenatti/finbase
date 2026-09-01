@@ -98,6 +98,29 @@ def _gcp_aggregated_select_sql(
         if "subscription" in fields
         else "CAST(NULL AS STRUCT<instance_id STRING>) AS subscription"
     )
+    # Some billing exports (older TI tables, partial schemas) omit the
+    # cost_at_* pricing columns. Reference them only when present so the
+    # aggregation query never fails with "not found inside src".
+    cost_at_list_expr = (
+        "SUM(src.cost_at_list) AS cost_at_list"
+        if "cost_at_list" in fields
+        else "CAST(NULL AS FLOAT64) AS cost_at_list"
+    )
+    cost_at_default_expr = (
+        "SUM(src.cost_at_effective_price_default) AS cost_at_effective_price_default"
+        if "cost_at_effective_price_default" in fields
+        else "CAST(NULL AS FLOAT64) AS cost_at_effective_price_default"
+    )
+    cost_at_consumption_expr = (
+        "SUM(src.cost_at_list_consumption_model) AS cost_at_list_consumption_model"
+        if "cost_at_list_consumption_model" in fields
+        else "CAST(NULL AS FLOAT64) AS cost_at_list_consumption_model"
+    )
+    consumption_model_expr = (
+        "ANY_VALUE(src.consumption_model) AS consumption_model"
+        if "consumption_model" in fields
+        else "CAST(NULL AS STRING) AS consumption_model"
+    )
     return f"""
         SELECT
             src.billing_account_id AS billing_account_id,
@@ -155,10 +178,10 @@ def _gcp_aggregated_select_sql(
             ANY_VALUE(src.invoice) AS invoice,
             src.cost_type AS cost_type,
             ANY_VALUE(src.adjustment_info) AS adjustment_info,
-            SUM(src.cost_at_list) AS cost_at_list,
-            SUM(src.cost_at_effective_price_default) AS cost_at_effective_price_default,
-            SUM(src.cost_at_list_consumption_model) AS cost_at_list_consumption_model,
-            ANY_VALUE(src.consumption_model) AS consumption_model
+            {cost_at_list_expr},
+            {cost_at_default_expr},
+            {cost_at_consumption_expr},
+            {consumption_model_expr}
         FROM `{fqn}` src
         {where_clause}
         GROUP BY

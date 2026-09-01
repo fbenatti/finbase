@@ -79,6 +79,7 @@ def _replicated_month_value(
     last_closed_month_total: float,
     current_month_realized: float,
     growth_rate: float,
+    lumpy: bool = False,
 ) -> float | None:
     if last_closed_month_total <= 0:
         return None
@@ -88,12 +89,14 @@ def _replicated_month_value(
             return None
         return last_closed_month_total * ((1.0 + growth_rate) ** 1)
     if behavior in {"RECURRING_MONTHLY", "RECURRING_UNTIL_END"}:
-        # Do not book the lumpy closed-month amount again in the open month:
-        # daily-mean math on a 1-day purchase would explode, and adding the
-        # last closed total on top of in-progress usage double-counts. Future
-        # months replicate last_closed_month_total.
+        # Séries lumpy (MONTHLY_LUMP: fatura mensal/assinatura já lançada no
+        # mês) não devem repetir o valor do mês fechado no mês aberto — a
+        # fatura já cobre o mês inteiro e somar projeção duplicaria.
+        # Uso diário (não lumpy — Azure/GCP/OCI) mantém o restante calculado
+        # pelo motor (baseline × dias_restantes): estimativa_do_mês =
+        # realizado parcial + forecast_restante.
         if forecast_month == current_month_key:
-            return 0.0
+            return 0.0 if lumpy else None
         if offset <= 0:
             return None
         return last_closed_month_total * ((1.0 + growth_rate) ** offset)
@@ -154,6 +157,8 @@ def _apply_forecast_business_rules(
     for rule in sorted(business_rules or [], key=lambda item: item.priority):
         if not getattr(rule, "active", True):
             continue
+        if str(getattr(rule, "behavior", "") or "") == "SOURCE_EXCLUDE_PREFIX":
+            continue
         mask = output["tipo"].eq("forecast")
         identity_mask, has_identity_filter, missing_field = _rule_identity_mask(output, rule, output_by_lower)
         if missing_field:
@@ -210,6 +215,7 @@ def _apply_forecast_business_rules(
                     last_closed_month_total=float(ctx["last_closed_month_total"]),
                     current_month_realized=float(ctx["current_month_realized"]),
                     growth_rate=growth_rate,
+                    lumpy=bool(ctx.get("lumpy")),
                 )
                 if replicated is not None:
                     output.at[idx, "forecast_value"] = replicated
@@ -272,6 +278,61 @@ def _q(name: str) -> str:
 
 def _lit(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def _source_exclusion_filter(
+    business_rules: list[Any], metadata: dict[str, Any], period_col: str | None,
+) -> tuple[str | None, list[str]]:
+    """Build safe Gold predicates for exclusions applied before aggregation."""
+    columns = {
+        str(item.get("name") or "").lower(): str(item.get("name") or "")
+        for item in (metadata.get("columns") or []) if item.get("name")
+    }
+    exclusions: list[str] = []
+    applied: list[str] = []
+    for rule in sorted(business_rules or [], key=lambda item: item.priority):
+        if not getattr(rule, "active", True) or getattr(rule, "behavior", "") != "SOURCE_EXCLUDE_PREFIX":
+            continue
+        clauses = list(getattr(rule, "identification_clauses", None) or []) or [{
+            "column": getattr(rule, "identification_column", ""),
+            "values": list(getattr(rule, "identification_values", None) or []),
+        }]
+        groups: list[str] = []
+        for clause in clauses:
+            if not isinstance(clause, dict):
+                continue
+            actual = columns.get(str(clause.get("column") or "").lower())
+            values = [str(value) for value in (clause.get("values") or []) if str(value)]
+            if actual and values:
+                groups.append("(" + " OR ".join(
+                    f"lower(COALESCE(CAST({_q(actual)} AS VARCHAR), '')) LIKE lower({_lit(value)}) || '%'"
+                    for value in values
+                ) + ")")
+        if not groups:
+            continue
+        predicates = ["(" + " OR ".join(groups) + ")"]
+        valid = True
+        for requested, value in (getattr(rule, "scope", None) or {}).items():
+            actual = columns.get(str(requested).lower())
+            if not actual:
+                valid = False
+                break
+            predicates.append(f"CAST({_q(actual)} AS VARCHAR) = {_lit(value)}")
+        if not valid:
+            continue
+        actual_period = columns.get(str(period_col or "").lower()) if period_col else None
+        if actual_period and getattr(rule, "start_period", None):
+            predicates.append(f"CAST({_q(actual_period)} AS VARCHAR) >= {_lit(rule.start_period)}")
+        if actual_period and getattr(rule, "end_period", None):
+            predicates.append(f"CAST({_q(actual_period)} AS VARCHAR) <= {_lit(rule.end_period)}")
+        exclusions.append("(" + " AND ".join(predicates) + ")")
+        applied.append(str(getattr(rule, "name", "SOURCE_EXCLUDE_PREFIX")))
+    return (" OR ".join(exclusions) if exclusions else None), applied
+
+
+def _and_filters(*filters: str | None) -> str | None:
+    parts = [f"({item})" for item in filters if item]
+    return " AND ".join(parts) if parts else None
 
 
 def gold_date_expr(date_col: str, period_col: str | None = None, *, table_alias: str | None = None) -> str:
@@ -734,6 +795,8 @@ async def _fetch_period_records(
     charge_end_col: str | None,
     period_col: str | None,
     connection_filter: str | None,
+    exclusion_filter: str | None = None,
+    only_exclusions: bool = False,
     minimum_monthly_points: int = 3,
 ) -> list[dict[str, Any]]:
     select_dims = ", ".join(_q(x) for x in dims)
@@ -742,9 +805,11 @@ async def _fetch_period_records(
     if mode == "interval":
         end_expr = _charge_interval_end_expr(date_expr, charge_end_col, period_col)
         select_sql = f"SELECT {group_prefix}{date_expr} AS charge_start, {end_expr} AS charge_end, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+        excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS charge_start, {end_expr} AS charge_end, -SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
         group_sql = f" GROUP BY {group_prefix}{date_expr}, {end_expr} ORDER BY charge_start"
     else:
         select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+        excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, -SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
         group_sql = f" GROUP BY {group_prefix}{date_expr} ORDER BY forecast_day"
     extra = f" AND {connection_filter}" if connection_filter else ""
     records: list[dict[str, Any]] = []
@@ -757,10 +822,78 @@ async def _fetch_period_records(
                 f"{select_sql} WHERE {type_filter} AND CAST({_q(period_col)} AS VARCHAR) = {_lit(billing_period)}"
                 f"{extra}{group_sql}"
             )
-            records.extend(await trino_execute(sql, timeout_s=300))
+            if not only_exclusions:
+                records.extend(await trino_execute(sql, timeout_s=300))
+            if exclusion_filter:
+                excluded_sql = (
+                    f"{excluded_select_sql} WHERE {type_filter} AND CAST({_q(period_col)} AS VARCHAR) = {_lit(billing_period)}"
+                    f" AND ({exclusion_filter}){group_sql}"
+                )
+                records.extend(await trino_execute(excluded_sql, timeout_s=300))
     else:
         sql = f"{select_sql} WHERE {type_filter} AND {date_filter}{extra}{group_sql}"
-        records = await trino_execute(sql, timeout_s=300)
+        records = [] if only_exclusions else await trino_execute(sql, timeout_s=300)
+        if exclusion_filter:
+            excluded_sql = (
+                f"{excluded_select_sql} WHERE {type_filter} AND {date_filter} "
+                f"AND ({exclusion_filter}){group_sql}"
+            )
+            records.extend(await trino_execute(excluded_sql, timeout_s=300))
+    return records
+
+
+async def _fetch_period_records_by_cloud(
+    *,
+    cloud_col: str | None,
+    clouds: dict[str, date],
+    connection_filter: str | None,
+    shard_col: str | None = None,
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    """Read one source cloud at a time to cap Trino aggregation cardinality.
+
+    The wide FinOps configuration groups by many dimensions. On a single-node
+    Trino, aggregating every origin in one hash table can restart the JVM. The
+    resulting records are additive, so partitioning by ``cloud_origem`` is
+    semantically identical while keeping every query bounded.
+    """
+    cloud_names = sorted(name for name in clouds if name)
+    if not cloud_col or not cloud_names:
+        return await _fetch_period_records(connection_filter=connection_filter, **kwargs)
+    cloud_expr = f"CAST({_q(cloud_col)} AS VARCHAR)"
+    records: list[dict[str, Any]] = []
+    for cloud in cloud_names:
+        cloud_filter = _and_filters(connection_filter, f"{cloud_expr} = {_lit(cloud)}")
+        shard_values: list[str | None] = [None]
+        if shard_col:
+            shard_rows = await trino_execute(
+                f"SELECT DISTINCT CAST({_q(shard_col)} AS VARCHAR) AS shard "
+                f"FROM {kwargs['source']} WHERE {kwargs['type_filter']} AND ({cloud_filter})",
+                timeout_s=120,
+            )
+            shard_values = [row.get("shard") for row in shard_rows]
+            # No shard values means no realized rows for this cloud/filter.
+            if not shard_values:
+                continue
+        for shard in shard_values:
+            shard_filter = cloud_filter
+            if shard_col:
+                shard_expr = f"CAST({_q(shard_col)} AS VARCHAR)"
+                shard_filter = _and_filters(
+                    cloud_filter,
+                    f"{shard_expr} IS NULL" if shard is None else f"{shard_expr} = {_lit(shard)}",
+                )
+            records.extend(await _fetch_period_records(
+                connection_filter=shard_filter,
+                **kwargs,
+            ))
+    # Preserve records with absent or unforeseen origins rather than silently
+    # dropping them when the cutoff discovery did not return a cloud key.
+    known = ", ".join(_lit(cloud) for cloud in cloud_names)
+    records.extend(await _fetch_period_records(
+        connection_filter=_and_filters(connection_filter, f"({cloud_expr} IS NULL OR {cloud_expr} NOT IN ({known}))"),
+        **kwargs,
+    ))
     return records
 
 
@@ -795,7 +928,7 @@ def validate_config(config: Any, metadata: dict[str, Any]) -> list[str]:
     return errors
 
 
-async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progress=None, business_rules: list[Any] | None = None, result_table: str | None = None, simulated_as_of: date | None = None) -> dict[str, Any]:
+async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None = None, progress=None, business_rules: list[Any] | None = None, result_table: str | None = None, simulated_as_of: date | None = None) -> dict[str, Any]:
     table = config.destination_physical_name
     namespace = getattr(config, "source_namespace", "gold")
     dims = list(config.dimensions or [])
@@ -814,6 +947,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     source = f"iceberg.{namespace}.{table}"
     excluded_days = max(0, int(getattr(config, "cutoff_days", 2) or 0))
     metadata = getattr(config, "gold_metadata", None) or {}
+    source_exclusion, source_rule_names = _source_exclusion_filter(
+        business_rules or [], metadata, period,
+    )
     cloud_col, id_col = _resolve_connection_columns(metadata)
     allocation_rules = _merge_allocation_rules(
         _normalize_allocation_rules(config),
@@ -867,13 +1003,22 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
             collected_through = collected_timestamp.date()
             effective_cutoff = collected_through - timedelta(days=excluded_days)
     # The longest model uses 28 days and AUTO_BACKTEST reserves seven days for
-    # validation. Keep the current month in full when it starts earlier.
+    # validation. Keep at least `minimum_monthly_points` full calendar months so
+    # that a structural spike (e.g. Datamesh August growth) is captured by every
+    # enabled window when the forecast is re-executed after data arrives.
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
-    history_start = min(
-        effective_cutoff.replace(day=1),
-        effective_cutoff - timedelta(days=max_window + 7),
-    )
     minimum_monthly = max(1, int(getattr(config, "minimum_monthly_points", 3) or 3))
+    # Start of the Nth month back from the anchor month.
+    month_history_start = effective_cutoff.replace(day=1)
+    for _ in range(minimum_monthly - 1):
+        month_history_start = (month_history_start - timedelta(days=1)).replace(day=1)
+    # Also honour the window-based minimum so backtest always has enough points.
+    window_history_start = effective_cutoff - timedelta(days=max_window + 7)
+    history_start = min(month_history_start, window_history_start)
+    logger.info(
+        "[forecast] history_start=%s (month_anchor=%s, window_anchor=%s, minimum_months=%d)",
+        history_start, month_history_start, window_history_start, minimum_monthly,
+    )
     query_dims = list(dims)
     for extra_col in (cloud_col, id_col):
         if extra_col and extra_col not in query_dims:
@@ -885,13 +1030,16 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
     ]
     per_connection = allocation_rules and not any(rule.get("_global") for rule in allocation_rules)
     global_interval = allocation_rules and any(rule.get("_global") for rule in allocation_rules)
+    shard_col = "subaccountname" if any(str(item).lower() == "subaccountname" for item in query_dims) else None
     frames: list[pd.DataFrame] = []
     if global_interval:
         charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
-        records = await _fetch_period_records(
+        records = await _fetch_period_records_by_cloud(
             source=source, type_filter=type_filter, period=period, history_start=history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
-            mode="interval", charge_end_col=charge_end_col, period_col=period, connection_filter=None,
+            mode="interval", charge_end_col=charge_end_col, period_col=period,
+            connection_filter=None, exclusion_filter=None,
+            cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=minimum_monthly,
         )
         interval_frame = pd.DataFrame(records)
@@ -900,10 +1048,12 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
             frames.append(interval_frame)
     elif per_connection:
         daily_filter = _connection_rule_filter(allocation_rules, cloud_col, id_col, negate=True)
-        daily_records = await _fetch_period_records(
+        daily_records = await _fetch_period_records_by_cloud(
             source=source, type_filter=type_filter, period=period, history_start=history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
-            mode="daily", charge_end_col=None, period_col=period, connection_filter=daily_filter,
+            mode="daily", charge_end_col=None, period_col=period,
+            connection_filter=daily_filter, exclusion_filter=None,
+            cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=minimum_monthly,
         )
         daily_frame = pd.DataFrame(daily_records)
@@ -912,10 +1062,12 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         interval_filter = _connection_rule_filter(allocation_rules, cloud_col, id_col, negate=False)
         if interval_filter:
             charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
-            interval_records = await _fetch_period_records(
+            interval_records = await _fetch_period_records_by_cloud(
                 source=source, type_filter=type_filter, period=period, history_start=history_start,
                 effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
-                mode="interval", charge_end_col=charge_end_col, period_col=period, connection_filter=interval_filter,
+                mode="interval", charge_end_col=charge_end_col, period_col=period,
+                connection_filter=interval_filter, exclusion_filter=None,
+                cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
                 minimum_monthly_points=minimum_monthly,
             )
             interval_frame = pd.DataFrame(interval_records)
@@ -923,15 +1075,28 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
                 interval_frame = _expand_charge_interval(interval_frame, query_dims)
                 frames.append(interval_frame)
     else:
-        daily_records = await _fetch_period_records(
+        daily_records = await _fetch_period_records_by_cloud(
             source=source, type_filter=type_filter, period=period, history_start=history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
-            mode="daily", charge_end_col=None, period_col=period, connection_filter=None,
+            mode="daily", charge_end_col=None, period_col=period,
+            connection_filter=None, exclusion_filter=None,
+            cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=minimum_monthly,
         )
         daily_frame = pd.DataFrame(daily_records)
         if not daily_frame.empty:
             frames.append(daily_frame)
+    if source_exclusion:
+        excluded_records = await _fetch_period_records(
+            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            mode="daily", charge_end_col=None, period_col=period,
+            connection_filter=None, exclusion_filter=source_exclusion, only_exclusions=True,
+            minimum_monthly_points=minimum_monthly,
+        )
+        excluded_frame = pd.DataFrame(excluded_records)
+        if not excluded_frame.empty:
+            frames.append(excluded_frame)
     if not frames:
         raise ValueError("A Gold não possui dados realizados para a configuração")
     frame = pd.concat(frames, ignore_index=True)
@@ -989,6 +1154,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
                 last_total = float(charged_months.iloc[-1])
                 days_in_last_month = calendar.monthrange(last_period.year, last_period.month)[1]
                 lump_daily_rate = last_total / days_in_last_month
+        # Série lumpy (fatura mensal já lançada) vs uso diário: as regras
+        # RECURRING_* zeram o mês aberto só para lumpy; uso diário mantém o
+        # restante (baseline × dias_restantes).
+        series_context[_series_key(key_values, key_cols)]["lumpy"] = lump_daily_rate is not None
         candidates = []
         for window in enabled_windows:
             sample = daily.tail(window)
@@ -1088,7 +1257,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         key_cols,
         effective_cutoff,
     )
-    applied_rules = [*interval_rule_names, *applied_rules]
+    applied_rules = [*source_rule_names, *interval_rule_names, *applied_rules]
     for adjustment in sorted(adjustments, key=lambda a: a.priority):
         mask = pd.Series(True, index=output.index)
         for column, value in (adjustment.filters or {}).items():
@@ -1102,7 +1271,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date, progre
         elif adjustment.adjustment_type == "ZERO": output.loc[mask, "forecast_value"] = 0.0
     # A forecast run is an immutable audit snapshot.  Callers pass the run ID
     # so two executions on the same day can never overwrite each other.
-    result_table = result_table or f"result_{config.id}_{int(cutoff.strftime('%Y%m%d'))}"
+    # ``cutoff`` is only a naming fallback; the math always uses the
+    # data-driven effective_cutoff (MAX collected − cutoff_days).
+    if not result_table:
+        anchor = cutoff or effective_cutoff
+        result_table = f"result_{config.id}_{int(anchor.strftime('%Y%m%d'))}"
     iceberg.write_forecast_result(result_table, output)
     # Simulated runs must never overwrite the current planning snapshot; they
     # are audit/backtest artifacts used only by the accuracy dashboard.

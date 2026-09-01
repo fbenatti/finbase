@@ -51,6 +51,8 @@ GRID_FIELDS = {
 # colaboração) e marketplace. Derivadas do connector_type — a UI filtra por elas.
 TOOL_CONNECTOR_TYPES = (
     "azure_openai_ptu",
+    "azure_automation_jobs",
+    "azure_resource_graph",
     "github_billing", "github_license", "github_token",
     "notebooklm_license", "notebooklm_token",
     "claude_license", "claude_token",
@@ -75,6 +77,8 @@ GRID_FILTER_VALUES = {
     },
     "connector_type": {
         "azure blob storage": "azure_blob",
+        "azure automation jobs": "azure_automation_jobs",
+        "azure resource graph": "azure_resource_graph",
         "gcp bigquery": "gcp_bigquery",
         "oracle cloud (oci)": "oci",
         "mongodb atlas": "mongodb_atlas",
@@ -90,7 +94,6 @@ GRID_FILTER_VALUES = {
         "gemini tokens": "gemini_token",
         "gemini notebooklm": "gemini_notebooklm",
         "databricks (sql warehouse)": "databricks",
-        "custo manual de ia": "manual_ai_cost",
     },
 }
 
@@ -211,6 +214,25 @@ async def create_connection(data: SourceConnectionCreate, db: AsyncSession = Dep
     db.add(conn)
     await db.commit()
     await db.refresh(conn)
+
+    # Azure Automation: cria tabela destino e mappings automaticamente.
+    if conn.connector_type == "azure_automation_jobs":
+        try:
+            from app.routers.scheduled_shutdown import _setup_for_connection
+            await _setup_for_connection(db, conn)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Falha ao configurar Azure Automation para conexão %s", conn.code)
+
+    # Azure Resource Graph: cria tabelas destino (inventário + órfãos) e mappings.
+    if conn.connector_type == "azure_resource_graph":
+        try:
+            from app.routers.azure_resource_graph import _setup_for_connection
+            await _setup_for_connection(db, conn)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Falha ao configurar Azure Resource Graph para conexão %s", conn.code)
+
     return _connection_out(conn)
 
 
@@ -227,7 +249,15 @@ async def update_connection(
 
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
-        setattr(conn, key, value)
+        # The API never returns private credentials.  Merge a configuration
+        # update so changing a harmless scope (such as OCI compartments) does
+        # not accidentally erase the stored key material.
+        if key == "config_json" and value is not None:
+            merged = dict(conn.config_json or {})
+            merged.update(value)
+            conn.config_json = merged
+        else:
+            setattr(conn, key, value)
     await db.commit()
     await db.refresh(conn)
     return _connection_out(conn)

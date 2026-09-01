@@ -373,7 +373,33 @@ class GithubTokenExtractor:
                 client, start_date, end_date, "ai_credit"
             )
 
-            if not report_id or report_status in ("failed", "error", "cancelled"):
+            # A completed report whose download URLs already expired cannot be
+            # downloaded. Treat it as missing so a fresh report is created.
+            if report_status == "completed":
+                poll_resp = client.get(f"{self._billing_reports_url}/{report_id}", headers=self._headers)
+                if poll_resp.status_code == 200:
+                    item_data = poll_resp.json()
+                    urls = item_data.get("download_urls") or []
+                    download_url = urls[0] if urls else item_data.get("download_url")
+                    if download_url:
+                        csv_resp = client.get(download_url, follow_redirects=True, timeout=120)
+                        if csv_resp.status_code == 200:
+                            content = csv_resp.content
+                            if content.startswith(b"\x1f\x8b"):
+                                import gzip
+                                content = gzip.decompress(content)
+                            df = pd.read_csv(io.BytesIO(content), dtype=str)
+                            return self._normalize_billing_csv(df), str(report_id)
+                        raise ValueError(
+                            f"Falha ao baixar CSV do GitHub: HTTP {csv_resp.status_code}"
+                        )
+                    logger.warning(
+                        "[GithubToken] Relatório %s completed sem download_urls; criando novo",
+                        report_id,
+                    )
+                    report_status = "expired_urls"
+
+            if not report_id or report_status in ("failed", "error", "cancelled", "expired_urls"):
                 payload = {
                     "report_type": "ai_credit",
                     "start_date": start_date,
@@ -447,9 +473,14 @@ class GithubTokenExtractor:
                     download_url = urls[0] if urls else item_data.get("download_url")
                     if download_url:
                         break
-                    raise ValueError(
-                        f"[GithubToken] Relatório {report_id} completed mas sem download_urls"
+                    # The report completed but the API never issued download
+                    # URLs: the period has no AI-credit rows to export. Return
+                    # an empty frame instead of failing the whole period.
+                    logger.warning(
+                        "[GithubToken] Relatório %s completed sem download_urls — período sem dados",
+                        report_id,
                     )
+                    return pd.DataFrame(), str(report_id)
                 if current_status in ("failed", "error", "cancelled"):
                     raise ValueError(
                         f"[GithubToken] Relatório {report_id} falhou com status '{current_status}'"

@@ -341,7 +341,8 @@ export default function ReprocessHistoryDataGrid({
 
   return (
     <>
-      <Box sx={{ height: 520, width: "100%" }} onContextMenu={onCellContextMenu}>
+      {/* autoHeight: sem barra de rolagem interna do grid — o portal rola a página */}
+      <Box sx={{ width: "100%" }} onContextMenu={onCellContextMenu}>
         <DataGrid
           apiRef={apiRef}
           rows={rows}
@@ -354,6 +355,7 @@ export default function ReprocessHistoryDataGrid({
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
+          autoHeight
           pageSizeOptions={[10, 25, 50]}
           paginationModel={paginationModel}
           sortModel={sortModel}

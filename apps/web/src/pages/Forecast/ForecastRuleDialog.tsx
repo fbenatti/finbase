@@ -197,8 +197,14 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
       <DialogContent sx={dialogFieldSx}>
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Configuração {config.id}: {config.name}. Regras versionadas aplicadas após a projeção matemática.
+          Configuração {config.id}: {config.name}. Exclusões da origem são aplicadas antes da agregação; as demais regras, após a projeção matemática.
         </Typography>
+
+        {rule.behavior === "SOURCE_EXCLUDE_PREFIX" && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            O campo será filtrado diretamente na Gold usando “começa com”. Ele não precisa estar nas dimensões do forecast.
+          </Alert>
+        )}
 
         <Stack spacing={2}>
           <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">

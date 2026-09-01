@@ -58,7 +58,8 @@ type GridQuery = {
 export default function Forecast() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState(searchParams.get("tab") || "config");
+  // Acurácia is the primary Forecast view; an explicit URL tab still wins.
+  const [tab, setTab] = useState(searchParams.get("tab") || "accuracy");
   const [tables, setTables] = useState<DestinationTable[]>([]);
   const [configs, setConfigs] = useState<ForecastConfig[]>([]);
   const [error, setError] = useState("");
@@ -314,10 +315,10 @@ export default function Forecast() {
           url.set("tab", value);
           navigate(`/forecast?${url.toString()}`, { replace: true });
         }} aria-label="Seções do Forecast" sx={{ mb: 0, minHeight: 42 }}>
+          <Tab value="accuracy" label="Acurácia" sx={{ minHeight: 42 }} />
           <Tab value="config" label="Configurações e execução" sx={{ minHeight: 42 }} />
           <Tab value="rules" label="Regras de negócio" sx={{ minHeight: 42 }} />
           <Tab value="history" label="Histórico e resultados" sx={{ minHeight: 42 }} />
-          <Tab value="accuracy" label="Acurácia" sx={{ minHeight: 42 }} />
         </Tabs>
       </Box>
 

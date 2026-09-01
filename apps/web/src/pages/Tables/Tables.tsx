@@ -1,21 +1,22 @@
 import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import Destinations from "../Destinations/Destinations";
-import CloneRules from "../CloneRules/CloneRules";
 import Relationship from "../Relationship/Relationship";
-import Dimon from "../Dimon/Dimon";
 
 const TABS = [
   { id: "destinations", label: "Tabelas de destino" },
-  { id: "clone-rules", label: "Regras de clonagem" },
   { id: "relationship", label: "Relacionamentos" },
-  { id: "cost-relationship", label: "Camada Dimon de Custo" },
 ] as const;
 
 export default function Tables() {
   const [params, setParams] = useSearchParams();
   // Legacy tab id redirect: ai-cost-relationship -> cost-relationship.
   const rawTab = params.get("tab");
+  // Itens de governança foram movidos para a área de Governança. Preserve links antigos.
+  if (rawTab === "clone-rules" || rawTab === "cost-relationship" || rawTab === "ai-cost-relationship") {
+    const governanceTab = rawTab === "clone-rules" ? "clone-rules" : "cost-relationship";
+    return <Navigate to={`/governance?tab=${governanceTab}`} replace />;
+  }
   const normalized = rawTab === "ai-cost-relationship" ? "cost-relationship" : rawTab;
   const activeTab = TABS.some((t) => t.id === normalized) ? normalized! : "destinations";
 
@@ -40,7 +41,7 @@ export default function Tables() {
           Tabelas
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Gerencie tabelas de destino, regras de clonagem e mapeamentos de relacionamentos em um só lugar.
+          Gerencie tabelas de destino e mapeamentos de relacionamentos em um só lugar.
         </Typography>
         <Tabs
           value={activeTab}
@@ -66,9 +67,7 @@ export default function Tables() {
           sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}
         >
           {activeTab === "destinations" && <Destinations embedded />}
-          {activeTab === "clone-rules" && <CloneRules embedded />}
           {activeTab === "relationship" && <Relationship embedded />}
-          {activeTab === "cost-relationship" && <Dimon embedded />}
         </Paper>
       </Box>
     </Box>

@@ -9,6 +9,7 @@ from app.services.forecast_service import (
     _cloud_effective_cutoff,
     _replicated_month_value,
     _series_key,
+    _source_exclusion_filter,
 )
 
 
@@ -243,6 +244,50 @@ def test_repeat_next_month_only_first_future_month():
     )
 
 
+def test_recurring_monthly_keeps_restante_for_daily_usage_open_month():
+    """Uso diário (não lumpy — Azure/GCP): o mês aberto mantém o restante
+    (baseline × dias_restantes) em vez de zerar — estimativa = realizado
+    parcial + forecast do restante."""
+    current = "202608"
+    assert (
+        _replicated_month_value(
+            behavior="RECURRING_MONTHLY",
+            forecast_month=current,
+            current_month_key=current,
+            last_closed_month_total=5_000_000.0,
+            current_month_realized=2_500_000.0,
+            growth_rate=0.0,
+            lumpy=False,
+        )
+        is None
+    )
+    # Futuros continuam replicando o último mês fechado.
+    assert _replicated_month_value(
+        behavior="RECURRING_MONTHLY",
+        forecast_month="202609",
+        current_month_key=current,
+        last_closed_month_total=5_000_000.0,
+        current_month_realized=2_500_000.0,
+        growth_rate=0.0,
+        lumpy=False,
+    ) == 5_000_000.0
+
+
+def test_recurring_monthly_zeroes_open_month_for_lumpy():
+    """Série lumpy (fatura mensal já lançada): mês aberto = 0 para não
+    duplicar o valor do mês fechado sobre o uso em andamento."""
+    current = "202608"
+    assert _replicated_month_value(
+        behavior="RECURRING_MONTHLY",
+        forecast_month=current,
+        current_month_key=current,
+        last_closed_month_total=1_417_849.0,
+        current_month_realized=1_417_849.0,
+        growth_rate=0.0,
+        lumpy=True,
+    ) == 0.0
+
+
 def test_rule_without_identification_or_scope_is_not_applied_globally():
     output = pd.DataFrame(
         [
@@ -260,3 +305,38 @@ def test_rule_without_identification_or_scope_is_not_applied_globally():
     )
     assert applied == ["Refund global (não aplicada: sem identificação/escopo)"]
     assert output["forecast_value"].tolist() == [100.0, 200.0]
+
+
+def test_source_exclusion_prefix_uses_gold_field_without_forecast_dimension():
+    rule = _rule(
+        name="Excluir consumo horario PTU Aura Brain",
+        identification_column="skumeter",
+        identification_values=["Provisioned Managed"],
+        behavior="SOURCE_EXCLUDE_PREFIX",
+        scope={"departamento_nivel_5": "Aura Brain", "servicename": "Microsoft.CognitiveServices"},
+        start_period="202512",
+    )
+    sql_filter, applied = _source_exclusion_filter(
+        [rule],
+        {"columns": [
+            {"name": "skumeter"}, {"name": "departamento_nivel_5"},
+            {"name": "servicename"}, {"name": "_billing_period"},
+        ]},
+        "_billing_period",
+    )
+    assert applied == [rule.name]
+    assert 'CAST("skumeter" AS VARCHAR)' in sql_filter
+    assert "Provisioned Managed" in sql_filter
+    assert 'CAST("departamento_nivel_5" AS VARCHAR) = \'Aura Brain\'' in sql_filter
+    assert 'CAST("_billing_period" AS VARCHAR) >= \'202512\'' in sql_filter
+
+
+def test_source_exclusion_rule_is_not_reapplied_after_aggregation():
+    output = pd.DataFrame([{"forecast_month": "202609", "tipo": "forecast", "forecast_value": 123.0}])
+    rule = _rule(
+        name="Excluir origem", identification_column="skumeter",
+        identification_values=["Provisioned Managed"], behavior="SOURCE_EXCLUDE_PREFIX",
+    )
+    applied = _apply_forecast_business_rules(output, [rule], {}, [], date(2026, 8, 29))
+    assert applied == []
+    assert output["forecast_value"].tolist() == [123.0]

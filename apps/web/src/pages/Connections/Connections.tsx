@@ -17,6 +17,8 @@ import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
   { value: "azure_openai_ptu", label: "Azure OpenAI PTU", scope: "azure" },
+  { value: "azure_automation_jobs", label: "Azure Automation Jobs", scope: "azure" },
+  { value: "azure_resource_graph", label: "Azure Resource Graph", scope: "azure" },
   { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
   { value: "oci", label: "Oracle Cloud (OCI)", scope: "oci" },
   { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
@@ -51,6 +53,8 @@ function categoryOfConnection(connection: { connector_type: string; cloud_scope?
   if (connection.connector_type === "mongodb_atlas" || connection.cloud_scope === "atlas") return "marketplace";
   if (
     connection.connector_type === "azure_openai_ptu" ||
+    connection.connector_type === "azure_automation_jobs" ||
+    connection.connector_type === "azure_resource_graph" ||
     connection.connector_type === "databricks" ||
     connection.connector_type.startsWith("github_") ||
     connection.connector_type.startsWith("notebooklm_") ||
@@ -92,6 +96,8 @@ const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: str
   // Provedores Cloud
   { value: "azure_blob", label: "Azure", description: "Blob Storage", icon: <Cloud />, color: "#0078D4", category: "provedor" },
   { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, color: "#0078D4", category: "ferramenta" },
+  { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de Start/Stop de VMs", icon: <Cloud />, color: "#0078D4", category: "ferramenta" },
+  { value: "azure_resource_graph", label: "Azure Resource Graph", description: "Inventário / recursos órfãos", icon: <Search />, color: "#0078D4", category: "ferramenta" },
   { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, color: "#4285F4", category: "provedor" },
   { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, color: "#F80000", category: "provedor" },
   // Ferramentas Cloud
@@ -135,7 +141,7 @@ const emptyForm = {
   storage_account: "", container_name: "", blob_prefixes: "",
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
-  oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "",
+  oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "", oci_genai_compartments: "",
   github_extraction_type: "token" as "billing" | "license" | "token",
   gemini_extraction_type: "token" as "license" | "token",
   admin_email: "",
@@ -149,6 +155,10 @@ const emptyForm = {
   databricks_query: "SELECT * FROM system.billing.usage",
   databricks_month_column: "usage_date",
   databricks_token: "",
+  automation_subscription_ids: "",
+  automation_backfill_days: 93,
+  arg_subscription_ids: "",
+  arg_orphan_rules: "",
 };
 
 export default function Connections() {
@@ -363,6 +373,7 @@ export default function Connections() {
         oci_fingerprint: cfg.fingerprint || "",
         oci_region: cfg.region || "sa-saopaulo-1",
         oci_private_key: cfg.private_key || cfg.key_content || "",
+        oci_genai_compartments: (cfg.generative_ai_compartment_ids || []).join("\n"),
         blob_prefixes: (conn.blob_prefixes || []).join("\n"),
       });
     } else if (conn.connector_type === "mongodb_atlas") {
@@ -479,6 +490,41 @@ export default function Connections() {
         databricks_month_column: cfg.month_column || "usage_date",
         databricks_token: "",
       });
+    } else if (conn.connector_type === "azure_automation_jobs") {
+      const subIds = Array.isArray(cfg.subscription_ids) ? cfg.subscription_ids.join("\n") : "";
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "Azure",
+        cloud_scope: conn.cloud_scope || "azure",
+        tenant_id: cfg.tenant_id || "",
+        client_id: cfg.client_id || "",
+        client_secret: cfg.client_secret || "",
+        credential_profile: cfg.credential_profile || "",
+        automation_subscription_ids: subIds,
+        automation_backfill_days: Number(cfg.backfill_days) || 93,
+      });
+    } else if (conn.connector_type === "azure_resource_graph") {
+      const subIds = Array.isArray(cfg.subscription_ids) ? cfg.subscription_ids.join("\n") : "";
+      const rules = (cfg.orphan_rules && typeof cfg.orphan_rules === "object")
+        ? Object.entries(cfg.orphan_rules as Record<string, string>)
+            .map(([rule, kql]) => `${rule}: ${kql}`)
+            .join("\n")
+        : "";
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "Azure",
+        cloud_scope: conn.cloud_scope || "azure",
+        tenant_id: cfg.tenant_id || "",
+        client_id: cfg.client_id || "",
+        client_secret: cfg.client_secret || "",
+        credential_profile: cfg.credential_profile || "",
+        arg_subscription_ids: subIds,
+        arg_orphan_rules: rules,
+      });
     } else {
       setForm({
         ...emptyForm,
@@ -529,6 +575,7 @@ export default function Connections() {
       if (form.oci_fingerprint) configJson.fingerprint = form.oci_fingerprint;
       if (form.oci_region) configJson.region = form.oci_region;
       if (form.oci_private_key) configJson.private_key = form.oci_private_key;
+      configJson.generative_ai_compartment_ids = form.oci_genai_compartments.split("\n").map(s => s.trim()).filter(Boolean);
     } else if (form.connector_type === "mongodb_atlas") {
       if (form.tenant_id) configJson.base_url = form.tenant_id;
       if (form.client_id) configJson.public_key = form.client_id;
@@ -571,6 +618,32 @@ export default function Connections() {
       if (form.databricks_month_column) configJson.month_column = form.databricks_month_column;
       // Token é write-only e opcional: por padrão o runtime lê de .env-databriks (DATABRICKS_TOKEN).
       if (form.databricks_token) configJson.token = form.databricks_token;
+    } else if (form.connector_type === "azure_automation_jobs") {
+      if (form.credential_profile) configJson.credential_profile = form.credential_profile;
+      if (form.tenant_id) configJson.tenant_id = form.tenant_id;
+      if (form.client_id) configJson.client_id = form.client_id;
+      if (form.client_secret) configJson.client_secret = form.client_secret;
+      configJson.subscription_ids = form.automation_subscription_ids
+        .split("\n").map(s => s.trim()).filter(Boolean);
+      configJson.backfill_days = Number(form.automation_backfill_days) || 93;
+    } else if (form.connector_type === "azure_resource_graph") {
+      if (form.credential_profile) configJson.credential_profile = form.credential_profile;
+      if (form.tenant_id) configJson.tenant_id = form.tenant_id;
+      if (form.client_id) configJson.client_id = form.client_id;
+      if (form.client_secret) configJson.client_secret = form.client_secret;
+      configJson.subscription_ids = form.arg_subscription_ids
+        .split("\n").map(s => s.trim()).filter(Boolean);
+      // Regras de órfãos opcionais: "regra: KQL" por linha → override do padrão.
+      const orphanRules: Record<string, string> = {};
+      for (const line of form.arg_orphan_rules.split("\n")) {
+        const idx = line.indexOf(":");
+        if (idx > 0) {
+          const rule = line.slice(0, idx).trim();
+          const kql = line.slice(idx + 1).trim();
+          if (rule && kql) orphanRules[rule] = kql;
+        }
+      }
+      if (Object.keys(orphanRules).length) configJson.orphan_rules = orphanRules;
     }
 
     return {
@@ -963,6 +1036,70 @@ export default function Connections() {
               </>
             )}
 
+            {form.connector_type === "azure_automation_jobs" && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>1. Identidade</Typography>
+                <Alert severity="info">A coleta lê jobs e schedules das Automation Accounts via ARM API. Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
+                <TextField label="Perfil de credencial" value={form.credential_profile || ""}
+                  onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
+                  helperText="Ex: azure-4p ou azure-ti (usa .env). Vazio = usar campos abaixo." />
+                <TextField label="Tenant ID" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+                <TextField label="Client ID" value={form.client_id}
+                  onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+                <TextField label="Client Secret (somente para credencial nova)" type="password" value={form.client_secret}
+                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                  helperText="Deixe vazio para manter o segredo runtime existente." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>2. Escopo Azure</Typography>
+                <TextField label="Subscription IDs (um por linha)" multiline rows={3}
+                  value={form.automation_subscription_ids}
+                  onChange={(e) => setForm({ ...form, automation_subscription_ids: e.target.value })}
+                  helperText="Vazio = todas as subscriptions acessíveis pela credencial." />
+                <TextField label="Backfill (dias)" type="number" value={form.automation_backfill_days}
+                  onChange={(e) => setForm({ ...form, automation_backfill_days: Number(e.target.value) || 93 })}
+                  helperText="Quantos dias de histórico de jobs coletar (padrão 93)." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Coleta</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Scan descobre as Automation Accounts; a extração coleta jobs (últimos N dias) e
+                  schedules atuais, persiste na Bronze e permite reprocessar para a Gold
+                  (MODELO AUTOMATION / MODELO AUTOMATION SCHEDULE).
+                </Typography>
+              </>
+            )}
+
+            {form.connector_type === "azure_resource_graph" && (
+              <>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>1. Identidade</Typography>
+                <Alert severity="info">A coleta consulta o Azure Resource Graph (inventário + recursos órfãos). Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
+                <TextField label="Perfil de credencial" value={form.credential_profile || ""}
+                  onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
+                  helperText="Ex: azure-4p ou azure-ti (usa .env). Vazio = usar campos abaixo." />
+                <TextField label="Tenant ID" value={form.tenant_id}
+                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+                <TextField label="Client ID" value={form.client_id}
+                  onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+                <TextField label="Client Secret (somente para credencial nova)" type="password" value={form.client_secret}
+                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                  helperText="Deixe vazio para manter o segredo runtime existente." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>2. Escopo Azure</Typography>
+                <TextField label="Subscription IDs (um por linha)" multiline rows={3}
+                  value={form.arg_subscription_ids}
+                  onChange={(e) => setForm({ ...form, arg_subscription_ids: e.target.value })}
+                  helperText="Vazio = todas as subscriptions acessíveis pela credencial. Recomendado preencher (limite de 10k linhas por query do ARG)." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Regras de órfãos (opcional)</Typography>
+                <TextField label="Regras KQL customizadas (regra: KQL por linha)" multiline rows={4}
+                  value={form.arg_orphan_rules}
+                  onChange={(e) => setForm({ ...form, arg_orphan_rules: e.target.value })}
+                  helperText="Override das regras padrão (disk_unattached, vm_deallocated, public_ip_idle, snapshot_orphan, lb_idle). Ex: vm_deallocated: resources | where ..." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Coleta</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Scan lista as subscriptions acessíveis; a extração coleta o inventário completo e
+                  os órfãos por snapshot diário, persiste na Bronze e permite reprocessar para a Gold
+                  (MODELO INVENTÁRIO CLOUD / MODELO RECURSOS ÓRFÃOS). Governança → Recursos Órfãos.
+                </Typography>
+              </>
+            )}
+
             {form.connector_type === "azure_blob" && (
               <>
                 <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>Azure Credentials</Typography>
@@ -1028,6 +1165,10 @@ export default function Connections() {
                   value={form.blob_prefixes}
                   onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
                   helperText="Padrão: reports/cost-csv (relatórios de custo financeiro)" />
+                <TextField label="Compartments OCI Generative AI / GPU (um OCID por linha)" multiline rows={3}
+                  value={form.oci_genai_compartments}
+                  onChange={(e) => setForm({ ...form, oci_genai_compartments: e.target.value })}
+                  helperText="Escopo da fonte OCI Generative AI & GPU Monitoring; necessário para coletar inventário, tokens e tendências." />
                 <Alert severity="info" sx={{ mt: 1, fontSize: "0.8rem" }}>
                   <strong>Consolidação Diária OCI:</strong> Os dados são automaticamente agrupados por dia, recurso e tags durante a ingestão para otimização de performance, preservando 100% dos valores financeiros em R$ e dimensões.
                 </Alert>

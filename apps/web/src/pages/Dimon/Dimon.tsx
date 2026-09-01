@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Chip, Divider, FormControl, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { Add, ContentCopy, Delete, Save } from "@mui/icons-material";
 import { DimonRule, DimonRuleSource, GoldTable, DimonGoldColumn, formatApiError, getDimonRules, getDimonGoldTables, getDimonGoldSchema, saveDimonRule, reprocessDimons, getDimonHistory, DimonHistoryItem, deleteDimonRule } from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import SqlEditor from "../../components/SqlEditor";
 
-type Condition = { column: string; operator: string; values: string[] };
+type Condition = { column: string; operator: string; values: string[]; logic?: "AND" | "OR" };
 const operators = ["IN", "=", "CONTAINS", "NOT_IN", "NOT_CONTAINS", "EMPTY", "NOT_EMPTY"];
 const emptySource = (): DimonRuleSource => ({ gold_tables: [], filter_json: [], value_column: "realizado", percent: 100 });
-const emptyRule = (): Partial<DimonRule> => ({ code: "", name: "", description: "", active: true, dimensions: [], measure_columns: [], sources: [emptySource()] });
+const emptyRule = (): Partial<DimonRule> => ({ code: "", name: "", description: "", active: true, dimensions: [], measure_columns: [], sql_template: "", snapshot_mode: false, sources: [emptySource()] });
 
 function conditions(source: DimonRuleSource): Condition[] {
   const raw: any = source.filter_json;
@@ -28,6 +29,7 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
   const [history, setHistory] = useState<DimonHistoryItem[]>([]);
   // Schema of the first selected Gold, used for the pivot autocompletes.
   const [schemaCols, setSchemaCols] = useState<DimonGoldColumn[]>([]);
+  const [editorMode, setEditorMode] = useState<"pivot" | "sql">("pivot");
 
   // Schema UNIFICADO de todas as Golds das fontes selecionadas (união de
   // colunas). Antes só o primaryGold (primeira Gold) era consultado, então
@@ -184,6 +186,10 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
       </Paper></Grid>
       <Grid item xs={12} md={8}><Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="h6" mb={2}>{selected.id ? "Editar regra" : "Nova regra"}</Typography>
+        <Tabs value={editorMode} onChange={(_, v) => setEditorMode(v)} sx={{ mb: 2 }}>
+          <Tab value="pivot" label="Pivot (Golds + filtros)" />
+          <Tab value="sql" label="SQL Custom" />
+        </Tabs>
         {selected.materialization_error && <Alert severity="error" sx={{ mb: 2 }}>Falha na última materialização: {selected.materialization_error}</Alert>}
         <Stack spacing={2}>
           <TextField label="dimon_code (nome da tabela)" value={selected.code || ""} onChange={e => setSelected({ ...selected, code: e.target.value })}
@@ -194,6 +200,32 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
             <MenuItem value="active">Regra ativa</MenuItem><MenuItem value="inactive">Regra inativa</MenuItem>
           </Select></FormControl>
           <Divider />
+          {editorMode === "sql" && (
+            <>
+              <Alert severity="info">No modo SQL, a query inteira é executada e o resultado vira a tabela <b>dest_dm_cost_{(selected.code || "code").toLowerCase().replace(/[^a-z0-9_\-]+/g, "_")}</b>. Campos recomendados: <code>_billing_period</code>, dimensões e medidas numéricas.</Alert>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={!!selected.snapshot_mode}
+                    onChange={(e) => setSelected({ ...selected, snapshot_mode: e.target.checked })}
+                  />
+                }
+                label={
+                  <>
+                    <b>Modo Snapshot</b> — cada reprocess <b>adiciona uma cópia datada</b> (coluna <code>_snapshot_date</code>) em vez de substituir a tabela. Use para comparar dados entre dias (ex.: delta de tags <code>shutdown=auto</code>).
+                  </>
+                }
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>Editor SQL com syntax highlighting — clique e edite direto.</Typography>
+              <SqlEditor
+                value={selected.sql_template || ""}
+                onChange={(v) => setSelected({ ...selected, sql_template: v })}
+                minRows={10}
+                maxRows={28}
+              />
+            </>
+          )}
+          {editorMode === "pivot" && (<>
           <Typography variant="subtitle1">Origens (Golds)</Typography>
           <Typography variant="caption" color="text.secondary">Cada origem pode ter UMA OU MAIS tabelas Gold com a mesma estrutura — unidas num dado único e limpo com os mesmos filtros. Origens diferentes são concatenadas e agregadas.</Typography>
           {(selected.sources || []).map((source, sourceIndex) => {
@@ -215,13 +247,14 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
                 </Select>
               </FormControl>
               {sourceConditions.map((condition, conditionIndex) => <Stack key={conditionIndex} direction={{ xs: "column", sm: "row" }} gap={1}>
+                {conditionIndex > 0 && <Select size="small" value={condition.logic || "AND"} title="Conector entre filtros" onChange={e => { const next = [...sourceConditions]; next[conditionIndex] = { ...condition, logic: e.target.value as "AND" | "OR" }; setConditions(sourceIndex, next); }} sx={{ minWidth: 76 }}><MenuItem value="AND">E (AND)</MenuItem><MenuItem value="OR">OU (OR)</MenuItem></Select>}
                 <TextField size="small" label="Campo" value={condition.column} onChange={e => { const next = [...sourceConditions]; next[conditionIndex] = { ...condition, column: e.target.value }; setConditions(sourceIndex, next); }} fullWidth />
                 <Select size="small" value={condition.operator} onChange={e => { const next = [...sourceConditions]; next[conditionIndex] = { ...condition, operator: e.target.value }; setConditions(sourceIndex, next); }}>{operators.map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}</Select>
                 <TextField size="small" label="Valores (vírgula)" value={(condition.values || []).join(", ")} disabled={["EMPTY", "NOT_EMPTY"].includes(condition.operator)} onChange={e => { const next = [...sourceConditions]; next[conditionIndex] = { ...condition, values: e.target.value.split(",").map(v => v.trim()).filter(Boolean) }; setConditions(sourceIndex, next); }} fullWidth />
                 <Button color="error" onClick={() => setConditions(sourceIndex, sourceConditions.filter((_, i) => i !== conditionIndex))}><Delete /></Button>
               </Stack>)}
               <Stack direction="row" gap={1}>
-                <Button size="small" startIcon={<Add />} onClick={() => setConditions(sourceIndex, [...sourceConditions, { column: "", operator: "IN", values: [] }])}>Adicionar filtro</Button>
+                <Button size="small" startIcon={<Add />} onClick={() => setConditions(sourceIndex, [...sourceConditions, { column: "", operator: "IN", values: [], logic: "AND" }])}>Adicionar filtro</Button>
                 <Button size="small" color="error" startIcon={<Delete />} onClick={() => setSelected({ ...selected, sources: (selected.sources || []).filter((_, i) => i !== sourceIndex) })}>Remover origem</Button>
               </Stack>
             </Stack></Paper>;
@@ -263,12 +296,17 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
             {!(selected.measure_columns || []).length && <Typography variant="caption" color="text.secondary">Nenhuma medida definida — será usado "realizado".</Typography>}
           </Box>
           <Divider />
+          </>)}
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Typography variant="caption" color="text.secondary">Tabela: {selected.id ? `dest_dm_cost_${selected.code}` : "criada ao salvar e reprocessar"}</Typography>
             <Stack direction="row" gap={1}>
               <Button variant="outlined" startIcon={<ContentCopy />} disabled={!selected.id} onClick={() => selected.id && cloneRule(selected.id)}>Clonar</Button>
               <Button variant="outlined" disabled={!selected.id} onClick={startReprocess}>Reprocessar</Button>
-              <Button variant="contained" startIcon={<Save />} disabled={saving || !selected.name || !selected.code || (selected.sources || []).some(s => !((s.gold_tables && s.gold_tables.length) || s.gold_table))} onClick={save}>Salvar regra</Button>
+              <Button variant="contained" startIcon={<Save />} disabled={(() => {
+                if (saving || !selected.name || !selected.code) return true;
+                if (selected.sql_template && selected.sql_template.trim()) return false;
+                return (selected.sources || []).some(s => !((s.gold_tables && s.gold_tables.length) || s.gold_table));
+              })()} onClick={save}>Salvar regra</Button>
             </Stack>
           </Stack>
         </Stack>

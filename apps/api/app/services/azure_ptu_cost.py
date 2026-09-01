@@ -9,9 +9,12 @@ financeiro do dashboard com a separação correta de capacidade PTU:
 * **On-demand** — meter ``Provisioned Throughput Units`` com
   ``consumedunit = '1/Month'`` e ``commitmentdiscounttype = 'OnDemand'``,
   ``consumedquantity = 100`` PTUs/mês; a PTU on-demand paga por mês.
-* **Uso horário da capacidade** — meter ``Provisioned Managed*`` (``1/Hour``):
-  horas provisionadas consumidas (informativo; as linhas cobertas pela
-  reserva são anuladas por Returns e não geram custo incremental).
+  Quando o mês ainda não recebeu a compra na Gold, o valor é estimado pelo
+  último realizado da compra (o forecast do planejamento espelha o consumo
+  horário e não expõe a compra — não é usado).
+
+O consumo diário/horário da capacidade (meter ``Provisioned Managed*``,
+``1/Hour``) não é retornado: ele já está incluído no custo da compra mensal.
 
 Os projetos são classificados no ``departamento_nivel_5`` (Vivo Mais /
 Aura Brain) — o nível de departamento onde os projetos vivem.
@@ -44,7 +47,6 @@ RESERVATION_SERVICE = "Microsoft.Capacity"           # compra da reserva
 RESERVATION_CHARGES = ("Purchase", "Refund", "Return")
 ONDEMAND_METER = "Provisioned Throughput Units"      # PTU on-demand mensal
 ONDEMAND_UNIT = "1/Month"
-USAGE_METER_PATTERN = "Provisioned Managed%"         # uso horário (1/Hour)
 
 # Quantos meses de histórico realizado a série mensal do dashboard mostra.
 HISTORY_MONTHS = 8
@@ -139,10 +141,6 @@ async def _load_realized_rows(
                          AND commitmentdiscounttype = 'OnDemand'
                         THEN COALESCE(TRY_CAST(realizado AS DOUBLE), 0)
                         ELSE 0 END) AS ondemand_cost,
-               SUM(CASE WHEN skumeter LIKE '{USAGE_METER_PATTERN}'
-                         AND lower(COALESCE(consumedunit, '')) = '1/hour'
-                        THEN COALESCE(TRY_CAST(consumedquantity AS DOUBLE), 0)
-                        ELSE 0 END) AS ptu_usage_hours,
                COUNT(*) FILTER (WHERE skumeter = '{ONDEMAND_METER}'
                                  AND consumedunit = '{ONDEMAND_UNIT}'
                                  AND commitmentdiscounttype = 'OnDemand') AS ondemand_rows
@@ -174,17 +172,7 @@ async def _load_forecast_rows(
         SELECT period AS periodo,
                COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) AS projeto,
                MAX(departamento_nivel_4) AS departamento_nivel_4,
-               SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realizado,
-               SUM(CASE WHEN servicename = '{RESERVATION_SERVICE}'
-                         AND chargecategory = 'Purchase'
-                        THEN COALESCE(TRY_CAST(realizado AS DOUBLE), 0)
-                        ELSE 0 END) AS forecast_reservation_cost,
-               SUM(CASE WHEN servicename = 'Microsoft.CognitiveServices'
-                         AND servicesubcategory = 'Azure OpenAI'
-                         AND chargecategory = 'Usage'
-                         AND COALESCE(TRY_CAST(realizado AS DOUBLE), 0) > 0
-                        THEN COALESCE(TRY_CAST(realizado AS DOUBLE), 0)
-                        ELSE 0 END) AS forecast_ondemand_cost
+               SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realizado
         FROM {GOLD_NAMESPACE}.{GOLD_PLANNING_TABLE}
         WHERE period IN ({period_list})
           AND COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) IN ({project_list})
@@ -213,7 +201,6 @@ def _monthly_rows(
             "ondemand_units": None,
             "ondemand_cost": None,
             "ondemand_rows": 0,
-            "ptu_usage_hours": 0.0,
             "total_realized": 0.0,
             "billedcost": 0.0,
             "forecast": None,
@@ -222,7 +209,6 @@ def _monthly_rows(
         bucket["billedcost"] = float(bucket["billedcost"]) + float(row.get("billedcost") or 0.0)
         bucket["reservation_units"] = float(bucket["reservation_units"]) + float(row.get("reservation_units_purchased") or 0.0)
         bucket["reservation_cost"] = float(bucket["reservation_cost"]) + float(row.get("reservation_cost") or 0.0)
-        bucket["ptu_usage_hours"] = float(bucket["ptu_usage_hours"]) + float(row.get("ptu_usage_hours") or 0.0)
         bucket["ondemand_rows"] = int(bucket["ondemand_rows"]) + int(row.get("ondemand_rows") or 0)
         if int(row.get("ondemand_rows") or 0) > 0:
             # Só expõe on-demand quando a linha mensal existe (evita "R$ 0"
@@ -242,16 +228,11 @@ def _monthly_rows(
             "ondemand_units": None,
             "ondemand_cost": None,
             "ondemand_rows": 0,
-            "ptu_usage_hours": 0.0,
             "total_realized": 0.0,
             "billedcost": 0.0,
             "forecast": None,
-            "forecast_reservation_cost": 0.0,
-            "forecast_ondemand_cost": 0.0,
         })
         bucket["forecast"] = float(row.get("realizado") or 0.0)
-        bucket["forecast_reservation_cost"] = float(row.get("forecast_reservation_cost") or 0.0)
-        bucket["forecast_ondemand_cost"] = float(row.get("forecast_ondemand_cost") or 0.0)
     return [grouped[key] for key in sorted(grouped)]
 
 
@@ -263,10 +244,10 @@ def _project_totals(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
         bucket = totals.setdefault(project, {
             "reservation_units": 0.0, "reservation_cost": 0.0,
             "ondemand_units": 0.0, "ondemand_cost": 0.0,
-            "ptu_usage_hours": 0.0, "total_realized": 0.0,
+            "total_realized": 0.0,
             "billedcost": 0.0, "forecast": 0.0,
         })
-        for field in ("reservation_units", "reservation_cost", "ptu_usage_hours", "total_realized", "billedcost"):
+        for field in ("reservation_units", "reservation_cost", "total_realized", "billedcost"):
             bucket[field] += float(row.get(field) or 0.0)
         bucket["ondemand_units"] += float(row.get("ondemand_units") or 0.0)
         bucket["ondemand_cost"] += float(row.get("ondemand_cost") or 0.0)
@@ -335,29 +316,29 @@ async def _load_dimon_ptu_costs(
     candidates = [p for p in window_periods if p in realized_periods] or realized_periods
     current = candidates[-1] if candidates else current_period
 
-    # On-demand é uma compra fixa de 100 PTUs/mês. Quando o mês corrente ainda
-    # não recebeu a linha na Gold (ex.: ago/2026), completa com o forecast do
-    # planejamento (tipo=forecast) quando houver valor positivo; senão, com o
-    # último realizado do mesmo projeto — sempre marcado como estimado.
+    # On-demand é uma compra fixa de 100 PTUs/mês (ex.: Aura Brain). Quando o
+    # mês corrente ainda não recebeu a linha na Gold (ex.: ago/2026), estima
+    # pelo ÚLTIMO REALIZADO da compra — "OnDemand = só o valor da compra; o
+    # resto (consumo diário/horário) é ignorado". O forecast do planejamento
+    # não é usado: no Aura Brain ele espelha o consumo horário ('Azure OpenAI'
+    # Usage), não a compra. Vale SOMENTE para projetos com histórico real de
+    # on-demand — nunca fabrica unidades para projetos cobertos pela reserva.
     for row in monthly:
         if int(row.get("ondemand_rows") or 0) == 0 and row["project"] in PROJECTS:
-            forecast_od = float(row.get("forecast_ondemand_cost") or 0.0)
             previous = next(
                 (r for r in reversed(monthly)
                  if r["project"] == row["project"] and r["period"] < row["period"]
                  and int(r.get("ondemand_rows") or 0) > 0),
                 None,
             )
-            if forecast_od > 0:
-                row["ondemand_units"] = 100.0
-                row["ondemand_cost"] = forecast_od
-                row["ondemand_estimated"] = True
-                row["ondemand_estimate_note"] = f"previsto (forecast {row.get('label')})"
-            elif previous is not None:
-                row["ondemand_units"] = previous.get("ondemand_units")
-                row["ondemand_cost"] = previous.get("ondemand_cost")
-                row["ondemand_estimated"] = True
-                row["ondemand_estimate_note"] = f"previsto — último realizado {previous.get('label')}"
+            if previous is None:
+                # Sem histórico de on-demand contratado: mantém 0/None — a
+                # capacidade desse projeto é coberta pela reserva (Microsoft.Capacity).
+                continue
+            row["ondemand_units"] = previous.get("ondemand_units")
+            row["ondemand_cost"] = previous.get("ondemand_cost")
+            row["ondemand_estimated"] = True
+            row["ondemand_estimate_note"] = f"previsto — último realizado {previous.get('label')}"
 
     current_rows = [row for row in monthly if row["period"] == current]
     by_project: dict[str, dict[str, Any]] = {}
@@ -369,7 +350,6 @@ async def _load_dimon_ptu_costs(
             "ondemand_cost": row["ondemand_cost"],
             "ondemand_estimated": row.get("ondemand_estimated", False),
             "ondemand_estimate_note": row.get("ondemand_estimate_note"),
-            "ptu_usage_hours": row["ptu_usage_hours"],
             "total_realized": row["total_realized"],
             "billedcost": row["billedcost"],
             "forecast": row["forecast"],
@@ -377,7 +357,7 @@ async def _load_dimon_ptu_costs(
         }
     project_totals = _project_totals(current_rows)
     totals = {field: sum(bucket[field] for bucket in project_totals.values()) for field in
-              ("reservation_units", "reservation_cost", "ptu_usage_hours", "total_realized", "billedcost")}
+              ("reservation_units", "reservation_cost", "total_realized", "billedcost")}
     totals["forecast"] = sum(bucket["forecast"] for bucket in project_totals.values())
     totals["ondemand_units"] = sum(bucket["ondemand_units"] for bucket in project_totals.values())
     totals["ondemand_cost"] = sum(bucket["ondemand_cost"] for bucket in project_totals.values())

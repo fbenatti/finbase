@@ -5,7 +5,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
   Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab, InputAdornment, Stack,
 } from "@mui/material";
-import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh } from "@mui/icons-material";
+import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh, Clear } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule, getClassificationsGrid,
@@ -443,12 +443,6 @@ export function ClassificationRulesTab() {
     try {
       const cloud = cloudOverride ?? cloudFilter;
       const destId = destOverride === undefined ? (selectedDestId === "" ? undefined : (selectedDestId as number)) : (destOverride === "" ? undefined : (destOverride as number));
-      if (cloud === "every" || !destId) {
-        setRules([]);
-        setTotal(0);
-        setLoading(false);
-        return;
-      }
       const data = await getClassificationsGrid({
         ...query,
         search: search.trim() || undefined,
@@ -510,7 +504,7 @@ export function ClassificationRulesTab() {
   );
 
   const selectedDestName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : null;
-  const filtersReady = cloudFilter !== "every" && selectedDestId !== "";
+  const filtersReady = true;
 
   return (
     <Box>
@@ -583,7 +577,7 @@ export function ClassificationRulesTab() {
       {!filtersReady ? (
         <Box sx={{ py: 7 }}>
           <EmptyState
-            message="Selecione a Cloud e a Tabela Destino para listar as regras. As regras são específicas por provedor."
+            message="Nenhuma classificação cadastrada para os filtros selecionados."
           />
         </Box>
       ) : (
@@ -601,30 +595,29 @@ export function ClassificationRulesTab() {
                     <Search fontSize="small" />
                   </InputAdornment>
                 ),
+                endAdornment: search ? (
+                  <InputAdornment position="end">
+                    <IconButton size="small" aria-label="Limpar busca" onClick={() => setSearch("")} edge="end">
+                      <Clear fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ) : undefined,
                 sx: { height: 40 },
               },
             }}
             sx={{ mb: 2, maxWidth: 520 }}
           />
 
-          {!loading && rules.length === 0 ? (
-            <Box sx={{ py: 7 }}>
-              <EmptyState
-                message={search ? "Nenhuma classificação corresponde aos filtros." : "Nenhuma classificação cadastrada para esta Cloud/Tabela. Clique em 'Nova' para começar."}
-              />
-            </Box>
-          ) : (
-            <ClassificationDataGrid
-              key={cloudFilter + "|" + selectedDestId}
-              rows={rules}
-              total={total}
-              loading={loading}
-              search={search}
-              onQuery={handleQuery}
-              onEdit={openEdit}
-              onDelete={setDeletePending}
-            />
-          )}
+          <ClassificationDataGrid
+            key={cloudFilter + "|" + selectedDestId}
+            rows={rules}
+            total={total}
+            loading={loading}
+            search={search}
+            onQuery={handleQuery}
+            onEdit={openEdit}
+            onDelete={setDeletePending}
+          />
         </>
       )}
 
@@ -715,8 +708,9 @@ function highlightBashHtml(bashStr: string): string {
     res = res.replace(/\b(az\s+policy\s+[a-z]+|az\s+[a-z]+|set\s+-[a-z]+|echo|cat|mktemp)\b/g, '<span style="color: #005cc5; font-weight: 600;">$1</span>');
     // Highlight flags --foo
     res = res.replace(/(--[a-zA-Z0-9-]+)/g, '<span style="color: #6f42c1; font-weight: 600;">$1</span>');
-    // Highlight strings
-    res = res.replace(/(".*?"|'.*?')/g, '<span style="color: #032f62;">$1</span>');
+    // Do not run another regex over generated <span> markup. It previously
+    // matched the style attributes and leaked fragments such as "color: #005cc5"
+    // into the script preview.
     return res;
   });
 
@@ -725,7 +719,9 @@ function highlightBashHtml(bashStr: string): string {
 
 export function TagsTab() {
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
+  const [selectedDepartment, setSelectedDepartment] = useState<number | "">("");
   const [rows, setRows] = useState<AzureTenantPolicy[]>([]);
   const [script, setScript] = useState("");
   const [loading, setLoading] = useState(false);
@@ -738,7 +734,10 @@ export function TagsTab() {
 
   useEffect(() => {
     getAzureTenants().then(setTenants).catch(() => setTenants([]));
+    getDepartments(false).then(setDepartments).catch(() => setDepartments([]));
   }, []);
+
+  const projectOptions = useMemo(() => flattenDepartments(departments), [departments]);
 
   const generate = async () => {
     try {
@@ -746,12 +745,13 @@ export function TagsTab() {
       setError("");
       setSuccess("");
       const connId = selectedTenant === "" ? undefined : (selectedTenant as number);
-      const result = await exportAzureTagPolicy(connId, "both");
+      const departmentId = selectedDepartment === "" ? undefined : (selectedDepartment as number);
+      const result = await exportAzureTagPolicy(connId, "both", departmentId);
       setRows(result.tenants);
       setScript(result.deployment_script);
       setSelectedJsonTenantIndex(0);
       setIsEditing(false);
-      setSuccess(`Políticas geradas com sucesso para ${result.tenants.length} tenant(s).`);
+      setSuccess(`${departmentId ? "Teste por projeto" : "Políticas"} gerado com sucesso para ${result.tenants.length} tenant(s).`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao gerar políticas");
     } finally {
@@ -818,6 +818,22 @@ export function TagsTab() {
           </Select>
         </FormControl>
 
+        <FormControl sx={{ minWidth: 300 }} size="small">
+          <InputLabel>Projeto para teste</InputLabel>
+          <Select
+            value={selectedDepartment}
+            label="Projeto para teste"
+            onChange={(e) => setSelectedDepartment(e.target.value as number | "")}
+          >
+            <MenuItem value="">Geração completa do tenant</MenuItem>
+            {projectOptions.map((department) => (
+              <MenuItem key={department.id} value={department.id}>
+                {department.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
         <Button variant="contained" onClick={generate} disabled={loading}>
           {loading ? "Gerando..." : "Gerar políticas"}
         </Button>
@@ -833,7 +849,7 @@ export function TagsTab() {
 
       {rows.length === 0 && !loading ? (
         <Alert severity="info">
-          Selecione um tenant e clique em <strong>"Gerar políticas"</strong> para inspecionar o script Bash e os JSONs de Azure Policy antes de realizar o download ou implantação.
+          Selecione um tenant ou um projeto para teste e clique em <strong>"Gerar políticas"</strong>. O teste inclui as exceções de prioridade superior na condição da policy.
         </Alert>
       ) : (
         <Box>
@@ -845,26 +861,35 @@ export function TagsTab() {
                   {t.connection_name} <Chip size="small" color="primary" label={`${t.rule_count} regras`} sx={{ ml: 1 }} />
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-                  Tenant ID: {t.tenant_id} · Cod: {t.connection_code}
+                  Tenant ID: {t.tenant_id} · Cod: {t.connection_code}{t.department_name ? ` · Teste: ${t.department_name}` : ""}
                 </Typography>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
                   <LayerSummary
-                    label="Herança de RG (Built-in)"
-                    count={Array.isArray(t.layers?.inheritance) ? (t.layers.inheritance as unknown[]).length : 0}
+                    label="Regras ARM elegíveis"
+                    count={t.coverage?.eligible_rules ?? 0}
                   />
                   <LayerSummary
-                    label="Resource Groups Exatos (agrupados)"
+                    label="Policies para Resource Groups"
                     count={Array.isArray(t.layers?.resource_groups) ? (t.layers.resource_groups as unknown[]).length : 0}
                   />
                   <LayerSummary
-                    label="Resource Groups por Padrão (~)"
-                    count={Array.isArray(t.layers?.rg_patterns) ? (t.layers.rg_patterns as unknown[]).length : 0}
+                    label="Policies para recursos"
+                    count={Array.isArray(t.layers?.resources) ? (t.layers.resources as unknown[]).length : 0}
                   />
                   <LayerSummary
-                    label="Recursos Individuais / SKUs / Tipos"
-                    count={Array.isArray(t.layers?.patterns) ? (t.layers.patterns as unknown[]).length : 0}
+                    label="Regras não implantáveis/bloqueadas"
+                    count={t.coverage?.diagnostics?.filter((d) => d.status !== "warning").length ?? 0}
                   />
                 </Box>
+                {(t.coverage?.diagnostics?.length ?? 0) > 0 && (
+                  <Alert severity="warning" sx={{ mt: 1.5, py: 0 }}>
+                    {t.coverage?.diagnostics.slice(0, 2).map((d, idx) => (
+                      <Typography key={`${d.rule_id ?? "diag"}-${idx}`} variant="caption" display="block">
+                        {d.rule_name ? `${d.rule_name}: ` : ""}{d.reason}
+                      </Typography>
+                    ))}
+                  </Alert>
+                )}
               </Box>
             ))}
           </Box>

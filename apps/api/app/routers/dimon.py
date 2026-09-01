@@ -65,6 +65,9 @@ class DimonRuleCreate(BaseModel):
     # Pivot-style: GROUP BY dimensions + measures to SUM; empty -> defaults.
     dimensions: list[str] = Field(default_factory=list)
     measure_columns: list[str] = Field(default_factory=list)
+    sql_template: str | None = None
+    snapshot_mode: bool = False
+    snapshot_col: str = "_snapshot_date"
     sources: list[DimonSourceIn] = Field(default_factory=list)
 
 
@@ -77,6 +80,9 @@ class DimonRuleUpdate(BaseModel):
     valid_until: str | None = None
     dimensions: list[str] | None = None
     measure_columns: list[str] | None = None
+    sql_template: str | None = None
+    snapshot_mode: bool | None = None
+    snapshot_col: str | None = None
     sources: list[DimonSourceIn] | None = None
 
 
@@ -90,6 +96,9 @@ class DimonRuleOut(BaseModel):
     valid_until: str | None = None
     dimensions: list[str] = Field(default_factory=list)
     measure_columns: list[str] = Field(default_factory=list)
+    sql_template: str | None = None
+    snapshot_mode: bool = False
+    snapshot_col: str = "_snapshot_date"
     materialization_table: str | None = None
     materialization_status: str | None = None
     materialization_rows: int | None = None
@@ -112,6 +121,9 @@ def _rule_out(rule: DimonRule) -> DimonRuleOut:
         valid_until=rule.valid_until,
         dimensions=list(getattr(rule, "dimensions", None) or []),
         measure_columns=list(getattr(rule, "measure_columns", None) or []),
+        sql_template=getattr(rule, "sql_template", None),
+        snapshot_mode=bool(getattr(rule, "snapshot_mode", False)),
+        snapshot_col=getattr(rule, "snapshot_col", "_snapshot_date"),
         materialization_table=rule.materialization_table,
         materialization_status=rule.materialization_status,
         materialization_rows=rule.materialization_rows,
@@ -183,6 +195,9 @@ async def create_rule(data: DimonRuleCreate, db: AsyncSession = Depends(get_db))
         valid_until=data.valid_until,
         dimensions=list(data.dimensions or []),
         measure_columns=list(data.measure_columns or []),
+        sql_template=data.sql_template.strip() if (data.sql_template or "").strip() else None,
+        snapshot_mode=data.snapshot_mode,
+        snapshot_col=data.snapshot_col or "_snapshot_date",
     )
     _replace_sources(rule, data.sources)
     rule.materialization_status = "PENDING"
@@ -229,6 +244,12 @@ async def update_rule(rule_id: int, data: DimonRuleUpdate, db: AsyncSession = De
         rule.dimensions = list(data.dimensions)
     if data.measure_columns is not None:
         rule.measure_columns = list(data.measure_columns)
+    if data.sql_template is not None:
+        rule.sql_template = data.sql_template.strip() if data.sql_template.strip() else None
+    if data.snapshot_mode is not None:
+        rule.snapshot_mode = data.snapshot_mode
+    if data.snapshot_col is not None:
+        rule.snapshot_col = data.snapshot_col
     if data.sources is not None:
         _replace_sources(rule, data.sources)
     rule.materialization_status = "PENDING"
@@ -340,7 +361,7 @@ class DimonReprocessRequest(BaseModel):
 
 @router.post("/reprocess")
 async def reprocess_dimons(body: DimonReprocessRequest, db: AsyncSession = Depends(get_db)):
-    """Queue one Dimon materialization pass (all active rules, or a subset)."""
+    """Queue one independent task per selected Dimon rule."""
     from datetime import datetime, timezone
     from app.models.etl_task import EtlTask
 
@@ -351,27 +372,17 @@ async def reprocess_dimons(body: DimonReprocessRequest, db: AsyncSession = Depen
         raise HTTPException(status_code=422, detail="Nenhuma regra Dimon ativa para materializar.")
 
     now = datetime.now(timezone.utc)
-    running = list((await db.execute(select(EtlTask).where(
-        EtlTask.task_type == "dimon_reprocess",
-        EtlTask.status.in_(["QUEUED", "RUNNING"]),
-    ))).scalars().all())
-    if running:
-        raise HTTPException(status_code=409, detail="Já existe um reprocessamento Dimon em andamento.")
-
-    task = EtlTask(task_type="dimon_reprocess", status="QUEUED", errors=[])
-    task.phase = f"Na fila: materializar {len(active)} Dimon(s)"
-    task.started_at = now
-    task.total_blobs = len(active)
-    task.processed_blobs = 0
-    task.rows_destination = 0
-    task.result_json = {
-        "event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}],
-        "rule_ids": [rule.id for rule in active],
-    }
-    db.add(task)
+    tasks = []
+    for rule in active:
+        task = EtlTask(task_type="dimon_reprocess", status="QUEUED", errors=[])
+        task.phase = f"Na fila: materializar {rule.code}"
+        task.started_at = now
+        task.total_blobs = 1
+        task.result_json = {"event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}], "rule_ids": [rule.id]}
+        db.add(task)
+        tasks.append(task)
     await db.commit()
-    await db.refresh(task)
-    return {"task_id": task.id, "status": task.status, "message": task.phase, "rules": len(active)}
+    return {"task_id": tasks[0].id, "task_ids": [task.id for task in tasks], "status": "QUEUED", "message": f"{len(tasks)} Dimon(s) colocada(s) em fila individual", "rules": len(tasks)}
 
 
 @router.get("/history")
@@ -396,6 +407,8 @@ from typing import Literal as _Literal
 _DIMON_TABLE_RE = _re.compile(r"^dest_dm_cost_[a-z0-9_]+$")
 _DIMON_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
 _DIMON_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS"})
+# Aliases lógicos → colunas físicas da Dimon (ex.: "quantity" da UI = consumedquantity).
+_DIMON_COLUMN_ALIASES = {"quantity": "consumedquantity"}
 
 
 class DimonQueryMeasure(BaseModel):
@@ -438,7 +451,14 @@ async def _dimon_schema(table: str) -> dict[str, str]:
 
 
 def _dimon_resolve(schema: dict[str, str], name: str) -> str | None:
-    return schema.get(str(name or "").lower())
+    key = str(name or "").lower()
+    if key in schema:
+        return schema[key]
+    # Aliases lógicos → colunas físicas (ex.: quantity → consumedquantity).
+    alias = _DIMON_COLUMN_ALIASES.get(key)
+    if alias and alias in schema:
+        return schema[alias]
+    return None
 
 
 def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]) -> str:

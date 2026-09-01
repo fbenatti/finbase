@@ -12,9 +12,10 @@ import { tokensLabel } from "./AzurePtuFormat";
  * Contrato do payload (backend -> `costs` no ops-overview):
  *   costs.current.totals/projects  -> KPIs do mês de referência
  *     reservation_units/cost       -> reserva Microsoft.Capacity (100 PTUs)
- *     ondemand_units/cost          -> on-demand Provisioned Throughput Units (100 PTUs, 1/Month)
- *     ptu_usage_hours              -> horas provisionadas consumidas (1/Hour)
+ *     ondemand_units/cost          -> on-demand Provisioned Throughput Units (100 PTUs, 1/Month);
+ *                                    estimado pelo último realizado quando o mês não recebeu a compra
  *   tokenData / aiDemand           -> tokens dos últimos 30 dias (custo/milhão)
+ * O consumo diário/horário (1/Hour) não é retornado — já está na compra mensal.
  */
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
@@ -47,7 +48,12 @@ function Kpi({ label, value, hint }: { label: string; value: React.ReactNode; hi
   );
 }
 
-export function PtuFinanceViews({ costs, tokenData, aiDemand }: { costs: any; tokenData?: any; aiDemand?: any }) {
+export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
+  costs: any;
+  tokenData?: any;
+  aiDemand?: any;
+  provisioned?: { total_ptus?: number; deployment_count?: number };
+}) {
   if (!costs || costs.available === false) {
     return <Alert severity="warning">Enriquecimento financeiro (Gold) indisponível{costs?.error ? `: ${costs.error}` : ""}. A aba operacional continua completa; os custos PTU não foram carregados.</Alert>;
   }
@@ -102,7 +108,8 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand }: { costs: any; to
     <Stack gap={2.5}>
       <Alert severity="info" sx={{ mb: 0.5 }}>
         <b>Fonte:</b> Gold FOCUS <code>{costs.table}</code> (+ planejamento) · mês de referência: <b>{costs.current_label}</b> · janela de faturamento intersectada: {costs.window_label}.
-        A capacidade PTU é separada em <b>reserva</b> (<i>Microsoft.Capacity</i>, 100 PTUs — Vivo Mais) e <b>on-demand</b> (<i>Provisioned Throughput Units · 1/Month</i>, 100 PTUs — Aura Brain), classificadas no <b>departamento_nivel_5</b>. Valores em BRL (realizado).
+        A capacidade PTU é faturada como <b>reserva</b> (<i>Microsoft.Capacity</i>) e <b>on-demand</b> (<i>Provisioned Throughput Units · 1/Month</i>), classificadas no <b>departamento_nivel_5</b>. Valores em BRL (realizado; previsto quando marcado).
+        As <b>unidades faturadas</b> (reserva + on-demand) <b>não são a capacidade provisionada física</b> — o inventário Azure mostra os PTUs realmente configurados nos deployments ({provisioned?.total_ptus != null ? `${n(provisioned.total_ptus)} PTUs em ${n(provisioned.deployment_count)} deployments` : "ver KPIs operacionais"}).
       </Alert>
       {notes.map((note: string, i: number) => <Alert key={i} severity="warning" sx={{ mb: 0.5 }}>{note}</Alert>)}
 
@@ -110,7 +117,7 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand }: { costs: any; to
 
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6} md={3}><Kpi label="Custo PTU mensal" value={money(ptuMonthlyCost)} hint={`reserva ${money(totals.reservation_cost)} + on-demand ${money(totals.ondemand_cost)}${ondemandEstimated ? " (previsto)" : ""}`} /></Grid>
-        <Grid item xs={12} sm={6} md={3}><Kpi label="PTUs (reserva + on-demand)" value={`${n(totalUnits)} PTUs`} hint={`reserva ${n(totals.reservation_units)} · on-demand ${n(totals.ondemand_units)}${ondemandEstimated ? " (previsto)" : ""}`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="PTUs (reserva + on-demand)" value={`${n(totalUnits)} PTUs`} hint={`reserva ${n(totals.reservation_units)} · on-demand ${n(totals.ondemand_units)}${ondemandEstimated ? " (previsto)" : ""}${provisioned?.total_ptus != null ? ` · provisionado: ${n(provisioned.total_ptus)} PTUs (${n(provisioned.deployment_count)} deployments)` : ""}`} /></Grid>
         <Grid item xs={12} sm={6} md={3}><Kpi label="On-demand vs reserva" value={deltaPct == null ? "—" : `${deltaPct >= 0 ? "+" : ""}${pct(deltaPct)}`} hint={deltaPct == null ? "sem dados de on-demand" : `on-demand ${pct(deltaPct)} sobre a reserva · reserva ${money(reservaUnitPrice)}/PTU · on-demand ${money(ondemandUnitPrice)}/PTU${ondemandEstimated ? " (on-demand previsto)" : ""}`} /></Grid>
         <Grid item xs={12} sm={6} md={3}><Kpi label="Custo por milhão de tokens" value={cpmTotal == null ? "—" : `${money2(cpmTotal)}/mi`} hint={`PTU reserva+on-demand ${money(ptuMonthlyCost)} ÷ ${tokensLabel(totalTokens)} tokens (últimos 30 dias)`} /></Grid>
       </Grid>
@@ -133,7 +140,6 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand }: { costs: any; to
                     {isVivo
                       ? <>Reserva: <b>{n(p.reservation_units)} PTUs</b> · <b>{money(p.reservation_cost)}</b></>
                       : <>On-demand: <b>{p.ondemand_units == null ? "não lançado" : `${n(p.ondemand_units)} PTUs · ${money(p.ondemand_cost)}${p.ondemand_estimated ? " (previsto)" : ""}`}</b></>}
-                    {p.ptu_usage_hours ? <> · Uso da capacidade: {n(p.ptu_usage_hours)} h</> : null}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                     Custo/milhão de tokens: <b>{cpmP == null ? "—" : `${money2(cpmP)}/mi`}</b> · tokens (30d): {tokensLabel(tokensByProject[project] || 0)}

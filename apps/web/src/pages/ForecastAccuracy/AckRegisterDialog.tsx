@@ -7,6 +7,7 @@ import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import { Department, createForecastAck, getDepartments } from "../../services/api";
 
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
+const ACK_SEVERITIES = ["Informação", "Perigo", "Crítico", "Sucesso"];
 
 export default function AckRegisterDialog({
   open, onClose, onSaved, defaultDepartment,
@@ -21,6 +22,8 @@ export default function AckRegisterDialog({
   const [dept, setDept] = useState(defaultDepartment);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [category, setCategory] = useState(ACK_CATEGORIES[0]);
+  const [severity, setSeverity] = useState(ACK_SEVERITIES[0]);
+  const [ordem, setOrdem] = useState(0);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -30,6 +33,8 @@ export default function AckRegisterDialog({
     setDept(defaultDepartment);
     setDate(new Date().toISOString().slice(0, 10));
     setCategory(ACK_CATEGORIES[0]);
+    setSeverity(ACK_SEVERITIES[0]);
+    setOrdem(0);
     setReason("");
     setError("");
     if (organization.length === 0) {
@@ -107,7 +112,7 @@ export default function AckRegisterDialog({
     setSaving(true);
     setError("");
     try {
-      await createForecastAck({ department: dept.trim(), category, reason: reason.trim(), registered_at: date });
+      await createForecastAck({ department: dept.trim(), category, reason: reason.trim(), severity, ordem, registered_at: date });
       onSaved(date.slice(0, 7).replace("-", ""), dept.split(" > ").pop() || "");
       onClose();
     } catch (e) {
@@ -147,6 +152,18 @@ export default function AckRegisterDialog({
             {ACK_CATEGORIES.map(cat => <MenuItem key={cat} value={cat}>{cat}</MenuItem>)}
           </Select>
         </FormControl>
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel>Severidade</InputLabel>
+          <Select label="Severidade" value={severity} onChange={e => setSeverity(e.target.value)}>
+            {ACK_SEVERITIES.map(sev => <MenuItem key={sev} value={sev}>{sev}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <TextField
+          fullWidth label="Ordem (menor = aparece primeiro)" type="number" size="small" sx={{ mb: 2 }}
+          value={ordem}
+          onChange={e => setOrdem(Number(e.target.value) || 0)}
+          helperText="Usada para ordenar os highlights."
+        />
         <TextField
           fullWidth multiline minRows={3} label="Motivo do desvio"
           value={reason} onChange={e => setReason(e.target.value)}

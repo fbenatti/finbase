@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -28,7 +28,9 @@ async def lifespan(app: FastAPI):
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
         from app.models.dimon_rule import DimonRule, DimonRuleSource  # noqa: F401
+        from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
+        from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
@@ -37,7 +39,10 @@ async def lifespan(app: FastAPI):
         for statement in (
             # reservation_collection (22 chars) excede o VARCHAR(20) original.
             "ALTER TABLE etl_task ALTER COLUMN task_type TYPE VARCHAR(40)",
+            "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE forecast_ack ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'Informação'",
+            "ALTER TABLE forecast_ack ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_status VARCHAR(30)",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_message VARCHAR(500)",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMPTZ",
@@ -151,6 +156,25 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE dimon_rule_source ADD COLUMN IF NOT EXISTS gold_tables JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS measure_columns JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS sql_template TEXT",
+            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS snapshot_mode BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS snapshot_col VARCHAR(50) NOT NULL DEFAULT '_snapshot_date'",
+            """CREATE TABLE IF NOT EXISTS shutdown_exception_rule (
+              id SERIAL PRIMARY KEY,
+              name VARCHAR(200) NOT NULL,
+              description TEXT,
+              owner_email VARCHAR(200),
+              scope_type VARCHAR(50) NOT NULL DEFAULT 'resource',
+              scope_value VARCHAR(500),
+              tag_key VARCHAR(200),
+              tag_value VARCHAR(500),
+              filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+              valid_from VARCHAR(6),
+              valid_until VARCHAR(6),
+              is_active BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
         ):
             await conn.execute(text(statement))
         await conn.execute(text("""
@@ -202,6 +226,9 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_classification_field_value_value_prefix ON classification_field_value (destination_table_id, cloud, field, value text_pattern_ops)",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_source_connection_cloud_scope ON source_connection (cloud_scope)",
+            # forecast_run.cutoff_date is now NULL until the engine computes the
+            # data-driven cutoff (MAX collected − cutoff_days); never "today".
+            "ALTER TABLE forecast_run ALTER COLUMN cutoff_date DROP NOT NULL",
         ):
             await conn.execute(text(statement))
         # The Projects feature was removed (UI, API and metadata).  Drop the
@@ -284,6 +311,9 @@ app.include_router(azure_tag_policy.router)
 app.include_router(dimon.router)
 app.include_router(azure_ptu.router)
 app.include_router(reservations.router)
+app.include_router(scheduled_shutdown.router)
+app.include_router(azure_resource_graph.router)
+app.include_router(oci_operational.router)
 
 
 @app.get("/health")

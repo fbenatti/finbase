@@ -18,13 +18,11 @@ import ForecastAccuracy from "./pages/ForecastAccuracy/ForecastAccuracy";
 import SharedCostHistory from "./pages/Reprocess/SharedCostHistory";
 import CloneRules from "./pages/CloneRules/CloneRules";
 import Tables from "./pages/Tables/Tables";
-import ExpectedView from "./pages/Dashboards/ExpectedView";
 import DashboardsIA from "./pages/Dashboards/DashboardsIA";
 import GitHubCopilotDashboard from "./pages/GitHubCopilotDashboard/GitHubCopilotDashboard";
 import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
-import Reservations from "./pages/Reservations/Reservations";
 import DimonDashboard from "./pages/DimonDashboard/DimonDashboard";
 function App() {
   return (
@@ -39,21 +37,22 @@ function App() {
         <Route path="tables" element={<Tables />} />
         <Route path="destinations" element={<Navigate to="/tables?tab=destinations" replace />} />
         <Route path="relationship" element={<Navigate to="/tables?tab=relationship" replace />} />
-        <Route path="clone-rules" element={<Navigate to="/tables?tab=clone-rules" replace />} />
+        <Route path="clone-rules" element={<Navigate to="/governance?tab=clone-rules" replace />} />
         <Route path="mappings" element={<Mappings />} />
         <Route path="governance" element={<Governance />} />
         <Route path="rules" element={<Navigate to="/governance?tab=rules" replace />} />
         <Route path="classifications" element={<Navigate to="/governance?tab=classification" replace />} />
         <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />
+        <Route path="schedules" element={<Navigate to="/reprocess?tab=schedules" replace />} />
         <Route path="analysis" element={<Analysis />} />
-        <Route path="expected-view" element={<ExpectedView />} />
+        <Route path="expected-view" element={<Navigate to="/dimon-dashboard?tab=visao-executiva" replace />} />
         <Route path="dashboards-ia" element={<DashboardsIA />} />
         <Route path="dimon-dashboard" element={<DimonDashboard />} />
         <Route path="visoes-consumo-ia" element={<AzurePtuOps />} />
         <Route path="azure-ptu-ops" element={<Navigate to="/visoes-consumo-ia" replace />} />
-        <Route path="reservations" element={<Reservations />} />
+        <Route path="reservations" element={<Navigate to="/savings?tab=reservas" replace />} />
         <Route path="github-copilot" element={<GitHubCopilotDashboard />} />
-        <Route path="ai-cost-origin" element={<Navigate to="/tables?tab=cost-relationship" replace />} />
+        <Route path="ai-cost-origin" element={<Navigate to="/governance?tab=cost-relationship" replace />} />
         <Route path="pipeline" element={<PipelineBuilder />} />
         <Route path="reprocess" element={<Reprocess />} />
         <Route path="forecast" element={<Forecast />} />

@@ -15,6 +15,10 @@ entender, modificar ou depurar o projeto.
 7. **[06-glossary.md](06-glossary.md)** — glossário de termos do domínio FinOps usados no código.
 8. **[08-ui-design-reference.md](08-ui-design-reference.md)** — padrão visual e interacional
    de referência, validado em Connections.
+9. **[10-finos-intelligence.md](10-finos-intelligence.md)** — FinOps Intelligence
+   (`/dimon-dashboard`), camada Dimon (materialização, dimensões, reprocessamento),
+   abas Decisão e Visão Contábil (pares Realizado × Provisão do Forecast Accuracy),
+   endpoints, armadilhas e o checklist de "caminhos" para tarefas comuns.
 
 ## Resumo executivo (TL;DR para a IA)
 

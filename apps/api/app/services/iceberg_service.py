@@ -775,6 +775,14 @@ def read_destination(physical_name: str, namespace: str = "gold") -> pd.DataFram
         logger.info(f"Unable to list tables in namespace {tid[0]} — returning empty DataFrame")
         return pd.DataFrame()
 
+    # Table exists — load and return its contents
+    try:
+        table = cat.load_table(tid)
+        return table.scan().to_pandas()
+    except Exception as e:
+        logger.warning(f"Failed to read gold.{safe_name}: {e} — returning empty DataFrame")
+        return pd.DataFrame()
+
 
 def read_destination_batches(physical_name: str, excluded_periods: set[str] | None = None,
                              excluded_connection_ids: set[int] | None = None,
@@ -811,13 +819,6 @@ def read_destination_batches(physical_name: str, excluded_periods: set[str] | No
                 if _col in batch_df.columns:
                     batch_df[_col] = pd.to_numeric(batch_df[_col], errors="coerce").astype("Int64")
             yield batch_df
-
-    try:
-        table = cat.load_table(tid)
-        return table.scan().to_pandas()
-    except Exception as e:
-        logger.warning(f"Failed to read gold.{safe_name}: {e} — returning empty DataFrame")
-        return pd.DataFrame()
 
 
 def write_destination_staged(

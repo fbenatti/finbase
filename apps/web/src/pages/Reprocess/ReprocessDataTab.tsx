@@ -13,6 +13,7 @@ import {
   getAvailablePeriods, AvailablePeriod,
   reprocessDest, getReprocessStatus, cancelReprocess, ReprocessStatus,
   getRunningTasks, TaskStatus, getWorkerHealth, WorkerHealth, getReprocessHistory,
+  getDimonRules, DimonRule,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import ReprocessHistoryDataGrid from "./ReprocessHistoryDataGrid";
@@ -35,6 +36,9 @@ export default function ReprocessDataTab() {
   const [selConnIds, setSelConnIds] = useState<number[]>([]);
   const [selPeriods, setSelPeriods] = useState<string[]>([]);
   const [replaceExisting, setReplaceExisting] = useState(false);
+  const [chainDimons, setChainDimons] = useState(false);
+  const [chainDimonRuleId, setChainDimonRuleId] = useState<number | "">("");
+  const [dimonRules, setDimonRules] = useState<DimonRule[]>([]);
   const [periods, setPeriods] = useState<AvailablePeriod[]>([]);
   const [processing, setProcessing] = useState(false);
   const [taskId, setTaskId] = useState<number | null>(null);
@@ -84,6 +88,7 @@ export default function ReprocessDataTab() {
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
+    getDimonRules().then(setDimonRules).catch(() => {});
     historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     const refreshWorker = () => getWorkerHealth().then(setWorkerHealth).catch(() => setWorkerHealth({ status: "offline", heartbeat_age_seconds: null }));
     refreshWorker();
@@ -218,6 +223,7 @@ export default function ReprocessDataTab() {
         connection_ids: selConnIds,
         billing_periods: selPeriods,
         replace_existing: replaceExisting,
+        chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
       });
       await notifications.addTaskById(res.task_id, { kind: "reprocess", title: "Reprocessar dados" });
       setTaskId(res.task_id);
@@ -250,6 +256,7 @@ export default function ReprocessDataTab() {
         connection_ids: item.connection_ids,
         billing_periods: item.billing_periods,
         replace_existing: false,
+        chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
       });
       await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
       setTaskId(res.task_id);
@@ -280,6 +287,7 @@ export default function ReprocessDataTab() {
             connection_ids: item.connection_ids,
             billing_periods: item.billing_periods,
             replace_existing: false,
+            chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
           });
           await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
           if (res.task_ids) allTaskIds.push(...res.task_ids);
@@ -427,6 +435,25 @@ export default function ReprocessDataTab() {
               control={<Switch checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} color="warning" />}
               label="Reconstruir tabela completa (substituir dados antigos)"
             />
+            <FormControlLabel
+              control={<Switch checked={chainDimons} onChange={(e) => setChainDimons(e.target.checked)} color="primary" />}
+              label="Materializar Dimon na sequência (visão completa)"
+            />
+            {chainDimons && (
+              <FormControl sx={{ minWidth: 280 }} size="small">
+                <InputLabel>Tabela Dimon</InputLabel>
+                <Select
+                  value={chainDimonRuleId}
+                  label="Tabela Dimon"
+                  onChange={(e) => setChainDimonRuleId(e.target.value as number | "")}
+                >
+                  <MenuItem value=""><em>Todas as regras ativas</em></MenuItem>
+                  {dimonRules.filter(r => r.active).map(r => (
+                    <MenuItem key={r.id} value={r.id!}>{r.name} ({r.materialization_table || r.code})</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
           </>
         )}
 
@@ -474,6 +501,13 @@ export default function ReprocessDataTab() {
         </Alert>
       )}
       {/* ── Andamento — movido para o ícone de notificações ── */}
+      {chainDimons && !isRunning && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          A Dimon selecionada será materializada <strong>na sequência</strong>, depois que o último
+          reprocessamento do grupo concluir (visão completa = realizado + forecast + rateio). Acompanhe
+          a execução da Dimon no sino de notificações e na aba <strong>Dimon (Custo pré-agregado)</strong>.
+        </Alert>
+      )}
       {(isRunning || isQueued) && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Processando dados{isQueued ? " (aguardando worker)" : ""} — acompanhe o andamento no ícone de notificações (canto superior direito).

@@ -91,6 +91,25 @@ signal.signal(signal.SIGTERM, shutdown)
 
 
 def main():
+    # Pandas keeps allocator arenas after large reprocesses.  On developer
+    # machines this can push the long-lived worker over its RSS safeguard even
+    # though each individual task completed.  Re-exec after a small number of
+    # terminal reprocesses to start the next queue items with a clean heap.
+    reprocess_tasks_since_restart = 0
+    reprocess_restart_after = max(0, int(os.getenv("REPROCESS_WORKER_MAX_TASKS", "6")))
+
+    def _maybe_recycle_reprocess_worker(*, failed: bool = False) -> None:
+        nonlocal reprocess_tasks_since_restart
+        reprocess_tasks_since_restart += 1
+        if failed or (reprocess_restart_after and reprocess_tasks_since_restart >= reprocess_restart_after):
+            print(
+                "Recycling worker after a failed reprocess"
+                if failed
+                else f"Recycling worker after {reprocess_tasks_since_restart} reprocess task(s) to release memory.",
+                flush=True,
+            )
+            os.execv(sys.executable, [sys.executable, "-u", str(Path(__file__).resolve())])
+
     lock_handle = WORKER_LOCK.open("a+")
     try:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -229,7 +248,8 @@ def main():
                         if (run.config_snapshot or {}).get("simulated_as_of"):
                             simulated_as_of = date.fromisoformat(run.config_snapshot["simulated_as_of"])
                         result = asyncio.run(run_forecast(
-                            config, adjustments, date.fromisoformat(run.cutoff_date),
+                            config, adjustments,
+                            date.fromisoformat(run.cutoff_date) if run.cutoff_date else None,
                             business_rules=business_rules, result_table=f"result_run_{run.id}",
                             simulated_as_of=simulated_as_of,
                         ))
@@ -244,13 +264,21 @@ def main():
                         # rather than the day on which the job was queued.
                         run.cutoff_date = result["effective_cutoff"]
                         run.selected_models = result["methods"]
-                        run.error_metrics = {}
+                        # Keep the rules that the engine actually evaluated in
+                        # the immutable run record.  Besides making the
+                        # forecast auditable from the UI/API, this prevents a
+                        # silent mismatch between an editable rule and a
+                        # published snapshot from going unnoticed.
+                        run.error_metrics = {
+                            "business_rules": result.get("business_rules", []),
+                        }
                         if task_row:
                             task_row.status = "COMPLETED"
                             task_row.rows_destination = result["rows"]
                             task_row.phase = "Forecast publicado"
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit()
+                        rateio: dict = {}
                         try:
                             from app.services.shared_cost import run_shared_cost_job_sync
                             rateio = run_shared_cost_job_sync(s, allow_empty=True)
@@ -262,6 +290,23 @@ def main():
                         except Exception as rateio_exc:
                             if task_row:
                                 task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
+                                s.commit()
+                        # Sequência: forecast → rateio → Dimon (visão completa =
+                        # realizado + forecast + rateio). A planning mudou, então a
+                        # Dimon pré-agregada precisa ser materializada de novo; a
+                        # fila do worker executa em ordem de id (sequência real).
+                        try:
+                            from app.services.dimon_materialization import enqueue_dimons_task
+                            dimon_task = enqueue_dimons_task(s, source="forecast")
+                            if dimon_task and task_row:
+                                task_row.phase = (
+                                    f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
+                                    f" · Dimon enfileirada (task #{dimon_task.id})"
+                                )
+                                s.commit()
+                        except Exception as dimon_exc:
+                            if task_row:
+                                task_row.phase = f"Forecast publicado · Dimon pendente: {dimon_exc}"
                                 s.commit()
                         s.close()
                     except Exception as exc:
@@ -609,6 +654,43 @@ def main():
                                     "rows_written": terminal_task.rows_destination,
                                     "error": "" if succeeded else str(result.get("error") or "Falha ao reprocessar"),
                                 }
+                                # Opção "Materializar Dimon na sequência": quando o
+                                # reprocessamento pediu chain_dimons, só a ÚLTIMA
+                                # tarefa do grupo enfileira a Dimon (visão completa
+                                # = realizado + forecast + rateio) na fila do worker.
+                                if succeeded:
+                                    chain = terminal_task.result_json.get("chain_dimons")
+                                    if chain and isinstance(chain, dict) and chain.get("enabled"):
+                                        group = terminal_task.result_json.get("queue_group")
+                                        position = terminal_task.result_json.get("queue_position")
+                                        total = terminal_task.result_json.get("queue_total")
+                                        is_last_group_task = (
+                                            position is not None and total is not None and position == total
+                                        )
+                                        if not is_last_group_task and group:
+                                            from sqlalchemy import select as _select
+                                            group_rows = terminal_session.execute(
+                                                _select(EtlTask.id, EtlTask.result_json).where(
+                                                    EtlTask.task_type == "reprocess",
+                                                    EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                                                )
+                                            ).all()
+                                            remaining = [
+                                                rid for rid, rj in group_rows
+                                                if (rj or {}).get("queue_group") == group
+                                            ]
+                                            is_last_group_task = not remaining
+                                        if is_last_group_task:
+                                            from app.services.dimon_materialization import enqueue_dimons_task
+                                            rule_ids = chain.get("rule_ids") or None
+                                            dimon_task = enqueue_dimons_task(
+                                                terminal_session, rule_ids=rule_ids, source="reprocess"
+                                            )
+                                            if dimon_task:
+                                                terminal_task.phase = (
+                                                    (terminal_task.phase or "")
+                                                    + f" · Dimon enfileirada (task #{dimon_task.id})"
+                                                )
                                 terminal_task.finished_at = datetime.now(timezone.utc)
                                 terminal_session.commit()
                         finally:
@@ -617,6 +699,17 @@ def main():
 
                         # Clean up in-memory entry
                         _inmemory_tasks.pop(task_id, None)
+                        # Reprocesses materialize sizeable Pandas/Arrow batches.  Release
+                        # completed-task allocations before the next queue item so an
+                        # allocator-retained RSS does not trip the per-worker guard.
+                        import gc
+                        gc.collect()
+                        try:
+                            import pyarrow as pa
+                            pa.default_memory_pool().release_unused()
+                        except Exception:
+                            pass
+                        _maybe_recycle_reprocess_worker(failed=not succeeded)
 
                     except Exception as e:
                         print(f"Task {task_id} FAILED: {e}")
@@ -641,6 +734,14 @@ def main():
                             s2.close()
 
                         _inmemory_tasks.pop(task_id, None)
+                        import gc
+                        gc.collect()
+                        try:
+                            import pyarrow as pa
+                            pa.default_memory_pool().release_unused()
+                        except Exception:
+                            pass
+                        _maybe_recycle_reprocess_worker(failed=True)
 
                 elif task.task_type == "shared_cost":
                     task.status = "RUNNING"
@@ -793,6 +894,89 @@ def main():
                         try:
                             from app.models.source_connection import SourceConnection as _PtuConnection
                             _ptu_conn = _ptu_session.get(_PtuConnection, conn_id)
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_automation_jobs":
+                                # Azure Automation é coletado via ARM (jobs e
+                                # schedules) e persistido na Bronze, seguindo o
+                                # mesmo padrão de coleta do PTU.
+                                from app.services.azure_automation_service import run_automation_collection
+                                _cfg = dict(_ptu_conn.config_json or {})
+                                _backfill = int(_cfg.get("backfill_days") or 93)
+                                try:
+                                    _result = run_automation_collection(
+                                        _ptu_session,
+                                        _ptu_conn.id,
+                                        backfill_days=_backfill,
+                                        task_id=task_id,
+                                    )
+                                except Exception as _coll_exc:
+                                    import traceback as _tb
+                                    _tb.print_exc()
+                                    _t_fail = _ptu_session.get(EtlTask, task_id)
+                                    if _t_fail:
+                                        _t_fail.status = "FAILED"
+                                        _t_fail.phase = f"Azure Automation coleta falhou: {str(_coll_exc)[:400]}"
+                                        _t_fail.errors = [str(_coll_exc)[:1000]]
+                                        _t_fail.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t = _ptu_session.get(EtlTask, task_id)
+                                if _t:
+                                    _t.status = "COMPLETED"
+                                    _t.phase = (
+                                        f"Azure Automation: {_result.get('jobs_collected', 0)} jobs / "
+                                        f"{_result.get('schedules_collected', 0)} schedules em "
+                                        f"{_result.get('accounts', 0)} conta(s)"
+                                    )
+                                    _t.rows_raw = _result.get("jobs_bronze", 0) + _result.get("schedules_bronze", 0)
+                                    _t.billing_periods = _result.get("billing_periods") or []
+                                    _t.result_json = _result
+                                    _t.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_resource_graph":
+                                # Azure Resource Graph é coletado via ARG (inventário
+                                # e regras de órfãos) e persistido na Bronze, seguindo
+                                # o mesmo padrão de coleta do PTU/Automation.
+                                from app.services.azure_resource_graph_service import run_resource_graph_collection
+                                try:
+                                    _arg_result = run_resource_graph_collection(
+                                        _ptu_session,
+                                        _ptu_conn.id,
+                                        task_id=task_id,
+                                    )
+                                except Exception as _arg_exc:
+                                    import traceback as _tb_arg
+                                    _tb_arg.print_exc()
+                                    _t_arg_fail = _ptu_session.get(EtlTask, task_id)
+                                    if _t_arg_fail:
+                                        _t_arg_fail.status = "FAILED"
+                                        _t_arg_fail.phase = f"Azure Resource Graph coleta falhou: {str(_arg_exc)[:400]}"
+                                        _t_arg_fail.errors = [str(_arg_exc)[:1000]]
+                                        _t_arg_fail.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_arg = _ptu_session.get(EtlTask, task_id)
+                                if _t_arg:
+                                    _t_arg.status = "COMPLETED"
+                                    _t_arg.phase = (
+                                        f"Azure Resource Graph: {_arg_result.get('inventory_rows', 0)} recursos / "
+                                        f"{sum((_arg_result.get('orphan_counts') or {}).values())} órfãos "
+                                        f"({len(_arg_result.get('orphan_counts') or {})} regras)"
+                                    )
+                                    _t_arg.rows_raw = _arg_result.get("bronze_rows", 0)
+                                    _t_arg.billing_periods = [_arg_result.get("billing_period") or ""]
+                                    _t_arg.result_json = _arg_result
+                                    _t_arg.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_openai_ptu":
                                 from app.services.azure_ptu_service import run_ptu_collection, resolve_ptu_collection_params
                                 _ptu_task = _ptu_session.get(EtlTask, task_id)

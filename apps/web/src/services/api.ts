@@ -22,6 +22,47 @@ export async function getAzurePtuView(view: "projects"|"deployments"|"subproject
   const { data } = await api.post(`/visoes-consumo-ia/dashboard/${view}`, params, { signal }); return data;
 }
 
+/** Dashboard executivo de custo de um projeto (Aura Brain | Vivo Mais) — Dimon dest_dm_cost_custo_aura_brain_vivo_mais. */
+export async function getProjectCostDashboard(params: { project_key: "aura-brain" | "vivo-mais"; period_range?: "current_year" | "all" }, signal?: AbortSignal) {
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/project-costs", params, { signal });
+  return data;
+}
+
+export type SinfoniaDashboard = {
+  available: boolean; empty?: boolean; table: string;
+  reference?: { period: string; label: string; source: "realizado" | "forecast" };
+  kpis?: { total: number; ibm: number; factory: number; forecast: number };
+  monthly: Array<{ period: string; label: string; ibm: number; factory: number; total: number; forecast_total: number; source: string }>;
+  projects?: Array<{ project: string; group: string; cloud: string; cost: number }>;
+  clouds?: Array<{ cloud: string; cost: number }>;
+  ai_families?: Array<{ family: string; cost: number }>;
+  services?: Array<{ cloud: string; service: string; cost: number }>;
+  notes?: string[];
+};
+
+export async function getSinfoniaDashboard(signal?: AbortSignal): Promise<SinfoniaDashboard> {
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/sinfonia", {}, { signal });
+  return data;
+}
+
+export type DatameshDashboard = {
+  available: boolean; empty?: boolean; table: string;
+  reference?: { period: string; label: string; source: "realizado" | "forecast" };
+  kpis?: { total: number; databricks: number; data: number; infra: number; forecast: number };
+  monthly: Array<{ period: string; label: string; buckets: Record<string, number>; total: number; forecast_total: number; source: string }>;
+  projects?: Array<{ project: string; cost: number; dominant_bucket: string; buckets: Record<string, number> }>;
+  coverage?: { project_periods: string[]; reference_has_projects: boolean; project_reference?: string | null };
+  cuts?: Record<string, Array<{ name: string; cost: number }>>;
+  services?: Array<{ bucket: string; service: string; cost: number }>;
+  notes?: string[];
+};
+
+export async function getDatameshDashboard(signal?: AbortSignal): Promise<DatameshDashboard> {
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/datamesh", {}, { signal });
+  return data;
+}
+export async function getWisperDashboard(signal?: AbortSignal): Promise<any> { const { data } = await api.post("/visoes-consumo-ia/dashboard/wisper", {}, { signal }); return data; }
+
 // ── Reservas Azure (RI + Savings Plans) ────────────────────────────────
 export async function getReservationSources(signal?: AbortSignal) {
   const { data } = await api.get("/reservations/sources", { signal });
@@ -91,7 +132,7 @@ api.interceptors.request.use((config) => {
 });
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "databricks"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "azure_automation_jobs", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "databricks"]);
 
 export function formatApiError(error: unknown, fallback = "Request failed"): string {
   if (axios.isAxiosError(error)) {
@@ -654,6 +695,14 @@ export interface AzureTenantPolicy {
   connection_code: string;
   connection_name: string;
   rule_count: number;
+  department_id?: number | null;
+  department_name?: string | null;
+  deployment_subscriptions?: string[];
+  coverage?: {
+    eligible_rules: number;
+    emitted_policies: number;
+    diagnostics: Array<{ status: string; reason: string; rule_id?: number; rule_name?: string; value?: string }>;
+  };
   layers: Record<string, unknown>;
 }
 
@@ -670,9 +719,11 @@ export async function getAzureTenants(): Promise<AzureTenant[]> {
 export async function exportAzureTagPolicy(
   connectionId?: number,
   fmt: "json" | "script" | "both" = "both",
+  departmentId?: number,
 ): Promise<AzureTagPolicyExport> {
   const params: Record<string, string | number> = { fmt };
   if (connectionId !== undefined) params.connection_id = connectionId;
+  if (departmentId !== undefined) params.department_id = departmentId;
   const { data } = await api.get("/azure-tag-policy/export", { params });
   return data;
 }
@@ -1048,7 +1099,8 @@ export interface ForecastDesvioSubcat { subcategory: string; forecast_value: num
 export interface ForecastAck {
   id: number; run_id: number | null; target_month: string; department_path: string[]; department_name: string;
   forecast_value: number; actual_value: number; variance: number; accuracy?: number | null;
-  category: string; reason: string; registered_at?: string | null; active?: boolean; created_at: string;
+  category: string; reason: string; severity?: string; ordem?: number | null;
+  registered_at?: string | null; active?: boolean; created_at: string;
   history?: Array<{ id: number; category: string; reason: string; changed_at: string }>;
 }
 export async function getForecastAccuracyDesvios(runId: number, targetMonth?: string, department?: string): Promise<ForecastDesvios> {
@@ -1059,11 +1111,16 @@ export async function getForecastAccuracyDesviosSubcategories(runId: number, tar
   const { data } = await api.get("/forecast/accuracy/desvios/subcategories", { params: { run_id: runId, target_month: targetMonth, department, scope }, timeout: 45000 });
   return data;
 }
-export async function createForecastAck(body: { run_id?: number | null; target_month?: string; department: string; category: string; reason: string; registered_at?: string }): Promise<ForecastAck> {
+export async function createForecastAck(body: {
+  run_id?: number | null; target_month?: string; department: string; category: string; reason: string;
+  severity?: string; ordem?: number; registered_at?: string;
+}): Promise<ForecastAck> {
   const { data } = await api.post("/forecast/accuracy/acks", body);
   return data;
 }
-export async function updateForecastAck(ackId: number, body: { category: string; reason: string }): Promise<ForecastAck> {
+export async function updateForecastAck(ackId: number, body: {
+  category: string; reason: string; severity?: string; ordem?: number; registered_at?: string;
+}): Promise<ForecastAck> {
   const { data } = await api.put(`/forecast/accuracy/acks/${ackId}`, body);
   return data;
 }
@@ -1330,9 +1387,27 @@ export interface TrinoHealth {
   minio: string;
 }
 
+export interface AnalysisStagingTable {
+  table_name: string;
+  base_table: string;
+  created_at: string;
+  row_count: number | null;
+  protected: boolean;
+  status: "ACTIVE_REPROCESS" | "ORPHANED";
+}
+
 export async function getAnalysisTables(): Promise<TrinoTableList> {
   const { data } = await api.get("/analysis/tables");
   return data;
+}
+
+export async function getAnalysisStagingTables(): Promise<AnalysisStagingTable[]> {
+  const { data } = await api.get("/analysis/staging-tables");
+  return data.tables || [];
+}
+
+export async function deleteAnalysisStagingTable(tableName: string): Promise<void> {
+  await api.delete(`/analysis/staging-tables/${encodeURIComponent(tableName)}`);
 }
 
 export async function runAnalysisQuery(sql: string): Promise<TrinoQueryResult> {
@@ -1564,6 +1639,7 @@ export interface ScheduledTask {
   id: number;
   name: string;
   connection_id: number;
+  connection_ids: number[];
   cron_expression: string;
   timezone: string;
   destination_reprocess: boolean;
@@ -1583,6 +1659,7 @@ export async function getSchedules(): Promise<ScheduledTask[]> {
 export async function createSchedule(body: {
   name: string;
   connection_id: number;
+  connection_ids?: number[];
   cron_expression: string;
   timezone?: string;
   destination_reprocess?: boolean;
@@ -1602,7 +1679,7 @@ export async function deleteSchedule(id: number): Promise<void> {
   await api.delete(`/etl/schedules/${id}`);
 }
 
-export async function runScheduleNow(id: number): Promise<{ task_id: number; connection_id: number; schedule_name: string }> {
+export async function runScheduleNow(id: number): Promise<{ task_ids: number[]; connection_ids: number[]; schedule_name: string }> {
   const { data } = await api.post(`/etl/schedules/${id}/run`);
   return data;
 }
@@ -1950,6 +2027,9 @@ export interface DimonRule {
   active?: boolean;
   dimensions?: string[];
   measure_columns?: string[];
+  sql_template?: string | null;
+  snapshot_mode?: boolean;
+  snapshot_col?: string;
   materialization_table?: string | null;
   materialization_status?: "PENDING" | "UPDATED" | "EMPTY" | "ERROR" | string | null;
   materialization_rows?: number | null;
@@ -1982,6 +2062,9 @@ export async function saveDimonRule(rule: Partial<DimonRule>): Promise<DimonRule
     active: rule.active ?? true,
     dimensions: rule.dimensions ?? [],
     measure_columns: rule.measure_columns ?? [],
+    sql_template: rule.sql_template ?? null,
+    snapshot_mode: rule.snapshot_mode ?? false,
+    snapshot_col: rule.snapshot_col ?? "_snapshot_date",
     sources: (rule.sources || []).map(s => {
       const golds = (s.gold_tables && s.gold_tables.length ? s.gold_tables : (s.gold_table ? [s.gold_table] : []));
       return {
@@ -2079,3 +2162,415 @@ export async function getDimonGoldSchema(goldTable: string): Promise<DimonGoldCo
   return data.columns || [];
 }
 
+// ── Scheduled Shutdown (Desligue Programado) ──
+export interface ScheduledShutdownSetup {
+  connection_id: number;
+  destination_table_id: number;
+  message: string;
+}
+
+export async function setupScheduledShutdown(connection_id?: number): Promise<ScheduledShutdownSetup> {
+  const { data } = await api.post("/scheduled-shutdown/setup", { connection_id });
+  return data;
+}
+
+export interface SavingsFilter {
+  billing_periods?: string[];
+  resource_ids?: string[];
+  resource_groups?: string[];
+  subscriptions?: string[];
+}
+
+export interface VmMonthSaving {
+  resource_id: string | null;
+  resource_name: string | null;
+  subscription_id: string | null;
+  resource_group: string | null;
+  billing_period: string;
+  source_connection_id?: number | null;
+  connection_code?: string | null;
+  hours_billed: number;
+  baseline_hours: number;
+  uptime_pct: number;
+  saved_hours: number;
+  list_unit_price_hour: number;
+  saving_brl: number;
+  age_days?: number | null;
+  is_new_vm?: boolean;
+  exception_rule_id?: number | null;
+  exception_rule_name?: string | null;
+  exception_cost_brl?: number;
+  job_count: number;
+  job_actions: string[];
+  has_automation: boolean;
+}
+
+export interface SavingsResponse {
+  billing_periods: string[];
+  rows: VmMonthSaving[];
+  total_saving_brl: number;
+  total_saved_hours: number;
+  vm_count: number;
+  new_vm_count: number;
+  vm_with_shutdown: number;
+}
+
+export async function getShutdownSavings(filter: SavingsFilter = {}): Promise<SavingsResponse> {
+  const { data } = await api.post("/scheduled-shutdown/savings", filter);
+  return data;
+}
+
+export interface SavingsMonthlyRow {
+  billing_period: string;
+  resources: number;
+  saved_hours: number;
+  saving_brl: number;
+}
+
+export async function getSavingsMonthly(): Promise<SavingsMonthlyRow[]> {
+  const { data } = await api.get("/scheduled-shutdown/savings-monthly");
+  return data.rows || [];
+}
+
+export interface PadraoItem {
+  padrao: string;
+  resources: number;
+  saved_hours: number;
+  saving_brl: number;
+  desligue_programado: boolean;
+}
+
+export interface PadroesResponse {
+  billing_period: string;
+  rows: PadraoItem[];
+}
+
+export async function getPadroes(period?: string): Promise<PadroesResponse> {
+  const { data } = await api.get("/scheduled-shutdown/padroes", { params: period ? { period } : {} });
+  return data;
+}
+
+export interface PadraoPeriodoItem {
+  period: string;
+  resources: number;
+}
+
+export async function getPadroesPeriodos(): Promise<PadraoPeriodoItem[]> {
+  const { data } = await api.get("/scheduled-shutdown/padroes-periodos");
+  return data.periods || [];
+}
+
+export interface PadraoRecursoItem {
+  resource_name: string;
+  connection_code: string | null;
+  subscription_name: string | null;
+  total_hours: number;
+  saved_hours: number;
+  saving_brl: number;
+  is_desligue_programado: boolean;
+}
+
+export interface PadraoRecursosResponse {
+  billing_period: string;
+  padrao: string;
+  rows: PadraoRecursoItem[];
+}
+
+export async function getPadroesRecursos(period: string, padrao: string): Promise<PadraoRecursosResponse> {
+  const { data } = await api.get("/scheduled-shutdown/padroes-recursos", { params: { period, padrao } });
+  return data;
+}
+
+export interface SavingDepartamentoItem {
+  departamento_nivel_4: string | null;
+  departamento_nivel_5: string | null;
+  vms: number;
+  saved_hours: number;
+  saving_brl: number;
+}
+
+export interface SavingDepartamentoResponse {
+  billing_period: string;
+  rows: SavingDepartamentoItem[];
+}
+
+export async function getSavingDepartamento(period?: string): Promise<SavingDepartamentoResponse> {
+  const { data } = await api.get("/scheduled-shutdown/saving-departamento", { params: period ? { period } : {} });
+  return data;
+}
+
+export interface VmDailyUsageItem {
+  day: string;
+  hours: number;
+  cost_brl: number;
+}
+
+export interface VmDailyUsageResponse {
+  resource_name: string;
+  days: number;
+  total_hours: number;
+  total_cost_brl: number;
+  rows: VmDailyUsageItem[];
+}
+
+export async function getVmDailyUsage(resourceName: string, days = 30): Promise<VmDailyUsageResponse> {
+  const { data } = await api.get("/scheduled-shutdown/vm-usage-daily", { params: { resource_name: resourceName, days } });
+  return data;
+}
+
+export interface ScheduleDeltaItem {
+  resource_id: string | null;
+  vm: string | null;
+  schedule_name?: string | null;
+  subscription_id: string | null;
+  source_connection_id: number | null;
+  connection_code: string | null;
+  change_type: string;
+  snapshot_date: string | null;
+  previous_enabled: boolean | null;
+  current_enabled: boolean | null;
+  enabled?: boolean | null;
+  days_out: number | null;
+  cost_since_removal: number;
+  is_exception?: boolean;
+  exception_rule_id?: number | null;
+}
+
+export interface ScheduleDeltaResponse {
+  latest_snapshot: string | null;
+  previous_snapshot: string | null;
+  rows: ScheduleDeltaItem[];
+  total_removed: number;
+  total_disabled: number;
+  total_added: number;
+  total_cost_since_removal: number;
+}
+
+export async function getScheduleDelta(): Promise<ScheduleDeltaResponse> {
+  const { data } = await api.get("/scheduled-shutdown/schedule-delta");
+  return data;
+}
+
+export interface TagDeltaItem {
+  resource_id: string | null;
+  resource_name: string | null;
+  connection_code: string | null;
+  change_type: string;
+  latest_snapshot: string | null;
+  previous_snapshot: string | null;
+  days_out: number | null;
+  cost_since_removal: number;
+}
+
+export interface TagDeltaResponse {
+  latest_snapshot: string | null;
+  previous_snapshot: string | null;
+  rows: TagDeltaItem[];
+  total_exited: number;
+  total_entered: number;
+  total_cost_since_removal: number;
+  total_resources?: number;
+  total_with_tag?: number;
+}
+
+export async function getTagDelta(): Promise<TagDeltaResponse> {
+  const { data } = await api.get("/scheduled-shutdown/tag-delta");
+  return data;
+}
+
+export interface OpportunityItem {
+  resource_id: string | null;
+  resource_name: string | null;
+  resource_type: string;
+  connection_code: string | null;
+  subscription_name: string | null;
+  billing_period: string;
+  total_hours: number;
+  baseline_hours: number;
+  uptime_pct: number;
+  potential_saved_hours: number;
+  effective_price_hour: number;
+  opportunity_brl: number;
+  is_new_vm: boolean;
+}
+
+export interface OpportunityResponse {
+  billing_period: string;
+  subscriptions: string[];
+  rows: OpportunityItem[];
+  total_opportunity_brl: number;
+  vm_count: number;
+  vmss_count: number;
+}
+
+export async function getOpportunity(filter: SavingsFilter): Promise<OpportunityResponse> {
+  const { data } = await api.post("/scheduled-shutdown/opportunity", filter);
+  return data;
+}
+
+export interface OpportunitySubscription {
+  name: string;
+  resources: number;
+  vmss: number;
+}
+
+export interface OpportunitySubscriptionsResponse {
+  billing_period: string;
+  subscriptions: OpportunitySubscription[];
+}
+
+export async function getOpportunitySubscriptions(): Promise<OpportunitySubscriptionsResponse> {
+  const { data } = await api.get("/scheduled-shutdown/opportunity-subscriptions");
+  return data;
+}
+
+export interface ShutdownExceptionRule {
+  id?: number;
+  name: string;
+  description?: string;
+  owner_email?: string;
+  scope_type: string;
+  scope_value?: string;
+  tag_key?: string;
+  tag_value?: string;
+  valid_from?: string;
+  valid_until?: string;
+  is_active?: boolean;
+}
+
+export async function listShutdownExceptions(active_only = false): Promise<ShutdownExceptionRule[]> {
+  const { data } = await api.get("/scheduled-shutdown/exceptions", { params: { active_only } });
+  return data;
+}
+
+export async function saveShutdownException(rule: ShutdownExceptionRule): Promise<ShutdownExceptionRule> {
+  if (rule.id) {
+    const { data } = await api.put("/scheduled-shutdown/exceptions/" + rule.id, rule);
+    return data;
+  }
+  const { data } = await api.post("/scheduled-shutdown/exceptions", rule);
+  return data;
+}
+
+export async function deleteShutdownException(ruleId: number): Promise<void> {
+  await api.delete("/scheduled-shutdown/exceptions/" + ruleId);
+}
+
+export interface ExceptionFromDeltaInput {
+  resource_id: string;
+  resource_name?: string;
+  connection_code?: string;
+  subscription_name?: string;
+  reason?: string;
+}
+
+export async function createExceptionFromDelta(input: ExceptionFromDeltaInput): Promise<ShutdownExceptionRule> {
+  const { data } = await api.post("/scheduled-shutdown/exceptions/from-delta", input);
+  return data;
+}
+
+
+// ── Azure Resource Graph — Recursos Órfãos (Governança) ─────────────────
+export interface OrphanSummary {
+  periods: string[];
+  snapshot_dates: string[];
+  latest_snapshot: string | null;
+  selected_snapshot?: string | null;
+  by_rule: Array<{ orphan_rule: string; cnt: number }>;
+  by_tipo: Array<{ tipo_recurso: string; cnt: number }>;
+  by_status: Array<{ status: string; count: number }>;
+  total: number;
+  annotated: number;
+  cost_brl: number;
+  dimon_ready: boolean;
+  error?: string;
+}
+
+export interface OrphanRow {
+  resource_id: string;
+  resource_name: string | null;
+  resource_type: string | null;
+  subscription_id: string | null;
+  resource_group: string | null;
+  location: string | null;
+  sku: string | null;
+  disk_size_gb?: string | null;
+  ip_address?: string | null;
+  source_disk?: string | null;
+  tags: string | null;
+  created_at: string | null;
+  orphan_rule: string;
+  orphan_reason: string | null;
+  tipo_recurso: string | null;
+  age_days: number | null;
+  status_flag: string | null;
+  estimated_monthly_cost_brl: number | null;
+  snapshot_date: string;
+  _billing_period: string;
+  cloud_origem: string | null;
+  focus_rows: number;
+  billedcost: number;
+  effectivecost: number;
+  cost_brl: number;
+  governance_status: string;
+  governance_reason?: string | null;
+}
+
+export async function getOrphanSummary(params: {
+  period?: string; snapshot_date?: string; orphan_rule?: string; tipo_recurso?: string;
+  subscription_id?: string; resource_group?: string;
+} = {}, signal?: AbortSignal): Promise<OrphanSummary> {
+  const { data } = await api.get("/azure-resource-graph/summary", { params, signal });
+  return data;
+}
+
+export async function getOrphans(params: {
+  period?: string; snapshot_date?: string; orphan_rule?: string; tipo_recurso?: string; subscription_id?: string;
+  resource_group?: string; status?: string; limit?: number;
+} = {}, signal?: AbortSignal): Promise<{ rows: OrphanRow[]; total: number; error?: string }> {
+  const { data } = await api.get("/azure-resource-graph/orphans", { params, signal });
+  return data;
+}
+
+export async function setOrphanAnnotation(body: {
+  resource_id: string; orphan_rule: string; snapshot_date: string;
+  status: "ORFAO" | "EM_ANALISE" | "EXCECAO"; reason?: string; updated_by?: string;
+}): Promise<{ status: string; removed: boolean }> {
+  const { data } = await api.post("/azure-resource-graph/annotations", body);
+  return data;
+}
+
+export interface OrphanSavingRow {
+  resource_id: string;
+  resource_name: string | null;
+  resource_type: string | null;
+  subscription_id: string | null;
+  resource_group: string | null;
+  location: string | null;
+  orphan_rule: string;
+  orphan_reason: string | null;
+  tipo_recurso: string | null;
+  last_seen_date: string;
+  disappeared_on: string;
+  _billing_period: string;
+  monthly_saving_brl: number;
+  days_saving: number;
+  saving_generated_brl: number;
+}
+
+export interface OrphanSavings {
+  as_of?: string;
+  rows: OrphanSavingRow[];
+  total: number;
+  monthly_saving_brl: number;
+  saving_generated_brl: number;
+  error?: string;
+}
+
+export async function getOrphanSavings(params: {
+  orphan_rule?: string; tipo_recurso?: string; subscription_id?: string;
+  resource_group?: string; limit?: number;
+} = {}, signal?: AbortSignal): Promise<OrphanSavings> {
+  const { data } = await api.get("/azure-resource-graph/orphan-savings", { params, signal });
+  return data;
+}

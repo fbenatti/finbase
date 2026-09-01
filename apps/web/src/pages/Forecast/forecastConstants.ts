@@ -1,4 +1,5 @@
 export const BEHAVIOR_LABELS: Record<string, string> = {
+  SOURCE_EXCLUDE_PREFIX: "Excluir da origem antes do forecast (prefixo)",
   CHARGE_INTERVAL: "Ratear fatura mensal (ChargePeriodEnd)",
   RECURRING_MONTHLY: "Replicar última compra mensal",
   REPEAT_NEXT_MONTH: "Repetir só no mês seguinte",

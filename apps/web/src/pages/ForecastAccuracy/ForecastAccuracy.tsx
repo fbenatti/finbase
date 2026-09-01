@@ -420,7 +420,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
         <Tabs value={tab} onChange={(_, value) => setTab(value as "visao" | "desvios" | "acks")} sx={{ mb: 0, minHeight: 42 }} aria-label="Seções da acurácia">
           <Tab value="visao" label="Visão" sx={{ minHeight: 42 }} />
           <Tab value="desvios" label="Desvios" sx={{ minHeight: 42 }} />
-          <Tab value="acks" label="Ack Registrados" sx={{ minHeight: 42 }} />
+          <Tab value="acks" label="Highlights" sx={{ minHeight: 42 }} />
         </Tabs>
 
         {pathParts.length > 0 && (

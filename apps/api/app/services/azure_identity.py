@@ -1,0 +1,78 @@
+"""Azure identity helpers compartilhados entre coletores ARM/ARG.
+
+Extrai o mecanismo de resolução de credenciais (credential_profile →
+Settings.azure_{profile}_*) e o ClientSecretCredential usado por
+azure_automation_service, azure_ptu_service e azure_resource_graph_service.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import httpx
+from azure.identity import ClientSecretCredential
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    """Preenche credenciais a partir do credential_profile, se indicado."""
+    cfg = dict(config or {})
+    if cfg.get("credential_profile"):
+        from app.config import settings
+        profile = str(cfg["credential_profile"]).strip().lower()
+        if profile.startswith("azure-"):
+            profile = profile[len("azure-"):]
+        try:
+            tid = getattr(settings, f"azure_{profile}_tenant_id")
+            cid = getattr(settings, f"azure_{profile}_client_id")
+            cid2 = getattr(settings, f"azure_{profile}_client_secret")
+        except AttributeError:
+            tid = cid = cid2 = None
+        if tid:
+            cfg.setdefault("tenant_id", tid)
+        if cid:
+            cfg.setdefault("client_id", cid)
+        if cid2:
+            cfg.setdefault("client_secret", cid2)
+    return cfg
+
+
+def credential(config: dict[str, Any]) -> ClientSecretCredential:
+    """Monta o ClientSecretCredential a partir de uma config resolvida."""
+    cfg = resolve_config(config)
+    missing = [k for k in ("tenant_id", "client_id", "client_secret") if not cfg.get(k)]
+    if missing:
+        raise ValueError(
+            f"Credenciais Azure incompletas na conexão: faltam {', '.join(missing)}. "
+            "Configure tenant_id, client_id e client_secret (ou credential_profile)."
+        )
+    return ClientSecretCredential(
+        tenant_id=cfg["tenant_id"],
+        client_id=cfg["client_id"],
+        client_secret=cfg["client_secret"],
+    )
+
+
+async def arm_headers(config: dict[str, Any]) -> dict[str, str]:
+    """Cabeçalhos de autorização para endpoints management.azure.com."""
+    cred = credential(config)
+    token = cred.get_token("https://management.azure.com/.default").token
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+async def get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str], params: dict[str, Any] | None = None) -> list[dict]:
+    """Percorre paginação (nextLink) de um endpoint ARM e devolve a lista de values."""
+    values: list[dict] = []
+    next_url: str | None = url
+    while next_url:
+        resp = await client.get(next_url, headers=headers, params=params if next_url == url else None, timeout=60.0)
+        if resp.status_code in (401, 403):
+            raise PermissionError(f"Azure ARM {resp.status_code}: acesso negado em {url[:120]}")
+        if resp.status_code >= 400:
+            body = resp.text[:300]
+            raise RuntimeError(f"Azure ARM {resp.status_code} em {url[:120]}: {body}")
+        data = resp.json()
+        values.extend(data.get("value") or [])
+        next_url = data.get("nextLink")
+    return values

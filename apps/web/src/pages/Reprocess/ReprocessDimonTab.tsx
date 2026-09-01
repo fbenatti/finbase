@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
-import { PlayArrow, Refresh } from "@mui/icons-material";
+import { Alert, Box, Button, Checkbox, Chip, CircularProgress, Stack, Typography } from "@mui/material";
+import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
 import { DimonHistoryItem, DimonRule, formatApiError, getDimonHistory, getDimonRules, reprocessDimons } from "../../services/api";
 
 export default function ReprocessDimonTab() {
   const [rules, setRules] = useState<DimonRule[]>([]);
-  const [selectedId, setSelectedId] = useState<number | "">("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<DimonHistoryItem[]>([]);
@@ -17,9 +17,17 @@ export default function ReprocessDimonTab() {
     ]);
     setRules(ruleList);
     setHistory(hist);
-    if (selectedId !== "" && !ruleList.some(r => r.id === selectedId)) setSelectedId("");
+    setSelectedIds(current => new Set([...current].filter(id => ruleList.some(r => r.id === id))));
   };
-  useEffect(() => { void load(); }, [selectedId]);
+  useEffect(() => { void load(); }, []);
+
+  const toggleRule = (id: number) => setSelectedIds(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allSelected = rules.length > 0 && rules.every(r => r.id != null && selectedIds.has(r.id));
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(rules.flatMap(r => r.id == null ? [] : [r.id])));
 
   const startAll = async () => {
     setRunning(true); setError("");
@@ -29,9 +37,9 @@ export default function ReprocessDimonTab() {
   };
 
   const startSelected = async () => {
-    if (selectedId === "") return;
+    if (!selectedIds.size) return;
     setRunning(true); setError("");
-    try { await reprocessDimons([selectedId]); await load(); }
+    try { await reprocessDimons([...selectedIds]); await load(); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
     finally { setRunning(false); }
   };
@@ -48,12 +56,17 @@ export default function ReprocessDimonTab() {
     <Typography color="text.secondary">Lê as Golds (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica a tabela pré-agregada dest_dm_cost_&lt;code&gt; no namespace iceberg.dimon. Escolha reprocessar <b>todas (full)</b> ou apenas uma regra/fonte.</Typography>
     {error && <Alert severity="error">{error}</Alert>}
 
+    <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+      <Button variant="outlined" startIcon={<PlayArrow />} disabled={running || selectedIds.size === 0} onClick={startSelected}>Reprocessar selecionadas ({selectedIds.size})</Button>
+      <Button variant="text" startIcon={allSelected ? <CheckBox /> : <CheckBoxOutlineBlank />} disabled={running || rules.length === 0} onClick={toggleAll}>{allSelected ? "Desmarcar todos" : "Marcar todos"}</Button>
+    </Stack>
+
     {/* Regras ativas com status */}
     <Box>
-      <Typography variant="subtitle2" mb={1}>Regras Dimon ({rules.length})</Typography>
+      <Typography variant="subtitle2" mb={1}>Regras Dimon ({rules.length}) · {selectedIds.size} selecionada(s)</Typography>
       {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra criada — use o editor em Relacionamentos de custo IA.</Typography> : <Stack spacing={1}>
-        {rules.map(r => <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, border: "1px solid", borderColor: "divider", borderRadius: 1, bgcolor: selectedId === r.id ? "action.selected" : "transparent" }}>
-          <input type="radio" name="dimon-rule" checked={selectedId === r.id} onChange={() => setSelectedId(selectedId === r.id ? "" : r.id!)} />
+        {rules.map(r => <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, border: "1px solid", borderColor: selectedIds.has(r.id!) ? "primary.main" : "divider", borderRadius: 1, bgcolor: selectedIds.has(r.id!) ? "action.selected" : "transparent", cursor: "pointer" }} onClick={() => r.id != null && toggleRule(r.id)}>
+          <Checkbox size="small" checked={r.id != null && selectedIds.has(r.id)} onChange={() => r.id != null && toggleRule(r.id)} onClick={e => e.stopPropagation()} />
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="body2" fontWeight={600} noWrap>{r.name}</Typography>
             <Typography variant="caption" color="text.secondary" noWrap>{r.code} · {r.materialization_table || "Pendente"} · {r.materialization_rows ?? 0} linhas</Typography>
@@ -62,11 +75,6 @@ export default function ReprocessDimonTab() {
         </Box>)}
       </Stack>}
     </Box>
-
-    <Stack direction="row" gap={1} flexWrap="wrap">
-      <Button variant="contained" startIcon={running ? <CircularProgress size={16} color="inherit" /> : <Refresh />} disabled={running} onClick={startAll}>Reprocessar todas (Full)</Button>
-      <Button variant="outlined" startIcon={<PlayArrow />} disabled={running || selectedId === ""} onClick={startSelected}>Reprocessar selecionada</Button>
-    </Stack>
 
     <Typography variant="subtitle2">Histórico recente</Typography>
     {history.length === 0 ? <Typography color="text.secondary">Nenhuma execução registrada.</Typography> : history.map(item => {
