@@ -38,7 +38,7 @@ export const FORECAST_RULE_FIELD_HELP = {
   values: "Valores exatos (separados por vírgula) que devem coincidir na coluna de identificação.",
   chargeType: "Tipo de cobrança FOCUS filtrado pela regra (Usage, Purchase, Refund, etc.).",
   behavior:
-    "O que fazer com os dados:\n• Excluir da origem — remove da Gold antes da agregação quando o campo começa com o valor informado; o campo não precisa ser dimensão.\n• Ratear fatura mensal — distribui valor no intervalo Start→End.\n• Recorrente — replica compra nos meses seguintes.\n• Cancelar em refund — encerra ao detectar estorno.\n• Substituir — troca por valor fixo.",
+    "O que fazer com os dados:\n• Excluir da origem — remove da Gold antes da agregação quando o campo começa com o valor informado; o campo não precisa ser dimensão.\n• Média de 30 dias — separa a origem e calcula esse componente com a média diária dos últimos 30 dias; ideal para overage que reinicia no ciclo mensal.\n• Ratear fatura mensal — distribui valor no intervalo Start→End.\n• Recorrente — replica compra nos meses seguintes.\n• Cancelar em refund — encerra ao detectar estorno.\n• Substituir — troca por valor fixo.",
   scope:
     "Filtro adicional por dimensão (formato dim=valor, separado por vírgula).\n\nEx.: cloud_origem=ibm-ti restringe a regra a essa origem.",
   chargeEndColumn: "Coluna com o fim do período de cobrança usada no rateio (ex.: ChargePeriodEnd). Obrigatória para comportamento de rateio.",

@@ -1,5 +1,9 @@
 """Testes da decomposição executiva de custo Aura Brain / Vivo Mais (Dimon)."""
 
+import pytest
+
+from app.services import aura_brain_vivo_mais as dashboard_service
+
 from app.services.aura_brain_vivo_mais import (
     classify_dimon_row,
     ia_family_for,
@@ -19,6 +23,41 @@ def _row(**kw):
             "is_ondemand_ptu": 0, "ia_family": None}
     base.update(kw)
     return base
+
+
+@pytest.mark.asyncio
+async def test_vivo_mais_queries_its_own_dimon_and_normalizes_project(monkeypatch):
+    captured = []
+
+    async def fake_execute(sql, **kwargs):
+        captured.append(sql)
+        return []
+
+    monkeypatch.setattr(dashboard_service, "trino_execute", fake_execute)
+
+    await dashboard_service._query_cost_rows("vivo-mais", None)
+    await dashboard_service._query_subaccounts("vivo-mais", "202607", None)
+
+    assert len(captured) == 2
+    for sql in captured:
+        assert "iceberg.dimon.dest_dm_cost_custo_vivo_mais" in sql
+        assert "lower(CAST(departamento_nivel_5 AS VARCHAR)) = 'vivo+'" in sql
+    assert "'Vivo Mais' AS project" in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_aura_brain_keeps_combined_dimon(monkeypatch):
+    captured = []
+
+    async def fake_execute(sql, **kwargs):
+        captured.append(sql)
+        return []
+
+    monkeypatch.setattr(dashboard_service, "trino_execute", fake_execute)
+    await dashboard_service._query_cost_rows("aura-brain", None)
+
+    assert "iceberg.dimon.dest_dm_cost_custo_aura_brain_vivo_mais" in captured[0]
+    assert "lower(CAST(departamento_nivel_5 AS VARCHAR)) = 'aura brain'" in captured[0]
 
 
 # ── classificação ──────────────────────────────────────────────────────────
@@ -176,6 +215,16 @@ def test_monthly_series_month_without_realized_is_none():
     assert series[0]["forecast"] == 300_000.0
     assert series[1]["realizado"] is None
     assert series[1]["forecast"] is None
+
+
+def test_monthly_series_does_not_treat_rateio_as_realized():
+    rows = [
+        _row(period="202608", project="Vivo Mais", tipo="realizado", realized=650_000.0),
+        _row(period="202609", project="Vivo Mais", tipo="rateio", realized=22_000.0),
+    ]
+    series = _monthly_series(rows, ["202608", "202609"], "Vivo Mais")
+    assert series[0]["realizado"]["total"] == 650_000.0
+    assert series[1]["realizado"] is None
 
 
 def test_monthly_series_forecast_excludes_return_rows():

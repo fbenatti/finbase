@@ -157,7 +157,9 @@ def _apply_forecast_business_rules(
     for rule in sorted(business_rules or [], key=lambda item: item.priority):
         if not getattr(rule, "active", True):
             continue
-        if str(getattr(rule, "behavior", "") or "") == "SOURCE_EXCLUDE_PREFIX":
+        if str(getattr(rule, "behavior", "") or "") in {
+            "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX",
+        }:
             continue
         mask = output["tipo"].eq("forecast")
         identity_mask, has_identity_filter, missing_field = _rule_identity_mask(output, rule, output_by_lower)
@@ -282,8 +284,10 @@ def _lit(value: Any) -> str:
 
 def _source_exclusion_filter(
     business_rules: list[Any], metadata: dict[str, Any], period_col: str | None,
+    *, behaviors: set[str] | None = None,
 ) -> tuple[str | None, list[str]]:
     """Build safe Gold predicates for exclusions applied before aggregation."""
+    behaviors = behaviors or {"SOURCE_EXCLUDE_PREFIX"}
     columns = {
         str(item.get("name") or "").lower(): str(item.get("name") or "")
         for item in (metadata.get("columns") or []) if item.get("name")
@@ -291,7 +295,7 @@ def _source_exclusion_filter(
     exclusions: list[str] = []
     applied: list[str] = []
     for rule in sorted(business_rules or [], key=lambda item: item.priority):
-        if not getattr(rule, "active", True) or getattr(rule, "behavior", "") != "SOURCE_EXCLUDE_PREFIX":
+        if not getattr(rule, "active", True) or getattr(rule, "behavior", "") not in behaviors:
             continue
         clauses = list(getattr(rule, "identification_clauses", None) or []) or [{
             "column": getattr(rule, "identification_column", ""),
@@ -797,6 +801,7 @@ async def _fetch_period_records(
     connection_filter: str | None,
     exclusion_filter: str | None = None,
     only_exclusions: bool = False,
+    exclusion_sign: int = -1,
     minimum_monthly_points: int = 3,
 ) -> list[dict[str, Any]]:
     select_dims = ", ".join(_q(x) for x in dims)
@@ -805,11 +810,11 @@ async def _fetch_period_records(
     if mode == "interval":
         end_expr = _charge_interval_end_expr(date_expr, charge_end_col, period_col)
         select_sql = f"SELECT {group_prefix}{date_expr} AS charge_start, {end_expr} AS charge_end, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
-        excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS charge_start, {end_expr} AS charge_end, -SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+        excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS charge_start, {end_expr} AS charge_end, {exclusion_sign} * SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
         group_sql = f" GROUP BY {group_prefix}{date_expr}, {end_expr} ORDER BY charge_start"
     else:
         select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
-        excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, -SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
+        excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, {exclusion_sign} * SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
         group_sql = f" GROUP BY {group_prefix}{date_expr} ORDER BY forecast_day"
     extra = f" AND {connection_filter}" if connection_filter else ""
     records: list[dict[str, Any]] = []
@@ -949,6 +954,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     metadata = getattr(config, "gold_metadata", None) or {}
     source_exclusion, source_rule_names = _source_exclusion_filter(
         business_rules or [], metadata, period,
+        behaviors={"SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX"},
+    )
+    mean_30d_source_filter, mean_30d_rule_names = _source_exclusion_filter(
+        business_rules or [], metadata, period,
+        behaviors={"SOURCE_MEAN_30D_PREFIX"},
     )
     cloud_col, id_col = _resolve_connection_columns(metadata)
     allocation_rules = _merge_allocation_rules(
@@ -1097,8 +1107,28 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         excluded_frame = pd.DataFrame(excluded_records)
         if not excluded_frame.empty:
             frames.append(excluded_frame)
+    # Overage mensal é um evento que reinicia a cada ciclo de créditos. Ele é
+    # removido da série-base acima e entra como um componente independente
+    # calculado pela média diária dos últimos 30 dias (incluindo dias sem
+    # overage), em vez de contaminar a janela curta do custo recorrente.
+    if mean_30d_source_filter:
+        overage_records = await _fetch_period_records(
+            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            mode="daily", charge_end_col=None, period_col=period,
+            connection_filter=None, exclusion_filter=mean_30d_source_filter,
+            only_exclusions=True, exclusion_sign=1,
+            minimum_monthly_points=minimum_monthly,
+        )
+        overage_frame = pd.DataFrame(overage_records)
+        if not overage_frame.empty:
+            overage_frame["__forecast_component"] = "MEAN_30D_SOURCE"
+            frames.append(overage_frame)
     if not frames:
         raise ValueError("A Gold não possui dados realizados para a configuração")
+    for source_frame in frames:
+        if "__forecast_component" not in source_frame:
+            source_frame["__forecast_component"] = "BASE"
     frame = pd.concat(frames, ignore_index=True)
     frame["forecast_day"] = pd.to_datetime(frame["forecast_day"], errors="coerce")
     frame["value"] = pd.to_numeric(frame["value"], errors="coerce").fillna(0.0)
@@ -1110,12 +1140,16 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         for col in (cloud_col, id_col):
             if col and col not in key_cols:
                 key_cols.append(col)
+    component_col = "__forecast_component"
+    model_key_cols = [*key_cols, component_col]
     results: list[dict[str, Any]] = []
     methods: dict[str, str] = {}
     series_context: dict[tuple[tuple[str, Any], ...], dict[str, Any]] = {}
-    for key, group_frame in frame.groupby(key_cols, dropna=False) if key_cols else [((), frame)]:
+    for key, group_frame in frame.groupby(model_key_cols, dropna=False):
         if not isinstance(key, tuple): key = (key,)
-        key_values = {col: (None if pd.isna(value) else value) for col, value in zip(key_cols, key)}
+        model_key_values = {col: (None if pd.isna(value) else value) for col, value in zip(model_key_cols, key)}
+        component = str(model_key_values.pop(component_col) or "BASE")
+        key_values = model_key_values
         cloud_effective_cutoff = _cloud_effective_cutoff(
             cloud_cutoffs, cloud_col, key_values, effective_cutoff,
         )
@@ -1172,7 +1206,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             extended_mean = float(daily.tail(extended_window).mean())
             weight = max(0.0, min(1.0, float(config.recent_weight or 0.7)))
             candidates.append((f"WEIGHTED_{recent_window}D_{extended_window}D", recent_mean * weight + extended_mean * (1.0 - weight)))
-        if lump_daily_rate is not None:
+        if component == "MEAN_30D_SOURCE":
+            method, baseline = "MEAN_30D_RULE", float(daily.tail(30).mean())
+        elif lump_daily_rate is not None:
             # A lump monthly bill is not a daily run-rate: force the monthly
             # rate regardless of AUTO_BACKTEST or fixed-window model modes.
             method, baseline = "MONTHLY_LUMP", lump_daily_rate
@@ -1246,7 +1282,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             month = series_anchor.month - 1 + month_offset
             year = series_anchor.year + month // 12
             month = month % 12 + 1
-            value = baseline * ((1.0 + float(config.growth_rate)) ** month_offset) * calendar.monthrange(year, month)[1]
+            # O componente de overage é deliberadamente uma média estável de
+            # 30 dias: não herda nem o modelo de curto prazo nem a tendência
+            # global do forecast para os próximos meses.
+            growth_rate = 0.0 if component == "MEAN_30D_SOURCE" else float(config.growth_rate)
+            value = baseline * ((1.0 + growth_rate) ** month_offset) * calendar.monthrange(year, month)[1]
             results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
     output = pd.DataFrame(results)
     if output.empty: raise ValueError("Nenhuma série pôde ser projetada")
@@ -1257,7 +1297,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         key_cols,
         effective_cutoff,
     )
-    applied_rules = [*source_rule_names, *interval_rule_names, *applied_rules]
+    applied_rules = list(dict.fromkeys([
+        *source_rule_names, *mean_30d_rule_names, *interval_rule_names, *applied_rules,
+    ]))
     for adjustment in sorted(adjustments, key=lambda a: a.priority):
         mask = pd.Series(True, index=output.index)
         for column, value in (adjustment.filters or {}).items():
@@ -1269,6 +1311,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         elif adjustment.adjustment_type == "ADD_VALUE": output.loc[mask, "forecast_value"] += float(adjustment.fixed_value or 0)
         elif adjustment.adjustment_type == "SUBTRACT_VALUE": output.loc[mask, "forecast_value"] -= float(adjustment.fixed_value or 0)
         elif adjustment.adjustment_type == "ZERO": output.loc[mask, "forecast_value"] = 0.0
+    # Component is an execution-only key. Planning/forecast tables retain the
+    # configured dimensions and sum the base + special components naturally.
+    output = output.drop(columns=[component_col], errors="ignore")
     # A forecast run is an immutable audit snapshot.  Callers pass the run ID
     # so two executions on the same day can never overwrite each other.
     # ``cutoff`` is only a naming fallback; the math always uses the

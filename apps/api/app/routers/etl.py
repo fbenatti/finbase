@@ -1508,8 +1508,11 @@ def _reprocess_destination_sync(
                         ClassificationRule.active == True,
                     ).order_by(ClassificationRule.priority, ClassificationRule.id)
                 ).scalars().all()
-                if rule_matches_connection(rule.connection_id, cid)
-                and rule_matches_destination(
+                # Classifications are shared by provider, not by source
+                # connection.  A rule created from Azure-4P must also classify
+                # Azure-TI when its cloud_scope is Azure; connection_id is
+                # legacy metadata for these rules and must not narrow Gold.
+                if rule_matches_destination(
                     rule.destination_table_id,
                     destination_table_id,
                     is_focus_destination=is_focus_destination,

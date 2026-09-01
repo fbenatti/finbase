@@ -1,7 +1,7 @@
 """Dashboard executivo de custo dos projetos Aura Brain e Vivo Mais.
 
-Lê a Dimon pré-agregada ``iceberg.dimon.dest_dm_cost_custo_aura_brain_vivo_mais``
-(regra ``custo_aura_brain_vivo_mais``) e decompõe o custo de cada projeto em
+Lê as Dimons pré-agregadas de Aura Brain e Vivo Mais e decompõe o custo de
+cada projeto em
 classes executivas:
 
 * **ptu** — a **compra mensal** de capacidade PTU: a reserva
@@ -33,15 +33,27 @@ import time
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services.azure_ptu_dimon import (
+    DIMON_TABLE as PTU_DIMON_TABLE,
+    load_project_token_totals,
+    load_project_tokens_last_30d,
+)
 
 logger = logging.getLogger(__name__)
 
 DIMON_NAMESPACE = "iceberg.dimon"
-DIMON_TABLE = "dest_dm_cost_custo_aura_brain_vivo_mais"
-DIMON_SQL = f"{DIMON_NAMESPACE}.{DIMON_TABLE}"
-
 PROJECT_LABELS = {"aura-brain": "Aura Brain", "vivo-mais": "Vivo Mais"}
 PROJECTS = ("Aura Brain", "Vivo Mais")
+PROJECT_SOURCES = {
+    "aura-brain": {
+        "table": "dest_dm_cost_custo_aura_brain_vivo_mais",
+        "source_project": "Aura Brain",
+    },
+    "vivo-mais": {
+        "table": "dest_dm_cost_custo_vivo_mais",
+        "source_project": "Vivo+",
+    },
+}
 
 # Meters da compra mensal de PTU on-demand (1/Month) — lowercased.
 _PTU_PURCHASE_METERS = (
@@ -76,10 +88,6 @@ def _ia_family_sql() -> str:
         for key, family in _IA_FAMILY_RULES
     )
     return f"CASE {clauses} ELSE NULL END"
-
-# Filtro de projeto: o departamento_nivel_5 é a dimensão confiável para os
-# dois tipos (o planning não projeta `departamento`, só os níveis).
-_PROJECT_FILTER_SQL = "lower(CAST(departamento_nivel_5 AS VARCHAR)) IN ('aura brain', 'vivo mais')"
 
 # Classificação executiva por linha da Dimon. Ordem importa:
 # 1) compra/reserva de capacidade (Purchase/Refund/Return da reserva Foundry /
@@ -181,14 +189,21 @@ def classify_dimon_row(row: dict[str, Any]) -> str:
     return "infra"
 
 
-async def _query_cost_rows(cancel_event: asyncio.Event | None) -> list[dict[str, Any]]:
+async def _query_cost_rows(
+    project_key: str,
+    cancel_event: asyncio.Event | None,
+) -> list[dict[str, Any]]:
     """Todas as linhas da Dimon agregadas por (período, projeto, tipo,
     chargecategory, classe, servicesubcategory, is_ondemand_ptu). O consumo
     diário/horário sai do resultado na própria query (WHERE <> '__excluded__').
     """
+    source = PROJECT_SOURCES[project_key]
+    table_sql = f"{DIMON_NAMESPACE}.{source['table']}"
+    project = PROJECT_LABELS[project_key]
+    source_project = source["source_project"].lower().replace("'", "''")
     sql = f"""
         SELECT _billing_period AS period,
-               departamento_nivel_5 AS project,
+               '{project}' AS project,
                tipo,
                chargecategory,
                {_COST_CLASS_SQL} AS cost_class,
@@ -197,8 +212,8 @@ async def _query_cost_rows(cancel_event: asyncio.Event | None) -> list[dict[str,
                CASE WHEN lower(COALESCE(CAST(skumeter AS VARCHAR), '')) IN ({_PTU_PURCHASE_METERS_IN})
                     THEN 1 ELSE 0 END AS is_ondemand_ptu,
                COALESCE(SUM(TRY_CAST(realizado AS DOUBLE)), 0) AS realized
-        FROM {DIMON_SQL}
-        WHERE {_PROJECT_FILTER_SQL}
+        FROM {table_sql}
+        WHERE lower(CAST(departamento_nivel_5 AS VARCHAR)) = '{source_project}'
           AND {_COST_CLASS_SQL} <> '__excluded__'
         GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
     """
@@ -206,18 +221,20 @@ async def _query_cost_rows(cancel_event: asyncio.Event | None) -> list[dict[str,
 
 
 async def _query_subaccounts(
+    project_key: str,
     period: str,
-    project: str,
     cancel_event: asyncio.Event | None,
 ) -> list[dict[str, Any]]:
     """Distribuição do mês por subconta (sustenta a narrativa do rateio)."""
+    source = PROJECT_SOURCES[project_key]
+    table_sql = f"{DIMON_NAMESPACE}.{source['table']}"
+    source_project = source["source_project"].lower().replace("'", "''")
     rows = await trino_execute(
         f"""
         SELECT subaccountname,
                COALESCE(SUM(TRY_CAST(realizado AS DOUBLE)), 0) AS realized
-        FROM {DIMON_SQL}
-        WHERE {_PROJECT_FILTER_SQL}
-          AND departamento_nivel_5 = '{project}'
+        FROM {table_sql}
+        WHERE lower(CAST(departamento_nivel_5 AS VARCHAR)) = '{source_project}'
           AND _billing_period = '{period}'
           AND tipo = 'realizado'
           AND {_COST_CLASS_SQL} <> '__excluded__'
@@ -289,6 +306,11 @@ def _monthly_series(
             if str(row.get("chargecategory") or "").upper() in ("RETURN", "REFUND"):
                 continue
             forecast_by_period[period] = forecast_by_period.get(period, 0.0) + amount
+            continue
+        # A Dimon específica do Vivo Mais também publica ``tipo='rateio'``
+        # para meses futuros. Rateio não é custo realizado e não pode definir
+        # o mês de referência nem ser somado aos KPIs de realizado.
+        if tipo != "realizado":
             continue
         bucket = realized_by_period.setdefault(period, {"classes": _empty_classes(), "ia_services": {}})
         klass = str(row.get("cost_class") or "infra")
@@ -407,14 +429,40 @@ async def load_project_cost_dashboard(
     if cached and time.monotonic() - cached[0] < _COST_CACHE_TTL_S:
         return cached[1]
 
-    rows = await _query_cost_rows(cancel_event)
+    source_table = PROJECT_SOURCES[project_key]["table"]
+    rows = await _query_cost_rows(project_key, cancel_event)
     periods = sorted({str(r.get("period") or "") for r in rows if r.get("period")})
     if not periods:
-        payload = {"available": False, "error": "Dimon sem períodos disponíveis.", "table": DIMON_TABLE}
+        payload = {"available": False, "error": "Dimon sem períodos disponíveis.", "table": source_table}
         _COST_CACHE[cache_key] = (time.monotonic(), payload)
         return payload
 
     series_all = _monthly_series(rows, periods, project)
+    try:
+        # A janela de tokens é independente dos períodos existentes na Dimon
+        # financeira. Isso permite sinalizar e estimar lacunas de cobertura.
+        tokens_by_period = await load_project_token_totals(project_key, None, cancel_event)
+    except Exception as exc:
+        logger.warning("Tokens da Dimon PTU falharam para %s: %s", project_key, exc)
+        tokens_by_period = {}
+    try:
+        tokens_last_30d = await load_project_tokens_last_30d(project_key, cancel_event)
+    except Exception as exc:
+        logger.warning("Tokens 30d da Dimon PTU falharam para %s: %s", project_key, exc)
+        tokens_last_30d = {}
+    for month in series_all:
+        token_row = tokens_by_period.get(str(month.get("period") or ""), {})
+        total_tokens = float(token_row.get("total_tokens") or 0)
+        month["tokens"] = {
+            "input_tokens": float(token_row.get("input_tokens") or 0),
+            "output_tokens": float(token_row.get("output_tokens") or 0),
+            "total_tokens": total_tokens,
+        }
+        realized_total = (month.get("realizado") or {}).get("total")
+        month["cost_per_million_tokens"] = (
+            float(realized_total) * 1_000_000 / total_tokens
+            if realized_total is not None and total_tokens > 0 else None
+        )
     anchor_idx = next(
         (i for i in range(len(series_all) - 1, -1, -1)
          if series_all[i].get("realizado") and series_all[i]["realizado"].get("total") is not None),
@@ -424,7 +472,7 @@ async def load_project_cost_dashboard(
         payload = {
             "available": True,
             "empty": True,
-            "table": DIMON_TABLE,
+            "table": source_table,
             "project_key": project_key,
             "project_label": project,
             "available_periods": periods,
@@ -452,7 +500,7 @@ async def load_project_cost_dashboard(
     detail_period = current_period
     detail_label = _period_label(detail_period)
 
-    subaccounts_task = _query_subaccounts(detail_period, project, cancel_event)
+    subaccounts_task = _query_subaccounts(project_key, detail_period, cancel_event)
     subaccounts = await subaccounts_task
     if isinstance(subaccounts, Exception):
         logger.warning("Subcontas Dimon falharam: %s", subaccounts)
@@ -535,10 +583,32 @@ async def load_project_cost_dashboard(
             for s in subaccounts
         ],
     }
+    current_tokens = tokens_last_30d
+    current_total_tokens = float(current_tokens.get("total_tokens") or 0)
+    current_payload["token_efficiency"] = {
+        "input_tokens": float(current_tokens.get("input_tokens") or 0),
+        "output_tokens": float(current_tokens.get("output_tokens") or 0),
+        "total_tokens": current_total_tokens,
+        "million_tokens": current_total_tokens / 1_000_000,
+        "project_cost": blended_total,
+        "cost_per_million_tokens": (
+            blended_total * 1_000_000 / current_total_tokens
+            if blended_total is not None and current_total_tokens > 0 else None
+        ),
+        "cost_period": current_period,
+        "token_window": "last_30_days",
+        "token_date_from": current_tokens.get("date_from"),
+        "token_date_to": current_tokens.get("date_to"),
+        "estimated": False,
+        "note": (
+            f"Custo mensal de {_period_label(current_period)} dividido pelo consumo móvel dos últimos 30 dias."
+        ),
+        "source_table": PTU_DIMON_TABLE,
+    }
 
     payload = {
         "available": True,
-        "table": DIMON_TABLE,
+        "table": source_table,
         "project_key": project_key,
         "project_label": project,
         "available_periods": periods,

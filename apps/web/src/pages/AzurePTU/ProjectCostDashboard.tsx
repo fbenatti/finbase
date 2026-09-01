@@ -14,6 +14,12 @@ const n = (v: any) => (v == null || isNaN(Number(v)) ? "—" : fmt.format(Number
 const money = (v: any) => (v == null || isNaN(Number(v)) ? "—" : brl.format(Number(v)));
 const money2 = (v: any) => (v == null || isNaN(Number(v)) ? "—" : brl2.format(Number(v)));
 const pct = (v: any) => (v == null || isNaN(Number(v)) ? "—" : `${fmt.format(Number(v))}%`);
+const periodLabel = (period?: string) => {
+  if (!period || period.length !== 6) return period || "—";
+  return new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" })
+    .format(new Date(`${period.slice(0, 4)}-${period.slice(4, 6)}-01T00:00:00Z`))
+    .replace(" de ", "/").replace(".", "");
+};
 
 /** Números grandes sumarizados: 1.234.567 -> "1,2 Mi". */
 const compact = (v: any) => {
@@ -51,10 +57,12 @@ const HELP: Record<string, string> = {
   "Infraestrutura": "Todo o restante: VMs, Cosmos DB, discos, rede, Service Bus, Log Analytics etc., detalhado por servicesubcategory (sem serviços de IA).",
   "Infra compartilhada (rateio)": "Custo de infraestrutura repassado ao projeto. O Vivo Mais não recebe rateio: consome a infra do Aura Brain, mas a divisão não é feita por não existir forma eficiente (a infra não é específica do Vivo Mais e uma estrutura dedicada seria inviável).",
   "Custo previsto (forecast)": "Total planejado (planning) do mês de referência, exibido como total no chip — o planejamento não tem granularidade por componente. Bruto (sem abater as devoluções do espelho, que espelham o consumo horário já excluído do realizado).",
+  "MM de tokens": "Milhões de tokens atribuídos ao projeto na Dimon diária de Azure PTU, somando input e output no mesmo mês do custo.",
+  "Custo por MM de tokens": "Custo total do projeto dividido pelos milhões de tokens atribuídos no mesmo período. Inclui toda a composição de custo do projeto, não apenas meters de tokens.",
 };
 
 function Kpi({ label, value, hint, color }: { label: string; value: React.ReactNode; hint?: string; color?: string }) {
-  const help = HELP[label] || "Indicador executivo calculado a partir da Dimon dest_dm_cost_custo_aura_brain_vivo_mais.";
+  const help = HELP[label] || "Indicador executivo calculado a partir da Dimon específica do projeto.";
   return (
     <Tooltip title={<Typography variant="body2" sx={{ maxWidth: 340, p: 0.5 }}>{help}</Typography>} arrow placement="top" enterDelay={250}>
       <Card sx={{ height: "100%", borderTop: color ? `3px solid ${color}` : undefined, cursor: "help" }}>
@@ -99,6 +107,8 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
   const realizedTotal = realized.realizado_total ?? Number(total);
   const ptuSource: "realizado" | "estimado" = cur.ptu_source === "estimado" ? "estimado" : "realizado";
   const ptuEstimateNote = cur.ptu_estimate_note || "último realizado";
+  const tokenEfficiency = cur.token_efficiency || {};
+  const efficiencyEstimated = Boolean(tokenEfficiency.estimated);
 
   // Famílias de IA na ordem de importância do mês corrente (cores estáveis).
   const iaFamilies = useMemo(() => {
@@ -169,6 +179,20 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
 
       {data?.available && !data?.empty && (
         <>
+          <Card sx={{ color: "white", background: `linear-gradient(120deg, ${PROJECT_ACCENT[project]}, #0F172A)` }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" gap={1}>
+                <Typography variant="overline" sx={{ opacity: 0.8 }}>Eficiência econômica de IA</Typography>
+                {efficiencyEstimated && <Chip size="small" label="run-rate estimado" sx={{ bgcolor: "rgba(255,255,255,.18)", color: "white" }} />}
+              </Stack>
+              <Grid container spacing={2} mt={0.25}>
+                <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>Custo total do projeto</Typography><Typography variant="h4">{money(tokenEfficiency.project_cost ?? total)}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>{periodLabel(tokenEfficiency.cost_period || cur.period)}</Typography></Grid>
+                <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>MM de tokens</Typography><Typography variant="h4">{tokenEfficiency.total_tokens ? `${n(tokenEfficiency.million_tokens)} MM` : "—"}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>input + output · últimos 30 dias{tokenEfficiency.token_date_from && tokenEfficiency.token_date_to ? ` (${tokenEfficiency.token_date_from} a ${tokenEfficiency.token_date_to})` : ""}</Typography></Grid>
+                <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>Custo por MM de tokens</Typography><Typography variant="h4">{money2(tokenEfficiency.cost_per_million_tokens)}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>custo mensal ÷ milhões de tokens</Typography></Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+          {tokenEfficiency.note && <Alert severity="info">{tokenEfficiency.note}</Alert>}
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={3}>
               <Kpi label="Custo total" value={money(total)} hint={`${cur.label} · último realizado: R$ ${compact(realizedTotal)}${cur.mom_pct == null ? "" : ` · ${cur.mom_pct >= 0 ? "+" : ""}${n(cur.mom_pct)}% vs ${cur.prev_period_label}`}`} color={PROJECT_ACCENT[project]} />

@@ -255,6 +255,36 @@ def _project_totals(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     return totals
 
 
+def _carry_forward_reservation_purchase(monthly: list[dict[str, Any]]) -> None:
+    """Mantém visível a última compra positiva da reserva nos meses seguintes.
+
+    Microsoft.Capacity não necessariamente publica uma nova linha Purchase em
+    todo mês. Ausência da linha não significa que as 100 PTUs do Vivo Mais
+    desapareceram; o dashboard deve mostrá-las como referência da última
+    compra, sem classificá-las como novo realizado do mês.
+    """
+    for row in monthly:
+        if float(row.get("reservation_units") or 0) > 0:
+            continue
+        previous = next(
+            (
+                candidate for candidate in reversed(monthly)
+                if candidate["project"] == row["project"]
+                and candidate["period"] < row["period"]
+                and not candidate.get("reservation_referenced")
+                and float(candidate.get("reservation_units") or 0) > 0
+                and float(candidate.get("reservation_cost") or 0) > 0
+            ),
+            None,
+        )
+        if previous is None:
+            continue
+        row["reservation_units"] = previous.get("reservation_units")
+        row["reservation_cost"] = previous.get("reservation_cost")
+        row["reservation_referenced"] = True
+        row["reservation_reference_note"] = f"última compra {previous.get('label')}"
+
+
 async def load_dimon_ptu_costs(
     *,
     date_from: str,
@@ -316,6 +346,10 @@ async def _load_dimon_ptu_costs(
     candidates = [p for p in window_periods if p in realized_periods] or realized_periods
     current = candidates[-1] if candidates else current_period
 
+    # A reserva do Vivo Mais continua contratada mesmo quando Microsoft.Capacity
+    # não publica uma nova linha Purchase no mês do filtro.
+    _carry_forward_reservation_purchase(monthly)
+
     # On-demand é uma compra fixa de 100 PTUs/mês (ex.: Aura Brain). Quando o
     # mês corrente ainda não recebeu a linha na Gold (ex.: ago/2026), estima
     # pelo ÚLTIMO REALIZADO da compra — "OnDemand = só o valor da compra; o
@@ -346,6 +380,8 @@ async def _load_dimon_ptu_costs(
         by_project[row["project"]] = {
             "reservation_units": row["reservation_units"],
             "reservation_cost": row["reservation_cost"],
+            "reservation_referenced": row.get("reservation_referenced", False),
+            "reservation_reference_note": row.get("reservation_reference_note"),
             "ondemand_units": row["ondemand_units"],
             "ondemand_cost": row["ondemand_cost"],
             "ondemand_estimated": row.get("ondemand_estimated", False),
@@ -362,6 +398,7 @@ async def _load_dimon_ptu_costs(
     totals["ondemand_units"] = sum(bucket["ondemand_units"] for bucket in project_totals.values())
     totals["ondemand_cost"] = sum(bucket["ondemand_cost"] for bucket in project_totals.values())
     totals["ondemand_estimated"] = any(row.get("ondemand_estimated") for row in current_rows)
+    totals["reservation_referenced"] = any(row.get("reservation_referenced") for row in current_rows)
 
     # Notas de qualidade do dado (ex.: on-demand do mês corrente estimado).
     notes: list[str] = []
@@ -373,6 +410,14 @@ async def _load_dimon_ptu_costs(
                 f"usado {row.get('ondemand_estimate_note', 'previsto')} "
                 f"(R$ {float(row.get('ondemand_cost') or 0):,.0f})."
             )
+    referenced_reservations = [row for row in current_rows if row.get("reservation_referenced")]
+    for row in referenced_reservations:
+        notes.append(
+            f"Reserva PTU de {row['project']} ({_period_label(current)}): exibida pela "
+            f"{row.get('reservation_reference_note', 'última compra disponível')} "
+            f"({float(row.get('reservation_units') or 0):,.0f} PTUs · "
+            f"R$ {float(row.get('reservation_cost') or 0):,.0f}); não é uma nova compra do mês."
+        )
     if any(float(row.get("reservation_cost") or 0) > 0 and float(row.get("reservation_units") or 0) != 100
            for row in current_rows):
         notes.append("Quantidade da reserva diferente de 100 PTUs no mês de referência (ajuste/refund de capacidade).")

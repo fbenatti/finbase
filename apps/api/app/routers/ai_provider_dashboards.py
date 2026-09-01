@@ -1,6 +1,6 @@
 """
 Dashboards executivo/técnico por provedor de IA (Anthropic Claude, Google NotebookLM)
-sobre as tabelas gold normalizadas dest_licencas_ia / dest_consumo_ia.
+sobre as Dimons derivadas das tabelas normalizadas de consumo e licenças.
 
 Estratégia: um único endpoint parametrizado por provider ("1 dash, troca o parâmetro").
 A semântica de métrica se adapta ao provider:
@@ -22,14 +22,15 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.services.ai_usage_dimon import AI_CONSUMPTION_TABLE, AI_LICENSE_TABLE, refresh_ai_usage_dimons
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/visoes-consumo-ia/provider", tags=["visoes-consumo-ia"])
 
-LIC_TABLE = "dest_licencas_ia"
-CONS_TABLE = "dest_consumo_ia"
+LIC_TABLE = f"iceberg.dimon.{AI_LICENSE_TABLE}"
+CONS_TABLE = f"iceberg.dimon.{AI_CONSUMPTION_TABLE}"
 
 _PROVIDERS: dict[str, dict[str, str]] = {
     "anthropic": {
@@ -48,7 +49,7 @@ _PROVIDERS: dict[str, dict[str, str]] = {
     },
 }
 
-# Cache curto: o dashboard é read-only e as tabelas Gold são batch-fed.
+# Cache curto: o dashboard é read-only e as Dimons são atualizadas em lote.
 _OVERVIEW_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _OVERVIEW_CACHE_TTL_S = 30.0
 
@@ -89,6 +90,18 @@ class ProviderIaRequest(BaseModel):
     date_to: str | None = Field(default=None, description="YYYY-MM-DD inclusivo")
     days: int | None = Field(default=90, ge=1, le=730, description="Janela dos últimos N dias até a última amostra")
     billing_period: str | None = Field(default=None, description="YYYYMM — sobrepõe o recorte por data")
+
+
+@router.post("/dimon/reprocess")
+async def reprocess_provider_dimons():
+    """Reconstrói as Dimons compartilhadas por Copilot, Claude e NotebookLM."""
+    try:
+        result = await refresh_ai_usage_dimons()
+        _OVERVIEW_CACHE.clear()
+        return result
+    except Exception as exc:
+        logger.exception("Falha ao materializar Dimons de consumo de IA")
+        raise HTTPException(status_code=503, detail=f"Falha ao materializar Dimons de IA: {exc}") from exc
 
 
 def _quote_literal(value: str | int | float | bool) -> str:
@@ -199,7 +212,7 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
                   min(substr("UsageDate", 1, 10)) AS min_day,
                   max(substr("UsageDate", 1, 10)) AS max_day,
                   COUNT(DISTINCT "_billing_period") AS period_count
-                FROM iceberg.gold.{CONS_TABLE}
+                FROM {CONS_TABLE}
                 WHERE {scope}
                 """,
                 interactive,
@@ -220,17 +233,17 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             # 2) KPIs de consumo
             kpi_sql = f"""
             SELECT
-              COUNT(*) AS consumption_rows,
+              SUM(source_rows) AS consumption_rows,
               COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS consumption_users,
-              SUM(CASE WHEN COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0) > 0 THEN 1 ELSE 0 END) AS rows_with_tokens,
-              SUM(CASE WHEN COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0) + COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0) > 0 THEN 1 ELSE 0 END) AS rows_with_io_tokens,
-              SUM(CASE WHEN {_cost_expr()} > 0 THEN 1 ELSE 0 END) AS rows_with_cost,
+              SUM(rows_with_tokens) AS rows_with_tokens,
+              SUM(rows_with_io_tokens) AS rows_with_io_tokens,
+              SUM(rows_with_cost) AS rows_with_cost,
               SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
               SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
               SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS total_requests,
               SUM({_cost_expr()}) AS total_cost
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM {CONS_TABLE}
             WHERE {scope} AND {date_filter}
             """
             kpi_rows = await _run_query(kpi_sql, interactive)
@@ -257,7 +270,7 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
               SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
               SUM({_cost_expr()}) AS cost,
               COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS users
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM {CONS_TABLE}
             WHERE {scope} AND {date_filter}
             GROUP BY 1
             ORDER BY 1
@@ -281,13 +294,13 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             SELECT
               COALESCE(NULLIF(TRIM(CAST("ModelName" AS VARCHAR)), ''), 'não informado') AS model_name,
               COALESCE(NULLIF(TRIM(CAST("RecordType" AS VARCHAR)), ''), '') AS record_type,
-              COUNT(*) AS rows,
+              SUM(source_rows) AS rows,
               SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
               SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
               SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
               SUM({_cost_expr()}) AS cost
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM {CONS_TABLE}
             WHERE {scope} AND {date_filter}
             GROUP BY 1, 2
             ORDER BY cost DESC, total_tokens DESC
@@ -322,10 +335,10 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             SELECT "UserEmail", "UserName", "UserRole", "LicenseStatus", "ActivityStatus",
                    "LastActivityAt", "DaysSinceLastActivity", "LicenseSkuName", "OrganizationId",
                    "_billing_period"
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM {LIC_TABLE}
             WHERE {scope}
               AND "_billing_period" = (
-                SELECT MAX("_billing_period") FROM iceberg.gold.{LIC_TABLE} WHERE {scope}
+                SELECT MAX("_billing_period") FROM {LIC_TABLE} WHERE {scope}
               )
             """
             lic_rows = await _run_query(lic_scope_sql, interactive)
@@ -374,7 +387,7 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
                 SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
                 SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
                 SUM({_cost_expr()}) AS cost
-              FROM iceberg.gold.{CONS_TABLE}
+              FROM {CONS_TABLE}
               WHERE {scope} AND {date_filter}
                 AND NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '') IS NOT NULL
               GROUP BY 1
@@ -387,10 +400,10 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
                 MAX("DaysSinceLastActivity") AS days_since_activity,
                 MAX({_activity_status_expr()}) AS activity_status,
                 MAX(NULLIF(TRIM(CAST("LicenseStatus" AS VARCHAR)), '')) AS license_status
-              FROM iceberg.gold.{LIC_TABLE}
+              FROM {LIC_TABLE}
               WHERE {scope}
                 AND "_billing_period" = (
-                  SELECT MAX("_billing_period") FROM iceberg.gold.{LIC_TABLE} WHERE {scope}
+                  SELECT MAX("_billing_period") FROM {LIC_TABLE} WHERE {scope}
                 )
               GROUP BY 1
             )

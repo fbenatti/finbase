@@ -172,6 +172,30 @@ def _azure_ptu_daily_job() -> None:
     _queue_ptu_collections(hours=168, lookback_note="Azure PTU daily re-read 7d")
 
 
+def _azure_ptu_dimon_daily_job() -> None:
+    """Compacta a Gold horária depois da coleta diária para os dashboards."""
+    try:
+        import asyncio
+        from app.services.azure_ptu_dimon import refresh_azure_ptu_dimon
+
+        result = asyncio.run(refresh_azure_ptu_dimon(days=400))
+        logger.info("Azure PTU Dimon refreshed: %s", result)
+    except Exception as exc:
+        logger.warning("Azure PTU Dimon refresh failed: %s", exc, exc_info=True)
+
+
+def _ai_usage_dimon_daily_job() -> None:
+    """Atualiza as Dimons de Copilot, Claude e NotebookLM após as cargas diárias."""
+    try:
+        import asyncio
+        from app.services.ai_usage_dimon import refresh_ai_usage_dimons
+
+        result = asyncio.run(refresh_ai_usage_dimons())
+        logger.info("AI usage Dimons refreshed: %s", result)
+    except Exception as exc:
+        logger.warning("AI usage Dimons refresh failed: %s", exc, exc_info=True)
+
+
 def _azure_ptu_eventhub_job() -> None:
     try:
         from app.services.azure_ptu_eventhub import consume_all_ptu_eventhubs
@@ -436,6 +460,8 @@ async def start_scheduler():
         _scheduler.add_job(_refresh_savings_job, "cron", hour=2, minute=15, id="savings_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
         _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
+        _scheduler.add_job(_azure_ptu_dimon_daily_job, "cron", hour=4, minute=30, id="azure_ptu_dimon_daily", replace_existing=True)
+        _scheduler.add_job(_ai_usage_dimon_daily_job, "cron", hour=5, minute=10, id="ai_usage_dimon_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
         _scheduler.add_job(_oci_operational_hourly_job, "cron", minute=18, id="oci_operational_hourly", replace_existing=True)
         _scheduler.add_job(_azure_reservations_daily_job, "cron", hour=3, minute=45, id="azure_reservations_daily", replace_existing=True)

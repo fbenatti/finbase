@@ -340,3 +340,41 @@ def test_source_exclusion_rule_is_not_reapplied_after_aggregation():
     applied = _apply_forecast_business_rules(output, [rule], {}, [], date(2026, 8, 29))
     assert applied == []
     assert output["forecast_value"].tolist() == [123.0]
+
+
+def test_source_mean_30d_rule_builds_a_source_filter_without_dimension():
+    rule = _rule(
+        name="GitHub overage média de 30 dias",
+        identification_column="skumeter",
+        identification_values=["AI Credit GAC"],
+        behavior="SOURCE_MEAN_30D_PREFIX",
+        scope={"servicename": "GitHub", "servicesubcategory": "GitHub Copilot"},
+        start_period="202606",
+    )
+    sql_filter, applied = _source_exclusion_filter(
+        [rule],
+        {"columns": [
+            {"name": "skumeter"}, {"name": "servicename"},
+            {"name": "servicesubcategory"}, {"name": "_billing_period"},
+        ]},
+        "_billing_period",
+        behaviors={"SOURCE_MEAN_30D_PREFIX"},
+    )
+    assert applied == [rule.name]
+    assert "AI Credit GAC" in sql_filter
+    assert 'CAST("servicesubcategory" AS VARCHAR) = \'GitHub Copilot\'' in sql_filter
+
+
+def test_source_mean_30d_rule_is_not_reapplied_after_aggregation():
+    output = pd.DataFrame([{
+        "cloud_origem": "azure-ti", "forecast_month": "202609",
+        "tipo": "forecast", "forecast_value": 123.0,
+    }])
+    rule = _rule(
+        identification_column="skumeter",
+        identification_values=["AI Credit GAC"],
+        behavior="SOURCE_MEAN_30D_PREFIX",
+    )
+    applied = _apply_forecast_business_rules(output, [rule], {}, [], date(2026, 8, 30))
+    assert applied == []
+    assert output["forecast_value"].tolist() == [123.0]

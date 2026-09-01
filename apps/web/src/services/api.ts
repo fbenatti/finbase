@@ -13,6 +13,10 @@ export async function getAzurePtuOpsOverview(params: Record<string, unknown> = {
   const { data } = await api.post("/visoes-consumo-ia/dashboard/ops-overview", params, { signal });
   return data;
 }
+export async function getAzurePtuOpsHeatmap(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/ops-heatmap", params, { signal });
+  return data;
+}
 
 export async function getAzurePtuExecutiveOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
   const { data } = await api.post("/visoes-consumo-ia/dashboard/executive-overview", params, { signal });
@@ -22,7 +26,7 @@ export async function getAzurePtuView(view: "projects"|"deployments"|"subproject
   const { data } = await api.post(`/visoes-consumo-ia/dashboard/${view}`, params, { signal }); return data;
 }
 
-/** Dashboard executivo de custo de um projeto (Aura Brain | Vivo Mais) — Dimon dest_dm_cost_custo_aura_brain_vivo_mais. */
+/** Dashboard executivo de custo de Aura Brain ou Vivo Mais, usando a Dimon específica de cada projeto. */
 export async function getProjectCostDashboard(params: { project_key: "aura-brain" | "vivo-mais"; period_range?: "current_year" | "all" }, signal?: AbortSignal) {
   const { data } = await api.post("/visoes-consumo-ia/dashboard/project-costs", params, { signal });
   return data;
@@ -1966,7 +1970,10 @@ export interface AIProviderOverviewResult {
     last_activity_at: string | null;
     days_since_activity: number | null;
     activity_status: string;
+    license_status: string;
     logged_in: boolean;
+    has_consumption: boolean;
+    has_license: boolean;
   }>;
   license_table: Array<{
     user_email: string;
@@ -1989,6 +1996,8 @@ export interface AIProviderOverviewResult {
     license_rows: number;
     license_period: string | null;
     primary_metric: "tokens" | "cost";
+    consumption_but_license_never: number;
+    consumption_without_license: number;
     notes: string[];
   };
 }

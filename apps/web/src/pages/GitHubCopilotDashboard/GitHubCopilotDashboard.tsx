@@ -188,6 +188,9 @@ interface CopilotHistory {
   total_cost: number;
   active_licenses: number;
   included_credits_pool: number;
+  contracted_credits_pool?: number;
+  effective_credits_pool?: number;
+  promotional_credits?: number;
   overage_usd?: number;
   overage_credits?: number;
 }
@@ -206,7 +209,7 @@ interface FinancialInsights {
   github: FinancialInsightRow[];
   github_alerts?: FinancialInsightRow[];
   azure: Array<{ meter_subcategory: string; meter_name: string; product_name: string; cost_category: string; usage_start_date?: string; usage_end_date?: string; quantity: number; unit_cost_brl: number | null; cost_brl: number; cost_usd: number; rows: number }>;
-  totals?: { github_total_tokens: number; github_cost_per_million_tokens: number | null; github_cost_per_million_tokens_market_usd?: number | null; github_cost_per_million_tokens_market_brl?: number | null; github_credits?: number; azure_cost_brl: number; reconciliation_delta_brl: number; reconciliation_market_vs_paid_brl?: number; github_market_cost_brl?: number; current_period?: string; current_realized_brl?: number; current_projection_brl?: number; current_projection_total_brl?: number };
+  totals?: { github_total_tokens: number; github_cost_per_million_tokens: number | null; github_cost_per_million_tokens_market_usd?: number | null; github_cost_per_million_tokens_market_brl?: number | null; github_credits?: number; azure_cost_brl: number; reconciliation_delta_brl: number; reconciliation_market_vs_paid_brl?: number; github_market_cost_brl?: number; current_period?: string; current_realized_brl?: number; current_forecast_brl?: number; current_projection_brl?: number; current_projection_total_brl?: number };
 }
 
 const AVAILABLE_PERIODS = [
@@ -443,10 +446,10 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                           <TableRow>
                             <TableCell>
                               <Typography variant="body2" fontWeight={600} color="text.secondary">Projeção (restante do mês)</Typography>
-                              <Typography variant="caption" color="text.secondary">realizado + forecast da Dimon</Typography>
+                              <Typography variant="caption" color="text.secondary">forecast da Dimon para os dias restantes</Typography>
                             </TableCell>
                             <TableCell align="right">—</TableCell>
-                            <TableCell align="right"><Typography variant="body2" fontWeight={600}>{money.format(Math.max(0, (financialInsights?.totals?.current_projection_brl || 0) - (financialInsights?.totals?.azure_cost_brl || 0)))}</Typography></TableCell>
+                            <TableCell align="right"><Typography variant="body2" fontWeight={600}>{money.format(financialInsights?.totals?.current_forecast_brl || 0)}</Typography></TableCell>
                           </TableRow>
                           <TableRow sx={{ bgcolor: "#f8fafc" }}>
                             <TableCell><Typography variant="body2" fontWeight={700}>Total projetado (mês corrente)</Typography></TableCell>
@@ -478,13 +481,13 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                   <Typography variant="subtitle2" fontWeight={700} mb={0.5}>Conciliação GitHub × Azure</Typography>
                   <Box display="flex" justifyContent="space-between"><Typography variant="body2">Custo de mercado GitHub (R$)</Typography><Typography variant="body2" fontWeight={600}>{money.format(financialInsights?.totals?.github_market_cost_brl || 0)}</Typography></Box>
                   <Box display="flex" justifyContent="space-between"><Typography variant="body2">Azure realizado parcial (R$)</Typography><Typography variant="body2" fontWeight={600}>{money.format(financialInsights?.totals?.azure_cost_brl || 0)}</Typography></Box>
-                  <Box display="flex" justifyContent="space-between"><Typography variant="body2">Projeção ago/2026 (projetado + realizado)</Typography><Typography variant="body2" fontWeight={700}>{money.format(financialInsights?.totals?.current_projection_total_brl || 0)}</Typography></Box>
+                  <Box display="flex" justifyContent="space-between"><Typography variant="body2">Projeção do período (realizado + restante)</Typography><Typography variant="body2" fontWeight={700}>{money.format(financialInsights?.totals?.current_projection_total_brl || 0)}</Typography></Box>
                   <Box display="flex" justifyContent="space-between" sx={{ borderTop: "1px dashed #cbd5e1", mt: 0.5, pt: 0.5 }}>
                     <Typography variant="body2" fontWeight={700}>Δ valor de mercado − (projetado + realizado)</Typography>
                     <Typography variant="body2" fontWeight={800} color="warning.main">{money.format(financialInsights?.totals?.reconciliation_market_vs_paid_brl || 0)}</Typography>
                   </Box>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                    Projeção ago/2026 = projeção do mês (realizado + forecast) + Azure realizado parcial. Δ = valor de mercado do consumo − projeção total.
+                    Projeção do período = SKUs Azure realizados + forecast somente dos dias restantes. Δ = valor de mercado do consumo − projeção total.
                   </Typography>
                 </Alert>
               </Box>
@@ -543,7 +546,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
           <Paper ref={tableSectionRef} elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, mb: 4, bgcolor: "background.paper" }}>
             <Box mb={2}>
               <Typography variant="h5" fontWeight="bold" color="primary.main">Relação de Desenvolvedores, Créditos e Engajamento</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Detalhamento individual. Clique em qualquer linha para ver o breakdown completo.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Resumo individual carregado da Dimon por usuário/período. Clique em qualquer linha para ver o breakdown da Dimon diária por modelo.</Typography>
             </Box>
 
             <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
@@ -729,14 +732,16 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
               <Typography variant="caption" color="text.secondary" display="block" mb={2}>
                 Últimos 12 meses. Desde junho/2026 a Microsoft/GitHub alterou o formato de cobrança do Copilot para AI Credits
                 (por token) — o consumo mensal de créditos passou a existir a partir daí; meses anteriores aparecem zerados.
-                Consumo = relatório real de AI Credits (ai_usage_report). Franquia = licenças × 1.900/3.900 créditos
-                (franquia documentada pelo GitHub para Business/Enterprise).
+                Consumo = relatório real de AI Credits (ai_usage_report). O pool efetivo é inferido por
+                consumo menos o overage efetivamente faturado, incluindo créditos promocionais quando existirem;
+                a linha tracejada mostra somente a franquia contratada (licenças × 1.900 créditos).
               </Typography>
               <Plot
                 data={[
-                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => Math.max(0, (h.total_credits || 0) - (h.overage_credits || 0))), type: "bar" as const, name: "Consumidos (dentro da franquia)", marker: { color: "#2563eb" } },
+                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => Math.max(0, (h.total_credits || 0) - (h.overage_credits || 0))), type: "bar" as const, name: "Consumidos (pool coberto)", marker: { color: "#2563eb" } },
                   { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => h.overage_credits || 0), type: "bar" as const, name: "Overage pago (extra)", marker: { color: "#dc2626" } },
-                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => h.included_credits_pool), type: "scatter" as const, mode: "lines+markers" as const, name: "Franquia (recebida)", line: { color: "#d97706", width: 2 } },
+                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => h.effective_credits_pool ?? h.included_credits_pool), type: "scatter" as const, mode: "lines+markers" as const, name: "Pool efetivo (incl. promoção)", line: { color: "#d97706", width: 2 } },
+                  { x: history.slice(-12).map(h => periodLabel(h.period)), y: history.slice(-12).map(h => h.contracted_credits_pool ?? h.included_credits_pool), type: "scatter" as const, mode: "lines" as const, name: "Franquia contratada", line: { color: "#64748b", width: 1.5, dash: "dash" } },
                 ]}
                 layout={{ autosize: true, height: 340, barmode: "stack", margin: { l: 70, r: 20, b: 40, t: 20 }, hovermode: "x unified", yaxis: { tickformat: ",.2s" } }}
                 useResizeHandler
@@ -755,9 +760,9 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                         <Typography variant="caption" color="text.secondary">últimos 12 meses</Typography>
                       </Box>
                       <Box sx={{ flex: 1, p: 1.5, border: "1px solid #e2e8f0", borderRadius: 1.5, bgcolor: "#fffbeb" }}>
-                        <Typography variant="caption" color="text.secondary">Crédito recebido (franquia)</Typography>
-                        <Typography variant="h6" fontWeight={700}>{compact(last?.included_credits_pool || 0)}</Typography>
-                        <Typography variant="caption" color="text.secondary">mês atual · licenças × franquia</Typography>
+                        <Typography variant="caption" color="text.secondary">Pool efetivo coberto</Typography>
+                        <Typography variant="h6" fontWeight={700}>{compact((last?.effective_credits_pool ?? last?.included_credits_pool) || 0)}</Typography>
+                        <Typography variant="caption" color="text.secondary">mês atual · inclui promoção inferida</Typography>
                       </Box>
                       <Box sx={{ flex: 1, p: 1.5, border: "1px solid #e2e8f0", borderRadius: 1.5, bgcolor: "#fef2f2" }}>
                         <Typography variant="caption" color="text.secondary">Overage pago (consumo extra)</Typography>

@@ -16,14 +16,25 @@ import httpx
 
 from app.database import get_db
 from app.routers.ai_dashboards import _ClientCancelScope, _dept_filter, _period_filter, _resolve_scope_path
+from app.services.ai_usage_dimon import (
+    AI_CONSUMPTION_TABLE,
+    AI_LICENSE_TABLE,
+    COPILOT_LICENSE_TABLE,
+    COPILOT_USER_PERIOD_TABLE,
+    COPILOT_USAGE_TABLE,
+    refresh_ai_usage_dimons,
+)
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai-copilot", tags=["ai-copilot"])
 
-CONS_TABLE = "dest_consumo_ia"
-LIC_TABLE = "dest_licencas_ia"
+CONS_TABLE = f"iceberg.dimon.{AI_CONSUMPTION_TABLE}"
+LIC_TABLE = f"iceberg.dimon.{AI_LICENSE_TABLE}"
+COPILOT_USAGE_DIMON = f"iceberg.dimon.{COPILOT_USAGE_TABLE}"
+COPILOT_LICENSE_DIMON = f"iceberg.dimon.{COPILOT_LICENSE_TABLE}"
+COPILOT_USER_PERIOD_DIMON = f"iceberg.dimon.{COPILOT_USER_PERIOD_TABLE}"
 # Custo de referência do Copilot: a Dimon pré-agregada (iceberg.dimon.dest_dm_cost_copilot_custo)
 # é gerada a partir de iceberg.gold.dest_modelo_focus (+ planning) filtrada por
 # ServiceName='GitHub'. Os dashboards consultam a Dimon em vez de varrer a Gold/raw.
@@ -155,10 +166,20 @@ async def _raw_token_columns(interactive: dict[str, Any]) -> set[str]:
     """Return available columns so deployments can roll forward safely."""
     rows = await _run_query(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'bronze' AND table_name = 'raw_github_token'",
+        f"WHERE table_schema = 'dimon' AND table_name = '{COPILOT_USAGE_TABLE}'",
         interactive,
     )
     return {str(row.get("column_name") or "").lower() for row in rows}
+
+
+@router.post("/dimon/reprocess")
+async def reprocess_copilot_dimons():
+    """Reconstrói as Dimons compartilhadas e detalhadas do Copilot."""
+    try:
+        return await refresh_ai_usage_dimons()
+    except Exception as exc:
+        logger.exception("Falha ao materializar Dimons do GitHub Copilot")
+        raise HTTPException(status_code=503, detail=f"Falha ao materializar Dimons do Copilot: {exc}") from exc
 
 
 class CopilotFinancialInsightsRequest(BaseModel):
@@ -222,7 +243,7 @@ async def copilot_financial_insights(
           SUM({financial_exprs['output']}) AS output_tokens,
           SUM({financial_exprs['cache_read']}) AS cache_read_tokens,
           SUM({financial_exprs['cache_write']}) AS cache_write_tokens
-        FROM iceberg.bronze.raw_github_token
+        FROM {COPILOT_USAGE_DIMON}
         WHERE {period_filter} AND assignee_login IS NOT NULL AND assignee_login <> ''
           {github_source_filter}
         GROUP BY 1,2,3,4
@@ -264,27 +285,20 @@ async def copilot_financial_insights(
             _run_query(github_sql, scope.trino_kwargs),
             _run_query(azure_sql, scope.trino_kwargs),
         )
-        # Projeção do mês corrente (realizado parcial + forecast do restante) —
-        # mesmo conceito do gráfico de evolução e do overview.
+        # O forecast do período selecionado já representa somente os dias que
+        # faltam no mês. Buscar o primeiro mês seguinte usava um forecast mensal
+        # completo como "restante do mês" (ex.: setembro inteiro em agosto).
         projection_sql = f"""
         SELECT
           (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
              FROM iceberg.dimon.{COPILOT_COST_DIMON}
-            WHERE tipo = 'realizado' AND "_billing_period" = '{body.period or "202608"}') AS realized_brl,
-          (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
-             FROM iceberg.dimon.{COPILOT_COST_DIMON}
             WHERE tipo = 'forecast'
-              AND "_billing_period" = (
-                  SELECT MIN("_billing_period") FROM iceberg.dimon.{COPILOT_COST_DIMON}
-                  WHERE tipo = 'forecast' AND "_billing_period" > '{body.period or "202608"}'
-              )) AS forecast_brl
+              AND lower(COALESCE(servicename, '')) = 'github'
+              AND "_billing_period" = '{body.period or "202608"}') AS forecast_brl
         """
         proj_rows = await _run_query(projection_sql, scope.trino_kwargs)
         proj_row = proj_rows[0] if proj_rows else {}
-        current_realized_brl = float(proj_row.get("realized_brl") or 0)
         current_forecast_brl = float(proj_row.get("forecast_brl") or 0)
-        # Projeção do mês corrente = realizado parcial + forecast do restante.
-        current_projection_brl = current_realized_brl + current_forecast_brl
         for row in github_rows:
             token_total = sum(float(row.get(key) or 0) for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"))
             net = float(row.get("net_amount") or 0)
@@ -309,13 +323,17 @@ async def copilot_financial_insights(
         if market_price_usd <= 0:
             market_price_usd = COPILOT_CREDIT_PRICE_USD
         azure_brl = sum(float(row.get("cost_brl") or 0) for row in azure_rows)
+        # A tabela é de SKUs Azure; portanto seu total deve usar exatamente a
+        # mesma base realizada exibida nas linhas, acrescida apenas do forecast
+        # residual do período corrente.
+        current_realized_brl = azure_brl
+        current_projection_brl = current_realized_brl + current_forecast_brl
         currencies = {str(row.get("billing_currency") or "").upper() for row in github_rows if row.get("net_amount") not in (None, "", 0, "0.0")}
         delta_brl = azure_brl - github_net if currencies == {"BRL"} else None
         # Custo de mercado do consumo (créditos × US$ 0,01/crédito, convertido a BRL).
         market_cost_brl = github_gross * COPILOT_USD_BRL
-        # Projeção ago/2026 = projetado (realizado + forecast da Dimon) + Azure realizado parcial.
-        current_projection_total_brl = round(current_projection_brl + azure_brl, 2)
-        # Δ valor de mercado vs custo pago/projetado = mercado − (projeção + Azure realizado).
+        current_projection_total_brl = round(current_projection_brl, 2)
+        # Δ valor de mercado vs custo pago/projetado = mercado − total projetado.
         market_vs_paid_delta_brl = round(market_cost_brl - current_projection_total_brl, 2)
         return {
             "period": body.period,
@@ -340,8 +358,8 @@ async def copilot_financial_insights(
                 # Mês corrente: realizado parcial + projeção (realizado + forecast).
                 "current_period": body.period,
                 "current_realized_brl": round(current_realized_brl, 2),
+                "current_forecast_brl": round(current_forecast_brl, 2),
                 "current_projection_brl": round(current_projection_brl, 2),
-                # Projeção ago/2026 (projetado + realizado) = projeção + Azure parcial.
                 "current_projection_total_brl": current_projection_total_brl,
             },
             "definitions": {
@@ -378,15 +396,15 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
           SUM(TRY_CAST("LinesAccepted" AS DOUBLE)) AS lines_accepted,
           SUM(TRY_CAST("acceptancescount" AS DOUBLE)) AS chat_turns,
           SUM(TRY_CAST("TotalTokens" AS DOUBLE)) AS total_tokens
-        FROM iceberg.gold.{CONS_TABLE}
+        FROM {CONS_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {period_filter} AND {dept_sql}
         """
 
-        # Créditos reais consumidos de IA no bronze
+        # Créditos reais consumidos de IA na Dimon financeira diária
         bronze_credits_sql = f"""
         SELECT SUM({overview_credit_expr}) AS total_credits
-        FROM iceberg.bronze.raw_github_token
+        FROM {COPILOT_USAGE_DIMON}
         WHERE {period_filter} {overview_credit_measure_filter}
           {overview_credit_source_filter}
         """
@@ -401,7 +419,7 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
           COUNT(DISTINCT "UserEmail") FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 60 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 90) AS inactive_60,
           COUNT(DISTINCT "UserEmail") FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 90) AS inactive_90,
           SUM(39.0 * 5.14) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30) AS potential_savings
-        FROM iceberg.gold.{LIC_TABLE}
+        FROM {LIC_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {period_filter} AND {dept_sql}
         """
@@ -430,7 +448,7 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
             SELECT 
                 "UserLogin",
                 SUM(COALESCE(TRY_CAST("LinesAccepted" AS DOUBLE), 0) + COALESCE(TRY_CAST("acceptancescount" AS DOUBLE), 0)) AS total_interactions
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM {CONS_TABLE}
             WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
               AND {period_filter} AND {dept_sql}
             GROUP BY 1
@@ -452,7 +470,7 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
             SELECT
                 lower(assignee_login) AS user_login,
                 MAX(COALESCE(TRY_CAST(monthly_quota AS DOUBLE), 0)) AS monthly_quota
-            FROM iceberg.bronze.raw_github_token
+            FROM {COPILOT_USAGE_DIMON}
             WHERE {period_filter} AND source_kind = 'ai_usage_report'
               AND assignee_login IS NOT NULL AND assignee_login <> ''
             GROUP BY 1
@@ -460,21 +478,21 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
         """ if "monthly_quota" in overview_token_columns else None
         if quota_pool_sql:
             overview_queries.append(quota_pool_sql)
-        # Projeção do mês corrente (realizado parcial + forecast do restante),
-        # base realizado da Dimon — mesmo conceito do gráfico de evolução.
+        # Projeção do mês corrente (realizado parcial + forecast residual do
+        # próprio período). O próximo mês contém uma projeção mensal completa
+        # e não pode ser usado como restante do mês selecionado.
         projection_sql = f"""
         SELECT
           (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
              FROM iceberg.dimon.{COPILOT_COST_DIMON}
-            WHERE tipo = 'realizado' AND "_billing_period" = '{body.period or "202608"}') AS realized_brl,
+            WHERE tipo = 'realizado'
+              AND lower(COALESCE(servicename, '')) = 'github'
+              AND "_billing_period" = '{body.period or "202608"}') AS realized_brl,
           (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
              FROM iceberg.dimon.{COPILOT_COST_DIMON}
             WHERE tipo = 'forecast'
-              AND "_billing_period" = (
-                  SELECT MIN("_billing_period")
-                  FROM iceberg.dimon.{COPILOT_COST_DIMON}
-                  WHERE tipo = 'forecast' AND "_billing_period" > '{body.period or "202608"}'
-              )) AS forecast_brl
+              AND lower(COALESCE(servicename, '')) = 'github'
+              AND "_billing_period" = '{body.period or "202608"}') AS forecast_brl
         """
         overview_queries.append(projection_sql)
         overview_results = await asyncio.gather(
@@ -586,7 +604,7 @@ async def copilot_users(body: CopilotDashboardRequest, request: Request, db: Asy
             SUM(TRY_CAST("CreditsAmount" AS DOUBLE)) AS total_credits,
             MAX(COALESCE(TRY_CAST("AllocatedCost" AS DOUBLE), TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0)) AS cost,
             MAX("Departamento_Nivel_2") as dept
-          FROM iceberg.gold.{CONS_TABLE}
+          FROM {CONS_TABLE}
           WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
             AND {period_filter} AND {dept_sql}
           GROUP BY 1
@@ -654,7 +672,7 @@ async def copilot_models(body: CopilotDashboardRequest, request: Request, db: As
             SUM(COALESCE(TRY_CAST(gross_amount AS DOUBLE), 0)) AS gross,
             SUM(COALESCE(TRY_CAST(input_tokens AS DOUBLE), 0) + COALESCE(TRY_CAST(output_tokens AS DOUBLE), 0)
                 + COALESCE(TRY_CAST(cache_read_tokens AS DOUBLE), 0) + COALESCE(TRY_CAST(cache_write_tokens AS DOUBLE), 0)) AS tokens
-        FROM iceberg.bronze.raw_github_token
+        FROM {COPILOT_USAGE_DIMON}
         WHERE {p_filter}
           AND source_kind = 'ai_usage_report'
           AND model NOT IN ('copilot_ai_credit', 'copilot_for_business', 'ghec_licenses')
@@ -668,7 +686,7 @@ async def copilot_models(body: CopilotDashboardRequest, request: Request, db: As
             SUM(COALESCE(TRY_CAST(total_lines_accepted AS DOUBLE), 0)) AS lines_accepted,
             SUM(COALESCE(TRY_CAST(total_acceptances_count AS DOUBLE), 0)) AS acceptances_count,
             SUM(COALESCE(TRY_CAST(total_suggestions_count AS DOUBLE), 0)) AS suggestions_count
-        FROM iceberg.bronze.raw_github_token
+        FROM {COPILOT_USAGE_DIMON}
         WHERE {p_filter}
           AND source_kind = 'copilot_metrics'
           AND model NOT IN ('copilot_ai_credit', 'copilot_for_business', 'ghec_licenses')
@@ -823,7 +841,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
           CAST("_billing_period" AS VARCHAR) AS period,
           COUNT(DISTINCT "UserLogin") AS active_licenses,
           SUM(COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), TRY_CAST("listcost" AS DOUBLE), 100)) AS total_lic_cost
-        FROM iceberg.gold.{LIC_TABLE}
+        FROM {LIC_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {year_filter} AND {dept_sql}
           AND {history_period_cutoff}
@@ -831,12 +849,12 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         ORDER BY 1
         """
 
-        # 2. Licenças cumulativas criadas a partir do bronze (raw_github_license)
+        # 2. Licenças cumulativas criadas a partir da Dimon de assentos
         bronze_lic_sql = f"""
         SELECT 
           (substr(created_at, 1, 4) || substr(created_at, 6, 2)) AS period,
           COUNT(DISTINCT assignee_login) AS new_licenses
-        FROM iceberg.bronze.raw_github_license
+        FROM {COPILOT_LICENSE_DIMON}
         WHERE created_at IS NOT NULL AND length(created_at) >= 7
         GROUP BY 1
         ORDER BY 1
@@ -850,7 +868,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
           SUM(TRY_CAST("acceptancescount" AS DOUBLE)) AS chat_turns,
           SUM(TRY_CAST("TotalTokens" AS DOUBLE)) AS total_tokens,
           COUNT(DISTINCT "UserLogin") AS active_users
-        FROM iceberg.gold.{CONS_TABLE}
+        FROM {CONS_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {year_filter} AND {dept_sql}
           AND {history_period_cutoff}
@@ -858,13 +876,13 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         ORDER BY 1
         """
 
-        # 3.1 Créditos reais consumidos de IA no bronze (relatório financeiro)
+        # 3.1 Créditos reais consumidos de IA na Dimon (relatório financeiro)
         bronze_credits_hist_sql = f"""
         SELECT
           CAST("_billing_period" AS VARCHAR) AS period,
           SUM({history_credit_expr}) AS total_credits,
           SUM(COALESCE(TRY_CAST(net_amount AS DOUBLE), 0)) AS overage_usd
-        FROM iceberg.bronze.raw_github_token
+        FROM {COPILOT_USAGE_DIMON}
         WHERE {history_credit_measure_filter.replace('AND ', '', 1)}
           AND {year_filter.replace('"_billing_period"', '"_billing_period"')}
           AND {history_period_cutoff}
@@ -1022,13 +1040,26 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
                     history_map[p]["active_licenses"] = gold_lic
                 history_map[p]["total_lic_cost"] = float(r.get("total_lic_cost") or 0)
 
-        # Ajusta licenças cumulativas e pool de créditos se active_licenses for 0 ou extrapolado
+        # Ajusta licenças cumulativas e pools de créditos se active_licenses for 0 ou extrapolado.
+        # A franquia contratada (licenças × 1.900) não representa necessariamente
+        # todo o pool recebido: o relatório financeiro pode conter créditos
+        # promocionais. Como o mesmo relatório informa o overage efetivamente
+        # cobrado, ``consumo - overage`` é o pool efetivo mínimo que cobriu o
+        # consumo no mês. Expor ambos evita que o dashboard trate promoção como
+        # consumo indevidamente acima da franquia.
         for p, data in history_map.items():
             cumul = get_cumulative_licenses(p)
             if data["active_licenses"] == 0 and cumul > 0:
                 data["active_licenses"] = cumul
-            # Franquia de 3.900 créditos por licença Enterprise
-            data["included_credits_pool"] = max(data["active_licenses"], cumul) * 1900
+            contracted_pool = max(data["active_licenses"], cumul) * 1900
+            total_credits = max(0.0, float(data.get("total_credits") or 0.0))
+            overage_credits = min(total_credits, max(0.0, float(data.get("overage_credits") or 0.0)))
+            covered_pool = max(contracted_pool, total_credits - overage_credits)
+            data["contracted_credits_pool"] = round(contracted_pool, 2)
+            data["effective_credits_pool"] = round(covered_pool, 2)
+            data["promotional_credits"] = round(max(0.0, covered_pool - contracted_pool), 2)
+            # Compatibilidade com consumidores antigos do endpoint.
+            data["included_credits_pool"] = data["effective_credits_pool"]
             # Se não teve faturamento cloud para o mês, calcula pelo valor de referência ($39 * 5.14)
             if data["total_cost"] == 0.0 and data["active_licenses"] > 0:
                 data["cost_usd"] = data["active_licenses"] * 39.0
@@ -1051,14 +1082,9 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         current_period = realized_periods[-1] if realized_periods else None
 
         def forecast_for_month(period: str) -> float:
-            value = forecast_by_period.get(period, 0.0)
-            if value > 0:
-                return value
-            # Forecast do mês corrente ainda zerado: usa o próximo mês com forecast.
-            for f in sorted(forecast_by_period):
-                if f > period and forecast_by_period[f] > 0:
-                    return forecast_by_period[f]
-            return 0.0
+            # Na planning, o mês corrente contém apenas os dias restantes;
+            # meses futuros contêm o mês completo.
+            return forecast_by_period.get(period, 0.0)
 
         cost_evolution: list[dict[str, Any]] = []
         for p in realized_periods:
@@ -1077,11 +1103,10 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
                 "segments": segments,
             }
             if p == current_period:
-                projection = forecast_for_month(p)
-                if projection > total:
-                    remainder = round(projection - total, 2)
+                remainder = round(forecast_for_month(p), 2)
+                if remainder > 0:
                     entry["is_current_month"] = True
-                    entry["projected_total"] = round(projection, 2)
+                    entry["projected_total"] = round(total + remainder, 2)
                     entry["forecast_remainder"] = remainder
                     entry["segments"].append({
                         "subcategory": "Projeção (restante do mês)",
@@ -1133,33 +1158,17 @@ async def copilot_engagement_users(
         scope_path = await _resolve_scope_path(db, body.department_id, body.department_path)
         period_filter = _period_filter(body.period, body.year)
         dept_sql = _dept_filter(scope_path)
-        token_columns = await _raw_token_columns(scope.trino_kwargs)
-        credit_expr = "TRY_CAST(total_chat_turns AS DOUBLE)"
-        credit_raw_expr = "total_chat_turns"
-        credit_source_filter = ""
-        credit_measure_filter = "AND model = 'copilot_ai_credit'"
-        if "ai_credits" in token_columns:
-            credit_expr = "COALESCE(TRY_CAST(ai_credits AS DOUBLE), TRY_CAST(total_chat_turns AS DOUBLE), 0)"
-            credit_raw_expr = "COALESCE(ai_credits, total_chat_turns)"
-        if "source_kind" in token_columns:
-            # Créditos só podem vir do relatório financeiro; métricas de adoção
-            # não são uma medida de faturamento.
-            credit_source_filter = "AND source_kind IN ('ai_usage_report', 'billing_report')"
-            credit_measure_filter = "AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')"
-
         # Franquia individual real (total_monthly_quota) vem do relatório
-        # financeiro de AI Credits, quando a coluna existe; senão cai na franquia
-        # documentada (Business 1.900 / Enterprise 3.900).
-        quota_available = "monthly_quota" in token_columns
+        # financeiro já consolidado por usuário/período.
+        quota_available = True
         quota_cte = f"""
         ,
         quota AS (
             SELECT
                 lower(assignee_login) AS user_login,
                 MAX(COALESCE(TRY_CAST(monthly_quota AS DOUBLE), 0)) AS monthly_quota
-            FROM iceberg.bronze.raw_github_token
+            FROM {COPILOT_USER_PERIOD_DIMON}
             WHERE {period_filter}
-              AND source_kind = 'ai_usage_report'
               AND assignee_login IS NOT NULL AND assignee_login <> ''
             GROUP BY 1
         )
@@ -1182,36 +1191,21 @@ async def copilot_engagement_users(
         )
 
         sql = f"""
-        WITH credit_daily AS (
-            SELECT 
-                day,
-                lower(assignee_login) AS assignee_login,
-                model,
-                language,
-                editor,
-                MAX_BY({credit_raw_expr}, _ingested_at) AS credit_value,
-                MAX_BY(COALESCE(TRY_CAST(net_amount AS DOUBLE), 0), _ingested_at) AS net_amount,
-                MAX_BY(COALESCE(TRY_CAST(discount_amount AS DOUBLE), 0), _ingested_at) AS included_amount
-            FROM iceberg.bronze.raw_github_token
-            WHERE {period_filter}
-              {credit_measure_filter}
-              {credit_source_filter}
-              AND assignee_login IS NOT NULL AND assignee_login <> ''
-            GROUP BY 1,2,3,4,5
-        ),
-        user_credits AS (
+        WITH user_credits AS (
             SELECT 
                 assignee_login,
-                SUM(COALESCE(TRY_CAST(credit_value AS DOUBLE), 0)) AS ai_credits,
+                SUM(COALESCE(ai_credits, 0)) AS ai_credits,
                 SUM(COALESCE(net_amount, 0)) AS net_amount,
-                SUM(COALESCE(included_amount, 0)) AS included_amount
-            FROM credit_daily
+                SUM(COALESCE(discount_amount, 0)) AS included_amount
+            FROM {COPILOT_USER_PERIOD_DIMON}
+            WHERE {period_filter}
             GROUP BY 1
         ),
         credit_bounds AS (
-            SELECT MIN(day) AS credit_period_start, MAX(day) AS credit_period_end,
-                   COUNT(DISTINCT day) AS credit_period_days
-            FROM credit_daily
+            SELECT MIN(period_start) AS credit_period_start, MAX(period_end) AS credit_period_end,
+                   MAX(period_days) AS credit_period_days
+            FROM {COPILOT_USER_PERIOD_DIMON}
+            WHERE {period_filter}
         )
         {quota_cte},
         lic AS (
@@ -1223,14 +1217,14 @@ async def copilot_engagement_users(
                 COALESCE(CAST("Departamento_Nivel_2" AS VARCHAR), CAST("departamento" AS VARCHAR), 'Não Informado') AS dept,
                 COALESCE(TRY_CAST("DaysSinceLastActivity" AS INTEGER), -1) AS days_inactive,
                 CAST("LastActivityAt" AS VARCHAR) AS last_activity
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM {LIC_TABLE}
             WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
               AND "_billing_period" = (
                   SELECT COALESCE(
                       MAX("_billing_period") FILTER (WHERE "_billing_period" = '{body.period or ''}'),
                       MAX("_billing_period")
                   )
-                  FROM iceberg.gold.{LIC_TABLE}
+                  FROM {LIC_TABLE}
                   WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
               )
               AND {dept_sql}
@@ -1242,7 +1236,7 @@ async def copilot_engagement_users(
                 SUM(COALESCE(TRY_CAST("LinesAccepted" AS DOUBLE), 0)) AS lines_accepted,
                 SUM(COALESCE(TRY_CAST("acceptancescount" AS DOUBLE), 0)) AS chat_turns,
                 SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM {CONS_TABLE}
             WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
               AND {period_filter} AND {dept_sql}
             GROUP BY 1
@@ -1489,6 +1483,7 @@ async def copilot_user_model_details(
                 model,
                 language,
                 editor,
+                source_kind,
                 TRY_CAST(COALESCE(ai_credits, total_chat_turns) AS DOUBLE) AS total_chat_turns,
                 TRY_CAST(total_lines_accepted AS DOUBLE) AS total_lines_accepted,
                 TRY_CAST(total_acceptances_count AS DOUBLE) AS total_acceptances_count,
@@ -1497,10 +1492,10 @@ async def copilot_user_model_details(
                 COALESCE(TRY_CAST(cache_read_tokens AS DOUBLE), 0) AS cache_read_tokens,
                 COALESCE(TRY_CAST(cache_write_tokens AS DOUBLE), 0) AS cache_write_tokens,
                 ROW_NUMBER() OVER (
-                    PARTITION BY day, assignee_login, model, language, editor
+                    PARTITION BY day, assignee_login, model, language, editor, source_kind
                     ORDER BY _ingested_at DESC
                 ) AS rn
-            FROM iceberg.bronze.raw_github_token
+            FROM {COPILOT_USAGE_DIMON}
             WHERE {period_filter}
               AND {user_match_sql}
         ),
@@ -1533,7 +1528,7 @@ async def copilot_user_model_details(
                 MAX(language) AS billing_language
             FROM dedup_token
             WHERE rn = 1
-              AND model = 'copilot_ai_credit'
+              AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')
         )
         SELECT 
             m.model_name,
@@ -1569,12 +1564,13 @@ async def copilot_user_model_details(
                     model,
                     language,
                     editor,
+                    source_kind,
                     TRY_CAST(COALESCE(ai_credits, total_chat_turns) AS DOUBLE) AS total_chat_turns,
                     ROW_NUMBER() OVER (
-                        PARTITION BY day, assignee_login, model, language, editor
+                        PARTITION BY day, assignee_login, model, language, editor, source_kind
                         ORDER BY _ingested_at DESC
                     ) AS rn
-                FROM iceberg.bronze.raw_github_token
+                FROM {COPILOT_USAGE_DIMON}
                 WHERE {period_filter}
                   AND {user_match_sql}
             )
@@ -1583,7 +1579,7 @@ async def copilot_user_model_details(
                 MAX(editor) AS billing_editor,
                 MAX(language) AS billing_language
             FROM dedup_token
-            WHERE rn = 1 AND model = 'copilot_ai_credit'
+            WHERE rn = 1 AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')
             """
             crows = await _run_query(credit_sql, scope.trino_kwargs)
             total_credits = float(crows[0].get("total_credits") or 0) if crows else 0.0

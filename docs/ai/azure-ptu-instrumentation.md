@@ -2,6 +2,19 @@
 
 Os deployments PTU são compartilhados. O Azure Monitor é a fonte autoritativa de tokens, requests e utilização. Eventos de aplicação servem **somente** para atribuir consumo a subprojetos.
 
+## Camada de leitura do dashboard
+
+- `iceberg.gold.dest_azure_ptu_metrics` preserva as métricas horárias e é lida
+  pelo dashboard somente quando o usuário aciona **Carregar heatmap**.
+- `iceberg.dimon.dest_dm_azure_ptu_daily` agrega a Gold por dia, deployment e
+  projeto. KPIs, séries, rankings e a correlação de custo por milhão de tokens
+  usam esta tabela leve.
+- A Dimon é atualizada diariamente após a coleta PTU e também pode ser refeita
+  por `POST /visoes-consumo-ia/azure-ptu/dimon/reprocess?days=400`.
+- Aura Brain e Vivo Mais cruzam o custo mensal de referência das respectivas
+  Dimons de custo com `input_tokens_sum + output_tokens_sum` acumulados nos
+  últimos 30 dias na Dimon PTU. A janela móvel pode atravessar meses.
+
 ## Regras
 
 - Não envie prompt, resposta, usuário, telefone, IP ou qualquer PII.

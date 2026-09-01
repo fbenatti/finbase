@@ -205,6 +205,11 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
             O campo será filtrado diretamente na Gold usando “começa com”. Ele não precisa estar nas dimensões do forecast.
           </Alert>
         )}
+        {rule.behavior === "SOURCE_MEAN_30D_PREFIX" && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            O campo será separado diretamente na Gold usando “começa com” e projetado pela média diária dos últimos 30 dias. Ele não precisa estar nas dimensões do forecast.
+          </Alert>
+        )}
 
         <Stack spacing={2}>
           <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">

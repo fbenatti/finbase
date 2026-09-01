@@ -68,6 +68,7 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
   const notes = costs.notes || [];
 
   const ondemandEstimated = totals.ondemand_estimated === true;
+  const reservationReferenced = totals.reservation_referenced === true;
   const ptuMonthlyCost = (Number(totals.reservation_cost) || 0) + (Number(totals.ondemand_cost) || 0);
   const totalUnits = (Number(totals.reservation_units) || 0) + (Number(totals.ondemand_units) || 0);
   const reservaUnitPrice = totals.reservation_units ? (Number(totals.reservation_cost) / Number(totals.reservation_units)) : null;
@@ -116,8 +117,8 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
       <Typography variant="h6" gutterBottom>Financeiro (Gold) — {costs.current_label}</Typography>
 
       <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={3}><Kpi label="Custo PTU mensal" value={money(ptuMonthlyCost)} hint={`reserva ${money(totals.reservation_cost)} + on-demand ${money(totals.ondemand_cost)}${ondemandEstimated ? " (previsto)" : ""}`} /></Grid>
-        <Grid item xs={12} sm={6} md={3}><Kpi label="PTUs (reserva + on-demand)" value={`${n(totalUnits)} PTUs`} hint={`reserva ${n(totals.reservation_units)} · on-demand ${n(totals.ondemand_units)}${ondemandEstimated ? " (previsto)" : ""}${provisioned?.total_ptus != null ? ` · provisionado: ${n(provisioned.total_ptus)} PTUs (${n(provisioned.deployment_count)} deployments)` : ""}`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Custo PTU mensal" value={money(ptuMonthlyCost)} hint={`reserva ${money(totals.reservation_cost)}${reservationReferenced ? " (última compra)" : ""} + on-demand ${money(totals.ondemand_cost)}${ondemandEstimated ? " (previsto)" : ""}`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="PTUs (reserva + on-demand)" value={`${n(totalUnits)} PTUs`} hint={`reserva ${n(totals.reservation_units)}${reservationReferenced ? " (última compra)" : ""} · on-demand ${n(totals.ondemand_units)}${ondemandEstimated ? " (previsto)" : ""}${provisioned?.total_ptus != null ? ` · provisionado: ${n(provisioned.total_ptus)} PTUs (${n(provisioned.deployment_count)} deployments)` : ""}`} /></Grid>
         <Grid item xs={12} sm={6} md={3}><Kpi label="On-demand vs reserva" value={deltaPct == null ? "—" : `${deltaPct >= 0 ? "+" : ""}${pct(deltaPct)}`} hint={deltaPct == null ? "sem dados de on-demand" : `on-demand ${pct(deltaPct)} sobre a reserva · reserva ${money(reservaUnitPrice)}/PTU · on-demand ${money(ondemandUnitPrice)}/PTU${ondemandEstimated ? " (on-demand previsto)" : ""}`} /></Grid>
         <Grid item xs={12} sm={6} md={3}><Kpi label="Custo por milhão de tokens" value={cpmTotal == null ? "—" : `${money2(cpmTotal)}/mi`} hint={`PTU reserva+on-demand ${money(ptuMonthlyCost)} ÷ ${tokensLabel(totalTokens)} tokens (últimos 30 dias)`} /></Grid>
       </Grid>
@@ -138,7 +139,7 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
                   </Stack>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                     {isVivo
-                      ? <>Reserva: <b>{n(p.reservation_units)} PTUs</b> · <b>{money(p.reservation_cost)}</b></>
+                      ? <>Reserva: <b>{n(p.reservation_units)} PTUs</b> · <b>{money(p.reservation_cost)}</b>{p.reservation_referenced ? ` (${p.reservation_reference_note})` : ""}</>
                       : <>On-demand: <b>{p.ondemand_units == null ? "não lançado" : `${n(p.ondemand_units)} PTUs · ${money(p.ondemand_cost)}${p.ondemand_estimated ? " (previsto)" : ""}`}</b></>}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
