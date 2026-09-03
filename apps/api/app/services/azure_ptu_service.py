@@ -72,13 +72,7 @@ def _hour_key(timestamp: str) -> str:
 
 
 def resolve_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    cfg = dict(config or {})
-    if cfg.get("credential_profile") == "azure-4p":
-        from app.config import settings
-        cfg.setdefault("tenant_id", settings.azure_4p_tenant_id)
-        cfg.setdefault("client_id", settings.azure_4p_client_id)
-        cfg.setdefault("client_secret", settings.azure_4p_client_secret)
-    return cfg
+    return dict(config or {})
 
 
 def _credential(config: dict[str, Any]) -> ClientSecretCredential:
@@ -87,7 +81,7 @@ def _credential(config: dict[str, Any]) -> ClientSecretCredential:
     client = cfg.get("client_id") or cfg.get("application_id")
     secret = cfg.get("client_secret")
     if not tenant or not client or not secret:
-        raise ValueError("azure_openai_ptu requer tenant_id, client_id e client_secret (ou credential_profile resolvido)")
+        raise ValueError("azure_openai_ptu requer tenant_id, client_id e client_secret no banco de dados")
     return ClientSecretCredential(tenant_id=tenant, client_id=client, client_secret=secret)
 
 

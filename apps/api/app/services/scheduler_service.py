@@ -465,11 +465,26 @@ async def start_scheduler():
         _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
         _scheduler.add_job(_oci_operational_hourly_job, "cron", minute=18, id="oci_operational_hourly", replace_existing=True)
         _scheduler.add_job(_azure_reservations_daily_job, "cron", hour=3, minute=45, id="azure_reservations_daily", replace_existing=True)
+        _scheduler.add_job(_iceberg_orphan_cleanup_job, "cron", hour=3, minute=0, id="iceberg_orphan_cleanup", replace_existing=True)
         logger.info("Scheduler started with %d active schedules", count)
     except Exception as e:
         logger.error("Failed to start scheduler: %s", e)
     finally:
         session.close()
+
+
+def _iceberg_orphan_cleanup_job() -> None:
+    try:
+        from app.services.iceberg_service import cleanup_orphan_staging, expire_gold_snapshots
+        result = cleanup_orphan_staging(max_age_hours=2)
+        logger.info(
+            "Limpeza periódica de staging órfão executada: %d pastas removidas, %.2f MB liberados",
+            result.get("deleted_dirs", 0),
+            result.get("deleted_bytes", 0) / (1024 * 1024),
+        )
+        expire_gold_snapshots("dest_modelo_focus", retention_days=1)
+    except Exception as exc:
+        logger.error("Falha na limpeza periódica de staging órfão do Iceberg: %s", exc)
 
 
 def _refresh_savings_job() -> None:

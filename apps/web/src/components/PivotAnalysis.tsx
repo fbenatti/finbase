@@ -6,10 +6,9 @@ import {
 } from "@mui/material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import { Add, Close, Delete, Download, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
-import Plot from "react-plotly.js";
 import * as XLSX from "xlsx";
 import {
-  DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView,
+  DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
   deletePivotView, drillDownPivot, getPivotMetadata, getPivotViews, runPivot, runPivotUnion, savePivotView,
   LakehouseSearchResult, searchPivotTable, formatApiError, FORECAST_MANUAL_PIVOT_ID,
 } from "../services/api";
@@ -112,6 +111,8 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [rows, setRows] = useState<string[]>([]);
   const [cols, setCols] = useState<string[]>([]);
   const [measures, setMeasures] = useState<PivotMeasure[]>([]);
+  const [sortRows, setSortRows] = useState<PivotSort[]>([]);
+  const [sortCols, setSortCols] = useState<PivotSort[]>([]);
   const [filters, setFilters] = useState<PivotFilter[]>(initialFilters);
   const [didAutoRun, setDidAutoRun] = useState(false);
   const [field, setField] = useState("");
@@ -127,8 +128,6 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResult, setSearchResult] = useState<LakehouseSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [chartType, setChartType] = useState<"bar" | "line" | "pie" | "area">("bar");
-  const [chartMeasure, setChartMeasure] = useState(0);
 
   const [drag, setDrag] = useState<{ area: "rows" | "cols" | "filters"; name: string } | null>(null);
   const [dragOverZone, setDragOverZone] = useState<"rows" | "cols" | "filters" | null>(null);
@@ -186,7 +185,23 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     setFilters(nextFilters);
   };
 
-  const request = useMemo<PivotRequest>(() => ({ destination_table_id: tableId, rows, columns: cols, measures, filters, row_limit: 500, column_limit: 60, include_totals: true }), [tableId, rows, cols, measures, filters]);
+  const request = useMemo<PivotRequest>(() => ({ destination_table_id: tableId, rows, columns: cols, measures, filters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols }), [tableId, rows, cols, measures, filters, sortRows, sortCols]);
+
+  const setAxisSort = (axis: "rows" | "columns", column: string, direction: PivotSort["direction"]) => {
+    const setter = axis === "rows" ? setSortRows : setSortCols;
+    setter(current => [...current.filter(item => item.column !== column), { column, direction }]);
+  };
+  const setMeasureSort = (index: number, direction: "none" | PivotSort["direction"] | "only_desc" | "only_asc") => {
+    if (direction === "only_desc" || direction === "only_asc") {
+      setSortRows([{ column: `m${index}`, direction: direction === "only_desc" ? "desc" : "asc" }]);
+      setSortCols([]);
+      return;
+    }
+    setSortRows(current => {
+      const withoutMeasures = current.filter(item => !/^m\d+$/.test(item.column));
+      return direction === "none" ? withoutMeasures : [...withoutMeasures, { column: `m${index}`, direction }];
+    });
+  };
 
   // Destination metadata is loaded asynchronously by the Analysis page. If
   // the user opens Pivot before that request completes, initialise as soon as
@@ -254,8 +269,8 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     setLoading(true); setError("");
     try {
       setResult(sourceIds.length > 1
-        ? await runPivotUnion({ destination_table_ids: sourceIds, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, origin_column: "origem" })
-        : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true }));
+        ? await runPivotUnion({ destination_table_ids: sourceIds, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, origin_column: "origem", sort_rows: sortRows, sort_columns: sortCols })
+        : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols }));
     }
     catch (e: unknown) { setError(formatApiError(e, "Falha ao consultar o Trino")); }
     finally { setLoading(false); }
@@ -281,8 +296,8 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     if (target === "filters" && !filters.some(f => f.column === field)) setFilters([...filters, { column: field, values: [], operator: "IN" }]);
   };
   const removeField = (target: "rows" | "cols" | "filters", name: string) => {
-    if (target === "rows") setRows(rows.filter(item => item !== name));
-    if (target === "cols") setCols(cols.filter(item => item !== name));
+    if (target === "rows") { setRows(rows.filter(item => item !== name)); setSortRows(sortRows.filter(item => item.column !== name)); }
+    if (target === "cols") { setCols(cols.filter(item => item !== name)); setSortCols(sortCols.filter(item => item.column !== name)); }
     if (target === "filters") setFilters(filters.filter(item => item.column !== name));
   };
   const saveView = async () => {
@@ -291,7 +306,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     try { await savePivotView(viewName.trim(), { ...request, source_ids: validSourceIds.length ? validSourceIds : [tableId] } as PivotRequest & { perspective_config?: unknown }); setViews(await getPivotViews()); setViewName(""); }
     catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível salvar a visão"); }
   };
-  const loadView = (view: PivotView) => { setTableId(view.destination_table_id); const sourceIds = (view.config as PivotView["config"] & { source_ids?: number[] }).source_ids?.filter(id => id !== 0) || []; setSourceIds(sourceIds.length ? sourceIds : [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); };
+  const loadView = (view: PivotView) => { setTableId(view.destination_table_id); const config = view.config as PivotView["config"] & { source_ids?: number[]; sort_rows?: PivotSort[]; sort_columns?: PivotSort[] }; const sourceIds = config.source_ids?.filter(id => id !== 0) || []; setSourceIds(sourceIds.length ? sourceIds : [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); setSortRows(config.sort_rows || []); setSortCols(config.sort_columns || []); };
   const loadDrill = async (
     destId: number,
     cellFilters: Record<string, unknown>,
@@ -306,8 +321,8 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       rows: payloadRows,
       columns: payloadCols,
       cell_filters: cellFilters,
-      limit: pagination.pageSize,
-      offset: pagination.page * pagination.pageSize,
+      limit: Math.min(100, pagination.pageSize),
+      offset: pagination.page * Math.min(100, pagination.pageSize),
     });
     setDrill(data);
   };
@@ -315,14 +330,18 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const openDrill = async (rowKey: unknown[], colKey: unknown[]) => {
     const originName = result?.origin_column || "origem";
     const cellFilters: Record<string, unknown> = {};
+    const normalizeCellValue = (value: unknown): unknown =>
+      value === "(vazio)" || value === "" ? null : value;
     let originValue: unknown;
     result?.rows.forEach((name, index) => {
-      if (name.toLowerCase() === originName.toLowerCase()) originValue = rowKey[index];
-      else cellFilters[name] = rowKey[index] as string;
+      const value = normalizeCellValue(rowKey[index]);
+      if (name.toLowerCase() === originName.toLowerCase()) originValue = value;
+      else cellFilters[name] = value;
     });
     result?.columns.forEach((name, index) => {
-      if (name.toLowerCase() === originName.toLowerCase()) originValue = colKey[index];
-      else cellFilters[name] = colKey[index] as string;
+      const value = normalizeCellValue(colKey[index]);
+      if (name.toLowerCase() === originName.toLowerCase()) originValue = value;
+      else cellFilters[name] = value;
     });
     const matched = result?.tables?.find(table => table.origin === originValue);
     // Without a union, the cell belongs to the single active source, which may
@@ -371,21 +390,6 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     }
     return columns;
   }, [meta, sourceIds]);
-  const chart = useMemo(() => {
-    if (!result || !rowKeys.length || !result.measures.length) return null;
-    const measureIndex = Math.min(chartMeasure, result.measures.length - 1);
-    const temporal = result.columns.some(name => ["_billing_period", "period", "forecast_month"].includes(name.toLowerCase()));
-    const labels = temporal ? colKeys.map(col => formatKey(col, result.columns)) : rowKeys.map(row => formatKey(row, result.rows));
-    const values = temporal
-      ? colKeys.map(col => (cells.get(`${key(rowKeys[0])}|${key(col)}`)?.[measureIndex] ?? 0) as number)
-      : rowKeys.map(row => totalFor("rows", row)[measureIndex] ?? 0);
-    const measure = result.measures[measureIndex];
-    return { labels, values, measure };
-  }, [result, rowKeys, chartMeasure]);
-  const chartData: any[] = chart && result ? (chartType === "pie"
-    ? [{ type: "pie", labels: chart.labels, values: chart.values, hole: 0.35 }]
-    : [{ type: chartType === "area" ? "scatter" : chartType, x: chart.labels, y: chart.values, name: chart.measure.label || chart.measure.column, fill: chartType === "area" ? "tozeroy" : undefined, mode: chartType === "line" ? "lines+markers" : undefined, marker: { color: "#0A8FDC" } }]) : [];
-  const chartLayout: any = chart && result ? { autosize: true, margin: { l: 60, r: 20, t: 30, b: 90 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent", xaxis: { title: result.rows.join(" / ") || "Categoria", tickangle: -35 }, yaxis: { title: chart.measure.label || chart.measure.column, tickformat: ",.2f" }, showlegend: chartType === "pie" } : {};
 
   return <Box>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -477,7 +481,19 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
                         onDragOver={(e) => e.preventDefault()}
                         onDragEnter={() => { dropIndexRef.current = index; }}
                       >
+                      <Stack direction="row" alignItems="center" spacing={0.25}>
                         <Chip label={name} onDelete={() => removeField(area, name)} size="small" />
+                        <Select
+                          variant="standard"
+                          value={(area === "rows" ? sortRows : sortCols).find(item => item.column === name)?.direction || "asc"}
+                          onChange={e => setAxisSort(area === "rows" ? "rows" : "columns", name, e.target.value as PivotSort["direction"])}
+                          sx={{ fontSize: 11, minWidth: 42 }}
+                          title="Ordenação"
+                        >
+                          <MenuItem value="asc">ASC</MenuItem>
+                          <MenuItem value="desc">DESC</MenuItem>
+                        </Select>
+                      </Stack>
                       </Box>
                     ))}
                 {items.length === 0 && <Typography variant="caption" color="text.secondary">Nenhum campo</Typography>}
@@ -485,10 +501,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             </Paper>
           );
         })}
-        <Paper variant="outlined" sx={{ p: 1, minWidth: 260, flex: 1 }}><Typography variant="caption" fontWeight={700}>VALORES</Typography>{measures.map((m, index) => <Stack key={index} direction="row" gap={.5} mt={.5}><Select size="small" value={m.column} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, column: e.target.value } : x))} sx={{ flex: 1 }}>{meta?.measures.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select><Select size="small" value={m.aggregation} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, aggregation: e.target.value as PivotMeasure["aggregation"] } : x))}>{["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"].map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}</Select><IconButton size="small" onClick={() => setMeasures(measures.filter((_, i) => i !== index))}><Delete fontSize="small" /></IconButton></Stack>)}<Button size="small" startIcon={<Add />} onClick={() => meta?.default_measure && setMeasures([...measures, { column: meta.default_measure, aggregation: "SUM" }])}>Adicionar medida</Button></Paper>
+        <Paper variant="outlined" sx={{ p: 1, minWidth: 260, flex: 1 }}><Typography variant="caption" fontWeight={700}>VALORES</Typography>{measures.map((m, index) => { const measureSort = sortRows.find(item => item.column === `m${index}`); const exclusive = sortRows.length === 1 && measureSort; const sortValue = exclusive ? (measureSort.direction === "desc" ? "only_desc" : "only_asc") : (measureSort?.direction || "none"); return <Stack key={index} direction="row" gap={.5} mt={.5}><Select size="small" value={m.column} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, column: e.target.value } : x))} sx={{ flex: 1 }}>{meta?.measures.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select><Select size="small" value={m.aggregation} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, aggregation: e.target.value as PivotMeasure["aggregation"] } : x))}>{["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"].map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}</Select><Select size="small" value={sortValue} onChange={e => setMeasureSort(index, e.target.value as "none" | PivotSort["direction"] | "only_desc" | "only_asc")} title="Ordenar linhas pelo valor"><MenuItem value="none">Sem ordem</MenuItem><MenuItem value="desc">Maior → menor</MenuItem><MenuItem value="asc">Menor → maior</MenuItem><MenuItem value="only_desc">Somente valor: maior → menor</MenuItem><MenuItem value="only_asc">Somente valor: menor → maior</MenuItem></Select><IconButton size="small" onClick={() => setMeasures(measures.filter((_, i) => i !== index))}><Delete fontSize="small" /></IconButton></Stack>; })}<Button size="small" startIcon={<Add />} onClick={() => meta?.default_measure && setMeasures([...measures, { column: meta.default_measure, aggregation: "SUM" }])}>Adicionar medida</Button></Paper>
       </Stack>
       {filters.map(filter => <Stack key={filter.column} direction="row" gap={1} alignItems="center" sx={{ mt: 1, mr: 1, flexWrap: "wrap" }}>
-        <FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Condição</InputLabel><Select label="Condição" value={filter.operator || "IN"} onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, operator: e.target.value as PivotFilter["operator"] } : f))}><MenuItem value="IN">É igual a</MenuItem><MenuItem value="NOT_IN">Não é</MenuItem><MenuItem value="CONTAINS">Contém</MenuItem><MenuItem value="NOT_CONTAINS">Não contém</MenuItem></Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Condição</InputLabel><Select label="Condição" value={filter.operator || "IN"} onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, operator: e.target.value as PivotFilter["operator"], values: ["IS_NULL", "IS_NOT_NULL"].includes(e.target.value) ? [] : f.values } : f))}><MenuItem value="IN">É igual a</MenuItem><MenuItem value="NOT_IN">Não é</MenuItem><MenuItem value="CONTAINS">Contém</MenuItem><MenuItem value="NOT_CONTAINS">Não contém</MenuItem><MenuItem value="IS_NULL">É vazio</MenuItem><MenuItem value="IS_NOT_NULL">Não é vazio</MenuItem></Select></FormControl>
         <TextField
           size="small"
           label={`Valor do filtro: ${filter.column}`}
@@ -496,6 +512,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           helperText="Use valores separados por vírgula para selecionar mais de um"
           sx={{ minWidth: 330 }}
           value={filter.values.join(", ")}
+          disabled={filter.operator === "IS_NULL" || filter.operator === "IS_NOT_NULL"}
           onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, values: e.target.value.split(",").map(v => v.trim()).filter(Boolean) } : f))}
         />
       </Stack>)}
@@ -505,7 +522,6 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     {result?.period_auto_applied && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu Gold e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
     {drillLoading && <Alert severity="info" sx={{ mb: 2 }}>Carregando drill-down...</Alert>}
     {result && <TableContainer component={Paper} sx={{ maxHeight: "60vh" }}><Table stickyHeader size="small"><TableHead><TableRow>{result.rows.map(name => <TableCell key={name}>{name}</TableCell>)}{colKeys.flatMap(col => result.measures.map(m => <TableCell key={`${key(col)}-${m.column}`}>{formatKey(col, result.columns)}<br /><small>{m.label || `${m.aggregation} ${m.column}`}</small></TableCell>))}<TableCell>Total</TableCell></TableRow></TableHead><TableBody>{rowKeys.map(row => <TableRow key={key(row)}>{row.map((value, i) => <TableCell key={i}>{dimLabel(result.rows[i], value)}</TableCell>)}{colKeys.flatMap(col => (cells.get(`${key(row)}|${key(col)}`) || result.measures.map(() => null)).map((value, i) => <TableCell key={`${key(col)}-${i}`} onClick={() => openDrill(row, col)} sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{totalFor("rows", row).map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>)}{result.totals && <TableRow sx={{ bgcolor: "action.hover" }}>{result.rows.map((_, i) => <TableCell key={i}>{i === 0 ? "TOTAL" : ""}</TableCell>)}{colKeys.flatMap(col => totalFor("columns", col).map((value, i) => <TableCell key={`${key(col)}-${i}`}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{result.totals.grand.map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>}</TableBody></Table></TableContainer>}
-    {chart && <Paper sx={{ mt: 2, p: 2 }}><Stack direction="row" alignItems="center" gap={1} flexWrap="wrap"><Typography variant="subtitle1" fontWeight={700}>Visualização</Typography><FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Tipo</InputLabel><Select label="Tipo" value={chartType} onChange={e => setChartType(e.target.value as typeof chartType)}><MenuItem value="bar">Barras</MenuItem><MenuItem value="line">Linhas</MenuItem><MenuItem value="area">Área</MenuItem><MenuItem value="pie">Pizza</MenuItem></Select></FormControl><FormControl size="small" sx={{ minWidth: 220 }}><InputLabel>Medida</InputLabel><Select label="Medida" value={chartMeasure} onChange={e => setChartMeasure(Number(e.target.value))}>{(result?.measures ?? []).map((m, i) => <MenuItem key={i} value={i}>{m.label || `${m.aggregation} ${m.column}`}</MenuItem>)}</Select></FormControl></Stack><Plot useResizeHandler style={{ width: "100%", height: 420 }} data={chartData} layout={chartLayout} config={{ responsive: true, displaylogo: false }} /></Paper>}
     {showSearch && searchResult && <Paper sx={{ mt: 2, p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="subtitle1">Resultados para “{searchTerm}”</Typography><Chip label={`${searchResult.total.toLocaleString("pt-BR")}${searchResult.total_is_estimate ? " exibidos (limite da busca)" : " registros encontrados"}`} size="small" /></Stack><Typography variant="caption" color="text.secondary">Pesquisa realizada em {searchResult.searched_columns?.length || 0} colunas textuais. As colunas encontradas aparecem destacadas.</Typography><TableContainer sx={{ maxHeight: "55vh", mt: 1 }}><Table stickyHeader size="small"><TableHead><TableRow>{searchResult.columns.map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead><TableBody>{searchResult.rows.map((row, index) => <TableRow key={index}>{searchResult.columns.map(column => <TableCell key={column} sx={searchResult.matched_columns[index]?.includes(column) ? { bgcolor: "#fff3cd", fontWeight: 700 } : undefined}>{String(row[column] ?? "")}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer></Paper>}
     <Drawer
       anchor="right"
@@ -526,7 +542,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           pagination
           paginationMode="server"
           rowCount={drill?.total || 0}
-          pageSizeOptions={[50, 100, 200]}
+          pageSizeOptions={[50, 100]}
           paginationModel={drillPage}
           onPaginationModelChange={model => { void onDrillPageChange(model); }}
         />

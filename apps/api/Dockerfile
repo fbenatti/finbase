@@ -6,6 +6,7 @@ COPY apps/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY apps/api/app ./app
+COPY apps/api/*.py ./
 COPY apps/api/alembic.ini .
 COPY apps/api/alembic ./alembic
 

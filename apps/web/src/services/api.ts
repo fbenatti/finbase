@@ -533,8 +533,18 @@ export async function reprocessDest(body: {
   connection_ids: number[];
   billing_periods?: string[];
   replace_existing?: boolean;
+  chain_dimons?: { enabled: boolean; rule_ids: number[] };
 }): Promise<{ task_id: number; task_ids?: number[]; queue_group?: string; message: string }> {
   const { data } = await api.post("/etl/reprocess", body);
+  return data;
+}
+
+export async function reclassifyDest(body: {
+  destination_table_id: number;
+  connection_ids: number[];
+  billing_periods: string[];
+}): Promise<{ task_id: number; task_ids?: number[]; message: string }> {
+  const { data } = await api.post("/etl/reclassify", body);
   return data;
 }
 
@@ -1505,7 +1515,7 @@ export async function queryAnalysisDestination(
 // ── Server-side Pivot ──
 export type PivotAggregation = "SUM" | "COUNT" | "COUNT_DISTINCT" | "AVG" | "MIN" | "MAX";
 export interface PivotMeasure { column: string; aggregation: PivotAggregation; label?: string | null }
-export type PivotFilterOperator = "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS";
+export type PivotFilterOperator = "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS" | "IS_NULL" | "IS_NOT_NULL";
 export interface PivotFilter { column: string; values: Array<string | number | boolean>; operator?: PivotFilterOperator }
 export interface PivotSort { column: string; direction: "asc" | "desc" }
 export interface PivotRequest {

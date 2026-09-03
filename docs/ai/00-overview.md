@@ -6,7 +6,7 @@
 
 1. **Ingere** dados de billing de Azure Blob Storage (CSV/Parquet), GCP BigQuery e MongoDB Atlas;
 2. **Normaliza e enriquece** através de engines de mapeamento, regras de negócio e classificação organizacional;
-3. **Armazena** os resultados em um data lakehouse (Apache Iceberg/Parquet sobre MinIO S3, versionado por Nessie);
+3. **Armazena** os resultados em um data lakehouse (Apache Iceberg/Parquet no warehouse local compartilhado, catalogado no PostgreSQL);
 4. **Analisa** via engine SQL Trino (pivot tables, queries livres, drill-down);
 5. **Projeta** custos futuros com um motor de Forecast metadata-driven.
 
@@ -26,8 +26,8 @@ os resultados financeiros projetados são gravados no namespace Iceberg `forecas
 | Backend | FastAPI, SQLAlchemy (async + sync), Pandas, PyIceberg |
 | Frontend | React, TypeScript, Vite, Material UI, react-pivottable, React Flow |
 | Metadata DB | PostgreSQL 16 |
-| Data Lake | MinIO S3, Apache Iceberg, Nessie (catálogo com branches/tags) |
-| Query Engine | Trino (perfil opcional `analytics`) |
+| Data Lake | Apache Iceberg/Parquet no warehouse local + catálogo SQL PostgreSQL |
+| Query Engine | Trino |
 | ETL/Agendamento | Pandas, ThreadPoolExecutor (2 workers), APScheduler (cron) |
 | Infra | Docker Compose |
 
@@ -35,7 +35,7 @@ os resultados financeiros projetados são gravados no namespace Iceberg `forecas
 
 ```
 OpenFinops/
-├── docker-compose.yml          # postgres, minio, nessie, trino (profile analytics)
+├── docker-compose.yml          # postgres, api, worker, web e Trino
 ├── start-local.sh              # sobe API (8001) + worker + web (5173) sem Docker
 ├── FORECAST.md                 # design do motor de Forecast (fonte de verdade)
 ├── apps/
@@ -59,12 +59,12 @@ OpenFinops/
 │           ├── layout/         # Layout com banner global de tarefas
 │           └── services/api.ts # cliente axios (baseURL /api)
 └── infra/
-    └── trino/catalog/iceberg.properties  # Trino → Iceberg (Nessie)
+    └── trino/catalog/iceberg.properties  # Trino → Iceberg (JDBC PostgreSQL)
 ```
 
 ## Como rodar
 
-### Opção 1 — Local sem Docker (fallback SQL catalog)
+### Opção 1 — Local sem Docker
 
 `start-local.sh` sobe três processos e supervisiona o worker (reinicia até 3x):
 
@@ -72,17 +72,16 @@ OpenFinops/
 - Worker: `python worker.py` (polling da fila a cada 2s, heartbeat em `/tmp/openfinops-worker.heartbeat`)
 - Web: `npm run dev` na porta **5173**
 
-Logs em `.runtime-logs/`. Se Nessie/MinIO estiverem indisponíveis, `iceberg_service`
-cai automaticamente para um SQL catalog (PostgreSQL) com warehouse em `./data/iceberg/`
-(ou `ICEBERG_CATALOG_TYPE=sql` para forçar).
+Logs em `.runtime-logs/`. O `iceberg_service` usa catálogo SQL PostgreSQL com
+warehouse em `./data/iceberg/`.
 
 ### Opção 2 — Com Docker
 
 ```bash
-docker compose up -d postgres minio nessie
+docker compose up -d postgres
 cd apps/api && pip install -r requirements.txt && python -m uvicorn app.main:app --port 8000
 cd apps/web && npm install && npx vite --port 5173
-docker compose --profile analytics up -d trino   # opcional, :8080
+docker compose up -d trino trino-worker          # :8080
 ```
 
 ## Startup da API (`apps/api/app/main.py`, lifespan)

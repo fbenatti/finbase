@@ -159,7 +159,10 @@ stop_pid_files() {
   local f pid
   shopt -s nullglob
   for f in "$LOG_DIR"/*.pid; do
-    [[ "$(basename "$f")" == start-local.pid ]] && continue
+    case "$(basename "$f")" in
+      api.pid|worker.pid|web.pid) ;;
+      *) continue ;;
+    esac
     pid="$(tr -d '[:space:]' < "$f")"
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     if kill -0 "$pid" 2>/dev/null; then
@@ -309,9 +312,24 @@ recover_api_pid() {
 
 trino_alive() {
   local payload
-  payload="$(curl -fsS --max-time 3 "$TRINO_URL/v1/info" 2>/dev/null || true)"
+  payload="$(http_get "$TRINO_URL/v1/info")"
   [[ -n "$payload" ]] || return 1
   python3 -c 'import json,sys; p=json.loads(sys.argv[1]); sys.exit(0 if p.get("state")=="ACTIVE" and not p.get("starting") else 1)' "$payload"
+}
+
+http_get() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 3 "$url" 2>/dev/null || true
+    return 0
+  fi
+  python3 - "$url" <<'PY' 2>/dev/null || true
+import sys
+from urllib.request import urlopen
+
+with urlopen(sys.argv[1], timeout=3) as response:
+    print(response.read().decode())
+PY
 }
 
 compose_cmd() {
@@ -336,7 +354,7 @@ configure_docker_host() {
 
 ensure_docker_daemon() {
   if ! command -v docker >/dev/null 2>&1; then
-    echo "ERRO: comando docker não encontrado; Trino/MinIO/Nessie exigem Docker." >&2
+    echo "ERRO: comando docker não encontrado; Trino exige Docker." >&2
     exit 1
   fi
 
@@ -363,13 +381,22 @@ ensure_docker_daemon() {
 
 start_infra() {
   ensure_docker_daemon
-  echo "Subindo containers OpenFinops (trino, nessie, minio) — start, sem recriar..."
-  compose_cmd start trino nessie minio >/dev/null 2>&1 || true
-  if compose_cmd up -d trino nessie minio; then
+  # Nessie and MinIO belong to the legacy catalog and are not used by the
+  # current local SQL catalog. The Compose stack uses the local Iceberg
+  # catalog and exposes Trino workers as
+  # an optional service, so never request removed services here.
+  local infra_services=(trino)
+  if compose_cmd config --services 2>/dev/null | grep -qx 'trino-worker'; then
+    infra_services+=(trino-worker)
+  fi
+
+  echo "Subindo containers OpenFinops (${infra_services[*]}) — start, sem recriar..."
+  compose_cmd start "${infra_services[@]}" >/dev/null 2>&1 || true
+  if compose_cmd up -d "${infra_services[@]}"; then
     return 0
   fi
   echo "ERRO: falha ao subir containers de infraestrutura." >&2
-  echo "  Veja: docker compose --project-directory \"$ROOT_DIR\" logs trino nessie minio" >&2
+  echo "  Veja: docker compose --project-directory \"$ROOT_DIR\" logs ${infra_services[*]}" >&2
   return 1
 }
 
@@ -406,7 +433,7 @@ ensure_infra() {
   fi
 
   echo "ERRO: Trino não ficou disponível após ${TRINO_WAIT_SECONDS}s." >&2
-  echo "  Os containers não foram recriados. Logs: docker compose --project-directory \"$ROOT_DIR\" logs trino nessie minio" >&2
+  echo "  Os containers não foram recriados. Logs: docker compose --project-directory \"$ROOT_DIR\" logs trino trino-worker" >&2
   exit 1
 }
 
@@ -430,8 +457,8 @@ backend_ready() {
   kill -0 "$api_pid" 2>/dev/null || return 1
   listener="$(listeners_on_port 8001 | head -1 | tr -d '[:space:]')"
   [[ -n "$listener" && "$listener" == "$api_pid" ]] || return 1
-  api_health="$(curl -fsS --max-time 3 "$API_URL/health" 2>/dev/null || true)"
-  worker_health="$(curl -fsS --max-time 3 "$API_URL/etl/worker-health" 2>/dev/null || true)"
+  api_health="$(http_get "$API_URL/health")"
+  worker_health="$(http_get "$API_URL/etl/worker-health")"
   [[ "$api_health" == *'"status":"ok"'* && "$worker_health" == *'"status":"ok"'* ]]
 }
 

@@ -16,12 +16,13 @@
 │                                                              │
 │  + APScheduler embarcado (scheduled_task, cron)              │
 └──────┬──────────────┬───────────────┬────────────┬───────────┘
-       │              │               │            │
-┌──────▼──────┐ ┌─────▼──────┐ ┌──────▼───────┐ ┌──▼───────────┐
-│ PostgreSQL  │ │ MinIO S3   │ │ Nessie       │ │ Trino :8080  │
-│ (metadata + │ │ (Parquet)  │ │ (catálogo    │ │ (SQL engine) │
-│  fila jobs) │ │            │ │  Iceberg)    │ │              │
-└──────▲──────┘ └────────────┘ └──────────────┘ └──────────────┘
+       │              │                              │
+┌──────▼──────┐ ┌─────▼──────────────────┐ ┌────────▼─────────┐
+│ PostgreSQL  │ │ Warehouse local Iceberg │ │  Trino :8080    │
+│ (metadata,  │ │ (Parquet + metadata)    │ │  (SQL engine)   │
+│ catálogo e  │ │ apps/data/iceberg        │ │                  │
+│ fila jobs)  │ └─────────────────────────┘ └──────────────────┘
+└──────▲──────┘
        │
 ┌──────┴──────────────────────────────────────────────────────┐
 │              WORKER (apps/api/worker.py)                     │
@@ -110,14 +111,13 @@ Funções relevantes: `apps/api/app/services/iceberg_service.py`
 - Polling FIFO (`ORDER BY id LIMIT 1`) sobre `status='QUEUED'`.
 - Cancelamento via flags em memória (`_cancel_flags` em `task_runner.py`).
 
-## Catálogo Iceberg — primário e fallback
+## Catálogo Iceberg
 
 `iceberg_service.py`:
 
-- **Primário:** Nessie (`NESSIE_URI`, default `http://localhost:19120/api/v1`) +
-  warehouse `s3://warehouse/` no MinIO (`S3_ENDPOINT`, default `:9000`).
-- **Fallback:** SQL catalog sobre PostgreSQL + warehouse local `./data/iceberg/`
-  (automático quando Nessie inalcançável, ou `ICEBERG_CATALOG_TYPE=sql`).
+- SQL catalog sobre PostgreSQL e warehouse local compartilhado em
+  `apps/data/iceberg/`.
+- API, worker e todos os nós Trino montam esse mesmo diretório.
 
 ## Comunicação API ↔ Worker
 

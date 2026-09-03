@@ -27,7 +27,7 @@ entender, modificar ou depurar o projeto.
   em um lakehouse Iceberg/Parquet consultável via Trino.
 - **Regra de ouro da arquitetura:** PostgreSQL guarda APENAS metadata e controle de jobs
   (conexões, regras, mapeamentos, tarefas, configs de forecast). Linhas financeiras vivem
-  exclusivamente em Iceberg/Parquet (MinIO S3 ou filesystem local em fallback).
+  exclusivamente em Iceberg/Parquet no warehouse local compartilhado.
 - **Pipeline:** Scan de blobs → Extração (Bronze) → Mappings (Silver) → Business Rules +
   Classificação + Clone (Gold) → Análise/Pivot (Trino) → Forecast (namespace `forecast`).
 - **Processos:** API FastAPI (`apps/api/app/main.py`, porta 8000/8001), Worker separado

@@ -1,12 +1,13 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: finops
       POSTGRES_USER: finops
       POSTGRES_PASSWORD: finops
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,12 +23,46 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
       DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      TRINO_URL: http://trino:8080
+      ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
+      OPENFINOPS_WORKER_HEARTBEAT: /run/openfinops-worker/worker.heartbeat
+      OPENFINOPS_WORKER_PID: /run/openfinops-worker/worker.pid
     ports:
       - "8000:8000"
     volumes:
       - ./apps/api/app:/app/app
+      - ./apps/data/iceberg:/data/iceberg
+      - ./apps/data/iceberg:/tmp/data/iceberg
+      - worker_runtime:/run/openfinops-worker
     depends_on:
       postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-u", "worker.py"]
+    restart: unless-stopped
+    pid: "service:api"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
+      DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      TRINO_URL: http://trino:8080
+      ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
+      OPENFINOPS_WORKER_HEARTBEAT: /run/openfinops-worker/worker.heartbeat
+      OPENFINOPS_WORKER_PID: /run/openfinops-worker/worker.pid
+      OPENFINOPS_WORKER_LOCK: /run/openfinops-worker/worker.lock
+    volumes:
+      - ./apps/data/iceberg:/data/iceberg
+      - ./apps/data/iceberg:/tmp/data/iceberg
+      - worker_runtime:/run/openfinops-worker
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      trino:
         condition: service_healthy
 
   web:
@@ -37,42 +72,11 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_PROXY_TARGET: http://host.docker.internal:8001
+      VITE_API_PROXY_TARGET: http://api:8000
     volumes:
       - ./apps/web/src:/app/src
     depends_on:
       - api
-
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  nessie:
-    image: projectnessie/nessie:latest
-    restart: unless-stopped
-    ports:
-      - "19120:19120"
-    environment:
-      nessie.version.store.type: IN_MEMORY
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:19120/api/v1/config"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
   trino:
     image: trinodb/trino:483
@@ -89,12 +93,26 @@ services:
       # SQL catalog readable from inside Trino.
       - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
       - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/data/iceberg
+      - ./apps/data/iceberg:/tmp/data/iceberg
+
+  trino-worker:
+    image: trinodb/trino:483
+    restart: unless-stopped
+    volumes:
+      - ./infra/trino/catalog:/etc/trino/catalog:ro
+      - ./infra/trino/config-worker.properties:/etc/trino/config.properties:ro
+      - ./infra/trino/jvm-worker.config:/etc/trino/jvm.config:ro
+      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/data/iceberg
+      - ./apps/data/iceberg:/tmp/data/iceberg
     depends_on:
-      minio:
+      trino:
         condition: service_healthy
-      nessie:
-        condition: service_healthy
+    deploy:
+      replicas: 1
 
 volumes:
   pgdata:
-  minio_data:
+  worker_runtime:

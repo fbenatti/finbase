@@ -1,13 +1,13 @@
 """
-Iceberg Service — Data Lakehouse layer atop MinIO + Nessie + PyIceberg.
+Iceberg Service — Data Lakehouse layer atop PostgreSQL SQL catalog + PyIceberg.
 
 Layers:
   Bronze  (raw)       → bronze.raw_{connection_code}
   Silver  (mapped)    → silver.{source}_{destination_model}
   Gold    (analytics) → gold.{destination_table}
 
-Fallback: if Nessie/MinIO are unavailable, uses SQL catalog (PostgreSQL) +
-local filesystem warehouse (./data/iceberg/).
+Metadata is stored in PostgreSQL and Parquet/metadata files are stored in the
+shared local filesystem warehouse (`apps/data/iceberg`).
 """
 
 from __future__ import annotations
@@ -39,19 +39,7 @@ logger = logging.getLogger(__name__)
 # Catalog configuration
 # ---------------------------------------------------------------------------
 
-# Primary: Nessie + MinIO S3 (Docker)
-_NESSIE_CONFIG = {
-    "type": "nessie",
-    "uri": os.getenv("NESSIE_URI", "http://localhost:19120/api/v1"),
-    "warehouse": os.getenv("ICEBERG_WAREHOUSE", "s3://warehouse/"),
-    "s3.endpoint": os.getenv("S3_ENDPOINT", "http://localhost:9000"),
-    "s3.access-key-id": os.getenv("AWS_ACCESS_KEY_ID", "minioadmin"),
-    "s3.secret-access-key": os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin"),
-    "s3.path-style-access": "true",
-    "s3.region": "us-east-1",
-}
-
-# Fallback: SQL catalog (PostgreSQL) + local filesystem (no Docker needed)
+# SQL catalog (PostgreSQL) + local filesystem warehouse.
 _LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
     "data", "iceberg",
@@ -59,20 +47,7 @@ _LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", os.path.join(
 _LOCAL_WAREHOUSE.mkdir(parents=True, exist_ok=True)
 
 _catalog: Optional[Catalog] = None
-_catalog_type: str = ""
 _initialized_namespaces: set[str] = set()
-
-
-def _try_nessie() -> Optional[Catalog]:
-    """Attempt to connect to Nessie + MinIO. Returns None on failure."""
-    try:
-        cat = load_catalog("nessie", **_NESSIE_CONFIG)
-        # Quick connectivity test
-        cat.list_namespaces()
-        return cat
-    except Exception as e:
-        logger.info("Nessie/MinIO unavailable (%s) — falling back to local SQL catalog", e)
-        return None
 
 
 def _create_sql_catalog() -> Catalog:
@@ -84,34 +59,16 @@ def _create_sql_catalog() -> Catalog:
         "sql",
         uri=settings.database_url_sync,           # PostgreSQL for catalog metadata
         warehouse=warehouse_uri,                   # Local filesystem for data files
-        **{"s3.endpoint": ""},                     # disable S3 config
     )
 
 
 def _get_catalog() -> Catalog:
-    """Lazy-load the Iceberg catalog.
-
-    Local Trino reads the PostgreSQL JDBC catalog + filesystem warehouse.
-    Prefer that unless ICEBERG_CATALOG_TYPE=nessie, otherwise writes disappear
-    from Trino while a stale SQL table (like raw_oci_prod) stays unreadable.
-    """
-    global _catalog, _catalog_type
+    """Lazy-load the PostgreSQL SQL catalog and local filesystem warehouse."""
+    global _catalog
     if _catalog is not None:
         return _catalog
 
-    requested = os.getenv("ICEBERG_CATALOG_TYPE", "sql").lower()
-    if requested == "nessie":
-        _catalog = _try_nessie()
-        if _catalog is None:
-            _catalog = _create_sql_catalog()
-            _catalog_type = "sql"
-        else:
-            _catalog_type = "nessie"
-            logger.info("Connected to Nessie catalog")
-        return _catalog
-
     _catalog = _create_sql_catalog()
-    _catalog_type = "sql"
     return _catalog
 
 
@@ -165,7 +122,10 @@ def _fold_case_insensitive_columns(df: pd.DataFrame) -> pd.DataFrame:
         groups.setdefault(str(column).lower(), []).append(column)
     if all(len(names) == 1 for names in groups.values()):
         return df
-    folded = pd.DataFrame(index=df.index)
+    # Build all columns at once. Assigning them one by one fragments the
+    # DataFrame for wide CSVs (OCI commonly has hundreds of tag columns),
+    # increasing both CPU time and peak memory before Arrow conversion.
+    folded_columns: dict[Any, pd.Series] = {}
     for names in groups.values():
         keep = names[0]
         series = df[keep]
@@ -173,8 +133,8 @@ def _fold_case_insensitive_columns(df: pd.DataFrame) -> pd.DataFrame:
             extra_series = df[extra]
             blank = series.isna() | (series.astype(str).str.strip() == "") | (series.astype(str) == "nan")
             series = series.where(~blank, extra_series)
-        folded[keep] = series
-    return folded
+        folded_columns[keep] = series
+    return pd.DataFrame(folded_columns, index=df.index)
 
 
 def _schema_has_case_collisions(schema: Any) -> bool:
@@ -821,6 +781,68 @@ def read_destination_batches(physical_name: str, excluded_periods: set[str] | No
             yield batch_df
 
 
+def read_destination_slice_batches(
+    physical_name: str,
+    *,
+    billing_period: str,
+    connection_id: int,
+    batch_size: int = 50_000,
+    namespace: str = "gold",
+):
+    """Yield one exact Gold source/month slice in bounded pandas batches."""
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    try:
+        table = _get_catalog().load_table(_table_id(namespace, safe_name))
+    except Exception:
+        return
+    from pyiceberg.expressions import And, EqualTo
+    row_filter = And(
+        EqualTo("_billing_period", str(billing_period)),
+        EqualTo("source_connection_id", int(connection_id)),
+    )
+    for arrow_batch in table.scan(row_filter=row_filter).to_arrow_batch_reader():
+        if arrow_batch.num_rows:
+            # PyArrow chooses its own record-batch size, which can be much
+            # larger than what the classification engine can process without
+            # monopolising a local workstation. Slice before converting to
+            # pandas so every rule evaluation and staged write is bounded.
+            for offset in range(0, arrow_batch.num_rows, batch_size):
+                batch_df = arrow_batch.slice(offset, batch_size).to_pandas().reset_index(drop=True)
+                # Legacy Gold files may expose nullable BIGINT columns as
+                # float64 through pandas. The staged Iceberg schema is long;
+                # normalise before append to avoid long -> double failures.
+                for column in ("clone_rule_id", "clone_rule_version", "source_connection_id"):
+                    if column in batch_df.columns:
+                        batch_df[column] = pd.to_numeric(batch_df[column], errors="coerce").astype("Int64")
+                yield batch_df
+
+
+def estimate_destination_slice_rows(
+    physical_name: str,
+    *,
+    billing_period: str,
+    connection_id: int,
+    namespace: str = "gold",
+) -> int:
+    """Return the manifest-level row count for one Gold source/month slice.
+
+    The destination table is partitioned by this same slice, therefore this
+    avoids a second full scan just to render task progress. It is deliberately
+    an estimate in the unlikely event a legacy file spans more than one slice.
+    """
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    try:
+        table = _get_catalog().load_table(_table_id(namespace, safe_name))
+    except Exception:
+        return 0
+    from pyiceberg.expressions import And, EqualTo
+    row_filter = And(
+        EqualTo("_billing_period", str(billing_period)),
+        EqualTo("source_connection_id", int(connection_id)),
+    )
+    return sum(int(task.file.record_count or 0) for task in table.scan(row_filter=row_filter).plan_files())
+
+
 def write_destination_staged(
     physical_name: str,
     df: pd.DataFrame,
@@ -1259,16 +1281,26 @@ def write_destination(
 def _force_delete_table(tid: tuple, safe_name: str) -> None:
     """Force-delete Iceberg table: SQL metadata + local Parquet/metadata files."""
     import shutil, os
-    # 1. Try catalog-level drop first (handles files + metadata atomically)
+    target_locations: list[str] = []
+
+    # 1. Obter caminho físico real antes do drop no catálogo
+    cat = _get_catalog()
     try:
-        cat = _get_catalog()
+        tbl = cat.load_table(tid)
+        loc = tbl.location()
+        if loc:
+            target_locations.append(loc.replace("file://", ""))
+    except Exception:
+        pass
+
+    # 2. Dropar tabela via catálogo (remove registro do Postgres no SqlCatalog)
+    try:
         cat.drop_table(tid)
         logger.info("Dropped table %s via catalog", tid)
-        return
     except Exception:
         pass  # Table may not exist in catalog, fall through to manual cleanup
 
-    # 2. Clean SQL catalog metadata
+    # 3. Clean SQL catalog metadata
     try:
         from app.database import SyncSession
         from sqlalchemy import text
@@ -1279,17 +1311,139 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
     except Exception:
         pass
 
-    # 3. Clean local warehouse files (Parquet, Avro, metadata)
-    #    PyIceberg SQL catalog uses {namespace}.db/{table_name}/ directory layout.
-    #    Match EXACT directory name to avoid deleting staged tables
-    #    (e.g. "dest_modelo_focus" only, NOT "dest_modelo_focus_stg_123").
+    # 4. Remover arquivos físicos reais do warehouse obtidos via location()
+    for loc_path in target_locations:
+        if os.path.isdir(loc_path):
+            shutil.rmtree(loc_path, ignore_errors=True)
+            logger.info("Deleted warehouse dir via location: %s", loc_path)
+
+    # 5. Clean local warehouse files (fallback por convenção de pasta)
     warehouse = _LOCAL_WAREHOUSE
-    for namespace_pattern in ["gold", "gold.db"]:
+    ns = tid[0] if isinstance(tid, tuple) and len(tid) > 0 else "gold"
+    for namespace_pattern in [ns, f"{ns}.db", "gold", "gold.db", "financial_base.db", "dimon"]:
         base = str(warehouse / namespace_pattern)
         candidate = os.path.join(base, safe_name)
         if os.path.isdir(candidate):
             shutil.rmtree(candidate, ignore_errors=True)
             logger.info("Deleted warehouse dir: %s", candidate)
+
+
+def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
+    """Garbage collector periódico para remover pastas temporárias órfãs (*_stg_*).
+
+    Inspeciona o warehouse local, protege todas as tabelas ativas no catálogo SQL
+    e exclui diretórios com padrão *_stg_* que tenham mais de max_age_hours de inatividade
+    e não correspondam a nenhuma tabela registrada.
+    """
+    import os, shutil, time
+    from pathlib import Path
+
+    cat = _get_catalog()
+    active_locations: set[str] = set()
+    warehouse_path = Path(_LOCAL_WAREHOUSE).resolve()
+
+    if not warehouse_path.exists():
+        return {"deleted_dirs": 0, "deleted_bytes": 0}
+
+    known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast", "dimon"]
+    for ns in known_namespaces:
+        try:
+            for t in cat.list_tables(ns):
+                table_name = t[1] if isinstance(t, tuple) else t
+                try:
+                    tbl = cat.load_table((ns, table_name))
+                    loc = tbl.location().replace("file://", "")
+                    active_locations.add(os.path.realpath(loc))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    now = time.time()
+    min_age_seconds = max_age_hours * 3600
+    deleted_dirs = 0
+    deleted_bytes = 0
+
+    for db_dir in warehouse_path.glob("*"):
+        if not db_dir.is_dir():
+            continue
+        for tbl_dir in db_dir.glob("*"):
+            if not tbl_dir.is_dir() or "_stg_" not in tbl_dir.name:
+                continue
+
+            real_path = os.path.realpath(str(tbl_dir))
+            if real_path in active_locations:
+                continue
+
+            try:
+                mtime = tbl_dir.stat().st_mtime
+                if (now - mtime) < min_age_seconds:
+                    continue  # Muito recente, pode pertencer a um job em execução
+
+                dir_size = 0
+                for f in tbl_dir.rglob("*"):
+                    if f.is_file():
+                        dir_size += f.stat().st_size
+
+                shutil.rmtree(tbl_dir, ignore_errors=True)
+                deleted_dirs += 1
+                deleted_bytes += dir_size
+                logger.info("Garbage Collector Iceberg removeu pasta órfã: %s (%d bytes)", tbl_dir.name, dir_size)
+            except Exception as e:
+                logger.warning("Falha ao remover pasta órfã %s: %s", tbl_dir, e)
+
+    if deleted_dirs > 0:
+        logger.info(
+            "Garbage Collector Iceberg finalizado: %d pastas removidas, %.2f MB liberados",
+            deleted_dirs, deleted_bytes / (1024 * 1024)
+        )
+    return {"deleted_dirs": deleted_dirs, "deleted_bytes": deleted_bytes}
+
+
+def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days: int = 1) -> bool:
+    """Expira snapshots técnicos antigos e purga arquivos órfãos não referenciados na Gold via Trino."""
+    from urllib.parse import urljoin
+    import httpx
+    from app.services.trino_service import TRINO_URL, TRINO_USER
+
+    retention_str = f"{retention_days}d"
+    session_prop = f"iceberg.expire_snapshots_min_retention={retention_str},iceberg.remove_orphan_files_min_retention={retention_str}"
+    headers = {
+        "X-Trino-User": TRINO_USER,
+        "X-Trino-Catalog": "iceberg",
+        "X-Trino-Schema": "gold",
+        "X-Trino-Session": session_prop,
+    }
+    submit_url = urljoin(TRINO_URL, "/v1/statement")
+    statements = [
+        f"ALTER TABLE iceberg.gold.{table_name} EXECUTE expire_snapshots(retention_threshold => '{retention_str}')",
+        f"ALTER TABLE iceberg.gold.{table_name} EXECUTE remove_orphan_files(retention_threshold => '{retention_str}')",
+    ]
+
+    try:
+        with httpx.Client(timeout=300.0) as client:
+            for sql in statements:
+                resp = client.post(submit_url, content=sql, headers=headers)
+                if resp.status_code != 200:
+                    logger.warning("Trino %s HTTP %d: %s", sql[:40], resp.status_code, resp.text)
+                    continue
+                data = resp.json()
+                next_uri = data.get("nextUri")
+                while next_uri:
+                    resp = client.get(next_uri, headers=headers)
+                    data = resp.json()
+                    if "error" in data:
+                        logger.warning("Trino erro em %s: %s", sql[:40], data["error"].get("message"))
+                        break
+                    state = data.get("stats", {}).get("state")
+                    if state in ("FINISHED", "FAILED", "CANCELED"):
+                        break
+                    next_uri = data.get("nextUri")
+        logger.info("Manutenção de snapshots concluída para iceberg.gold.%s (retenção: %s)", table_name, retention_str)
+        return True
+    except Exception as exc:
+        logger.warning("Falha na manutenção de snapshots para iceberg.gold.%s: %s", table_name, exc)
+        return False
 
 
 def get_catalog() -> Catalog:

@@ -108,6 +108,11 @@ def main():
                 else f"Recycling worker after {reprocess_tasks_since_restart} reprocess task(s) to release memory.",
                 flush=True,
             )
+            # On Linux the heartbeat multiprocessing child is forked and keeps
+            # the advisory lock descriptor open.  Stop it before re-exec so
+            # the replacement worker can acquire the lock.
+            heartbeat_worker.terminate()
+            heartbeat_worker.join(timeout=2)
             os.execv(sys.executable, [sys.executable, "-u", str(Path(__file__).resolve())])
 
     lock_handle = WORKER_LOCK.open("a+")
@@ -184,7 +189,7 @@ def main():
             task = session.execute(
                 select(EtlTask).where(
                     EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "extraction", "forecast", "forecast_accuracy", "shared_cost", "ai_cost_relationship_reprocess", "dimon_reprocess", "reservation_collection"]),
+                    EtlTask.task_type.in_(["reprocess", "reclassification", "extraction", "forecast", "forecast_accuracy", "shared_cost", "ai_cost_relationship_reprocess", "dimon_reprocess", "reservation_collection"]),
                 )
                 .order_by(EtlTask.id)
                 .limit(1)
@@ -512,7 +517,7 @@ def main():
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
-                elif task.task_type == "reprocess":
+                elif task.task_type in ("reprocess", "reclassification"):
                     dest_id = task.destination_table_id
                     conn_ids = task.connection_ids or []
                     periods = task.billing_periods or []
@@ -531,7 +536,7 @@ def main():
                     session.close()
 
                     try:
-                        from app.routers.etl import _reprocess_destination_sync
+                        from app.routers.etl import _reprocess_destination_sync, _reclassify_destination_sync
                         from app.routers.etl import _append_reprocess_log
                         from app.services.task_runner import _inmemory_tasks
                         from app.models.source_connection import SourceConnection as _ReprocessConnection
@@ -616,14 +621,14 @@ def main():
                             }
                             _append_reprocess_log(task_id, "Worker assumiu a tarefa da fila")
 
-                            result = _reprocess_destination_sync(
-                                task_id,
-                                dest_id,
-                                conn_ids,
-                                periods,
-                                replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
-                                publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
-                            )
+                            if task.task_type == "reclassification":
+                                result = _reclassify_destination_sync(task_id, dest_id, conn_ids, periods)
+                            else:
+                                result = _reprocess_destination_sync(
+                                    task_id, dest_id, conn_ids, periods,
+                                    replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
+                                    publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
+                                )
                         print(f"Task {task_id} completed: {result}")
 
                         # Persist the terminal state explicitly.  The

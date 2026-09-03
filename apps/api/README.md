@@ -76,7 +76,7 @@ apps/api/
 | `scheduler_service.py`       | APScheduler cron jobs + auto-reprocess destinations              |
 | `classification_engine.py`   | Multi-condition classification matching + department inheritance |
 | `expression_engine.py`       | Formula/Conditional business rule evaluation via pandas.eval()   |
-| `iceberg_service.py`         | PyIceberg read/write (bronze/silver/gold) via MinIO + Nessie    |
+| `iceberg_service.py`         | PyIceberg read/write (bronze/silver/gold) via PostgreSQL + warehouse local |
 | `trino_service.py`           | Trino HTTP client for SQL queries                                |
 | `fact_service.py`            | Populate fact_cost from normalized data                          |
 | `period_service.py`          | Billing period lifecycle management                              |
@@ -96,7 +96,8 @@ iceberg.write_silver(connection_code, df, billing_period)
 iceberg.write_destination(physical_name, df, partition_col="_billing_period")
 ```
 
-Each layer writes **Parquet files** to MinIO S3, cataloged via **Nessie** (Iceberg catalog with versioning).
+Each layer writes **Parquet files** to the shared local Iceberg warehouse,
+cataloged by the PostgreSQL SQL catalog.
 
 ## Models — Database Schema
 
@@ -113,7 +114,10 @@ Each layer writes **Parquet files** to MinIO S3, cataloged via **Nessie** (Icebe
 | `period_status.py`     | `period_status`                | Billing period lifecycle                               |
 | `scheduled_task.py`    | `scheduled_task`               | Cron-based automation schedules                        |
 
-**Data Storage Principle:** PostgreSQL stores ONLY metadata and job control. Bronze keeps the immutable source; Silver maps sources to destination schemas; Gold applies business rules/classifications. Financial rows are stored as Iceberg/Parquet on MinIO S3.
+**Data Storage Principle:** PostgreSQL stores application metadata, job control
+and the Iceberg catalog. Bronze keeps the immutable source; Silver maps sources
+to destination schemas; Gold applies business rules/classifications. Financial
+rows are stored as Iceberg/Parquet in the shared local warehouse.
 
 ## Environment Variables
 
@@ -123,8 +127,4 @@ Configured in `.env` files (loaded by `app/config.py`):
 |-----------------------|------------------------------------------|--------------------------------|
 | `DATABASE_URL`        | `postgresql+asyncpg://finops:finops@localhost:5432/finops` | Async DB URL |
 | `DATABASE_URL_SYNC`   | `postgresql://finops:finops@localhost:5432/finops` | Sync DB URL (ETL) |
-| `NESSIE_URI`          | `http://localhost:19120/api/v1`          | Nessie catalog endpoint        |
-| `ICEBERG_WAREHOUSE`   | `s3://warehouse/`                        | Iceberg S3 warehouse           |
-| `S3_ENDPOINT`         | `http://localhost:9000`                  | MinIO S3 endpoint              |
-| `AWS_ACCESS_KEY_ID`   | `minioadmin`                             | S3 access key                  |
-| `AWS_SECRET_ACCESS_KEY`| `minioadmin`                            | S3 secret key                  |
+| `ICEBERG_LOCAL_WAREHOUSE` | `apps/data/iceberg`                 | Shared local warehouse          |

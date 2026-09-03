@@ -9,8 +9,9 @@ import {
 } from "@mui/material";
 import {
   Storage, AttachMoney, PlayArrow, Refresh, Delete,
-  Schema as SchemaIcon, Tune, BarChart, Terminal, Search as SearchIcon, DeleteSweep,
+  Schema as SchemaIcon, Tune, BarChart, Terminal, Search as SearchIcon, DeleteSweep, TableChart,
 } from "@mui/icons-material";
+import * as XLSX from "xlsx";
 import {
   getAnalysisHealth, getAnalysisTables, runAnalysisQuery,
   TrinoQueryResult, TrinoHealth, TrinoTableList,
@@ -72,6 +73,7 @@ export default function Analysis() {
   const [tables, setTables] = useState<TrinoTableList>({ bronze: [], silver: [], gold: [], dimon: [] });
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<TrinoQueryResult | null>(null);
+  const [executedSql, setExecutedSql] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [search, setSearch] = useState("");
@@ -191,6 +193,7 @@ export default function Analysis() {
     try {
       const res = await runAnalysisQuery(q);
       setResult(res);
+      setExecutedSql(q);
       setPage(0);
     } catch (e: unknown) {
       setError(formatApiError(e, "Query failed"));
@@ -232,6 +235,41 @@ export default function Analysis() {
       if (sortDir === "asc") setSortDir("desc");
       else { setSortKey(null); setSortDir("asc"); }
     } else { setSortKey(col); setSortDir("asc"); }
+  };
+
+  const exportQueryResult = () => {
+    if (!result) return;
+
+    const matrix = [
+      result.columns,
+      ...filteredRows.map((row) => result.columns.map((column) => {
+        const value = row[column];
+        if (value === null || value === undefined) return "";
+        if (typeof value === "object") return JSON.stringify(value);
+        return value;
+      })),
+    ];
+    const resultSheet = XLSX.utils.aoa_to_sheet(matrix);
+    resultSheet["!views"] = [{ state: "frozen", ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft" }];
+    resultSheet["!cols"] = result.columns.map((column) => ({
+      wch: Math.min(60, Math.max(12, column.length + 2)),
+    }));
+
+    const querySheet = XLSX.utils.aoa_to_sheet([
+      ["SQL executado"],
+      [executedSql],
+      [],
+      ["Exportado em", new Date().toLocaleString("pt-BR")],
+      ["Registros exportados", filteredRows.length],
+    ]);
+    querySheet["!cols"] = [{ wch: 24 }, { wch: 24 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, resultSheet, "Resultado");
+    XLSX.utils.book_append_sheet(workbook, querySheet, "Consulta");
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    XLSX.writeFile(workbook, `resultado-query-${timestamp}.xlsx`);
   };
 
   const formatCell = (val: unknown): string => {
@@ -543,6 +581,15 @@ export default function Analysis() {
                 sx={{ fontFamily: "monospace", "& textarea": { fontSize: "0.85rem" } }} />
               <Button variant="contained" startIcon={<PlayArrow />} onClick={() => executeSql()}
                 disabled={loading || !sql.trim()} sx={{ minWidth: 100 }}>Run</Button>
+              <Button
+                variant="outlined"
+                startIcon={<TableChart />}
+                onClick={exportQueryResult}
+                disabled={!result || filteredRows.length === 0}
+                sx={{ minWidth: 160 }}
+              >
+                Exportar Excel
+              </Button>
             </Box>
           </Paper>
 

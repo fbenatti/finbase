@@ -48,28 +48,7 @@ SP_ORDER_CONCURRENCY = 4
 # Config / credentials (mesmo padrão do azure_ptu_service)
 # ---------------------------------------------------------------------------
 def resolve_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    cfg = dict(config or {})
-    profile = cfg.get("credential_profile")
-    if profile:
-        from app.config import settings
-        mapping = {
-            "azure-4p": (
-                settings.azure_4p_tenant_id,
-                settings.azure_4p_client_id,
-                settings.azure_4p_client_secret,
-            ),
-            "azure-ti": (
-                settings.azure_ti_tenant_id,
-                settings.azure_ti_client_id,
-                settings.azure_ti_client_secret,
-            ),
-        }
-        if profile in mapping:
-            tenant, client, secret = mapping[profile]
-            cfg.setdefault("tenant_id", tenant)
-            cfg.setdefault("client_id", client)
-            cfg.setdefault("client_secret", secret)
-    return cfg
+    return dict(config or {})
 
 
 def _credential(config: dict[str, Any]) -> ClientSecretCredential:
@@ -80,7 +59,7 @@ def _credential(config: dict[str, Any]) -> ClientSecretCredential:
     if not tenant or not client or not secret:
         raise ValueError(
             "azure_reservations requer tenant_id, client_id e client_secret "
-            "(ou credential_profile azure-4p / azure-ti resolvido)"
+            "persistidos no banco de dados"
         )
     return ClientSecretCredential(tenant_id=tenant, client_id=client, client_secret=secret)
 

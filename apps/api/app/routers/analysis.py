@@ -4,7 +4,7 @@ Analysis Router — query the Data Lakehouse via Trino, PostgreSQL sources, and 
 Endpoints:
   GET  /analysis/tables           → list available Iceberg tables (Bronze, Silver, Gold)
   POST /analysis/query            → run arbitrary SQL via Trino
-  GET  /analysis/health           → health check for Trino/Nessie
+  GET  /analysis/health           → health check for Trino and Iceberg catalog
   GET  /analysis/sources          → list connections with ingested data counts
   GET  /analysis/sources/{id}     → query ingested normalized data for a source
   GET  /analysis/destinations     → list destination tables with row counts
@@ -150,7 +150,7 @@ class PivotMeasure(BaseModel):
 class PivotFilter(BaseModel):
     column: str
     values: list[str | int | float | bool] = []
-    operator: Literal["IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS"] = "IN"
+    operator: Literal["IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_NULL", "IS_NOT_NULL"] = "IN"
 
 
 class PivotSort(BaseModel):
@@ -421,6 +421,12 @@ def _canonicalize_request(req: PivotRequest, schema: dict[str, str]) -> None:
 def _where_clause(filters: list[PivotFilter], cell_filters: dict[str, Any] | None = None) -> str:
     clauses: list[str] = []
     for item in filters:
+        if item.operator == "IS_NULL":
+            clauses.append(f"{_quote_ident(item.column)} IS NULL")
+            continue
+        if item.operator == "IS_NOT_NULL":
+            clauses.append(f"{_quote_ident(item.column)} IS NOT NULL")
+            continue
         if item.values:
             if item.operator == "NOT_IN":
                 vals = []
@@ -771,7 +777,9 @@ async def _search_pivot_table_core(
     term = _quote_literal(f"%{req.term.strip().lower()}%")
     order_candidates = [name for name in ("chargeperiodstart", "billingperiodstart", "date", "_billing_period") if name in schema]
     order = f" ORDER BY TRY_CAST({_quote_ident(order_candidates[0])} AS TIMESTAMP) DESC" if order_candidates else ""
-    limit = max(1, min(req.limit, 500))
+    # Drill-down is intentionally paginated. Never allow a cell click to
+    # materialize hundreds/thousands of rows in Trino or the browser.
+    limit = max(1, min(req.limit, 100))
     offset = max(0, req.offset)
     lowered = req.term.strip().lower()
     # Search in bounded column groups.  Concatenating all 100+ text columns
@@ -1380,8 +1388,11 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     limit = max(1, min(req.limit, 50000))
     offset = max(0, req.offset)
     select_expr = ", ".join(_quote_ident(name) for name in canonical_columns) if canonical_columns else "*"
-    period_col = _schema_period_column(schema)
-    order_by = f" ORDER BY {_quote_ident(period_col)} DESC" if period_col else ""
+    # Do not sort the full Gold partition for a detail page.  The cell
+    # filters already identify the slice; ORDER BY on a non-partitioned
+    # 30M-row table forces Trino to materialize/sort everything before the
+    # LIMIT and was killing the worker with exit 137 (OOM).
+    order_by = ""
     gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
     sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
     try:
@@ -1429,31 +1440,109 @@ async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, t
         )
     where = _where_clause(req.filters, cell_filters)
     ordered = await _declared_column_order(db, table_id, schema)
-    limit = max(1, min(req.limit, 500))
+    limit = max(1, min(req.limit, 100))
     offset = max(0, req.offset)
     select_expr = ", ".join(_quote_ident(name) for name in ordered) if ordered else "*"
-    period_col = _schema_period_column(schema)
-    order_by = f" ORDER BY {_quote_ident(period_col)} DESC" if period_col else ""
+    # Never sort the full Gold partition for a detail request. The page is
+    # located by its key and limited below; sorting first can OOM the Trino
+    # worker before LIMIT is applied.
+    order_by = ""
     gold_from = await _gold_from(db, table_id, table_name, schema)
-    sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
-    count_sql = f"SELECT COUNT(*) AS total FROM {gold_from}{where}"
-    try:
-        rows = await trino_execute(sql, **trino_kwargs)
-        counted = await trino_execute(count_sql, **trino_kwargs)
-    except TrinoCancelled:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Falha no drill-down do Trino: {exc}")
+    # Locate a bounded page using only the stable source key first. Selecting
+    # all ~150 Gold columns while scanning a large Parquet partition makes the
+    # Trino worker decode far more data than the detail page needs and was
+    # causing the worker (172.21.0.6) to be OOM-killed (exit 137).
+    key_column = next((name for name in ordered if name.lower() == "source_record_id"), None)
+    if key_column:
+        key_sql = f"SELECT {_quote_ident(key_column)} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
+        try:
+            key_rows = await trino_execute(key_sql, **trino_kwargs)
+            keys = [row.get(key_column) for row in key_rows if row.get(key_column) is not None]
+            if not keys:
+                # Older GOLD loads may legitimately have a null
+                # source_record_id.  In that case query the bounded slice
+                # directly; do not interpret an empty key page as no data.
+                sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
+                rows = await trino_execute(sql, **trino_kwargs)
+            else:
+                key_values = ", ".join(_quote_literal(str(value)) for value in dict.fromkeys(keys))
+                detail_where = f"{where} AND {_quote_ident(key_column)} IN ({key_values})"
+                sql = f"SELECT {select_expr} FROM {gold_from}{detail_where} LIMIT {limit}"
+                rows = await trino_execute(sql, **trino_kwargs)
+        except TrinoCancelled:
+            raise
+        except Exception as exc:
+            logger.warning("Drill-down Trino falhou (%s); usando leitura local Iceberg", exc)
+            rows = await asyncio.to_thread(_local_drilldown_rows, table_name, ordered, req, cell_filters, offset, limit)
+    else:
+        sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
+        try:
+            rows = await trino_execute(sql, **trino_kwargs)
+        except TrinoCancelled:
+            raise
+        except Exception as exc:
+            logger.warning("Drill-down Trino falhou (%s); usando leitura local Iceberg", exc)
+            rows = await asyncio.to_thread(_local_drilldown_rows, table_name, ordered, req, cell_filters, offset, limit)
     response = {
         "columns": ordered,
         "rows": rows,
-        "total": int(counted[0]["total"]) if counted else 0,
+        # Avoid a second unbounded COUNT(*) query: on large Gold partitions it
+        # creates another Trino task and was the source of drill-down 503s.
+        # Keep a conservative lower-bound/has-more estimate for pagination.
+        "total": offset + len(rows) + (1 if len(rows) == limit else 0),
+        "total_is_estimate": True,
         "limit": limit,
         "offset": offset,
     }
     if auto_period:
         response["period_auto_applied"] = auto_period
     return response
+
+
+def _local_drilldown_rows(table_name: str, ordered: list[str], req: PivotDrillDownRequest,
+                          cell_filters: dict[str, Any], offset: int, limit: int) -> list[dict[str, Any]]:
+    """Bounded local fallback when a Trino worker is restarting/OOMing."""
+    from app.services import iceberg_service as iceberg
+    table = iceberg._get_catalog().load_table(iceberg._table_id("gold", table_name))
+    import pyarrow as pa
+    from pyiceberg.expressions import AlwaysTrue, And, EqualTo
+    scan_filter = AlwaysTrue()
+    for item in [*req.filters, *[PivotFilter(column=k, values=[v]) for k, v in cell_filters.items()]]:
+        if item.column == "_billing_period" and item.values:
+            scan_filter = And(scan_filter, EqualTo(item.column, str(item.values[0])))
+    wanted = list(dict.fromkeys([*ordered, *[f.column for f in req.filters], *cell_filters.keys()]))
+    wanted = [column for column in wanted if column in {field.name for field in table.schema().fields}]
+    matched = 0; emitted: list[dict[str, Any]] = []
+    for batch in table.scan(row_filter=scan_filter, selected_fields=wanted).to_arrow_batch_reader():
+        frame = batch.to_pandas()
+        for item in req.filters:
+            if item.column not in frame:
+                continue
+            if item.operator == "IS_NULL":
+                frame = frame[frame[item.column].isna()]
+                continue
+            if item.operator == "IS_NOT_NULL":
+                frame = frame[frame[item.column].notna()]
+                continue
+            if not item.values:
+                continue
+            values = [str(v).lower() for v in item.values]
+            series = frame[item.column].fillna("").astype(str).str.lower()
+            mask = series.str.contains(values[0], regex=False) if item.operator == "CONTAINS" else series.isin(values)
+            frame = frame[mask]
+        for column, value in cell_filters.items():
+            if column in frame:
+                frame = frame[frame[column].isna()] if value is None else frame[frame[column].fillna("").astype(str).str.lower() == str(value).lower()]
+        if frame.empty:
+            continue
+        if matched + len(frame) <= offset:
+            matched += len(frame); continue
+        start = max(0, offset - matched)
+        emitted.extend(frame.iloc[start:start + (limit - len(emitted))].to_dict("records"))
+        matched += len(frame)
+        if len(emitted) >= limit:
+            break
+    return emitted
 
 
 @router.get("/pivot/views")
@@ -2194,7 +2283,7 @@ async def run_query(req: QueryRequest, request: Request):
             raise _cancelled_http()
         except TrinoError as e:
             # Gold may still be in the local PyIceberg catalog while Trino is
-            # connected to Nessie/MinIO. Support the standard destination
+            # connected through the PostgreSQL Iceberg catalog. Support the standard destination
             # aggregations through the same local Iceberg table until the data
             # catalog migration is complete.
             rows = _run_local_gold_query(req.sql)
@@ -2330,8 +2419,8 @@ async def get_summary(
 
 @router.get("/health")
 async def health_check():
-    """Check if Trino and Nessie are reachable."""
-    status = {"trino": "unknown", "nessie": "unknown", "minio": "unknown"}
+    """Check if Trino and the PostgreSQL-backed Iceberg catalog are reachable."""
+    status = {"trino": "unknown", "iceberg_catalog": "unknown"}
 
     # Test Trino
     try:
@@ -2340,25 +2429,13 @@ async def health_check():
     except Exception as e:
         status["trino"] = str(e)[:120]
 
-    # Test Nessie catalog
+    # Test PostgreSQL-backed Iceberg catalog.
     try:
         cat = get_catalog()
         cat.list_namespaces()
-        status["nessie"] = "ok"
+        status["iceberg_catalog"] = "ok"
     except Exception as e:
-        status["nessie"] = str(e)[:120]
-
-    # MinIO is still part of the lakehouse stack even when the current local
-    # JDBC catalog uses the filesystem warehouse. Report its real state rather
-    # than leaving the frontend with a misleading "unknown" warning.
-    try:
-        import httpx
-        minio_url = os.getenv("MINIO_URL", "http://localhost:9000").rstrip("/")
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{minio_url}/minio/health/live")
-        status["minio"] = "ok" if response.status_code == 200 else f"HTTP {response.status_code}"
-    except Exception as e:
-        status["minio"] = str(e)[:120]
+        status["iceberg_catalog"] = str(e)[:120]
 
     return status
 

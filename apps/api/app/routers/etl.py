@@ -704,12 +704,7 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         # endpoint for the row action and the create wizard.
         try:
             from app.services.azure_ptu_service import test_connection_checks
-            from app.config import settings
             cfg = dict(config or {})
-            if cfg.get("credential_profile") == "azure-4p":
-                cfg.setdefault("tenant_id", settings.azure_4p_tenant_id)
-                cfg.setdefault("client_id", settings.azure_4p_client_id)
-                cfg.setdefault("client_secret", settings.azure_4p_client_secret)
             result = await test_connection_checks(cfg)
             summary = result.get("summary") or {}
             result["message"] = (
@@ -1949,6 +1944,136 @@ def _reprocess_destination_sync(
             pass
 
 
+def _reclassify_destination_sync(task_id: int, destination_table_id: int, connection_ids: list[int], billing_periods: list[str]) -> dict:
+    """Rewrite Gold classification dimensions only; financial facts stay untouched."""
+    import json
+    from app.database import SyncSession
+    from app.models.destination import DestinationTable
+    from app.models.etl_task import EtlTask
+    from app.models.rules import ClassificationRule, Department
+    from app.models.source_connection import SourceConnection
+    from app.services import iceberg_service as iceberg
+    from app.services.cloud_scope import rule_matches_cloud, rule_matches_destination
+    from app.services.task_runner import _apply_classifications_sync, _check_cancelled
+
+    def _progress(phase: str, processed: int, expected: int) -> None:
+        """Persist incremental progress; this task has no blob lifecycle."""
+        progress = min(100, int((processed * 100) / expected)) if expected else 0
+        db = SyncSession()
+        try:
+            task = db.get(EtlTask, task_id)
+            if task and task.status != "CANCELLED":
+                task.status = "RUNNING"
+                task.rows_destination = processed
+                task.total_blobs = expected
+                task.processed_blobs = processed
+                task.phase = f"{phase} · {processed:,}/{expected:,} linhas ({progress}%)"[:200]
+                task.current_blob = task.phase[:500]
+                result = dict(task.result_json or {})
+                result.update({
+                    "incremental": True,
+                    "rows_processed": processed,
+                    "estimated_total_rows": expected,
+                    "progress_percent": progress,
+                })
+                task.result_json = result
+                db.commit()
+        finally:
+            db.close()
+
+    session = SyncSession()
+    staged = None
+    try:
+        dest = session.get(DestinationTable, destination_table_id)
+        if not dest:
+            return {"success": False, "error": "Tabela destino nao encontrada", "rows_written": 0}
+        depts = {d.id: d for d in session.execute(select(Department)).scalars().all()}
+        is_focus = (dest.physical_name or "").lower() == "dest_modelo_focus"
+        expected_total = sum(
+            iceberg.estimate_destination_slice_rows(
+                dest.physical_name, billing_period=str(period), connection_id=cid,
+            )
+            for cid in connection_ids
+            for period in billing_periods
+        )
+        total = 0
+        _progress("Preparando recorte Gold", total, expected_total)
+        for cid in connection_ids:
+            conn = session.get(SourceConnection, cid)
+            if not conn:
+                continue
+            rules = [r for r in session.execute(select(ClassificationRule).where(ClassificationRule.active == True).order_by(ClassificationRule.priority, ClassificationRule.id)).scalars().all()
+                     if rule_matches_destination(r.destination_table_id, destination_table_id, is_focus_destination=is_focus)
+                     and rule_matches_cloud(r.cloud_scope, conn.cloud_scope, conn.cloud_name)]
+            hierarchy_cache = {}
+            for period in billing_periods:
+                staged = None; rows = 0
+                for frame in iceberg.read_destination_slice_batches(
+                    dest.physical_name,
+                    billing_period=str(period),
+                    connection_id=cid,
+                    batch_size=int(os.getenv("RECLASSIFY_BATCH_ROWS", "50000")),
+                ):
+                    if _check_cancelled(task_id):
+                        return {"success": False, "error": "Cancelado", "rows_written": 0}
+                    was_classified = pd.Series(False, index=frame.index)
+                    if "business_rule" in frame.columns:
+                        def clear_classification(value):
+                            try: payload = json.loads(value) if isinstance(value, str) and value else {}
+                            except (TypeError, json.JSONDecodeError): return (value, False)
+                            had_classification = "classification" in payload
+                            payload.pop("classification", None)
+                            return (json.dumps(payload, ensure_ascii=False) if payload else None, had_classification)
+                        cleared = frame["business_rule"].map(clear_classification)
+                        frame["business_rule"] = cleared.map(lambda item: item[0])
+                        was_classified = cleared.map(lambda item: item[1])
+                    # Never erase fields on rows owned only by business rules.
+                    # Rows with prior classification (or empty dimensions) are
+                    # safe to recompute from the current classification rules.
+                    reset_mask = was_classified | frame.get("departamento", pd.Series(None, index=frame.index)).isna()
+                    for col in ("departamento", "centro_custo", "ambiente", "custom_fields", "subscription_rg", "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5", "departamento_nivel_6", "departamento_nivel_7"):
+                        if col in frame.columns:
+                            frame.loc[reset_mask, col] = None
+                    _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)
+                    if staged is None: staged = iceberg.write_destination_staged(dest.physical_name, frame)
+                    else: iceberg.append_to_staged(staged, frame)
+                    rows += len(frame)
+                    _progress(f"Reclassificando {conn.code}/{period}", total + rows, expected_total)
+                if staged is None:
+                    return {"success": False, "error": f"Nenhuma linha Gold para {conn.code}/{period}", "rows_written": total}
+                iceberg.publish_staged_partition(dest.physical_name, staged, billing_period=str(period), connection_id=cid)
+                total += rows
+                staged = None
+        _progress("Publicação Gold concluída", total, expected_total)
+        return {"success": True, "rows_written": total, "table": dest.name}
+    except Exception:
+        if staged:
+            iceberg.cleanup_staged_table(staged)
+        raise
+    finally:
+        session.close()
+
+
+@router.post("/reclassify")
+async def reclassify_destination(body: ReprocessRequest, db: AsyncSession = Depends(get_db)):
+    """Queue an incremental Gold-only classification refresh by source/month."""
+    from app.models.etl_task import EtlTask
+    from sqlalchemy import insert
+    task_ids = []
+    for cid in body.connection_ids:
+        for period in body.billing_periods:
+            result = await db.execute(insert(EtlTask).values(
+                task_type="reclassification", status="QUEUED", destination_table_id=body.destination_table_id,
+                connection_ids=[cid], billing_periods=[str(period)], rows_raw=0, rows_normalized=0,
+                rows_destination=0, total_blobs=0, processed_blobs=0, errors=[],
+                phase=f"Na fila: reclassificar fonte {cid}, mês {period}",
+                result_json={"incremental": True, "connection_ids": [cid], "billing_periods": [str(period)]},
+            ).returning(EtlTask.id))
+            task_ids.append(result.scalar_one())
+    await db.commit()
+    return {"task_id": task_ids[0], "task_ids": task_ids, "message": "Reclassificação incremental enfileirada"}
+
+
 @router.post("/reprocess")
 async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depends(get_db)):
     """Queue one atomic Gold publication per source and billing month."""
@@ -2296,7 +2421,7 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
             # `table` vive em result_json; comparar pela coluna JSON extraída (texto).
             "table": EtlTask.result_json.op("->>")("table"),
         }
-        conditions = [EtlTask.task_type == "reprocess"]
+        conditions = [EtlTask.task_type.in_(["reprocess", "reclassification"])]
         if search:
             needle = f"%{search.strip()}%"
             conditions.append(or_(

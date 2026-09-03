@@ -11,7 +11,7 @@ import {
   getDestinationTables, DestinationTable,
   getConnectionsForDestination, MappedConnection,
   getAvailablePeriods, AvailablePeriod,
-  reprocessDest, getReprocessStatus, cancelReprocess, ReprocessStatus,
+  reprocessDest, reclassifyDest, getReprocessStatus, cancelReprocess, ReprocessStatus,
   getRunningTasks, TaskStatus, getWorkerHealth, WorkerHealth, getReprocessHistory,
   getDimonRules, DimonRule,
 } from "../../services/api";
@@ -36,6 +36,7 @@ export default function ReprocessDataTab() {
   const [selConnIds, setSelConnIds] = useState<number[]>([]);
   const [selPeriods, setSelPeriods] = useState<string[]>([]);
   const [replaceExisting, setReplaceExisting] = useState(false);
+  const [classificationOnly, setClassificationOnly] = useState(false);
   const [chainDimons, setChainDimons] = useState(false);
   const [chainDimonRuleId, setChainDimonRuleId] = useState<number | "">("");
   const [dimonRules, setDimonRules] = useState<DimonRule[]>([]);
@@ -218,14 +219,16 @@ export default function ReprocessDataTab() {
     setTaskId(null);
     setTaskStatus(null);
     try {
-      const res = await reprocessDest({
-        destination_table_id: selDestId as number,
-        connection_ids: selConnIds,
-        billing_periods: selPeriods,
-        replace_existing: replaceExisting,
-        chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
-      });
-      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: "Reprocessar dados" });
+      const res = classificationOnly
+        ? await reclassifyDest({ destination_table_id: selDestId as number, connection_ids: selConnIds, billing_periods: selPeriods })
+        : await reprocessDest({
+            destination_table_id: selDestId as number,
+            connection_ids: selConnIds,
+            billing_periods: selPeriods,
+            replace_existing: replaceExisting,
+            chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
+          });
+      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: classificationOnly ? "Reclassificar projetos" : "Reprocessar dados" });
       setTaskId(res.task_id);
       pollTask(res.task_ids || [res.task_id]);
       historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
@@ -432,11 +435,15 @@ export default function ReprocessDataTab() {
               Reprocessar
             </Button>
             <FormControlLabel
-              control={<Switch checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} color="warning" />}
+              control={<Switch checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} color="warning" disabled={classificationOnly} />}
               label="Reconstruir tabela completa (substituir dados antigos)"
             />
             <FormControlLabel
-              control={<Switch checked={chainDimons} onChange={(e) => setChainDimons(e.target.checked)} color="primary" />}
+              control={<Switch checked={classificationOnly} onChange={(e) => { setClassificationOnly(e.target.checked); if (e.target.checked) { setReplaceExisting(false); setChainDimons(false); } }} color="primary" />}
+              label="Reprocessar apenas classificação dos projetos"
+            />
+            <FormControlLabel
+              control={<Switch checked={chainDimons} onChange={(e) => setChainDimons(e.target.checked)} color="primary" disabled={classificationOnly} />}
               label="Materializar Dimon na sequência (visão completa)"
             />
             {chainDimons && (

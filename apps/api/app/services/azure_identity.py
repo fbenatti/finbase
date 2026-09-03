@@ -1,7 +1,7 @@
 """Azure identity helpers compartilhados entre coletores ARM/ARG.
 
-Extrai o mecanismo de resolução de credenciais (credential_profile →
-Settings.azure_{profile}_*) e o ClientSecretCredential usado por
+Centraliza a leitura das credenciais persistidas na conexão e o
+ClientSecretCredential usado por
 azure_automation_service, azure_ptu_service e azure_resource_graph_service.
 """
 from __future__ import annotations
@@ -16,26 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    """Preenche credenciais a partir do credential_profile, se indicado."""
-    cfg = dict(config or {})
-    if cfg.get("credential_profile"):
-        from app.config import settings
-        profile = str(cfg["credential_profile"]).strip().lower()
-        if profile.startswith("azure-"):
-            profile = profile[len("azure-"):]
-        try:
-            tid = getattr(settings, f"azure_{profile}_tenant_id")
-            cid = getattr(settings, f"azure_{profile}_client_id")
-            cid2 = getattr(settings, f"azure_{profile}_client_secret")
-        except AttributeError:
-            tid = cid = cid2 = None
-        if tid:
-            cfg.setdefault("tenant_id", tid)
-        if cid:
-            cfg.setdefault("client_id", cid)
-        if cid2:
-            cfg.setdefault("client_secret", cid2)
-    return cfg
+    """Return only configuration persisted in source_connection.config_json."""
+    return dict(config or {})
 
 
 def credential(config: dict[str, Any]) -> ClientSecretCredential:
@@ -45,7 +27,7 @@ def credential(config: dict[str, Any]) -> ClientSecretCredential:
     if missing:
         raise ValueError(
             f"Credenciais Azure incompletas na conexão: faltam {', '.join(missing)}. "
-            "Configure tenant_id, client_id e client_secret (ou credential_profile)."
+            "Configure tenant_id, client_id e client_secret no banco de dados."
         )
     return ClientSecretCredential(
         tenant_id=cfg["tenant_id"],
