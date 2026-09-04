@@ -3,10 +3,13 @@ import csv
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, delete, or_
 from sqlalchemy.exc import IntegrityError
+from app.core.audit import audit
+from app.core.audit_sanitize import to_snapshot
+from app.core.deps import resolve_user_from_request
 from app.database import get_db
 from app.models.rules import (
     EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, Department,
@@ -223,7 +226,7 @@ async def list_business_rules(
 
 
 @router.post("/business-rules/", response_model=BusinessRuleOut, status_code=201)
-async def create_business_rule(data: BusinessRuleCreate, db: AsyncSession = Depends(get_db)):
+async def create_business_rule(data: BusinessRuleCreate, request: Request, db: AsyncSession = Depends(get_db)):
     rule = BusinessRule(**data.model_dump())
     db.add(rule)
     await db.flush()
@@ -257,17 +260,22 @@ async def create_business_rule(data: BusinessRuleCreate, db: AsyncSession = Depe
         # Relationships are explicit user configuration and are created only
         # from the Relationship screen.
 
+    audit_user = await resolve_user_from_request(request, db)
+    await audit(db, request, audit_user, module="rules", method="POST", action_label="create",
+                entity_type="business_rule", entity_id=rule.id, entity_label=rule.name,
+                after=to_snapshot(rule), status_code=201)
     await db.commit()
     await db.refresh(rule)
     return rule
 
 
 @router.put("/business-rules/{rule_id}", response_model=BusinessRuleOut)
-async def update_business_rule(rule_id: int, data: BusinessRuleUpdate, db: AsyncSession = Depends(get_db)):
+async def update_business_rule(rule_id: int, data: BusinessRuleUpdate, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BusinessRule).where(BusinessRule.id == rule_id))
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Business rule not found")
+    before_snapshot = to_snapshot(rule)
     update_data = data.model_dump(exclude_unset=True)
     for k, v in update_data.items():
         setattr(rule, k, v)
@@ -314,17 +322,24 @@ async def update_business_rule(rule_id: int, data: BusinessRuleUpdate, db: Async
                 active=rule.active,
             ))
 
+    await db.flush()
+    await db.refresh(rule)  # recarrega colunas (evita lazy de atributo expirado)
+    audit_user = await resolve_user_from_request(request, db)
+    await audit(db, request, audit_user, module="rules", method="PUT", action_label="update",
+                entity_type="business_rule", entity_id=rule.id, entity_label=rule.name,
+                before=before_snapshot, after=to_snapshot(rule), status_code=200)
     await db.commit()
     await db.refresh(rule)
     return rule
 
 
 @router.delete("/business-rules/{rule_id}", status_code=204)
-async def delete_business_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_business_rule(rule_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BusinessRule).where(BusinessRule.id == rule_id))
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404)
+    before_snapshot = to_snapshot(rule)
 
     # Delete the auto-created EtlMapping for this rule's source→target
     cfg = (rule.config_json or {})

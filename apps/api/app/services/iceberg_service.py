@@ -39,11 +39,11 @@ logger = logging.getLogger(__name__)
 # Catalog configuration
 # ---------------------------------------------------------------------------
 
-# SQL catalog (PostgreSQL) + local filesystem warehouse.
-_LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "data", "iceberg",
-)))
+# SQL catalog (PostgreSQL) + local filesystem warehouse. Containers explicitly
+# set ICEBERG_LOCAL_WAREHOUSE=/data/iceberg; local development keeps using the
+# repository's apps/data/iceberg directory.
+_LOCAL_DEFAULT = Path("/data/iceberg") if Path("/.dockerenv").exists() else Path(__file__).resolve().parents[3] / "data" / "iceberg"
+_LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(_LOCAL_DEFAULT))).expanduser().resolve()
 _LOCAL_WAREHOUSE.mkdir(parents=True, exist_ok=True)
 
 _catalog: Optional[Catalog] = None
@@ -53,7 +53,7 @@ _initialized_namespaces: set[str] = set()
 def _create_sql_catalog() -> Catalog:
     """Create a SQL catalog using PostgreSQL + local filesystem warehouse."""
     from app.config import settings
-    warehouse_uri = f"file://{_LOCAL_WAREHOUSE.resolve()}"
+    warehouse_uri = _LOCAL_WAREHOUSE.as_uri()
     logger.info("Using SQL catalog (PostgreSQL) with warehouse at %s", warehouse_uri)
     return load_catalog(
         "sql",

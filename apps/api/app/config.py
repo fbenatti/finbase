@@ -140,6 +140,7 @@ class Settings(BaseSettings):
     admin_initial_password: str = os.getenv("ADMIN_INITIAL_PASSWORD", "")
     auth_enabled: bool = os.getenv("AUTH_ENABLED", "true").lower() == "true"
     dev_master_token: str = os.getenv("DEV_MASTER_TOKEN", "")
+    audit_retention_days: int = int(os.getenv("AUDIT_RETENTION_DAYS", "365"))
 
     # --- Azure 4P (loaded from .env-4p via mapping above) ---
     azure_4p_tenant_id: str = os.getenv("AZURE_4P_TENANT_ID", "")

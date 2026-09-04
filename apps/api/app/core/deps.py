@@ -28,6 +28,24 @@ async def _get_dev_admin(db: AsyncSession) -> User:
     return user
 
 
+async def resolve_user_from_request(request: Request, db: AsyncSession) -> User:
+    """Resolve o usuário a partir do header Authorization (sem DEV bypass implícito aqui)."""
+    auth = request.headers.get("authorization", "")
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autenticado")
+    try:
+        payload = security.decode_access_token(token)
+        user_id = int(payload["sub"])
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido ou expirado")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
+    return user
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),

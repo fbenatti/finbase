@@ -11,6 +11,7 @@ from app.config import settings
 from app.core import security
 from app.core.deps import get_current_user
 from app.core.perms import compute_effective_perms, perms_to_json
+from app.core.audit import audit
 from app.database import get_db
 from app.models.identity import RefreshToken, User
 
@@ -72,11 +73,17 @@ async def login(body: LoginBody, request: Request, response: Response, db: Async
     result = await db.execute(select(User).where(User.username == body.username.lower().strip()))
     user = result.scalar_one_or_none()
     if user is None or not security.verify_password(body.password, user.password_hash):
+        await audit(db, request, None, module="auth", method="LOGIN_FAILED", action_label="failed", status_code=401)
+        await db.commit()
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     if not user.is_active:
+        await audit(db, request, None, module="auth", method="LOGIN_FAILED", action_label="failed", status_code=401)
+        await db.commit()
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
     access_token = await _issue_tokens(response, db, user, request)
+    await audit(db, request, user, module="auth", method="LOGIN", action_label="login",
+                after={"username": user.username}, status_code=200)
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     return {
@@ -143,12 +150,18 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
 @router.post("/logout")
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get(REFRESH_COOKIE_NAME)
+    user = None
     if token:
         token_hash = security.hash_refresh_token(token)
         result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
         row = result.scalar_one_or_none()
-        if row is not None and row.revoked_at is None:
-            row.revoked_at = datetime.now(timezone.utc)
+        if row is not None:
+            if row.revoked_at is None:
+                row.revoked_at = datetime.now(timezone.utc)
+            ures = await db.execute(select(User).where(User.id == row.user_id))
+            user = ures.scalar_one_or_none()
+            await audit(db, request, user, module="auth", method="LOGOUT", action_label="logout",
+                        after={"username": user.username if user else None}, status_code=200)
             await db.commit()
     response.delete_cookie(key=REFRESH_COOKIE_NAME, path=_COOKIE_PATH)
     return {"ok": True}

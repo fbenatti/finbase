@@ -1,7 +1,9 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 class SourceConnectionCreate(BaseModel):
     code: str
@@ -320,8 +322,8 @@ class ClassificationRuleOut(BaseModel):
 # ---- CSV Import ----
 
 class CsvImportRequest(BaseModel):
-    diretorias_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/diretorias_download.csv"
-    business_rules_path: str = "/Users/fernandohenriquebenatti/projetos/OpenFinops/businessRules_download.csv"
+    diretorias_path: str = str(_REPOSITORY_ROOT / "diretorias_download.csv")
+    business_rules_path: str = str(_REPOSITORY_ROOT / "businessRules_download.csv")
     cloud_root_map: dict[str, int] | None = None
 
 

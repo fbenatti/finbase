@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from datetime import date
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import String, cast, delete, func, or_, select
+from app.core.audit import audit
+from app.core.audit_sanitize import to_snapshot
+from app.core.deps import resolve_user_from_request
 from app.database import get_db
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
@@ -203,7 +206,7 @@ async def get_connection(connection_id: int, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/", response_model=SourceConnectionOut, status_code=201)
-async def create_connection(data: SourceConnectionCreate, db: AsyncSession = Depends(get_db)):
+async def create_connection(data: SourceConnectionCreate, request: Request, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(
         select(SourceConnection).where(SourceConnection.code == data.code)
     )
@@ -212,6 +215,11 @@ async def create_connection(data: SourceConnectionCreate, db: AsyncSession = Dep
 
     conn = SourceConnection(**data.model_dump())
     db.add(conn)
+    await db.flush()
+    audit_user = await resolve_user_from_request(request, db)
+    await audit(db, request, audit_user, module="connections", method="POST", action_label="create",
+                entity_type="connection", entity_id=conn.id, entity_label=conn.code,
+                after=to_snapshot(conn), status_code=201)
     await db.commit()
     await db.refresh(conn)
 
@@ -238,7 +246,7 @@ async def create_connection(data: SourceConnectionCreate, db: AsyncSession = Dep
 
 @router.put("/{connection_id}", response_model=SourceConnectionOut)
 async def update_connection(
-    connection_id: int, data: SourceConnectionUpdate, db: AsyncSession = Depends(get_db)
+    connection_id: int, data: SourceConnectionUpdate, request: Request, db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
         select(SourceConnection).where(SourceConnection.id == connection_id)
@@ -247,6 +255,7 @@ async def update_connection(
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
+    before_snapshot = to_snapshot(conn)
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         # The API never returns private credentials.  Merge a configuration
@@ -258,19 +267,24 @@ async def update_connection(
             conn.config_json = merged
         else:
             setattr(conn, key, value)
+    audit_user = await resolve_user_from_request(request, db)
+    await audit(db, request, audit_user, module="connections", method="PUT", action_label="update",
+                entity_type="connection", entity_id=conn.id, entity_label=conn.code,
+                before=before_snapshot, after=to_snapshot(conn), status_code=200)
     await db.commit()
     await db.refresh(conn)
     return _connection_out(conn)
 
 
 @router.delete("/{connection_id}", status_code=204)
-async def delete_connection(connection_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_connection(connection_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(SourceConnection).where(SourceConnection.id == connection_id)
     )
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    before_snapshot = to_snapshot(conn)
 
     # Bloqueia deleção se ainda existem dados ingeridos (Bronze não limpo)
     blob_count_result = await db.execute(
@@ -305,6 +319,10 @@ async def delete_connection(connection_id: int, db: AsyncSession = Depends(get_d
         delete(PeriodStatus).where(PeriodStatus.connection_id == connection_id)
     )
 
+    audit_user = await resolve_user_from_request(request, db)
+    await audit(db, request, audit_user, module="connections", method="DELETE", action_label="delete",
+                entity_type="connection", entity_id=conn.id, entity_label=conn.code,
+                before=before_snapshot, status_code=204)
     await db.delete(conn)
     await db.commit()
 
