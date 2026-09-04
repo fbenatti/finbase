@@ -1,4 +1,5 @@
 import { Navigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "../../auth/AuthContext";
 import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
@@ -7,23 +8,29 @@ import CloneRules from "../CloneRules/CloneRules";
 import Dimon from "../Dimon/Dimon";
 
 const TABS = [
-  { id: "rules", label: "Regras financeiras" },
-  { id: "classification", label: "Classificar Departamentos" },
-  { id: "clone-rules", label: "Regras de clonagem" },
-  { id: "cost-relationship", label: "Camada Dimon de Custo" },
-  { id: "visao-contabil", label: "Visão Contábil" },
-  { id: "tags", label: "Tags Automatizadas" },
+  { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
+  { id: "classification", label: "Classificar Departamentos", perms: [{ module: "rules", scope: null }] },
+  { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
+  { id: "cost-relationship", label: "Camada Dimon de Custo", perms: [{ module: "dimon", scope: null }] },
+  { id: "visao-contabil", label: "Visão Contábil", perms: [{ module: "dimon", scope: "visao-contabil" }, { module: "forecast", scope: "visao-contabil" }] },
+  { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
 export default function Governance() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { hasPerm } = useAuth();
   const requested = searchParams.get("tab");
   if (requested === "desligue" || requested === "orfaos") {
     return <Navigate to={`/savings?tab=${requested}`} replace />;
   }
-  const tab: TabId = TABS.some((item) => item.id === requested) ? (requested as TabId) : "rules";
+  const allowedTabs = TABS.filter((item) => item.perms.some((p) => hasPerm(p.module, "read", p.scope)));
+  const fallback = allowedTabs[0]?.id ?? null;
+  const tab: TabId | null =
+    requested && TABS.some((item) => item.id === requested && allowedTabs.some((a) => a.id === requested))
+      ? (requested as TabId)
+      : fallback;
 
   const setTab = (value: TabId) => {
     setSearchParams({ tab: value }, { replace: true });
@@ -36,11 +43,11 @@ export default function Governance() {
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Governança</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Regras de negócio, clonagem, classificação organizacional, políticas de tags e visão contábil.
+            Regras de negócio, reservas e Savings Plans, classificação organizacional, políticas de tags e visão contábil.
           </Typography>
         </Box>
         <Tabs value={tab} onChange={(_, value: TabId) => setTab(value)} aria-label="Governança" sx={{ mb: 0, minHeight: 42 }}>
-          {TABS.map((item) => (
+          {allowedTabs.map((item) => (
             <Tab key={item.id} value={item.id} label={item.label} sx={{ minHeight: 42 }} />
           ))}
         </Tabs>
@@ -52,6 +59,11 @@ export default function Governance() {
         "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
         "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
       }}>
+        {!tab && (
+          <Typography color="text.secondary" sx={{ py: 6, textAlign: "center" }}>
+            Você não tem permissão de leitura para nenhuma aba desta página. Solicite acesso ao administrador.
+          </Typography>
+        )}
         {tab === "rules" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Rules embedded />

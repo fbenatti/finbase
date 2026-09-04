@@ -1,49 +1,54 @@
-/** Mapa de rota → (módulo RBAC, escopo). Escopo null = página usa o módulo
- *  inteiro; escopo definido = "aba" dentro do módulo (ex.: visao-contabil).
+/** Mapa de rota → alvos RBAC. Cada alvo = {module, scope}; o usuário pode
+ *  acessar a rota se tiver read em QUALQUER um dos alvos (menu e guard).
+ *  scope null = permissão de módulo inteiro; scope definido = "aba"/área.
  *  Rotas fora do mapa não têm verificação (a API é a autoridade). */
-const ROUTE_MODULES: Array<{ prefix: string; module: string; scope?: string | null }> = [
-  { prefix: "/admin/audit", module: "audit" },
-  { prefix: "/admin/sso", module: "auth" },
-  { prefix: "/admin", module: "users" },
-  { prefix: "/visao-contabil", module: "dimon", scope: "visao-contabil" },
-  { prefix: "/connections", module: "connections" },
-  { prefix: "/explorer", module: "connections" },
-  { prefix: "/reprocess", module: "etl" },
-  { prefix: "/pipeline", module: "etl" },
-  { prefix: "/extraction", module: "etl" },
-  { prefix: "/analysis", module: "analysis" },
-  { prefix: "/dimon-dashboard", module: "dimon" },
-  { prefix: "/expected-view", module: "analysis" },
-  { prefix: "/dashboards-ia", module: "ai_dashboards" },
-  { prefix: "/github-copilot", module: "ai_dashboards" },
-  { prefix: "/visoes-consumo-ia", module: "azure_ptu" },
-  { prefix: "/azure-ptu-ops", module: "azure_ptu" },
-  { prefix: "/forecast-accuracy", module: "forecast" },
-  { prefix: "/forecast", module: "forecast" },
-  { prefix: "/budgets", module: "planning" },
-  { prefix: "/departments", module: "planning" },
-  { prefix: "/savings", module: "savings" },
-  { prefix: "/reservations", module: "savings" },
-  { prefix: "/governance", module: "rules" },
-  { prefix: "/rules", module: "rules" },
-  { prefix: "/classifications", module: "rules" },
-  { prefix: "/mappings", module: "rules" },
-  { prefix: "/clone-rules", module: "rules" },
-  { prefix: "/tables", module: "destinations" },
-  { prefix: "/destinations", module: "destinations" },
-  { prefix: "/relationship", module: "destinations" },
+type PermTarget = { module: string; scope?: string | null };
+
+const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
+  { prefix: "/admin/audit", targets: [{ module: "audit" }] },
+  { prefix: "/admin/sso", targets: [{ module: "auth" }] },
+  { prefix: "/admin", targets: [{ module: "users" }] },
+  { prefix: "/connections", targets: [{ module: "connections" }] },
+  { prefix: "/explorer", targets: [{ module: "connections" }] },
+  { prefix: "/reprocess", targets: [{ module: "etl" }] },
+  { prefix: "/pipeline", targets: [{ module: "etl" }] },
+  { prefix: "/extraction", targets: [{ module: "etl" }] },
+  { prefix: "/analysis", targets: [{ module: "analysis" }] },
+  { prefix: "/dimon-dashboard", targets: [{ module: "dimon" }] },
+  { prefix: "/expected-view", targets: [{ module: "analysis" }] },
+  { prefix: "/dashboards-ia", targets: [{ module: "ai_dashboards" }] },
+  { prefix: "/github-copilot", targets: [{ module: "ai_dashboards" }] },
+  { prefix: "/visoes-consumo-ia", targets: [{ module: "azure_ptu" }] },
+  { prefix: "/azure-ptu-ops", targets: [{ module: "azure_ptu" }] },
+  { prefix: "/forecast-accuracy", targets: [{ module: "forecast" }] },
+  { prefix: "/forecast", targets: [{ module: "forecast" }] },
+  { prefix: "/budgets", targets: [{ module: "planning" }] },
+  { prefix: "/departments", targets: [{ module: "planning" }] },
+  { prefix: "/savings", targets: [{ module: "savings" }] },
+  { prefix: "/reservations", targets: [{ module: "savings" }] },
+  {
+    prefix: "/governance",
+    targets: [
+      { module: "rules" },
+      { module: "azure_tag_policy" },
+      { module: "dimon", scope: "visao-contabil" },
+      { module: "forecast", scope: "visao-contabil" },
+    ],
+  },
+  { prefix: "/rules", targets: [{ module: "rules" }] },
+  { prefix: "/classifications", targets: [{ module: "rules" }] },
+  { prefix: "/mappings", targets: [{ module: "rules" }] },
+  { prefix: "/clone-rules", targets: [{ module: "rules" }] },
+  { prefix: "/tables", targets: [{ module: "destinations" }] },
+  { prefix: "/destinations", targets: [{ module: "destinations" }] },
+  { prefix: "/relationship", targets: [{ module: "destinations" }] },
 ];
 
-export function moduleAndScopeForPath(pathname: string): { module: string; scope?: string | null } | null {
-  for (const entry of ROUTE_MODULES) {
+export function permissionTargetsForPath(pathname: string): PermTarget[] | null {
+  for (const entry of ROUTE_TARGETS) {
     if (pathname === entry.prefix || pathname.startsWith(entry.prefix + "/")) {
-      return { module: entry.module, scope: entry.scope ?? null };
+      return entry.targets;
     }
   }
   return null;
-}
-
-/** Compat: apenas o módulo (sem escopo). */
-export function moduleForPath(pathname: string): string | null {
-  return moduleAndScopeForPath(pathname)?.module ?? null;
 }

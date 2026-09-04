@@ -40,7 +40,7 @@ import {
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
-import { moduleAndScopeForPath } from "../auth/moduleMap";
+import { permissionTargetsForPath } from "../auth/moduleMap";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
@@ -72,7 +72,6 @@ const menuGroups = [
       { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
       { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
-      { path: "/visao-contabil", label: "Visão Contábil", icon: <AccountBalanceIcon /> },
     ],
   },
   {
@@ -110,8 +109,8 @@ export default function Layout() {
     .map((g) => {
       if (g.label !== "Administração") {
         return { ...g, items: g.items.filter((item) => {
-          const target = moduleAndScopeForPath(item.path);
-          return !target || hasPerm(target.module, "read", target.scope);
+          const targets = permissionTargetsForPath(item.path);
+          return !targets || targets.some((t) => hasPerm(t.module, "read", t.scope));
         }) };
       }
       return {
@@ -289,9 +288,9 @@ export default function Layout() {
         }}
       >
         {(() => {
-          const target = moduleAndScopeForPath(location.pathname);
-          if (target && !hasPerm(target.module, "read", target.scope)) {
-            const mod = target.module;
+          const targets = permissionTargetsForPath(location.pathname);
+          if (targets && !targets.some((t) => hasPerm(t.module, "read", t.scope))) {
+            const mod = targets.map((t) => t.scope ? `${t.module}:${t.scope}` : t.module).join(" / ");
             return (
               <Box sx={{ p: 6, textAlign: "center" }}>
                 <Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography>

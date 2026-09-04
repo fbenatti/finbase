@@ -31,7 +31,6 @@ import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
 import DimonDashboard from "./pages/DimonDashboard/DimonDashboard";
 import Admin from "./pages/Admin/Admin";
 import SsoProviders from "./pages/Admin/SsoProviders";
-import VisaoContabilPage from "./pages/VisaoContabilPage/VisaoContabilPage";
 import Audit from "./pages/Admin/Audit";
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -93,7 +92,6 @@ function App() {
         <Route path="extraction/history/:taskId" element={<ExtractionHistory />} />
         <Route path="admin" element={<Admin />} />
         <Route path="admin/sso" element={<SsoProviders />} />
-        <Route path="visao-contabil" element={<VisaoContabilPage />} />
         <Route path="admin/audit" element={<Audit />} />
         </Route>
       </Routes>

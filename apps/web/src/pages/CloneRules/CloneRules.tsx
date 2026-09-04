@@ -50,7 +50,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
   const [deletePending, setDeletePending] = useState<CloneRule | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [name, setName] = useState("Nova regra de clone");
+  const [name, setName] = useState("Nova regra");
   const [description, setDescription] = useState("");
   const [connectionId, setConnectionId] = useState<number | "">("");
   const [provider, setProvider] = useState("");
@@ -98,7 +98,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
   const reset = () => {
     setEditingId(null);
-    setName("Nova regra de clone");
+    setName("Nova regra");
     setDescription("");
     setConnectionId("");
     setProvider("");
@@ -291,12 +291,23 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
     }}>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
 
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="subtitle2" fontWeight={700} gutterBottom>Por que estas regras existem?</Typography>
+        <Typography variant="body2" component="div">
+          Na fatura Azure, linhas de <strong>uso (Usage)</strong> cobertas por <strong>Reserva</strong> ou <strong>Savings Plan</strong> frequentemente chegam com custo zerado — o compromisso já foi pago em outro lançamento. Sem esse tratamento, dashboards e pivots subestimam o consumo real da cloud.
+          <br /><br />
+          No reprocessamento da Gold, cada regra elegível reconstrói o <strong>preço On-Demand de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
+          <br /><br />
+          Templates editáveis para tabelas FOCUS são instalados automaticamente (ex.: <em>Azure Reservation Usage → Return</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
+        </Typography>
+      </Alert>
+
       <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1.5} sx={{ mb: 2 }}>
           <Box>
-            <Typography variant="h6">Regras de clonagem</Typography>
+            <Typography variant="h6">Reservas e Savings Plans</Typography>
             <Typography variant="body2" color="text.secondary">
-              Clonagem de linhas com transformações declarativas, por tabela destino.
+              Regras de estorno On-Demand para uso coberto por compromisso — por tabela destino FOCUS.
             </Typography>
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
@@ -326,7 +337,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
             <EmptyState
               message={search
                 ? "Nenhuma regra corresponde à busca."
-                : "Nenhuma regra de clonagem cadastrada para esta tabela. Clique em 'Nova regra' para começar."}
+                : "Nenhuma regra cadastrada para esta tabela. Clique em 'Nova regra' para começar."}
             />
           </Box>
         ) : (
@@ -352,7 +363,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editingId ? "Editar regra de clonagem" : "Nova regra de clonagem"}</DialogTitle>
+        <DialogTitle>{editingId ? "Editar regra" : "Nova regra"}</DialogTitle>
         <DialogContent dividers>
           <Stack gap={2} sx={{ mt: 1 }}>
             <Stack direction="row" gap={2} flexWrap="wrap">
@@ -429,7 +440,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       </Dialog>
 
       <Dialog open={Boolean(deletePending)} onClose={() => setDeletePending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir regra de clonagem?</DialogTitle>
+        <DialogTitle>Excluir regra?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir <strong>{deletePending?.name}</strong>. Esta ação não pode ser desfeita.
