@@ -39,6 +39,9 @@ import {
   CalendarMonth as CalendarMonthIcon,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
+import { useAuth } from "../auth/AuthContext";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
 const DRAWER_WIDTH = 280;
@@ -81,10 +84,20 @@ const menuGroups = [
       { path: "/visoes-consumo-ia", label: "Dados e IA", icon: <SmartToyIcon /> },
     ],
   },
+  {
+    label: "Administração",
+    icon: <AdminPanelSettingsIcon fontSize="small" />,
+    color: "#b45309",
+    background: "#fffbeb",
+    items: [{ path: "/admin", label: "Usuários, grupos e roles", icon: <AdminPanelSettingsIcon /> }],
+  },
 ];
 
 export default function Layout() {
   const theme = useTheme();
+  const { hasPerm, user, logout } = useAuth();
+  const canAdmin = hasPerm("users", "read") || hasPerm("groups", "read") || hasPerm("roles", "read");
+  const visibleMenuGroups = menuGroups.filter((g) => g.label !== "Administração" || canAdmin);
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -123,6 +136,12 @@ export default function Layout() {
             FinOps Platform
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
+          <Typography variant="body2" sx={{ mr: 1, opacity: 0.9 }}>{user?.username}</Typography>
+          <Tooltip title="Sair">
+            <IconButton color="inherit" onClick={() => logout()} size="small" sx={{ mr: 1 }}>
+              <LogoutIcon />
+            </IconButton>
+          </Tooltip>
           <NotificationBell />
         </Toolbar>
       </AppBar>
@@ -145,7 +164,7 @@ export default function Layout() {
         <Toolbar />
         <Box sx={{ overflowY: "auto", overflowX: "hidden", flex: 1, py: 1 }}>
           <List sx={{ pb: 2 }}>
-            {menuGroups.map((group, groupIndex) => (
+            {visibleMenuGroups.map((group, groupIndex) => (
               <Box key={group.label}>
                 {groupIndex > 0 && <Divider sx={{ my: 1.25, mx: 1.5, borderColor: "#e5e7eb" }} />}
                 {expanded ? (
