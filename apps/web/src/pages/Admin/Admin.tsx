@@ -266,6 +266,9 @@ function UsersTab() {
   const [eff, setEff] = useState<EffectivePermissions | null>(null);
   const [newUser, setNewUser] = useState("");
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [resetDialog, setResetDialog] = useState<AdminUser | null>(null);
+  const [newPass, setNewPass] = useState("");
+  const [resetError, setResetError] = useState<string | null>(null);
   const [grantModule, setGrantModule] = useState("rules");
   const [grantAction, setGrantAction] = useState<string>("create");
   const [grantReason, setGrantReason] = useState("");
@@ -314,10 +317,7 @@ function UsersTab() {
             <Typography variant="h6">{selected.username} <Typography component="span" variant="caption">({selected.full_name ?? ""})</Typography></Typography>
             <Stack direction="row" spacing={1}>
               <Tooltip title="Resetar senha">
-                <IconButton onClick={() => call(async () => {
-                  const r = await resetUserPassword(selected.id);
-                  if (r.temporary_password) setTempPassword(r.temporary_password);
-                })}><LockResetIcon /></IconButton>
+                <IconButton onClick={() => { setResetDialog(selected); setNewPass(""); setResetError(null); }}><LockResetIcon /></IconButton>
               </Tooltip>
               <FormControlLabel control={
                 <Switch checked={selected.is_active} onChange={(e) => call(() => updateUser(selected.id, { is_active: e.target.checked }))} />
@@ -377,6 +377,39 @@ function UsersTab() {
               </Box>
             </>
           )}
+          <Dialog open={resetDialog !== null} onClose={() => setResetDialog(null)} maxWidth="xs" fullWidth>
+            <DialogTitle>Resetar senha de {resetDialog?.username}</DialogTitle>
+            <DialogContent>
+              {tempPassword && <Alert severity="info" sx={{ mb: 1 }}>Senha temporária: <b>{tempPassword}</b></Alert>}
+              {resetError && <Alert severity="error" sx={{ mb: 1 }}>{resetError}</Alert>}
+              <TextField size="small" fullWidth label="Nova senha (opcional)"
+                helperText="Deixe vazio para gerar temporária. Mín. 10 caracteres, maiúscula, minúscula e dígito."
+                value={newPass} onChange={(e) => setNewPass(e.target.value)}
+                type="password" autoComplete="new-password" />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setResetDialog(null)}>Cancelar</Button>
+              <Button variant="outlined" disabled={!!newPass} onClick={async () => {
+                try {
+                  const r = await resetUserPassword(resetDialog!.id);
+                  if (r.temporary_password) setTempPassword(r.temporary_password);
+                  setResetDialog(null); setResetError(null);
+                } catch (e: any) {
+                  setResetError(e?.response?.data?.detail || "Falha ao resetar");
+                }
+              }}>Gerar temporária</Button>
+              <Button variant="contained" disabled={!newPass.trim()} onClick={async () => {
+                try {
+                  await resetUserPassword(resetDialog!.id, newPass);
+                  setTempPassword(null);
+                  setResetDialog(null); setNewPass(""); setResetError(null);
+                  load();
+                } catch (e: any) {
+                  setResetError(e?.response?.data?.detail || "Falha ao definir senha");
+                }
+              }}>Definir senha</Button>
+            </DialogActions>
+          </Dialog>
         </Paper>
       )}
     </Stack>
