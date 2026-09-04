@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(days=settings.audit_retention_days))
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
+        await conn.execute(text("ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ"))
         # asyncpg executes prepared statements and rejects multi-command SQL,
         # so each migration operation must be sent independently.
         for statement in (
@@ -301,9 +303,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FinOps ETL Platform", version="0.1.0", lifespan=lifespan)
 
+from app.core.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.audit_middleware import AuditCaptureMiddleware
 from app.core.authz_middleware import RBACMiddleware
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuditCaptureMiddleware)
 app.add_middleware(RBACMiddleware)
 app.add_middleware(

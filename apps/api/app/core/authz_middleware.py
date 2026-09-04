@@ -48,6 +48,9 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/scheduled-shutdown", "scheduled_shutdown"),
     ("/oci-operational", "oci_operational"),
     ("/fact", "fact"),
+    ("/users", "users"),
+    ("/groups", "groups"),
+    ("/roles", "roles"),
 ]
 
 PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health")

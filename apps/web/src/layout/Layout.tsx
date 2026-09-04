@@ -40,6 +40,7 @@ import {
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
+import { moduleForPath } from "../auth/moduleMap";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
@@ -105,9 +106,15 @@ export default function Layout() {
   const visibleMenuGroups = menuGroups
     .filter((g) => g.label !== "Administração" || canAdmin)
     .map((g) => {
-      if (g.label !== "Administração") return g;
+      if (g.label !== "Administração") {
+        return { ...g, items: g.items.filter((item) => {
+          const mod = moduleForPath(item.path);
+          return !mod || hasPerm(mod, "read");
+        }) };
+      }
       return { ...g, items: g.items.filter((item) => item.path !== "/admin/audit" || hasPerm("audit", "read")) };
-    });
+    })
+    .filter((g) => g.items.length > 0);
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -272,7 +279,21 @@ export default function Layout() {
           minHeight: "100vh",
         }}
       >
-        <Outlet />
+        {(() => {
+          const mod = moduleForPath(location.pathname);
+          if (mod && !hasPerm(mod, "read")) {
+            return (
+              <Box sx={{ p: 6, textAlign: "center" }}>
+                <Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography>
+                <Typography color="text.secondary">
+                  Você não tem permissão de leitura no módulo <b>{mod}</b>.{" "}
+                  Solicite acesso ao administrador se precisar utilizá-lo.
+                </Typography>
+              </Box>
+            );
+          }
+          return <Outlet />;
+        })()}
       </Box>
     </Box>
   );

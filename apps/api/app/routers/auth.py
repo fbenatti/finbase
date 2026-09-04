@@ -12,6 +12,7 @@ from app.core import security
 from app.core.deps import get_current_user
 from app.core.perms import compute_effective_perms, perms_to_json
 from app.core.audit import audit
+from app.core.rate_limit import rate_limit
 from app.database import get_db
 from app.models.identity import RefreshToken, User
 
@@ -75,9 +76,26 @@ async def login_config():
 
 @router.post("/login")
 async def login(body: LoginBody, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, _ = rate_limit(f"login:{ip}", limit=10, window_seconds=60)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Muitas tentativas. Aguarde um minuto.")
+
     result = await db.execute(select(User).where(User.username == body.username.lower().strip()))
     user = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    locked = user is not None and user.locked_until is not None and user.locked_until.replace(tzinfo=timezone.utc) > now
+    if locked:
+        raise HTTPException(status_code=423, detail="Conta temporariamente bloqueada por tentativas inválidas")
+
     if user is None or not security.verify_password(body.password, user.password_hash):
+        if user is not None:
+            user.failed_attempts = (user.failed_attempts or 0) + 1
+            if user.failed_attempts >= 5:
+                user.locked_until = now + timedelta(minutes=15)
+                user.failed_attempts = 0
+                logger.warning("Conta %s bloqueada por 15 min após 5 falhas", user.username)
+            await db.commit()
         await audit(db, request, None, module="auth", method="LOGIN_FAILED", action_label="failed", status_code=401)
         await db.commit()
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
@@ -85,6 +103,9 @@ async def login(body: LoginBody, request: Request, response: Response, db: Async
         await audit(db, request, None, module="auth", method="LOGIN_FAILED", action_label="failed", status_code=401)
         await db.commit()
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
+
+    user.failed_attempts = 0
+    user.locked_until = None
 
     access_token = await _issue_tokens(response, db, user, request)
     await audit(db, request, user, module="auth", method="LOGIN", action_label="login",
@@ -100,6 +121,10 @@ async def login(body: LoginBody, request: Request, response: Response, db: Async
 
 @router.post("/refresh")
 async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, _ = rate_limit(f"refresh:{ip}", limit=60, window_seconds=60)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Muitas tentativas. Aguarde um minuto.")
     token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=401, detail="Refresh token ausente")

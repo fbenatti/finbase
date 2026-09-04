@@ -94,6 +94,12 @@ class AuditCaptureMiddleware:
         async def wrapped_send(message: Message) -> None:
             if message["type"] == "http.response.start":
                 status_holder["status"] = message["status"]
+                headers = list(message.get("headers", []))
+                headers.append((b"x-content-type-options", b"nosniff"))
+                headers.append((b"x-frame-options", b"DENY"))
+                headers.append((b"referrer-policy", b"no-referrer"))
+                headers.append((b"content-security-policy", b"frame-ancestors 'none'"))
+                message = {**message, "headers": headers}
             await send(message)
 
         await self.app(scope, wrapped_receive, wrapped_send)

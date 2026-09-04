@@ -128,3 +128,15 @@ Configured in `.env` files (loaded by `app/config.py`):
 | `DATABASE_URL`        | `postgresql+asyncpg://finops:finops@localhost:5432/finops` | Async DB URL |
 | `DATABASE_URL_SYNC`   | `postgresql://finops:finops@localhost:5432/finops` | Sync DB URL (ETL) |
 | `ICEBERG_LOCAL_WAREHOUSE` | `apps/data/iceberg`                 | Shared local warehouse          |
+
+## Auth, RBAC e Auditoria
+
+Documentação completa: [`docs/auth-runbook.md`](../../docs/auth-runbook.md).
+
+Resumo DEV: `ENV=development` + `AUTH_ENABLED=false` → tudo roda como `dev-admin`, sem login.
+Em produção a flag é ignorada; exige `JWT_SECRET_KEY` e `ADMIN_INITIAL_PASSWORD`.
+Permissão = `(module, action)` com `read|create|update|delete`; módulo = prefixo do router.
+Routers novos: `auth`, `users`, `groups`, `roles`, `audit`, `sso`, `sso_providers` — veja a
+cobertura de proteção em `docs/auth-runbook.md` §3 e a tabela do PR.
+
+Testes mínimos: `apps/api/scripts/test-auth.sh`.
