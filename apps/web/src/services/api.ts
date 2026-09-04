@@ -144,9 +144,19 @@ export function onSessionExpired(handler: () => void) {
   sessionExpiredHandler = handler;
 }
 
+/** Rotas de /auth que NÃO usam Bearer (públicas ou via cookie). */
+function isTokenlessPublic(url: string): boolean {
+  return (
+    url.startsWith("/auth/login") ||
+    url.startsWith("/auth/refresh") ||
+    url.startsWith("/auth/sso") ||
+    url.startsWith("/auth/login-config")
+  );
+}
+
 api.interceptors.request.use((config) => {
   const token = getAccessToken();
-  if (token && config.url && !config.url.startsWith("/auth/")) {
+  if (token && config.url && !isTokenlessPublic(config.url)) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -180,8 +190,10 @@ api.interceptors.response.use(
   async (error) => {
     const original = error.config || {};
     const url: string = original.url || "";
-    const isAuthCall = url.startsWith("/auth/");
-    if (error.response?.status === 401 && !original._retried && !isAuthCall) {
+    // login/refresh/sso jamais repetem via refresh (evita loop); as demais
+    // rotas de /auth (me, change-password, logout) tentam refresh em 401.
+    const neverRetry = isTokenlessPublic(url);
+    if (error.response?.status === 401 && !original._retried && !neverRetry) {
       original._retried = true;
       const token = await tryRefresh();
       if (token) {
