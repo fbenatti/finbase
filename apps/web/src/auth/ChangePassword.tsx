@@ -26,7 +26,13 @@ export default function ChangePassword({ onChanged }: { onChanged: () => void })
       await apiChangePassword(current, next);
       onChanged();
     } catch (err: any) {
+      const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
+      if (status === 401) {
+        // Sessão perdida (ex.: senha resetada em outra aba) → volta ao login
+        await logout();
+        return;
+      }
       setError(typeof detail === "string" ? detail : "Não foi possível trocar a senha");
     } finally {
       setBusy(false);

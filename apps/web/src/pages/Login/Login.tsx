@@ -35,8 +35,18 @@ export default function Login() {
     try {
       await login(username, password);
       navigate("/", { replace: true });
-    } catch {
-      setError("Usuário ou senha inválidos");
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      if (status === 423) {
+        setError("Conta temporariamente bloqueada por tentativas inválidas. Tente novamente em alguns minutos.");
+      } else if (detail === "Conta temporariamente bloqueada por tentativas inválidas") {
+        setError("Conta temporariamente bloqueada por tentativas inválidas. Tente novamente em alguns minutos.");
+      } else if (status === 429) {
+        setError("Muitas tentativas. Aguarde um minuto antes de tentar de novo.");
+      } else {
+        setError("Usuário ou senha inválidos");
+      }
     } finally {
       setBusy(false);
     }
