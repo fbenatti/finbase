@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "refresh_token"
-_COOKIE_PATH = "/auth"
+_COOKIE_PATH = "/"  # "/" para funcionar também atrás do proxy /api do Vite em dev
 
 
 class LoginBody(BaseModel):
