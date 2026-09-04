@@ -89,15 +89,25 @@ const menuGroups = [
     icon: <AdminPanelSettingsIcon fontSize="small" />,
     color: "#b45309",
     background: "#fffbeb",
-    items: [{ path: "/admin", label: "Usuários, grupos e roles", icon: <AdminPanelSettingsIcon /> }],
+    items: [
+      { path: "/admin", label: "Usuários, grupos e roles", icon: <AdminPanelSettingsIcon /> },
+      { path: "/admin/audit", label: "Auditoria", icon: <AdminPanelSettingsIcon /> },
+    ],
   },
 ];
+
+const AUDIT_MODULES = ["audit"];
 
 export default function Layout() {
   const theme = useTheme();
   const { hasPerm, user, logout } = useAuth();
   const canAdmin = hasPerm("users", "read") || hasPerm("groups", "read") || hasPerm("roles", "read");
-  const visibleMenuGroups = menuGroups.filter((g) => g.label !== "Administração" || canAdmin);
+  const visibleMenuGroups = menuGroups
+    .filter((g) => g.label !== "Administração" || canAdmin)
+    .map((g) => {
+      if (g.label !== "Administração") return g;
+      return { ...g, items: g.items.filter((item) => item.path !== "/admin/audit" || hasPerm("audit", "read")) };
+    });
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);

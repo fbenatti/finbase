@@ -30,6 +30,7 @@ import Savings from "./pages/Savings/Savings";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
 import DimonDashboard from "./pages/DimonDashboard/DimonDashboard";
 import Admin from "./pages/Admin/Admin";
+import Audit from "./pages/Admin/Audit";
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -89,6 +90,7 @@ function App() {
         <Route path="reprocess/shared-cost/history/:runId" element={<SharedCostHistory />} />
         <Route path="extraction/history/:taskId" element={<ExtractionHistory />} />
         <Route path="admin" element={<Admin />} />
+        <Route path="admin/audit" element={<Audit />} />
         </Route>
       </Routes>
     </AuthProvider>

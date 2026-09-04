@@ -14,6 +14,7 @@ import {
   Cable,
   Delete,
   Edit,
+  History,
   FilterAlt,
 } from "@mui/icons-material";
 import { DataGrid, GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
@@ -33,6 +34,7 @@ type Props = {
   testingId: number | null;
   testMessages: Record<number, ConnectionTestMessage>;
   onEdit: (connection: SourceConnection) => void;
+  onHistory: (connection: SourceConnection) => void;
   onTest: (connection: SourceConnection) => void;
   onDelete: (connection: SourceConnection) => void;
   onQuery: (query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ConnectionGridFilter[] }) => void;
@@ -133,6 +135,7 @@ export default function ConnectionsDataGrid({
   testingId,
   testMessages,
   onEdit,
+  onHistory,
   onTest,
   onDelete,
   onQuery,
@@ -242,7 +245,7 @@ export default function ConnectionsDataGrid({
     {
       field: "actions",
       headerName: "Ações",
-      width: 126,
+      width: 158,
       sortable: false,
       filterable: false,
       align: "center",
@@ -251,6 +254,9 @@ export default function ConnectionsDataGrid({
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
           <Tooltip title="Editar conexão">
             <IconButton size="small" aria-label={`Editar ${row.name}`} onClick={() => onEdit(row)}><Edit fontSize="small" /></IconButton>
+          </Tooltip>
+          <Tooltip title="Histórico de alterações">
+            <IconButton size="small" aria-label={`Histórico ${row.name}`} onClick={() => onHistory(row)}><History fontSize="small" /></IconButton>
           </Tooltip>
           <Tooltip title="Testar conexão">
             <span>

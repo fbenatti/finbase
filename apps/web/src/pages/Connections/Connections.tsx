@@ -13,6 +13,7 @@ import {
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
+import RecordHistory from "../../components/RecordHistory";
 
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
@@ -180,6 +181,7 @@ export default function Connections() {
   const [toolSubPicker, setToolSubPicker] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SourceConnection | null>(null);
+  const [historyConn, setHistoryConn] = useState<SourceConnection | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [testingForm, setTestingForm] = useState(false);
   const [formTestMessage, setFormTestMessage] = useState<{ severity: "success" | "warning" | "error"; msg: string } | null>(null);
@@ -881,6 +883,7 @@ export default function Connections() {
             testingId={testingId}
             testMessages={testMsgs}
             onEdit={openEdit}
+            onHistory={(conn) => setHistoryConn(conn)}
             onTest={(connection) => void runTest(connection)}
             onDelete={setConnectionPendingDeletion}
             onQuery={(query) => {
@@ -1395,6 +1398,12 @@ export default function Connections() {
         <Alert severity="success" variant="filled" onClose={() => setDeleteFeedback("")}>{deleteFeedback}</Alert>
       </Snackbar>
 
+      <Dialog open={historyConn !== null} onClose={() => setHistoryConn(null)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pb: 0 }}>Histórico de alterações — {historyConn?.name ?? ""}</DialogTitle>
+        <DialogContent>
+          {historyConn && <RecordHistory module="connections" entityType="connection" entityId={historyConn.id} />}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }
