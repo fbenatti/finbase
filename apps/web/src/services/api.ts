@@ -214,6 +214,18 @@ export async function apiMe(): Promise<AuthUser> {
   return data;
 }
 
+/** Boot: tenta /auth/me; em 401 tenta refresh silencioso via cookie e refaz. */
+export async function bootSession(): Promise<AuthUser> {
+  try {
+    return await apiMe();
+  } catch (err: any) {
+    if (err?.response?.status !== 401) throw err;
+    const token = await tryRefresh();
+    if (!token) throw err;
+    return apiMe();
+  }
+}
+
 export async function apiChangePassword(currentPassword: string, newPassword: string): Promise<void> {
   await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
 }

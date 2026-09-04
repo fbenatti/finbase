@@ -2,6 +2,7 @@
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, ForeignKey, Table, UniqueConstraint, func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -111,6 +112,19 @@ class UserGrant(Base):
     reason = Column(String(500), nullable=False)
     expires_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SsoProvider(Base):
+    """Provedor SSO corporativo (OIDC ou SAML2). Segredos referenciados a env ou criptografados — nunca retornados pela API."""
+    __tablename__ = "sso_provider"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False, unique=True)
+    protocol = Column(String(10), nullable=False)  # oidc|saml
+    enabled = Column(Boolean, nullable=False, default=False)
+    config_json = Column(JSONB)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class RefreshToken(Base):

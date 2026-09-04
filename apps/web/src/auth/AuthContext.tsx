@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiLogin, apiLogout, apiMe, onSessionExpired } from "../services/api";
+import { apiLogin, apiLogout, apiMe, bootSession, onSessionExpired } from "../services/api";
 import { setAccessToken } from "./tokenStore";
 import { AuthUser, userHasPerm, Permission } from "./types";
 
@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     // Boot: tenta /auth/me. Com bypass de DEV ativo responde 200 como dev-admin
     // (pula a tela de login); com auth ligada e sem token retorna 401.
-    apiMe()
+    bootSession()
       .then((me) => setUser(me))
       .catch(() => setUser(null))
       .finally(() => setLoading(false));

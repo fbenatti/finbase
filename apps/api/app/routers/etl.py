@@ -69,19 +69,9 @@ async def worker_health(db: AsyncSession = Depends(get_db)):
     A health-page refresh must never fail queued/running work. Orphan cleanup
     belongs to worker startup, where process ownership is known.
     """
-    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
-    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
-    try:
-        pid = int(open(pid_file).read().strip())
-        os.kill(pid, 0)
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        return {"status": "offline", "heartbeat_age_seconds": None, "worker_pid": None, "orphaned_tasks_cleared": 0}
-    try:
-        age = max(0, __import__("time").time() - os.path.getmtime(heartbeat))
-        status = "ok" if age <= 15 else "stale"
-        return {"status": status, "heartbeat_age_seconds": round(age, 1), "worker_pid": pid, "orphaned_tasks_cleared": 0}
-    except FileNotFoundError:
-        return {"status": "stale", "heartbeat_age_seconds": None, "worker_pid": pid, "orphaned_tasks_cleared": 0}
+    from app.services.worker_runtime import aggregate_worker_health
+
+    return aggregate_worker_health()
 
 
 @router.post("/connections/{connection_id}/scan")
@@ -1132,85 +1122,23 @@ def _process_blob_for_reprocess(
 
         chunks: list[pd.DataFrame] = []
         rows_in_blob = 0
-        source_batches = (source.iloc[start:start + 50000].copy()
-                         for start in range(0, len(source), 50000)) if isinstance(source, pd.DataFrame) else source
-        for chunk in source_batches:
-            if _check_cancelled(task_id):
-                return None
+        chunk_rows = int(os.getenv("REPROCESS_CLASSIFICATION_CHUNK_ROWS", "50000"))
+        cpu_workers = max(1, int(os.getenv("REPROCESS_CPU_WORKERS", "2")))
+        use_process_pool = clone_engine is None and cpu_workers > 1
+        source_batches = (
+            source.iloc[start:start + chunk_rows].copy()
+            for start in range(0, len(source), chunk_rows)
+        ) if isinstance(source, pd.DataFrame) else source
 
-            df_chunk = chunk.drop(columns=[c for c in ["_billing_period", "_blob_path", "_ingested_at"] if c in chunk.columns])
-
-            # Phase 1: Map source columns → destination columns (Silver)
-            target = apply_mappings(df_chunk, cmapps)
-
-            # Preserve provenance and only destination-named fields.
-            target["cloud_origem"] = connection_code
-            target["source_connection_id"] = connection_id
-            target["_billing_period"] = str(billing_period)
-            # Gold facts are historical realized data. Keeping this explicit
-            # on every mapped batch prevents downstream Forecast from having
-            # to infer a null type after a future schema evolution.
-            target["tipo"] = "realizado"
-
-            # Synthetic Return rows are created on the destination contract,
-            # before financial business rules and classifications.
-            clone_count = 0
-            if clone_engine is not None:
-                target, clone_count = clone_engine.apply(target, str(billing_period))
-
-            # Compatibility calculation used by the imported attribution CSV.
-            # It is intentionally evaluated after cloning: reservation Usage
-            # uses the resolved On-Demand cost and its synthetic Return keeps
-            # the equal negative value.  This is a destination calculation,
-            # not a provider-header dependency.
-            if "TotalCostOnDemandBRL" in dest_col_names:
-                # Defensive helper: never let pd.to_numeric(None) collapse to a
-                # scalar numpy.float64, which would break vectorized ops below.
-                def _num(col: str) -> pd.Series:
-                    return pd.to_numeric(
-                        target[col] if col in target.columns else pd.Series([None] * len(target), index=target.index),
-                        errors="coerce",
-                    )
-
-                direct_cost = _num("BilledCost")
-                quantity = _num("ConsumedQuantity")
-                unit_price = _num("source_unit_price")
-                exchange = _num("source_exchange_rate")
-                calculated = unit_price * quantity * exchange.fillna(1)
-                # The historical rule uses billed cost for contractual events;
-                # for usage it uses unit price × quantity × exchange rate.
-                # If the provider did not supply a usable unit price (common
-                # for a reservation), use the clone-resolved billed value.
-                charge = target.get("ChargeCategory", pd.Series("", index=target.index)).astype(str).str.lower()
-                contractual = charge.isin({"purchase", "refund", "roundingadjustment"})
-                target["TotalCostOnDemandBRL"] = calculated.where(
-                    calculated.notna() & calculated.ne(0) & ~contractual,
-                    direct_cost,
-                )
-
-            # Phase 2: Rules operate on the mapped destination contract.
-            for r in brules:
-                _apply_business_rule_sync(target, r, str(billing_period))
-
-            # Phase 3: Classifications operate on the mapped destination.
-            if crules:
-                _apply_classifications_sync(
-                    target, crules, None,
-                    dept_map=dept_cache,
-                    hierarchy_cache=hierarchy_cache,
-                )
-
+        def _handle_transformed_target(target: pd.DataFrame, input_rows: int, clone_count: int = 0) -> None:
+            nonlocal rows_in_blob
             if target.empty:
-                continue
-
+                return
             rows_in_blob += len(target)
             if batch_callback is not None:
-                batch_callback(target, len(chunk))
+                batch_callback(target, input_rows)
             else:
                 chunks.append(target)
-            # Persist heartbeat/progress while a large blob is being processed.
-            # Previously the UI stayed on the same blob until the whole future
-            # completed, which looked like a deadlock for 300k+ row files.
             progress_text = (
                 f"blob {billing_period}: {rows_in_blob:,} linhas processadas ({clone_count:,} Returns no batch)"
             )
@@ -1224,6 +1152,104 @@ def _process_blob_for_reprocess(
                  WHERE id = :task_id AND status = 'RUNNING'
             """), {"phase": progress_text, "task_id": task_id})
             session.commit()
+
+        if use_process_pool:
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            from app.services.reprocess_transform import build_chunk_payload, transform_reprocess_chunk
+
+            with ProcessPoolExecutor(max_workers=cpu_workers) as executor:
+                futures = {}
+                for chunk in source_batches:
+                    if _check_cancelled(task_id):
+                        return None
+                    payload = build_chunk_payload(
+                        records=chunk.to_dict(orient="records"),
+                        connection_id=connection_id,
+                        connection_code=connection_code,
+                        billing_period=str(billing_period),
+                        brules=brules,
+                        crules=crules,
+                        cmapps=cmapps,
+                        dept_cache=dept_cache,
+                        hierarchy_cache=hierarchy_cache,
+                        dest_col_names=dest_col_names,
+                    )
+                    futures[executor.submit(transform_reprocess_chunk, payload)] = len(chunk)
+                for future in as_completed(futures):
+                    if _check_cancelled(task_id):
+                        return None
+                    records = future.result()
+                    if not records:
+                        continue
+                    _handle_transformed_target(pd.DataFrame(records), futures[future])
+        else:
+            for chunk in source_batches:
+                if _check_cancelled(task_id):
+                    return None
+
+                df_chunk = chunk.drop(columns=[c for c in ["_billing_period", "_blob_path", "_ingested_at"] if c in chunk.columns])
+
+                # Phase 1: Map source columns → destination columns (Silver)
+                target = apply_mappings(df_chunk, cmapps)
+
+                # Preserve provenance and only destination-named fields.
+                target["cloud_origem"] = connection_code
+                target["source_connection_id"] = connection_id
+                target["_billing_period"] = str(billing_period)
+                # Gold facts are historical realized data. Keeping this explicit
+                # on every mapped batch prevents downstream Forecast from having
+                # to infer a null type after a future schema evolution.
+                target["tipo"] = "realizado"
+
+                # Synthetic Return rows are created on the destination contract,
+                # before financial business rules and classifications.
+                clone_count = 0
+                if clone_engine is not None:
+                    target, clone_count = clone_engine.apply(target, str(billing_period))
+
+                # Compatibility calculation used by the imported attribution CSV.
+                # It is intentionally evaluated after cloning: reservation Usage
+                # uses the resolved On-Demand cost and its synthetic Return keeps
+                # the equal negative value.  This is a destination calculation,
+                # not a provider-header dependency.
+                if "TotalCostOnDemandBRL" in dest_col_names:
+                    # Defensive helper: never let pd.to_numeric(None) collapse to a
+                    # scalar numpy.float64, which would break vectorized ops below.
+                    def _num(col: str) -> pd.Series:
+                        return pd.to_numeric(
+                            target[col] if col in target.columns else pd.Series([None] * len(target), index=target.index),
+                            errors="coerce",
+                        )
+
+                    direct_cost = _num("BilledCost")
+                    quantity = _num("ConsumedQuantity")
+                    unit_price = _num("source_unit_price")
+                    exchange = _num("source_exchange_rate")
+                    calculated = unit_price * quantity * exchange.fillna(1)
+                    # The historical rule uses billed cost for contractual events;
+                    # for usage it uses unit price × quantity × exchange rate.
+                    # If the provider did not supply a usable unit price (common
+                    # for a reservation), use the clone-resolved billed value.
+                    charge = target.get("ChargeCategory", pd.Series("", index=target.index)).astype(str).str.lower()
+                    contractual = charge.isin({"purchase", "refund", "roundingadjustment"})
+                    target["TotalCostOnDemandBRL"] = calculated.where(
+                        calculated.notna() & calculated.ne(0) & ~contractual,
+                        direct_cost,
+                    )
+
+                # Phase 2: Rules operate on the mapped destination contract.
+                for r in brules:
+                    _apply_business_rule_sync(target, r, str(billing_period))
+
+                # Phase 3: Classifications operate on the mapped destination.
+                if crules:
+                    _apply_classifications_sync(
+                        target, crules, None,
+                        dept_map=dept_cache,
+                        hierarchy_cache=hierarchy_cache,
+                    )
+
+                _handle_transformed_target(target, len(chunk), clone_count)
 
         if not chunks and batch_callback is None:
             return None
@@ -1267,6 +1293,7 @@ def _reprocess_destination_sync(
     from app.services import dimon_builder
     from app.services.task_runner import _inmemory_tasks, _check_cancelled
     from app.services.cloud_scope import (
+        allowed_rule_cloud_scopes,
         rule_matches_cloud,
         rule_matches_connection,
         rule_matches_destination,
@@ -1497,10 +1524,27 @@ def _reprocess_destination_sync(
                 details={"connection_id": cid, "rule_ids": [rule.id for rule in _brules]},
             )
 
+            classification_destination_filter = ClassificationRule.destination_table_id == destination_table_id
+            if is_focus_destination:
+                classification_destination_filter = or_(
+                    classification_destination_filter,
+                    ClassificationRule.destination_table_id.is_(None),
+                )
             _crules = [
                 rule for rule in session.execute(
                     select(ClassificationRule).where(
                         ClassificationRule.active == True,
+                        classification_destination_filter,
+                        or_(
+                            ClassificationRule.cloud_scope.is_(None),
+                            ClassificationRule.cloud_scope.in_(
+                                sorted(
+                                    scope
+                                    for scope in allowed_rule_cloud_scopes(conn.cloud_scope, conn.cloud_name)
+                                    if scope is not None
+                                )
+                            ),
+                        ),
                     ).order_by(ClassificationRule.priority, ClassificationRule.id)
                 ).scalars().all()
                 # Classifications are shared by provider, not by source
@@ -2080,15 +2124,9 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     from app.models.etl_task import EtlTask
     from sqlalchemy import insert
 
-    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
-    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
-    try:
-        worker_pid = int(open(pid_file).read().strip())
-        os.kill(worker_pid, 0)
-        worker_age = __import__("time").time() - os.path.getmtime(heartbeat)
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        worker_age = 999
-    if worker_age > 15:
+    from app.services.worker_runtime import any_worker_healthy
+
+    if not any_worker_healthy():
         raise HTTPException(status_code=503, detail="Worker ETL indisponível; a tarefa não foi criada")
 
     active = await db.execute(

@@ -719,13 +719,10 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
             raise HTTPException(422, "simulated_as_of deve estar no formato YYYY-MM-DD")
     active = (await db.execute(select(ForecastRun.id).where(ForecastRun.forecast_config_id == config_id, ForecastRun.status.in_(["QUEUED", "RUNNING"])))).scalar_one_or_none()
     if active: raise HTTPException(409, f"Já existe forecast ativo: {active}")
-    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
-    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
-    try:
-        worker_pid = int(open(pid_file).read().strip()); os.kill(worker_pid, 0)
-        age = datetime.now().timestamp() - os.stat(heartbeat).st_mtime
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError): age = 999
-    if age > 15: raise HTTPException(503, "Worker ETL indisponível; forecast não foi criado")
+    from app.services.worker_runtime import any_worker_healthy
+
+    if not any_worker_healthy():
+        raise HTTPException(503, "Worker ETL indisponível; forecast não foi criado")
     destination = await db.get(DestinationTable, config.destination_table_id)
     if not destination or not destination.active:
         raise HTTPException(404, "Tabela Gold da configuração não encontrada")
@@ -2152,14 +2149,9 @@ async def accuracy_reprocess(body: AccuracyReprocessIn, db: AsyncSession = Depen
             "Meses sem realizado no próprio mês ou no mês anterior (cutoff do forecast): "
             + ", ".join(unavailable),
         )
-    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
-    pid_file = os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid")
-    try:
-        worker_pid = int(open(pid_file).read().strip()); os.kill(worker_pid, 0)
-        age = datetime.now().timestamp() - os.stat(heartbeat).st_mtime
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        age = 999
-    if age > 15:
+    from app.services.worker_runtime import any_worker_healthy
+
+    if not any_worker_healthy():
         raise HTTPException(503, "Worker ETL indisponível; reprocessamento não foi criado")
     active = (await db.execute(
         select(EtlTask.id).where(

@@ -68,6 +68,11 @@ def _validate_password_policy(password: str) -> None:
         raise HTTPException(status_code=422, detail=security.PASSWORD_POLICY_ERROR)
 
 
+@router.get("/login-config")
+async def login_config():
+    return {"allow_local_login": settings.allow_local_login}
+
+
 @router.post("/login")
 async def login(body: LoginBody, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == body.username.lower().strip()))

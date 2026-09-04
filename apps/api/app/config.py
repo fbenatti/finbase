@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     auth_enabled: bool = os.getenv("AUTH_ENABLED", "true").lower() == "true"
     dev_master_token: str = os.getenv("DEV_MASTER_TOKEN", "")
     audit_retention_days: int = int(os.getenv("AUDIT_RETENTION_DAYS", "365"))
+    allow_local_login: bool = os.getenv("ALLOW_LOCAL_LOGIN", "true").lower() == "true"
+    sso_cookie_secure: bool = os.getenv("SSO_COOKIE_SECURE", "false").lower() == "true"
+    sso_redirect_uri: str = os.getenv("SSO_REDIRECT_URI", "")
 
     # --- Azure 4P (loaded from .env-4p via mapping above) ---
     azure_4p_tenant_id: str = os.getenv("AZURE_4P_TENANT_ID", "")

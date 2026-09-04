@@ -6,7 +6,11 @@ Classification happens AFTER mapping, so conditions reference FOCUS column names
 Usage: cd apps/api && python reimport_rules.py
 """
 import sys, os, json
-sys.path.insert(0, ".")
+from pathlib import Path
+
+API_DIR = Path(__file__).resolve().parent
+REPOSITORY_ROOT = API_DIR.parent.parent
+sys.path.insert(0, str(API_DIR))
 os.environ.setdefault("APP_ENV", "development")
 import pandas as pd
 from app.database import SyncSession
@@ -84,7 +88,7 @@ def parse_conditions(cond_str):
 
 
 def main():
-    csv_path = "/Users/fernandohenriquebenatti/projetos/OpenFinops/businessRules_download.csv"
+    csv_path = REPOSITORY_ROOT / "businessRules_download.csv"
     df = pd.read_csv(csv_path, sep=";")
     session = SyncSession()
 

@@ -89,6 +89,22 @@ def rule_matches_connection(
     return rule_connection_id is None or rule_connection_id == connection_id
 
 
+def allowed_rule_cloud_scopes(
+    connection_cloud_scope_value: str | None,
+    connection_cloud_name: str | None = None,
+) -> set[str | None]:
+    """Scopes accepted by SQL pre-filter for classification/business rules."""
+    effective = resolve_connection_scope(connection_cloud_scope_value, connection_cloud_name)
+    if effective == "atlas":
+        effective = "mongodb"
+    if not effective:
+        return {None}
+    allowed: set[str | None] = {None, effective}
+    if effective == "mongodb":
+        allowed.add("atlas")
+    return allowed
+
+
 def rule_matches_destination(
     rule_destination_table_id: int | None,
     destination_table_id: int,

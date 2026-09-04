@@ -14,10 +14,7 @@ import time
 import signal
 import sys
 import os
-import threading
-import time
 import multiprocessing
-import fcntl
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -25,9 +22,6 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 
 # ── Pre-import ALL models so SQLAlchemy Base.metadata is fully populated ──
-# The sync engine is created at module-import time in database.py with an
-# empty metadata. Importing every model file here ensures all __tablename__
-# registrations happen before worker queries reference foreign keys.
 from app.database import SyncSession
 from app.models.etl_task import EtlTask
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
@@ -40,11 +34,24 @@ from app.models.period_status import PeriodStatus
 from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun
 from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject
 from sqlalchemy import select, text
+from app.services.etl_task_claim import (
+    claim_next_etl_task,
+    reconcile_stale_running_tasks,
+    release_task_resource_locks,
+    release_task_to_queue,
+    try_acquire_task_resource_locks,
+)
+from app.services.worker_runtime import (
+    heartbeat_path,
+    pid_path,
+    runtime_dir,
+    supervisor_pid_path,
+    touch_heartbeat,
+    write_pid,
+)
 
 POLL_INTERVAL = 2  # seconds between polls when idle
-HEARTBEAT = Path(os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat"))
-WORKER_PID = Path(os.getenv("OPENFINOPS_WORKER_PID", "/tmp/openfinops-worker.pid"))
-WORKER_LOCK = Path(os.getenv("OPENFINOPS_WORKER_LOCK", "/tmp/openfinops-worker.lock"))
+
 
 running = True
 
@@ -60,26 +67,6 @@ def _format_task_error(exc: Exception) -> str:
     return name
 
 
-def _heartbeat_process(parent_pid: int):
-    """Update liveness outside the worker GIL and stop with the parent."""
-    # ``spawn`` imports this module and would otherwise inherit/register the
-    # worker's graceful SIGTERM handler.  A Process.terminate() must terminate
-    # this tiny child immediately so the main worker can actually exit and the
-    # supervisor can restart it.
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    while True:
-        try:
-            os.kill(parent_pid, 0)
-        except OSError:
-            break
-        try:
-            HEARTBEAT.touch()
-        except OSError:
-            pass
-        time.sleep(2)
-
-
 def shutdown(sig, frame):
     global running
     running = False
@@ -90,7 +77,7 @@ signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
 
-def main():
+def consumer_main(worker_id: int):
     # Pandas keeps allocator arenas after large reprocesses.  On developer
     # machines this can push the long-lived worker over its RSS safeguard even
     # though each individual task completed.  Re-exec after a small number of
@@ -108,95 +95,39 @@ def main():
                 else f"Recycling worker after {reprocess_tasks_since_restart} reprocess task(s) to release memory.",
                 flush=True,
             )
-            # On Linux the heartbeat multiprocessing child is forked and keeps
-            # the advisory lock descriptor open.  Stop it before re-exec so
-            # the replacement worker can acquire the lock.
-            heartbeat_worker.terminate()
-            heartbeat_worker.join(timeout=2)
-            os.execv(sys.executable, [sys.executable, "-u", str(Path(__file__).resolve())])
+            sys.exit(1 if failed else 0)
 
-    lock_handle = WORKER_LOCK.open("a+")
-    try:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print("Another FinOps Worker already owns the worker lock; exiting.", flush=True)
-        return
-    WORKER_PID.write_text(str(os.getpid()))
-    print("FinOps Worker started. Polling for QUEUED tasks every", POLL_INTERVAL, "seconds...", flush=True)
-    HEARTBEAT.touch()
-    # Set close-on-exec so the child heartbeat process does NOT inherit the lock fd.
-    # On macOS, multiprocessing uses 'spawn' which forks+exec; without FD_CLOEXEC
-    # the child keeps the flock open and the lock is never released when the parent dies.
-    import fcntl as _fcntl_flags
-    flags = _fcntl_flags.fcntl(lock_handle.fileno(), _fcntl_flags.F_GETFD)
-    _fcntl_flags.fcntl(lock_handle.fileno(), _fcntl_flags.F_SETFD, flags | _fcntl_flags.FD_CLOEXEC)
-    heartbeat_worker = multiprocessing.Process(
-        target=_heartbeat_process, args=(os.getpid(),), name="worker-heartbeat", daemon=True
+    runtime_dir().mkdir(parents=True, exist_ok=True)
+    write_pid(worker_id)
+    print(
+        f"FinOps Worker #{worker_id} started. Polling for QUEUED tasks every",
+        POLL_INTERVAL,
+        "seconds...",
+        flush=True,
     )
-    heartbeat_worker.start()
-    startup = SyncSession()
-    try:
-        # A process restart cannot resume a Python stack safely. Make stale
-        # RUNNING rows visible as failures instead of leaving them hanging.
-        # Azure PTU extractions are re-queued so long Monitor backfills can resume.
-        from app.models.source_connection import SourceConnection as _StartupConnection
-        stale = startup.execute(select(EtlTask).where(EtlTask.status == "RUNNING")).scalars().all()
-        stale_forecast_run_ids: set[int] = set()
-        for row in stale:
-            if row.task_type == "extraction" and row.connection_id:
-                conn = startup.get(_StartupConnection, row.connection_id)
-                if conn and conn.connector_type == "azure_openai_ptu":
-                    row.status = "QUEUED"
-                    row.phase = "Reenfileirado após reinício do worker"
-                    row.finished_at = None
-                    continue
-            if row.task_type == "reservation_collection":
-                row.status = "QUEUED"
-                row.phase = "Reenfileirado após reinício do worker"
-                row.finished_at = None
-                continue
-            if row.task_type in ("ai_cost_relationship_reprocess", "dimon_reprocess"):
-                row.status = "QUEUED"
-                row.phase = "Reenfileirado após reinício do worker"
-                row.finished_at = None
-                continue
-            row.status = "FAILED"
-            row.phase = "Worker reiniciado; tarefa RUNNING anterior foi encerrada"
-            row.finished_at = datetime.now(timezone.utc)
-            if row.task_type == "forecast":
-                run_id = (row.result_json or {}).get("forecast_run_id")
-                if isinstance(run_id, int):
-                    stale_forecast_run_ids.add(run_id)
-        if stale_forecast_run_ids:
-            stale_runs = startup.execute(
-                select(ForecastRun).where(
-                    ForecastRun.id.in_(stale_forecast_run_ids),
-                    ForecastRun.status.in_(["QUEUED", "RUNNING"]),
-                )
-            ).scalars().all()
-            for run in stale_runs:
-                run.status = "FAILED"
-                run.phase = "Worker reiniciado; execução anterior foi encerrada"
-                run.error = "Worker reiniciado durante a execução do forecast"
-                run.finished_at = datetime.now(timezone.utc)
-        startup.commit()
-    finally:
-        startup.close()
+    touch_heartbeat(worker_id)
     while running:
-        HEARTBEAT.touch()
+        touch_heartbeat(worker_id)
         session = SyncSession()
         try:
-            task = session.execute(
-                select(EtlTask).where(
-                    EtlTask.status == "QUEUED",
-                    EtlTask.task_type.in_(["reprocess", "reclassification", "extraction", "forecast", "forecast_accuracy", "shared_cost", "ai_cost_relationship_reprocess", "dimon_reprocess", "reservation_collection"]),
-                )
-                .order_by(EtlTask.id)
-                .limit(1)
-            ).scalar_one_or_none()
+            task = claim_next_etl_task(session)
+            if task is None:
+                session.close()
+                time.sleep(POLL_INTERVAL)
+                continue
 
-            if task:
-                task_id = task.id
+            if not try_acquire_task_resource_locks(session, task):
+                release_task_to_queue(session, task)
+                session.commit()
+                session.close()
+                time.sleep(0.2)
+                continue
+
+            session.commit()
+            session.close()
+            task_id = task.id
+            lock_session = SyncSession()
+            try:
 
                 if task.task_type == "forecast":
                     config_id = task.destination_table_id
@@ -1064,9 +995,16 @@ def main():
                             s2.close()
 
                         _inmemory_tasks.pop(task_id, None)
-            else:
-                session.close()
-                time.sleep(POLL_INTERVAL)
+
+            finally:
+                try:
+                    release_task_resource_locks(lock_session, task)
+                except Exception:
+                    pass
+                try:
+                    lock_session.close()
+                except Exception:
+                    pass
 
         except Exception as e:
             print(f"Worker polling error: {e}")
@@ -1078,16 +1016,62 @@ def main():
                 pass
             time.sleep(POLL_INTERVAL)
 
-    print("Worker stopped.")
-    heartbeat_worker.terminate()
-    heartbeat_worker.join(timeout=2)
+    print(f"Worker #{worker_id} stopped.")
+
+
+def _spawn_consumer(worker_id: int) -> None:
+    os.environ["OPENFINOPS_WORKER_ID"] = str(worker_id)
+    consumer_main(worker_id)
+
+
+def supervisor_main() -> None:
+    global running
+    concurrency = max(1, int(os.getenv("OPENFINOPS_WORKER_CONCURRENCY", "3")))
+    runtime_dir().mkdir(parents=True, exist_ok=True)
+    supervisor_pid_path().write_text(str(os.getpid()))
+    print(
+        f"FinOps Worker supervisor started with concurrency={concurrency}",
+        flush=True,
+    )
+
+    startup = SyncSession()
     try:
-        HEARTBEAT.unlink(missing_ok=True)
-        WORKER_PID.unlink(missing_ok=True)
-    except Exception:
-        pass
-    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-    lock_handle.close()
+        reconcile_stale_running_tasks(startup)
+    finally:
+        startup.close()
+
+    ctx = multiprocessing.get_context("spawn")
+    processes: dict[int, multiprocessing.Process] = {}
+    while running:
+        for worker_id in range(concurrency):
+            proc = processes.get(worker_id)
+            if proc is not None and proc.is_alive():
+                continue
+            if proc is not None:
+                proc.join(timeout=1)
+            proc = ctx.Process(
+                target=_spawn_consumer,
+                args=(worker_id,),
+                name=f"openfinops-worker-{worker_id}",
+                daemon=True,
+            )
+            proc.start()
+            processes[worker_id] = proc
+        time.sleep(2)
+
+    for proc in processes.values():
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
+    print("FinOps Worker supervisor stopped.")
+
+
+def main() -> None:
+    worker_id = os.getenv("OPENFINOPS_WORKER_ID")
+    if worker_id is not None:
+        consumer_main(int(worker_id))
+        return
+    supervisor_main()
 
 
 if __name__ == "__main__":

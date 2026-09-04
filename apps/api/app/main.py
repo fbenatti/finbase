@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
-        from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant  # noqa: F401
+        from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant, SsoProvider  # noqa: F401
         from app.models.audit_log import AuditLog  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # Retenção de auditoria (roda depois do create_all)
@@ -319,6 +319,8 @@ app.include_router(users_router.router)
 app.include_router(groups_router.router)
 app.include_router(roles_router.router)
 app.include_router(audit_router.router)
+app.include_router(sso_router.router)
+app.include_router(sso_providers_router.router)
 app.include_router(connections.router)
 app.include_router(csv_upload.router)
 app.include_router(etl.router)
