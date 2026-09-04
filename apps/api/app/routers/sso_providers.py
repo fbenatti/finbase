@@ -60,6 +60,7 @@ async def create_provider(body: ProviderCreate, db: AsyncSession = Depends(get_d
     )
     db.add(provider)
     await db.commit()
+    await db.refresh(provider)
     return _provider_out(provider)
 
 
@@ -79,6 +80,7 @@ async def update_provider(provider_id: int, body: ProviderUpdate, db: AsyncSessi
         current.update(protect_config(dict(body.config_json)))
         provider.config_json = current
     await db.commit()
+    await db.refresh(provider)
     return _provider_out(provider)
 
 

@@ -2135,6 +2135,31 @@ export async function getAIProviderOverview(
   return data;
 }
 
+export async function getAICopilotOverview(body: Record<string, unknown>, signal?: AbortSignal) {
+  const { data } = await api.post("/ai-copilot/overview", body, { signal, timeout: 120000 });
+  return data;
+}
+export async function getAICopilotModels(body: Record<string, unknown>, signal?: AbortSignal) {
+  const { data } = await api.post("/ai-copilot/models", body, { signal, timeout: 120000 });
+  return data;
+}
+export async function getAICopilotHistory(body: Record<string, unknown>, signal?: AbortSignal) {
+  const { data } = await api.post("/ai-copilot/history", body, { signal, timeout: 120000 });
+  return data;
+}
+export async function getAICopilotFinancialInsights(body: Record<string, unknown>, signal?: AbortSignal) {
+  const { data } = await api.post("/ai-copilot/financial-insights", body, { signal, timeout: 120000 });
+  return data;
+}
+export async function getAICopilotEngagementUsers(body: Record<string, unknown>, signal?: AbortSignal) {
+  const { data } = await api.post("/ai-copilot/engagement-users", body, { signal, timeout: 120000 });
+  return data;
+}
+export async function getAICopilotUserModelDetails(body: Record<string, unknown>, signal?: AbortSignal) {
+  const { data } = await api.post("/ai-copilot/user-model-details", body, { signal, timeout: 120000 });
+  return data;
+}
+
 // ── Dimon (pre-aggregated cost mart) ──
 export interface DimonRuleSource {
   id?: number;

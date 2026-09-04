@@ -11,6 +11,14 @@ import {
   Psychology, Bolt, Code, ChatBubbleOutline
 } from "@mui/icons-material";
 import Plot from "react-plotly.js";
+import {
+  getAICopilotEngagementUsers,
+  getAICopilotFinancialInsights,
+  getAICopilotHistory,
+  getAICopilotModels,
+  getAICopilotOverview,
+  getAICopilotUserModelDetails,
+} from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const num = new Intl.NumberFormat("pt-BR");
@@ -261,10 +269,10 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
         // As consultas foram otimizadas (Dimon pré-agregada + filtro de partição);
         // agora podem rodar em paralelo para reduzir o tempo de carregamento.
         const [ovRes, mdRes, hsRes, fiRes] = await Promise.all([
-          fetch("/api/ai-copilot/overview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
-          fetch("/api/ai-copilot/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
-          fetch("/api/ai-copilot/history", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
-          fetch("/api/ai-copilot/financial-insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json()),
+          getAICopilotOverview(payload),
+          getAICopilotModels(payload),
+          getAICopilotHistory(payload),
+          getAICopilotFinancialInsights(payload),
         ]);
         if (ovRes.metrics) setMetrics(ovRes.metrics);
         if (mdRes.models) setModels(mdRes.models);
@@ -281,7 +289,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
       setEngagementLoading(true);
       try {
         const payload = { period: period, engagement_filter: selectedFilter, search: searchQuery, limit: 5000, offset: 0 };
-        const res = await fetch("/api/ai-copilot/engagement-users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then((r) => r.json());
+        const res = await getAICopilotEngagementUsers(payload);
         if (res.users) setEngagementUsers(res.users);
         if (res.counts) setEngagementCounts(res.counts);
         if (res.credit_period) setCreditPeriod(res.credit_period);
@@ -297,11 +305,11 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
     setDrawerLoading(true);
     setUserDetails(null);
     try {
-      const res = await fetch("/api/ai-copilot/user-model-details", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_login: user.user_login, email: user.email, period: period }),
-      }).then((r) => r.json());
+      const res = await getAICopilotUserModelDetails({
+        user_login: user.user_login,
+        email: user.email,
+        period: period,
+      });
       setUserDetails(res);
     } catch (err) { console.error(err); } finally { setDrawerLoading(false); }
   };

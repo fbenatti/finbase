@@ -94,6 +94,7 @@ const menuGroups = [
     items: [
       { path: "/admin", label: "Usuários, grupos e roles", icon: <AdminPanelSettingsIcon /> },
       { path: "/admin/audit", label: "Auditoria", icon: <AdminPanelSettingsIcon /> },
+      { path: "/admin/sso", label: "Provedores SSO", icon: <AdminPanelSettingsIcon /> },
     ],
   },
 ];
@@ -113,7 +114,14 @@ export default function Layout() {
           return !target || hasPerm(target.module, "read", target.scope);
         }) };
       }
-      return { ...g, items: g.items.filter((item) => item.path !== "/admin/audit" || hasPerm("audit", "read")) };
+      return {
+        ...g,
+        items: g.items.filter((item) => {
+          if (item.path === "/admin/audit") return hasPerm("audit", "read");
+          if (item.path === "/admin/sso") return hasPerm("auth", "read");
+          return true;
+        }),
+      };
     })
     .filter((g) => g.items.length > 0);
   const navigate = useNavigate();

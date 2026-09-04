@@ -3,6 +3,7 @@
  *  Rotas fora do mapa não têm verificação (a API é a autoridade). */
 const ROUTE_MODULES: Array<{ prefix: string; module: string; scope?: string | null }> = [
   { prefix: "/admin/audit", module: "audit" },
+  { prefix: "/admin/sso", module: "auth" },
   { prefix: "/admin", module: "users" },
   { prefix: "/visao-contabil", module: "dimon", scope: "visao-contabil" },
   { prefix: "/connections", module: "connections" },
