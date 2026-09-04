@@ -53,3 +53,19 @@ def hash_refresh_token(token: str) -> str:
 
 def tokens_equal(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+PASSWORD_POLICY_ERROR = (
+    "A senha deve ter no mínimo 10 caracteres, com pelo menos 1 maiúscula, "
+    "1 minúscula e 1 dígito"
+)
+
+
+def validate_password_policy(password: str) -> bool:
+    """True se atende à política (mín. 10, 1 maiúscula, 1 minúscula, 1 dígito)."""
+    return (
+        len(password) >= 10
+        and any(c.isupper() for c in password)
+        and any(c.islower() for c in password)
+        and any(c.isdigit() for c in password)
+    )

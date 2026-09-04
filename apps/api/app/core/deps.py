@@ -62,3 +62,19 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
     return user
+
+
+def require(module: str, action: str):
+    """Dependency factory: exige permissão (module, action) no RBAC."""
+    from app.core.rbac import get_effective_permissions
+
+    async def checker(
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        perms = await get_effective_permissions(db, user.id)
+        if action not in perms.get(module, set()):
+            raise HTTPException(status_code=403, detail="Sem permissão para esta ação.")
+        return user
+
+    return checker

@@ -1,6 +1,5 @@
 """Authentication endpoints: login, refresh, logout, change-password, me."""
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -63,20 +62,9 @@ async def _issue_tokens(response: Response, db: AsyncSession, user: User, reques
     return access_token
 
 
-PASSWORD_POLICY_ERROR = (
-    "A senha deve ter no mínimo 10 caracteres, com pelo menos 1 maiúscula, "
-    "1 minúscula e 1 dígito"
-)
-
-
 def _validate_password_policy(password: str) -> None:
-    if (
-        len(password) < 10
-        or not re.search(r"[A-Z]", password)
-        or not re.search(r"[a-z]", password)
-        or not re.search(r"\d", password)
-    ):
-        raise HTTPException(status_code=422, detail=PASSWORD_POLICY_ERROR)
+    if not security.validate_password_policy(password):
+        raise HTTPException(status_code=422, detail=security.PASSWORD_POLICY_ERROR)
 
 
 @router.post("/login")

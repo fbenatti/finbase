@@ -5,18 +5,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from app.database import Base
 
-# Módulos conhecidos da plataforma (cada router = um módulo). Usado pelo seed
-# e validação de permissões. Manter sincronizado com docs/plano-auth-rbac-auditoria.
-ALL_MODULES = [
-    "connections", "rules", "etl", "analysis", "forecast", "planning",
-    "reservations", "savings", "periods", "destinations", "schema", "fact",
-    "csv_upload", "clone_rules", "dimon", "ai_copilot", "ai_dashboards",
-    "ai_provider_dashboards", "azure_ptu", "azure_resource_graph",
-    "azure_tag_policy", "oci_operational", "scheduled_shutdown",
-    "auth", "users", "groups", "roles", "audit",
-]
-
-ALL_ACTIONS = ("read", "create", "update", "delete")
+from app.core.modules import ALL_MODULES, ALL_ACTIONS  # noqa: F401 (re-export)
 
 
 class User(Base):
@@ -107,6 +96,21 @@ role_role = Table(
     Column("role_id", Integer, ForeignKey("role.id", ondelete="CASCADE"), primary_key=True),
     Column("parent_role_id", Integer, ForeignKey("role.id", ondelete="CASCADE"), primary_key=True),
 )
+
+
+class UserGrant(Base):
+    """Grant direto nominal: permissão fina concedida a um usuário sem role."""
+    __tablename__ = "user_grant"
+    __table_args__ = (UniqueConstraint("user_id", "module", "action", name="uq_user_grant"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("user_account.id", ondelete="CASCADE"), nullable=False)
+    module = Column(String(80), nullable=False)
+    action = Column(String(20), nullable=False)  # read|create|update|delete
+    granted_by_id = Column(Integer, ForeignKey("user_account.id", ondelete="SET NULL"))
+    reason = Column(String(500), nullable=False)
+    expires_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class RefreshToken(Base):

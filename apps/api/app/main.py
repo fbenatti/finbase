@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, auth as auth_router
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
-        from app.models.identity import User, Role, RolePermission, Group, RefreshToken  # noqa: F401
+        from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
@@ -266,6 +266,11 @@ async def lifespan(app: FastAPI):
             END
             WHERE cloud_scope IS NULL
         """))
+        # PyIceberg's SQL catalog is external to our ORM metadata. Repair old
+        # host-specific file:// URIs only when that native table already exists.
+        from app.services.iceberg_catalog_migration import migrate_iceberg_catalog_paths
+        from app.services.iceberg_service import _LOCAL_WAREHOUSE
+        await migrate_iceberg_catalog_paths(conn, _LOCAL_WAREHOUSE)
 
     async with async_session() as db:
         await seed(db)
@@ -302,6 +307,9 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router)
+app.include_router(users_router.router)
+app.include_router(groups_router.router)
+app.include_router(roles_router.router)
 app.include_router(connections.router)
 app.include_router(csv_upload.router)
 app.include_router(etl.router)
