@@ -28,6 +28,7 @@ function RolesTab() {
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [selected, setSelected] = useState<AdminRole | null>(null);
   const [perms, setPerms] = useState<Record<string, Set<string>>>({});
+  const [scopes, setScopes] = useState<Record<string, string>>({});
   const [tree, setTree] = useState<any>(null);
   const [newRole, setNewRole] = useState("");
   const [error, setError, show] = useErrorAlert();
@@ -45,6 +46,11 @@ function RolesTab() {
         (map[p.module] = map[p.module] || new Set()).add(p.action);
       });
       setPerms(map);
+      const sc: Record<string, string> = {};
+      full.permissions?.forEach((p) => {
+        if (p.scope) sc[p.module] = sc[p.module] || p.scope;
+      });
+      setScopes(sc);
       setTree(await getRoleTree(r.id));
       setError(null); setMsg(null);
     } catch (e) { show(e); }
@@ -76,7 +82,7 @@ function RolesTab() {
   const savePerms = async () => {
     if (!selected) return;
     const items = Object.entries(perms).flatMap(([module, set]) =>
-      Array.from(set).map((action) => ({ module, action }))
+      Array.from(set).map((action) => ({ module, action, scope: scopes[module] || null }))
     );
     try {
       await setRolePermissions(selected.id, items);
@@ -132,12 +138,17 @@ function RolesTab() {
             <Button variant="contained" onClick={savePerms}>Salvar permissões</Button>
           </Stack>
           <Grid container spacing={1} sx={{ mb: 1 }}>
-            <Grid item xs={3}><Typography variant="caption">Módulo</Typography></Grid>
+            <Grid item xs={2}><Typography variant="caption">Módulo</Typography></Grid>
+            <Grid item xs={1}><Typography variant="caption">Escopo</Typography></Grid>
             {ACTIONS.map((a) => <Grid key={a} item xs={2}><Typography variant="caption">{a}</Typography></Grid>)}
           </Grid>
           {modules.map((m) => (
             <Grid container spacing={1} key={m} alignItems="center">
-              <Grid item xs={3}><Typography variant="body2">{m}</Typography></Grid>
+              <Grid item xs={2}><Typography variant="body2">{m}</Typography></Grid>
+              <Grid item xs={1}>
+                <TextField size="small" variant="standard" placeholder="escopo" title="Escopo (ex.: visao-contabil); vazio = módulo inteiro"
+                  value={scopes[m] || ""} onChange={(e) => setScopes((prev) => ({ ...prev, [m]: e.target.value.trim() }))} />
+              </Grid>
               {ACTIONS.map((a) => (
                 <Grid key={a} item xs={2}>
                   <Checkbox size="small" checked={perms[m]?.has(a) ?? false} onChange={() => toggle(m, a)} />

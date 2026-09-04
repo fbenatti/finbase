@@ -11,8 +11,12 @@ def runtime_dir() -> Path:
     explicit = os.getenv("OPENFINOPS_WORKER_RUNTIME_DIR")
     if explicit:
         return Path(explicit)
-    heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT", "/tmp/openfinops-worker.heartbeat")
-    return Path(heartbeat).parent
+    legacy_heartbeat = os.getenv("OPENFINOPS_WORKER_HEARTBEAT")
+    if legacy_heartbeat:
+        legacy = Path(legacy_heartbeat)
+        if legacy.name.startswith("worker."):
+            return legacy.parent
+    return Path("/tmp/openfinops-worker")
 
 
 def heartbeat_path(worker_id: int) -> Path:

@@ -82,16 +82,16 @@ async def get_current_user(
     return user
 
 
-def require(module: str, action: str):
-    """Dependency factory: exige permissão (module, action) no RBAC."""
-    from app.core.rbac import get_effective_permissions
+def require(module: str, action: str, scope: str | None = None):
+    """Dependency factory: exige permissão (module, action[, scope]) no RBAC."""
+    from app.core.rbac import get_effective_permissions, has_permission
 
     async def checker(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> User:
         perms = await get_effective_permissions(db, user.id)
-        if action not in perms.get(module, set()):
+        if not has_permission(perms, module, action, scope):
             raise HTTPException(status_code=403, detail="Sem permissão para esta ação.")
         return user
 

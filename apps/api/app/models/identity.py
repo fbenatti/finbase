@@ -52,13 +52,16 @@ class Role(Base):
 
 
 class RolePermission(Base):
+    """Permissão (module, action, scope). scope None = módulo inteiro; scope
+    definido (ex.: 'visao-contabil') restringe a permissão àquela área do módulo."""
     __tablename__ = "role_permission"
-    __table_args__ = (UniqueConstraint("role_id", "module", "action", name="uq_role_permission"),)
+    __table_args__ = (UniqueConstraint("role_id", "module", "action", "scope", name="uq_role_permission"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     role_id = Column(Integer, ForeignKey("role.id", ondelete="CASCADE"), nullable=False)
     module = Column(String(80), nullable=False)
     action = Column(String(20), nullable=False)  # read|create|update|delete
+    scope = Column(String(60))  # NULL = módulo inteiro
 
     role = relationship("Role", back_populates="permissions")
 
@@ -104,12 +107,13 @@ role_role = Table(
 class UserGrant(Base):
     """Grant direto nominal: permissão fina concedida a um usuário sem role."""
     __tablename__ = "user_grant"
-    __table_args__ = (UniqueConstraint("user_id", "module", "action", name="uq_user_grant"),)
+    __table_args__ = (UniqueConstraint("user_id", "module", "action", "scope", name="uq_user_grant"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("user_account.id", ondelete="CASCADE"), nullable=False)
     module = Column(String(80), nullable=False)
     action = Column(String(20), nullable=False)  # read|create|update|delete
+    scope = Column(String(60))  # NULL = módulo inteiro
     granted_by_id = Column(Integer, ForeignKey("user_account.id", ondelete="SET NULL"))
     reason = Column(String(500), nullable=False)
     expires_at = Column(DateTime(timezone=True))

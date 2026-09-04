@@ -9,7 +9,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  hasPerm: (module: string, action: string) => boolean;
+  hasPerm: (module: string, action: string, scope?: string | null) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [navigate]);
 
   const hasPerm = useCallback(
-    (module: string, action: string) => userHasPerm(user, module, action),
+    (module: string, action: string, scope?: string | null) => userHasPerm(user, module, action, scope),
     [user]
   );
 

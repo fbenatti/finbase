@@ -93,7 +93,7 @@ async def _load_user_context(db: AsyncSession, user_id: int) -> tuple[set[int], 
 
 async def _resolve(db: AsyncSession, user_id: int) -> tuple[dict[str, set[str]], list[dict]]:
     role_ids, roles_with_origin = await _load_user_context(db, user_id)
-    perms: dict[str, set[str]] = {}
+    perms: dict[str, dict[str, set[str | None]]] = {}
 
     if role_ids:
         expanded, trace = await _expand_with_trace(db, role_ids)
@@ -101,7 +101,7 @@ async def _resolve(db: AsyncSession, user_id: int) -> tuple[dict[str, set[str]],
         role_names = {row[0]: row[1] for row in result.all()}
         result = await db.execute(select(RolePermission).where(RolePermission.role_id.in_(expanded)))
         for p in result.scalars().all():
-            perms.setdefault(p.module, set()).add(p.action)
+            perms.setdefault(p.module, {}).setdefault(p.action, set()).add(p.scope)
 
         direct_ids = {r["role_id"] for r in roles_with_origin}
         for rid in expanded - direct_ids:
@@ -122,18 +122,19 @@ async def _resolve(db: AsyncSession, user_id: int) -> tuple[dict[str, set[str]],
         )
     )
     for g in result.scalars().all():
-        perms.setdefault(g.module, set()).add(g.action)
+        perms.setdefault(g.module, {}).setdefault(g.action, set()).add(g.scope)
+        scope_txt = f":{g.scope}" if g.scope else ""
         roles_with_origin.append({
             "role_id": None,
-            "role": f"grant direto ({g.module}:{g.action})",
+            "role": f"grant direto ({g.module}:{g.action}{scope_txt})",
             "origin": f"grant direto — {g.reason}",
         })
 
     return perms, roles_with_origin
 
 
-async def get_effective_permissions(db: AsyncSession, user_id: int) -> dict[str, set[str]]:
-    """module -> set(actions) efetivos, com cache TTL de 60s."""
+async def get_effective_permissions(db: AsyncSession, user_id: int) -> dict[str, dict[str, set[str | None]]]:
+    """module -> {action -> set(scope|None)} efetivos, com cache TTL de 60s."""
     now = time.time()
     hit = _cache.get(user_id)
     if hit is not None and now - hit[0] < CACHE_TTL_SECONDS:
@@ -141,6 +142,23 @@ async def get_effective_permissions(db: AsyncSession, user_id: int) -> dict[str,
     perms, origins = await _resolve(db, user_id)
     _cache[user_id] = (now, perms, origins)
     return perms
+
+
+def has_permission(
+    perms: dict[str, dict[str, set[str | None]]],
+    module: str,
+    action: str,
+    scope: str | None = None,
+) -> bool:
+    """True se o usuário tem (module, action). scope=None exige permissão de
+    módulo inteiro; scope definido vale se houver permissão total ou do escopo."""
+    module_perms = perms.get(module) or {}
+    scopes = module_perms.get(action) or set()
+    if not scopes:
+        return False
+    if scope is None:
+        return None in scopes
+    return None in scopes or scope in scopes
 
 
 async def get_effective_roles(db: AsyncSession, user_id: int) -> list[dict]:

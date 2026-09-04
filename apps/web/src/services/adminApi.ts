@@ -3,7 +3,7 @@ import { api } from "./api";
 export interface AdminRole {
   id: number; name: string; description: string | null; is_system: boolean;
   created_at?: string;
-  permissions?: Array<{ module: string; action: string }>;
+  permissions?: Array<{ module: string; action: string; scope?: string | null }>;
   inherits_from?: Array<{ id: number; name: string }>;
   inherited_by?: Array<{ id: number; name: string }>;
 }
@@ -27,7 +27,7 @@ export interface AdminGrant {
 }
 export interface EffectivePermissions {
   user_id: number; username: string;
-  permissions: Array<{ module: string; action: string }>;
+  permissions: Array<{ module: string; action: string; scope?: string | null }>;
   origins: Array<{ role_id: number | null; role: string; origin: string }>;
 }
 

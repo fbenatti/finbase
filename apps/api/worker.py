@@ -1071,6 +1071,18 @@ def main() -> None:
     if worker_id is not None:
         consumer_main(int(worker_id))
         return
+
+    concurrency = max(1, int(os.getenv("OPENFINOPS_WORKER_CONCURRENCY", "3")))
+    if concurrency == 1:
+        runtime_dir().mkdir(parents=True, exist_ok=True)
+        startup = SyncSession()
+        try:
+            reconcile_stale_running_tasks(startup)
+        finally:
+            startup.close()
+        consumer_main(0)
+        return
+
     supervisor_main()
 
 

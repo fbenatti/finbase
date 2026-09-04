@@ -1,4 +1,5 @@
 """Administração de roles: CRUD, permissões, herança (com anti-ciclo), árvore."""
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, select
@@ -27,6 +28,7 @@ class RoleUpdate(BaseModel):
 class PermissionItem(BaseModel):
     module: str
     action: str
+    scope: str | None = None
 
 
 def _validate_perm(module: str, action: str) -> None:
@@ -34,6 +36,21 @@ def _validate_perm(module: str, action: str) -> None:
         raise HTTPException(status_code=422, detail=f"Módulo desconhecido: {module}")
     if action not in ALL_ACTIONS:
         raise HTTPException(status_code=422, detail=f"Ação inválida: {action}")
+
+
+_SCOPE_RE = re.compile(r"^[a-z0-9_-]{1,60}$")
+
+
+def _validate_scope(scope: str | None) -> str | None:
+    if scope is None or scope == "":
+        return None
+    if not _SCOPE_RE.match(scope):
+        raise HTTPException(status_code=422, detail="scope deve ter 1–60 chars (a-z0-9_-)")
+    return scope
+
+
+def _perm_item(p) -> dict:
+    return {"module": p.module, "action": p.action, "scope": p.scope}
 
 
 def _role_out(role: Role, perms: list[RolePermission] | None = None) -> dict:
@@ -44,7 +61,7 @@ def _role_out(role: Role, perms: list[RolePermission] | None = None) -> dict:
         "is_system": role.is_system,
         "created_at": role.created_at,
         "permissions": [
-            {"module": p.module, "action": p.action}
+            _perm_item(p)
             for p in (perms or role.permissions or [])
         ] if perms is not None or role.permissions is not None else [],
     }
@@ -77,7 +94,7 @@ async def list_roles(db: AsyncSession = Depends(get_db), user: User = Depends(re
     roles = result.scalars().all()
     return [
         {"id": r.id, "name": r.name, "description": r.description, "is_system": r.is_system,
-         "created_at": r.created_at, "permissions": [{"module": p.module, "action": p.action} for p in r.permissions]}
+         "created_at": r.created_at, "permissions": [_perm_item(p) for p in r.permissions]}
         for r in roles
     ]
 
@@ -107,7 +124,7 @@ async def get_role(role_id: int, db: AsyncSession = Depends(get_db), user: User 
     return {
         "id": role.id, "name": role.name, "description": role.description,
         "is_system": role.is_system, "created_at": role.created_at,
-        "permissions": [{"module": p.module, "action": p.action} for p in role.permissions],
+        "permissions": [_perm_item(p) for p in role.permissions],
         "inherits_from": parents,
         "inherited_by": children,
     }
@@ -149,14 +166,15 @@ async def set_role_permissions(role_id: int, items: list[PermissionItem], db: As
         raise HTTPException(status_code=404, detail="Role não encontrada")
     for item in items:
         _validate_perm(item.module, item.action)
+        item.scope = _validate_scope(item.scope)
     await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
     seen = set()
     for item in items:
-        key = (item.module, item.action)
+        key = (item.module, item.action, item.scope)
         if key in seen:
             continue
         seen.add(key)
-        db.add(RolePermission(role_id=role_id, module=item.module, action=item.action))
+        db.add(RolePermission(role_id=role_id, module=item.module, action=item.action, scope=item.scope))
     await db.commit()
     invalidate_permissions_cache()
     return {"ok": True, "count": len(seen)}

@@ -43,6 +43,7 @@ class RolesBody(BaseModel):
 class GrantCreate(BaseModel):
     module: str
     action: str
+    scope: str | None = None
     reason: str
     expires_at: datetime | None = None
 
@@ -93,6 +94,9 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), user
     result = await db.execute(select(User).where(User.username == username))
     if result.scalar_one_or_none() is not None:
         raise HTTPException(status_code=422, detail="Já existe usuário com este nome")
+    if body.password is not None and not validate_password_policy(body.password):
+        from app.core.security import PASSWORD_POLICY_ERROR
+        raise HTTPException(status_code=422, detail=PASSWORD_POLICY_ERROR)
     temp_password = body.password or secrets.token_urlsafe(10)
     new_user = User(
         username=username,
@@ -109,7 +113,7 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), user
     db.add(new_user)
     await db.commit()
     invalidate_permissions_cache()
-    out = _user_out(new_user)
+    out = _user_out(await _reload(db, new_user.id))
     if body.password is None:
         out["temporary_password"] = temp_password
     return out
@@ -181,13 +185,15 @@ async def effective_permissions(user_id: int, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     perms = await get_effective_permissions(db, user_id)
     origins = await get_effective_roles(db, user_id)
+    flat = []
+    for m in sorted(perms):
+        for a in sorted(perms[m]):
+            for scp in sorted(perms[m][a], key=lambda s: (s is None, s)):
+                flat.append({"module": m, "action": a, "scope": scp})
     return {
         "user_id": user_id,
         "username": target.username,
-        "permissions": [
-            {"module": m, "action": a}
-            for m, actions in sorted(perms.items()) for a in sorted(actions)
-        ],
+        "permissions": flat,
         "origins": origins,
     }
 
@@ -199,7 +205,7 @@ async def list_grants(user_id: int, db: AsyncSession = Depends(get_db), user: Us
     result = await db.execute(select(UserGrant).where(UserGrant.user_id == user_id))
     return [
         {
-            "id": g.id, "module": g.module, "action": g.action,
+            "id": g.id, "module": g.module, "action": g.action, "scope": g.scope,
             "reason": g.reason, "expires_at": g.expires_at, "created_at": g.created_at,
             "granted_by_id": g.granted_by_id,
         }
@@ -210,6 +216,8 @@ async def list_grants(user_id: int, db: AsyncSession = Depends(get_db), user: Us
 @router.post("/{user_id}/grants", status_code=201)
 async def create_grant(user_id: int, body: GrantCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "update"))):
     _validate_perm(body.module, body.action)
+    from app.routers.roles import _validate_scope as _vs
+    body.scope = _vs(body.scope)
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -220,12 +228,13 @@ async def create_grant(user_id: int, body: GrantCreate, db: AsyncSession = Depen
             UserGrant.user_id == user_id,
             UserGrant.module == body.module,
             UserGrant.action == body.action,
+            UserGrant.scope.is_(body.scope) if body.scope is None else UserGrant.scope == body.scope,
         )
     )
     if result.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=422, detail="Já existe grant para este módulo/ação")
+        raise HTTPException(status_code=422, detail="Já existe grant para este módulo/ação/escopo")
     grant = UserGrant(
-        user_id=user_id, module=body.module, action=body.action,
+        user_id=user_id, module=body.module, action=body.action, scope=body.scope,
         reason=body.reason.strip(), expires_at=body.expires_at, granted_by_id=user.id,
     )
     db.add(grant)

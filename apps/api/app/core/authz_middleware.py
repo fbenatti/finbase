@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
 from app.core import security
-from app.core.rbac import get_effective_permissions
+from app.core.rbac import get_effective_permissions, has_permission
 from app.database import async_session
 from sqlalchemy import select
 
@@ -53,7 +53,7 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/roles", "roles"),
 ]
 
-PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health")
+PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health", "/etl/worker-health")
 # já protegidos por Depends(require(...)) nos próprios routers
 SKIP_PREFIXES = ("/auth", "/users", "/groups", "/roles")
 
@@ -65,6 +65,31 @@ METHOD_ACTION = {
     "PATCH": "update",
     "DELETE": "delete",
 }
+
+
+# Endpoints de consulta de dados que usam POST mas são LEITURA (exceção
+# documentada ao mapeamento HTTP→ação: POST→create). Valem para leitores.
+READ_POST_PREFIXES: list[tuple[str, str]] = [
+    ("/visoes-consumo-ia/dashboard/", "azure_ptu"),
+    ("/ai-dashboards/", "ai_dashboards"),
+    ("/dimon/query", "dimon"),
+    ("/dimon/info", "dimon"),
+    ("/analysis/query", "analysis"),
+    ("/analysis/pivot", "analysis"),
+    ("/analysis/expected-view", "analysis"),
+]
+
+# Áreas de "aba" escopadas dentro de um módulo (kind prefix|contains).
+# kind=prefix casa path.startswith(needle); kind=contains casa needle em path.
+# Regras de consulta (query POST) redefinem a ação para "read" — apenas nessas
+# áreas exatas (não afetam cancel/execuções sob o mesmo prefixo).
+SCOPED_PATH_RULES: list[tuple[str, str, str, str, bool]] = [
+    # (kind, needle, module, scope, post_é_leitura)
+    ("prefix", "/forecast/accuracy/months", "forecast", "visao-contabil", True),
+    ("contains", "/history/", "forecast", "visao-contabil", True),
+    ("prefix", "/dimon/query", "dimon", "visao-contabil", True),
+    ("prefix", "/dimon/info", "dimon", "visao-contabil", True),
+]
 
 
 def _module_for(path: str) -> str | None:
@@ -108,6 +133,30 @@ class RBACMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Consultas por POST são leitura (documentado)
+        if scope.get("method") in ("POST", "PUT", "PATCH"):
+            for qprefix, qmodule in READ_POST_PREFIXES:
+                if path.startswith(qprefix) and module == qmodule:
+                    action = "read"
+                    break
+
+        # Regra escopada (aba) tem precedência e pode redefinir a ação
+        rbac_scope: str | None = None
+        method_action = METHOD_ACTION.get(scope.get("method", ""))
+        for kind, needle, rule_module, rule_scope, post_is_read in SCOPED_PATH_RULES:
+            matched = path.startswith(needle) if kind == "prefix" else needle in path
+            if not matched:
+                continue
+            module = rule_module
+            rbac_scope = rule_scope
+            if post_is_read and scope.get("method") in ("POST", "PUT", "PATCH"):
+                action = "read"
+            elif scope.get("method") == "GET":
+                action = "read"
+            else:
+                action = method_action or "read"
+            break
+
         headers = dict(scope.get("headers") or [])
         auth = headers.get(b"authorization", b"").decode("latin-1")
 
@@ -139,7 +188,7 @@ class RBACMiddleware:
                 return
 
             perms = await get_effective_permissions(db, user.id)
-            if action not in perms.get(module, set()):
+            if not has_permission(perms, module, action, rbac_scope):
                 await _respond(send, 403, "Sem permissão para esta ação.")
                 return
 

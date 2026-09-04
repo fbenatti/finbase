@@ -46,6 +46,12 @@ async def lifespan(app: FastAPI):
         # idempotent migration next to startup until Alembic is introduced.
         await conn.execute(text("ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0"))
         await conn.execute(text("ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ"))
+        await conn.execute(text("ALTER TABLE role_permission ADD COLUMN IF NOT EXISTS scope VARCHAR(60)"))
+        await conn.execute(text("ALTER TABLE user_grant ADD COLUMN IF NOT EXISTS scope VARCHAR(60)"))
+        await conn.execute(text("ALTER TABLE role_permission DROP CONSTRAINT IF EXISTS uq_role_permission"))
+        await conn.execute(text("ALTER TABLE user_grant DROP CONSTRAINT IF EXISTS uq_user_grant"))
+        await conn.execute(text("ALTER TABLE role_permission ADD CONSTRAINT uq_role_permission UNIQUE (role_id, module, action, scope)"))
+        await conn.execute(text("ALTER TABLE user_grant ADD CONSTRAINT uq_user_grant UNIQUE (user_id, module, action, scope)"))
         # asyncpg executes prepared statements and rejects multi-command SQL,
         # so each migration operation must be sent independently.
         for statement in (
