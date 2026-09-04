@@ -33,6 +33,9 @@ services:
       - ./apps/api/app:/app/app
       - ./apps/data/iceberg:/data/iceberg
       - ./apps/data/iceberg:/tmp/data/iceberg
+      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
       - worker_runtime:/run/openfinops-worker
     depends_on:
       postgres:
@@ -56,6 +59,9 @@ services:
     volumes:
       - ./apps/data/iceberg:/data/iceberg
       - ./apps/data/iceberg:/tmp/data/iceberg
+      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
       - worker_runtime:/run/openfinops-worker
     depends_on:
       api:
@@ -95,6 +101,7 @@ services:
       - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
       - ./apps/data/iceberg:/data/iceberg
       - ./apps/data/iceberg:/tmp/data/iceberg
+      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
 
   trino-worker:
     image: trinodb/trino:483
@@ -107,6 +114,7 @@ services:
       - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
       - ./apps/data/iceberg:/data/iceberg
       - ./apps/data/iceberg:/tmp/data/iceberg
+      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
     depends_on:
       trino:
         condition: service_healthy

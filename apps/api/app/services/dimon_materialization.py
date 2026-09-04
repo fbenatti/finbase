@@ -362,7 +362,7 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
             if progress:
                 progress(0, 1, "Preparando histórico mensal de VMs (saving por desligue)")
             try:
-                await prepare_vm_monthly(progress=progress)
+                await prepare_vm_monthly(progress=progress, sources=rule.sources)
             except Exception as prep_exc:
                 logger.exception("Falha ao preparar auxiliar para %s", rule.code)
                 raise
@@ -587,13 +587,21 @@ def materialize_dimons_sync(session: Any, *, run_id: int, progress: Any | None =
 VM_MONTHLY_TABLE = "_tmp_vm_monthly"
 VM_MONTHLY_HISTORY_MONTHS = 8
 
-
-async def prepare_vm_monthly(progress: Any | None = None, *, months: list[str] | None = None) -> int:
+async def prepare_vm_monthly(
+    progress: Any | None = None,
+    *,
+    months: list[str] | None = None,
+    sources: list[DimonRuleSource] | None = None,
+) -> int:
     """Popula dimon._tmp_vm_monthly com histórico de VMs reais mês a mês.
 
     ``months`` opcional: lista explícita de períodos YYYYMM a coletar (ex. para
     reprocessar o histórico). Default: últimos ``VM_MONTHLY_HISTORY_MONTHS``
     meses a partir de hoje.
+
+    Quando a regra Dimon possui Origens configuradas, seus filtros declarativos
+    (inclusive ``subaccountname``) são aplicados à Gold antes de montar o
+    histórico. Assim o SQL customizado respeita os filtros editados no portal.
     """
     await execute(f"DROP TABLE IF EXISTS iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE}", timeout_s=120)
     await execute(f"""
@@ -621,6 +629,20 @@ async def prepare_vm_monthly(progress: Any | None = None, *, months: list[str] |
                 yy -= 1
             months.append(f"{yy:04d}{ym:02d}")
 
+    source_filters: list[str] = []
+    if sources:
+        schema = await load_gold_schema("dest_modelo_focus")
+        for source in sources:
+            golds = list(getattr(source, "gold_tables", None) or [])
+            if not golds and getattr(source, "gold_table", None):
+                golds = [source.gold_table]
+            if "dest_modelo_focus" in golds:
+                source_filters.append(_source_clause(schema, source, gold_table="dest_modelo_focus"))
+    configured_filter = (
+        "AND (" + " OR ".join(f"({clause})" for clause in source_filters) + ")"
+        if source_filters else ""
+    )
+
     total = 0
     for period in months:
         if progress:
@@ -647,6 +669,7 @@ async def prepare_vm_monthly(progress: Any | None = None, *, months: list[str] |
           AND LOWER(CAST(b."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
           AND POSITION('virtualMachines' IN CAST(b."ResourceId" AS VARCHAR)) > 0
           AND NOT regexp_like(element_at(split(CAST(b."ResourceId" AS VARCHAR), '/'), -1), '^[0-9a-f]{{32}}$')
+          {configured_filter}
         GROUP BY CAST(b."ResourceId" AS VARCHAR), b.cloud_origem, b._billing_period
         """, timeout_s=300)
         result = await execute(
@@ -737,6 +760,214 @@ async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | 
 
 SAVING_DIMON_CODE = "saving_desligue_vm"
 
+# Janela diária por recurso para validar ciclo de vida antes de classificar desligue.
+DESLIGUE_LOOKBACK_DAYS = 30
+DESLIGUE_EDGE_DAYS = 15
+
+# Janela de validação diária (últimos N dias do mês fechado) para confirmar desligue.
+DESLIGUE_VALIDATION_DAYS = 14
+DESLIGUE_MIN_ACTIVE_DAYS = 5
+DESLIGUE_MIN_ACTIVE_HOURS_PER_DAY = 4
+DESLIGUE_MAX_UPTIME_PCT = 0.75
+DESLIGUE_VALIDATION_CAPACITY_HOURS = DESLIGUE_VALIDATION_DAYS * 24
+
+# Nós gerenciados de AKS (resource group MC_AKS*) não são candidatos a desligue isolado.
+AKS_RESOURCE_GROUP_PATTERN = r"(?i)/resourcegroups/mc_aks"
+
+# Padrões excluídos da lista de desligue (efêmeras, AKS gerenciado, sempre ligadas).
+DESLIGUE_LIST_EXCLUDED_PADROES = (
+    "CICLO_CURTO",
+    "AKS_GERENCIADO",
+    "LIGADA_24x7",
+)
+
+# Nomes conhecidos de recursos efêmeros (scans agentless etc.) — ocultos mesmo
+# antes de reprocessar a Dimon com a classificação CICLO_CURTO.
+DESLIGUE_EPHEMERAL_NAME_PATTERNS = (
+    r"(?i)^prismacloud-scan-",
+)
+
+
+def desligue_list_filter_sql(*, alias: str = "") -> str:
+    """Predicado SQL para ocultar VMs efêmeras e 24×7 da lista de desligue."""
+    prefix = f"{alias}." if alias else ""
+    excluded = ", ".join(_quote_literal(p) for p in DESLIGUE_LIST_EXCLUDED_PADROES)
+    padrao_filter = f"COALESCE({prefix}padrao, '') NOT IN ({excluded})"
+    name_ref = f"COALESCE(CAST({prefix}resource_name AS VARCHAR), '')"
+    ephemeral_filters = " AND ".join(
+        f"NOT regexp_like({name_ref}, '{pat}')" for pat in DESLIGUE_EPHEMERAL_NAME_PATTERNS
+    )
+    return f"({padrao_filter}) AND ({ephemeral_filters})"
+
+
+def _desligue_window_dates(period: str) -> tuple[str, str]:
+    """Retorna (início, fim) ISO da janela de análise diária do período YYYYMM."""
+    import calendar as _cal
+    from datetime import date as _date, timedelta as _td
+
+    y = int(period[:4])
+    m = int(period[4:6])
+    end = _date(y, m, _cal.monthrange(y, m)[1])
+    start = end - _td(days=DESLIGUE_LOOKBACK_DAYS - 1)
+    return start.isoformat(), end.isoformat()
+
+
+def _desligue_validation_dates(period: str) -> tuple[str, str]:
+    """Retorna (início, fim) ISO dos últimos DESLIGUE_VALIDATION_DAYS do mês YYYYMM."""
+    import calendar as _cal
+    from datetime import date as _date, timedelta as _td
+
+    y = int(period[:4])
+    m = int(period[4:6])
+    end = _date(y, m, _cal.monthrange(y, m)[1])
+    start = end - _td(days=DESLIGUE_VALIDATION_DAYS - 1)
+    return start.isoformat(), end.isoformat()
+
+
+def evaluate_daily_quality(
+    daily_rows: list[dict[str, Any]],
+    *,
+    validation_start: str,
+    validation_end: str,
+    total_hours: float | None = None,
+    baseline_hours: float | None = None,
+) -> dict[str, Any]:
+    """Calcula métricas de qualidade diária na janela de validação (14 dias)."""
+    from datetime import date as _date
+
+    vs = _date.fromisoformat(validation_start)
+    ve = _date.fromisoformat(validation_end)
+    window_hours = 0.0
+    active_days = 0
+    for row in daily_rows or []:
+        day_raw = str(row.get("day") or "")[:10]
+        if not day_raw:
+            continue
+        day = _date.fromisoformat(day_raw)
+        if day < vs or day > ve:
+            continue
+        hours = float(row.get("hours") or 0)
+        window_hours += hours
+        if hours >= DESLIGUE_MIN_ACTIVE_HOURS_PER_DAY:
+            active_days += 1
+    window_uptime_pct = (
+        window_hours / DESLIGUE_VALIDATION_CAPACITY_HOURS
+        if DESLIGUE_VALIDATION_CAPACITY_HOURS
+        else 0.0
+    )
+    monthly_uptime_pct = None
+    if total_hours is not None and baseline_hours:
+        monthly_uptime_pct = total_hours / baseline_hours
+    return {
+        "active_days": active_days,
+        "window_hours": round(window_hours, 2),
+        "window_uptime_pct": round(window_uptime_pct, 4),
+        "monthly_uptime_pct": round(monthly_uptime_pct, 4) if monthly_uptime_pct is not None else None,
+        "validation_start": validation_start,
+        "validation_end": validation_end,
+        "min_active_days": DESLIGUE_MIN_ACTIVE_DAYS,
+        "min_active_hours_per_day": DESLIGUE_MIN_ACTIVE_HOURS_PER_DAY,
+        "max_uptime_pct": DESLIGUE_MAX_UPTIME_PCT,
+    }
+
+
+def is_aks_managed_resource(resource_id: str | None) -> bool:
+    return bool(re.search(AKS_RESOURCE_GROUP_PATTERN, str(resource_id or "")))
+
+
+def evaluate_vm_lifecycle(
+    first_seen: str | None,
+    last_seen: str | None,
+    window_start: str,
+    window_end: str,
+) -> tuple[bool, bool, str]:
+    """Classifica ciclo de vida na janela diária (30d, folga 15d nas bordas)."""
+    from datetime import date as _date
+
+    if not first_seen or not last_seen:
+        return True, True, "unknown"
+    fs = _date.fromisoformat(str(first_seen)[:10])
+    ls = _date.fromisoformat(str(last_seen)[:10])
+    ws = _date.fromisoformat(window_start)
+    we = _date.fromisoformat(window_end)
+    edge_start = ws.toordinal() + DESLIGUE_EDGE_DAYS
+    edge_end = we.toordinal() - DESLIGUE_EDGE_DAYS
+    is_born = fs.toordinal() > ws.toordinal() and (
+        fs.toordinal() <= edge_start
+        or (we.toordinal() - fs.toordinal() + 1) < DESLIGUE_EDGE_DAYS
+    )
+    is_died = ls.toordinal() < edge_end
+    if is_born:
+        return True, False, "recently_born"
+    if is_died:
+        return False, True, "recently_died"
+    return False, False, "ok"
+
+
+def _lifecycle_sql_cte(
+    window_start: str,
+    window_end: str,
+    *,
+    validation_start: str | None = None,
+    validation_end: str | None = None,
+) -> str:
+    """CTE lifecycle + métricas diárias de qualidade (Gold FOCUS)."""
+    validation_start = validation_start or window_start
+    validation_end = validation_end or window_end
+    return f"""
+        lifecycle AS (
+            SELECT
+                LOWER(TRIM(CAST(g."ResourceId" AS VARCHAR))) AS resource_key,
+                MIN(CASE
+                    WHEN COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0) > 0
+                    THEN date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y')
+                END) AS first_seen,
+                MAX(CASE
+                    WHEN COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0) > 0
+                    THEN date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y')
+                END) AS last_seen,
+                COUNT(DISTINCT CASE
+                    WHEN COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0) >= {DESLIGUE_MIN_ACTIVE_HOURS_PER_DAY}
+                         AND date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y')
+                             BETWEEN DATE '{validation_start}' AND DATE '{validation_end}'
+                    THEN date_format(
+                        date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y'),
+                        '%Y-%m-%d'
+                    )
+                END) AS active_days,
+                SUM(CASE
+                    WHEN date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y')
+                         BETWEEN DATE '{validation_start}' AND DATE '{validation_end}'
+                    THEN COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0)
+                    ELSE 0
+                END) AS window_hours
+            FROM iceberg.gold.dest_modelo_focus g
+            WHERE g."ChargePeriodStart" IS NOT NULL
+              AND LOWER(CAST(g."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
+              AND (g."ChargeCategory" = 'Usage' OR g."ChargeCategory" IS NULL)
+              AND POSITION('/virtualMachines/' IN CAST(g."ResourceId" AS VARCHAR)) > 0
+              AND date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y')
+                  BETWEEN DATE '{window_start}' AND DATE '{window_end}'
+            GROUP BY 1
+        )"""
+
+
+def _lifecycle_flags_sql(window_start: str, window_end: str) -> tuple[str, str]:
+    """Expressões SQL para is_recently_born / is_recently_died."""
+    born = f"""(
+            lc.first_seen IS NULL
+            OR (
+                lc.first_seen > DATE '{window_start}'
+                AND (
+                    lc.first_seen <= DATE '{window_start}' + INTERVAL '{DESLIGUE_EDGE_DAYS}' DAY
+                    OR date_diff('day', lc.first_seen, DATE '{window_end}') < {DESLIGUE_EDGE_DAYS}
+                )
+            )
+        )"""
+    died = f"(lc.last_seen IS NULL OR lc.last_seen < DATE '{window_end}' - INTERVAL '{DESLIGUE_EDGE_DAYS}' DAY)"
+    return born, died
+
+
 # Comentário injetado no topo do sql_template da regra (visível em Dimon → editar).
 SAVING_TEMPLATE_HEADER = """--
 -- ⚠ QUERY DE REPROCESSAMENTO MÊS A MÊS (NÃO RODAR PARA VÁRIOS MESES DE UMA VEZ)
@@ -746,13 +977,25 @@ SAVING_TEMPLATE_HEADER = """--
 -- Para popular o histórico (ex.: jan/2026 → mês atual), reprocesse mês a mês
 -- via /scheduled-shutdown/reprocess-history ou reprocesse a regra a cada mês
 -- fechado. O padrão exige >= 3 meses de histórico (60+ dias) por VM.
+-- Além disso, exige janela diária de 30 dias por recurso com folga de 15 dias
+-- nas bordas (sem nascimento/morte recente na janela).
+-- Confirmação de desligue exige 14 dias de consumo diário com >=5 dias materiais
+-- (>=4h/dia), uptime <75% na janela e no mês, e exclui AKS gerenciado (MC_AKS*).
+-- A Dimon mantém todas as subscriptions para diagnóstico. Os cálculos do
+-- dashboard só consideram DEV, HML/HMP, TEST, SANDBOX, QA, UAT, POC ou
+-- STAGING; PROD/PRD/PRO ficam fora dos totais de saving (filtro na Origem Gold).
 --
 
 
 """
 
 
-async def materialize_saving_history(progress: Any | None = None, *, periods: list[str] | None = None) -> dict[str, Any]:
+async def materialize_saving_history(
+    progress: Any | None = None,
+    *,
+    periods: list[str] | None = None,
+    sources: list[DimonRuleSource] | None = None,
+) -> dict[str, Any]:
     """Materializa a Dimon de saving por desligue MÊS A MÊS.
 
     Prepara a tabela auxiliar UMA única vez (todos os meses do histórico) e,
@@ -765,6 +1008,9 @@ async def materialize_saving_history(progress: Any | None = None, *, periods: li
 
     ``periods`` opcional: lista YYYYMM a materializar (default: todos os
     disponíveis na Gold até o mês anterior ao atual).
+
+    ``sources`` aplica os filtros declarativos das Origens configuradas na
+    regra Dimon, inclusive filtros por ``subaccountname``.
     """
     from datetime import date as _date
     today = _date.today()
@@ -801,6 +1047,14 @@ async def materialize_saving_history(progress: Any | None = None, *, periods: li
         effective_price_hour DOUBLE,
         age_days INTEGER,
         is_new_vm BOOLEAN,
+        first_seen_day VARCHAR,
+        last_seen_day VARCHAR,
+        is_recently_born BOOLEAN,
+        is_recently_died BOOLEAN,
+        active_days INTEGER,
+        window_hours DOUBLE,
+        window_uptime_pct DOUBLE,
+        monthly_uptime_pct DOUBLE,
         padrao VARCHAR,
         is_desligue_programado BOOLEAN
     )
@@ -809,7 +1063,7 @@ async def materialize_saving_history(progress: Any | None = None, *, periods: li
     # Prepara a auxiliar UMA vez com todos os meses (histórico completo).
     if progress:
         progress(0, len(periods), "Preparando histórico mensal de VMs (uma única vez)")
-    await prepare_vm_monthly(progress=None, months=periods)
+    await prepare_vm_monthly(progress=None, months=periods, sources=sources)
 
     summary: dict[str, Any] = {"periods": [], "rows": {}}
     for i, target in enumerate(periods):
@@ -818,6 +1072,18 @@ async def materialize_saving_history(progress: Any | None = None, *, periods: li
 
         # Roda a query com o mês alvo e insere na Dimon final.
         baseline = _baseline_hours(target)
+        window_start, window_end = _desligue_window_dates(target)
+        validation_start, validation_end = _desligue_validation_dates(target)
+        born_sql, died_sql = _lifecycle_flags_sql(window_start, window_end)
+        lifecycle_cte = _lifecycle_sql_cte(
+            window_start,
+            window_end,
+            validation_start=validation_start,
+            validation_end=validation_end,
+        )
+        max_uptime = DESLIGUE_MAX_UPTIME_PCT
+        min_active = DESLIGUE_MIN_ACTIVE_DAYS
+        validation_capacity = DESLIGUE_VALIDATION_CAPACITY_HOURS
         sql = f"""
         WITH stats AS (
             SELECT
@@ -835,6 +1101,7 @@ async def materialize_saving_history(progress: Any | None = None, *, periods: li
             WHERE billing_period <= '{target}'
             GROUP BY resource_id, vm_name, connection_code, subscription_name
         ),
+        {lifecycle_cte},
         gold_dept AS (
             SELECT
                 LOWER(TRIM(g."ResourceId")) AS rid,
@@ -844,47 +1111,79 @@ async def materialize_saving_history(progress: Any | None = None, *, periods: li
             JOIN stats s ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(s.resource_id))
             WHERE g._billing_period = '{target}'
             GROUP BY 1
+        ),
+        classified AS (
+            SELECT
+                s.resource_id,
+                s.vm_name AS resource_name,
+                CASE WHEN POSITION('virtualMachineScaleSets' IN s.resource_id) > 0 THEN 'VMSS' ELSE 'VM' END AS resource_type,
+                s.connection_code,
+                s.subscription_name,
+                COALESCE(g.n4, 'SEM DEPARTAMENTO') AS departamento_nivel_4,
+                COALESCE(g.n5, 'SEM PROJETO') AS departamento_nivel_5,
+                '{target}' AS _billing_period,
+                '{target}' AS billing_period,
+                s.cur_hours AS total_hours,
+                {baseline} AS baseline_hours,
+                GREATEST(0, {baseline} - s.cur_hours) AS saved_hours,
+                GREATEST(0, {baseline} - s.cur_hours) * (s.cur_cost / NULLIF(s.cur_hours, 0)) AS saving_brl,
+                s.cur_cost / NULLIF(s.cur_hours, 0) AS effective_price_hour,
+                date_diff('day',
+                    date_parse(s.first_period || '01', '%Y%m%d'),
+                    date_parse('{target}' || '01', '%Y%m%d') + INTERVAL '1' MONTH - INTERVAL '1' DAY
+                ) AS age_days,
+                (s.first_period >= date_format(date_add('month', -2, date_parse('{target}' || '01', '%Y%m%d')), '%Y%m')) AS is_new_vm,
+                date_format(lc.first_seen, '%Y-%m-%d') AS first_seen_day,
+                date_format(lc.last_seen, '%Y-%m-%d') AS last_seen_day,
+                {born_sql} AS is_recently_born,
+                {died_sql} AS is_recently_died,
+                COALESCE(lc.active_days, 0) AS active_days,
+                COALESCE(lc.window_hours, 0) AS window_hours,
+                COALESCE(lc.window_hours, 0) / {validation_capacity}.0 AS window_uptime_pct,
+                s.cur_hours / NULLIF({baseline}.0, 0) AS monthly_uptime_pct,
+                CASE
+                    WHEN regexp_like(s.resource_id, '{AKS_RESOURCE_GROUP_PATTERN}') THEN 'AKS_GERENCIADO'
+                    WHEN COALESCE(lc.active_days, 0) < {min_active} THEN 'CICLO_CURTO'
+                    WHEN COALESCE(lc.window_hours, 0) / {validation_capacity}.0 >= {max_uptime}
+                         OR s.cur_hours / NULLIF({baseline}.0, 0) >= {max_uptime}
+                         OR s.avg_hours > 700 THEN 'LIGADA_24x7'
+                    WHEN s.months_history < 3
+                         OR {born_sql}
+                         OR ({died_sql} AND COALESCE(lc.active_days, 0) < {min_active}) THEN 'POUCO_HISTORICO'
+                    WHEN s.avg_hours BETWEEN 100 AND 450
+                         AND s.stddev_hours < 80
+                         AND COALESCE(lc.active_days, 0) >= {min_active}
+                         AND COALESCE(lc.window_hours, 0) / {validation_capacity}.0 < {max_uptime}
+                         AND s.cur_hours / NULLIF({baseline}.0, 0) < {max_uptime}
+                         AND NOT ({born_sql} OR {died_sql}) THEN 'DESLIGUE_PROGRAMADO'
+                    WHEN s.avg_hours < 50 AND s.stddev_hours < 50 THEN 'VM_DESLIGADA'
+                    WHEN s.stddev_hours > 150 THEN 'USO_IRREGULAR'
+                    ELSE 'ANALISAR'
+                END AS padrao,
+                CASE
+                    WHEN regexp_like(s.resource_id, '{AKS_RESOURCE_GROUP_PATTERN}') THEN FALSE
+                    WHEN COALESCE(lc.active_days, 0) < {min_active} THEN FALSE
+                    WHEN COALESCE(lc.window_hours, 0) / {validation_capacity}.0 >= {max_uptime}
+                         OR s.cur_hours / NULLIF({baseline}.0, 0) >= {max_uptime}
+                         OR s.avg_hours > 700 THEN FALSE
+                    WHEN s.months_history < 3
+                         OR {born_sql}
+                         OR ({died_sql} AND COALESCE(lc.active_days, 0) < {min_active}) THEN FALSE
+                    WHEN s.avg_hours BETWEEN 100 AND 450
+                         AND s.stddev_hours < 80
+                         AND COALESCE(lc.active_days, 0) >= {min_active}
+                         AND COALESCE(lc.window_hours, 0) / {validation_capacity}.0 < {max_uptime}
+                         AND s.cur_hours / NULLIF({baseline}.0, 0) < {max_uptime}
+                         AND NOT ({born_sql} OR {died_sql}) THEN TRUE
+                    ELSE FALSE
+                END AS is_desligue_programado
+            FROM stats s
+            LEFT JOIN lifecycle lc ON lc.resource_key = LOWER(TRIM(s.resource_id))
+            LEFT JOIN gold_dept g ON g.rid = LOWER(TRIM(s.resource_id))
+            WHERE s.cur_hours IS NOT NULL
         )
-        SELECT
-            s.resource_id,
-            s.vm_name AS resource_name,
-            CASE WHEN POSITION('virtualMachineScaleSets' IN s.resource_id) > 0 THEN 'VMSS' ELSE 'VM' END AS resource_type,
-            s.connection_code,
-            s.subscription_name,
-            COALESCE(g.n4, 'SEM DEPARTAMENTO') AS departamento_nivel_4,
-            COALESCE(g.n5, 'SEM PROJETO') AS departamento_nivel_5,
-            '{target}' AS _billing_period,
-            '{target}' AS billing_period,
-            s.cur_hours AS total_hours,
-            {baseline} AS baseline_hours,
-            GREATEST(0, {baseline} - s.cur_hours) AS saved_hours,
-            GREATEST(0, {baseline} - s.cur_hours) * (s.cur_cost / NULLIF(s.cur_hours, 0)) AS saving_brl,
-            s.cur_cost / NULLIF(s.cur_hours, 0) AS effective_price_hour,
-            -- Idade da VM no mês alvo: dias entre o primeiro mês em que apareceu
-            -- no billing e o fim do mês alvo.
-            date_diff('day',
-                date_parse(s.first_period || '01', '%Y%m%d'),
-                date_parse('{target}' || '01', '%Y%m%d') + INTERVAL '1' MONTH - INTERVAL '1' DAY
-            ) AS age_days,
-            -- Recém-criada: primeira aparição no billing dentro dos últimos
-            -- ~60 dias (2 meses) em relação ao mês alvo. Usa o first_period
-            -- relativo ao alvo, não ao início do histórico.
-            (s.first_period >= date_format(date_add('month', -2, date_parse('{target}' || '01', '%Y%m%d')), '%Y%m')) AS is_new_vm,
-            CASE
-                WHEN s.months_history < 3 THEN 'POUCO_HISTORICO'
-                WHEN s.avg_hours BETWEEN 100 AND 450 AND s.stddev_hours < 80 THEN 'DESLIGUE_PROGRAMADO'
-                WHEN s.avg_hours < 50 AND s.stddev_hours < 50 THEN 'VM_DESLIGADA'
-                WHEN s.stddev_hours > 150 THEN 'USO_IRREGULAR'
-                WHEN s.avg_hours > 700 THEN 'LIGADA_24x7'
-                ELSE 'ANALISAR'
-            END AS padrao,
-            CASE
-                WHEN s.months_history >= 3 AND s.avg_hours BETWEEN 100 AND 450 AND s.stddev_hours < 80 THEN TRUE
-                ELSE FALSE
-            END AS is_desligue_programado
-        FROM stats s
-        LEFT JOIN gold_dept g ON g.rid = LOWER(TRIM(s.resource_id))
-        WHERE s.cur_hours IS NOT NULL
+        SELECT * FROM classified
+        WHERE {desligue_list_filter_sql()}
         """
         await execute(
             f"INSERT INTO iceberg.{DIMON_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} {sql}",

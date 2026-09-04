@@ -49,13 +49,19 @@ function monthLabel(m: string) {
 // histórico mensal de horas faturadas — BilledCost/h por hora on-demand).
 const PADRAO_EXPLICACAO: Record<string, string> = {
   DESLIGUE_PROGRAMADO:
-    "Horas faturadas consistentes entre 100–450h/mês (≈15h/dia em dias úteis) com desvio padrão < 80h e saving em ≥3 meses consecutivos (60+ dias de histórico). É o padrão que confirma desligue recorrente via schedule.",
+    "Horas faturadas consistentes entre 100–450h/mês (≈15h/dia em dias úteis) com desvio padrão < 80h, ≥5 dias materiais (≥4h/dia) nos últimos 14 dias do mês, uptime <75% na janela e no mês, histórico ≥3 meses e ciclo de vida estável. Confirma desligue recorrente via billing.",
+  CICLO_CURTO:
+    "Menos de 5 dias materiais (≥4h faturadas) nos últimos 14 dias do mês — consumo efêmero ou VM que nasceu/morreu no período, sem padrão de desligue recorrente.",
+  AKS_GERENCIADO:
+    "Nó gerenciado de AKS (resource group MC_AKS*) — não é candidato a desligue isolado de VM.",
+  LIGADA_24x7:
+    "Uptime ≥75% na janela diária de 14 dias ou no mês (ou média mensal >700h) — VM praticamente sempre ligada, sem padrão de desligue.",
   VM_DESLIGADA:
     "Média de horas faturadas < 50h/mês com desvio padrão < 50h — a VM fica praticamente sempre desligada (não é um desligue pontual, parece abandonada ou desativada).",
   USO_IRREGULAR:
     "Desvio padrão de horas > 150h/mês — as horas variam muito de um mês para outro (uso esporádico/manual, sem padrão de schedule).",
   POUCO_HISTORICO:
-    "Menos de 3 meses de histórico disponível (60+ dias) — ainda não é possível afirmar um padrão de desligue. VMs recém-criadas ou com histórico incompleto.",
+    "Menos de 3 meses de histórico disponível (60+ dias) ou ciclo de vida recente (nascimento/morte na janela) — ainda não é possível afirmar um padrão de desligue.",
   ANALISAR:
     "Não se encaixa nos padrões acima — horas entre os limiares ou comportamento misto. Requer revisão manual.",
   SEM_PADRAO: "Sem classificação atribuída.",
@@ -311,6 +317,11 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     </Select>
                   </FormControl>
                 </Stack>
+                <Alert severity="info" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
+                  VMs efêmeras (<strong>CICLO_CURTO</strong>, <strong>AKS gerenciado</strong>) e{" "}
+                  <strong>ligadas 24×7</strong> não aparecem nesta lista. Os totais de saving consideram apenas{" "}
+                  <strong>desligue confirmado</strong> — escopo de subscriptions configurável na Origem Gold da regra Dimon.
+                </Alert>
                 {!padroes || padroes.rows.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">Sem padrões (materialize a Dimon em Dimon → Reprocessar).</Typography>
                 ) : (
@@ -781,8 +792,28 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             <DialogContent dividers>
               {usageDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
               {usageDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{usageDialog.error}</Alert>}
+              {usageDialog.data?.is_recently_born && (
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  VM recém-aparecida na janela de 30 dias — classificada como <strong>POUCO_HISTORICO</strong> até estabilizar o ciclo de vida.
+                </Alert>
+              )}
+              {usageDialog.data?.is_recently_died && !usageDialog.data?.is_recently_born && (
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  Último consumo faturado antes do fim da janela — pode indicar encerramento recente ou desligue prolongado no período.
+                </Alert>
+              )}
               {usageDialog.data && usageDialog.data.rows.length > 0 && (
                 <>
+                  {usageDialog.data.padrao && (
+                    <Alert
+                      severity={usageDialog.data.is_desligue_programado ? "success" : "info"}
+                      sx={{ mb: 1.5 }}
+                    >
+                      Padrão: <strong>{usageDialog.data.padrao}</strong>
+                      {" — "}
+                      {PADRAO_EXPLICACAO[usageDialog.data.padrao] || PADRAO_EXPLICACAO.SEM_PADRAO}
+                    </Alert>
+                  )}
                   <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">
                     <Box>
                       <Typography variant="caption" color="text.secondary">Tempo faturado (mês)</Typography>
@@ -793,12 +824,24 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       <Typography variant="subtitle1" fontWeight={600}>{money(usageDialog.data.total_cost_brl)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Dias com consumo</Typography>
-                      <Typography variant="subtitle1" fontWeight={600}>{usageDialog.data.rows.length}</Typography>
+                      <Typography variant="caption" color="text.secondary">Dias materiais (14d, ≥4h)</Typography>
+                      <Typography variant="subtitle1" fontWeight={600}>
+                        {usageDialog.data.active_days ?? 0} / {usageDialog.data.min_active_days ?? 5} mín.
+                      </Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Média nos dias ativos</Typography>
-                      <Typography variant="subtitle1" fontWeight={600}>{duration(usageDialog.data.total_hours / Math.max(usageDialog.data.rows.length, 1))}</Typography>
+                      <Typography variant="caption" color="text.secondary">Uptime janela 14d</Typography>
+                      <Typography variant="subtitle1" fontWeight={600}>{pct((usageDialog.data.window_uptime_pct ?? 0) * 100)}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Uptime mensal</Typography>
+                      <Typography variant="subtitle1" fontWeight={600}>
+                        {usageDialog.data.monthly_uptime_pct != null ? pct(usageDialog.data.monthly_uptime_pct * 100) : "—"}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Dias com consumo</Typography>
+                      <Typography variant="subtitle1" fontWeight={600}>{usageDialog.data.rows.length}</Typography>
                     </Box>
                   </Stack>
                   <Chart
@@ -828,12 +871,20 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                   />
                   <Box sx={{ mt: 3 }}>
                     <Alert severity="info" icon={false} sx={{ mb: 2, py: 0.5 }}>
-                      As horas são decimais: <strong>0,5 h = 30 min</strong>; 4 h = 4 horas. A classificação usa 4 horas faturadas como limite diário.
+                      Janela de validação: <strong>{usageDialog.data.validation_start} → {usageDialog.data.validation_end}</strong>.
+                      Dias materiais = dias com ≥{usageDialog.data.min_active_hours_per_day ?? 4}h faturadas.
+                      Desligue confirmado exige ≥{usageDialog.data.min_active_days ?? 5} dias materiais e uptime &lt;{pct((usageDialog.data.max_uptime_pct ?? 0.75) * 100)}.
                     </Alert>
                     {(() => {
-                      const dias = usageDialog.data.rows;
-                      const ligados = dias.filter(r => r.hours >= 4);
-                      const desligados = dias.filter(r => r.hours < 4);
+                      const dias = usageDialog.data.rows.filter((r) => {
+                        const vs = usageDialog.data?.validation_start;
+                        const ve = usageDialog.data?.validation_end;
+                        if (!vs || !ve) return true;
+                        return r.day >= vs && r.day <= ve;
+                      });
+                      const minH = usageDialog.data.min_active_hours_per_day ?? 4;
+                      const ligados = dias.filter(r => r.hours >= minH);
+                      const desligados = dias.filter(r => r.hours < minH);
                       return (
                         <>
                           <Typography variant="subtitle1" fontWeight={700} sx={{ color: GREEN, mb: 1 }}>

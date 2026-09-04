@@ -404,7 +404,7 @@ async def dimon_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
 import re as _re
 from typing import Literal as _Literal
 
-_DIMON_TABLE_RE = _re.compile(r"^dest_dm_cost_[a-z0-9_]+$")
+_DIMON_TABLE_RE = _re.compile(r"^dest_dm_[a-z0-9_]+$")
 _DIMON_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
 _DIMON_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS"})
 # Aliases lógicos → colunas físicas da Dimon (ex.: "quantity" da UI = consumedquantity).

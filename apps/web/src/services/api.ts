@@ -2329,6 +2329,24 @@ export interface VmDailyUsageResponse {
   days: number;
   total_hours: number;
   total_cost_brl: number;
+  window_start?: string | null;
+  window_end?: string | null;
+  validation_start?: string | null;
+  validation_end?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  lifecycle?: string;
+  is_recently_born?: boolean;
+  is_recently_died?: boolean;
+  active_days?: number;
+  window_hours?: number;
+  window_uptime_pct?: number;
+  monthly_uptime_pct?: number | null;
+  min_active_days?: number;
+  min_active_hours_per_day?: number;
+  max_uptime_pct?: number;
+  padrao?: string | null;
+  is_desligue_programado?: boolean;
   rows: VmDailyUsageItem[];
 }
 

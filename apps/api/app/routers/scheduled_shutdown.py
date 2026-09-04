@@ -17,12 +17,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
 from app.models.source_connection import SourceConnection
 from app.models.shutdown_exception_rule import ShutdownExceptionRule
 from app.services.trino_service import execute
+from app.services.dimon_materialization import (
+    _baseline_hours,
+    _desligue_validation_dates,
+    _desligue_window_dates,
+    desligue_list_filter_sql,
+    evaluate_daily_quality,
+    evaluate_vm_lifecycle,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scheduled-shutdown", tags=["scheduled-shutdown"])
@@ -386,7 +395,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         is_desligue_programado
     FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
-      AND COALESCE(padrao, '') NOT IN ('LIGADA_24x7', 'POUCO_HISTORICO')
+      AND is_desligue_programado = TRUE
     ORDER BY saving_brl DESC
     LIMIT 5000
     """
@@ -401,7 +410,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         COALESCE(SUM(saving_brl), 0) AS total_saving_brl
     FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
-      AND COALESCE(padrao, '') NOT IN ('LIGADA_24x7', 'POUCO_HISTORICO')
+      AND is_desligue_programado = TRUE
     """
     try:
         rows = await execute(dimon_sql, timeout_s=120)
@@ -564,6 +573,7 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
             resource_name,
             billing_period,
             hours_billed,
+            total_effective_cost,
             date_parse(billing_period || '01', '%Y%m%d') AS month_start_date,
             last_day_of_month(date_parse(billing_period || '01', '%Y%m%d')) AS month_end_date,
             date_diff('day', date_parse(billing_period || '01', '%Y%m%d'), CAST(COALESCE(first_seen, date_parse(billing_period || '01', '%Y%m%d')) AS DATE)) AS age_days
@@ -574,6 +584,7 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
         resource_name,
         billing_period,
         hours_billed,
+        total_effective_cost,
         age_days,
         CASE WHEN age_days < 60 THEN TRUE ELSE FALSE END AS is_new_vm,
         (date_diff('day', CAST(GREATEST(month_start_date, COALESCE(first_seen, month_start_date)) AS DATE), month_end_date) + 1) * 24 AS baseline_hours,
@@ -581,6 +592,42 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
     FROM baseline
     """
     rows = await execute(sql, timeout_s=600)
+
+    # Ciclo de vida diário por período (janela 30d com folga de 15d).
+    lifecycle_by_key: dict[tuple[str, str], tuple[bool, bool]] = {}
+    for period in periods_filter:
+        window_start, window_end = _desligue_window_dates(period)
+        life_sql = f"""
+        SELECT
+            LOWER(TRIM("ResourceName")) AS resource_name,
+            MIN(CASE
+                WHEN COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0) > 0
+                THEN date_parse("ChargePeriodStart", '%m/%d/%Y')
+            END) AS first_seen,
+            MAX(CASE
+                WHEN COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0) > 0
+                THEN date_parse("ChargePeriodStart", '%m/%d/%Y')
+            END) AS last_seen
+        FROM iceberg.gold.dest_modelo_focus
+        WHERE _billing_period = '{period}'
+          AND "ChargePeriodStart" IS NOT NULL
+          AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
+          AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
+          AND date_parse("ChargePeriodStart", '%m/%d/%Y')
+              BETWEEN DATE '{window_start}' AND DATE '{window_end}'
+        GROUP BY 1
+        """
+        try:
+            life_rows = await execute(life_sql, timeout_s=120)
+        except Exception:
+            life_rows = []
+        for lr in life_rows:
+            fs = lr.get("first_seen")
+            ls = lr.get("last_seen")
+            fs_s = fs.isoformat() if hasattr(fs, "isoformat") else (str(fs)[:10] if fs else None)
+            ls_s = ls.isoformat() if hasattr(ls, "isoformat") else (str(ls)[:10] if ls else None)
+            born, died, _ = evaluate_vm_lifecycle(fs_s, ls_s, window_start, window_end)
+            lifecycle_by_key[(str(lr.get("resource_name") or "").strip().lower(), period)] = (born, died)
 
     exception_rules = (await db.execute(select(ShutdownExceptionRule).where(ShutdownExceptionRule.is_active == True))).scalars().all()
 
@@ -592,6 +639,10 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
     out: list[VmMonthSaving] = []
     for r in rows:
         bp = str(r["billing_period"])
+        rname = str(r.get("resource_name") or "").strip().lower()
+        born, died = lifecycle_by_key.get((rname, bp), (False, False))
+        if born or died:
+            continue
         baseline = float(r["baseline_hours"] or _hours_in_month(bp))
         hours_billed = float(r["hours_billed"] or 0)
         price = float(r["effective_price_hour"] or 0)
@@ -1084,7 +1135,7 @@ async def savings_monthly():
         COALESCE(SUM(saving_brl), 0) AS saving_brl
     FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
     WHERE saved_hours > 0
-      AND COALESCE(padrao, '') NOT IN ('LIGADA_24x7', 'POUCO_HISTORICO')
+      AND is_desligue_programado = TRUE
     GROUP BY 1
     ORDER BY 1
     """
@@ -1121,10 +1172,12 @@ async def padroes_periodos():
     """Lista todos os períodos disponíveis na Dimon de saving (para o seletor
     de data do dashboard — inclui meses sem padrões relevantes, como jan/2026
     que é 100% POUCO_HISTORICO)."""
-    sql = """
+    list_filter = desligue_list_filter_sql()
+    sql = f"""
     SELECT _billing_period AS period,
            COUNT(*) AS resources
     FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    WHERE {list_filter}
     GROUP BY 1
     ORDER BY 1
     """
@@ -1149,7 +1202,6 @@ async def padroes_distribuicao(period: str | None = None):
 
     ``period`` opcional (YYYYMM). Default: mês mais recente disponível.
     """
-    explicit = bool(period)
     if not period:
         try:
             pr = await execute(
@@ -1161,11 +1213,8 @@ async def padroes_distribuicao(period: str | None = None):
             pass
     if not period:
         return PadroesResponse(billing_period="", rows=[])
-    # Filtra padrões não-acionáveis por padrão (LIGADA_24x7 e POUCO_HISTORICO
-    # são estados informativos, não padrões de desligue). Quando um período é
-    # selecionado explicitamente (ex.: jan/2026, que é 100% POUCO_HISTORICO),
-    # inclui POUCO_HISTORICO para o usuário ver os dados do mês.
-    pouco_filter = "" if explicit else "AND padrao != 'POUCO_HISTORICO'"
+    # Lista apenas padrões relevantes — exclui efêmeras (CICLO_CURTO, AKS) e 24×7.
+    list_filter = desligue_list_filter_sql()
     sql = f"""
     SELECT
         COALESCE(padrao, 'SEM_PADRAO') AS padrao,
@@ -1175,8 +1224,7 @@ async def padroes_distribuicao(period: str | None = None):
         MAX(is_desligue_programado) AS dp
     FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
-      AND padrao != 'LIGADA_24x7'
-      {pouco_filter}
+      AND {list_filter}
     GROUP BY 1
     ORDER BY saving_brl DESC
     """
@@ -1233,6 +1281,7 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
             pass
     if not period or not padrao:
         return PadraoRecursosResponse(billing_period=period or "", padrao=padrao or "", rows=[])
+    list_filter = desligue_list_filter_sql()
     sql = f"""
     SELECT
         resource_name,
@@ -1244,7 +1293,8 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
         is_desligue_programado
     FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
-      AND padrao = '{padrao}'
+      AND padrao = '{padrao.replace("'", "''")}'
+      AND {list_filter}
     ORDER BY saving_brl DESC
     """
     try:
@@ -1288,6 +1338,24 @@ class VmDailyUsageResponse(BaseModel):
     days: int
     total_hours: float
     total_cost_brl: float
+    window_start: str | None = None
+    window_end: str | None = None
+    validation_start: str | None = None
+    validation_end: str | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
+    lifecycle: str = "ok"
+    is_recently_born: bool = False
+    is_recently_died: bool = False
+    active_days: int = 0
+    window_hours: float = 0
+    window_uptime_pct: float = 0
+    monthly_uptime_pct: float | None = None
+    min_active_days: int = 5
+    min_active_hours_per_day: int = 4
+    max_uptime_pct: float = 0.75
+    padrao: str | None = None
+    is_desligue_programado: bool = False
     rows: list[VmDailyUsageItem]
 
 
@@ -1297,12 +1365,20 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
 
     Usado pelo dialog de detalhe do recurso — mostra o padrão de consumo dia a
     dia (horas e custo), permitindo ver quando a VM foi desligada/ligada.
+    Inclui flags de ciclo de vida (nascimento/morte na janela de 30 dias).
     """
     from datetime import date as _date, timedelta as _td
     import calendar as _cal
     name = resource_name.strip()
+    empty = VmDailyUsageResponse(
+        resource_name=name,
+        days=0,
+        total_hours=0,
+        total_cost_brl=0,
+        rows=[],
+    )
     if not name:
-        return VmDailyUsageResponse(resource_name=name, days=0, total_hours=0, total_cost_brl=0, rows=[])
+        return empty
     days = min(max(int(days), 7), 90)
 
     # Sempre usa o MÊS REALIZADO (anterior ao atual — fechado), nunca o mês
@@ -1313,6 +1389,9 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
     done_period = f"{done_y:04d}{done_m:02d}"
     end_date = _date(done_y, done_m, _cal.monthrange(done_y, done_m)[1])  # fim do mês realizado
     start = (end_date - _td(days=days - 1)).strftime("%Y-%m-%d")
+    window_start, window_end = _desligue_window_dates(done_period)
+    validation_start, validation_end = _desligue_validation_dates(done_period)
+    baseline_hours = float(_baseline_hours(done_period))
 
     # Períodos: realizado + 1 anterior (a janela de 30 dias termina no fim do
     # mês realizado e pode cruzar até ~2 dias do mês anterior).
@@ -1338,6 +1417,47 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
         rows = await execute(sql, timeout_s=120)
     except Exception:
         rows = []
+    active_rows = [r for r in rows if float(r.get("hours") or 0) > 0]
+    first_seen = str(active_rows[0]["day"]) if active_rows else None
+    last_seen = str(active_rows[-1]["day"]) if active_rows else None
+    is_born, is_died, lifecycle = evaluate_vm_lifecycle(
+        first_seen, last_seen, window_start, window_end
+    )
+    quality = evaluate_daily_quality(
+        rows,
+        validation_start=validation_start,
+        validation_end=validation_end,
+        total_hours=sum(float(r.get("hours") or 0) for r in rows),
+        baseline_hours=baseline_hours,
+    )
+    padrao = None
+    is_desligue = False
+    try:
+        dimon_rows = await execute(
+            f"""
+            SELECT padrao, is_desligue_programado, active_days, window_hours,
+                   window_uptime_pct, monthly_uptime_pct
+            FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+            WHERE _billing_period = '{done_period}'
+              AND LOWER(TRIM(resource_name)) = LOWER(TRIM('{name.replace("'", "''")}'))
+            LIMIT 1
+            """,
+            timeout_s=60,
+        )
+        if dimon_rows:
+            dimon = dimon_rows[0]
+            padrao = str(dimon.get("padrao") or "") or None
+            is_desligue = bool(dimon.get("is_desligue_programado"))
+            if dimon.get("active_days") is not None:
+                quality["active_days"] = int(dimon.get("active_days") or 0)
+            if dimon.get("window_hours") is not None:
+                quality["window_hours"] = round(float(dimon.get("window_hours") or 0), 2)
+            if dimon.get("window_uptime_pct") is not None:
+                quality["window_uptime_pct"] = round(float(dimon.get("window_uptime_pct") or 0), 4)
+            if dimon.get("monthly_uptime_pct") is not None:
+                quality["monthly_uptime_pct"] = round(float(dimon.get("monthly_uptime_pct") or 0), 4)
+    except Exception:
+        pass
     total_h = sum(float(r["hours"] or 0) for r in rows)
     total_c = sum(float(r["cost_brl"] or 0) for r in rows)
     return VmDailyUsageResponse(
@@ -1345,6 +1465,24 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
         days=days,
         total_hours=round(total_h, 2),
         total_cost_brl=round(total_c, 2),
+        window_start=window_start,
+        window_end=window_end,
+        validation_start=validation_start,
+        validation_end=validation_end,
+        first_seen=first_seen,
+        last_seen=last_seen,
+        lifecycle=lifecycle,
+        is_recently_born=is_born,
+        is_recently_died=is_died,
+        active_days=int(quality["active_days"]),
+        window_hours=float(quality["window_hours"]),
+        window_uptime_pct=float(quality["window_uptime_pct"]),
+        monthly_uptime_pct=quality.get("monthly_uptime_pct"),
+        min_active_days=int(quality["min_active_days"]),
+        min_active_hours_per_day=int(quality["min_active_hours_per_day"]),
+        max_uptime_pct=float(quality["max_uptime_pct"]),
+        padrao=padrao,
+        is_desligue_programado=is_desligue,
         rows=[
             VmDailyUsageItem(
                 day=str(r["day"]),
@@ -1388,7 +1526,7 @@ async def saving_departamento(period: str | None = None):
         SELECT d.resource_id, d.saved_hours, d.saving_brl
         FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm d
         WHERE d._billing_period = '{period}'
-          AND d.padrao NOT IN ('POUCO_HISTORICO', 'LIGADA_24x7')
+          AND d.is_desligue_programado = TRUE
     ),
     gold_dept AS (
         SELECT
@@ -1439,7 +1577,8 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
     Este endpoint roda a materialização histórica completa (janeiro até o mês
     anterior ao atual) e pode demorar vários minutos.
     """
-    from app.services.dimon_materialization import materialize_saving_history
+    from app.services.dimon_materialization import SAVING_DIMON_CODE, materialize_saving_history
+    from app.models.dimon_rule import DimonRule
     from app.models.etl_task import EtlTask
 
     task = EtlTask(
@@ -1453,7 +1592,14 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
     await db.refresh(task)
 
     try:
-        summary = await materialize_saving_history()
+        saving_rule = (await db.execute(
+            select(DimonRule)
+            .options(selectinload(DimonRule.sources))
+            .where(DimonRule.code == SAVING_DIMON_CODE)
+        )).scalar_one_or_none()
+        summary = await materialize_saving_history(
+            sources=list(saving_rule.sources) if saving_rule else None
+        )
         task.status = "COMPLETED"
         task.phase = f"Saving por desligue: {len(summary['periods'])} meses materializados"
         task.rows_destination = sum(summary["rows"].values())
