@@ -129,8 +129,17 @@ class Settings(BaseSettings):
     )
 
     # Environment control
-    env: str = os.getenv("ENV", "dev")
+    env: str = os.getenv("ENV", "development")
     skip_seed: bool = os.getenv("SKIP_SEED", "false").lower() == "true"
+
+    # --- Auth / RBAC ---
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "dev-insecure-secret-change-me")
+    jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+    access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+    refresh_token_expire_days: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    admin_initial_password: str = os.getenv("ADMIN_INITIAL_PASSWORD", "")
+    auth_enabled: bool = os.getenv("AUTH_ENABLED", "true").lower() == "true"
+    dev_master_token: str = os.getenv("DEV_MASTER_TOKEN", "")
 
     # --- Azure 4P (loaded from .env-4p via mapping above) ---
     azure_4p_tenant_id: str = os.getenv("AZURE_4P_TENANT_ID", "")

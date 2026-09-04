@@ -4,13 +4,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, auth as auth_router
 from app.seed import seed
 from app.services import scheduler_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import logging
+    _log = logging.getLogger("app.main")
+    if settings.env == "production" and not settings.auth_enabled:
+        _log.warning("AUTH_ENABLED=false ignorado em production: autenticação sempre ligada em produção")
+    if settings.env == "production" and settings.jwt_secret_key == "dev-insecure-secret-change-me":
+        raise RuntimeError("JWT_SECRET_KEY deve ser configurada em production")
     async with engine.begin() as conn:
         from app.models.source_connection import SourceConnection  # noqa: F401
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
@@ -31,6 +37,7 @@ async def lifespan(app: FastAPI):
         from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
+        from app.models.identity import User, Role, RolePermission, Group, RefreshToken  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
@@ -262,6 +269,8 @@ async def lifespan(app: FastAPI):
 
     async with async_session() as db:
         await seed(db)
+        from app.seed_identity import seed_identity
+        await seed_identity(db)
         from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules
         await ensure_default_config(db)
         await ensure_provider_forecast_rules(db)
@@ -292,6 +301,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router.router)
 app.include_router(connections.router)
 app.include_router(csv_upload.router)
 app.include_router(etl.router)
