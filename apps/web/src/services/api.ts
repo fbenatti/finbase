@@ -65,7 +65,110 @@ export async function getDatameshDashboard(signal?: AbortSignal): Promise<Datame
   const { data } = await api.post("/visoes-consumo-ia/dashboard/datamesh", {}, { signal });
   return data;
 }
-export async function getWisperDashboard(signal?: AbortSignal): Promise<any> { const { data } = await api.post("/visoes-consumo-ia/dashboard/wisper", {}, { signal }); return data; }
+export type WisperDashboardPayload = {
+  available: boolean;
+  empty?: boolean;
+  generated_at?: string;
+  reference?: {
+    closed_period?: string;
+    closed_label?: string;
+    current_period?: string;
+    current_label?: string;
+    financial_source?: string;
+    forecast_source?: string;
+    inventory_snapshot_at?: string | null;
+    telemetry_window_days?: number | null;
+    telemetry_window_from?: string | null;
+    telemetry_window_to?: string | null;
+  };
+  executive?: {
+    total_closed?: number;
+    total_prev_closed?: number;
+    mom_delta_pct?: number | null;
+    current_partial?: number;
+    current_forecast?: number;
+    forecast_remaining?: number | null;
+    run_rate_daily?: number;
+    monthly_projection?: number;
+    hosting_dedicated?: {
+      total?: number;
+      share_pct?: number;
+      generative_ai?: { cost?: number; share_pct?: number; bucket?: string; source?: string };
+      gpu_hosting?: { cost?: number; share_pct?: number; bucket?: string; source?: string };
+    };
+  };
+  buckets?: Record<string, { cost?: number; share_pct?: number; prev?: number }>;
+  capacity?: {
+    gpu_hours?: number;
+    gpu_average?: number;
+    ai_unit_hours?: number;
+    ai_unit_average?: number;
+    ocpu_hours?: number;
+    gb_hours?: number;
+    daily?: Array<{ date: string; cost: number; gpu_hours?: number; ai_unit_hours?: number; buckets?: Record<string, number>; is_partial?: boolean }>;
+    daily_closed?: Array<{ date: string; cost: number; gpu_hours?: number; ai_unit_hours?: number; buckets?: Record<string, number> }>;
+    reconciliation?: { note?: string };
+  };
+  monthly?: Array<{
+    period: string;
+    label: string;
+    buckets?: Record<string, number>;
+    total?: number;
+    forecast_total?: number | null;
+    is_partial?: boolean;
+    is_forecast_only?: boolean;
+  }>;
+  skus?: Array<{
+    sku: string;
+    executive_name?: string;
+    bucket?: string;
+    description?: string;
+    quantity?: number;
+    unit?: string;
+    cost?: number;
+    share_pct?: number;
+    unit_price?: number | null;
+    shapes?: string;
+  }>;
+  subaccounts?: Array<{ name: string; cost: number; share_pct?: number }>;
+  insights?: Array<{ name: string; value?: number; note?: string }>;
+  operational?: {
+    available?: boolean;
+    window?: { min?: string; max?: string; days?: number };
+    daily?: Array<{ date: string; input_tokens?: number; output_tokens?: number }>;
+    kpis?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      invocations?: number;
+      latency?: number;
+      errors?: number;
+      success_rate?: number | null;
+      gpu_utilization?: number | null;
+      gpu_utilization_source?: string | null;
+    };
+    inventory?: {
+      ai_clusters?: Array<{ unit_shape?: string; unit_count?: number }>;
+      endpoints_by_model?: Array<{ model: string; count: number }>;
+      compute_gpu?: Array<{ shape: string; count: number }>;
+      compute_support?: Array<{ shape: string; count: number }>;
+      by_compartment?: Array<{ compartment: string; ai_clusters: number; endpoints: number; compute_instances: number }>;
+      totals?: { gpu_units_dedicated?: number; endpoints?: number; compute_instances?: number };
+      collected_at?: string | null;
+    };
+  };
+  unit_economics?: {
+    cost_per_mm_total_tokens?: number | null;
+    is_estimate?: boolean;
+    summary?: string;
+    note?: string;
+  };
+  notes?: string[];
+};
+
+export async function getWisperDashboard(signal?: AbortSignal): Promise<WisperDashboardPayload> {
+  const { data } = await api.post("/visoes-consumo-ia/dashboard/wisper", {}, { signal });
+  return data;
+}
 
 // ── Reservas Azure (RI + Savings Plans) ────────────────────────────────
 export async function getReservationSources(signal?: AbortSignal) {
@@ -1758,13 +1861,13 @@ export const FORECAST_MANUAL_PIVOT_ID = -1000000;
 
 type ExpectedViewResult = { director: string; department_id?: number; rows: ExpectedViewRow[]; drivers: ExpectedViewDriver[] };
 
-export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal, includeSharedCost = false): Promise<ExpectedViewResult> {
-  const key = director + "|" + year + "|" + (departmentId ?? "") + "|" + (includeSharedCost ? 1 : 0);
+export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal, includeSharedCost = false, directorView = false): Promise<ExpectedViewResult> {
+  const key = director + "|" + year + "|" + (departmentId ?? "") + "|" + (includeSharedCost ? 1 : 0) + "|" + (directorView ? 1 : 0);
   let entry = expectedViewInflight.get(key);
   if (!entry || entry.controller.signal.aborted) {
     const controller = new AbortController();
     trackAnalysisAbort(controller);
-    const promise = api.post("/analysis/expected-view", { director, year, department_id: departmentId, include_shared_cost: includeSharedCost }, { timeout: 120000, signal: controller.signal }).then(result => result.data as ExpectedViewResult).finally(() => {
+    const promise = api.post("/analysis/expected-view", { director, year, department_id: departmentId, include_shared_cost: includeSharedCost, director_view: directorView }, { timeout: 120000, signal: controller.signal }).then(result => result.data as ExpectedViewResult).finally(() => {
       const current = expectedViewInflight.get(key);
       if (current?.controller === controller) expectedViewInflight.delete(key);
     });

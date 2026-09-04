@@ -1,5 +1,7 @@
 """Testes da decomposição executiva de custo Aura Brain / Vivo Mais (Dimon)."""
 
+from datetime import date
+
 import pytest
 
 from app.services import aura_brain_vivo_mais as dashboard_service
@@ -9,6 +11,7 @@ from app.services.aura_brain_vivo_mais import (
     ia_family_for,
     _empty_classes,
     _infra_by_subcategory,
+    _last_closed_period,
     _mom_pct,
     _monthly_series,
     _ondemand_ptu_estimate,
@@ -274,3 +277,5 @@ def test_empty_classes_and_period_label():
     assert _empty_classes() == {"ptu": 0.0, "tokens_ondemand": 0.0, "ia_service": 0.0, "infra": 0.0}
     assert _period_label("202608") == "ago/2026"
     assert _period_label("") == "—"
+    assert _last_closed_period(date(2026, 9, 4)) == "202608"
+    assert _last_closed_period(date(2026, 1, 4)) == "202512"

@@ -9,7 +9,7 @@ import Dimon from "../Dimon/Dimon";
 
 const TABS = [
   { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
-  { id: "classification", label: "Classificar Departamentos", perms: [{ module: "rules", scope: null }] },
+  { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Camada Dimon de Custo", perms: [{ module: "dimon", scope: null }] },
   { id: "visao-contabil", label: "Visão Contábil", perms: [{ module: "dimon", scope: "visao-contabil" }, { module: "forecast", scope: "visao-contabil" }] },

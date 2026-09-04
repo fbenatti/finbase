@@ -19,6 +19,7 @@ import {
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
+import { ORG } from "../../constants/orgLabels";
 
 interface CondEntry { field: string; operator: string; values: string; logic: string }
 
@@ -257,7 +258,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
             departments={departments}
             value={form.department_id}
             onChange={(departmentId) => setForm((prev) => ({ ...prev, department_id: departmentId }))}
-            label="Departamento"
+            label="Organograma"
             helperText="Escolha o departamento na hierarquia, como em Departamentos > Editar Departamento."
           />
 
@@ -510,7 +511,7 @@ export function ClassificationRulesTab() {
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
         <Box>
-          <Typography variant="h6">Classificar Departamentos</Typography>
+          <Typography variant="h6">Classificar modelo organizacional</Typography>
           <Typography variant="body2" color="text.secondary">
             Regras que classificam linhas de custo em departamentos da hierarquia.
           </Typography>

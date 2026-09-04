@@ -4,6 +4,7 @@ import {
 } from "@mui/material";
 import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import type { Department } from "../services/api";
+import { ORG } from "../constants/orgLabels";
 
 export function flattenDepartments(
   nodes: Department[],
@@ -59,9 +60,9 @@ export default function DepartmentTreePicker({
   departments,
   value,
   onChange,
-  label = "Departamento",
+  label = ORG.node,
   helperText,
-  placeholder = "Selecione o departamento",
+  placeholder = ORG.selectNode,
   allowClear = false,
   clearLabel = "Nenhum",
   blockedIds = new Set<number>(),

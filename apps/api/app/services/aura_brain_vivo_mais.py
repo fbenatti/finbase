@@ -28,6 +28,7 @@ infraestrutura não é específica do Vivo Mais.
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 import logging
 import time
 from typing import Any
@@ -143,6 +144,14 @@ def _period_label(period: str) -> str:
         return f"{_MONTH_LABELS.get(month, str(month).zfill(2))}/{year}"
     except (ValueError, TypeError):
         return str(period or "—")
+
+
+def _last_closed_period(today: date | None = None) -> str:
+    """Retorna o mês anterior ao atual no formato YYYYMM."""
+    reference = today or date.today()
+    if reference.month == 1:
+        return f"{reference.year - 1}12"
+    return f"{reference.year}{reference.month - 1:02d}"
 
 
 def _empty_classes() -> dict[str, float]:
@@ -483,10 +492,17 @@ async def load_project_cost_dashboard(
         _COST_CACHE[cache_key] = (time.monotonic(), payload)
         return payload
 
-    # O dashboard é uma fotografia do último mês realizado fechado. O último
-    # período disponível pode ainda estar parcial; por isso usamos sempre o
-    # realizado imediatamente anterior, quando existir.
-    current_idx = anchor_idx - 1 if anchor_idx > 0 else anchor_idx
+    # O realizado de referência é o mês fechado anterior ao mês corrente.
+    # Se a carga já contém o mês atual parcial, ele é ignorado; se o último
+    # realizado disponível já é o mês anterior, ele não deve ser recuado de novo.
+    closed_period = _last_closed_period()
+    closed_realized_indices = [
+        i for i, month in enumerate(series_all)
+        if month["period"] <= closed_period
+        and month.get("realizado")
+        and month["realizado"].get("total") is not None
+    ]
+    current_idx = closed_realized_indices[-1] if closed_realized_indices else anchor_idx
     anchor = series_all[current_idx]
     if period_range == "current_year":
         anchor_year = anchor["period"][:4]
@@ -494,7 +510,12 @@ async def load_project_cost_dashboard(
     else:
         series = series_all
     current = anchor
-    prev = series_all[current_idx - 1] if current_idx > 0 else None
+    previous_realized_indices = [
+        i for i in range(current_idx)
+        if series_all[i].get("realizado")
+        and series_all[i]["realizado"].get("total") is not None
+    ]
+    prev = series_all[previous_realized_indices[-1]] if previous_realized_indices else None
     current_period = current["period"]
     # Todos os detalhes usam a mesma referência do KPI.
     detail_period = current_period

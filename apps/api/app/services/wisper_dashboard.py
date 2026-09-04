@@ -25,6 +25,16 @@ DIMON_TABLE = "iceberg.dimon.dest_dm_cost_custo_wisper"
 
 WISPER_SUBACCOUNT_RE = "whisper|llm|poc-stt"
 
+BUCKET_GPU = "Hospedagem GPU (compute + suporte)"
+BUCKETS = ("Generative AI", BUCKET_GPU, "Dados e armazenamento", "Infraestrutura")
+
+SKU_EXECUTIVE_NAMES = {
+    "B95909": "GPU dedicada (GPU-h)",
+    "B108085": "Generative AI (AI unit-h)",
+    "B97384": "Suporte compute (OCPU-h)",
+    "B97385": "Suporte compute (GB-h)",
+}
+
 
 def _s(v: Any) -> str:
     return str(v or "").strip()
@@ -47,7 +57,7 @@ def _bucket(service: str, subcategory: str, sku: str) -> str:
     if service == "GENERATIVE_AI":
         return "Generative AI"
     if subcategory == "GPU HOURS" or sku in {"B95909", "B97384", "B97385"}:
-        return "Hospedagem GPU"
+        return BUCKET_GPU
     if service in {"OBJECTSTORE", "DATABASE", "BLOCK_STORAGE"}:
         return "Dados e armazenamento"
     return "Infraestrutura"
@@ -67,6 +77,118 @@ def _period_date(period: str, day: int) -> str:
 
 def _add_insight(name: str, value: Any, note: str = "") -> dict[str, Any]:
     return {"name": name, "value": value, "note": note}
+
+
+def _is_gpu_shape(shape: str) -> bool:
+    haystack = shape.upper()
+    return any(token in haystack for token in ("GPU", "A10", "A100", "H100", "L40", "BM."))
+
+
+def _next_period(period: str) -> str:
+    y, m = int(period[:4]), int(period[4:6])
+    m += 1
+    if m > 12:
+        y += 1
+        m = 1
+    return f"{y}{m:02d}"
+
+
+def _periods_until_year_end(anchor: str) -> list[str]:
+    year = anchor[:4]
+    end = f"{year}12"
+    periods: list[str] = []
+    current = anchor
+    while current <= end:
+        periods.append(current)
+        if current == end:
+            break
+        current = _next_period(current)
+    return periods
+
+
+def _merge_forecast_monthly(
+    monthly: list[dict[str, Any]],
+    forecast_by_period: dict[str, dict[str, Any]],
+    current_period: str,
+) -> list[dict[str, Any]]:
+    """Attach forecast totals and future months from Dimon/planning."""
+    by_period = {item["period"]: dict(item) for item in monthly}
+    for period, forecast in forecast_by_period.items():
+        entry = by_period.setdefault(
+            period,
+            {
+                "period": period,
+                "label": _label(period),
+                "buckets": {bucket: 0.0 for bucket in BUCKETS},
+                "total": 0.0,
+                "is_partial": period == current_period,
+                "is_forecast_only": period > current_period,
+            },
+        )
+        entry["forecast_total"] = round(_money(forecast.get("total")), 2)
+        entry["forecast_buckets"] = {
+            bucket: round(_money(forecast.get("buckets", {}).get(bucket)), 2)
+            for bucket in BUCKETS
+        }
+        entry["is_forecast_only"] = period > current_period
+        if period > current_period:
+            entry["total"] = entry["forecast_total"]
+            entry["buckets"] = dict(entry["forecast_buckets"])
+    for period, entry in by_period.items():
+        forecast_total = _money(forecast_by_period.get(period, {}).get("total"))
+        entry["forecast_total"] = round(forecast_total, 2) if forecast_total else None
+        if period == current_period and forecast_total:
+            partial = _money(entry.get("total"))
+            entry["forecast_remaining"] = round(max(forecast_total - partial, 0.0), 2)
+    return [by_period[p] for p in sorted(by_period)]
+
+
+async def _forecast_by_period(
+    current_period: str,
+    cancel_event: asyncio.Event | None,
+) -> dict[str, dict[str, Any]]:
+    """Forecast monthly totals from Dimon until December of the current year."""
+    end_period = f"{current_period[:4]}12"
+    try:
+        rows = await trino_execute(
+            f"""
+            SELECT _billing_period AS period,
+                   servicename,
+                   servicesubcategory,
+                   skumeter,
+                   SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS amount
+            FROM {DIMON_TABLE}
+            WHERE lower(tipo) = 'forecast'
+              AND _billing_period >= '{current_period}'
+              AND _billing_period <= '{end_period}'
+            GROUP BY 1, 2, 3, 4
+            """,
+            timeout_s=60,
+            cancel_event=cancel_event,
+        )
+    except Exception:
+        return {}
+
+    by_period: dict[str, dict[str, Any]] = defaultdict(lambda: {"total": 0.0, "buckets": defaultdict(float)})
+    for row in rows or []:
+        period = _s(row.get("period"))
+        if not period:
+            continue
+        bucket = _bucket(
+            _s(row.get("servicename")),
+            _s(row.get("servicesubcategory")),
+            _s(row.get("skumeter")),
+        )
+        amount = _money(row.get("amount"))
+        by_period[period]["total"] += amount
+        by_period[period]["buckets"][bucket] += amount
+    return {
+        period: {
+            "total": values["total"],
+            "buckets": dict(values["buckets"]),
+        }
+        for period, values in by_period.items()
+    }
 
 
 async def _financials(
@@ -232,6 +354,12 @@ async def _financials(
         skus.append(
             {
                 "sku": sku,
+                "executive_name": SKU_EXECUTIVE_NAMES.get(sku, _s(r.get("servicesubcategory")) or _s(r.get("servicename"))),
+                "bucket": _bucket(
+                    _s(r.get("servicename")),
+                    _s(r.get("servicesubcategory")),
+                    sku,
+                ),
                 "service": _s(r.get("servicename")),
                 "description": f"{_s(r.get('servicename'))} — {_s(r.get('servicesubcategory'))}",
                 "subcategory": _s(r.get("servicesubcategory")),
@@ -259,14 +387,15 @@ async def _financials(
 
     hours_in_closed = 24 * calendar.monthrange(int(closed_period[:4]), int(closed_period[4:6]))[1]
 
-    # 4. Daily series for closed period + current partial (used for run-rate and insights).
-    # Only the dates of the two displayed months — cross-month usage (e.g. start 2026-06-30
-    # billed in July) stays out of the chart so the bars reconcile with the month KPIs.
+    # 4. Daily series for closed period (component cost + billed capacity).
     closed_month = closed_period[:4] + "-" + closed_period[4:6]
     current_month = current_period[:4] + "-" + current_period[4:6]
     daily_rows = await trino_execute(
         f"""
         SELECT substr(chargeperiodstart, 1, 10) AS dia,
+               servicename,
+               servicesubcategory,
+               skumeter,
                SUM(billedcost) AS custo,
                SUM(CASE WHEN skumeter = 'B95909' THEN consumedquantity ELSE 0 END) AS gpu_hours,
                SUM(CASE WHEN skumeter = 'B108085' THEN consumedquantity ELSE 0 END) AS ai_unit_hours,
@@ -274,35 +403,59 @@ async def _financials(
         FROM {FOCUS_TABLE}
         WHERE {scope_sql}
           AND substr(chargeperiodstart, 1, 7) IN ('{closed_month}', '{current_month}')
-        GROUP BY 1
+        GROUP BY 1, 2, 3, 4
         ORDER BY 1
         """,
         timeout_s=120,
         cancel_event=cancel_event,
     )
 
-    daily: list[dict[str, Any]] = []
-    closed_daily: list[float] = []
-    current_daily: list[float] = []
+    daily_by_date: dict[str, dict[str, Any]] = {}
     for r in daily_rows or []:
         dia = _s(r.get("dia"))
+        if not dia:
+            continue
+        bucket = _bucket(
+            _s(r.get("servicename")),
+            _s(r.get("servicesubcategory")),
+            _s(r.get("skumeter")),
+        )
         custo = _money(r.get("custo"))
         gpu_hours = _money(r.get("gpu_hours"))
         ai_unit_hours = _money(r.get("ai_unit_hours"))
-        daily.append(
+        entry = daily_by_date.setdefault(
+            dia,
             {
                 "date": dia,
-                "cost": custo,
-                "gpu_hours": round(gpu_hours, 2),
-                "gpu_units": round(gpu_hours / 24, 2) if gpu_hours else 0.0,
-                "ai_unit_hours": round(ai_unit_hours, 2),
-                "ai_units": round(ai_unit_hours / 24, 2) if ai_unit_hours else 0.0,
-            }
+                "cost": 0.0,
+                "cost_hosting": 0.0,
+                "buckets": {bucket_name: 0.0 for bucket_name in BUCKETS},
+                "gpu_hours": 0.0,
+                "ai_unit_hours": 0.0,
+                "is_partial": dia.startswith(current_period[:4] + "-" + current_period[4:6]),
+            },
         )
-        if dia.startswith(closed_period[:4] + "-" + closed_period[4:6]):
-            closed_daily.append(custo)
-        if dia.startswith(current_period[:4] + "-" + current_period[4:6]):
-            current_daily.append(custo)
+        entry["cost"] += custo
+        entry["buckets"][bucket] += custo
+        if bucket in (BUCKET_GPU, "Generative AI"):
+            entry["cost_hosting"] += custo
+        entry["gpu_hours"] += gpu_hours
+        entry["ai_unit_hours"] += ai_unit_hours
+
+    daily = [
+        {
+            **entry,
+            "cost": round(entry["cost"], 2),
+            "cost_hosting": round(entry["cost_hosting"], 2),
+            "buckets": {bucket: round(value, 2) for bucket, value in entry["buckets"].items()},
+            "gpu_hours": round(entry["gpu_hours"], 2),
+            "ai_unit_hours": round(entry["ai_unit_hours"], 2),
+        }
+        for entry in sorted(daily_by_date.values(), key=lambda item: item["date"])
+    ]
+    daily_closed = [item for item in daily if not item["is_partial"]]
+    closed_daily = [item["cost"] for item in daily_closed]
+    current_daily = [item["cost"] for item in daily if item["is_partial"]]
 
     # 5. Current partial month and run-rate projection
     # Partial = billing period total (same source as the monthly chart), so the
@@ -336,7 +489,7 @@ async def _financials(
     except Exception:
         forecast_current = 0.0
 
-    # 7. Subaccounts for closed period
+    # 7. Subaccounts for closed period (share_pct filled after closed_total is known)
     sub_rows = await trino_execute(
         f"""
         SELECT subaccountname,
@@ -350,7 +503,7 @@ async def _financials(
         timeout_s=60,
         cancel_event=cancel_event,
     )
-    subaccounts = [
+    subaccounts_raw = [
         {"name": _s(r.get("subaccountname")) or "Não informado", "cost": _money(r.get("cost"))}
         for r in sub_rows or []
     ]
@@ -387,12 +540,12 @@ async def _financials(
     mom = ((closed_total - prev_total) / prev_total * 100) if prev_total else None
 
     # Bucket breakdown for closed period
-    buckets = {k: by_period[closed_period].get(k, 0.0) for k in ("Generative AI", "Hospedagem GPU", "Dados e armazenamento", "Infraestrutura")}
+    buckets = {k: by_period[closed_period].get(k, 0.0) for k in BUCKETS}
 
     # Monthly chart series (realizado for every collected period)
     monthly = []
     for p in all_periods:
-        vals = {k: by_period[p].get(k, 0.0) for k in ("Generative AI", "Hospedagem GPU", "Dados e armazenamento", "Infraestrutura")}
+        vals = {k: by_period[p].get(k, 0.0) for k in BUCKETS}
         monthly.append(
             {
                 "period": p,
@@ -400,8 +553,24 @@ async def _financials(
                 "buckets": vals,
                 "total": period_total.get(p, 0.0),
                 "is_partial": p == current_period,
+                "is_forecast_only": False,
             }
         )
+
+    forecast_by_period = await _forecast_by_period(current_period, cancel_event)
+    monthly = _merge_forecast_monthly(monthly, forecast_by_period, current_period)
+
+    genai_cost = buckets.get("Generative AI", 0.0)
+    gpu_cost = buckets.get(BUCKET_GPU, 0.0)
+    hosting_total = genai_cost + gpu_cost
+
+    subaccounts = [
+        {
+            **item,
+            "share_pct": round(item["cost"] / closed_total * 100, 2) if closed_total else 0.0,
+        }
+        for item in subaccounts_raw
+    ]
 
     return {
         "available": True,
@@ -411,6 +580,8 @@ async def _financials(
             "closed_label": _label(closed_period),
             "current_period": current_period,
             "current_label": _label(current_period),
+            "financial_source": "FOCUS",
+            "forecast_source": "Dimon/planning",
         },
         "executive": {
             "total_closed": round(closed_total, 2),
@@ -418,8 +589,25 @@ async def _financials(
             "mom_delta_pct": round(mom, 2) if mom is not None else None,
             "current_partial": round(current_partial, 2),
             "current_forecast": round(forecast_current, 2),
+            "forecast_remaining": round(max(forecast_current - current_partial, 0.0), 2) if forecast_current else None,
             "run_rate_daily": round(run_rate_7d, 2),
             "monthly_projection": round(projection, 2),
+            "hosting_dedicated": {
+                "total": round(hosting_total, 2),
+                "share_pct": round(hosting_total / closed_total * 100, 2) if closed_total else 0.0,
+                "generative_ai": {
+                    "cost": round(genai_cost, 2),
+                    "share_pct": round(genai_cost / closed_total * 100, 2) if closed_total else 0.0,
+                    "bucket": "Generative AI",
+                    "source": "FOCUS · serviço GENERATIVE_AI",
+                },
+                "gpu_hosting": {
+                    "cost": round(gpu_cost, 2),
+                    "share_pct": round(gpu_cost / closed_total * 100, 2) if closed_total else 0.0,
+                    "bucket": BUCKET_GPU,
+                    "source": "FOCUS · GPU-h, OCPU-h e GB-h de suporte",
+                },
+            },
         },
         "buckets": {
             k: {
@@ -437,6 +625,15 @@ async def _financials(
             "ocpu_hours": round(ocpu_hours, 2),
             "gb_hours": round(gb_hours, 2),
             "daily": daily,
+            "daily_closed": daily_closed,
+            "reconciliation": {
+                "billed_gpu_hours": round(gpu_hours, 2),
+                "billed_ai_unit_hours": round(ai_unit_hours, 2),
+                "note": (
+                    "Capacidade faturada vem da FOCUS (horas cobradas). "
+                    "O inventário OCI mostra recursos provisionados no snapshot mais recente."
+                ),
+            },
         },
         "skus": [
             {
@@ -656,19 +853,54 @@ async def _operational(
     endpoints: list[dict[str, Any]] = []
     compute_by_shape: dict[str, dict[str, Any]] = {}
     gpu_units = 0
+    inventory_collected_at: str | None = None
+    by_compartment: dict[str, dict[str, Any]] = {}
+    endpoints_by_model: dict[str, dict[str, Any]] = {}
     for r in inventory:
+        if r.get("collected_at") and not inventory_collected_at:
+            inventory_collected_at = r["collected_at"]
+        compartment = r.get("compartment_name") or r.get("compartment_id") or "Não informado"
+        comp_entry = by_compartment.setdefault(
+            compartment,
+            {
+                "compartment": compartment,
+                "ai_clusters": 0,
+                "endpoints": 0,
+                "compute_instances": 0,
+                "gpu_units": 0.0,
+            },
+        )
         rt = r["resource_type"]
         if rt == "dedicated_ai_cluster":
-            ai_clusters.append(r)
+            ai_clusters.append({**r, "financial_bucket": "Generative AI", "source": "OCI GenAI API"})
             gpu_units += r["unit_count"] if r["unit_count"] else 0
+            comp_entry["ai_clusters"] += 1
+            comp_entry["gpu_units"] += _money(r.get("unit_count"))
         elif rt == "endpoint":
-            endpoints.append(r)
+            endpoints.append({**r, "financial_bucket": "Generative AI", "source": "OCI GenAI API"})
+            comp_entry["endpoints"] += 1
+            model = r.get("model_id") or "Modelo não informado"
+            model_entry = endpoints_by_model.setdefault(
+                model,
+                {"model": model, "count": 0, "states": defaultdict(int)},
+            )
+            model_entry["count"] += 1
+            model_entry["states"][r.get("lifecycle_state") or "UNKNOWN"] += 1
         elif rt == "compute_instance":
             shape = r["unit_shape"] or "Não informado"
+            role = "gpu_compute" if _is_gpu_shape(shape) else "support_infra"
             if shape not in compute_by_shape:
-                compute_by_shape[shape] = {"shape": shape, "count": 0, "states": defaultdict(int)}
+                compute_by_shape[shape] = {
+                    "shape": shape,
+                    "count": 0,
+                    "states": defaultdict(int),
+                    "role": role,
+                    "financial_bucket": BUCKET_GPU if role == "gpu_compute" else "Infraestrutura",
+                    "source": "OCI Compute API",
+                }
             compute_by_shape[shape]["count"] += 1
             compute_by_shape[shape]["states"][r["lifecycle_state"] or "UNKNOWN"] += 1
+            comp_entry["compute_instances"] += 1
 
     # GPU utilization can come from two sources:
     #  1. oci_computeagent (Bare Metal GPU hosts only — OCI does not publish it for VM.GPU)
@@ -713,10 +945,22 @@ async def _operational(
             "items": inventory,
             "ai_clusters": ai_clusters,
             "endpoints": endpoints,
+            "endpoints_by_model": [
+                {"model": model, "count": values["count"], "states": dict(values["states"])}
+                for model, values in sorted(endpoints_by_model.items(), key=lambda item: -item[1]["count"])
+            ],
             "compute_by_shape": [
-                {"shape": s, "count": v["count"], "states": dict(v["states"])}
+                {"shape": s, "count": v["count"], "states": dict(v["states"]), "role": v["role"], "financial_bucket": v["financial_bucket"], "source": v["source"]}
                 for s, v in sorted(compute_by_shape.items())
             ],
+            "compute_gpu": [
+                item for item in sorted(compute_by_shape.values(), key=lambda item: -item["count"]) if item["role"] == "gpu_compute"
+            ],
+            "compute_support": [
+                item for item in sorted(compute_by_shape.values(), key=lambda item: -item["count"]) if item["role"] == "support_infra"
+            ],
+            "by_compartment": sorted(by_compartment.values(), key=lambda item: -(item["ai_clusters"] + item["endpoints"] + item["compute_instances"])),
+            "collected_at": inventory_collected_at,
             "totals": {
                 "gpu_units_dedicated": round(gpu_units, 0),
                 "endpoints": len(endpoints),
@@ -794,10 +1038,18 @@ async def load(cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
     # Data quality checks
     data_quality = _data_quality(financials, operational)
 
+    reference = {
+        **financials["reference"],
+        "inventory_snapshot_at": operational.get("inventory", {}).get("collected_at"),
+        "telemetry_window_days": operational.get("window", {}).get("days"),
+        "telemetry_window_from": operational.get("window", {}).get("min"),
+        "telemetry_window_to": operational.get("window", {}).get("max"),
+    }
+
     return {
         "available": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "reference": financials["reference"],
+        "reference": reference,
         "executive": financials["executive"],
         "buckets": financials["buckets"],
         "capacity": financials["capacity"],
@@ -810,7 +1062,9 @@ async def load(cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
         "data_quality": data_quality,
         "notes": [
             "B95909 = GPU Hours; B97384 = OCPU de suporte; B97385 = GB Hours de suporte; B108085 = AI unit-hours.",
-            "O custo do mês em curso é parcial; a projeção usa a média móvel dos últimos 7 dias com telemetria financeira.",
+            "Hospedagem dedicada de IA = Generative AI + Hospedagem GPU (compute + suporte).",
+            "O custo do mês em curso é parcial; a projeção por run-rate usa a média móvel dos últimos 7 dias com telemetria financeira.",
+            "Realizado: FOCUS · Forecast: Dimon/planning.",
         ],
     }
 
@@ -843,6 +1097,8 @@ def _compute_unit_economics(
         "period": cost_period,
         "period_label": _label(cost_period),
         "basis": "Generative AI",
+        "is_estimate": True,
+        "excludes_gpu_hosting": True,
         "genai_cost": round(genai_cost, 2),
         "input_tokens": round(tokens_in, 2),
         "output_tokens": round(tokens_out, 2),
@@ -851,6 +1107,10 @@ def _compute_unit_economics(
         "cost_per_mm_input_tokens": None,
         "cost_per_mm_output_tokens": None,
         "cost_per_mm_total_tokens": None,
+        "summary": (
+            "Considera apenas o custo de Generative AI. Não inclui Hospedagem GPU: "
+            "não há telemetria de consumo de tokens processado nas GPUs."
+        ),
         "note": "Telemetria insuficiente para calcular custo por token.",
     }
 
@@ -868,8 +1128,9 @@ def _compute_unit_economics(
         if tokens_per_day_out > 0:
             result["cost_per_mm_output_tokens"] = round(genai_cost_per_day / (tokens_per_day_out / 1e6), 2)
         result["note"] = (
-            f"Baseado apenas em Generative AI (tokens mensuráveis): R$ {genai_cost_per_day:,.2f}/dia "
-            f"(mês fechado {_label(cost_period)}) ÷ consumo dos últimos {window_days} dias de telemetria."
+            f"Custo Generative AI de {_label(cost_period)} (R$ {genai_cost:,.0f} no mês fechado) "
+            f"÷ tokens dos últimos {window_days} dias de telemetria. "
+            "Não inclui Hospedagem GPU."
         )
 
     return result

@@ -258,6 +258,7 @@ class WidgetQueryRequest(BaseModel):
 class ExpectedViewRequest(BaseModel):
     director: str = "DIR DADOS E INTELIGENCIA ARTIFICIAL"
     department_id: int | None = None
+    director_view: bool = False
     year: int = 2026
     include_shared_cost: bool = False
     # Nome físico da Dimon pré-agregada que alimenta a Visão Esperada.
@@ -1896,8 +1897,8 @@ async def _expected_view_core(
     forecast_type = _quote_ident(forecast_columns["tipo"])
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
     department_map = {department.id: department for department in departments}
-    selected = department_map.get(body.department_id) if body.department_id is not None else None
-    if body.department_id is not None and not selected:
+    selected = department_map.get(body.department_id) if body.department_id is not None and not body.director_view else None
+    if body.department_id is not None and not body.director_view and not selected:
         raise HTTPException(status_code=422, detail="Departamento selecionado não existe ou está inativo")
     if selected:
         scope_path: list[str] = []
@@ -1908,13 +1909,14 @@ async def _expected_view_core(
             current = department_map.get(current.parent_id) if current.parent_id else None
         scope_path.reverse()
     else:
-        scope_path = [body.director]
+        scope_path = [part.strip() for part in body.director.split(" > ") if part.strip()] if body.director_view else [body.director]
     if len(scope_path) > 7:
         raise HTTPException(status_code=422, detail="A Visão Esperada suporta até 7 níveis de departamento")
+    scope_level_order = [1, 2, 4, 3, 5, 6] if body.director_view else list(range(1, len(scope_path) + 1))
 
     def scope_filter(columns: dict[str, str]) -> str:
         checks: list[str] = []
-        for level, name in enumerate(scope_path, start=1):
+        for level, name in zip(scope_level_order, scope_path):
             key = f"departamento_nivel_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}; reprocese os dados após ajustar o organograma")
@@ -1965,7 +1967,7 @@ async def _expected_view_core(
     # azure-marketplace) whenever another series already had forecast rows in
     # an earlier month.
     forecast_from = f" AND {forecast_period} >= {cutoff_lit}" if cutoff_lit else ""
-    driver_level = min(len(scope_path) + 1, 7)
+    driver_level = 3 if body.director_view and len(scope_path) == 3 else min(len(scope_path) + 1, 7)
     driver_key = f"departamento_nivel_{driver_level}"
     actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
     forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
@@ -2088,8 +2090,24 @@ async def _expected_view_core(
                 continue
             selected_ids.add(current_id)
             pending.extend(child.id for child in children_by_parent.get(current_id, []))
+
+    def planning_scope_match(levels: list[str] | None) -> bool:
+        if not levels:
+            return False
+        return all(
+            level <= len(levels) and str(levels[level - 1]).strip() == name.strip()
+            for level, name in zip(scope_level_order, scope_path)
+        )
+
+    def planning_driver(path: list[str]) -> str:
+        if body.director_view and len(scope_path) < len(scope_level_order):
+            next_level = scope_level_order[len(scope_path)]
+            if next_level <= len(path):
+                return str(path[next_level - 1])
+        return str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
+
     for entry in budget_entries:
-        legacy_match = bool(entry.department_levels and entry.department_levels[:len(scope_path)] == scope_path)
+        legacy_match = planning_scope_match(entry.department_levels)
         if (selected and entry.department_id in selected_ids) or (not selected and legacy_match):
             period = f"{budget_year:04d}{entry.month:02d}"
             budget_by_period[period] = budget_by_period.get(period, 0.0) + float(entry.value or 0)
@@ -2102,7 +2120,7 @@ async def _expected_view_core(
                 path.reverse()
             else:
                 path = entry.department_levels or []
-            driver = str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
+            driver = planning_driver(path)
             budget_by_driver[driver] = budget_by_driver.get(driver, 0.0) + float(entry.value or 0)
 
     # Forecast manual is composed on top of the realized/forecast series using
@@ -2121,7 +2139,7 @@ async def _expected_view_core(
     forecast_manual_by_period: dict[str, float] = {}
     forecast_manual_by_driver: dict[str, float] = {}
     for entry in forecast_manual_entries:
-        legacy_match = bool(entry.department_levels and entry.department_levels[:len(scope_path)] == scope_path)
+        legacy_match = planning_scope_match(entry.department_levels)
         if (selected and entry.department_id in selected_ids) or (not selected and legacy_match):
             period = f"{budget_year:04d}{entry.month:02d}"
             if period in realized_periods:
@@ -2139,7 +2157,7 @@ async def _expected_view_core(
                 path.reverse()
             else:
                 path = entry.department_levels or []
-            driver = str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
+            driver = planning_driver(path)
             forecast_manual_by_driver[driver] = forecast_manual_by_driver.get(driver, 0.0) + value
     by_period = {str(row["period"]): dict(row) for row in fact_rows}
     for period in budget_by_period:

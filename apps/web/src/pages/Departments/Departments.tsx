@@ -52,6 +52,7 @@ import DepartmentTreePicker, {
   flattenDepartments,
   descendantIds,
 } from "../../components/DepartmentTreePicker";
+import { ORG } from "../../constants/orgLabels";
 
 const emptyDeptForm = {
   parent_id: null as number | null,
@@ -142,7 +143,7 @@ export default function Departments() {
     try {
       const result: CsvImportResult = await importCsvData();
       setSuccess(
-        "Importado: " + result.departments_created + " departamentos e " +
+        "Importado: " + result.departments_created + " nós do organograma e " +
         result.classification_rules_created + " regras de classificação"
       );
       if (result.errors.length > 0) {
@@ -223,10 +224,10 @@ export default function Departments() {
         })),
       });
       setDeptDialog(false);
-      setSuccess(sharedEnabled ? "Departamento e custo compartilhado salvos." : "Departamento salvo.");
+      setSuccess(sharedEnabled ? ORG.savedWithShared : ORG.saved);
       await load();
     } catch (e: unknown) {
-      setDeptDialogError(formatApiError(e, "Não foi possível salvar o departamento"));
+      setDeptDialogError(formatApiError(e, "Não foi possível salvar o organograma"));
     } finally {
       setSavingDept(false);
     }
@@ -239,10 +240,10 @@ export default function Departments() {
     try {
       await deleteDepartment(deleteDeptPending.id);
       setDeleteDeptPending(null);
-      setSuccess("Departamento excluído.");
+      setSuccess(ORG.deleted);
       await load();
     } catch (e: unknown) {
-      setError(formatApiError(e, "Não foi possível excluir o departamento"));
+      setError(formatApiError(e, "Não foi possível excluir o organograma"));
     }
   };
 
@@ -332,11 +333,11 @@ export default function Departments() {
           <Tooltip title="Adicionar filho">
             <IconButton size="small" onClick={() => openNewDept(dept.id)}><Add fontSize="small" /></IconButton>
           </Tooltip>
-          <Tooltip title="Cadastro financeiro deste departamento">
+          <Tooltip title={ORG.financialTooltip}>
             <IconButton size="small" onClick={() => navigate("/departments/financial?department_id=" + dept.id)}><AccountBalance fontSize="small" /></IconButton>
           </Tooltip>
           <IconButton size="small" onClick={() => void openEditDept(dept)}><Edit fontSize="small" /></IconButton>
-          <Tooltip title="Excluir departamento">
+          <Tooltip title="Excluir organograma">
             <IconButton size="small" color="error" onClick={(event) => { event.stopPropagation(); setDeleteDeptPending(dept); }}><Delete fontSize="small" /></IconButton>
           </Tooltip>
         </Paper>
@@ -354,9 +355,9 @@ export default function Departments() {
       {/* Faixa de contexto branca */}
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Departamentos</Typography>
+          <Typography variant="h4">{ORG.modelTitle}</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Hierarquia de Diretorias e Departamentos (até 7 níveis) com campos customizados.
+            {ORG.modelSubtitle}
           </Typography>
         </Box>
       </Box>
@@ -381,9 +382,9 @@ export default function Departments() {
         <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
             <Box>
-              <Typography variant="h6">Organograma</Typography>
+              <Typography variant="h6">{ORG.hierarchySection}</Typography>
               <Typography variant="body2" color="text.secondary">
-                Diretorias, departamentos e hierarquia com custo compartilhado.
+                {ORG.hierarchySectionDesc}
               </Typography>
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap" flexShrink={0}>
@@ -403,14 +404,14 @@ export default function Departments() {
                 {importing ? "Importando..." : "Importar CSV"}
               </Button>
               <Button size="small" variant="contained" startIcon={<Add />} onClick={() => openNewDept(null)}>
-                Novo Departamento
+                {ORG.newNode}
               </Button>
             </Stack>
           </Stack>
           <TextField
             fullWidth
             size="small"
-            placeholder="Buscar departamento (nome, centro de custo, ambiente ou cloud)"
+            placeholder={ORG.searchPlaceholder}
             value={deptSearch}
             onChange={(event) => setDeptSearch(event.target.value)}
             slotProps={{
@@ -427,11 +428,11 @@ export default function Departments() {
           />
           {departments.length === 0 ? (
             <Box sx={{ py: 7 }}>
-              <EmptyState message="Nenhum departamento cadastrado. Clique em 'Novo Departamento' ou 'Importar CSV' para começar." />
+              <EmptyState message={ORG.emptyNone} />
             </Box>
           ) : filteredTree.length === 0 ? (
             <Box sx={{ py: 7 }}>
-              <EmptyState message="Nenhum departamento corresponde à busca." />
+              <EmptyState message={ORG.emptySearch} />
             </Box>
           ) : (
             <Box>
@@ -443,7 +444,7 @@ export default function Departments() {
 
       {/* Department Dialog */}
       <Dialog open={deptDialog} onClose={() => setDeptDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editingDept ? "Editar" : "Novo"} Departamento</DialogTitle>
+        <DialogTitle>{editingDept ? ORG.editNode : ORG.newNode}</DialogTitle>
         <DialogContent sx={{
           "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
           "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
@@ -459,10 +460,10 @@ export default function Departments() {
               departments={departments}
               value={deptForm.parent_id}
               onChange={(parentId) => setDeptForm({ ...deptForm, parent_id: parentId })}
-              label="Departamento pai"
-              placeholder="Raiz (sem departamento pai)"
+              label={ORG.parentNode}
+              placeholder={ORG.parentRoot}
               allowClear
-              clearLabel="Raiz (sem departamento pai)"
+              clearLabel={ORG.parentRoot}
               blockedIds={blockedParentIds}
             />
             <Box sx={{ display: "flex", gap: 2 }}>
@@ -517,9 +518,9 @@ export default function Departments() {
                 </FormControl>
                 {sharedMode === "consumption" ? (
                   <Typography variant="body2" color="text.secondary">
-                    O valor rateado é o gasto deste departamento e de todos os filhos. Ligue a flag no departamento
+                    O valor rateado é o gasto deste nó do organograma e de todos os filhos. Ligue a flag no nó
                     Condomínio (folha), não na diretoria de Infra — senão a DIR Dados/IA paga uma fatia de Compra de RIs,
-                    redes e o resto da Infra, não só os 2 MM do Condomínio. O rateio vai para os departamentos da mesma
+                    redes e o resto da Infra, não só os 2 MM do Condomínio. O rateio vai para os nós da mesma
                     cloud, na proporção do consumo. Quem não consumiu não paga.
                   </Typography>
                 ) : <>
@@ -534,7 +535,7 @@ export default function Departments() {
                     setSharedTargets([...sharedTargets, { department_id: found.id, percent: null, name: found.name, path: found.path }]);
                     setSharedPicker(null);
                   }}
-                  label="Adicionar departamento destino"
+                  label="Adicionar nó destino no organograma"
                   placeholder="Selecione para incluir no rateio"
                   blockedIds={blockedParentIds}
                 />
@@ -585,7 +586,7 @@ export default function Departments() {
 
       {/* Confirmações Material — nunca window.confirm */}
       <Dialog open={Boolean(deleteDeptPending)} onClose={() => setDeleteDeptPending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir departamento?</DialogTitle>
+        <DialogTitle>{ORG.deleteConfirm}</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir <strong>{deleteDeptPending?.name}</strong>. Filhos sobem para a raiz e o cadastro de custo compartilhado vinculado será removido.
@@ -594,7 +595,7 @@ export default function Departments() {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeleteDeptPending(null)}>Cancelar</Button>
           <Button variant="contained" color="error" onClick={() => void removeDept()}>
-            Excluir departamento
+            {ORG.deleteAction}
           </Button>
         </DialogActions>
       </Dialog>

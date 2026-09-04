@@ -57,7 +57,7 @@ const HELP: Record<string, string> = {
   "Infraestrutura": "Todo o restante: VMs, Cosmos DB, discos, rede, Service Bus, Log Analytics etc., detalhado por servicesubcategory (sem serviços de IA).",
   "Infra compartilhada (rateio)": "Custo de infraestrutura repassado ao projeto. O Vivo Mais não recebe rateio: consome a infra do Aura Brain, mas a divisão não é feita por não existir forma eficiente (a infra não é específica do Vivo Mais e uma estrutura dedicada seria inviável).",
   "Custo previsto (forecast)": "Total planejado (planning) do mês de referência, exibido como total no chip — o planejamento não tem granularidade por componente. Bruto (sem abater as devoluções do espelho, que espelham o consumo horário já excluído do realizado).",
-  "MM de tokens": "Milhões de tokens atribuídos ao projeto na Dimon diária de Azure PTU, somando input e output no mesmo mês do custo.",
+  "Bilhões de tokens": "Bilhões de tokens atribuídos ao projeto na Dimon diária de Azure PTU, somando input e output no mesmo mês do custo.",
   "Custo por MM de tokens": "Custo total do projeto dividido pelos milhões de tokens atribuídos no mesmo período. Inclui toda a composição de custo do projeto, não apenas meters de tokens.",
 };
 
@@ -187,27 +187,27 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
               </Stack>
               <Grid container spacing={2} mt={0.25}>
                 <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>Custo total do projeto</Typography><Typography variant="h4">{money(tokenEfficiency.project_cost ?? total)}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>{periodLabel(tokenEfficiency.cost_period || cur.period)}</Typography></Grid>
-                <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>MM de tokens</Typography><Typography variant="h4">{tokenEfficiency.total_tokens ? `${n(tokenEfficiency.million_tokens)} MM` : "—"}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>input + output · últimos 30 dias{tokenEfficiency.token_date_from && tokenEfficiency.token_date_to ? ` (${tokenEfficiency.token_date_from} a ${tokenEfficiency.token_date_to})` : ""}</Typography></Grid>
+                <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>Bilhões de tokens</Typography><Typography variant="h4">{tokenEfficiency.total_tokens ? n(Number(tokenEfficiency.total_tokens) / 1_000_000_000) : "—"}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>input + output · últimos 30 dias{tokenEfficiency.token_date_from && tokenEfficiency.token_date_to ? ` (${tokenEfficiency.token_date_from} a ${tokenEfficiency.token_date_to})` : ""}</Typography></Grid>
                 <Grid item xs={12} md={4}><Typography variant="body2" sx={{ opacity: 0.8 }}>Custo por MM de tokens</Typography><Typography variant="h4">{money2(tokenEfficiency.cost_per_million_tokens)}</Typography><Typography variant="caption" sx={{ opacity: 0.75 }}>custo mensal ÷ milhões de tokens</Typography></Grid>
               </Grid>
             </CardContent>
           </Card>
           {tokenEfficiency.note && <Alert severity="info">{tokenEfficiency.note}</Alert>}
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={isVivo ? 4 : 3}>
               <Kpi label="Custo total" value={money(total)} hint={`${cur.label} · último realizado: R$ ${compact(realizedTotal)}${cur.mom_pct == null ? "" : ` · ${cur.mom_pct >= 0 ? "+" : ""}${n(cur.mom_pct)}% vs ${cur.prev_period_label}`}`} color={PROJECT_ACCENT[project]} />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={isVivo ? 4 : 3}>
               <Kpi label="PTUs (compra mensal)" value={<>{money(classes.ptu)} {ptuSource === "estimado" && <Chip size="small" color="warning" label="estimado" sx={{ ml: 0.5 }} />}</>} hint={`${pct(pcts.ptu)} do total · ${ptuSource === "estimado" ? `compra ainda não lançada na Gold — estimado pelo ${ptuEstimateNote}` : isVivo ? "reserva (Purchase) realizada" : "on-demand mensal realizado"}`} color={CLASS_COLORS.ptu} />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={isVivo ? 4 : 3}>
               <Kpi label="Tokens on-demand" value={money(classes.tokens_ondemand)} hint={`${pct(pcts.tokens_ondemand)} do total · meters PAYG clássicos (GPT-5, Claude e outros têm card próprio)`} color={CLASS_COLORS.tokens_ondemand} />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              {isVivo
-                ? <Kpi label="Infra compartilhada (rateio)" value="R$ 0" hint="não alocada ao Vivo Mais (ver aviso acima)" color="#64748B" />
-                : <Kpi label="Infraestrutura" value={money(classes.infra)} hint={`${pct(pcts.infra)} do total · ${infra.length} subcategorias · sem serviços de IA`} color={CLASS_COLORS.infra} />}
-            </Grid>
+            {!isVivo && (
+              <Grid item xs={12} sm={6} md={3}>
+                <Kpi label="Infraestrutura" value={money(classes.infra)} hint={`${pct(pcts.infra)} do total · ${infra.length} subcategorias · sem serviços de IA`} color={CLASS_COLORS.infra} />
+              </Grid>
+            )}
           </Grid>
 
           <Card>

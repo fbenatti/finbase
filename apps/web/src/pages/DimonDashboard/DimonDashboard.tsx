@@ -5,6 +5,7 @@ import {
   FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Stack, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Divider, Tooltip, LinearProgress, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
+  FormControlLabel, Switch,
 } from "@mui/material";
 import { Refresh, ContentCopy, FilterAltOff, ExpandMore, ChevronRight, Business, FileDownload } from "@mui/icons-material";
 import Plot from "react-plotly.js";
@@ -22,21 +23,111 @@ import {
 } from "../../services/api";
 import ExpectedView from "../Dashboards/ExpectedView";
 import * as XLSX from "xlsx";
+import { ORG } from "../../constants/orgLabels";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constantes e formatadores
 // ─────────────────────────────────────────────────────────────────────
 const DEFAULT_TABLE = "dest_dm_cost_visao_completa";
 const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
+const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
+
+/** Hierarquia da Visão Diretoria: nivel_1 → 2 → 4 → 3 → 5 → 6 */
+const VISAO_DIRETORIA_LEVELS = [
+  "departamento_nivel_1",
+  "departamento_nivel_2",
+  "departamento_nivel_4",
+  "departamento_nivel_3",
+  "departamento_nivel_5",
+  "departamento_nivel_6",
+] as const;
+
+/** Ordem de exibição do caminho legado (árvore linear → visão diretoria) */
+const VISAO_DIRETORIA_PATH_ORDER = [1, 2, 4, 3, 5, 6] as const;
+
+/** Profundidade na árvore → coluna departamento_nivel_N (Visão Diretoria: 1,2,4,3,5,6). */
+const VISAO_DIRETORIA_DEPTH_TO_NIVEL = [1, 2, 4, 3, 5, 6] as const;
+
+function pathSegmentFilters(path: string[], visaoDiretoria: boolean): DimonQueryFilter[] {
+  const out: DimonQueryFilter[] = [];
+  path.forEach((segment, depth) => {
+    if (!segment?.trim()) return;
+    const nivel = visaoDiretoria
+      ? (VISAO_DIRETORIA_DEPTH_TO_NIVEL[depth] ?? depth + 1)
+      : depth + 1;
+    out.push({ column: `departamento_nivel_${nivel}`, operator: "IN", values: [segment] });
+  });
+  return out;
+}
+
+function formatDirectorPath(path: string[]): string {
+  return VISAO_DIRETORIA_PATH_ORDER
+    .map(nivel => {
+      const depth = VISAO_DIRETORIA_DEPTH_TO_NIVEL.indexOf(nivel);
+      return depth >= 0 && depth < path.length ? path[depth] : "";
+    })
+    .filter(Boolean)
+    .join(" > ");
+}
+
+function displayOrgPath(f: Filters): string {
+  if (!f.path.length) return ORG.allNodes;
+  return f.path.join(" > ");
+}
+
+/**
+ * Reorganiza a árvore existente para 1 → 2 → 4 → 3 → 5 → 6.
+ * Em cada nó de nível 2, a Diretoria passa a ser pai do VP ao qual
+ * pertencia; os demais níveis continuam abaixo do VP.
+ */
+function swapDirectorTreeLevels(nodes: Department[], depth = 0): Department[] {
+  return nodes.map(node => {
+    const activeChildren = (node.children || []).filter(child => child.active);
+    if (depth !== 1) {
+      return { ...node, children: swapDirectorTreeLevels(activeChildren, depth + 1) };
+    }
+
+    // A mesma Diretoria pode existir em várias clouds. Agrupe pelo nome para
+    // que ela apareça uma única vez e exponha todas as clouds como filhas.
+    const directorsByName = new Map<string, Department>();
+    activeChildren.forEach(level3 => {
+      (level3.children || []).filter(child => child.active).forEach(level4 => {
+        const key = level4.name.trim().toLocaleLowerCase("pt-BR");
+        const cloudNode: Department = {
+          ...level3,
+          parent_id: level4.id,
+          children: swapDirectorTreeLevels(
+            (level4.children || []).filter(child => child.active),
+            4,
+          ),
+        };
+        const existing = directorsByName.get(key);
+        if (existing) {
+          existing.children.push(cloudNode);
+        } else {
+          directorsByName.set(key, { ...level4, children: [cloudNode] });
+        }
+      });
+    });
+    return { ...node, children: Array.from(directorsByName.values()) };
+  });
+}
+
+function nivelNum(field: string): number {
+  const m = field.match(/^departamento_nivel_(\d+)$/);
+  return m ? Number(m[1]) : 0;
+}
 const PURPLE = "#660099", ORANGE = "#ff7a00", BLUE = "#155eef",
       GREEN = "#10b981", RED = "#ef4444", YELLOW = "#f59e0b", INK = "#0f172a", MUT = "#64748b";
 
 const DIM_LABELS: Record<string, string> = {
   _billing_period: "Mês",
   cloud_origem: "Cloud",
+  departamento_nivel_1: "Segmento",
+  departamento_nivel_2: "Modelo",
   departamento_nivel_3: "VP",
   departamento_nivel_4: "Diretoria",
-  departamento_nivel_5: "Departamento",
+  departamento_nivel_5: ORG.level5,
   departamento_nivel_6: "Unidade",
   departamento: "Área",
   centro_custo: "Centro de Custo",
@@ -49,6 +140,40 @@ const DIM_LABELS: Record<string, string> = {
   regionname: "Região",
   chargecategory: "Tipo de Carga",
 };
+
+const DIRECTOR_VIEW_LABELS: Record<string, string> = {
+  departamento_nivel_1: "Segmento",
+  departamento_nivel_2: "Modelo",
+  departamento_nivel_4: "Diretoria",
+  departamento_nivel_3: "Cloud",
+  departamento_nivel_5: "Projeto",
+  departamento_nivel_6: "SubProjeto",
+};
+
+function directorNivelLabel(depth: number): string | null {
+  const nivel = VISAO_DIRETORIA_DEPTH_TO_NIVEL[depth];
+  if (!nivel) return null;
+  return DIRECTOR_VIEW_LABELS[`departamento_nivel_${nivel}`] || `Nível ${nivel}`;
+}
+
+function visaoDiretoriaChain(): Array<{ field: string; label: string }> {
+  return VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: DIRECTOR_VIEW_LABELS[field] || field }));
+}
+
+function analysisDimOptions(visaoDiretoria: boolean): string[] {
+  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_4", "departamento_nivel_5"];
+  return ["cloud_origem", ...dept, "servicename", "servicecategory", "regionname", "subaccountname"];
+}
+
+function investigationDimOptions(visaoDiretoria: boolean): string[] {
+  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_4", "departamento_nivel_5"];
+  return ["servicename", "cloud_origem", ...dept, "servicecategory", "regionname", "subaccountname"];
+}
+
+function heatmapDimOptions(visaoDiretoria: boolean): string[] {
+  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_4"];
+  return [...dept, "cloud_origem", "servicename", "servicecategory", "regionname", "subaccountname"];
+}
 
 const MEASURE_LABELS: Record<string, string> = {
   realizado: "Realizado (BRL)",
@@ -119,12 +244,14 @@ type Filters = {
   // e o id do departamento selecionado (quando for um nó real do organograma).
   path: string[];
   deptId: number | null;
+  /** Agrupa por nivel_1 → 2 → 4 → 3 → 5 → 6 em todas as abas */
+  visaoDiretoria: boolean;
   // Filtros adicionais por coluna (ex.: contexto aplicado pela árvore de decomposição
   // em dimensões que não são níveis de departamento — servicename, servicecategory, ...).
   extra: Record<string, string[]>;
 };
 
-const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, extra: {} };
+const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, visaoDiretoria: false, extra: {} };
 
 function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter[] {
   const out: DimonQueryFilter[] = [...extra];
@@ -134,13 +261,7 @@ function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter
   if (f.depts.length) out.push({ column: "departamento_nivel_5", operator: "IN", values: f.depts });
   if (f.servicos.length) out.push({ column: "servicename", operator: "IN", values: f.servicos });
   if (f.cats.length) out.push({ column: "servicecategory", operator: "IN", values: f.cats });
-  // Filtro global de departamento: cada nível do caminho restringe a coluna
-  // correspondente (departamento_nivel_1..N), herdado por todas as abas.
-  if (f.path.length) {
-    f.path.forEach((segment, index) => {
-      out.push({ column: `departamento_nivel_${index + 1}`, operator: "IN", values: [segment] });
-    });
-  }
+  if (f.path.length) out.push(...pathSegmentFilters(f.path, f.visaoDiretoria));
   // Filtros extras por coluna (contexto da árvore de decomposição, etc.).
   if (f.extra) {
     Object.entries(f.extra).forEach(([column, values]) => {
@@ -272,7 +393,10 @@ export default function DimonDashboard() {
     ? urlTab as TabId
     : "visao-executiva";
   const [tab, setTab] = useState<TabId>(initialTab);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...EMPTY_FILTERS,
+    visaoDiretoria: window.localStorage.getItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY) === "1",
+  }));
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
   const [periodPreset, setPeriodPreset] = useState("all");
   const [error, setError] = useState("");
@@ -281,6 +405,10 @@ export default function DimonDashboard() {
   const [organization, setOrganization] = useState<Department[]>([]);
   const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
+  const displayedOrganization = useMemo(
+    () => filters.visaoDiretoria ? swapDirectorTreeLevels(organization) : organization,
+    [organization, filters.visaoDiretoria],
+  );
 
   useEffect(() => {
     getDepartments().then(departments => {
@@ -297,7 +425,10 @@ export default function DimonDashboard() {
         }
         return undefined;
       };
-      const savedDepartment = findDepartment(departments);
+      const tree = window.localStorage.getItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY) === "1"
+        ? swapDirectorTreeLevels(departments)
+        : departments;
+      const savedDepartment = findDepartment(tree);
       if (savedDepartment) {
         setFilters(current => ({ ...current, path: savedDepartment.path, deptId: savedDepartment.department.id }));
       } else {
@@ -325,8 +456,10 @@ export default function DimonDashboard() {
         <ListItemButton
           sx={{ pl: 1 + depth * 2, py: 0.25 }}
           onClick={() => {
-            setFilters(f => ({ ...f, path, deptId: node.id }));
-            window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(node.id));
+            const groupedDirector = filters.visaoDiretoria && depth === 2;
+            setFilters(f => ({ ...f, path, deptId: groupedDirector ? null : node.id }));
+            if (groupedDirector) window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+            else window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(node.id));
             setOrganizationAnchor(null);
           }}
         >
@@ -337,7 +470,12 @@ export default function DimonDashboard() {
               </IconButton>
             )}
           </Box>
-          <ListItemText primary={node.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
+          <ListItemText
+            primary={node.name}
+            secondary={filters.visaoDiretoria ? directorNivelLabel(depth) : undefined}
+            primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }}
+            secondaryTypographyProps={{ variant: "caption", color: "secondary" }}
+          />
         </ListItemButton>
         <Collapse in={expanded} timeout="auto" unmountOnExit>
           {children.map(child => renderOrgNode(child, depth + 1, path))}
@@ -378,6 +516,7 @@ export default function DimonDashboard() {
 
   const clearFilters = () => {
     window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+    window.localStorage.removeItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY);
     setFilters(EMPTY_FILTERS);
     setPeriodPreset("all");
   };
@@ -419,16 +558,48 @@ export default function DimonDashboard() {
             </Select>
           </FormControl>
           <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
-            {filters.path.length ? filters.path.join(" > ") : "Todos os departamentos"}
+            {displayOrgPath(filters)}
           </Button>
           <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Selecione um departamento — todas as abas respeitam este filtro.</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
+              {filters.visaoDiretoria
+                ? `Selecione na árvore — níveis mapeados como ${ORG.directorViewLevels} (profundidade 3↔4 invertida).`
+                : ORG.selectNodeFilterHint}
+            </Typography>
             <List dense disablePadding>
-              {organization.filter(department => department.active).map(node => renderOrgNode(node))}
+              {displayedOrganization.filter(department => department.active).map(node => renderOrgNode(node))}
             </List>
           </Menu>
+          <FormControlLabel
+            control={(
+              <Switch
+                size="small"
+                checked={filters.visaoDiretoria}
+                onChange={(_, checked) => {
+                  window.localStorage.setItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY, checked ? "1" : "0");
+                  setFilters(f => {
+                    const path = f.path.length >= 4
+                      ? formatDirectorPath(f.path).split(" > ")
+                      : f.path.length === 3 ? f.path.slice(0, 2) : f.path;
+                    return { ...f, visaoDiretoria: checked, path, deptId: null };
+                  });
+                  window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+                  setRefreshTick(t => t + 1);
+                }}
+              />
+            )}
+            label={(
+              <Tooltip title={`Agrupa por ${ORG.directorViewChain} em rankings, drilldown e decomposição`}>
+                <Typography variant="body2" sx={{ fontWeight: filters.visaoDiretoria ? 800 : 500 }}>Visão Diretoria</Typography>
+              </Tooltip>
+            )}
+            sx={{ ml: 0.5 }}
+          />
           <Button size="small" startIcon={<FilterAltOff />} onClick={clearFilters}>Limpar</Button>
         </Stack>
+        {filters.visaoDiretoria && (
+          <Chip size="small" color="secondary" label={`Visão Diretoria: ${ORG.directorViewChain}`} sx={{ mt: 1, fontWeight: 800 }} />
+        )}
         {filters.months.length > 0 && (
           <Stack direction="row" gap={0.5} flexWrap="wrap" mt={1}>
             {filters.months.map(m => <Chip key={m} size="small" label={monthLabel(m)} onDelete={() => setFilter("months", filters.months.filter(x => x !== m))} />)}
@@ -447,7 +618,7 @@ export default function DimonDashboard() {
         <Tab value="drilldown" label="Drilldown" />
       </Tabs>
 
-      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} />}
+      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} />}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}
@@ -472,7 +643,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   const defs = useMemo<QueryDef[]>(() => [
     { id: "totais", measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters) },
     { id: "mensal", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
-    { id: "dirs", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
     { id: "clouds", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
     { id: "servicos", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
     { id: "categorias", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
@@ -506,6 +677,9 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   )));
   const healthStatus = health >= 85 ? { label: "CONTROLADO", color: GREEN } : health >= 70 ? { label: "MONITORAR", color: YELLOW } : { label: "AÇÃO", color: RED };
 
+  const dirField = filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4";
+  const dirLabel = DIM_LABELS[dirField] || dirField;
+
   const email = useMemo(() => {
     const period = filters.months.length ? `competência(s) ${filters.months.map(monthLong).join(", ")}` : "todo o período disponível";
     return [
@@ -513,13 +687,13 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
       "",
       `Realizado (BRL): ${moneyFull(total.realizado)} | Billed Cost (USD): ${moneyFull(total.billedcost, "USD")} | Quantidade: ${num(total.quantity)}`,
       `Mês mais recente (${latest ? monthLong(latest.month) : "—"}): ${latest ? moneyFull(latest.value) : "—"}${mom !== null ? ` (${mom >= 0 ? "+" : ""}${pct(mom)} vs mês anterior)` : ""}`,
-      `Top diretoria: ${topDir ? esc(topDir.departamento_nivel_4) : "—"} (${topDir ? money(topDir.realizado) : "—"}) · Concentração top 5: ${pct(top5Share)}`,
+      `Top ${dirLabel.toLowerCase()}: ${topDir ? esc(topDir[dirField]) : "—"} (${topDir ? money(topDir.realizado) : "—"}) · Concentração top 5: ${pct(top5Share)}`,
       `Top cloud: ${topCloud ? esc(topCloud.cloud_origem) : "—"} · Top serviço: ${topServico ? esc(topServico.servicename) : "—"}`,
       `Health Score: ${health}/100 (${healthStatus.label}).`,
       "",
       "Gerado automaticamente pelo Dashboard FinOps (Dimon).",
     ].join("\n");
-  }, [total, mensal, mom, topDir, topCloud, topServico, top5Share, health, healthStatus, filters.months, latest]);
+  }, [total, mensal, mom, topDir, topCloud, topServico, top5Share, health, healthStatus, filters.months, latest, dirField, dirLabel]);
 
   return (
     <LoadingBlock loading={loading}>
@@ -553,7 +727,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={5}>
-          <RankBars title="Top Diretorias" rows={dirRows} measure="realizado" limit={8} color={PURPLE} />
+          <RankBars title={`Top ${dirLabel}`} rows={dirRows} measure="realizado" limit={8} color={PURPLE} />
         </Grid>
         <Grid item xs={12} md={3.5}>
           <RankBars title="Top Clouds" rows={rowsOf(results.clouds)} measure="realizado" limit={6} color={BLUE} />
@@ -579,7 +753,11 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
 // Aba 2 — Evolução (mensal + drivers + run rate)
 // ═══════════════════════════════════════════════════════════════════
 function Evolucao({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
+  const dimOptions = useMemo(() => analysisDimOptions(filters.visaoDiretoria), [filters.visaoDiretoria]);
   const [dim, setDim] = useState("cloud_origem");
+  useEffect(() => {
+    if (filters.visaoDiretoria) setDim(VISAO_DIRETORIA_LEVELS[0]);
+  }, [filters.visaoDiretoria]);
   const defs = useMemo<QueryDef[]>(() => [
     { id: "mensal", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
     { id: "drivers", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
@@ -639,7 +817,7 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
           <ChartCard title={`What Changed? — variação ${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"} por ${DIM_LABELS[dim] || dim}`} note="Maiores contribuintes absolutos da variação. Não presume causalidade operacional.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={dim} onChange={e => setDim(e.target.value)}>
-                {["cloud_origem", "departamento_nivel_4", "departamento_nivel_5", "servicename", "servicecategory", "regionname", "subaccountname"].map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
+                {dimOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
@@ -682,16 +860,34 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
 // Aba 3 — Organização (rankings + hierarquia + governança)
 // ═══════════════════════════════════════════════════════════════════
 function Organizacao({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
-  const defs = useMemo<QueryDef[]>(() => [
-    { id: "n3", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-    { id: "n4", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "n5", rows: ["departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "dept", rows: ["departamento"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-    { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-    { id: "hier", rows: ["departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
-    { id: "gov", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
-  ], [filterKey]);
+  const hierLevels = filters.visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5"];
+  const defs = useMemo<QueryDef[]>(() => {
+    if (filters.visaoDiretoria) {
+      return [
+        { id: "n1", rows: ["departamento_nivel_1"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n2", rows: ["departamento_nivel_2"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n4", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n3", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n5", rows: ["departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n6", rows: ["departamento_nivel_6"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "dept", rows: ["departamento"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "hier", rows: [...VISAO_DIRETORIA_LEVELS], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
+        { id: "gov", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
+      ];
+    }
+    return [
+      { id: "n3", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "n4", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "n5", rows: ["departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "dept", rows: ["departamento"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "hier", rows: ["departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
+      { id: "gov", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
+    ];
+  }, [filterKey, filters.visaoDiretoria]);
   const { results, loading } = useTabQueries(table, defs, filterKey);
 
   const hierRows = rowsOf(results.hier);
@@ -705,37 +901,63 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
       <Grid container spacing={1.5} mb={1.5}>
         <Grid item xs={6} md={3}><KpiCard label="Governança (Diretoria)" value={pct(govShare)} sub="% do Realizado classificado" color={govShare >= 90 ? GREEN : govShare >= 70 ? YELLOW : RED} /></Grid>
         <Grid item xs={6} md={3}><KpiCard label="Diretorias com custo" value={String(govRows.length)} color={PURPLE} /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Níveis hierárquicos" value={hierRows.length ? "5" : "—"} sub="nivel_1 .. nivel_5" color={BLUE} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Níveis hierárquicos" value={hierRows.length ? String(hierLevels.length) : "—"} sub={filters.visaoDiretoria ? `Visão Diretoria (${ORG.directorViewLevels})` : "nivel_1 .. nivel_5"} color={BLUE} /></Grid>
         <Grid item xs={6} md={3}><KpiCard label="Concentração Top 5 Dir." value={govRows.length ? pct(govRows.slice(0, 5).reduce((s, r) => s + Number(r.realizado || 0), 0) / (govTotal || 1) * 100) : "—"} color={ORANGE} /></Grid>
       </Grid>
       <Grid container spacing={1.5}>
-        <Grid item xs={12} md={4}><RankBars title="VP (Nível 3)" rows={rowsOf(results.n3)} measure="realizado" limit={10} color={PURPLE} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Diretorias (Nível 4)" rows={rowsOf(results.n4)} measure="realizado" limit={12} color={BLUE} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Departamentos (Nível 5)" rows={rowsOf(results.n5)} measure="realizado" limit={12} color={GREEN} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Áreas (departamento)" rows={rowsOf(results.dept)} measure="realizado" limit={12} color={ORANGE} /></Grid>
+        {filters.visaoDiretoria ? (
+          <>
+            {VISAO_DIRETORIA_LEVELS.map((field, i) => {
+              const ids = ["n1", "n2", "n4", "n3", "n5", "n6"];
+              const colors = [PURPLE, BLUE, "#7c3aed", GREEN, ORANGE, YELLOW];
+              return (
+                <Grid item xs={12} sm={6} md={4} key={field}>
+                  <RankBars
+                    title={`${DIM_LABELS[field]} (Nível ${nivelNum(field)})`}
+                    rows={rowsOf(results[ids[i]])}
+                    measure="realizado"
+                    limit={12}
+                    color={colors[i]}
+                  />
+                </Grid>
+              );
+            })}
+          </>
+        ) : (
+          <>
+            <Grid item xs={12} md={4}><RankBars title="VP (Nível 3)" rows={rowsOf(results.n3)} measure="realizado" limit={10} color={PURPLE} /></Grid>
+            <Grid item xs={12} md={4}><RankBars title="Diretorias (Nível 4)" rows={rowsOf(results.n4)} measure="realizado" limit={12} color={BLUE} /></Grid>
+            <Grid item xs={12} md={4}><RankBars title={`${ORG.level5} (Nível 5)`} rows={rowsOf(results.n5)} measure="realizado" limit={12} color={GREEN} /></Grid>
+          </>
+        )}
+        <Grid item xs={12} md={4}><RankBars title="Áreas (legado)" rows={rowsOf(results.dept)} measure="realizado" limit={12} color={ORANGE} /></Grid>
         <Grid item xs={12} md={4}><RankBars title="Centros de Custo" rows={rowsOf(results.cc)} measure="realizado" limit={10} color={YELLOW} /></Grid>
         <Grid item xs={12} md={4}><RankBars title="Clouds" rows={rowsOf(results.cloud)} measure="realizado" limit={10} color="#7c3aed" /></Grid>
         <Grid item xs={12}>
-          <ChartCard title="Hierarquia organizacional — custo por caminho (níveis 1→5)" note="Top 200 caminhos por Realizado; use os filtros globais para estreitar.">
+          <ChartCard
+            title={filters.visaoDiretoria ? `Hierarquia Visão Diretoria — custo por caminho (${ORG.directorViewLevels})` : "Hierarquia organizacional — custo por caminho (níveis 1→5)"}
+            note="Top 200 caminhos por Realizado; use os filtros globais para estreitar."
+          >
             <TableContainer sx={{ maxHeight: 460 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    {["Nível 1", "Nível 2", "Nível 3 (VP)", "Nível 4 (Diretoria)", "Nível 5 (Departamento)", "Realizado"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                    {hierLevels.map(level => (
+                      <TableCell key={level} sx={{ fontWeight: 900, fontSize: 11 }}>{DIM_LABELS[level] || level}</TableCell>
+                    ))}
+                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Realizado</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {hierRows.map((r, i) => (
                     <TableRow key={i} hover>
-                      <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_1)}</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_2)}</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_3)}</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_4)}</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>{esc(r.departamento_nivel_5)}</TableCell>
+                      {hierLevels.map(level => (
+                        <TableCell key={level} sx={{ fontSize: 12 }}>{esc(r[level])}</TableCell>
+                      ))}
                       <TableCell sx={{ fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{money(r.realizado)}</TableCell>
                     </TableRow>
                   ))}
-                  {!hierRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary" }}>Sem dados para o escopo.</TableCell></TableRow>}
+                  {!hierRows.length && <TableRow><TableCell colSpan={hierLevels.length + 1} align="center" sx={{ color: "text.secondary" }}>Sem dados para o escopo.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -750,7 +972,11 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
 // Aba 4 — Serviços & Regiões
 // ═══════════════════════════════════════════════════════════════════
 function Servicos({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
+  const heatOptions = useMemo(() => heatmapDimOptions(filters.visaoDiretoria), [filters.visaoDiretoria]);
   const [heatDim, setHeatDim] = useState("departamento_nivel_4");
+  useEffect(() => {
+    if (filters.visaoDiretoria) setHeatDim(VISAO_DIRETORIA_LEVELS[0]);
+  }, [filters.visaoDiretoria]);
   const defs = useMemo<QueryDef[]>(() => [
     { id: "serv", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
     { id: "cat", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
@@ -793,7 +1019,7 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
           <ChartCard title={`Heatmap ${DIM_LABELS[heatDim] || heatDim} × Mês — Realizado (BRL)`} note="Top 14 valores da dimensão; célula = soma mensal no escopo filtrado.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={heatDim} onChange={e => setHeatDim(e.target.value)}>
-                {["departamento_nivel_4", "cloud_origem", "servicename", "servicecategory", "regionname", "subaccountname"].map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
+                {heatOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
@@ -811,13 +1037,17 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
 // Aba 5 — Investigação (attention, desvios, anomalias, pareto, aceleração)
 // ═══════════════════════════════════════════════════════════════════
 function Investigacao({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
+  const dimOptions = useMemo(() => investigationDimOptions(filters.visaoDiretoria), [filters.visaoDiretoria]);
   const [dim, setDim] = useState("servicename");
+  useEffect(() => {
+    if (filters.visaoDiretoria) setDim(VISAO_DIRETORIA_LEVELS[0]);
+  }, [filters.visaoDiretoria]);
   const defs = useMemo<QueryDef[]>(() => [
     { id: "serie", rows: [dim, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 2000 },
     { id: "cloud", rows: ["cloud_origem", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
-    { id: "dirs", rows: ["departamento_nivel_4", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
+    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
     { id: "pareto", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 300 },
-  ], [filterKey, dim]);
+  ], [filterKey, dim, filters.visaoDiretoria]);
   const { results, loading } = useTabQueries(table, defs, filterKey + dim);
 
   // Séries mensais por item da dimensão
@@ -876,13 +1106,13 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
     if (dirTotal) {
       const top5 = dirSeries.slice(0, 5).reduce((s, r) => s + Math.abs(Number(r.realizado) || 0), 0);
       const conc = top5 / dirTotal * 100;
-      if (conc > 70) items.push({ sev: "P2", title: "Concentração financeira", detail: `Top 5 diretorias respondem por ${pct(conc)} do custo.`, color: YELLOW });
+      if (conc > 70) items.push({ sev: "P2", title: "Concentração financeira", detail: `Top 5 ${(filters.visaoDiretoria ? DIM_LABELS[VISAO_DIRETORIA_LEVELS[0]] : "diretorias").toLowerCase()} respondem por ${pct(conc)} do custo.`, color: YELLOW });
     }
     if (paretoCount > 0 && paretoCount <= Math.max(8, Math.round(paretoRows.length * 0.15))) {
       items.push({ sev: "P3", title: "Pareto 80/20", detail: `${paretoCount} de ${paretoRows.length} itens de ${DIM_LABELS[dim] || dim} respondem por 80% do custo.`, color: GREEN });
     }
     return items.sort((a, b) => a.sev.localeCompare(b.sev)).slice(0, 10);
-  }, [topGrow, anomalies, accelerated, results.dirs, paretoCount, paretoRows.length, dim]);
+  }, [topGrow, anomalies, accelerated, results.dirs, paretoCount, paretoRows.length, dim, filters.visaoDiretoria]);
 
   return (
     <LoadingBlock loading={loading}>
@@ -907,7 +1137,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
           <ChartCard title={`Top Desvios MoM por ${DIM_LABELS[dim] || dim}`} note="Variação absoluta do último mês vs anterior.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={dim} onChange={e => setDim(e.target.value)}>
-                {["servicename", "cloud_origem", "departamento_nivel_4", "departamento_nivel_5", "servicecategory", "regionname", "subaccountname"].map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
+                {dimOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
@@ -992,29 +1222,52 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // ═══════════════════════════════════════════════════════════════════
 
 // Dimensões disponíveis para os widgets de decisão (colunas válidas da Dimon).
-const DECISAO_DIMS: Array<{ field: string; label: string }> = [
+const DECISAO_DIMS_BASE: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
   { field: "departamento_nivel_3", label: "Plataforma" },
   { field: "departamento_nivel_4", label: "Diretoria" },
-  { field: "departamento_nivel_5", label: "Departamento" },
+  { field: "departamento_nivel_5", label: ORG.level5 },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "subaccountname", label: "Subconta" },
 ];
 
+function buildDecisaoDims(visaoDiretoria: boolean): Array<{ field: string; label: string }> {
+  if (!visaoDiretoria) return DECISAO_DIMS_BASE;
+  return [
+    { field: "cloud_origem", label: "Cloud" },
+    ...visaoDiretoriaChain(),
+    { field: "servicename", label: "Serviço" },
+    { field: "servicecategory", label: "Categoria" },
+    { field: "subaccountname", label: "Subconta" },
+  ];
+}
+
 // Cadeia da decomposição hierárquica encadeada (níveis de detalhe).
-const DECOMP_CHAIN: Array<{ field: string; label: string }> = [
+const DECOMP_CHAIN_BASE: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
   { field: "departamento_nivel_1", label: "Segmento" },
   { field: "departamento_nivel_2", label: "Modelo" },
   { field: "departamento_nivel_3", label: "Plataforma" },
   { field: "departamento_nivel_4", label: "Diretoria" },
-  { field: "departamento_nivel_5", label: "Departamento" },
+  { field: "departamento_nivel_5", label: ORG.level5 },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "servicesubcategory", label: "Subcategoria" },
   { field: "subaccountname", label: "Subconta" },
 ];
+
+function buildDecompChain(visaoDiretoria: boolean): Array<{ field: string; label: string }> {
+  if (!visaoDiretoria) return DECOMP_CHAIN_BASE;
+  return [
+    { field: "cloud_origem", label: "Cloud" },
+    ...visaoDiretoriaChain(),
+    { field: "servicename", label: "Serviço" },
+    { field: "servicecategory", label: "Categoria" },
+    { field: "servicesubcategory", label: "Subcategoria" },
+    { field: "subaccountname", label: "Subconta" },
+  ];
+}
 
 // ── helpers de dados (séries mensais por chave × tipo) ──
 type DimRow = Record<string, any>;
@@ -1079,30 +1332,49 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   table: string; filters: Filters; filterKey: string;
   setFilters: React.Dispatch<React.SetStateAction<Filters>>;
 }) {
+  const decisaoDims = useMemo(() => buildDecisaoDims(filters.visaoDiretoria), [filters.visaoDiretoria]);
+  const decompChain = useMemo(() => buildDecompChain(filters.visaoDiretoria), [filters.visaoDiretoria]);
+  const govDeptLevels = useMemo(
+    () => (filters.visaoDiretoria
+      ? VISAO_DIRETORIA_LEVELS.map((field, index) => ({ id: `gov${index + 1}`, field, label: DIM_LABELS[field] || field }))
+      : [
+        { id: "gov1", field: "departamento_nivel_3", label: "Plataforma" },
+        { id: "gov2", field: "departamento_nivel_4", label: "Diretoria" },
+      ]),
+    [filters.visaoDiretoria],
+  );
   const [dim, setDim] = useState("departamento_nivel_4");
   const [treePath, setTreePath] = useState<Array<{ field: string; value: string }>>([]);
   const [compA, setCompA] = useState("");
   const [compB, setCompB] = useState("");
-  const dimLabel = DECISAO_DIMS.find(d => d.field === dim)?.label || dim;
+  useEffect(() => {
+    if (filters.visaoDiretoria) {
+      setDim(VISAO_DIRETORIA_LEVELS[0]);
+      setTreePath([]);
+    }
+  }, [filters.visaoDiretoria]);
+  const dimLabel = decisaoDims.find(d => d.field === dim)?.label || dim;
 
   // ── consultas base (independentes da árvore) ──
   const baseDefs = useMemo<QueryDef[]>(() => {
     const global = filtersOf(filters);
     const realiz = [...global, { column: "tipo", operator: "IN" as const, values: ["realizado"] }];
+    const govDefs: QueryDef[] = [
+      ...govDeptLevels.map(g => ({ id: g.id, rows: [g.field], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 })),
+      { id: "govServ", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      { id: "govCat", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      { id: "govSub", rows: ["subaccountname"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      { id: "govCloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+    ];
     return [
       { id: "pulse", rows: ["_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 400 },
       { id: "dim", rows: [dim, "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 10000 },
       { id: "dimCloud", rows: ["cloud_origem", "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 2000 },
       { id: "dimServ", rows: ["servicename", "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 10000 },
-      { id: "gov1", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
-      { id: "gov2", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
-      { id: "gov3", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
-      { id: "gov4", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
-      { id: "gov5", rows: ["subaccountname"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
-      { id: "gov6", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: realiz, row_limit: 8000 },
+      ...govDefs,
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, dim]);
+  }, [filterKey, dim, filters.visaoDiretoria, govDeptLevels]);
   const { results: base, loading: baseLoading } = useTabQueries(table, baseDefs, "decisao-base-" + filterKey + dim);
 
   // ── consultas da árvore de decomposição (v233: spine do caminho + branch de filhos) ──
@@ -1116,18 +1388,17 @@ function Decisao({ table, filters, filterKey, setFilters }: {
       defs.push({ id: `spine${i}`, measures: [{ column: "realizado", aggregation: "SUM" }], filters: [...global, ...pathFilters(i)], row_limit: 5 });
     }
     // branch: filhos do próximo nível com série mensal (para MoM)
-    if (treeStart < DECOMP_CHAIN.length) {
+    if (treeStart < decompChain.length) {
       defs.push({
         id: `tree${treeStart}`,
-        rows: [DECOMP_CHAIN[treeStart].field, "_billing_period", "tipo"],
+        rows: [decompChain[treeStart].field, "_billing_period", "tipo"],
         measures: [{ column: "realizado", aggregation: "SUM" }],
         filters: [...global, ...pathFilters(treeStart)],
         row_limit: 10000,
       });
     }
     return defs;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, treePath]);
+  }, [filterKey, treePath, decompChain]);
   const { results: treeResults, loading: treeLoading } = useTabQueries(table, treeDefs, "decisao-tree-" + filterKey + JSON.stringify(treePath));
 
   // ── séries mensais globais ──
@@ -1164,17 +1435,16 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   }, [dimRowsAll, dim, latestMonth]);
 
   // ── governança / qualidade de dados ──
-  const govDims = [
-    { id: "gov1", field: "departamento_nivel_3", label: "Plataforma" },
-    { id: "gov2", field: "departamento_nivel_4", label: "Diretoria" },
-    { id: "gov3", field: "servicename", label: "Serviço" },
-    { id: "gov4", field: "servicecategory", label: "Categoria" },
-    { id: "gov5", field: "subaccountname", label: "Subconta" },
-    { id: "gov6", field: "cloud_origem", label: "Cloud" },
-  ];
+  const govDims = useMemo(() => [
+    ...govDeptLevels,
+    { id: "govServ", field: "servicename", label: "Serviço" },
+    { id: "govCat", field: "servicecategory", label: "Categoria" },
+    { id: "govSub", field: "subaccountname", label: "Subconta" },
+    { id: "govCloud", field: "cloud_origem", label: "Cloud" },
+  ], [govDeptLevels]);
   const gov = useMemo(() => {
     const rowsPer = govDims.map(g => {
-      const rows = rowsOf(base[g.id]);
+      const rows = rowsOf(base[g.id as keyof typeof base] as DimonQueryResult | null | undefined);
       let spend = 0, missingSpend = 0, missingRows = 0, cnt = 0;
       for (const r of rows) {
         const v = Math.abs(Number(r.realizado || 0));
@@ -1185,18 +1455,17 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     });
     const score = 100 - rowsPer.reduce((s, x) => s + x.spendPct, 0) / Math.max(1, rowsPer.length);
     return { score, rowsPer: [...rowsPer].sort((a, b) => b.spendPct - a.spendPct) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base.gov1, base.gov2, base.gov3, base.gov4, base.gov5, base.gov6]);
+  }, [base, govDims]);
   const govScore = gov.score;
 
   // ── custo de IA (heurística por nome de serviço) ──
   const aiCost = useMemo(() => {
     let s = 0;
-    for (const r of rowsOf(base.gov3)) {
+    for (const r of rowsOf(base.govServ)) {
       if (/openai|gpt|copilot|machine learning|cognitive|bedrock|anthropic|azure ai/i.test(String(r.servicename || ""))) s += Math.abs(Number(r.realizado || 0));
     }
     return s;
-  }, [base.gov3]);
+  }, [base.govServ]);
 
   // ── risk index ──
   const riskIndex = Math.round((100 - (globalAcc ?? 100)) * 0.4 + (100 - govScore) * 0.25 + top5Pct * 0.2 + (aiCost > 0 ? 15 : 5));
@@ -1391,14 +1660,14 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   const pathNodes = useMemo(() => {
     const out: Array<{ label: string; dim: string; cost: number }> = [{ label: "TOTAL", dim: "TOTAL", cost: totalAll }];
     treePath.forEach((p, i) => {
-      out.push({ label: p.value, dim: DECOMP_CHAIN.find(c => c.field === p.field)?.label || p.field, cost: spineCosts[i + 1] || 0 });
+      out.push({ label: p.value, dim: decompChain.find(c => c.field === p.field)?.label || p.field, cost: spineCosts[i + 1] || 0 });
     });
     return out;
-  }, [treePath, spineCosts, totalAll]);
+  }, [treePath, spineCosts, totalAll, decompChain]);
   const treeChildren = useMemo(() => {
-    if (treeStart >= DECOMP_CHAIN.length) return [];
+    if (treeStart >= decompChain.length) return [];
     const rows = rowsOf(treeResults[`tree${treeStart}`]);
-    const field = DECOMP_CHAIN[treeStart].field;
+    const field = decompChain[treeStart].field;
     const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
     for (const r of rows) {
       const k = String(r[field] ?? "Não informado");
@@ -1423,9 +1692,9 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     const rest = items.slice(7);
     if (rest.length) top.push({ key: "Outros", cost: rest.reduce((s, x) => s + x.cost, 0), mom: null, __other: true });
     return top;
-  }, [treeResults, treeStart]);
-  const nextField = treeStart < DECOMP_CHAIN.length ? DECOMP_CHAIN[treeStart].field : null;
-  const nextLabel = treeStart < DECOMP_CHAIN.length ? DECOMP_CHAIN[treeStart].label : null;
+  }, [treeResults, treeStart, decompChain]);
+  const nextField = treeStart < decompChain.length ? decompChain[treeStart].field : null;
+  const nextLabel = treeStart < decompChain.length ? decompChain[treeStart].label : null;
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
   const top3Share = nodeTotal ? (treeChildren.slice(0, 3).reduce((s, x) => s + Math.abs(x.cost), 0) / Math.abs(nodeTotal)) * 100 : 0;
   const shareTotal = totalAll ? (Math.abs(nodeTotal) / Math.abs(totalAll)) * 100 : 0;
@@ -1475,16 +1744,16 @@ function Decisao({ table, filters, filterKey, setFilters }: {
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel>Dimensão de análise</InputLabel>
             <Select label="Dimensão de análise" value={dim} onChange={e => { setDim(e.target.value); setCompA(""); setCompB(""); }}>
-              {DECISAO_DIMS.map(d => <MenuItem key={d.field} value={d.field}>{d.label}</MenuItem>)}
+              {decisaoDims.map(d => <MenuItem key={d.field} value={d.field}>{d.label}</MenuItem>)}
             </Select>
           </FormControl>
           <Typography variant="caption" sx={{ color: MUT, fontWeight: 800 }}>
-            Escopo: {filters.path.length ? filters.path.join(" > ") : "Portfólio completo"}{Object.keys(filters.extra).length ? " · contexto da árvore" : ""} · {monthLabel(latestMonth) || "—"} vs {monthLabel(prevMonth) || "—"}
+            Escopo: {displayOrgPath(filters) === ORG.allNodes ? "Portfólio completo" : displayOrgPath(filters)}{Object.keys(filters.extra).length ? " · contexto da árvore" : ""} · {monthLabel(latestMonth) || "—"} vs {monthLabel(prevMonth) || "—"}
           </Typography>
         </Stack>
 
         {!latestMonth ? (
-          <Alert severity="info">Sem competências de Realizado no escopo filtrado. Ajuste os filtros globais (período/departamento) ou clique em “Limpar”.</Alert>
+          <Alert severity="info">Sem competências de Realizado no escopo filtrado. Ajuste os filtros globais (período/organograma) ou clique em “Limpar”.</Alert>
         ) : (
         <>
         {/* 01 · Executive Pulse */}
@@ -1859,7 +2128,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 13 · Decomposição hierárquica encadeada (v233 — árvore de fluxo interativa) */}
-        <SectionPanel title="Decomposição hierárquica encadeada" subtitle={`Navegue do custo total para ${DECOMP_CHAIN.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}
+        <SectionPanel title="Decomposição hierárquica encadeada" subtitle={`Navegue do custo total para ${decompChain.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}
           right={
             <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
               <Box sx={{ display: "inline-flex", border: "1px solid #d8dce7", borderRadius: 1.5, p: 0.3, bgcolor: "#f8fafc" }}>
@@ -1884,7 +2153,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                   {treePath.map((p, i) => (
                     <Box key={i} display="flex" alignItems="center" gap={0.5}>
                       <Typography sx={{ color: "#8b5cf6", fontWeight: 950 }}>›</Typography>
-                      <Chip size="small" label={`${DECOMP_CHAIN.find(c => c.field === p.field)?.label || p.field}: ${p.value}`} color={i === treePath.length - 1 ? "primary" : "default"} onClick={() => setTreePath(treePath.slice(0, i + 1))} sx={{ fontWeight: 900, maxWidth: 240 }} />
+                      <Chip size="small" label={`${decompChain.find(c => c.field === p.field)?.label || p.field}: ${p.value}`} color={i === treePath.length - 1 ? "primary" : "default"} onClick={() => setTreePath(treePath.slice(0, i + 1))} sx={{ fontWeight: 900, maxWidth: 240 }} />
                     </Box>
                   ))}
                 </Stack>
@@ -1947,7 +2216,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     </path>
                   );
                 });
-                const emptyBranch = treeStart >= DECOMP_CHAIN.length && (
+                const emptyBranch = treeStart >= decompChain.length && (
                   <text x={branchX} y={pathY + 20} fontSize={12} fontWeight={850} fill="#94a3b8">Fim da hierarquia disponível</text>
                 );
                 return (
@@ -2031,25 +2300,42 @@ function pivotFiltersFrom(filters: Filters): Record<string, HistoryFilter> {
   if (filters.depts.length) out.departamento_nivel_5 = { operator: "in", value: filters.depts };
   if (filters.servicos.length) out.servicename = { operator: "in", value: filters.servicos };
   if (filters.cats.length) out.servicecategory = { operator: "in", value: filters.cats };
-  if (filters.path.length) filters.path.forEach((seg, i) => { if (seg) out[`departamento_nivel_${i + 1}`] = { operator: "in", value: [seg] }; });
+  if (filters.path.length) {
+    pathSegmentFilters(filters.path, filters.visaoDiretoria).forEach(f => {
+      out[f.column] = { operator: "in", value: f.values.map(String) };
+    });
+  }
   Object.entries(filters.extra || {}).forEach(([col, vals]) => { if (vals && vals.length) out[col] = { operator: "in", value: vals }; });
   return out;
 }
 
-const DRILL_CHAIN: Array<{ field: string; label: string }> = [
+const DRILL_CHAIN_BASE: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
   { field: "departamento_nivel_4", label: "Diretoria" },
-  { field: "departamento_nivel_5", label: "Departamento" },
+  { field: "departamento_nivel_5", label: ORG.level5 },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "regionname", label: "Região" },
   { field: "subaccountname", label: "Subconta" },
 ];
 
+function buildDrillChain(visaoDiretoria: boolean): Array<{ field: string; label: string }> {
+  if (!visaoDiretoria) return DRILL_CHAIN_BASE;
+  return [
+    ...visaoDiretoriaChain(),
+    { field: "servicename", label: "Serviço" },
+    { field: "servicecategory", label: "Categoria" },
+    { field: "regionname", label: "Região" },
+    { field: "subaccountname", label: "Subconta" },
+  ];
+}
+
 function Drilldown({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
+  const drillChain = useMemo(() => buildDrillChain(filters.visaoDiretoria), [filters.visaoDiretoria]);
   const [path, setPath] = useState<Array<{ field: string; value: string }>>([]);
+  useEffect(() => { setPath([]); }, [filters.visaoDiretoria]);
   const level = path.length;
-  const next = DRILL_CHAIN[level];
+  const next = drillChain[level];
 
   const pathFilters = useMemo<DimonQueryFilter[]>(() => path.map(p => ({ column: p.field, operator: "IN", values: [p.value] })), [path]);
 
@@ -2077,7 +2363,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
             {path.map((p, i) => (
               <Box key={i} display="flex" alignItems="center" gap={0.6}>
                 <Typography sx={{ color: MUT, fontWeight: 950 }}>→</Typography>
-                <Chip size="small" label={`${DRILL_CHAIN[i].label}: ${p.value}`} color={i === path.length - 1 ? "primary" : "default"} onDelete={() => setPath(path.slice(0, i))} />
+                <Chip size="small" label={`${drillChain[i].label}: ${p.value}`} color={i === path.length - 1 ? "primary" : "default"} onDelete={() => setPath(path.slice(0, i))} />
               </Box>
             ))}
             {level > 0 && <Button size="small" onClick={() => setPath(path.slice(0, -1))}>Voltar</Button>}
@@ -2092,7 +2378,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
         <>
           <Grid item xs={12} md={7}>
             <LoadingBlock loading={loading}>
-              <RankBars title={`${DRILL_CHAIN[level].label} — filhos (Top 20)`} rows={children} measure="realizado" limit={20} color={PURPLE} />
+              <RankBars title={`${drillChain[level].label} — filhos (Top 20)`} rows={children} measure="realizado" limit={20} color={PURPLE} />
             </LoadingBlock>
           </Grid>
           <Grid item xs={12} md={5}>
@@ -2115,7 +2401,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
               <TableContainer>
                 <Table size="small">
                   <TableHead><TableRow>
-                    {[DRILL_CHAIN[level].label, "Realizado", "Billed Cost", "Quantidade", "% do nível"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                    {[drillChain[level].label, "Realizado", "Billed Cost", "Quantidade", "% do nível"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
                   </TableRow></TableHead>
                   <TableBody>
                     {children.slice(0, 30).map((r, i) => {

@@ -2,17 +2,18 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import Plot from "react-plotly.js";
 import { useSearchParams } from "react-router-dom";
 import {
-  Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Collapse, Dialog, DialogContent, DialogTitle, FormControl, Grid, IconButton,
+  Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,
   InputLabel, LinearProgress, Link, List, ListItemButton, ListItemText, Menu, MenuItem,
   Paper, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, Typography,
+  TableRow, TextField, Typography,
 } from "@mui/material";
-import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
+import { Add, ArrowBack, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
 import DesviosTab from "./DesviosTab";
 import AcksRegisteredTab from "./AcksRegisteredTab";
 import {
   Department, ForecastAccuracyMonth, ForecastAccuracyDimensions, ForecastAccuracyDelta, ForecastAccuracyDeltaRow,
   ForecastAccuracyDeltaSeries, ForecastAck, ForecastDesvioSubcat,
+  createForecastAck,
   getDepartments, getForecastAccuracyMonths, getForecastAccuracyDimensions, getForecastAccuracyDelta,
   getForecastAccuracyDeltaSeries, getForecastAccuracyDesviosSubcategories, getForecastAcks,
 } from "../../services/api";
@@ -66,7 +67,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [deltaShowAll, setDeltaShowAll] = useState(false);
   const [dimsLoading, setDimsLoading] = useState(false);
   const [deltaLoading, setDeltaLoading] = useState(false);
   // No último nível os ofensores abrem o detalhe por ServiceSubcategory
@@ -78,6 +78,10 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
   const [seriesDialog, setSeriesDialog] = useState<{ subcategory: string; data: ForecastAccuracyDeltaSeries | null; loading: boolean; error: string } | null>(null);
   // Acks (motivos de desvio) do mês selecionado — exibidos no Top 5 ofensores.
   const [acks, setAcks] = useState<ForecastAck[]>([]);
+  const [ackTarget, setAckTarget] = useState<ForecastAccuracyDeltaRow | null>(null);
+  const [ackCategory, setAckCategory] = useState("Pico sazonal");
+  const [ackReason, setAckReason] = useState("");
+  const [savingAck, setSavingAck] = useState(false);
   const openSeriesDialog = (row: ForecastAccuracyDeltaRow) => {
     if (selectedRun == null) return;
     const subcategory = row.subcategory || row.name;
@@ -186,7 +190,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
         if (cancelled) return;
         setDimensions(dimsData);
         setDeltaData(delta);
-        setDeltaShowAll(false);
       })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) { setDimsLoading(false); setDeltaLoading(false); } });
@@ -213,7 +216,49 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       : [deltaData.department, item.name].filter(Boolean).join(" > ");
     const exact = acks.filter(ack => ack.department_path.join(" > ") === rowPath);
     const descendants = acks.filter(ack => ack.department_path.join(" > ").startsWith(rowPath + " > "));
-    return [...exact, ...descendants.filter(ack => !exact.includes(ack))];
+    const ancestors = acks.filter(ack => rowPath.startsWith(ack.department_path.join(" > ") + " > "));
+    return [...exact, ...descendants, ...ancestors].filter((ack, index, all) => all.findIndex(item => item.id === ack.id) === index);
+  };
+
+  const projectPathForRow = (item: ForecastAccuracyDeltaRow): string => {
+    const parts = item.path?.length
+      ? item.path
+      : [...pathParts, item.name].filter(Boolean);
+    // Organograma padrão: Segmento > Modelo > Cloud > Diretoria > Projeto.
+    return parts.length >= 5 ? parts.slice(0, 5).join(" > ") : "";
+  };
+
+  const saveAck = async () => {
+    if (!ackTarget || selectedRun == null || !ackReason.trim()) return;
+    const path = projectPathForRow(ackTarget);
+    if (!path) return;
+    setSavingAck(true);
+    try {
+      await createForecastAck({
+        run_id: selectedRun,
+        target_month: selectedMonth,
+        department: path,
+        category: ackCategory,
+        reason: ackReason.trim(),
+      });
+      const result = await getForecastAcks(selectedMonth, department || undefined);
+      setAcks(result.items);
+      setAckTarget(null);
+      setAckReason("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao salvar Ack");
+    } finally {
+      setSavingAck(false);
+    }
+  };
+
+  const goBackOffender = () => {
+    if (offenderSubcatOpen) {
+      setOffenderSubcatOpen(null);
+      return;
+    }
+    const parent = pathParts.slice(0, -1).join(" > ");
+    setDepartment(parent);
   };
 
   const handleMonthChange = (month: string) => {
@@ -363,7 +408,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
           <Box>
             <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Acurácia" : "Acurácia de Forecast"}</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-              O que foi projetado no início do mês × o que realmente foi realizado — snapshot imutável no Iceberg por mês simulado.
+              O que foi projetado no início do mês × o que realmente foi realizado.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap" }}>
@@ -477,7 +522,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
             <Grid container spacing={2}>
               <Grid item xs={12} lg={7}>
                 <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="h6" sx={{ mb: 1 }}>Projetado × Realizado por {dimensions?.dimension}</Typography>
+                  <Typography variant="h6" sx={{ mb: 1 }}>Projetado × Realizado</Typography>
                   <Box sx={{ height: 340 }}>
                     <Plot
                       data={chartData}
@@ -524,15 +569,22 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
 
             <Paper elevation={0} sx={{ mt: 2, p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Box>
-                  <Typography variant="h6">Top 5 ofensores do desvio</Typography>
+                <Stack direction="row" alignItems="flex-start" gap={1}>
+                  {(department || offenderSubcatOpen) && (
+                    <IconButton size="small" onClick={goBackOffender} aria-label="Voltar um nível" title="Voltar um nível">
+                      <ArrowBack fontSize="small" />
+                    </IconButton>
+                  )}
+                  <Box>
+                  <Typography variant="h6">Principais desvios</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Nível abaixo do departamento selecionado — {deltaData?.level_label || "—"} · top 5 por |delta|.
+                    Nível abaixo do departamento selecionado — {deltaData?.level_label || "—"} · top 10 por |delta|.
                     {department ? ` Filtrado por: ${department}.` : " Sem filtro de departamento."}
                     {deltaData && !deltaData.leaf && deltaData.records.some(r => !isOffenderLeaf(r)) && " Clique em uma linha para navegar um nível abaixo."}
                     {deltaData && !deltaData.leaf && deltaData.records.some(isOffenderLeaf) && " Clique em uma linha para ver o detalhe por ServiceSubcategory."}
                   </Typography>
-                </Box>
+                  </Box>
+                </Stack>
                 {deltaLoading && <Chip size="small" label="carregando…" color="info" variant="outlined" />}
               </Stack>
               {deltaLoading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
@@ -552,7 +604,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {(deltaShowAll ? deltaData.records : deltaData.records.slice(0, 5)).map(item => {
+                        {deltaData.records.slice(0, 10).map(item => {
                           const rowPath = item.path && item.path.length ? item.path.join(" > ") : [deltaData.department, item.name].filter(Boolean).join(" > ");
                           const subcatOpen = offenderSubcatOpen === rowPath;
                           const subcats = offenderSubcats[rowPath];
@@ -591,7 +643,15 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                                 <TableCell align="right" sx={{ color: accuracyColor(item.accuracy) }}>{pct(item.accuracy)}</TableCell>
                                 <TableCell>
                                   {rowAcks.length === 0 ? (
-                                    <Typography variant="caption" color="text.disabled">—</Typography>
+                                    projectPathForRow(item) ? (
+                                      <Button
+                                        size="small"
+                                        variant="contained"
+                                        onClick={event => { event.stopPropagation(); setAckTarget(item); }}
+                                      >
+                                        Ack
+                                      </Button>
+                                    ) : <Typography variant="caption" color="text.disabled">Disponível no nível Projeto</Typography>
                                   ) : (
                                     <Stack spacing={0.5} sx={{ maxWidth: 360 }}>
                                       <Chip size="small" color="info" label={`✓ Ack${rowAcks.length > 1 ? ` (${rowAcks.length})` : ""}: ${rowAcks[0].category}`} />
@@ -650,11 +710,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                     </Table>
                   </TableContainer>
                   <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 1 }}>
-                    {deltaData.records.length > 5 && (
-                      <Button size="small" onClick={() => setDeltaShowAll(!deltaShowAll)}>
-                        {deltaShowAll ? "Mostrar top 5" : `Mostrar todos (${deltaData.records.length})`}
-                      </Button>
-                    )}
                     <Typography variant="caption" color="text.secondary">
                       <Box component="span" sx={{ color: "#DC2626" }}>vermelho = subestimou</Box> (realizado acima do projetado) ·{" "}
                       <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (projetado acima do realizado).
@@ -665,6 +720,36 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                 <Typography variant="body2" color="text.secondary">Sem dados neste nível para os filtros atuais.</Typography>
               )}
             </Paper>
+
+            <Dialog open={Boolean(ackTarget)} onClose={() => !savingAck && setAckTarget(null)} maxWidth="sm" fullWidth>
+              <DialogTitle>Registrar Ack — Projeto {ackTarget ? projectPathForRow(ackTarget).split(" > ").slice(-1)[0] : ""}</DialogTitle>
+              <DialogContent>
+                <Stack gap={2} sx={{ mt: 1 }}>
+                  <FormControl fullWidth>
+                    <InputLabel>Categoria</InputLabel>
+                    <Select value={ackCategory} label="Categoria" onChange={event => setAckCategory(event.target.value)}>
+                      {["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"].map(category => (
+                        <MenuItem key={category} value={category}>{category}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <TextField
+                    label="Motivo do desvio"
+                    value={ackReason}
+                    onChange={event => setAckReason(event.target.value)}
+                    multiline
+                    minRows={3}
+                    required
+                  />
+                </Stack>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setAckTarget(null)} disabled={savingAck}>Cancelar</Button>
+                <Button variant="contained" onClick={saveAck} disabled={savingAck || !ackReason.trim()}>
+                  {savingAck ? "Salvando…" : "Salvar Ack"}
+                </Button>
+              </DialogActions>
+            </Dialog>
 
             <Paper elevation={0} sx={{ mt: 2, p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>

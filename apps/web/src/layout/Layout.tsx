@@ -69,7 +69,7 @@ const menuGroups = [
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
-      { path: "/departments", label: "Departamentos", icon: <BusinessIcon /> },
+      { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
       { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
