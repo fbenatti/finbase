@@ -167,6 +167,7 @@ async def set_user_roles(user_id: int, body: RolesBody, db: AsyncSession = Depen
     if target is None:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     result = await db.execute(select(Role).where(Role.id.in_(body.role_ids)))
+    target = await _reload(db, user_id)  # roles carregada (evita lazy fora de greenlet)
     target.roles = list(result.scalars().all())
     await db.commit()
     invalidate_permissions_cache()

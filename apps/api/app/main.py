@@ -298,6 +298,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FinOps ETL Platform", version="0.1.0", lifespan=lifespan)
 
+from app.core.authz_middleware import RBACMiddleware
+
+app.add_middleware(RBACMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
