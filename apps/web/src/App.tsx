@@ -1,5 +1,10 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Box, CircularProgress } from "@mui/material";
+import type { ReactElement } from "react";
 import Layout from "./layout/Layout";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
+import ChangePassword from "./auth/ChangePassword";
+import Login from "./pages/Login/Login";
 import Connections from "./pages/Connections/Connections";
 import Explorer from "./pages/Explorer/Explorer";
 import Mappings from "./pages/Mappings/Mappings";
@@ -24,10 +29,31 @@ import Planning from "./pages/Planning/Planning";
 import Savings from "./pages/Savings/Savings";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
 import DimonDashboard from "./pages/DimonDashboard/DimonDashboard";
+function RequireAuth({ children }: { children: ReactElement }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) {
+    return (
+      <Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  if (user.must_change_password) {
+    return <ChangePassword onChanged={() => window.location.reload()} />;
+  }
+  return children;
+}
+
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Navigate to="/connections" replace />} />
         <Route path="connections" element={<Connections />} />
         <Route path="explorer/:connectionId" element={<Explorer />} />
@@ -61,8 +87,9 @@ function App() {
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
         <Route path="reprocess/shared-cost/history/:runId" element={<SharedCostHistory />} />
         <Route path="extraction/history/:taskId" element={<ExtractionHistory />} />
-      </Route>
-    </Routes>
+        </Route>
+      </Routes>
+    </AuthProvider>
   );
 }
 

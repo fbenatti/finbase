@@ -135,6 +135,89 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// ── Auth: token em memória + refresh silencioso em 401 ────────────────────
+import { getAccessToken, setAccessToken } from "../auth/tokenStore";
+import type { AuthUser } from "../auth/types";
+
+let sessionExpiredHandler: (() => void) | null = null;
+export function onSessionExpired(handler: () => void) {
+  sessionExpiredHandler = handler;
+}
+
+api.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token && config.url && !config.url.startsWith("/auth/")) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+let refreshPromise: Promise<string | null> | null = null;
+
+async function tryRefresh(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const { data } = await axios.post("/api/auth/refresh", {}, { withCredentials: true });
+        setAccessToken(data.access_token);
+        return data.access_token as string;
+      } catch {
+        setAccessToken(null);
+        return null;
+      } finally {
+        setTimeout(() => {
+          refreshPromise = null;
+        }, 0);
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config || {};
+    const url: string = original.url || "";
+    const isAuthCall = url.startsWith("/auth/");
+    if (error.response?.status === 401 && !original._retried && !isAuthCall) {
+      original._retried = true;
+      const token = await tryRefresh();
+      if (token) {
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${token}`;
+        return api(original);
+      }
+      sessionExpiredHandler?.();
+    }
+    return Promise.reject(error);
+  }
+);
+
+export async function apiLogin(username: string, password: string): Promise<{ must_change_password: boolean }> {
+  const { data } = await axios.post("/api/auth/login", { username, password }, { withCredentials: true });
+  setAccessToken(data.access_token);
+  return data;
+}
+
+export async function apiLogout(): Promise<void> {
+  try {
+    await axios.post("/api/auth/logout", {}, { withCredentials: true });
+  } finally {
+    setAccessToken(null);
+  }
+}
+
+export async function apiMe(): Promise<AuthUser> {
+  const { data } = await api.get("/auth/me");
+  return data;
+}
+
+export async function apiChangePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
+}
+
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
 export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "azure_automation_jobs", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "databricks"]);
 
