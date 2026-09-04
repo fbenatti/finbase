@@ -16,8 +16,10 @@ financeiro do dashboard com a separação correta de capacidade PTU:
 O consumo diário/horário da capacidade (meter ``Provisioned Managed*``,
 ``1/Hour``) não é retornado: ele já está incluído no custo da compra mensal.
 
-Os projetos são classificados no ``departamento_nivel_5`` (Vivo Mais /
-Aura Brain) — o nível de departamento onde os projetos vivem.
+Os projetos são classificados no ``departamento_nivel_5``. O Vivo Mais
+publica a reserva PTU como ``Vivo+`` na Gold (subconta de faturamento);
+o dashboard normaliza para o rótulo ``Vivo Mais``. Aura Brain usa o
+mesmo nome na Gold.
 """
 
 from __future__ import annotations
@@ -36,11 +38,28 @@ GOLD_PLANNING_TABLE = "dest_modelo_focus_planning"
 GOLD_NAMESPACE = "iceberg.gold"
 PROJECTS = ("Vivo Mais", "Aura Brain")
 
-# Chaves de projeto usadas pelo dashboard (filtro de projeto) -> nome na Gold.
+# Chaves de projeto usadas pelo dashboard (filtro de projeto) -> rótulo exibido.
 PROJECT_KEY_TO_DIMON = {
     "vivo-mais": "Vivo Mais",
     "aura-brain": "Aura Brain",
 }
+
+# Nomes publicados na Gold FOCUS por rótulo do dashboard (Vivo Mais -> Vivo+).
+GOLD_PROJECT_NAMES: dict[str, tuple[str, ...]] = {
+    "Vivo Mais": ("Vivo Mais", "Vivo+"),
+    "Aura Brain": ("Aura Brain",),
+}
+
+_PROJECT_SQL = (
+    "CASE WHEN COALESCE(NULLIF(departamento_nivel_5, ''), departamento) = 'Vivo+' "
+    "THEN 'Vivo Mais' "
+    "ELSE COALESCE(NULLIF(departamento_nivel_5, ''), departamento) END"
+)
+_PLANNING_PROJECT_SQL = (
+    "CASE WHEN COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) = 'Vivo+' "
+    "THEN 'Vivo Mais' "
+    "ELSE COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) END"
+)
 
 # Classificação dos meters PTU na Gold FOCUS.
 RESERVATION_SERVICE = "Microsoft.Capacity"           # compra da reserva
@@ -99,13 +118,23 @@ def _periods_in_window(date_from: str, date_to: str) -> list[str]:
 
 
 def _resolve_projects(project_keys: list[str] | None) -> list[str]:
-    """Mapeia as chaves do dashboard (vivo-mais/aura-brain) para a Gold."""
+    """Mapeia as chaves do dashboard (vivo-mais/aura-brain) para o rótulo exibido."""
     resolved: list[str] = []
     for key in (project_keys or []):
         name = PROJECT_KEY_TO_DIMON.get(str(key or ""), str(key or ""))
         if name in PROJECTS and name not in resolved:
             resolved.append(name)
     return resolved or list(PROJECTS)
+
+
+def _gold_project_names(project_labels: list[str]) -> list[str]:
+    """Expande rótulos do dashboard para os valores literais na Gold."""
+    names: list[str] = []
+    for label in project_labels:
+        for gold_name in GOLD_PROJECT_NAMES.get(label, (label,)):
+            if gold_name not in names:
+                names.append(gold_name)
+    return names
 
 
 async def _load_realized_rows(
@@ -115,12 +144,13 @@ async def _load_realized_rows(
 ) -> list[dict[str, Any]]:
     """Agregação única sobre a Gold (realizado) por (período, projeto)."""
     selected_projects = _resolve_projects(project_keys)
-    project_list = ", ".join(f"'{p}'" for p in selected_projects)
+    gold_projects = _gold_project_names(selected_projects)
+    project_list = ", ".join(f"'{p}'" for p in gold_projects)
     period_list = ", ".join(f"'{p}'" for p in periods)
     reservation_charges = ", ".join(f"'{c}'" for c in RESERVATION_CHARGES)
     sql = f"""
         SELECT _billing_period AS periodo,
-               COALESCE(NULLIF(departamento_nivel_5, ''), departamento) AS projeto,
+               {_PROJECT_SQL} AS projeto,
                MAX(departamento_nivel_4) AS departamento_nivel_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))     AS realizado,
                SUM(COALESCE(TRY_CAST(billedcost AS DOUBLE), 0))    AS billedcost,
@@ -166,11 +196,12 @@ async def _load_forecast_rows(
     para completar o mês corrente quando o realizado ainda não chegou.
     """
     selected_projects = _resolve_projects(project_keys)
-    project_list = ", ".join(f"'{p}'" for p in selected_projects)
+    gold_projects = _gold_project_names(selected_projects)
+    project_list = ", ".join(f"'{p}'" for p in gold_projects)
     period_list = ", ".join(f"'{p}'" for p in periods)
     sql = f"""
         SELECT period AS periodo,
-               COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) AS projeto,
+               {_PLANNING_PROJECT_SQL} AS projeto,
                MAX(departamento_nivel_4) AS departamento_nivel_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realizado
         FROM {GOLD_NAMESPACE}.{GOLD_PLANNING_TABLE}

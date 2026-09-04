@@ -1,4 +1,8 @@
-from app.services.azure_ptu_cost import _carry_forward_reservation_purchase
+from app.services.azure_ptu_cost import (
+    _carry_forward_reservation_purchase,
+    _gold_project_names,
+    _resolve_projects,
+)
 
 
 def test_vivo_reservation_uses_last_positive_purchase_as_reference():
@@ -32,3 +36,8 @@ def test_reservation_reference_never_uses_refund_or_zero_quantity():
     assert rows[-1]["reservation_units"] == 0.0
     assert rows[-1]["reservation_cost"] == 0.0
     assert "reservation_referenced" not in rows[-1]
+
+
+def test_vivo_mais_gold_project_names_include_vivo_plus():
+    assert _gold_project_names(["Vivo Mais"]) == ["Vivo Mais", "Vivo+"]
+    assert _resolve_projects(["vivo-mais"]) == ["Vivo Mais"]

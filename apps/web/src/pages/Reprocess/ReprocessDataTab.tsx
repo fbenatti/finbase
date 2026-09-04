@@ -59,14 +59,14 @@ export default function ReprocessDataTab() {
     offset: number;
     limit: number;
     sort?: { field: string; direction: "asc" | "desc" };
-    filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+    filters: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
   }>({ offset: 0, limit: 10, filters: [] });
 
   const historyQuery = useCallback(async (queryParam?: {
     offset: number;
     limit: number;
     sort?: { field: string; direction: "asc" | "desc" };
-    filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+    filters: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
   }) => {
     setHistoryLoading(true);
     try {

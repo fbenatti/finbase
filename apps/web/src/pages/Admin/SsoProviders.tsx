@@ -116,9 +116,17 @@ export default function SsoProviders() {
   };
 
   return (
-    <Box>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Typography variant="h4" sx={{ mb: 0.5 }}>Provedores SSO</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          OIDC e SAML2 corporativos para login único. Segredos são cifrados e nunca reaparecem depois de salvos.
+        </Typography>
+      </Box>
+      <Box sx={{ p: 3 }}>
+        <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 } }}>
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-        <Typography variant="h6">Provedores SSO</Typography>
+        <Typography variant="h6">Provedores</Typography>
         <Box flex={1} />
         <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Novo provedor</Button>
         <IconButton size="small" onClick={load}><RefreshIcon /></IconButton>
@@ -130,7 +138,7 @@ export default function SsoProviders() {
       {providers.length === 0 && <Typography color="text.secondary">Nenhum provedor configurado.</Typography>}
       <Stack spacing={1}>
         {providers.map((p) => (
-          <Paper key={p.id} sx={{ p: 2, display: "flex", alignItems: "center", gap: 2 }}>
+          <Paper key={p.id} variant="outlined" sx={{ p: 2, display: "flex", alignItems: "center", gap: 2 }}>
             <Chip size="small" label={p.protocol.toUpperCase()} color={p.protocol === "oidc" ? "primary" : "secondary"} variant="outlined" />
             <Box sx={{ minWidth: 180 }}>
               <Typography variant="body2" fontWeight={600}>{p.name}</Typography>
@@ -149,6 +157,8 @@ export default function SsoProviders() {
           </Paper>
         ))}
       </Stack>
+      </Paper>
+      </Box>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{editing ? `Editar ${editing.name}` : "Novo provedor SSO"}</DialogTitle>

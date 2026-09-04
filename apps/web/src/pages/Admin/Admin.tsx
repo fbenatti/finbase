@@ -419,16 +419,25 @@ function UsersTab() {
 export default function Admin() {
   const [tab, setTab] = useState(0);
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" sx={{ mb: 2 }}>Administração</Typography>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Usuários" />
-        <Tab label="Grupos" />
-        <Tab label="Roles" />
-      </Tabs>
-      {tab === 0 && <UsersTab />}
-      {tab === 1 && <GroupsTab />}
-      {tab === 2 && <RolesTab />}
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+        <Typography variant="h4" sx={{ mb: 0.5 }}>Administração</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Usuários, grupos de acesso, roles com permissões por módulo e escopo, e os vínculos que definem o que cada pessoa enxerga.
+        </Typography>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+          <Tab label="Usuários" />
+          <Tab label="Grupos" />
+          <Tab label="Roles" />
+        </Tabs>
+      </Box>
+      <Box sx={{ p: 3 }}>
+        <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 } }}>
+          {tab === 0 && <UsersTab />}
+          {tab === 1 && <GroupsTab />}
+          {tab === 2 && <RolesTab />}
+        </Paper>
+      </Box>
     </Box>
   );
 }

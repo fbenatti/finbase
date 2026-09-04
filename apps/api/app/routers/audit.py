@@ -1,8 +1,9 @@
 """Consulta de auditoria: histórico por registro (timeline) e visão global."""
 from datetime import datetime
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require
@@ -21,6 +22,10 @@ def _timeline_item(row: AuditLog) -> dict:
         "user": {"id": row.user_id, "username": row.username, "full_name": None},
         "action": row.action_label,
         "method": row.method,
+        "module": row.module,
+        "status_code": row.status_code,
+        "entity_type": row.entity_type,
+        "entity_id": row.entity_id,
         "entity_label": row.entity_label,
         "changes": row.changes_json,
         "has_full_snapshot": row.before_json is not None or row.after_json is not None,
@@ -97,11 +102,15 @@ async def global_logs(
     entity_id: str | None = None,
     method: str | None = None,
     action_label: str | None = None,
+    sort_field: str = Query("created_at"),
+    sort_direction: str = Query("desc", pattern="^(asc|desc)$"),
+    filters: str | None = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("audit", "read")),
 ):
+    from datetime import datetime as _dt, timedelta
     query = select(AuditLog)
     if from_ is not None:
         query = query.where(AuditLog.created_at >= from_)
@@ -120,8 +129,65 @@ async def global_logs(
     if action_label:
         query = query.where(AuditLog.action_label == action_label)
 
+    # Filtros genéricos (AND) no mesmo contrato do grid: [{field, operator, value}]
+    sortable = {
+        "id": AuditLog.id,
+        "created_at": AuditLog.created_at,
+        "username": AuditLog.username,
+        "module": AuditLog.module,
+        "method": AuditLog.method,
+        "action_label": AuditLog.action_label,
+        "entity_label": AuditLog.entity_label,
+        "entity_type": AuditLog.entity_type,
+        "entity_id": AuditLog.entity_id,
+        "status_code": AuditLog.status_code,
+    }
+    if filters:
+        try:
+            specs = json.loads(filters)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(422, "Filtros inválidos") from exc
+        for spec in specs if isinstance(specs, list) else []:
+            field = str(spec.get("field", ""))
+            op = str(spec.get("operator", "equals"))
+            value = str(spec.get("value", ""))
+            column = sortable.get(field)
+            if column is None or value == "":
+                continue
+            if field in ("created_at",):
+                try:
+                    if "T" in value:
+                        dt_val = _dt.fromisoformat(value.replace("Z", "+00:00"))
+                    else:
+                        dt_val = _dt.fromisoformat(value + "T00:00:00")
+                except ValueError:
+                    continue
+                if op == "after":
+                    query = query.where(column >= dt_val)
+                elif op == "before":
+                    query = query.where(column <= dt_val + timedelta(days=1))
+                elif op == "notEquals":
+                    query = query.where(or_(column.is_(None), column < dt_val, column >= dt_val + timedelta(days=1)))
+                else:
+                    query = query.where(column >= dt_val, column < dt_val + timedelta(days=1))
+                continue
+            if op == "notEquals":
+                query = query.where(or_(column.is_(None), cast(column, String) != value))
+            elif op == "contains":
+                query = query.where(cast(column, String).ilike(f"%{value}%"))
+            elif op == "notContains":
+                query = query.where(or_(column.is_(None), ~cast(column, String).ilike(f"%{value}%")))
+            elif op == "after":
+                query = query.where(column >= value)
+            elif op == "before":
+                query = query.where(column <= value)
+            else:
+                query = query.where(cast(column, String) == value)
+
+    order = sortable.get(sort_field, AuditLog.created_at)
+    ordering = order.desc() if sort_direction == "desc" else order.asc()
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
-    result = await db.execute(query.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset))
+    result = await db.execute(query.order_by(ordering).limit(limit).offset(offset))
     rows = result.scalars().all()
     return {"items": [_timeline_item(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 

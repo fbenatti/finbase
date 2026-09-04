@@ -185,8 +185,12 @@ export default function ExpectedView({
   const sortedDrivers = drivers.filter(driver => Math.abs(driver.variance) > 0.005).sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
   const leadingDrivers = sortedDrivers.slice(0, 8);
   const otherDrivers = sortedDrivers.slice(8).reduce((total, item) => total + item.variance, 0);
+  // Waterfall: Orçamento → drivers → Forecast. Cada driver.variance = orçamento −
+  // forecast; o passo relativo precisa ser (forecast − orçamento), senão o total
+  // vira 2×orçamento − forecast e inverte a leitura quando forecast > orçamento.
+  const driverStep = (variance: number) => -variance;
   const waterfallLabels = ["Orçamento", ...leadingDrivers.map(item => item.name), ...(sortedDrivers.length > 8 ? ["Outros"] : []), "Forecast"];
-  const waterfallValues = [budget, ...leadingDrivers.map(item => item.variance), ...(sortedDrivers.length > 8 ? [otherDrivers] : []), 0];
+  const waterfallValues = [budget, ...leadingDrivers.map(item => driverStep(item.variance)), ...(sortedDrivers.length > 8 ? [driverStep(otherDrivers)] : []), 0];
   const waterfallMeasures = ["absolute", ...leadingDrivers.map(() => "relative"), ...(sortedDrivers.length > 8 ? ["relative"] : []), "total"];
   const stackedDrivers = [...drivers]
     .filter(driver => Math.abs(Number(driver.actual_value || 0)) + Math.abs(Number(driver.shared_value || 0)) > 0.005)

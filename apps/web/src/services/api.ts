@@ -242,6 +242,47 @@ export async function apiChangePassword(currentPassword: string, newPassword: st
   await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
 }
 
+// ── Auditoria ─────────────────────────────────────────────────────────────────
+export interface AuditLogItem {
+  id: number;
+  created_at: string | null;
+  user: { id: number | null; username: string | null; full_name?: string | null };
+  action: string;
+  method: string;
+  module: string;
+  status_code?: number | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  entity_label: string | null;
+  changes?: Array<{ field: string; old: unknown; new: unknown }> | null;
+  has_full_snapshot?: boolean;
+}
+export type GridFilterOp = "equals" | "notEquals" | "contains" | "notContains" | "after" | "before";
+export type GridFilter = { field: string; operator: GridFilterOp; value: string };
+
+export async function getAuditLogs(params: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  sort_field?: string;
+  sort_direction?: "asc" | "desc";
+  filters?: GridFilter[];
+} = {}): Promise<{ items: AuditLogItem[]; total: number }> {
+  const { filters, search, ...query } = params;
+  const effectiveFilters = search
+    ? [...(filters ?? []), { field: "username", operator: "contains" as GridFilterOp, value: search }]
+    : filters ?? [];
+  const { data } = await api.get("/audit/logs", {
+    params: { ...query, ...(effectiveFilters.length ? { filters: JSON.stringify(effectiveFilters) } : {}) },
+  });
+  return data;
+}
+
+export async function getAuditLog(id: number): Promise<AuditLogItem & { before_json?: unknown; after_json?: unknown; ip?: string | null; user_agent?: string | null; request_id?: string | null }> {
+  const { data } = await api.get(`/audit/logs/${id}`);
+  return data;
+}
+
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
 export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "azure_automation_jobs", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "databricks"]);
 
@@ -424,7 +465,7 @@ export async function getConnectionsGrid(params: {
   filter_field?: string;
   filter_operator?: "equals" | "notEquals";
   filter_value?: string;
-  filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+  filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
 }): Promise<ConnectionsGridResponse> {
   const { filters, ...query } = params;
   const { data } = await api.get("/connections/grid", { params: { ...query, ...(filters?.length ? { filters: JSON.stringify(filters) } : {}) } });
@@ -681,7 +722,7 @@ export async function getReprocessStatus(taskId: number): Promise<ReprocessStatu
   const { data } = await api.get(`/etl/reprocess-status/${taskId}`);
   return data;
 }
-export async function getReprocessHistory(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> } = {}): Promise<{ items: ReprocessStatus[]; total: number }> {
+export async function getReprocessHistory(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }> } = {}): Promise<{ items: ReprocessStatus[]; total: number }> {
   const { data } = await api.get("/etl/reprocess-history", { params: { ...params, filters: params.filters ? JSON.stringify(params.filters) : undefined } });
   return data;
 }
@@ -756,7 +797,7 @@ export async function getClassificationsGrid(params: {
   search?: string;
   sort_field?: string;
   sort_direction?: "asc" | "desc";
-  filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+  filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
   destination_table_id?: number;
   cloud?: string;
 } = {},
@@ -929,7 +970,7 @@ export interface GridParams {
   search?: string;
   sort_field?: string;
   sort_direction?: "asc" | "desc";
-  filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }>;
+  filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
 }
 export async function getDepartmentsGrid(params: GridParams = {}): Promise<{ items: Department[]; total: number }> {
   const { data } = await api.get("/departments/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
@@ -1146,7 +1187,7 @@ export async function validateForecastConfig(id: number): Promise<{ valid: boole
 export async function createForecastRun(configId: number): Promise<{ run_id: number; task_id: number; status: string }> { const { data } = await api.post(`/forecast/runs?config_id=${configId}`); return data; }
 export async function getForecastRuns(): Promise<ForecastRun[]> { const { data } = await api.get("/forecast/runs"); return data; }
 export interface ForecastRunsGridResponse { items: ForecastRun[]; total: number; }
-export async function getForecastRunsGrid(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> } = {}): Promise<ForecastRunsGridResponse> {
+export async function getForecastRunsGrid(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }> } = {}): Promise<ForecastRunsGridResponse> {
   const { data } = await api.get("/forecast/runs/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
   return data;
 }
@@ -1268,7 +1309,7 @@ export async function reprocessForecastAccuracy(configId: number, months: string
   const { data } = await api.post("/forecast/accuracy/reprocess", { config_id: configId, months });
   return data;
 }
-export type ForecastGridParams = { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> };
+export type ForecastGridParams = { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }> };
 export interface ForecastConfigsGridResponse { items: ForecastConfig[]; total: number; }
 export async function getForecastConfigsGrid(params: ForecastGridParams = {}): Promise<ForecastConfigsGridResponse> {
   const { data } = await api.get("/forecast/configs/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });

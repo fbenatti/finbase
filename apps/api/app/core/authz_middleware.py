@@ -71,6 +71,8 @@ METHOD_ACTION = {
 # documentada ao mapeamento HTTP→ação: POST→create). Valem para leitores.
 READ_POST_PREFIXES: list[tuple[str, str]] = [
     ("/visoes-consumo-ia/dashboard/", "azure_ptu"),
+    ("/visoes-consumo-ia/provider/", "ai_provider_dashboards"),
+    ("/ai-copilot/", "ai_copilot"),
     ("/ai-dashboards/", "ai_dashboards"),
     ("/dimon/query", "dimon"),
     ("/dimon/info", "dimon"),
@@ -78,6 +80,7 @@ READ_POST_PREFIXES: list[tuple[str, str]] = [
     ("/analysis/pivot", "analysis"),
     ("/analysis/expected-view", "analysis"),
 ]
+READ_POST_WRITE_MARKERS = ("/reprocess", "/exec", "/cancel", "/enqueue", "/run")
 
 # Áreas de "aba" escopadas dentro de um módulo (kind prefix|contains).
 # kind=prefix casa path.startswith(needle); kind=contains casa needle em path.
@@ -137,7 +140,8 @@ class RBACMiddleware:
         if scope.get("method") in ("POST", "PUT", "PATCH"):
             for qprefix, qmodule in READ_POST_PREFIXES:
                 if path.startswith(qprefix) and module == qmodule:
-                    action = "read"
+                    if not any(marker in path for marker in READ_POST_WRITE_MARKERS):
+                        action = "read"
                     break
 
         # Regra escopada (aba) tem precedência e pode redefinir a ação

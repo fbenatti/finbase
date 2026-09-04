@@ -2482,13 +2482,20 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
             if field in ("started_at", "finished_at"):
                 try:
                     clean_val = value.replace("Z", "+00:00")
-                    if "T" in clean_val:
-                        dt_val = datetime.fromisoformat(clean_val)
-                    else:
-                        dt_val = datetime.fromisoformat(clean_val + "T00:00:00")
-                    expr = func.date_trunc("minute", column) == func.date_trunc("minute", dt_val) if ":" in value else func.date(column) == dt_val.date()
+                    dt_val = datetime.fromisoformat(clean_val) if "T" in clean_val else datetime.fromisoformat(clean_val + "T00:00:00")
                 except ValueError:
                     continue
+                if op == "after":
+                    expr = column >= dt_val
+                elif op == "before":
+                    expr = column <= (dt_val + timedelta(days=1) if "T" not in value else dt_val)
+                elif op == "notEquals":
+                    if ":" in value:
+                        expr = func.date_trunc("minute", column) != func.date_trunc("minute", dt_val)
+                    else:
+                        expr = func.date(column) != dt_val.date()
+                else:
+                    expr = func.date_trunc("minute", column) == func.date_trunc("minute", dt_val) if ":" in value else func.date(column) == dt_val.date()
             elif field == "rows_written":
                 try:
                     num_val = int(value)
@@ -2497,9 +2504,17 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
                     continue
             else:
                 # Mesmo padrão do grid de Connections: comparar como texto,
-                # com NULL incluído no notEquals.
+                # com NULL incluído no notEquals/notContains.
                 if op == "notEquals":
                     conditions.append(or_(column.is_(None), cast(column, String) != value))
+                elif op == "contains":
+                    conditions.append(cast(column, String).ilike(f"%{value}%"))
+                elif op == "notContains":
+                    conditions.append(or_(column.is_(None), ~cast(column, String).ilike(f"%{value}%")))
+                elif op == "after":
+                    conditions.append(cast(column, String) >= value)
+                elif op == "before":
+                    conditions.append(cast(column, String) <= value)
                 else:
                     conditions.append(cast(column, String) == value)
                 continue

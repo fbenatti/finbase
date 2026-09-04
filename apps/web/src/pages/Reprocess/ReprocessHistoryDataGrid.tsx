@@ -23,7 +23,7 @@ import { ReprocessStatus } from "../../services/api";
 
 export type ReprocessGridFilter = {
   field: string;
-  operator: "equals" | "notEquals";
+  operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before";
   value: string;
 };
 
@@ -233,9 +233,17 @@ export default function ReprocessHistoryDataGrid({
     }
     setPaginationModel((current) => ({ ...current, page: 0 }));
     const val = item.value instanceof Date ? item.value.toISOString() : String(item.value);
+    const opByMui: Record<string, ReprocessGridFilter["operator"]> = {
+      is: "equals", equals: "equals", "=": "equals",
+      not: "notEquals", isNot: "notEquals", "!=": "notEquals",
+      contains: "contains", isAnyOf: "contains",
+      doesNotContain: "notContains", notContains: "notContains",
+      isAfter: "after", after: "after", ">": "after", onOrAfter: "after",
+      isBefore: "before", before: "before", "<": "before", onOrBefore: "before",
+    };
     const filter: ReprocessGridFilter = {
       field: item.field,
-      operator: "equals",
+      operator: opByMui[item.operator] || "equals",
       value: val,
     };
     const filters = { ...activeFilters, [filter.field]: filter };
