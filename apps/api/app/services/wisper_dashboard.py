@@ -79,6 +79,19 @@ def _add_insight(name: str, value: Any, note: str = "") -> dict[str, Any]:
     return {"name": name, "value": value, "note": note}
 
 
+async def _trino(
+    sql: str,
+    *,
+    timeout_s: int,
+    cancel_event: asyncio.Event | None,
+) -> list[dict[str, Any]]:
+    """Run a Trino statement; return [] on failure so callers can gather safely."""
+    try:
+        return await trino_execute(sql, timeout_s=timeout_s, cancel_event=cancel_event) or []
+    except Exception:
+        return []
+
+
 def _is_gpu_shape(shape: str) -> bool:
     haystack = shape.upper()
     return any(token in haystack for token in ("GPU", "A10", "A100", "H100", "L40", "BM."))
@@ -241,48 +254,34 @@ async def _financials(
     closed_candidates = [p for p in all_periods if p < current_period]
     closed_period = closed_candidates[-1] if closed_candidates else all_periods[-1]
 
-    # 3. SKUs / capacity for the closed period
-    sku_rows = await trino_execute(
-        f"""
-        SELECT servicename,
-               servicesubcategory,
-               skumeter,
-               consumedunit,
-               MAX(regionname) AS regionname,
-               SUM(billedcost) AS cost,
-               SUM(consumedquantity) AS quantity,
-               SUM(COALESCE(listcost, 0)) AS list_cost,
-               SUM(COALESCE(effectivecost, 0)) AS effective_cost,
-               COUNT(DISTINCT resourceid) AS resources
-        FROM {FOCUS_TABLE}
-        WHERE {scope_sql}
-          AND _billing_period = '{closed_period}'
-        GROUP BY 1, 2, 3, 4
-        ORDER BY 5 DESC
-        """,
-        timeout_s=120,
-        cancel_event=cancel_event,
-    )
-
-    # MoM per SKU (cost in previous closed period)
+    # 3. Closed-period detail: SKU MoM, shapes, daily grain, forecast, subaccounts
     prev_period = _prev_period(closed_period)
-    prev_sku_rows = await trino_execute(
-        f"""
-        SELECT skumeter, SUM(billedcost) AS cost
-        FROM {FOCUS_TABLE}
-        WHERE {scope_sql}
-          AND _billing_period = '{prev_period}'
-        GROUP BY 1
-        """,
-        timeout_s=60,
-        cancel_event=cancel_event,
-    )
-    prev_sku_cost = {_s(r.get("skumeter")): _money(r.get("cost")) for r in prev_sku_rows or []}
+    closed_month = closed_period[:4] + "-" + closed_period[4:6]
+    current_month = current_period[:4] + "-" + current_period[4:6]
 
-    # Shapes per SKU (via operational inventory resource_id -> unit_shape)
-    shapes_by_sku: dict[str, list[tuple[str, int]]] = defaultdict(list)
-    try:
-        shape_rows = await trino_execute(
+    sku_rows, shape_rows, fleet_rows, daily_rows, sub_rows, forecast_by_period = await asyncio.gather(
+        _trino(
+            f"""
+            SELECT _billing_period AS period,
+                   servicename,
+                   servicesubcategory,
+                   skumeter,
+                   consumedunit,
+                   MAX(regionname) AS regionname,
+                   SUM(billedcost) AS cost,
+                   SUM(consumedquantity) AS quantity,
+                   SUM(COALESCE(listcost, 0)) AS list_cost,
+                   SUM(COALESCE(effectivecost, 0)) AS effective_cost,
+                   COUNT(DISTINCT resourceid) AS resources
+            FROM {FOCUS_TABLE}
+            WHERE {scope_sql}
+              AND _billing_period IN ('{closed_period}', '{prev_period}')
+            GROUP BY 1, 2, 3, 4, 5
+            """,
+            timeout_s=120,
+            cancel_event=cancel_event,
+        ),
+        _trino(
             f"""
             SELECT f.skumeter AS sku,
                    COALESCE(i.unit_shape, '') AS shape,
@@ -300,22 +299,8 @@ async def _financials(
             """,
             timeout_s=120,
             cancel_event=cancel_event,
-        )
-        for r in shape_rows or []:
-            sku = _s(r.get("sku"))
-            shape = _s(r.get("shape"))
-            recursos = int(r.get("recursos") or 0)
-            if sku and shape:
-                shapes_by_sku[sku].append((shape, recursos))
-    except Exception:
-        pass
-
-    # Fallback: fleet shapes of the project's Dedicated AI Clusters (accessible
-    # inventory) for Generative AI SKUs when the billed resource is not inventoried
-    # (billing compartments return 404 without IAM read on compute/generativeai).
-    fleet_shapes: list[tuple[str, int]] = []
-    try:
-        fleet_rows = await trino_execute(
+        ),
+        _trino(
             f"""
             SELECT unit_shape, SUM(unit_count) AS units
             FROM {OP_METRICS_TABLE}
@@ -325,14 +310,69 @@ async def _financials(
             """,
             timeout_s=30,
             cancel_event=cancel_event,
-        )
-        fleet_shapes = [
-            (_s(r.get("unit_shape")), int(r.get("units") or 0))
-            for r in fleet_rows or []
-            if _s(r.get("unit_shape"))
-        ]
-    except Exception:
-        pass
+        ),
+        _trino(
+            f"""
+            SELECT substr(chargeperiodstart, 1, 10) AS dia,
+                   servicename,
+                   servicesubcategory,
+                   skumeter,
+                   SUM(billedcost) AS custo,
+                   SUM(CASE WHEN skumeter = 'B95909' THEN consumedquantity ELSE 0 END) AS gpu_hours,
+                   SUM(CASE WHEN skumeter = 'B108085' THEN consumedquantity ELSE 0 END) AS ai_unit_hours,
+                   COUNT(*) AS linhas
+            FROM {FOCUS_TABLE}
+            WHERE {scope_sql}
+              AND substr(chargeperiodstart, 1, 7) IN ('{closed_month}', '{current_month}')
+            GROUP BY 1, 2, 3, 4
+            ORDER BY 1
+            """,
+            timeout_s=120,
+            cancel_event=cancel_event,
+        ),
+        _trino(
+            f"""
+            SELECT subaccountname,
+                   SUM(billedcost) AS cost
+            FROM {FOCUS_TABLE}
+            WHERE {scope_sql}
+              AND _billing_period = '{closed_period}'
+            GROUP BY 1
+            ORDER BY 2 DESC
+            """,
+            timeout_s=60,
+            cancel_event=cancel_event,
+        ),
+        _forecast_by_period(current_period, cancel_event),
+    )
+
+    prev_sku_cost: dict[str, float] = defaultdict(float)
+    closed_sku_rows: list[dict[str, Any]] = []
+    for r in sku_rows:
+        period = _s(r.get("period"))
+        sku = _s(r.get("skumeter"))
+        cost = _money(r.get("cost"))
+        if period == prev_period:
+            prev_sku_cost[sku] += cost
+        elif period == closed_period:
+            closed_sku_rows.append(r)
+    sku_rows = closed_sku_rows
+
+    shapes_by_sku: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for r in shape_rows:
+        sku = _s(r.get("sku"))
+        shape = _s(r.get("shape"))
+        recursos = int(r.get("recursos") or 0)
+        if sku and shape:
+            shapes_by_sku[sku].append((shape, recursos))
+
+    # Fallback: fleet shapes of Dedicated AI Clusters when billed resources are
+    # not inventoried (billing compartments return 404 without IAM read).
+    fleet_shapes = [
+        (_s(r.get("unit_shape")), int(r.get("units") or 0))
+        for r in fleet_rows
+        if _s(r.get("unit_shape"))
+    ]
 
     skus: list[dict[str, Any]] = []
     gpu_hours = ai_unit_hours = ocpu_hours = gb_hours = 0.0
@@ -387,31 +427,8 @@ async def _financials(
 
     hours_in_closed = 24 * calendar.monthrange(int(closed_period[:4]), int(closed_period[4:6]))[1]
 
-    # 4. Daily series for closed period (component cost + billed capacity).
-    closed_month = closed_period[:4] + "-" + closed_period[4:6]
-    current_month = current_period[:4] + "-" + current_period[4:6]
-    daily_rows = await trino_execute(
-        f"""
-        SELECT substr(chargeperiodstart, 1, 10) AS dia,
-               servicename,
-               servicesubcategory,
-               skumeter,
-               SUM(billedcost) AS custo,
-               SUM(CASE WHEN skumeter = 'B95909' THEN consumedquantity ELSE 0 END) AS gpu_hours,
-               SUM(CASE WHEN skumeter = 'B108085' THEN consumedquantity ELSE 0 END) AS ai_unit_hours,
-               COUNT(*) AS linhas
-        FROM {FOCUS_TABLE}
-        WHERE {scope_sql}
-          AND substr(chargeperiodstart, 1, 7) IN ('{closed_month}', '{current_month}')
-        GROUP BY 1, 2, 3, 4
-        ORDER BY 1
-        """,
-        timeout_s=120,
-        cancel_event=cancel_event,
-    )
-
     daily_by_date: dict[str, dict[str, Any]] = {}
-    for r in daily_rows or []:
+    for r in daily_rows:
         dia = _s(r.get("dia"))
         if not dia:
             continue
@@ -421,8 +438,8 @@ async def _financials(
             _s(r.get("skumeter")),
         )
         custo = _money(r.get("custo"))
-        gpu_hours = _money(r.get("gpu_hours"))
-        ai_unit_hours = _money(r.get("ai_unit_hours"))
+        day_gpu_hours = _money(r.get("gpu_hours"))
+        day_ai_unit_hours = _money(r.get("ai_unit_hours"))
         entry = daily_by_date.setdefault(
             dia,
             {
@@ -439,8 +456,8 @@ async def _financials(
         entry["buckets"][bucket] += custo
         if bucket in (BUCKET_GPU, "Generative AI"):
             entry["cost_hosting"] += custo
-        entry["gpu_hours"] += gpu_hours
-        entry["ai_unit_hours"] += ai_unit_hours
+        entry["gpu_hours"] += day_gpu_hours
+        entry["ai_unit_hours"] += day_ai_unit_hours
 
     daily = [
         {
@@ -471,41 +488,10 @@ async def _financials(
     current_days = calendar.monthrange(int(current_period[:4]), int(current_period[4:6]))[1]
     projection = run_rate_7d * current_days if run_rate_7d else 0.0
 
-    # 6. Forecast from dimon (for comparison only — never use as KPI)
-    forecast_current = 0.0
-    try:
-        forecast_rows = await trino_execute(
-            f"""
-            SELECT SUM(realizado) AS forecast_value
-            FROM {DIMON_TABLE}
-            WHERE _billing_period = '{current_period}'
-              AND lower(tipo) = 'forecast'
-            """,
-            timeout_s=30,
-            cancel_event=cancel_event,
-        )
-        if forecast_rows:
-            forecast_current = _money(forecast_rows[0].get("forecast_value"))
-    except Exception:
-        forecast_current = 0.0
-
-    # 7. Subaccounts for closed period (share_pct filled after closed_total is known)
-    sub_rows = await trino_execute(
-        f"""
-        SELECT subaccountname,
-               SUM(billedcost) AS cost
-        FROM {FOCUS_TABLE}
-        WHERE {scope_sql}
-          AND _billing_period = '{closed_period}'
-        GROUP BY 1
-        ORDER BY 2 DESC
-        """,
-        timeout_s=60,
-        cancel_event=cancel_event,
-    )
+    forecast_current = _money((forecast_by_period or {}).get(current_period, {}).get("total"))
     subaccounts_raw = [
         {"name": _s(r.get("subaccountname")) or "Não informado", "cost": _money(r.get("cost"))}
-        for r in sub_rows or []
+        for r in sub_rows
     ]
 
     # 8. Insights / anomalies
@@ -557,8 +543,7 @@ async def _financials(
             }
         )
 
-    forecast_by_period = await _forecast_by_period(current_period, cancel_event)
-    monthly = _merge_forecast_monthly(monthly, forecast_by_period, current_period)
+    monthly = _merge_forecast_monthly(monthly, forecast_by_period or {}, current_period)
 
     genai_cost = buckets.get("Generative AI", 0.0)
     gpu_cost = buckets.get(BUCKET_GPU, 0.0)
@@ -659,113 +644,219 @@ def _prev_period(period: str) -> str:
     return f"{y}{m:02d}"
 
 
-async def _operational(
-    wisper_compartment_ids: list[str],
-    cancel_event: asyncio.Event | None,
-) -> dict[str, Any]:
-    """Return OCI operational metrics and inventory filtered to the Wisper scope."""
-
-    compartment_filter = ""
-    if wisper_compartment_ids:
-        quoted = ", ".join(f"'{c}'" for c in wisper_compartment_ids)
-        compartment_filter = f"AND compartment_id IN ({quoted})"
-
-    # Metrics — last 90 days (or whatever is available)
-    metrics_rows = []
-    try:
-        metrics_rows = await trino_execute(
-            f"""
-            SELECT metric_name,
-                   SUM(metric_value) AS total_value,
-                   AVG(metric_value) AS average_value,
-                   APPROX_PERCENTILE(metric_value, 0.5) AS p50_value,
-                   COUNT(*) AS points
-            FROM {OP_METRICS_TABLE}
-            WHERE record_type = 'metric'
-              AND from_iso8601_timestamp(timestamp) >= current_timestamp - INTERVAL '90' DAY
-              {compartment_filter}
-            GROUP BY 1
-            """,
-            timeout_s=60,
-            cancel_event=cancel_event,
-        )
-    except Exception:
-        metrics_rows = []
-
-    by_name = {str(row.get("metric_name")): row for row in metrics_rows or []}
-    invocations = _money(by_name.get("TotalInvocationCount", {}).get("total_value"))
-    errors = _money(by_name.get("ClientErrorCount", {}).get("total_value")) + _money(
-        by_name.get("ServerErrorCount", {}).get("total_value")
+def _metric_date_predicate(days: int) -> str:
+    """Robust rolling window on metric timestamps (varchar or ISO in Iceberg)."""
+    return (
+        f"TRY_CAST(substr(CAST(timestamp AS VARCHAR), 1, 10) AS DATE) "
+        f">= CURRENT_DATE - INTERVAL '{int(days)}' DAY"
     )
 
-    # Window coverage
-    window = {"min": None, "max": None, "days": None}
-    try:
-        window_rows = await trino_execute(
-            f"""
-            SELECT MIN(timestamp) AS min_ts,
-                   MAX(timestamp) AS max_ts,
-                   COUNT(*) AS points
-            FROM {OP_METRICS_TABLE}
-            WHERE record_type = 'metric' {compartment_filter}
-            """,
-            timeout_s=30,
-            cancel_event=cancel_event,
-        )
-        if window_rows:
-            min_ts = _s(window_rows[0].get("min_ts"))
-            max_ts = _s(window_rows[0].get("max_ts"))
-            points = int(window_rows[0].get("points") or 0)
-            days = None
-            if min_ts and max_ts:
-                try:
-                    days = (
-                        datetime.fromisoformat(max_ts.replace("Z", "+00:00"))
-                        - datetime.fromisoformat(min_ts.replace("Z", "+00:00"))
-                    ).days + 1
-                except Exception:
-                    pass
-            window = {"min": min_ts or None, "max": max_ts or None, "days": days, "points": points}
-    except Exception:
-        pass
 
-    # Daily operational series
+def _tokens_from_daily_window(daily_ops: list[dict[str, Any]], window_days: int = 30) -> dict[str, Any]:
+    """Aggregate token totals for the last N calendar days in the daily series."""
+    empty = {
+        "input_tokens": 0.0,
+        "output_tokens": 0.0,
+        "total_tokens": 0.0,
+        "window_days": 0,
+        "date_from": None,
+        "date_to": None,
+    }
+    if not daily_ops:
+        return empty
+
+    dated = [day for day in daily_ops if day.get("date")]
+    if not dated:
+        return empty
+
+    max_date_str = max(str(day["date"]) for day in dated)
+    try:
+        max_date = datetime.strptime(max_date_str[:10], "%Y-%m-%d").date()
+        from datetime import timedelta
+
+        cutoff = (max_date - timedelta(days=window_days - 1)).isoformat()
+        window = [day for day in dated if str(day["date"])[:10] >= cutoff]
+    except Exception:
+        window = dated[-window_days:]
+
+    input_tokens = sum(_money(day.get("input_tokens")) for day in window)
+    output_tokens = sum(_money(day.get("output_tokens")) for day in window)
+    total_tokens = input_tokens + output_tokens
+    if total_tokens <= 0:
+        return empty
+
+    days_with_tokens = sum(
+        1
+        for day in window
+        if _money(day.get("input_tokens")) or _money(day.get("output_tokens"))
+    )
+    return {
+        "input_tokens": round(input_tokens, 2),
+        "output_tokens": round(output_tokens, 2),
+        "total_tokens": round(total_tokens, 2),
+        "window_days": days_with_tokens or len(window) or window_days,
+        "date_from": window[0].get("date"),
+        "date_to": window[-1].get("date"),
+    }
+
+
+def _empty_tokens_30d() -> dict[str, Any]:
+    return {
+        "input_tokens": 0.0,
+        "output_tokens": 0.0,
+        "total_tokens": 0.0,
+        "window_days": 0,
+        "date_from": None,
+        "date_to": None,
+    }
+
+
+def _pick_tokens_30d(
+    daily_ops: list[dict[str, Any]],
+    extra_sum: dict[str, Any] | None = None,
+    unfiltered_daily: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Prefer already-loaded daily series; optional SUM / unfiltered daily as fallback."""
+    from_daily = _tokens_from_daily_window(daily_ops, 30)
+    if from_daily["total_tokens"] > 0:
+        return from_daily
+    if extra_sum and _money(extra_sum.get("total_tokens")) > 0:
+        return extra_sum
+    if unfiltered_daily:
+        alt = _tokens_from_daily_window(unfiltered_daily, 30)
+        if alt["total_tokens"] > 0:
+            return alt
+    return from_daily if from_daily["total_tokens"] > 0 else _empty_tokens_30d()
+
+
+
+async def _tokens_last_30d(
+    extra_filter: str,
+    cancel_event: asyncio.Event | None,
+) -> dict[str, Any]:
+    """Single 30-day token SUM (GenAI metrics). extra_filter is a WHERE fragment or ''."""
+    rows = await _trino(
+        f"""
+        SELECT
+          SUM(CASE WHEN metric_name = 'InputTokenCount' THEN metric_value ELSE 0 END) AS input_tokens,
+          SUM(CASE WHEN metric_name = 'OutputTokenCount' THEN metric_value ELSE 0 END) AS output_tokens,
+          MIN(substr(CAST(timestamp AS VARCHAR), 1, 10)) AS date_from,
+          MAX(substr(CAST(timestamp AS VARCHAR), 1, 10)) AS date_to,
+          COUNT(DISTINCT substr(CAST(timestamp AS VARCHAR), 1, 10)) AS days_with_tokens
+        FROM {OP_METRICS_TABLE}
+        WHERE record_type = 'metric'
+          AND metric_name IN ('InputTokenCount', 'OutputTokenCount')
+          AND {_metric_date_predicate(30)}
+          {extra_filter}
+        """,
+        timeout_s=60,
+        cancel_event=cancel_event,
+    )
+    if not rows:
+        return _empty_tokens_30d()
+    row = rows[0]
+    input_tokens = _money(row.get("input_tokens"))
+    output_tokens = _money(row.get("output_tokens"))
+    total_tokens = input_tokens + output_tokens
+    if total_tokens <= 0:
+        return _empty_tokens_30d()
+    return {
+        "input_tokens": round(input_tokens, 2),
+        "output_tokens": round(output_tokens, 2),
+        "total_tokens": round(total_tokens, 2),
+        "window_days": int(row.get("days_with_tokens") or 0) or 30,
+        "date_from": _s(row.get("date_from")) or None,
+        "date_to": _s(row.get("date_to")) or None,
+    }
+
+
+
+async def _load_daily_ops(
+    compartment_filter: str,
+    cancel_event: asyncio.Event | None,
+    *,
+    days: int = 90,
+) -> list[dict[str, Any]]:
     daily_ops: list[dict[str, Any]] = []
-    try:
-        daily_rows = await trino_execute(
-            f"""
-            SELECT substr(CAST(timestamp AS VARCHAR), 1, 10) AS dia,
-                   SUM(CASE WHEN metric_name = 'InputTokenCount' THEN metric_value ELSE 0 END) AS input_tokens,
-                   SUM(CASE WHEN metric_name = 'OutputTokenCount' THEN metric_value ELSE 0 END) AS output_tokens,
-                   SUM(CASE WHEN metric_name = 'TotalInvocationCount' THEN metric_value ELSE 0 END) AS invocations,
-                   SUM(CASE WHEN metric_name = 'ClientErrorCount' THEN metric_value ELSE 0 END) AS client_errors,
-                   SUM(CASE WHEN metric_name = 'ServerErrorCount' THEN metric_value ELSE 0 END) AS server_errors,
-                   AVG(CASE WHEN metric_name = 'InvocationLatency' THEN metric_value END) AS latency_avg
-            FROM {OP_METRICS_TABLE}
-            WHERE record_type = 'metric'
-              AND from_iso8601_timestamp(timestamp) >= current_timestamp - INTERVAL '90' DAY
-              {compartment_filter}
-            GROUP BY 1
-            ORDER BY 1
-            """,
-            timeout_s=60,
-            cancel_event=cancel_event,
+    daily_rows = await _trino(
+        f"""
+        SELECT substr(CAST(timestamp AS VARCHAR), 1, 10) AS dia,
+               SUM(CASE WHEN metric_name = 'InputTokenCount' THEN metric_value ELSE 0 END) AS input_tokens,
+               SUM(CASE WHEN metric_name = 'OutputTokenCount' THEN metric_value ELSE 0 END) AS output_tokens,
+               SUM(CASE WHEN metric_name = 'TotalInvocationCount' THEN metric_value ELSE 0 END) AS invocations,
+               SUM(CASE WHEN metric_name = 'ClientErrorCount' THEN metric_value ELSE 0 END) AS client_errors,
+               SUM(CASE WHEN metric_name = 'ServerErrorCount' THEN metric_value ELSE 0 END) AS server_errors,
+               AVG(CASE WHEN metric_name = 'InvocationLatency' THEN metric_value END) AS latency_avg
+        FROM {OP_METRICS_TABLE}
+        WHERE record_type = 'metric'
+          AND {_metric_date_predicate(days)}
+          {compartment_filter}
+        GROUP BY 1
+        ORDER BY 1
+        """,
+        timeout_s=60,
+        cancel_event=cancel_event,
+    )
+    for r in daily_rows:
+        daily_ops.append(
+            {
+                "date": _s(r.get("dia")),
+                "input_tokens": round(_money(r.get("input_tokens")), 2),
+                "output_tokens": round(_money(r.get("output_tokens")), 2),
+                "invocations": round(_money(r.get("invocations")), 2),
+                "errors": round(_money(r.get("client_errors")) + _money(r.get("server_errors")), 2),
+                "latency_avg_ms": round(_money(r.get("latency_avg")), 2),
+            }
         )
-        for r in daily_rows or []:
-            daily_ops.append(
-                {
-                    "date": _s(r.get("dia")),
-                    "input_tokens": round(_money(r.get("input_tokens")), 2),
-                    "output_tokens": round(_money(r.get("output_tokens")), 2),
-                    "invocations": round(_money(r.get("invocations")), 2),
-                    "errors": round(_money(r.get("client_errors")) + _money(r.get("server_errors")), 2),
-                    "latency_avg_ms": round(_money(r.get("latency_avg")), 2),
-                }
-            )
-    except Exception:
-        pass
+    return daily_ops
 
-    # Inventory — latest snapshot only
+
+async def _resolve_tokens_30d(
+    *,
+    compartment_filter: str,
+    daily_ops: list[dict[str, Any]],
+    invocations: float,
+    cancel_event: asyncio.Event | None,
+) -> dict[str, Any]:
+    """30-day tokens from daily series; at most one extra Trino round-trip."""
+    from_daily = _tokens_from_daily_window(daily_ops, 30)
+    if from_daily["total_tokens"] > 0:
+        return from_daily
+
+    extra_sum = await _tokens_last_30d(compartment_filter, cancel_event)
+    picked = _pick_tokens_30d(daily_ops, extra_sum=extra_sum)
+    if picked["total_tokens"] > 0:
+        return picked
+
+    if invocations > 0 and compartment_filter:
+        unfiltered_daily = await _load_daily_ops("", cancel_event)
+        return _pick_tokens_30d(daily_ops, extra_sum=extra_sum, unfiltered_daily=unfiltered_daily)
+    return _empty_tokens_30d()
+
+
+def _window_from_rows(window_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    window: dict[str, Any] = {"min": None, "max": None, "days": None}
+    if not window_rows:
+        return window
+    min_ts = _s(window_rows[0].get("min_ts"))
+    max_ts = _s(window_rows[0].get("max_ts"))
+    points = int(window_rows[0].get("points") or 0)
+    days = None
+    if min_ts and max_ts:
+        try:
+            days = (
+                datetime.fromisoformat(max_ts.replace("Z", "+00:00"))
+                - datetime.fromisoformat(min_ts.replace("Z", "+00:00"))
+            ).days + 1
+        except Exception:
+            pass
+    return {"min": min_ts or None, "max": max_ts or None, "days": days, "points": points}
+
+
+async def _load_inventory(
+    compartment_filter: str,
+    cancel_event: asyncio.Event | None,
+) -> list[dict[str, Any]]:
     inventory: list[dict[str, Any]] = []
     try:
         inv_rows = await trino_execute(
@@ -809,44 +900,98 @@ async def _operational(
                     "collected_at": _s(r.get("collected_at")),
                 }
             )
+        return inventory
     except Exception:
-        # Fallback: read without collected_at filter if the column is missing (legacy schema)
-        try:
-            inv_rows = await trino_execute(
-                f"""
-                SELECT resource_type,
-                       resource_name,
-                       region,
-                       model_id,
-                       unit_shape,
-                       unit_count,
-                       lifecycle_state,
-                       compartment_id
-                FROM {OP_METRICS_TABLE}
-                WHERE record_type = 'inventory'
-                  {compartment_filter}
-                ORDER BY resource_type, resource_name
-                """,
-                timeout_s=60,
-                cancel_event=cancel_event,
+        pass
+
+    try:
+        inv_rows = await trino_execute(
+            f"""
+            SELECT resource_type,
+                   resource_name,
+                   region,
+                   model_id,
+                   unit_shape,
+                   unit_count,
+                   lifecycle_state,
+                   compartment_id
+            FROM {OP_METRICS_TABLE}
+            WHERE record_type = 'inventory'
+              {compartment_filter}
+            ORDER BY resource_type, resource_name
+            """,
+            timeout_s=60,
+            cancel_event=cancel_event,
+        )
+        for r in inv_rows or []:
+            inventory.append(
+                {
+                    "resource_type": _s(r.get("resource_type")),
+                    "resource_name": _s(r.get("resource_name")),
+                    "region": _s(r.get("region")),
+                    "model_id": _s(r.get("model_id")),
+                    "unit_shape": _s(r.get("unit_shape")),
+                    "unit_count": _money(r.get("unit_count")),
+                    "lifecycle_state": _s(r.get("lifecycle_state")),
+                    "compartment_id": _s(r.get("compartment_id")),
+                    "compartment_name": "",
+                    "collected_at": None,
+                }
             )
-            for r in inv_rows or []:
-                inventory.append(
-                    {
-                        "resource_type": _s(r.get("resource_type")),
-                        "resource_name": _s(r.get("resource_name")),
-                        "region": _s(r.get("region")),
-                        "model_id": _s(r.get("model_id")),
-                        "unit_shape": _s(r.get("unit_shape")),
-                        "unit_count": _money(r.get("unit_count")),
-                        "lifecycle_state": _s(r.get("lifecycle_state")),
-                        "compartment_id": _s(r.get("compartment_id")),
-                        "compartment_name": "",
-                        "collected_at": None,
-                    }
-                )
-        except Exception:
-            pass
+    except Exception:
+        pass
+    return inventory
+
+
+async def _operational(
+    wisper_compartment_ids: list[str],
+    cancel_event: asyncio.Event | None,
+) -> dict[str, Any]:
+    """Return OCI operational metrics and inventory filtered to the Wisper scope."""
+
+    compartment_filter = ""
+    if wisper_compartment_ids:
+        quoted = ", ".join(f"'{c}'" for c in wisper_compartment_ids)
+        compartment_filter = f"AND compartment_id IN ({quoted})"
+
+    metrics_rows, window_rows, daily_ops, inventory = await asyncio.gather(
+        _trino(
+            f"""
+            SELECT metric_name,
+                   SUM(metric_value) AS total_value,
+                   AVG(metric_value) AS average_value,
+                   APPROX_PERCENTILE(metric_value, 0.5) AS p50_value,
+                   COUNT(*) AS points
+            FROM {OP_METRICS_TABLE}
+            WHERE record_type = 'metric'
+              AND {_metric_date_predicate(90)}
+              {compartment_filter}
+            GROUP BY 1
+            """,
+            timeout_s=60,
+            cancel_event=cancel_event,
+        ),
+        _trino(
+            f"""
+            SELECT MIN(timestamp) AS min_ts,
+                   MAX(timestamp) AS max_ts,
+                   COUNT(*) AS points
+            FROM {OP_METRICS_TABLE}
+            WHERE record_type = 'metric' {compartment_filter}
+            """,
+            timeout_s=30,
+            cancel_event=cancel_event,
+        ),
+        _load_daily_ops(compartment_filter, cancel_event),
+        _load_inventory(compartment_filter, cancel_event),
+    )
+
+    by_name = {str(row.get("metric_name")): row for row in metrics_rows}
+    invocations = _money(by_name.get("TotalInvocationCount", {}).get("total_value"))
+    errors = _money(by_name.get("ClientErrorCount", {}).get("total_value")) + _money(
+        by_name.get("ServerErrorCount", {}).get("total_value")
+    )
+    window = _window_from_rows(window_rows)
 
     # Aggregate inventory for the executive view
     ai_clusters: list[dict[str, Any]] = []
@@ -902,6 +1047,13 @@ async def _operational(
             compute_by_shape[shape]["states"][r["lifecycle_state"] or "UNKNOWN"] += 1
             comp_entry["compute_instances"] += 1
 
+    tokens_30d = await _resolve_tokens_30d(
+        compartment_filter=compartment_filter,
+        daily_ops=daily_ops,
+        invocations=invocations,
+        cancel_event=cancel_event,
+    )
+
     # GPU utilization can come from two sources:
     #  1. oci_computeagent (Bare Metal GPU hosts only — OCI does not publish it for VM.GPU)
     #  2. custom_gpu namespace (in-guest agent publishing nvidia-smi, see scripts/oci-gpu-agent)
@@ -918,9 +1070,13 @@ async def _operational(
         "available": len(metrics_rows) > 0 or len(inventory) > 0,
         "window": window,
         "daily": daily_ops,
+        "tokens_30d": tokens_30d,
         "kpis": {
-            "input_tokens": round(_money(by_name.get("InputTokenCount", {}).get("total_value")), 2),
-            "output_tokens": round(_money(by_name.get("OutputTokenCount", {}).get("total_value")), 2),
+            "input_tokens": tokens_30d["input_tokens"],
+            "output_tokens": tokens_30d["output_tokens"],
+            "total_tokens": tokens_30d["total_tokens"],
+            "input_tokens_90d": round(_money(by_name.get("InputTokenCount", {}).get("total_value")), 2),
+            "output_tokens_90d": round(_money(by_name.get("OutputTokenCount", {}).get("total_value")), 2),
             "invocations": round(invocations, 2),
             # Latency can be dominated by a few long-running batches; prefer the
             # median (p50) over the mean for the executive KPI.
@@ -975,9 +1131,8 @@ async def _wisper_compartment_ids(
     cancel_event: asyncio.Event | None,
 ) -> list[str]:
     """Discover Wisper compartment IDs from billing + GenAI inventory."""
-    ids: set[str] = set()
-    try:
-        rows = await trino_execute(
+    focus_rows, inventory_scope_rows, inventory_name_rows = await asyncio.gather(
+        _trino(
             f"""
             SELECT DISTINCT subaccountid AS compartment_id
             FROM {FOCUS_TABLE}
@@ -985,16 +1140,23 @@ async def _wisper_compartment_ids(
             """,
             timeout_s=60,
             cancel_event=cancel_event,
-        )
-        for r in rows or []:
-            cid = _s(r.get("compartment_id"))
-            if cid:
-                ids.add(cid)
-    except Exception:
-        pass
-
-    try:
-        rows = await trino_execute(
+        ),
+        _trino(
+            f"""
+            SELECT DISTINCT compartment_id
+            FROM {OP_METRICS_TABLE}
+            WHERE record_type = 'inventory'
+              AND resource_type IN ('dedicated_ai_cluster', 'endpoint')
+              AND compartment_id IN (
+                  SELECT DISTINCT subaccountid
+                  FROM {FOCUS_TABLE}
+                  WHERE {scope_sql}
+              )
+            """,
+            timeout_s=60,
+            cancel_event=cancel_event,
+        ),
+        _trino(
             f"""
             SELECT DISTINCT compartment_id
             FROM {OP_METRICS_TABLE}
@@ -1008,14 +1170,14 @@ async def _wisper_compartment_ids(
             """,
             timeout_s=60,
             cancel_event=cancel_event,
-        )
-        for r in rows or []:
+        ),
+    )
+    ids: set[str] = set()
+    for rows in (focus_rows, inventory_scope_rows, inventory_name_rows):
+        for r in rows:
             cid = _s(r.get("compartment_id"))
             if cid:
                 ids.add(cid)
-    except Exception:
-        pass
-
     return sorted(ids)
 
 
@@ -1023,12 +1185,12 @@ async def load(cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
     current_period = _now_period()
     scope_sql = f"regexp_like(lower(COALESCE(subaccountname, '')), '{WISPER_SUBACCOUNT_RE}')"
 
-    financials = await _financials(scope_sql, current_period, cancel_event)
+    financials, compartment_ids = await asyncio.gather(
+        _financials(scope_sql, current_period, cancel_event),
+        _wisper_compartment_ids(scope_sql, cancel_event),
+    )
     if financials.get("empty"):
         return {"available": True, "empty": True, "monthly": []}
-
-    # Discover compartment IDs for operational/inventory filtering
-    compartment_ids = await _wisper_compartment_ids(scope_sql, cancel_event)
 
     operational = await _operational(compartment_ids, cancel_event)
 
@@ -1086,12 +1248,13 @@ def _compute_unit_economics(
     genai_cost = _money((financials.get("buckets") or {}).get("Generative AI", {}).get("cost"))
     days_in_closed = calendar.monthrange(int(cost_period[:4]), int(cost_period[4:6]))[1]
 
-    # Tokens dos ÚLTIMOS 30 DIAS de telemetria (série diária já agregada)
-    daily_ops = operational.get("daily") or []
-    window_days = min(30, len(daily_ops))
-    last_days = daily_ops[-window_days:] if window_days > 0 else []
-    tokens_in = sum(_money(d.get("input_tokens")) for d in last_days)
-    tokens_out = sum(_money(d.get("output_tokens")) for d in last_days)
+    # Tokens dos últimos 30 dias (consulta dedicada; evita dias com outras métricas e zero tokens).
+    tokens_30d = operational.get("tokens_30d") or {}
+    if _money(tokens_30d.get("total_tokens")) <= 0:
+        tokens_30d = _tokens_from_daily_window(operational.get("daily") or [], 30)
+    tokens_in = _money(tokens_30d.get("input_tokens"))
+    tokens_out = _money(tokens_30d.get("output_tokens"))
+    window_days = int(tokens_30d.get("window_days") or 0)
 
     result: dict[str, Any] = {
         "period": cost_period,
@@ -1103,7 +1266,9 @@ def _compute_unit_economics(
         "input_tokens": round(tokens_in, 2),
         "output_tokens": round(tokens_out, 2),
         "total_tokens": round(tokens_in + tokens_out, 2),
-        "telemetry_window_days": window_days,
+        "telemetry_window_days": window_days or 30,
+        "token_date_from": tokens_30d.get("date_from"),
+        "token_date_to": tokens_30d.get("date_to"),
         "cost_per_mm_input_tokens": None,
         "cost_per_mm_output_tokens": None,
         "cost_per_mm_total_tokens": None,

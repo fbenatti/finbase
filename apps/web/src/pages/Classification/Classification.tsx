@@ -2,10 +2,10 @@ import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react";
 import {
   Box, Typography, Button, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
+  Select, MenuItem, FormControl, InputLabel, Switch, Checkbox, FormControlLabel,
   Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab, InputAdornment, Stack,
 } from "@mui/material";
-import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh, Clear } from "@mui/icons-material";
+import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh, Clear, AccountTree, Close } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule, getClassificationsGrid,
@@ -13,12 +13,13 @@ import {
   getDepartments, Department,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
-  getAzureTenants, exportAzureTagPolicy, downloadText,
-  AzureTenant, AzureTenantPolicy,
+  getAzureTenants, exportAzureTagPolicy, downloadText, getAzureTagMappings, createAzureTagMapping, updateAzureTagMapping,
+  AzureTenant, AzureTenantPolicy, AzureTagMapping,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
+import PolicyFlow from "./PolicyFlow";
 import { ORG } from "../../constants/orgLabels";
 
 interface CondEntry { field: string; operator: string; values: string; logic: string }
@@ -718,17 +719,101 @@ function highlightBashHtml(bashStr: string): string {
   return highlightedLines.join("\n");
 }
 
+function MappingRow({ mapping, focusFields, onSave }: {
+  mapping: AzureTagMapping;
+  focusFields: string[];
+  onSave: (body: Omit<AzureTagMapping, "id">, id?: number) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<Omit<AzureTagMapping, "id">>({
+    tag_key: mapping.tag_key, focus_field: mapping.focus_field, active: mapping.active,
+  });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setDraft({ tag_key: mapping.tag_key, focus_field: mapping.focus_field, active: mapping.active }), [mapping]);
+  const changed = draft.tag_key !== mapping.tag_key || draft.focus_field !== mapping.focus_field || draft.active !== mapping.active;
+  const save = async () => {
+    setSaving(true);
+    try { await onSave(draft, mapping.id); } finally { setSaving(false); }
+  };
+  return <>
+    <TextField size="small" label="Chave da tag Azure" value={draft.tag_key} onChange={(e) => setDraft({ ...draft, tag_key: e.target.value })} />
+    <Autocomplete size="small" options={focusFields} value={draft.focus_field}
+      onChange={(_, value) => setDraft({ ...draft, focus_field: value || "" })}
+      renderInput={(params) => <TextField {...params} label="Campo FOCUS" />} />
+    <Box sx={{ display: "flex", gap: .75, alignItems: "center", justifyContent: "flex-start", flexWrap: "wrap" }}>
+      <Switch size="small" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
+      {changed && <Chip size="small" color="warning" label="Não salvo" />}
+      <Button size="small" variant="contained" disabled={!changed || saving} onClick={save}>
+        {saving ? "Salvando…" : "Salvar alterações"}
+      </Button>
+    </Box>
+  </>;
+}
+
+function TagMappingsTab() {
+  const [mappings, setMappings] = useState<AzureTagMapping[]>([]);
+  const [focusFields, setFocusFields] = useState<string[]>([]);
+  const [newMapping, setNewMapping] = useState({ tag_key: "", focus_field: "", active: true });
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getAzureTagMappings()
+      .then(({ mappings: rows, focus_fields }) => { setMappings(rows); setFocusFields(focus_fields); })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível carregar os mapeamentos"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const saveMapping = async (body: Omit<AzureTagMapping, "id">, id?: number) => {
+    try {
+      setError("");
+      const saved = id ? await updateAzureTagMapping(id, body) : await createAzureTagMapping(body);
+      setMappings((current) => id ? current.map((item) => item.id === id ? saved : item) : [...current, saved]);
+      setNewMapping({ tag_key: "", focus_field: "", active: true });
+      setSuccess(id ? "Mapeamento atualizado." : "Nova tag adicionada ao mapeamento.");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Não foi possível salvar o mapeamento");
+    }
+  };
+
+  return <Box>
+    <Typography variant="h6" sx={{ mb: .5 }}>Mapeamento global de tags Azure</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+      A chave é a tag criada no Azure; o valor vem do campo FOCUS selecionado. As mudanças valem para todos os tenants na próxima geração de policies.
+    </Typography>
+    {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+    {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
+    {loading ? <CircularProgress size={26} /> : <Box sx={{ maxWidth: 900, border: "1px solid", borderColor: "divider", borderRadius: 2, p: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(260px, 1.4fr) minmax(270px, auto)", gap: 1.5, alignItems: "center" }}>
+        <Typography variant="subtitle2">Chave da tag</Typography>
+        <Typography variant="subtitle2">Campo FOCUS (valor)</Typography>
+        <Typography variant="subtitle2">Status e ações</Typography>
+        {mappings.map((mapping) => <MappingRow key={mapping.id} mapping={mapping} focusFields={focusFields} onSave={saveMapping} />)}
+        <Divider sx={{ gridColumn: "1 / -1", my: .5 }} />
+        <TextField size="small" label="Nova chave" placeholder="ex.: unidade_negocio" value={newMapping.tag_key} onChange={(e) => setNewMapping({ ...newMapping, tag_key: e.target.value })} />
+        <Autocomplete size="small" options={focusFields} value={newMapping.focus_field}
+          onChange={(_, value) => setNewMapping({ ...newMapping, focus_field: value || "" })}
+          renderInput={(params) => <TextField {...params} label="Campo FOCUS" placeholder="ex.: service_name" />} />
+        <Button variant="contained" startIcon={<Add />} disabled={!newMapping.tag_key.trim() || !newMapping.focus_field.trim()} onClick={() => saveMapping(newMapping)}>Adicionar</Button>
+      </Box>
+    </Box>}
+  </Box>;
+}
+
 export function TagsTab() {
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
   const [selectedDepartment, setSelectedDepartment] = useState<number | "">("");
+  const [planOnly, setPlanOnly] = useState(false);
   const [rows, setRows] = useState<AzureTenantPolicy[]>([]);
   const [script, setScript] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [viewTab, setViewTab] = useState<"script" | "json">("script");
+  const [tagSubTab, setTagSubTab] = useState<"policies" | "mapping">("policies");
+  const [flowDialogOpen, setFlowDialogOpen] = useState(false);
   const [selectedJsonTenantIndex, setSelectedJsonTenantIndex] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -738,7 +823,12 @@ export function TagsTab() {
     getDepartments(false).then(setDepartments).catch(() => setDepartments([]));
   }, []);
 
-  const projectOptions = useMemo(() => flattenDepartments(departments), [departments]);
+  const projectOptions = useMemo(
+    () => [...flattenDepartments(departments)].sort((left, right) =>
+      left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" }),
+    ),
+    [departments],
+  );
 
   const generate = async () => {
     try {
@@ -747,7 +837,7 @@ export function TagsTab() {
       setSuccess("");
       const connId = selectedTenant === "" ? undefined : (selectedTenant as number);
       const departmentId = selectedDepartment === "" ? undefined : (selectedDepartment as number);
-      const result = await exportAzureTagPolicy(connId, "both", departmentId);
+      const result = await exportAzureTagPolicy(connId, "both", departmentId, planOnly);
       setRows(result.tenants);
       setScript(result.deployment_script);
       setSelectedJsonTenantIndex(0);
@@ -797,8 +887,16 @@ export function TagsTab() {
 
   const currentJsonString = JSON.stringify(rows[selectedJsonTenantIndex] || {}, null, 2);
 
+  const tagTabs = <Tabs value={tagSubTab} onChange={(_, value) => setTagSubTab(value)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
+    <Tab value="policies" label="Policies Azure" />
+    <Tab value="mapping" label="Mapeamento de Tags" />
+  </Tabs>;
+
+  if (tagSubTab === "mapping") return <Box>{tagTabs}<TagMappingsTab /></Box>;
+
   return (
     <Box>
+      {tagTabs}
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
 
@@ -838,6 +936,10 @@ export function TagsTab() {
         <Button variant="contained" onClick={generate} disabled={loading}>
           {loading ? "Gerando..." : "Gerar políticas"}
         </Button>
+        <FormControlLabel
+          control={<Checkbox checked={planOnly} onChange={(e) => setPlanOnly(e.target.checked)} />}
+          label="Gerar script em modo PLAN"
+        />
         <Button
           variant="outlined"
           startIcon={<Download />}
@@ -847,6 +949,7 @@ export function TagsTab() {
           Baixar todos os arquivos
         </Button>
       </Box>
+
 
       {rows.length === 0 && !loading ? (
         <Alert severity="info">
@@ -878,6 +981,10 @@ export function TagsTab() {
                     count={Array.isArray(t.layers?.resources) ? (t.layers.resources as unknown[]).length : 0}
                   />
                   <LayerSummary
+                    label="Subscriptions GOLD cobertas"
+                    count={t.subscriptions?.length ?? 0}
+                  />
+                  <LayerSummary
                     label="Regras não implantáveis/bloqueadas"
                     count={t.coverage?.diagnostics?.filter((d) => d.status !== "warning").length ?? 0}
                   />
@@ -891,6 +998,11 @@ export function TagsTab() {
                     ))}
                   </Alert>
                 )}
+                {(t.subscriptions?.length ?? 0) > 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
+                    Escopo GOLD: {t.subscriptions!.map((s) => `${s.subscription_id.slice(0, 8)}… (${s.policies.length})`).join(" · ")}
+                  </Typography>
+                )}
               </Box>
             ))}
           </Box>
@@ -900,7 +1012,13 @@ export function TagsTab() {
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e1e4e8", px: 2, pt: 1, bgcolor: "#f6f8fa", flexWrap: "wrap", gap: 1 }}>
               <Tabs
                 value={viewTab}
-                onChange={(_, v) => setViewTab(v)}
+                onChange={(_, v) => {
+                  if (v === "flow") {
+                    setFlowDialogOpen(true);
+                    return;
+                  }
+                  setViewTab(v);
+                }}
                 sx={{ minHeight: 44 }}
               >
                 <Tab
@@ -917,6 +1035,7 @@ export function TagsTab() {
                   label="Políticas JSON (.json)"
                   sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }}
                 />
+                <Tab value="flow" icon={<AccountTree fontSize="small" />} iconPosition="start" label="Fluxo da policy" sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }} />
               </Tabs>
 
               <Box sx={{ display: "flex", gap: 1, pb: 1, alignItems: "center" }}>
@@ -953,7 +1072,7 @@ export function TagsTab() {
                       Baixar Script
                     </Button>
                   </>
-                ) : (
+                ) : viewTab === "json" ? (
                   <>
                     {rows.length > 1 && (
                       <FormControl size="small" sx={{ minWidth: 200 }}>
@@ -988,7 +1107,7 @@ export function TagsTab() {
                       Baixar JSON
                     </Button>
                   </>
-                )}
+                ) : null}
               </Box>
             </Box>
 
@@ -1044,6 +1163,15 @@ export function TagsTab() {
           </Box>
         </Box>
       )}
+      <Dialog fullScreen open={flowDialogOpen} onClose={() => setFlowDialogOpen(false)}>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid", borderColor: "divider" }}>
+          Fluxo de policies — {rows[selectedJsonTenantIndex]?.department_name || "projeto selecionado"}
+          <IconButton aria-label="Fechar fluxo de policies" onClick={() => setFlowDialogOpen(false)}><Close /></IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, bgcolor: "#f8fafc" }}>
+          <PolicyFlow tenant={rows[selectedJsonTenantIndex]} />
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

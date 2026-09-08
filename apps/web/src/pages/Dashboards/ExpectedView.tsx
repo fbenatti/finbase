@@ -6,6 +6,7 @@ import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { Department, formatApiError, getDepartments, getExpectedView, ExpectedViewDriver, ExpectedViewRow } from "../../services/api";
 import AcksWidget from "./AcksWidget";
+import ConsumptionDrillDialog from "../DimonDashboard/ConsumptionDrillDialog";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const flattenDepartments = (nodes: Department[], parents: string[] = []): Array<Department & { path: string }> => nodes.flatMap(node => {
@@ -18,7 +19,8 @@ export default function ExpectedView({
   director: externalDirector,
   departmentId: externalDepartmentId,
   directorView = false,
-}: { embedded?: boolean; director?: string; departmentId?: number; directorView?: boolean } = {}) {
+  table,
+}: { embedded?: boolean; director?: string; departmentId?: number; directorView?: boolean; table?: string } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [rows, setRows] = useState<ExpectedViewRow[]>([]);
@@ -41,6 +43,8 @@ export default function ExpectedView({
   const [includeSharedCost, setIncludeSharedCost] = useState(params.get("shared") === "1");
   const [reloadNonce, setReloadNonce] = useState(0);
   const [showBudget, setShowBudget] = useState(true);
+  const [drillOpen, setDrillOpen] = useState(false);
+  const [drillPeriod, setDrillPeriod] = useState<string | undefined>();
   useEffect(() => {
     let cancelled = false;
     getDepartments().then((departments: Department[]) => {
@@ -249,20 +253,19 @@ export default function ExpectedView({
     if (year) query.set("year", year);
     navigate(`/analysis?${query.toString()}`);
   };
-  // Clique na coluna do gráfico: abre o pivot (análise) no mesmo formato
-  // do exemplo — mês clicado como ano-mês (o pivot filtra _billing_period
-  // por CONTAINS, então year=YYYYMM restringe ao mês), escopo do departamento
-  // e medida realizado.
-  const openMonthPivot = (period: string) => {
-    const query = new URLSearchParams({ tab: "pivot", measure: "realizado", path: director, tipo: "realizado", year: period });
-    navigate(`/analysis?${query.toString()}`);
-  };
+  // Clique no gráfico: abre o diálogo de decomposição (estado próprio, sem
+  // alterar filtros da página). O mês clicado restringe só o diálogo.
   const onMainChartClick = (event: any) => {
     const x = event?.points?.[0]?.x;
-    if (x == null) return;
-    const date = new Date(x);
-    if (Number.isNaN(date.getTime())) return;
-    openMonthPivot(`${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`);
+    let period: string | undefined;
+    if (x != null) {
+      const date = new Date(x);
+      if (!Number.isNaN(date.getTime())) {
+        period = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`;
+      }
+    }
+    setDrillPeriod(period);
+    setDrillOpen(true);
   };
   const openDriver = (name: string) => {
     if (!name || ["Orçamento", "Forecast", "Outros", "Realizado", "Custo compartilhado"].includes(name)) return;
@@ -394,7 +397,7 @@ export default function ExpectedView({
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Box>
                         <Typography variant="h6">Gasto ao longo do tempo</Typography>
-                        <Typography variant="caption" color="text.secondary">{cumulative ? (sharedOn ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast" : "Acumulado · Realizado, orçamento e forecast") : (sharedOn ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento" : "Mensal · Realizado e forecast empilhados (mês corrente: parcial + restante); orçamento em linha")}</Typography>
+                        <Typography variant="caption" color="text.secondary">{cumulative ? (sharedOn ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast" : "Acumulado · Realizado, orçamento e forecast") : (sharedOn ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento" : "Mensal · Realizado e forecast empilhados (mês corrente: parcial + restante); orçamento em linha")} · clique para decompor o consumo</Typography>
                       </Box>
                       <FormControlLabel control={<Switch checked={cumulative} onChange={(_, checked) => setCumulative(checked)} />} label="Acumulado" />
                     </Stack>
@@ -466,6 +469,14 @@ export default function ExpectedView({
           {!loading && filteredRows.length > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Orçamento anual carregado: {money.format(budget)}</Typography>
           )}
+          <ConsumptionDrillDialog
+            open={drillOpen}
+            onClose={() => setDrillOpen(false)}
+            table={table}
+            directorPath={director}
+            directorView={directorView}
+            period={drillPeriod}
+          />
     </>
   );
   const acksBox = (

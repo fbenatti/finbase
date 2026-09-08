@@ -15,6 +15,7 @@ import signal
 import sys
 import os
 import multiprocessing
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -77,6 +78,21 @@ signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
 
+def _start_heartbeat_thread(worker_id: int, interval: float = 5.0) -> threading.Thread:
+    def _loop() -> None:
+        while running:
+            touch_heartbeat(worker_id)
+            time.sleep(interval)
+
+    thread = threading.Thread(
+        target=_loop,
+        name=f"openfinops-worker-{worker_id}-heartbeat",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def consumer_main(worker_id: int):
     # Pandas keeps allocator arenas after large reprocesses.  On developer
     # machines this can push the long-lived worker over its RSS safeguard even
@@ -99,6 +115,7 @@ def consumer_main(worker_id: int):
 
     runtime_dir().mkdir(parents=True, exist_ok=True)
     write_pid(worker_id)
+    _start_heartbeat_thread(worker_id)
     print(
         f"FinOps Worker #{worker_id} started. Polling for QUEUED tasks every",
         POLL_INTERVAL,
@@ -107,7 +124,6 @@ def consumer_main(worker_id: int):
     )
     touch_heartbeat(worker_id)
     while running:
-        touch_heartbeat(worker_id)
         session = SyncSession()
         try:
             task = claim_next_etl_task(session)
@@ -1053,7 +1069,6 @@ def supervisor_main() -> None:
                 target=_spawn_consumer,
                 args=(worker_id,),
                 name=f"openfinops-worker-{worker_id}",
-                daemon=True,
             )
             proc.start()
             processes[worker_id] = proc
@@ -1072,17 +1087,9 @@ def main() -> None:
         consumer_main(int(worker_id))
         return
 
-    concurrency = max(1, int(os.getenv("OPENFINOPS_WORKER_CONCURRENCY", "3")))
-    if concurrency == 1:
-        runtime_dir().mkdir(parents=True, exist_ok=True)
-        startup = SyncSession()
-        try:
-            reconcile_stale_running_tasks(startup)
-        finally:
-            startup.close()
-        consumer_main(0)
-        return
-
+    # Always supervise consumers, including concurrency=1. Reprocess workers
+    # recycle with sys.exit() to drop RSS; that must not kill the PID that
+    # start-local.sh watches.
     supervisor_main()
 
 

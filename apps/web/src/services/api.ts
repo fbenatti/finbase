@@ -135,10 +135,21 @@ export type WisperDashboardPayload = {
   operational?: {
     available?: boolean;
     window?: { min?: string; max?: string; days?: number };
+    tokens_30d?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+      window_days?: number;
+      date_from?: string | null;
+      date_to?: string | null;
+    };
     daily?: Array<{ date: string; input_tokens?: number; output_tokens?: number }>;
     kpis?: {
       input_tokens?: number;
       output_tokens?: number;
+      total_tokens?: number;
+      input_tokens_90d?: number;
+      output_tokens_90d?: number;
       invocations?: number;
       latency?: number;
       errors?: number;
@@ -147,11 +158,34 @@ export type WisperDashboardPayload = {
       gpu_utilization_source?: string | null;
     };
     inventory?: {
-      ai_clusters?: Array<{ unit_shape?: string; unit_count?: number }>;
-      endpoints_by_model?: Array<{ model: string; count: number }>;
-      compute_gpu?: Array<{ shape: string; count: number }>;
-      compute_support?: Array<{ shape: string; count: number }>;
-      by_compartment?: Array<{ compartment: string; ai_clusters: number; endpoints: number; compute_instances: number }>;
+      items?: Array<Record<string, unknown>>;
+      ai_clusters?: Array<{
+        resource_name?: string;
+        unit_shape?: string;
+        unit_count?: number;
+        region?: string;
+        lifecycle_state?: string;
+        compartment_id?: string;
+        compartment_name?: string;
+      }>;
+      endpoints?: Array<{
+        resource_name?: string;
+        model_id?: string;
+        region?: string;
+        lifecycle_state?: string;
+        compartment_id?: string;
+        compartment_name?: string;
+      }>;
+      endpoints_by_model?: Array<{ model: string; count: number; states?: Record<string, number> }>;
+      compute_gpu?: Array<{ shape: string; count: number; states?: Record<string, number>; source?: string }>;
+      compute_support?: Array<{ shape: string; count: number; states?: Record<string, number>; financial_bucket?: string }>;
+      by_compartment?: Array<{
+        compartment: string;
+        ai_clusters: number;
+        endpoints: number;
+        compute_instances: number;
+        gpu_units?: number;
+      }>;
       totals?: { gpu_units_dedicated?: number; endpoints?: number; compute_instances?: number };
       collected_at?: string | null;
     };
@@ -161,6 +195,12 @@ export type WisperDashboardPayload = {
     is_estimate?: boolean;
     summary?: string;
     note?: string;
+    total_tokens?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    telemetry_window_days?: number;
+    token_date_from?: string | null;
+    token_date_to?: string | null;
   };
   notes?: string[];
 };
@@ -955,6 +995,25 @@ export interface AzureTenant {
   tenant_id: string;
 }
 
+export interface AzureTagMapping {
+  id: number;
+  tag_key: string;
+  focus_field: string;
+  active: boolean;
+}
+
+export interface AzurePolicyPlanItem {
+  rule_id: number;
+  rule_name: string;
+  priority: number;
+  scope_subscriptions: string[];
+  evidence_count: number;
+  observed: { resource_group_name?: string; resource_id?: string };
+  tags: Record<string, string>;
+  condition: Record<string, unknown>;
+  exclusions: Array<{ rule_id: number; rule_name: string; department_name?: string; observed?: { resource_group_name?: string; resource_id?: string } }>;
+}
+
 export interface AzureTenantPolicy {
   tenant_id: string | null;
   connection_code: string;
@@ -962,13 +1021,29 @@ export interface AzureTenantPolicy {
   rule_count: number;
   department_id?: number | null;
   department_name?: string | null;
+  tag_mappings?: Array<{ tag_key: string; focus_field: string }>;
   deployment_subscriptions?: string[];
+  subscription_catalog?: Array<{ name: string; ids: string[] }>;
   coverage?: {
     eligible_rules: number;
     emitted_policies: number;
     diagnostics: Array<{ status: string; reason: string; rule_id?: number; rule_name?: string; value?: string }>;
   };
-  layers: Record<string, unknown>;
+  subscriptions?: Array<{
+    subscription_id: string;
+    policies: Array<{
+      rule_id: number;
+      rule_name: string;
+      priority: number;
+      evidence_count: number;
+      observed?: { resource_group_name?: string; resource_id?: string };
+      exclusions?: Array<{ rule_id: number; rule_name: string; department_name?: string }>;
+    }>;
+  }>;
+  layers: {
+    resource_groups?: AzurePolicyPlanItem[];
+    resources?: AzurePolicyPlanItem[];
+  };
 }
 
 export interface AzureTagPolicyExport {
@@ -981,14 +1056,31 @@ export async function getAzureTenants(): Promise<AzureTenant[]> {
   return data;
 }
 
+export async function getAzureTagMappings(): Promise<{ mappings: AzureTagMapping[]; focus_fields: string[] }> {
+  const { data } = await api.get("/azure-tag-policy/tag-mappings");
+  return data;
+}
+
+export async function createAzureTagMapping(body: Omit<AzureTagMapping, "id">): Promise<AzureTagMapping> {
+  const { data } = await api.post("/azure-tag-policy/tag-mappings", body);
+  return data;
+}
+
+export async function updateAzureTagMapping(id: number, body: Omit<AzureTagMapping, "id">): Promise<AzureTagMapping> {
+  const { data } = await api.put(`/azure-tag-policy/tag-mappings/${id}`, body);
+  return data;
+}
+
 export async function exportAzureTagPolicy(
   connectionId?: number,
   fmt: "json" | "script" | "both" = "both",
   departmentId?: number,
+  planOnly = false,
 ): Promise<AzureTagPolicyExport> {
-  const params: Record<string, string | number> = { fmt };
+  const params: Record<string, string | number | boolean> = { fmt };
   if (connectionId !== undefined) params.connection_id = connectionId;
   if (departmentId !== undefined) params.department_id = departmentId;
+  if (planOnly) params.plan_only = true;
   const { data } = await api.get("/azure-tag-policy/export", { params });
   return data;
 }

@@ -220,6 +220,28 @@ def test_monthly_series_month_without_realized_is_none():
     assert series[1]["forecast"] is None
 
 
+def test_monthly_series_infra_is_only_infra_class():
+    """Infraestrutura is the infra class alone, not total and not total+infra."""
+    rows = [
+        _row(period="202607", project="Vivo Mais", cost_class="ptu", realized=100_000.0),
+        _row(period="202607", project="Vivo Mais", cost_class="tokens_ondemand", realized=20_000.0),
+        _row(period="202607", project="Vivo Mais", cost_class="ia_service",
+             ia_family="Claude (Anthropic)", realized=5_000.0),
+        _row(period="202607", project="Vivo Mais", cost_class="infra", realized=8_000.0),
+        _row(period="202607", project="Vivo Mais", cost_class="__excluded__", realized=99_000.0),
+    ]
+    series = _monthly_series(rows, ["202607"], "Vivo Mais")
+    realized = series[0]["realizado"]
+    assert realized["ptu"] == 100_000.0
+    assert realized["tokens_ondemand"] == 20_000.0
+    assert realized["ia_service"] == 5_000.0
+    assert realized["ia_services"] == {"Claude (Anthropic)": 5_000.0}
+    assert realized["infra"] == 8_000.0
+    assert realized["total"] == 133_000.0
+    assert realized["infra"] != realized["total"]
+    assert realized["infra"] != realized["total"] + 8_000.0
+
+
 def test_monthly_series_does_not_treat_rateio_as_realized():
     rows = [
         _row(period="202608", project="Vivo Mais", tipo="realizado", realized=650_000.0),

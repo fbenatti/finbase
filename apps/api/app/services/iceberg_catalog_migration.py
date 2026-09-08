@@ -14,25 +14,73 @@ logger = logging.getLogger(__name__)
 
 _METADATA_VERSION = re.compile(r"^(\d+)-.*\.metadata\.json$")
 
+# Logical warehouse used in catalog metadata and Iceberg manifests. Physical
+# files live at ICEBERG_LOCAL_WAREHOUSE (host) or /data/iceberg (containers).
+CANONICAL_WAREHOUSE_URI = "file:///data/iceberg"
+CANONICAL_WAREHOUSE_PATH = "/data/iceberg"
+
 
 def file_uri(path: Path) -> str:
     return path.resolve().as_uri()
 
 
+def to_catalog_uri(path: Path, warehouse: Path) -> str:
+    """Store a warehouse-relative file:// URI that can move with the data dir."""
+    relative = path.resolve().relative_to(warehouse.resolve()).as_posix()
+    if relative in {".", ""}:
+        return CANONICAL_WAREHOUSE_URI
+    return f"{CANONICAL_WAREHOUSE_URI}/{relative}"
+
+
+def _raw_fs_path(location: str) -> str | None:
+    parsed = urlparse(location)
+    if parsed.scheme in {"s3", "s3a", "s3n", "gs", "gcs", "abfs", "abfss", "hdfs", "viewfs"}:
+        return None
+    if parsed.scheme == "file":
+        return unquote(parsed.path)
+    if parsed.scheme:
+        return None
+    return location
+
+
+def physical_warehouse_path(location: str | None, warehouse: Path) -> Path | None:
+    """Map any local Iceberg URI/path onto the configured warehouse directory."""
+    if not location:
+        return None
+    raw = _raw_fs_path(location)
+    if raw is None:
+        return None
+    posix = raw.replace("\\", "/").rstrip("/")
+    warehouse = warehouse.resolve()
+    canonical = CANONICAL_WAREHOUSE_PATH.rstrip("/")
+    if posix == canonical:
+        return warehouse
+    if posix.startswith(canonical + "/"):
+        return warehouse / posix[len(canonical) + 1 :]
+    marker = "/iceberg/"
+    if marker in posix + "/":
+        if posix.endswith("/iceberg"):
+            return warehouse
+        if marker in posix:
+            return warehouse / posix.split(marker, 1)[1]
+    return None
+
+
 def normalize_warehouse_uri(location: str | None, warehouse: Path) -> str | None:
-    """Map any legacy local warehouse URI to the configured warehouse."""
+    """Map any legacy local warehouse URI to the portable catalog URI."""
     if not location:
         return location
-    parsed = urlparse(location)
-    raw_path = unquote(parsed.path) if parsed.scheme == "file" else location
-    marker = "/iceberg/"
-    if marker not in raw_path:
+    physical = physical_warehouse_path(location, warehouse)
+    if physical is None:
         return location
-    relative = raw_path.split(marker, 1)[1]
-    return file_uri(warehouse / relative)
+    return to_catalog_uri(physical, warehouse)
 
 
-def uri_to_path(location: str) -> Path:
+def uri_to_path(location: str, warehouse: Path | None = None) -> Path:
+    if warehouse is not None:
+        physical = physical_warehouse_path(location, warehouse)
+        if physical is not None:
+            return physical
     parsed = urlparse(location)
     if parsed.scheme != "file":
         raise ValueError(f"unsupported metadata URI scheme: {parsed.scheme!r}")
@@ -47,6 +95,18 @@ def _valid_metadata(path: Path) -> bool:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
     return isinstance(payload, dict) and "format-version" in payload and "table-uuid" in payload
+
+
+_STG_DIR = re.compile(r"^(.+)_stg_\d+.*$")
+
+
+def published_metadata_dir(missing_path: Path) -> Path | None:
+    """Map a leftover staging metadata file to the published table metadata dir."""
+    table_dir = missing_path.parent.parent
+    match = _STG_DIR.match(table_dir.name)
+    if not match:
+        return None
+    return table_dir.with_name(match.group(1)) / "metadata"
 
 
 def latest_valid_metadata(metadata_dir: Path) -> Path | None:
@@ -69,14 +129,19 @@ def repair_metadata_location(location: str | None, warehouse: Path) -> tuple[str
     if not normalized:
         return normalized, "unchanged"
     try:
-        path = uri_to_path(normalized)
+        path = uri_to_path(normalized, warehouse)
     except ValueError:
         return normalized, "unchanged"
     if _valid_metadata(path):
         return normalized, "normalized" if normalized != location else "unchanged"
     candidate = latest_valid_metadata(path.parent)
     if candidate:
-        return file_uri(candidate), "fallback"
+        return to_catalog_uri(candidate, warehouse), "fallback"
+    published = published_metadata_dir(path)
+    if published:
+        candidate = latest_valid_metadata(published)
+        if candidate:
+            return to_catalog_uri(candidate, warehouse), "fallback"
     return normalized, "missing"
 
 

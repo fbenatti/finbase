@@ -323,6 +323,8 @@ def _monthly_series(
             continue
         bucket = realized_by_period.setdefault(period, {"classes": _empty_classes(), "ia_services": {}})
         klass = str(row.get("cost_class") or "infra")
+        if klass == "__excluded__":
+            continue
         bucket["classes"][klass] = bucket["classes"].get(klass, 0.0) + amount
         if klass == "ia_service":
             family = str(row.get("ia_family") or "Serviços de IA")

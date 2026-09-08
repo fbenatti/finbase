@@ -119,11 +119,15 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
   }, [monthly, cur]);
 
   // O gráfico cobre toda a janela selecionada (ano atual / todo o período): as
-  // barras coloridas são o realizado por classe (empilhadas via `base` manual)
-  // e a barra cinza ao fundo é o forecast TOTAL — o planejamento não tem
+  // barras coloridas são o realizado por classe (stack nativo do Plotly). A
+  // barra cinza é o forecast TOTAL em overlay — o planejamento não tem
   // granularidade por componente, então o forecast é uma barra única.
-  const series = useMemo(() => {
-    const allTraces = [
+  // Não usar `base` manual nas classes: com `base` o Plotly reporta y como
+  // base+segmento, e Infraestrutura (último da pilha) vira o total.
+  const series = useMemo(() => ({
+    x: monthly.map(m => m.label),
+    forecast: monthly.map(m => m.forecast ?? null),
+    traces: [
       { name: CLASS_LABELS.ptu, values: monthly.map(m => m.realizado?.ptu ?? null), color: CLASS_COLORS.ptu },
       { name: CLASS_LABELS.tokens_ondemand, values: monthly.map(m => m.realizado?.tokens_ondemand ?? null), color: CLASS_COLORS.tokens_ondemand },
       ...iaFamilies.map((fam, i) => ({
@@ -132,19 +136,8 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
         color: IA_PALETTE[i % IA_PALETTE.length],
       })),
       { name: CLASS_LABELS.infra, values: monthly.map(m => m.realizado?.infra ?? null), color: CLASS_COLORS.infra },
-    ];
-    const acc = Array(monthly.length).fill(0);
-    const withBase = allTraces.map(t => {
-      const base = [...acc];
-      t.values.forEach((v, i) => { if (v != null) acc[i] += v; });
-      return { ...t, base };
-    });
-    return {
-      x: monthly.map(m => m.label),
-      forecast: monthly.map(m => m.forecast ?? null),
-      traces: withBase,
-    };
-  }, [monthly, iaFamilies]);
+    ],
+  }), [monthly, iaFamilies]);
 
   const infraTop = infra.slice(0, 12);
   // Barra horizontal do Plotly: o 1º item fica embaixo — inverte para o mais
@@ -221,11 +214,10 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
               </Typography>
               <Plot
                 data={[
-                  { x: series.x, y: series.forecast, name: "Forecast (projeção)", type: "bar", marker: { color: "rgba(15, 23, 42, 0.18)" }, hovertemplate: "%{y:,.0f}<extra>Forecast (projeção)</extra>" },
+                  { x: series.x, y: series.forecast, base: 0, name: "Forecast (projeção)", type: "bar", marker: { color: "rgba(15, 23, 42, 0.18)" }, hovertemplate: "%{y:,.0f}<extra>Forecast (projeção)</extra>" },
                   ...series.traces.map(t => ({
                     x: series.x,
                     y: t.values,
-                    base: t.base,
                     name: t.name,
                     type: "bar" as const,
                     marker: { color: t.color },
@@ -233,7 +225,7 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
                   })),
                 ]}
                 layout={{
-                  autosize: true, barmode: "overlay", hovermode: "x unified",
+                  autosize: true, barmode: "stack", hovermode: "x unified",
                   margin: { l: 70, r: 20, t: 20, b: 50 },
                   paper_bgcolor: "transparent", plot_bgcolor: "transparent",
                   yaxis: { title: { text: "R$" }, rangemode: "tozero", tickprefix: "R$ " },

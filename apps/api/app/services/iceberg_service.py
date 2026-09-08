@@ -41,24 +41,75 @@ logger = logging.getLogger(__name__)
 
 # SQL catalog (PostgreSQL) + local filesystem warehouse. Containers explicitly
 # set ICEBERG_LOCAL_WAREHOUSE=/data/iceberg; local development keeps using the
-# repository's apps/data/iceberg directory.
+# repository's apps/data/iceberg directory. Catalog URIs stay portable as
+# file:///data/iceberg/...; FileIO remaps them onto this physical directory.
 _LOCAL_DEFAULT = Path("/data/iceberg") if Path("/.dockerenv").exists() else Path(__file__).resolve().parents[3] / "data" / "iceberg"
 _LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(_LOCAL_DEFAULT))).expanduser().resolve()
 _LOCAL_WAREHOUSE.mkdir(parents=True, exist_ok=True)
 
 _catalog: Optional[Catalog] = None
 _initialized_namespaces: set[str] = set()
+_legacy_path_patch_installed = False
+
+
+def _normalize_pyiceberg_location(location: str) -> str:
+    """Map portable /data/iceberg and legacy host URIs to the physical warehouse."""
+    from app.services.iceberg_catalog_migration import physical_warehouse_path
+
+    if not location:
+        return location
+    physical = physical_warehouse_path(location, _LOCAL_WAREHOUSE)
+    return str(physical) if physical is not None else location
+
+
+def _install_legacy_warehouse_path_patch() -> None:
+    """Remap warehouse paths in every PyIceberg local-file open.
+
+    Scans call ``pyiceberg.io.pyarrow._parse_location`` then
+    ``LocalFileSystem.open_input_file(path)``. Patching ``PyArrowFile`` is not
+    enough because that class is not on the scan path.
+    """
+    global _legacy_path_patch_installed
+    if _legacy_path_patch_installed:
+        return
+
+    import pyiceberg.io as iceberg_io
+    import pyiceberg.io.pyarrow as iceberg_pyarrow
+    from pyiceberg.io.pyarrow import PyArrowFileIO
+
+    def _wrap_parse(original):
+        def patched(location: str, *args, **kwargs):
+            return original(_normalize_pyiceberg_location(location), *args, **kwargs)
+        return patched
+
+    if hasattr(iceberg_io, "_parse_location"):
+        iceberg_io._parse_location = _wrap_parse(iceberg_io._parse_location)
+    if hasattr(iceberg_pyarrow, "_parse_location"):
+        iceberg_pyarrow._parse_location = _wrap_parse(iceberg_pyarrow._parse_location)
+    PyArrowFileIO.parse_location = staticmethod(_wrap_parse(PyArrowFileIO.parse_location))
+    _legacy_path_patch_installed = True
+
+
+# Scan/FileIO remap must be active before the first Bronze read, including in
+# spawned worker processes that never went through FastAPI lifespan.
+_install_legacy_warehouse_path_patch()
 
 
 def _create_sql_catalog() -> Catalog:
     """Create a SQL catalog using PostgreSQL + local filesystem warehouse."""
     from app.config import settings
-    warehouse_uri = _LOCAL_WAREHOUSE.as_uri()
-    logger.info("Using SQL catalog (PostgreSQL) with warehouse at %s", warehouse_uri)
+    from app.services.iceberg_catalog_migration import CANONICAL_WAREHOUSE_URI
+
+    _install_legacy_warehouse_path_patch()
+    logger.info(
+        "Using SQL catalog (PostgreSQL) with logical warehouse %s (physical %s)",
+        CANONICAL_WAREHOUSE_URI,
+        _LOCAL_WAREHOUSE,
+    )
     return load_catalog(
         "sql",
         uri=settings.database_url_sync,           # PostgreSQL for catalog metadata
-        warehouse=warehouse_uri,                   # Local filesystem for data files
+        warehouse=CANONICAL_WAREHOUSE_URI,        # Portable URI; FileIO remaps to disk
     )
 
 
@@ -1058,10 +1109,11 @@ def publish_staged_partition(
         target = cat.load_table(target_id)
     except Exception as exc:
         from pyiceberg.exceptions import NoSuchTableError
-        if not isinstance(exc, NoSuchTableError):
+        missing_table = isinstance(exc, (NoSuchTableError, FileNotFoundError))
+        if not missing_table:
             raise
-        # First published slice: keeping the staging table itself is the
-        # cheapest atomic publication and preserves its partition spec.
+        # First published slice, or catalog still pointing at a deleted
+        # warehouse path: rename staging into the destination identity.
         cat.rename_table(staging_id, target_id)
         return int(row_count)
 

@@ -23,12 +23,32 @@ import {
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const num = new Intl.NumberFormat("pt-BR");
 
-/** "202608" -> "ago/2026" (rótulo de mês para os eixos dos gráficos). */
+/** Calendar YYYYMM from the viewer's clock (in-progress month). */
+const currentCalendarPeriod = (now = new Date()) =>
+  `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+/** "202609" -> "set de 2026" (rótulo de mês para os eixos dos gráficos). */
 const periodLabel = (p: string) => {
   if (!p || p.length !== 6) return p;
   const d = new Date(Number(p.slice(0, 4)), Number(p.slice(4, 6)) - 1, 1);
   return d.toLocaleDateString("pt-BR", { month: "short", year: "numeric" }).replace(/\./g, "");
 };
+
+const buildAvailablePeriods = (now = new Date()) => {
+  const periods: { value: string; label: string }[] = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = currentCalendarPeriod(d);
+    const monthName = d.toLocaleDateString("pt-BR", { month: "long" });
+    const pretty = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+    const suffix = i === 0 ? " (Atual)" : "";
+    periods.push({ value, label: `${pretty} / ${d.getFullYear()}${suffix}` });
+  }
+  return periods;
+};
+
+const AVAILABLE_PERIODS = buildAvailablePeriods();
+const OPEN_PERIOD = currentCalendarPeriod();
 
 /** Números grandes sumarizados: 1.234.567 -> "1,2 Mi"; 174.899.376.089 -> "174,9 Bi". */
 const compact = (n: number) => {
@@ -220,17 +240,6 @@ interface FinancialInsights {
   totals?: { github_total_tokens: number; github_cost_per_million_tokens: number | null; github_cost_per_million_tokens_market_usd?: number | null; github_cost_per_million_tokens_market_brl?: number | null; github_credits?: number; azure_cost_brl: number; reconciliation_delta_brl: number; reconciliation_market_vs_paid_brl?: number; github_market_cost_brl?: number; current_period?: string; current_realized_brl?: number; current_forecast_brl?: number; current_projection_brl?: number; current_projection_total_brl?: number };
 }
 
-const AVAILABLE_PERIODS = [
-  { value: "202608", label: "Agosto / 2026 (Atual)" },
-  { value: "202607", label: "Julho / 2026" },
-  { value: "202606", label: "Junho / 2026" },
-  { value: "202605", label: "Maio / 2026" },
-  { value: "202604", label: "Abril / 2026" },
-  { value: "202603", label: "Março / 2026" },
-  { value: "202602", label: "Fevereiro / 2026" },
-  { value: "202601", label: "Janeiro / 2026" },
-];
-
 export default function GitHubCopilotDashboard({ embedded = false }: { embedded?: boolean }) {
   const [metrics, setMetrics] = useState<CopilotMetrics | null>(null);
   const [models, setModels] = useState<CopilotModel[]>([]);
@@ -238,7 +247,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
   const [costEvolution, setCostEvolution] = useState<CostEvolution[]>([]);
   const [financialInsights, setFinancialInsights] = useState<FinancialInsights | null>(null);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState("202608");
+  const [period, setPeriod] = useState(OPEN_PERIOD);
 
   const [engagementUsers, setEngagementUsers] = useState<EngagementUser[]>([]);
   const [engagementCounts, setEngagementCounts] = useState<EngagementCounts>({
@@ -789,7 +798,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
               <Typography variant="h6" mb={0.5}>Evolução do Custo Realizado — GitHub (PricingCategory = GitHub)</Typography>
               <Typography variant="body2" color="text.secondary" mb={2}>
                 Total mensal = soma do realizado da Dimon <b>dest_dm_cost_copilot_custo</b> (classificação PricingCategory=GitHub, mesma usada na criação da Dimon). Julho ≈ 190 mil BRL.
-                {" "}<b>Mês corrente (agosto): realizado parcial + projeção do restante</b>; meses futuros = projeção (forecast da Dimon) até o fim do horizonte — padrão FinOps de mês em andamento.
+                {" "}<b>Mês corrente ({periodLabel(OPEN_PERIOD)}): realizado parcial + projeção do restante</b>; meses futuros = projeção (forecast da Dimon) até o fim do horizonte — padrão FinOps de mês em andamento.
               </Typography>
               <Plot
                 data={[

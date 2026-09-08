@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.destination import DestinationTable, SourceDestinationMapping
+from app.models.azure_tag_mapping import AzureTagMapping
 from app.models.rules import ClassificationRule, Department
 from app.models.source_connection import SourceConnection
 from app.services.classification_engine import normalize_rule_conditions
@@ -60,10 +61,7 @@ SEMANTIC_FIELD_MAP: dict[str, tuple[str, str]] = {
 }
 
 TAG_CONTRIBUTOR_ROLE = "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
-TAG_KEYS = [
-    "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3",
-    "departamento_nivel_4", "departamento_nivel_5", "centro_custo", "ambiente",
-]
+SAFE_FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 UUID_ANY_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.I)
 # Keep generated definitions comfortably below Azure Policy payload limits. A
@@ -111,6 +109,13 @@ class AzureTagPolicyService:
     async def _load_departments(self) -> dict[int, Department]:
         rows = await self.db.execute(select(Department).where(Department.active == True))
         return {row.id: row for row in rows.scalars().all()}
+
+    async def _tag_mappings(self) -> list[dict[str, str]]:
+        rows = await self.db.execute(select(AzureTagMapping).where(
+            AzureTagMapping.active == True,
+        ).order_by(AzureTagMapping.id))
+        return [{"tag_key": row.tag_key, "focus_field": row.focus_field}
+                for row in rows.scalars().all()]
 
     async def _connection_destinations(self, connection_id: int) -> list[tuple[int, bool]]:
         result = await self.db.execute(select(SourceDestinationMapping.destination_table_id).where(
@@ -176,37 +181,166 @@ class AzureTagPolicyService:
             return catalog, sorted(set(ids)), message
         return catalog, sorted(set(ids)), None
 
-    async def _observed_project_scopes(self, conn: SourceConnection, catalog: dict[str, list[str]]) -> tuple[dict[str, list[str]], str | None]:
-        """Resolve the subscriptions actually classified in the Dimon cost view.
+    async def _gold_evidence(self, conn: SourceConnection, mappings: list[dict[str, str]]) -> tuple[list[dict], str | None]:
+        """Return the concrete Azure targets classified in the latest Gold period.
 
-        Azure credentials can see subscriptions with no OpenFinops business rule.
-        They are never a safe default policy scope, so this query is the scope
-        source for RG/name/resource rules that do not contain an explicit GUID.
+        ``business_rule.classification.id`` is written by the classifier at the
+        moment a rule wins.  It is the only safe link between a Gold line and a
+        classification rule: department names are neither unique nor enough to
+        distinguish a broad rule from a resource exception.
         """
         safe_code = (conn.code or "").replace("'", "''")
+        unsafe = [mapping["focus_field"] for mapping in mappings
+                  if not SAFE_FOCUS_FIELD_RE.fullmatch(mapping["focus_field"])]
+        if unsafe:
+            return [], f"Campo FOCUS inválido no mapeamento de tags: {', '.join(unsafe)}"
+        dynamic_fields = ",\n                    ".join(
+            f'trim(CAST("{mapping["focus_field"]}" AS varchar)) AS tag_value_{index}'
+            for index, mapping in enumerate(mappings)
+        )
+        dynamic_group = ", " + ", ".join(str(index + 6) for index in range(len(mappings))) if mappings else ""
         try:
             from app.services.trino_service import execute as trino_execute
             rows = await trino_execute(f"""
-                SELECT lower(trim(departamento)) AS department_name,
-                       lower(trim(subaccountname)) AS subscription_name
-                FROM iceberg.dimon.dest_dm_cost_visao_completa
+                WITH latest AS (
+                    SELECT max(_billing_period) AS period
+                    FROM iceberg.gold.dest_modelo_focus
+                    WHERE cloud_origem = '{safe_code}'
+                      AND CAST(source_connection_id AS bigint) = {int(conn.id)}
+                )
+                SELECT
+                    CAST(json_extract_scalar(business_rule, '$.classification.id') AS integer) AS rule_id,
+                    trim(subaccountid) AS subscription_id,
+                    trim(subaccountname) AS subscription_name,
+                    trim(source_resource_group_name) AS resource_group_name,
+                    trim(resourceid) AS resource_id,
+                    {dynamic_fields + ',' if dynamic_fields else ''}
+                    count(*) AS evidence_count
+                FROM iceberg.gold.dest_modelo_focus
                 WHERE cloud_origem = '{safe_code}'
                   AND CAST(source_connection_id AS bigint) = {int(conn.id)}
-                  AND departamento IS NOT NULL AND trim(departamento) <> ''
-                  AND subaccountname IS NOT NULL AND trim(subaccountname) <> ''
-                GROUP BY 1, 2
+                  AND _billing_period = (SELECT period FROM latest)
+                  AND json_extract_scalar(business_rule, '$.classification.id') IS NOT NULL
+                GROUP BY 1, 2, 3, 4, 5{dynamic_group}
             """, timeout_s=60)
         except Exception as exc:
-            message = f"Não foi possível consultar as subscriptions classificadas no Dimon: {str(exc)[:180]}"
-            logger.warning("Azure tag policy Dimon scope for %s: %s", conn.code, message)
-            return {}, message
-        scopes: dict[str, set[str]] = defaultdict(set)
-        for row in rows:
-            department_name = str(row.get("department_name") or "").strip().casefold()
-            subscription_name = str(row.get("subscription_name") or "").strip().casefold()
-            if department_name:
-                scopes[department_name].update(catalog.get(subscription_name, []))
-        return {name: sorted(ids) for name, ids in scopes.items()}, None
+            message = f"Não foi possível consultar evidências no GOLD: {str(exc)[:180]}"
+            logger.warning("Azure tag policy Gold evidence for %s: %s", conn.code, message)
+            return [], message
+        return rows, None
+
+    @staticmethod
+    def _selected_department_ids(departments: dict[int, Department], department_id: int | None) -> set[int] | None:
+        """Return a selected organizational node plus all of its descendants."""
+        if department_id is None:
+            return None
+        selected = {department_id}
+        changed = True
+        while changed:
+            changed = False
+            for department in departments.values():
+                if department.parent_id in selected and department.id not in selected:
+                    selected.add(department.id)
+                    changed = True
+        return selected
+
+    @staticmethod
+    def _gold_subscription_id(row: dict) -> str:
+        value = str(row.get("subscription_id") or "").strip()
+        return value if UUID_RE.match(value) else ""
+
+    @staticmethod
+    def _replace_terms(terms: list[dict], scope: str, replacement: dict, *, remove_all: bool = False) -> list[dict]:
+        """Replace an ARM dimension with a concrete target observed in Gold."""
+        out: list[dict] = []
+        replaced = False
+        for term in terms:
+            if term["scope"] == scope and (remove_all or not replaced):
+                if not replaced:
+                    out.append(replacement)
+                    replaced = True
+                continue
+            out.append(term)
+        if not replaced:
+            out.append(replacement)
+        return out
+
+    def _concrete_items(self, rule: ClassificationRule, terms: list[dict], evidence: list[dict], hierarchy: dict[str, str], mappings: list[dict[str, str]] | bool, selected: bool | list[dict],
+                        diagnostics: list[dict] | None = None) -> list[dict]:
+        """Turn Gold rows into exact subscription/RG/resource policy targets.
+
+        Contains rules intentionally become exact RG selectors here.  Gold is
+        the coverage contract, so a future similarly named RG is not tagged
+        until it has been classified and appears in a later preview.
+        """
+        # Compatibility with the former internal helper signature used by
+        # focused unit tests: (..., tags, selected, diagnostics).
+        if isinstance(mappings, bool):
+            legacy_selected = mappings
+            diagnostics = selected if isinstance(selected, list) else (diagnostics or [])
+            mappings = [{"tag_key": key, "focus_field": key} for key in hierarchy]
+            selected = legacy_selected
+        diagnostics = diagnostics if diagnostics is not None else []
+        scopes = {term["scope"] for term in terms}
+        if not scopes.intersection({SCOPE_RESOURCE, SCOPE_RG, SCOPE_SUBSCRIPTION}):
+            diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "not_deployable",
+                                "reason": "Regra ARM sem escopo de subscription, Resource Group ou recurso"})
+            return []
+        level = (SCOPE_RESOURCE if SCOPE_RESOURCE in scopes else
+                 SCOPE_RG if SCOPE_RG in scopes else SCOPE_SUBSCRIPTION)
+        grouped: dict[tuple, int] = defaultdict(int)
+        for row in evidence:
+            subscription_id = self._gold_subscription_id(row)
+            if not subscription_id:
+                continue
+            if level == SCOPE_RESOURCE:
+                resource_id = str(row.get("resource_id") or "").strip()
+                if not resource_id or "/providers/" not in resource_id.lower():
+                    continue
+                grouped[(subscription_id, resource_id, *[str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings))])] += int(row.get("evidence_count") or 0)
+            elif level == SCOPE_RG:
+                resource_group = str(row.get("resource_group_name") or "").strip()
+                if not resource_group:
+                    continue
+                grouped[(subscription_id, resource_group, *[str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings))])] += int(row.get("evidence_count") or 0)
+            else:
+                grouped[(subscription_id, *[str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings))])] += int(row.get("evidence_count") or 0)
+
+        if not grouped:
+            diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                "reason": "Sem alvo Azure tagueável no último período GOLD"})
+            return []
+        items: list[dict] = []
+        for key, evidence_count in sorted(grouped.items()):
+            subscription_id = key[0]
+            value_offset = 2 if level in {SCOPE_RESOURCE, SCOPE_RG} else 1
+            tags = {mapping["tag_key"]: (hierarchy.get(mapping["focus_field"]) or key[value_offset + index])
+                    for index, mapping in enumerate(mappings)}
+            tags = {key: value for key, value in tags.items() if value}
+            if level == SCOPE_RESOURCE:
+                concrete = {"scope": SCOPE_RESOURCE, "field": "id", "operator": "=", "values": [key[1]]}
+                item_terms = self._replace_terms(terms, SCOPE_RESOURCE, concrete, remove_all=True)
+                item_terms = self._replace_terms(item_terms, SCOPE_SUBSCRIPTION,
+                                                 {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}, remove_all=True)
+                targets = ("resource",)
+                observed = {"resource_id": key[1]}
+            elif level == SCOPE_RG:
+                concrete = {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": [key[1]]}
+                item_terms = self._replace_terms(terms, SCOPE_RG, concrete, remove_all=True)
+                item_terms = self._replace_terms(item_terms, SCOPE_SUBSCRIPTION,
+                                                 {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}, remove_all=True)
+                targets = ("resource_group", "resource")
+                observed = {"resource_group_name": key[1]}
+            else:
+                # SubAccountName is not an ARM field.  The observed GUID is.
+                item_terms = [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}]
+                targets = ("resource_group", "resource")
+                observed = {}
+            items.append({"rule": rule, "terms": item_terms, "tags": tags,
+                          "scope_subscriptions": [subscription_id], "targets": targets,
+                          "evidence_count": evidence_count, "observed": observed,
+                          "selected": selected})
+        return items
 
     @staticmethod
     def _explicit_scope_subscriptions(terms: list[dict]) -> list[str]:
@@ -222,7 +356,8 @@ class AzureTagPolicyService:
     def _field_scope(self, field: str) -> tuple[str, str]:
         return SEMANTIC_FIELD_MAP.get(_norm(field), (SCOPE_UNSUPPORTED, ""))
 
-    def _translate_conditions(self, rule: ClassificationRule, catalog: dict[str, list[str]], diagnostics: list[dict]) -> list[dict] | None:
+    def _translate_conditions(self, rule: ClassificationRule, catalog: dict[str, list[str]], diagnostics: list[dict], *,
+                              resolve_subscriptions: bool = True) -> list[dict] | None:
         translated: list[dict] = []
         for cond in normalize_rule_conditions(rule):
             scope, arm_field = self._field_scope(str(cond.get("field") or ""))
@@ -236,7 +371,7 @@ class AzureTagPolicyService:
                 diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "not_deployable",
                                     "reason": f"Operador não suportado pela Azure Policy: {operator}"})
                 return None
-            if scope == SCOPE_SUBSCRIPTION:
+            if scope == SCOPE_SUBSCRIPTION and resolve_subscriptions:
                 resolved: list[str] = []
                 for value in values:
                     if UUID_RE.match(value):
@@ -386,123 +521,127 @@ class AzureTagPolicyService:
                         return True
         return False
 
+    @staticmethod
+    def _resource_group_from_id(resource_id: str) -> str:
+        match = re.search(r"/resourcegroups/([^/]+)", str(resource_id or ""), re.I)
+        return match.group(1).casefold() if match else ""
+
+    @classmethod
+    def _observed_targets_disjoint(cls, current: dict, previous: dict) -> bool:
+        """Use concrete GOLD targets before falling back to conservative rules.
+
+        An exact ResourceId in ``rg-network`` cannot overlap a Prisma policy
+        whose concrete GOLD RG is ``pccagentlessscanresourcegroup`` merely
+        because both occur in the same subscription.
+        """
+        current_id = str(current.get("resource_id") or "").casefold()
+        previous_id = str(previous.get("resource_id") or "").casefold()
+        current_rg = str(current.get("resource_group_name") or "").casefold()
+        previous_rg = str(previous.get("resource_group_name") or "").casefold()
+        if current_id and previous_id:
+            return current_id != previous_id
+        if current_id and previous_rg:
+            return bool(cls._resource_group_from_id(current_id) and cls._resource_group_from_id(current_id) != previous_rg)
+        if previous_id and current_rg:
+            return bool(cls._resource_group_from_id(previous_id) and cls._resource_group_from_id(previous_id) != current_rg)
+        return bool(current_rg and previous_rg and current_rg != previous_rg)
+
     async def generate_tenant_policy(self, connection_id: int, department_id: int | None = None) -> dict | None:
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or resolve_connection_scope(conn.cloud_scope, conn.cloud_name) != "azure":
             return None
         departments = await self._load_departments()
         rules = await self._load_classification_rules(conn)
-        catalog, deployment_subscriptions, catalog_error = await self._subscription_catalog(conn)
-        observed_scopes, dimon_scope_error = await self._observed_project_scopes(conn, catalog)
+        selected_department_ids = self._selected_department_ids(departments, department_id)
+        mappings = await self._tag_mappings()
+        gold_rows, gold_error = await self._gold_evidence(conn, mappings)
         diagnostics: list[dict] = []
-        if catalog_error:
-            diagnostics.append({"status": "warning", "reason": catalog_error})
-        if dimon_scope_error:
-            diagnostics.append({"status": "warning", "reason": dimon_scope_error})
+        if gold_error:
+            diagnostics.append({"status": "warning", "reason": gold_error})
+
+        evidence_by_rule: dict[int, list[dict]] = defaultdict(list)
+        catalog: dict[str, list[str]] = defaultdict(list)
+        for row in gold_rows:
+            try:
+                evidence_by_rule[int(row.get("rule_id"))].append(row)
+            except (TypeError, ValueError):
+                continue
+            subscription_id = self._gold_subscription_id(row)
+            subscription_name = str(row.get("subscription_name") or "").strip().casefold()
+            if subscription_id and subscription_name:
+                catalog[subscription_name].append(subscription_id)
+        catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
+
         compiled: list[dict] = []
         for rule in rules:
-            terms = self._translate_conditions(rule, catalog, diagnostics)
+            terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=False)
             department = departments.get(rule.department_id)
             if terms and department:
-                explicit_scopes = self._explicit_scope_subscriptions(terms)
-                scopes = explicit_scopes or observed_scopes.get(department.name.casefold(), [])
-                if not scopes:
-                    diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
-                                        "reason": "Sem subscription observada no Dimon ou GUID explícito na regra"})
-                compiled.append({"rule": rule, "tags": self._hierarchy(department, departments), "terms": terms,
-                                 "scope_subscriptions": scopes})
+                selected = selected_department_ids is None or rule.department_id in selected_department_ids
+                compiled.extend(self._concrete_items(
+                    rule, terms, evidence_by_rule.get(rule.id, []), self._hierarchy(department, departments), mappings, selected, diagnostics,
+                ))
 
         layers = {"resource_groups": [], "resources": []}
-        previous: dict[str, list[dict]] = {"resource_group": [], "resource": []}
+        # Policies are decision regions per subscription.  A resource exception
+        # in terra-connectivity must not leak into another Terra subscription.
+        previous: dict[tuple[str, str], list[dict]] = defaultdict(list)
         for item in compiled:
             rule: ClassificationRule = item["rule"]
-            for target, layer in (("resource_group", "resource_groups"), ("resource", "resources")):
+            for target in item["targets"]:
+                layer = "resource_groups" if target == "resource_group" else "resources"
                 selector = self._selector(item["terms"], target)
-                # Uma regra sem subscription comprovada é somente diagnóstico.
-                # Ela não pode virar exceção e abrir um buraco na policy
-                # principal se sua própria policy não pode ser atribuída.
-                if not selector or not item["scope_subscriptions"]:
+                if not selector:
                     continue
-
-                # Calcular candidatos a exceção e registrar os descartados para diagnóstico.
-                # Ordem de verificação (curto-circuito mais barato primeiro):
-                #   1. Disjunção por scope de assinaturas (GUIDs) — O(1)
-                #   2. Disjunção sintática avançada dos termos ARM — O(n²) mas conjunto pequeno
-                overlapping: list[dict] = []
-                pruned: list[dict] = []
-                for entry in previous[target]:
+                subscription_id = item["scope_subscriptions"][0]
+                bucket = previous[(target, subscription_id)]
+                overlapping = []
+                pruned = []
+                for entry in bucket:
                     if entry["tags"] == item["tags"]:
-                        pruned.append({
-                            "rule_id": entry["rule_id"],
-                            "rule_name": entry["rule_name"],
-                            "department_name": entry["department_name"],
-                            "prune_reason": "same_classification",
-                        })
-                    elif self._scopes_disjoint(item["scope_subscriptions"], entry["scope_subscriptions"]):
-                        pruned.append({
-                            "rule_id": entry["rule_id"],
-                            "rule_name": entry["rule_name"],
-                            "department_name": entry["department_name"],
-                            "prune_reason": "scope_disjoint",
-                        })
-                        logger.debug(
-                            "Excluindo exceção dispensável (scope disjunto): regra #%s vs #%s",
-                            rule.id, entry["rule_id"],
-                        )
+                        pruned.append({**entry["summary"], "prune_reason": "same_classification"})
+                    elif self._observed_targets_disjoint(item["observed"], entry["observed"]):
+                        pruned.append({**entry["summary"], "prune_reason": "gold_targets_disjoint"})
                     elif self._is_disjoint_by_arm_terms(item["terms"], entry["terms"]):
-                        pruned.append({
-                            "rule_id": entry["rule_id"],
-                            "rule_name": entry["rule_name"],
-                            "department_name": entry["department_name"],
-                            "prune_reason": "arm_terms_disjoint",
-                        })
-                        logger.debug(
-                            "Excluindo exceção dispensável (termos ARM disjuntos): regra #%s vs #%s",
-                            rule.id, entry["rule_id"],
-                        )
+                        pruned.append({**entry["summary"], "prune_reason": "arm_terms_disjoint"})
                     else:
                         overlapping.append(entry)
-
                 effective = self._effective(selector, [entry["selector"] for entry in overlapping])
-                previous[target].append({
+                output = {
+                    "rule_id": rule.id, "rule_name": rule.name, "priority": rule.priority,
+                    "department_id": rule.department_id, "tags": item["tags"],
+                    "condition": effective, "scope_subscriptions": [subscription_id],
+                    "evidence_count": item["evidence_count"], "observed": item["observed"],
+                    "selected": item["selected"],
+                    "excludes_rule_ids": [entry["rule_id"] for entry in overlapping],
+                    "exclusions": [entry["summary"] for entry in overlapping],
+                    "pruned_exclusions": pruned,
+                }
+                bucket.append({
                     "selector": selector, "terms": item["terms"],
                     "rule_id": rule.id, "rule_name": rule.name,
                     "department_id": rule.department_id,
                     "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
-                    "scope_subscriptions": item["scope_subscriptions"],
                     "tags": item["tags"],
+                    "observed": item["observed"],
+                    "summary": {"rule_id": rule.id, "rule_name": rule.name, "department_id": rule.department_id,
+                                "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
+                                "observed": item["observed"]},
                 })
-                if department_id is not None and rule.department_id != department_id:
-                    continue
                 condition_bytes = len(json.dumps(effective, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
                 if condition_bytes > MAX_CONDITION_BYTES:
                     diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
                                         "reason": f"Condição efetiva excede {MAX_CONDITION_BYTES} bytes; reduza exceções sobrepostas",
                                         "condition_bytes": condition_bytes})
                     continue
-                if pruned:
-                    logger.info(
-                        "Regra #%s (%s): %d exceção(ões) dispensável(is) removida(s): %s",
-                        rule.id, rule.name, len(pruned),
-                        [(p["rule_id"], p["prune_reason"]) for p in pruned],
-                    )
-                layers[layer].append({
-                    "rule_id": rule.id, "rule_name": rule.name,
-                    "department_id": rule.department_id, "tags": item["tags"],
-                    "condition": effective,
-                    "scope_subscriptions": item["scope_subscriptions"],
-                    "excludes_rule_ids": [entry["rule_id"] for entry in overlapping],
-                    "exclusions": [
-                        {
-                            "rule_id": entry["rule_id"],
-                            "rule_name": entry["rule_name"],
-                            "department_id": entry["department_id"],
-                            "department_name": entry["department_name"],
-                        }
-                        for entry in overlapping
-                    ],
-                    "pruned_exclusions": pruned,
-                })
+                layers[layer].append(output)
+
+        # The loop sees all rules to calculate the selected project's exact
+        # exclusions, but exports only policies owned by that selected project.
+        # A Prisma inclusion policy is exported when Prisma itself is selected.
+        if department_id is not None:
+            for layer, values in layers.items():
+                layers[layer] = [item for item in values if item["selected"]]
 
         selected = departments.get(department_id) if department_id else None
         emitted_scopes = sorted({subscription for values in layers.values() for item in values
@@ -511,7 +650,13 @@ class AzureTagPolicyService:
                 "connection_name": conn.name, "rule_count": len(rules), "department_id": department_id,
                 "department_name": selected.name if selected else None,
                 "deployment_subscriptions": emitted_scopes,
+                "tag_mappings": mappings,
                 "subscription_catalog": [{"name": name, "ids": ids} for name, ids in sorted(catalog.items())],
+                "subscriptions": [
+                    {"subscription_id": subscription, "policies": [item for values in layers.values() for item in values
+                                                                         if subscription in item["scope_subscriptions"]]}
+                    for subscription in emitted_scopes
+                ],
                 "layers": layers,
                 "coverage": {"eligible_rules": len(compiled),
                              "emitted_policies": sum(len(values) for values in layers.values()),

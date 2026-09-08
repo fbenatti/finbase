@@ -8,9 +8,14 @@ import {
   Box,
   Button,
   Card,
+  CardActionArea,
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
   Stack,
   Table,
@@ -22,12 +27,27 @@ import {
   Typography,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import MemoryIcon from "@mui/icons-material/Memory";
+import HubIcon from "@mui/icons-material/Hub";
+import CloudQueueIcon from "@mui/icons-material/CloudQueue";
+import DnsIcon from "@mui/icons-material/Dns";
 import { getWisperDashboard, type WisperDashboardPayload } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const money2 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
 const cash = (v: unknown) => money.format(Number(v || 0));
+const cash2 = (v: unknown) => money2.format(Number(v || 0));
 const num = (v: unknown, d = 0) => Number(v || 0).toLocaleString("pt-BR", { maximumFractionDigits: d });
 const pct = (v: unknown, d = 1) => `${Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d })}%`;
+
+/** Bilhões com precisão suficiente para volumes abaixo de 1 bi (ex.: 3,5M → 0,0035). */
+function formatBillions(tokens: number): string {
+  const billions = tokens / 1_000_000_000;
+  if (billions >= 1) {
+    return billions.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return billions.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+}
 
 const BUCKET_COLORS: Record<string, string> = {
   "Generative AI": "#7C3AED",
@@ -35,6 +55,8 @@ const BUCKET_COLORS: Record<string, string> = {
   "Dados e armazenamento": "#2563EB",
   Infraestrutura: "#64748B",
 };
+
+const WISPER_ACCENT = "#7C3AED";
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
@@ -60,11 +82,313 @@ function KpiCard({ label, value, hint, color, tooltip }: {
   return tooltip ? <Tooltip title={tooltip} arrow placement="top">{content}</Tooltip> : content;
 }
 
+function InventoryStatCard({
+  icon, label, value, hint, color, onClick,
+}: {
+  icon: React.ReactNode; label: string; value: React.ReactNode; hint?: string; color: string; onClick?: () => void;
+}) {
+  const content = (
+    <Card sx={{ height: "100%", border: "1px solid", borderColor: "divider" }}>
+      <CardContent>
+        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+          <Box sx={{ color, mt: 0.25 }}>{icon}</Box>
+          <Box>
+            <Typography variant="body2" color="text.secondary">{label}</Typography>
+            <Typography variant="h5" fontWeight={700}>{value}</Typography>
+            {hint && <Typography variant="caption" color="text.secondary">{hint}</Typography>}
+            {onClick && (
+              <Typography variant="caption" color="primary" display="block" sx={{ mt: 0.5 }}>
+                Clique para detalhes
+              </Typography>
+            )}
+          </Box>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+  if (!onClick) return content;
+  return (
+    <CardActionArea onClick={onClick} sx={{ height: "100%", borderRadius: 1 }}>
+      {content}
+    </CardActionArea>
+  );
+}
+
+type InventoryDialogKey = "clusters" | "endpoints" | "gpu" | "support";
+
+type InventoryData = NonNullable<NonNullable<WisperDashboardPayload["operational"]>["inventory"]>;
+
+function InventoryDetailDialog({
+  kind,
+  inventory,
+  clusterShapes,
+  onClose,
+}: {
+  kind: InventoryDialogKey | null;
+  inventory: InventoryData;
+  clusterShapes: Array<{ shape: string; units: number }>;
+  onClose: () => void;
+}) {
+  const titles: Record<InventoryDialogKey, string> = {
+    clusters: "Units dedicadas — clusters DAC",
+    endpoints: "Endpoints de inferência",
+    gpu: "VMs GPU — hospedagem",
+    support: "VMs de suporte — infraestrutura auxiliar",
+  };
+  const buckets: Record<InventoryDialogKey, string> = {
+    clusters: "Generative AI",
+    endpoints: "Generative AI",
+    gpu: "Hospedagem GPU",
+    support: "Infraestrutura",
+  };
+
+  const aiClusters = inventory.ai_clusters || [];
+  const endpoints = inventory.endpoints || [];
+  const computeGpu = inventory.compute_gpu || [];
+  const computeSupport = inventory.compute_support || [];
+  const byCompartment = inventory.by_compartment || [];
+
+  const renderCompartmentTable = () => {
+    if (!byCompartment.length) return null;
+    return (
+      <Box mt={3}>
+        <Typography variant="subtitle2" gutterBottom>Distribuição por compartment</Typography>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Compartment</TableCell>
+              <TableCell align="right">Clusters</TableCell>
+              <TableCell align="right">Endpoints</TableCell>
+              <TableCell align="right">VMs</TableCell>
+              <TableCell align="right">Units GPU</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {byCompartment.map((row) => (
+              <TableRow key={row.compartment}>
+                <TableCell sx={{ wordBreak: "break-word" }}>{row.compartment}</TableCell>
+                <TableCell align="right">{num(row.ai_clusters)}</TableCell>
+                <TableCell align="right">{num(row.endpoints)}</TableCell>
+                <TableCell align="right">{num(row.compute_instances)}</TableCell>
+                <TableCell align="right">{num(row.gpu_units, 1)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Box>
+    );
+  };
+
+  const renderStates = (states?: Record<string, number>) => {
+    if (!states || !Object.keys(states).length) return "—";
+    return Object.entries(states).map(([state, count]) => `${state}: ${count}`).join(" · ");
+  };
+
+  let body: React.ReactNode = null;
+
+  if (kind === "clusters") {
+    body = (
+      <>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Clusters dedicados (DAC) provisionados via OCI GenAI API. Fonte: snapshot de inventário.
+        </Typography>
+        {clusterShapes.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Resumo por shape</Typography>
+            <Stack direction="row" gap={1} flexWrap="wrap">
+              {clusterShapes.map((item) => (
+                <Chip key={item.shape} label={`${item.shape}: ${num(item.units)} units`} size="small" variant="outlined" />
+              ))}
+            </Stack>
+          </Box>
+        )}
+        {aiClusters.length ? (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Recurso</TableCell>
+                <TableCell>Shape</TableCell>
+                <TableCell align="right">Units</TableCell>
+                <TableCell>Região</TableCell>
+                <TableCell>Estado</TableCell>
+                <TableCell>Compartment</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {aiClusters.map((item, index) => (
+                <TableRow key={`${item.resource_name || "cluster"}-${index}`}>
+                  <TableCell sx={{ wordBreak: "break-word" }}>{item.resource_name || "—"}</TableCell>
+                  <TableCell>{item.unit_shape || "—"}</TableCell>
+                  <TableCell align="right">{num(item.unit_count)}</TableCell>
+                  <TableCell>{item.region || "—"}</TableCell>
+                  <TableCell>{item.lifecycle_state || "—"}</TableCell>
+                  <TableCell sx={{ wordBreak: "break-word" }}>{item.compartment_name || item.compartment_id || "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <Alert severity="info">Nenhum cluster dedicado encontrado no snapshot.</Alert>
+        )}
+        {renderCompartmentTable()}
+      </>
+    );
+  } else if (kind === "endpoints") {
+    const endpointsByModel = inventory.endpoints_by_model || [];
+    body = (
+      <>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Endpoints de inferência Generative AI. Agrupamento executivo por modelo; tabela abaixo lista cada recurso.
+        </Typography>
+        {endpointsByModel.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" gutterBottom>Resumo por modelo</Typography>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Modelo</TableCell>
+                  <TableCell align="right">Qtd.</TableCell>
+                  <TableCell>Estados</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {endpointsByModel.map((item) => (
+                  <TableRow key={item.model}>
+                    <TableCell sx={{ wordBreak: "break-word" }}>{item.model}</TableCell>
+                    <TableCell align="right">{num(item.count)}</TableCell>
+                    <TableCell>{renderStates(item.states)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+        )}
+        {endpoints.length ? (
+          <>
+            <Typography variant="subtitle2" gutterBottom>Detalhe por recurso</Typography>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Endpoint</TableCell>
+                  <TableCell>Modelo</TableCell>
+                  <TableCell>Região</TableCell>
+                  <TableCell>Estado</TableCell>
+                  <TableCell>Compartment</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {endpoints.map((item, index) => (
+                  <TableRow key={`${item.resource_name || "endpoint"}-${index}`}>
+                    <TableCell sx={{ wordBreak: "break-word" }}>{item.resource_name || "—"}</TableCell>
+                    <TableCell sx={{ wordBreak: "break-word" }}>{item.model_id || "—"}</TableCell>
+                    <TableCell>{item.region || "—"}</TableCell>
+                    <TableCell>{item.lifecycle_state || "—"}</TableCell>
+                    <TableCell sx={{ wordBreak: "break-word" }}>{item.compartment_name || item.compartment_id || "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        ) : (
+          <Alert severity="info">Nenhum endpoint encontrado no snapshot.</Alert>
+        )}
+        {renderCompartmentTable()}
+      </>
+    );
+  } else if (kind === "gpu") {
+    body = (
+      <>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Instâncias Compute com shape GPU. Fonte: OCI Compute API · bucket Hospedagem GPU.
+        </Typography>
+        {computeGpu.length ? (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Shape</TableCell>
+                <TableCell align="right">VMs</TableCell>
+                <TableCell>Estados</TableCell>
+                <TableCell>Fonte</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {computeGpu.map((item) => (
+                <TableRow key={item.shape}>
+                  <TableCell>{item.shape}</TableCell>
+                  <TableCell align="right">{num(item.count)}</TableCell>
+                  <TableCell>{renderStates(item.states)}</TableCell>
+                  <TableCell>{item.source || "OCI Compute API"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <Alert severity="info">Nenhuma VM GPU encontrada no snapshot.</Alert>
+        )}
+        {renderCompartmentTable()}
+      </>
+    );
+  } else if (kind === "support") {
+    body = (
+      <>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          VMs de infraestrutura auxiliar (shapes sem GPU). Complementam a hospedagem dedicada.
+        </Typography>
+        {computeSupport.length ? (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Shape</TableCell>
+                <TableCell align="right">VMs</TableCell>
+                <TableCell>Estados</TableCell>
+                <TableCell>Bucket</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {computeSupport.map((item) => (
+                <TableRow key={item.shape}>
+                  <TableCell>{item.shape}</TableCell>
+                  <TableCell align="right">{num(item.count)}</TableCell>
+                  <TableCell>{renderStates(item.states)}</TableCell>
+                  <TableCell>{item.financial_bucket || "Infraestrutura"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <Alert severity="info">Nenhuma VM de suporte encontrada no snapshot.</Alert>
+        )}
+        {renderCompartmentTable()}
+      </>
+    );
+  }
+
+  return (
+    <Dialog open={kind !== null} onClose={onClose} maxWidth="lg" fullWidth>
+      {kind && (
+        <>
+          <DialogTitle>
+            <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
+              <span>{titles[kind]}</span>
+              <Chip size="small" label={`Bucket: ${buckets[kind]}`} />
+            </Stack>
+          </DialogTitle>
+          <DialogContent dividers>{body}</DialogContent>
+          <DialogActions>
+            <Button onClick={onClose}>Fechar</Button>
+          </DialogActions>
+        </>
+      )}
+    </Dialog>
+  );
+}
+
 export default function WisperDashboard() {
   const [data, setData] = useState<WisperDashboardPayload | null>(null);
   const [error, setError] = useState("");
   const [showAllSkus, setShowAllSkus] = useState(false);
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  const [inventoryDialog, setInventoryDialog] = useState<InventoryDialogKey | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,7 +411,6 @@ export default function WisperDashboard() {
   const buckets = data.buckets || {};
   const capacity = data.capacity || {};
   const skus = data.skus || [];
-  const subaccounts = data.subaccounts || [];
   const insights = data.insights || [];
   const op = data.operational || {};
   const opKpis = op.kpis || {};
@@ -98,10 +421,20 @@ export default function WisperDashboard() {
   const months = data.monthly || [];
   const dailyClosed = capacity.daily_closed || [];
   const inventory = op.inventory || {};
-  const endpointsByModel = inventory.endpoints_by_model || [];
   const computeGpu = inventory.compute_gpu || [];
   const computeSupport = inventory.compute_support || [];
-  const inventoryByCompartment = inventory.by_compartment || [];
+
+  const tokens30d = op.tokens_30d || {};
+  const totalTokens30d = unitEco.total_tokens ?? tokens30d.total_tokens ?? opKpis.total_tokens ?? 0;
+  const inputTokens30d = unitEco.input_tokens ?? tokens30d.input_tokens ?? opKpis.input_tokens ?? 0;
+  const outputTokens30d = unitEco.output_tokens ?? tokens30d.output_tokens ?? opKpis.output_tokens ?? 0;
+  const tokenWindowDays = unitEco.telemetry_window_days || tokens30d.window_days || 30;
+  const tokenDateFrom = unitEco.token_date_from || tokens30d.date_from;
+  const tokenDateTo = unitEco.token_date_to || tokens30d.date_to;
+
+  const tokenDaily = (op.daily || []).filter((d) =>
+    Number(d.input_tokens || 0) > 0 || Number(d.output_tokens || 0) > 0,
+  ).slice(-tokenWindowDays);
 
   const clusterShapeMap = new Map<string, number>();
   (inventory.ai_clusters || []).forEach((c) => {
@@ -112,22 +445,20 @@ export default function WisperDashboard() {
 
   const topComponents = skus.slice(0, 5);
   const restComponents = skus.slice(5);
+  const supportVmCount = computeSupport.reduce((sum, item) => sum + item.count, 0);
 
   return (
     <Stack gap={3}>
       <Box>
         <Typography variant="h4">Wisper — OCI AI</Typography>
         <Typography color="text.secondary">
-          Quanto custa, com qual capacidade provisionada e com que eficiência operacional.
+          Quanto custa, quanto consome e com qual capacidade a plataforma opera.
         </Typography>
         <Stack direction="row" gap={1} mt={1.5} flexWrap="wrap">
           <Chip size="small" color="success" label={`Financeiro fechado: ${ref.closed_label || "—"} · FOCUS`} />
           <Chip size="small" color="warning" variant="outlined" label={`Mês em curso: ${ref.current_label || "—"} (parcial)`} />
           {ref.inventory_snapshot_at && (
             <Chip size="small" variant="outlined" label={`Inventário OCI: ${String(ref.inventory_snapshot_at).slice(0, 16).replace("T", " ")}`} />
-          )}
-          {ref.telemetry_window_days && (
-            <Chip size="small" variant="outlined" label={`Telemetria: últimos ${ref.telemetry_window_days} dias`} />
           )}
         </Stack>
         {insights.map((ins, i) => (
@@ -137,14 +468,62 @@ export default function WisperDashboard() {
         ))}
       </Box>
 
-      {/* A. Finanças */}
+      {/* Hero: consumo e eficiência (estilo Aura Brain / Vivo Mais) */}
+      <Card sx={{ color: "white", background: `linear-gradient(120deg, ${WISPER_ACCENT}, #0F172A)` }}>
+        <CardContent>
+          <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
+            <Typography variant="overline" sx={{ opacity: 0.85 }}>Consumo e eficiência de IA</Typography>
+            {unitEco.is_estimate && (
+              <Chip size="small" label="estimativa" sx={{ bgcolor: "rgba(255,255,255,.18)", color: "white" }} />
+            )}
+          </Stack>
+          <Grid container spacing={2} mt={0.25}>
+            <Grid item xs={12} md={4}>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>Hospedagem dedicada de IA</Typography>
+              <Typography variant="h4">{cash(hosting.total)}</Typography>
+              <Typography variant="caption" sx={{ opacity: 0.75 }}>
+                {ref.closed_label} · GenAI {cash(hosting.generative_ai?.cost)} + GPU {cash(hosting.gpu_hosting?.cost)}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>Bilhões de tokens</Typography>
+              <Typography variant="h4">
+                {totalTokens30d > 0 ? formatBillions(Number(totalTokens30d)) : "—"}
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.75 }}>
+                {totalTokens30d > 0 ? (
+                  <>
+                    input + output · últimos {tokenWindowDays} dias
+                    {tokenDateFrom && tokenDateTo ? ` (${tokenDateFrom} a ${tokenDateTo})` : ""}
+                  </>
+                ) : (
+                  <>sem telemetria de tokens nos últimos {tokenWindowDays || 30} dias</>
+                )}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>Custo Generative AI por MM de tokens</Typography>
+              <Typography variant="h4">
+                {unitEco.cost_per_mm_total_tokens != null ? cash2(unitEco.cost_per_mm_total_tokens) : "—"}
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.75 }}>
+                apenas Generative AI · não inclui GPU
+              </Typography>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {unitEco.note && <Alert severity="info">{unitEco.note}</Alert>}
+
+      {/* Finanças */}
       <Box>
         <SectionTitle
           title="Finanças"
           subtitle={`Referência do mês fechado (${ref.closed_label}). Realizado: FOCUS · Forecast: Dimon/planning.`}
         />
         <Grid container spacing={2} sx={{ mb: 2 }}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <KpiCard
               label="Custo mês fechado"
               value={cash(totalClosed)}
@@ -152,30 +531,16 @@ export default function WisperDashboard() {
               color="#0F172A"
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <KpiCard
-              label="Mês em curso (parcial)"
-              value={cash(exec.current_partial)}
-              hint={`Projeção run-rate: ${cash(exec.monthly_projection)}${exec.current_forecast ? ` · Forecast Dimon: ${cash(exec.current_forecast)}` : ""}`}
-              color="#F59E0B"
-            />
+          <Grid item xs={12} sm={6} md={4}>
+            <KpiCard label="Mês em curso (parcial)" value={cash(exec.current_partial)} color="#F59E0B" />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <KpiCard
               label="Hospedagem dedicada de IA"
               value={cash(hosting.total)}
-              hint={`${pct(hosting.share_pct)} do mês fechado · GenAI ${cash(hosting.generative_ai?.cost)} + GPU ${cash(hosting.gpu_hosting?.cost)}`}
+              hint={`${pct(hosting.share_pct)} do mês fechado`}
               color="#F97316"
-              tooltip="Soma de Generative AI com Hospedagem GPU (compute + suporte: GPU-h, OCPU-h e GB-h)."
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <KpiCard
-              label="Custo Generative AI por MM de tokens"
-              value={unitEco.cost_per_mm_total_tokens != null ? cash(unitEco.cost_per_mm_total_tokens) : "—"}
-              hint={unitEco.is_estimate ? "Estimativa · apenas Generative AI" : "Apenas Generative AI"}
-              color="#7C3AED"
-              tooltip={unitEco.summary}
+              tooltip="Soma de Generative AI com Hospedagem GPU (compute + suporte)."
             />
           </Grid>
         </Grid>
@@ -257,279 +622,155 @@ export default function WisperDashboard() {
             </Card>
           </Grid>
         </Grid>
-
-        {subaccounts.length > 0 && (
-          <Card sx={{ mt: 2 }}>
-            <CardContent>
-              <Typography variant="h6">Custo por subprojeto (compartment)</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Compartments de billing na FOCUS. O inventário OCI pode incluir recursos fora desses subaccounts.
-              </Typography>
-              <Grid container spacing={2}>
-                {subaccounts.map((s, i) => {
-                  const inv = inventoryByCompartment.find((c) => c.compartment === s.name);
-                  return (
-                    <Grid item xs={12} sm={6} md={3} key={i}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Typography variant="body2" color="text.secondary">{s.name}</Typography>
-                          <Typography variant="h6">{cash(s.cost)}</Typography>
-                          <Typography variant="caption" color="text.secondary" display="block">{pct(s.share_pct)} do mês fechado</Typography>
-                          {inv && (
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                              Inventário: {inv.ai_clusters} clusters · {inv.endpoints} endpoints · {inv.compute_instances} VMs
-                            </Typography>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  );
-                })}
-              </Grid>
-            </CardContent>
-          </Card>
-        )}
       </Box>
 
-      {/* B. Capacidade e inventário */}
+      {/* Capacidade e inventário */}
       <Box>
         <SectionTitle
           title="Capacidade e inventário"
-          subtitle="Capacidade faturada = horas cobradas na FOCUS. Inventário = recursos provisionados no snapshot OCI."
+          subtitle="Custo diário do mês fechado e recursos provisionados no snapshot OCI."
         />
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Typography variant="h6">Capacidade faturada — {ref.closed_label}</Typography>
-                <Stack gap={0.8} mt={1}>
-                  <Box><Typography variant="body2" color="text.secondary">GPU-h faturadas (B95909)</Typography><Typography variant="h6">{num(capacity.gpu_hours)}</Typography></Box>
-                  <Box><Typography variant="body2" color="text.secondary">AI unit-h faturadas (B108085)</Typography><Typography variant="h6">{num(capacity.ai_unit_hours)}</Typography></Box>
-                  <Box><Typography variant="body2" color="text.secondary">OCPU-h de suporte (B97384)</Typography><Typography variant="body2"><b>{num(capacity.ocpu_hours)}</b></Typography></Box>
-                  <Box><Typography variant="body2" color="text.secondary">GB-h de suporte (B97385)</Typography><Typography variant="body2"><b>{num(capacity.gb_hours)}</b></Typography></Box>
-                </Stack>
-                {capacity.reconciliation?.note && (
-                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-                    {capacity.reconciliation.note}
-                  </Typography>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={8}>
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6">Custo diário por componente — {ref.closed_label}</Typography>
-                    <Plot
-                      data={bucketNames.map((bucket) => ({
-                        x: dailyClosed.map((d) => d.date),
-                        y: dailyClosed.map((d) => d.buckets?.[bucket] || 0),
-                        name: bucket,
-                        type: "bar" as const,
-                        marker: { color: BUCKET_COLORS[bucket] },
-                      }))}
-                      layout={{
-                        autosize: true,
-                        barmode: "stack",
-                        paper_bgcolor: "transparent",
-                        plot_bgcolor: "transparent",
-                        margin: { l: 60, r: 20, t: 20, b: 60 },
-                        legend: { orientation: "h", y: -0.3 },
-                      }}
-                      config={{ displayModeBar: false, responsive: true }}
-                      style={{ width: "100%", height: 240 }}
-                      useResizeHandler
-                    />
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6">Capacidade faturada por dia — {ref.closed_label}</Typography>
-                    <Plot
-                      data={[
-                        {
-                          x: dailyClosed.map((d) => d.date),
-                          y: dailyClosed.map((d) => d.gpu_hours || 0),
-                          name: "GPU-h/dia (B95909)",
-                          type: "scatter" as const,
-                          mode: "lines+markers",
-                          line: { color: "#F97316" },
-                        },
-                        {
-                          x: dailyClosed.map((d) => d.date),
-                          y: dailyClosed.map((d) => d.ai_unit_hours || 0),
-                          name: "AI unit-h/dia (B108085)",
-                          type: "scatter" as const,
-                          mode: "lines+markers",
-                          line: { color: "#7C3AED" },
-                        },
-                      ]}
-                      layout={{
-                        autosize: true,
-                        paper_bgcolor: "transparent",
-                        plot_bgcolor: "transparent",
-                        margin: { l: 60, r: 20, t: 20, b: 60 },
-                        yaxis: { title: { text: "horas/dia" } },
-                        legend: { orientation: "h", y: -0.3 },
-                      }}
-                      config={{ displayModeBar: false, responsive: true }}
-                      style={{ width: "100%", height: 220 }}
-                      useResizeHandler
-                    />
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Grid>
-        </Grid>
 
-        <Card sx={{ mt: 2 }}>
+        {dailyClosed.length > 0 && (
+          <Card sx={{ mb: 2 }}>
+            <CardContent>
+              <Typography variant="h6">Custo diário por componente — {ref.closed_label}</Typography>
+              <Plot
+                data={bucketNames.map((bucket) => ({
+                  x: dailyClosed.map((d) => d.date),
+                  y: dailyClosed.map((d) => d.buckets?.[bucket] || 0),
+                  name: bucket,
+                  type: "bar" as const,
+                  marker: { color: BUCKET_COLORS[bucket] },
+                }))}
+                layout={{
+                  autosize: true,
+                  barmode: "stack",
+                  paper_bgcolor: "transparent",
+                  plot_bgcolor: "transparent",
+                  margin: { l: 60, r: 20, t: 20, b: 60 },
+                  legend: { orientation: "h", y: -0.3 },
+                }}
+                config={{ displayModeBar: false, responsive: true }}
+                style={{ width: "100%", height: 280 }}
+                useResizeHandler
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
           <CardContent>
-            <Typography variant="h6">Inventário executivo OCI</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Origem: APIs OCI (GenAI e Compute). Bucket financeiro relacionado indicado em cada bloco.
+            <Typography variant="h6" gutterBottom>Inventário executivo OCI</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Snapshot das APIs OCI GenAI e Compute. Clique em um componente para ver o detalhamento técnico.
             </Typography>
+
             <Grid container spacing={2}>
-              <Grid item xs={12} md={4}>
-                <Typography variant="subtitle2">Clusters dedicados (Generative AI)</Typography>
-                {clusterShapes.length ? (
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow><TableCell>Shape</TableCell><TableCell align="right">Units</TableCell></TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {clusterShapes.map((c, i) => (
-                        <TableRow key={i}>
-                          <TableCell>{c.shape}</TableCell>
-                          <TableCell align="right">{num(c.units)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <Typography color="text.secondary" variant="body2">Nenhum cluster encontrado.</Typography>
-                )}
-                <Typography variant="body2" mt={1}><b>Total units dedicadas:</b> {num(inventory.totals?.gpu_units_dedicated || 0)}</Typography>
+              <Grid item xs={12} sm={6} md={3}>
+                <InventoryStatCard
+                  icon={<HubIcon />}
+                  label="Units dedicadas"
+                  value={num(inventory.totals?.gpu_units_dedicated || 0)}
+                  hint="Generative AI · clusters DAC"
+                  color={WISPER_ACCENT}
+                  onClick={() => setInventoryDialog("clusters")}
+                />
               </Grid>
-              <Grid item xs={12} md={4}>
-                <Typography variant="subtitle2">Endpoints de inferência (Generative AI)</Typography>
-                {endpointsByModel.length ? (
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow><TableCell>Modelo</TableCell><TableCell align="right">Qtd</TableCell></TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {endpointsByModel.slice(0, 6).map((e, i) => (
-                        <TableRow key={i}>
-                          <TableCell>{e.model}</TableCell>
-                          <TableCell align="right">{num(e.count)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <Typography color="text.secondary" variant="body2">Nenhum endpoint encontrado.</Typography>
-                )}
+              <Grid item xs={12} sm={6} md={3}>
+                <InventoryStatCard
+                  icon={<CloudQueueIcon />}
+                  label="Endpoints"
+                  value={num(inventory.totals?.endpoints || 0)}
+                  hint="Generative AI · inferência"
+                  color="#2563EB"
+                  onClick={() => setInventoryDialog("endpoints")}
+                />
               </Grid>
-              <Grid item xs={12} md={4}>
-                <Typography variant="subtitle2">Compute GPU (Hospedagem GPU)</Typography>
-                {computeGpu.length ? (
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow><TableCell>Shape</TableCell><TableCell align="right">Qtd</TableCell></TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {computeGpu.slice(0, 6).map((s, i) => (
-                        <TableRow key={i}>
-                          <TableCell>{s.shape}</TableCell>
-                          <TableCell align="right">{num(s.count)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <Typography color="text.secondary" variant="body2">Nenhuma VM GPU no escopo.</Typography>
-                )}
-                {computeSupport.length > 0 && (
-                  <Accordion sx={{ mt: 1, boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Typography variant="body2">Infra de suporte ({computeSupport.reduce((s, r) => s + r.count, 0)} VMs)</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails sx={{ pt: 0 }}>
-                      <Table size="small">
-                        <TableBody>
-                          {computeSupport.map((s, i) => (
-                            <TableRow key={i}>
-                              <TableCell>{s.shape}</TableCell>
-                              <TableCell align="right">{num(s.count)}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </AccordionDetails>
-                  </Accordion>
-                )}
+              <Grid item xs={12} sm={6} md={3}>
+                <InventoryStatCard
+                  icon={<MemoryIcon />}
+                  label="VMs GPU"
+                  value={num(computeGpu.reduce((s, r) => s + r.count, 0))}
+                  hint="Hospedagem GPU"
+                  color="#F97316"
+                  onClick={() => setInventoryDialog("gpu")}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <InventoryStatCard
+                  icon={<DnsIcon />}
+                  label="VMs de suporte"
+                  value={num(supportVmCount)}
+                  hint="Infraestrutura auxiliar"
+                  color="#64748B"
+                  onClick={() => setInventoryDialog("support")}
+                />
               </Grid>
             </Grid>
+
+            <InventoryDetailDialog
+              kind={inventoryDialog}
+              inventory={inventory}
+              clusterShapes={clusterShapes}
+              onClose={() => setInventoryDialog(null)}
+            />
           </CardContent>
         </Card>
       </Box>
 
-      {/* C. Operação e eficiência */}
+      {/* Operação */}
       <Box>
         <SectionTitle
-          title="Operação e eficiência"
-          subtitle={`Telemetria dos últimos ${ref.telemetry_window_days || "—"} dias. Tokens medidos apenas em Generative AI.`}
+          title="Operação e consumo de tokens"
+          subtitle={`Telemetria Generative AI dos últimos ${tokenWindowDays} dias. Chamadas, latência e erros na mesma janela.`}
         />
-        {unitEco.note && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            {unitEco.note}
-          </Alert>
-        )}
         <Card>
           <CardContent>
             {op.available ? (
               <>
-                <Grid container spacing={1}>
+                <Grid container spacing={2} sx={{ mb: 2 }}>
                   {[
-                    ["Tokens entrada", num(opKpis.input_tokens)],
-                    ["Tokens saída", num(opKpis.output_tokens)],
-                    ["Total tokens", num((opKpis.input_tokens || 0) + (opKpis.output_tokens || 0))],
+                    ["Tokens entrada", num(inputTokens30d)],
+                    ["Tokens saída", num(outputTokens30d)],
+                    ["Total tokens", num(totalTokens30d)],
                     ["Chamadas", num(opKpis.invocations)],
                     ["Latência p50", `${num(opKpis.latency, 1)} ms`],
                     ["Erros", num(opKpis.errors)],
                     ["Sucesso", opKpis.success_rate == null ? "—" : pct(opKpis.success_rate)],
-                    ["Utilização GPU", opKpis.gpu_utilization == null ? "Sem telemetria de tokens em GPU" : pct(opKpis.gpu_utilization, 1) + (opKpis.gpu_utilization_source === "custom_gpu" ? " (agente)" : "")],
                   ].map(([label, value]) => (
-                    <Grid item xs={6} sm={4} md={3} key={String(label)}>
+                    <Grid item xs={6} sm={4} md={3} lg={12 / 7} key={String(label)}>
                       <Typography variant="caption" color="text.secondary">{label}</Typography>
-                      <Typography variant="body2"><b>{value}</b></Typography>
+                      <Typography variant="body1" fontWeight={700}>{value}</Typography>
                     </Grid>
                   ))}
                 </Grid>
-                {op.daily && op.daily.length > 0 && (
-                  <Box mt={2}>
+                {tokenDaily.length > 0 ? (
+                  <Box mt={1}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Consumo diário de tokens (input + output)
+                    </Typography>
                     <Plot
                       data={[
                         {
-                          x: op.daily.map((d) => d.date),
-                          y: op.daily.map((d) => d.input_tokens),
-                          name: "Input tokens",
+                          x: tokenDaily.map((d) => d.date),
+                          y: tokenDaily.map((d) => d.input_tokens ?? 0),
+                          name: "Input",
                           type: "scatter",
-                          mode: "lines+markers",
-                          line: { color: "#7C3AED" },
+                          mode: "lines",
+                          stackgroup: "tokens",
+                          line: { color: "#7C3AED", width: 2 },
+                          fillcolor: "rgba(124, 58, 237, 0.25)",
                         },
                         {
-                          x: op.daily.map((d) => d.date),
-                          y: op.daily.map((d) => d.output_tokens),
-                          name: "Output tokens",
+                          x: tokenDaily.map((d) => d.date),
+                          y: tokenDaily.map((d) => d.output_tokens ?? 0),
+                          name: "Output",
                           type: "scatter",
-                          mode: "lines+markers",
-                          line: { color: "#2563EB" },
+                          mode: "lines",
+                          stackgroup: "tokens",
+                          line: { color: "#2563EB", width: 2 },
+                          fillcolor: "rgba(37, 99, 235, 0.25)",
                         },
                       ]}
                       layout={{
@@ -540,22 +781,25 @@ export default function WisperDashboard() {
                         legend: { orientation: "h", y: -0.25 },
                       }}
                       config={{ displayModeBar: false, responsive: true }}
-                      style={{ width: "100%", height: 260 }}
+                      style={{ width: "100%", height: 280 }}
                       useResizeHandler
                     />
                   </Box>
+                ) : (
+                  <Alert severity="info" sx={{ mt: 1 }}>
+                    Sem consumo de tokens na telemetria dos últimos {tokenWindowDays} dias.
+                  </Alert>
                 )}
               </>
             ) : (
               <Alert severity="warning">
-                A telemetria OCI ainda não foi materializada. Tokens e utilização aparecerão aqui após a coleta.
+                A telemetria OCI ainda não foi materializada.
               </Alert>
             )}
           </CardContent>
         </Card>
       </Box>
 
-      {/* Detalhamento técnico */}
       <Accordion>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Typography variant="h6">Principais componentes de custo — {ref.closed_label}</Typography>

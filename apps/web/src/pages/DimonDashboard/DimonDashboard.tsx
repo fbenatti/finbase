@@ -22,6 +22,7 @@ import {
   ForecastAccuracyMonth, HistoryFilter,
 } from "../../services/api";
 import ExpectedView from "../Dashboards/ExpectedView";
+import HierarchicalDecompTree, { buildDecompChain, type DecompPathStep } from "./HierarchicalDecompTree";
 import * as XLSX from "xlsx";
 import { ORG } from "../../constants/orgLabels";
 
@@ -618,7 +619,7 @@ export default function DimonDashboard() {
         <Tab value="drilldown" label="Drilldown" />
       </Tabs>
 
-      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} />}
+      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} />}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}
@@ -1243,33 +1244,8 @@ function buildDecisaoDims(visaoDiretoria: boolean): Array<{ field: string; label
   ];
 }
 
-// Cadeia da decomposição hierárquica encadeada (níveis de detalhe).
-const DECOMP_CHAIN_BASE: Array<{ field: string; label: string }> = [
-  { field: "cloud_origem", label: "Cloud" },
-  { field: "departamento_nivel_1", label: "Segmento" },
-  { field: "departamento_nivel_2", label: "Modelo" },
-  { field: "departamento_nivel_3", label: "Plataforma" },
-  { field: "departamento_nivel_4", label: "Diretoria" },
-  { field: "departamento_nivel_5", label: ORG.level5 },
-  { field: "servicename", label: "Serviço" },
-  { field: "servicecategory", label: "Categoria" },
-  { field: "servicesubcategory", label: "Subcategoria" },
-  { field: "subaccountname", label: "Subconta" },
-];
+// Cadeia da decomposição hierárquica: ver buildDecompChain em HierarchicalDecompTree.
 
-function buildDecompChain(visaoDiretoria: boolean): Array<{ field: string; label: string }> {
-  if (!visaoDiretoria) return DECOMP_CHAIN_BASE;
-  return [
-    { field: "cloud_origem", label: "Cloud" },
-    ...visaoDiretoriaChain(),
-    { field: "servicename", label: "Serviço" },
-    { field: "servicecategory", label: "Categoria" },
-    { field: "servicesubcategory", label: "Subcategoria" },
-    { field: "subaccountname", label: "Subconta" },
-  ];
-}
-
-// ── helpers de dados (séries mensais por chave × tipo) ──
 type DimRow = Record<string, any>;
 
 function isMissingValue(v: unknown): boolean {
@@ -1344,13 +1320,11 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     [filters.visaoDiretoria],
   );
   const [dim, setDim] = useState("departamento_nivel_4");
-  const [treePath, setTreePath] = useState<Array<{ field: string; value: string }>>([]);
   const [compA, setCompA] = useState("");
   const [compB, setCompB] = useState("");
   useEffect(() => {
     if (filters.visaoDiretoria) {
       setDim(VISAO_DIRETORIA_LEVELS[0]);
-      setTreePath([]);
     }
   }, [filters.visaoDiretoria]);
   const dimLabel = decisaoDims.find(d => d.field === dim)?.label || dim;
@@ -1376,30 +1350,6 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, dim, filters.visaoDiretoria, govDeptLevels]);
   const { results: base, loading: baseLoading } = useTabQueries(table, baseDefs, "decisao-base-" + filterKey + dim);
-
-  // ── consultas da árvore de decomposição (v233: spine do caminho + branch de filhos) ──
-  const treeStart = treePath.length;
-  const treeDefs = useMemo<QueryDef[]>(() => {
-    const global = filtersOf(filters);
-    const pathFilters = (n: number) => treePath.slice(0, n).map(p => ({ column: p.field, operator: "IN" as const, values: [p.value] }));
-    const defs: QueryDef[] = [];
-    // spine: custo total de cada nó do caminho (índice 0 = TOTAL/global)
-    for (let i = 0; i <= treeStart; i++) {
-      defs.push({ id: `spine${i}`, measures: [{ column: "realizado", aggregation: "SUM" }], filters: [...global, ...pathFilters(i)], row_limit: 5 });
-    }
-    // branch: filhos do próximo nível com série mensal (para MoM)
-    if (treeStart < decompChain.length) {
-      defs.push({
-        id: `tree${treeStart}`,
-        rows: [decompChain[treeStart].field, "_billing_period", "tipo"],
-        measures: [{ column: "realizado", aggregation: "SUM" }],
-        filters: [...global, ...pathFilters(treeStart)],
-        row_limit: 10000,
-      });
-    }
-    return defs;
-  }, [filterKey, treePath, decompChain]);
-  const { results: treeResults, loading: treeLoading } = useTabQueries(table, treeDefs, "decisao-tree-" + filterKey + JSON.stringify(treePath));
 
   // ── séries mensais globais ──
   const pulseRows = rowsOf(base.pulse);
@@ -1646,67 +1596,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   const mA = compMetric(entA);
   const mB = compMetric(entB);
 
-  // ── decomposição hierárquica (v233: spine do caminho + branch de filhos) ──
-  const [treeMetric, setTreeMetric] = useState<"cost" | "share" | "mom">("cost");
-  const spineCosts = useMemo(() => {
-    const arr: number[] = [];
-    for (let i = 0; i <= treeStart; i++) {
-      arr.push(rowsOf(treeResults[`spine${i}`]).reduce((s, r) => s + Number(r.realizado || 0), 0));
-    }
-    return arr;
-  }, [treeResults, treeStart]);
-  const totalAll = spineCosts[0] || 0;
-  const nodeTotal = spineCosts[treeStart] || 0;
-  const pathNodes = useMemo(() => {
-    const out: Array<{ label: string; dim: string; cost: number }> = [{ label: "TOTAL", dim: "TOTAL", cost: totalAll }];
-    treePath.forEach((p, i) => {
-      out.push({ label: p.value, dim: decompChain.find(c => c.field === p.field)?.label || p.field, cost: spineCosts[i + 1] || 0 });
-    });
-    return out;
-  }, [treePath, spineCosts, totalAll, decompChain]);
-  const treeChildren = useMemo(() => {
-    if (treeStart >= decompChain.length) return [];
-    const rows = rowsOf(treeResults[`tree${treeStart}`]);
-    const field = decompChain[treeStart].field;
-    const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
-    for (const r of rows) {
-      const k = String(r[field] ?? "Não informado");
-      if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
-      const o = map.get(k)!;
-      const v = Number(r.realizado || 0);
-      if (String(r.tipo ?? "") === "realizado") {
-        o.cost += v;
-        const m = String(r._billing_period || "");
-        if (m) o.byMonth.set(m, (o.byMonth.get(m) || 0) + v);
-      }
-    }
-    const items: Array<{ key: string; cost: number; mom: number | null; __other?: boolean }> = [...map.entries()]
-      .map(([key, o]) => {
-        const months = [...o.byMonth.keys()].sort();
-        const cur = months.length ? o.byMonth.get(months[months.length - 1]) || 0 : 0;
-        const prev = months.length > 1 ? o.byMonth.get(months[months.length - 2]) || 0 : 0;
-        return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null };
-      })
-      .sort((a, b) => Math.abs(b.cost) - Math.abs(a.cost));
-    const top = items.slice(0, 7);
-    const rest = items.slice(7);
-    if (rest.length) top.push({ key: "Outros", cost: rest.reduce((s, x) => s + x.cost, 0), mom: null, __other: true });
-    return top;
-  }, [treeResults, treeStart, decompChain]);
-  const nextField = treeStart < decompChain.length ? decompChain[treeStart].field : null;
-  const nextLabel = treeStart < decompChain.length ? decompChain[treeStart].label : null;
-  const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
-  const top3Share = nodeTotal ? (treeChildren.slice(0, 3).reduce((s, x) => s + Math.abs(x.cost), 0) / Math.abs(nodeTotal)) * 100 : 0;
-  const shareTotal = totalAll ? (Math.abs(nodeTotal) / Math.abs(totalAll)) * 100 : 0;
-  const treeMetricText = (item: { cost: number; mom: number | null }, parentTotal: number) => {
-    if (treeMetric === "share") return pct(parentTotal ? (Math.abs(item.cost) / Math.abs(parentTotal)) * 100 : 0);
-    if (treeMetric === "mom") return item.mom == null ? "N/A" : `${item.mom >= 0 ? "+" : ""}${pct(item.mom)}`;
-    return compact(item.cost || 0);
-  };
-  const selectTreeNode = (idx: number, field: string, value: string) => {
-    setTreePath([...treePath.slice(0, idx), { field, value }]);
-  };
-  const applyTreeContext = () => {
+  const applyTreeContext = (treePath: DecompPathStep[]) => {
     const extra: Record<string, string[]> = {};
     const path: string[] = [];
     for (const p of treePath) {
@@ -1739,7 +1629,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
 
   return (
     <Box>
-      <LoadingBlock loading={baseLoading || treeLoading}>
+      <LoadingBlock loading={baseLoading}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center" sx={{ mb: 2 }}>
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel>Dimensão de análise</InputLabel>
@@ -2128,163 +2018,18 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 13 · Decomposição hierárquica encadeada (v233 — árvore de fluxo interativa) */}
-        <SectionPanel title="Decomposição hierárquica encadeada" subtitle={`Navegue do custo total para ${decompChain.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}
-          right={
-            <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
-              <Box sx={{ display: "inline-flex", border: "1px solid #d8dce7", borderRadius: 1.5, p: 0.3, bgcolor: "#f8fafc" }}>
-                {(["cost", "share", "mom"] as const).map(m => (
-                  <Button key={m} size="small" onClick={() => setTreeMetric(m)}
-                    sx={{ minWidth: 0, px: 1.2, py: 0.4, borderRadius: 1.2, fontWeight: 950, fontSize: 11, textTransform: "none", color: treeMetric === m ? "#fff" : "#667085", bgcolor: treeMetric === m ? "#111827" : "transparent", "&:hover": { bgcolor: treeMetric === m ? "#111827" : "#eef0f4" } }}>
-                    {m === "cost" ? "Custo" : m === "share" ? "Share" : "MoM"}
-                  </Button>
-                ))}
-              </Box>
-              <Button size="small" variant="outlined" onClick={() => setTreePath([])}>Resetar</Button>
-              {treePath.length > 0 && <Button size="small" variant="contained" onClick={applyTreeContext}>Aplicar contexto</Button>}
-            </Stack>
-          }>
-          <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2.5, overflow: "hidden", bgcolor: "#fff" }}>
-            {/* topo: caminho de investigação */}
-            <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1.5, alignItems: "flex-start", p: 1.6, borderBottom: "1px solid", borderColor: "divider", background: "linear-gradient(135deg, rgba(91,0,203,.06), rgba(110,0,167,.015))", flexWrap: "wrap" }}>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 1, color: "#6b7280", mb: 0.6 }}>Caminho de investigação</Typography>
-                <Stack direction="row" gap={0.5} alignItems="center" flexWrap="wrap">
-                  <Chip size="small" label="TOTAL" onClick={() => setTreePath([])} color={treePath.length === 0 ? "primary" : "default"} sx={{ fontWeight: 950 }} />
-                  {treePath.map((p, i) => (
-                    <Box key={i} display="flex" alignItems="center" gap={0.5}>
-                      <Typography sx={{ color: "#8b5cf6", fontWeight: 950 }}>›</Typography>
-                      <Chip size="small" label={`${decompChain.find(c => c.field === p.field)?.label || p.field}: ${p.value}`} color={i === treePath.length - 1 ? "primary" : "default"} onClick={() => setTreePath(treePath.slice(0, i + 1))} sx={{ fontWeight: 900, maxWidth: 240 }} />
-                    </Box>
-                  ))}
-                </Stack>
-              </Box>
-            </Box>
-            {/* ribbon: 4 cartões */}
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4,1fr)" }, gap: 1, p: 1.6, borderBottom: "1px solid", borderColor: "divider" }}>
-              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Custo no nó atual</Typography>
-                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{compact(nodeTotal)}</Typography>
-                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treePath.length ? treePath[treePath.length - 1].value : "TOTAL"}</Typography>
-              </Box>
-              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Share do total</Typography>
-                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827" }}>{pct(shareTotal)}</Typography>
-                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800 }}>participação no contexto global</Typography>
-              </Box>
-              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Maior filho</Typography>
-                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treeChildren[0] ? treeChildren[0].key : "N/A"}</Typography>
-                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800 }}>{treeChildren[0] ? `${pct(topShare)} do nó atual` : "sem próximo nível"}</Typography>
-              </Box>
-              <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-                <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#667085" }}>Concentração Top 3</Typography>
-                <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827" }}>{pct(top3Share)}</Typography>
-                <Typography variant="caption" sx={{ color: "#667085", fontWeight: 800 }}>{nextLabel || "fim da hierarquia"}</Typography>
-              </Box>
-            </Box>
-            {/* canvas SVG */}
-            <Box sx={{ overflow: "auto", px: 1, pt: 1, background: "radial-gradient(circle at 10% 0%, rgba(91,0,203,.045), transparent 30%), linear-gradient(180deg,#fff,#fbfcff)" }}>
-              {(() => {
-                const nodeW = 205, nodeH = 62, stageGap = 54, left = 28, top = 50;
-                const pathCount = pathNodes.length;
-                const branchX = left + pathCount * (nodeW + stageGap);
-                const childGap = 74;
-                const childCount = Math.max(treeChildren.length, 1);
-                const H = Math.max(420, top + childCount * childGap + 40);
-                const W = Math.max(1060, branchX + nodeW + 80);
-                const pathY = Math.max(96, H / 2 - 31);
-                const spineLinks = pathNodes.slice(1).map((n, i) => {
-                  const px = left + i * (nodeW + stageGap) + nodeW, py = pathY + nodeH / 2;
-                  const cx = left + (i + 1) * (nodeW + stageGap), cy = pathY + nodeH / 2;
-                  const parent = pathNodes[i].cost;
-                  const shr = parent ? (Math.abs(n.cost) / Math.abs(parent)) * 100 : 0;
-                  const sw = Math.max(3, Math.min(16, 3 + shr / 8));
-                  return (
-                    <path key={`sl${i}`} d={`M ${px} ${py} C ${px + 25} ${py}, ${cx - 25} ${cy}, ${cx} ${cy}`} stroke="url(#v233PathGradient)" strokeWidth={sw} fill="none" strokeLinecap="round" opacity={0.88}>
-                      <title>{`${pct(shr)} do pai`}</title>
-                    </path>
-                  );
-                });
-                const branchLinks = treeChildren.map((it, idx) => {
-                  const y = top + idx * childGap, cy = y + nodeH / 2;
-                  const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
-                  const sw = Math.max(2, Math.min(15, 2 + share / 7));
-                  const col = it.mom == null ? "#7c3aed" : it.mom >= 0 ? "#dc2626" : "#059669";
-                  return (
-                    <path key={`bl${idx}`} d={`M ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW} ${pathY + nodeH / 2} C ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW + 34} ${pathY + nodeH / 2}, ${branchX - 34} ${cy}, ${branchX} ${cy}`} stroke={col} strokeWidth={sw} fill="none" strokeLinecap="round" opacity={0.42}>
-                      <title>{`${it.key} · ${pct(share)} do nó atual`}</title>
-                    </path>
-                  );
-                });
-                const emptyBranch = treeStart >= decompChain.length && (
-                  <text x={branchX} y={pathY + 20} fontSize={12} fontWeight={850} fill="#94a3b8">Fim da hierarquia disponível</text>
-                );
-                return (
-                  <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Árvore interativa de decomposição de custo" style={{ width: "100%", minWidth: 1050, height: "auto", display: "block" }}>
-                    <defs>
-                      <linearGradient id="v233BarGradient" x1="0" x2="1"><stop offset="0%" stopColor="#7c3aed" /><stop offset="100%" stopColor="#5b00cb" /></linearGradient>
-                      <linearGradient id="v233PathGradient" x1="0" x2="1"><stop offset="0%" stopColor="#a78bfa" /><stop offset="100%" stopColor="#5b00cb" /></linearGradient>
-                    </defs>
-                    {/* labels dos estágios */}
-                    {pathNodes.map((n, i) => (
-                      <text key={`st${i}`} x={left + i * (nodeW + stageGap)} y={28} fontSize={9} fontWeight={950} letterSpacing={0.8} fill="#7c3aed">{n.dim}</text>
-                    ))}
-                    {nextLabel && <text x={branchX} y={28} fontSize={9} fontWeight={950} letterSpacing={0.8} fill="#7c3aed">{nextLabel}</text>}
-                    {spineLinks}
-                    {branchLinks}
-                    {/* nós do spine */}
-                    {pathNodes.map((n, i) => {
-                      const x = left + i * (nodeW + stageGap), y = pathY;
-                      const parent = i ? pathNodes[i - 1].cost : totalAll;
-                      const shr = i === 0 ? 100 : parent ? (Math.abs(n.cost) / Math.abs(parent)) * 100 : 0;
-                      const click = i === 0 ? () => setTreePath([]) : () => setTreePath(treePath.slice(0, i));
-                      return (
-                        <g key={`pn${i}`} className="node" style={{ cursor: "pointer" }} onClick={click}>
-                          <rect className="nodeBg" x={x} y={y} width={nodeW} height={nodeH} rx={14} fill={i === 0 ? "#160d35" : "#f5f0ff"} stroke={i === 0 ? "#5b00cb" : "#8b5cf6"} strokeWidth={i === 0 ? 1 : 1.4} />
-                          <text x={x + 13} y={y + 21} fontSize={11} fontWeight={900} fill={i === 0 ? "#fff" : "#1f2937"}>{String(n.label).slice(0, 28)}</text>
-                          <text x={x + 13} y={y + 41} fontSize={10} fontWeight={800} fill={i === 0 ? "#d8ccff" : "#64748b"}>{compact(n.cost)}</text>
-                          <text x={x + nodeW - 12} y={y + 41} fontSize={10} fontWeight={950} textAnchor="end" fill={i === 0 ? "#c4b5fd" : "#5b00cb"}>{pct(shr)}</text>
-                          <title>{`${n.label} · ${compact(n.cost)} · ${pct(shr)} do pai`}</title>
-                        </g>
-                      );
-                    })}
-                    {/* nós da branch */}
-                    {treeChildren.map((it, idx) => {
-                      const x = branchX, y = top + idx * childGap;
-                      const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
-                      const barW = Math.max(3, (nodeW - 26) * Math.min(1, share / Math.max(topShare, 1)));
-                      const clickable = !(it as any).__other;
-                      const metric = treeMetricText(it, nodeTotal);
-                      const metricColor = treeMetric === "mom" && it.mom != null ? (it.mom >= 0 ? "#dc2626" : "#059669") : "#5b00cb";
-                      return (
-                        <g key={`cn${idx}`} className="node" style={{ cursor: clickable ? "pointer" : "default" }} onClick={clickable ? () => selectTreeNode(treeStart, nextField!, it.key) : undefined}>
-                          <rect x={x} y={y} width={nodeW} height={nodeH} rx={14} fill="#fff" stroke="#e5e7eb" strokeWidth={1} />
-                          <text x={x + 13} y={y + 20} fontSize={11} fontWeight={900} fill="#1f2937">{String(it.key).slice(0, 28)}</text>
-                          <text x={x + 13} y={y + 40} fontSize={10} fontWeight={800} fill="#64748b">{compact(it.cost)}</text>
-                          <text x={x + nodeW - 12} y={y + 40} fontSize={10} fontWeight={950} textAnchor="end" fill={metricColor}>{metric}</text>
-                          <rect x={x + 13} y={y + 50} width={nodeW - 26} height={5} rx={3} fill="#eef2f7" />
-                          <rect x={x + 13} y={y + 50} width={barW} height={5} rx={3} fill="url(#v233BarGradient)" />
-                          <title>{`${it.key} · custo ${compact(it.cost)} · share ${pct(share)}${it.mom == null ? "" : ` · MoM ${it.mom >= 0 ? "+" : ""}${pct(it.mom)}`}`}</title>
-                        </g>
-                      );
-                    })}
-                    {emptyBranch}
-                  </svg>
-                );
-              })()}
-            </Box>
-            {/* legenda */}
-            <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="center" flexWrap="wrap" sx={{ px: 1.6, py: 1.2, color: "#667085", fontSize: 10, fontWeight: 750 }}>
-              <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar.</Box>
-              <Stack direction="row" gap={1.5} alignItems="center">
-                <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#7c3aed", mr: 0.6 }} />estrutura / share</Box>
-                <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#dc2626", mr: 0.6 }} />MoM positivo</Box>
-                <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#059669", mr: 0.6 }} />MoM negativo</Box>
-              </Stack>
-            </Stack>
-          </Box>
+        <SectionPanel title="Decomposição hierárquica encadeada" subtitle={`Navegue do custo total para ${decompChain.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}>
+          <HierarchicalDecompTree
+            table={table}
+            baseFilters={filtersOf(filters)}
+            chain={decompChain}
+            queryKey={"decisao-tree-" + filterKey}
+            onApplyContext={applyTreeContext}
+            shareCaption="participação no contexto global"
+          />
           <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 1 }}>“Outros” agrupa os filhos restantes além do top 7 (não clicável). “Aplicar contexto” transforma a trilha em filtros globais do cockpit.</Typography>
         </SectionPanel>
+
         </>
         )}
       </LoadingBlock>

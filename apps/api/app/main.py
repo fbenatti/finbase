@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
         from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant, SsoProvider  # noqa: F401
         from app.models.audit_log import AuditLog  # noqa: F401
+        from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # Retenção de auditoria (roda depois do create_all)
         await conn.execute(text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(days=settings.audit_retention_days))
@@ -144,6 +145,19 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_ai_cost_link_source_link ON ai_cost_link_source (link_id)",
             "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS description TEXT",
             "ALTER TABLE azure_ptu_subproject ADD COLUMN IF NOT EXISTS department_id INTEGER",
+            """CREATE TABLE IF NOT EXISTS azure_tag_mapping (
+              id SERIAL PRIMARY KEY,
+              tag_key VARCHAR(512) NOT NULL,
+              focus_field VARCHAR(200) NOT NULL,
+              active BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now(),
+              CONSTRAINT uq_azure_tag_mapping_key UNIQUE (tag_key)
+            )""",
+            """INSERT INTO azure_tag_mapping (tag_key, focus_field, active)
+               SELECT seed.tag_key, seed.focus_field, TRUE
+               FROM (VALUES ('projeto', 'departamento_nivel_5'), ('diretoria', 'departamento_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
+               WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
             """CREATE TABLE IF NOT EXISTS dimon_rule (
               id SERIAL PRIMARY KEY,
               code VARCHAR(120) NOT NULL UNIQUE,

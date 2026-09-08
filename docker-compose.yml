@@ -25,17 +25,12 @@ services:
       DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
       TRINO_URL: http://trino:8080
       ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
-      OPENFINOPS_WORKER_HEARTBEAT: /run/openfinops-worker/worker.heartbeat
-      OPENFINOPS_WORKER_PID: /run/openfinops-worker/worker.pid
+      OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
     ports:
       - "8000:8000"
     volumes:
       - ./apps/api/app:/app/app
       - ./apps/data/iceberg:/data/iceberg
-      - ./apps/data/iceberg:/tmp/data/iceberg
-      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
-      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
-      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
       - worker_runtime:/run/openfinops-worker
     depends_on:
       postgres:
@@ -47,21 +42,20 @@ services:
       dockerfile: apps/api/Dockerfile
     command: ["python", "-u", "worker.py"]
     restart: unless-stopped
-    pid: "service:api"
     environment:
       DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
       DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
       TRINO_URL: http://trino:8080
       ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
-      OPENFINOPS_WORKER_HEARTBEAT: /run/openfinops-worker/worker.heartbeat
-      OPENFINOPS_WORKER_PID: /run/openfinops-worker/worker.pid
-      OPENFINOPS_WORKER_LOCK: /run/openfinops-worker/worker.lock
+      OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
+      OPENFINOPS_WORKER_CONCURRENCY: ${OPENFINOPS_WORKER_CONCURRENCY:-3}
+      REPROCESS_CPU_WORKERS: ${REPROCESS_CPU_WORKERS:-2}
+      REPROCESS_CLASSIFICATION_CHUNK_ROWS: ${REPROCESS_CLASSIFICATION_CHUNK_ROWS:-50000}
+      REPROCESS_BATCH_ROWS: ${REPROCESS_BATCH_ROWS:-100000}
+      REPROCESS_MEMORY_LIMIT_MB: ${REPROCESS_MEMORY_LIMIT_MB:-6144}
+      REPROCESS_WORKER_MAX_TASKS: ${REPROCESS_WORKER_MAX_TASKS:-6}
     volumes:
       - ./apps/data/iceberg:/data/iceberg
-      - ./apps/data/iceberg:/tmp/data/iceberg
-      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
-      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
-      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
       - worker_runtime:/run/openfinops-worker
     depends_on:
       api:
@@ -88,24 +82,26 @@ services:
     image: trinodb/trino:483
     # Trino is required by dashboards, pivots and forecasts.  It must start
     # with the default stack and recover automatically after a Docker restart.
+    # Heap is 2G; cap RSS so the ~8 GiB Docker Desktop VM is not OOM-killed
+    # (exit 137 → PAGE_TRANSPORT_ERROR on workers).
     restart: unless-stopped
+    mem_limit: 2560m
     ports:
       - "8080:8080"
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog
       - ./infra/trino/config.properties:/etc/trino/config.properties:ro
       - ./infra/trino/jvm.config:/etc/trino/jvm.config:ro
-      # Keep the absolute file:// locations emitted by the local PyIceberg
-      # SQL catalog readable from inside Trino.
+      # Host paths in iceberg_tables (PyIceberg) + file:///data/iceberg (Trino Hadoop FS).
       - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
       - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
       - ./apps/data/iceberg:/data/iceberg
       - ./apps/data/iceberg:/tmp/data/iceberg
-      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
 
   trino-worker:
     image: trinodb/trino:483
     restart: unless-stopped
+    mem_limit: 2560m
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog:ro
       - ./infra/trino/config-worker.properties:/etc/trino/config.properties:ro
@@ -114,12 +110,13 @@ services:
       - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
       - ./apps/data/iceberg:/data/iceberg
       - ./apps/data/iceberg:/tmp/data/iceberg
-      - ./apps/data/iceberg:/opt/OpenFinops/apps/data/iceberg
     depends_on:
       trino:
         condition: service_healthy
+    # `deploy.replicas` is ignored by `docker compose up` (Swarm only).
+    # Scale with: docker compose up -d --scale trino-worker=${TRINO_WORKERS:-1}
     deploy:
-      replicas: 1
+      replicas: ${TRINO_WORKERS:-1}
 
 volumes:
   pgdata:

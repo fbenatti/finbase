@@ -16,7 +16,11 @@ worker_restarts=0
 TRINO_URL="${TRINO_URL:-http://localhost:8080}"
 TRINO_WAIT_SECONDS="${TRINO_WAIT_SECONDS:-30}"
 API_URL="${API_URL:-http://localhost:8001}"
-BACKEND_WAIT_SECONDS="${BACKEND_WAIT_SECONDS:-60}"
+BACKEND_WAIT_SECONDS="${BACKEND_WAIT_SECONDS:-180}"
+OPENFINOPS_WORKER_RUNTIME_DIR="${OPENFINOPS_WORKER_RUNTIME_DIR:-/tmp/openfinops-worker}"
+OPENFINOPS_WORKER_CONCURRENCY="${OPENFINOPS_WORKER_CONCURRENCY:-1}"
+ICEBERG_LOCAL_WAREHOUSE="${ICEBERG_LOCAL_WAREHOUSE:-$ROOT_DIR/apps/data/iceberg}"
+export OPENFINOPS_WORKER_RUNTIME_DIR OPENFINOPS_WORKER_CONCURRENCY ICEBERG_LOCAL_WAREHOUSE
 
 is_docker_pid() {
   local pid="$1"
@@ -117,7 +121,8 @@ is_openfinops_cmd() {
 
 is_openfinops_api_cmd() {
   local cmd="$1"
-  [[ "$cmd" == *uvicorn* && "$cmd" == *app.main:app* && "$cmd" == *"port 8001"* ]]
+  [[ "$cmd" == *uvicorn* && "$cmd" == *app.main:app* && "$cmd" == *"port 8001"* ]] \
+    || [[ "$cmd" == *multiprocessing.spawn* && "$cmd" == *spawn_main* ]]
 }
 
 is_openfinops_web_cmd() {
@@ -261,6 +266,9 @@ kill_orphan_workers() {
     sleep 1
   fi
   rm -f /tmp/openfinops-worker.lock /tmp/openfinops-worker.pid /tmp/openfinops-worker.heartbeat
+  rm -f "$OPENFINOPS_WORKER_RUNTIME_DIR"/worker-*.heartbeat "$OPENFINOPS_WORKER_RUNTIME_DIR"/worker-*.pid
+  rm -f "$OPENFINOPS_WORKER_RUNTIME_DIR"/supervisor.pid
+  rmdir "$OPENFINOPS_WORKER_RUNTIME_DIR" 2>/dev/null || true
 }
 
 free_stale_processes() {
@@ -454,9 +462,10 @@ ensure_infra
 
 backend_ready() {
   local api_health worker_health listener
+  sync_api_pid_from_port || true
   kill -0 "$api_pid" 2>/dev/null || return 1
   listener="$(listeners_on_port 8001 | head -1 | tr -d '[:space:]')"
-  [[ -n "$listener" && "$listener" == "$api_pid" ]] || return 1
+  [[ -n "$listener" ]] || return 1
   api_health="$(http_get "$API_URL/health")"
   worker_health="$(http_get "$API_URL/etl/worker-health")"
   [[ "$api_health" == *'"status":"ok"'* && "$worker_health" == *'"status":"ok"'* ]]
@@ -516,8 +525,11 @@ start_api_process() {
       free_listeners_on_port 8001 "API local" uvicorn app.main:app
     fi
     : >"$LOG_DIR/api.log"
-    (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload) \
-      >>"$LOG_DIR/api.log" 2>&1 &
+    (
+      cd "$ROOT_DIR/apps/api"
+      export OPENFINOPS_WORKER_RUNTIME_DIR OPENFINOPS_WORKER_CONCURRENCY ICEBERG_LOCAL_WAREHOUSE
+      exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    ) >>"$LOG_DIR/api.log" 2>&1 &
     api_pid=$!
     write_pid_file api "$api_pid"
     sleep 0.5
@@ -536,8 +548,12 @@ start_api_process() {
 }
 
 start_worker_process() {
-  (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -u worker.py) \
-    >"$LOG_DIR/worker.log" 2>&1 &
+  mkdir -p "$OPENFINOPS_WORKER_RUNTIME_DIR"
+  (
+    cd "$ROOT_DIR/apps/api"
+    export OPENFINOPS_WORKER_RUNTIME_DIR OPENFINOPS_WORKER_CONCURRENCY ICEBERG_LOCAL_WAREHOUSE
+    exec "$ROOT_DIR/.venv/bin/python" -u worker.py
+  ) >"$LOG_DIR/worker.log" 2>&1 &
   worker_pid=$!
   write_pid_file worker "$worker_pid"
 }
@@ -605,12 +621,18 @@ while true; do
     exit 1
   fi
   if ! kill -0 "$worker_pid" 2>/dev/null; then
-    worker_restarts=$((worker_restarts + 1))
-    if (( worker_restarts > 3 )); then
-      echo "Worker encerrou após 3 tentativas; veja $LOG_DIR/worker.log" >&2
-      exit 1
+    wait "$worker_pid" 2>/dev/null
+    worker_exit=$?
+    if (( worker_exit == 0 )); then
+      echo "Worker reciclou o processo para liberar memória; seguindo a fila."
+    else
+      worker_restarts=$((worker_restarts + 1))
+      if (( worker_restarts > 3 )); then
+        echo "Worker encerrou após 3 tentativas; veja $LOG_DIR/worker.log" >&2
+        exit 1
+      fi
+      echo "Worker encerrou; reiniciando ($worker_restarts/3)"
     fi
-    echo "Worker encerrou; reiniciando ($worker_restarts/3)"
     (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -u worker.py) \
       >>"$LOG_DIR/worker.log" 2>&1 &
     worker_pid=$!

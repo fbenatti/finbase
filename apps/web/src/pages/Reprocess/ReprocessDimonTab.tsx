@@ -21,6 +21,13 @@ export default function ReprocessDimonTab() {
   };
   useEffect(() => { void load(); }, []);
 
+  const hasActiveJobs = history.some(item => item.status === "QUEUED" || item.status === "RUNNING");
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+    const timer = window.setInterval(() => { void load(); }, 4000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveJobs]);
+
   const toggleRule = (id: number) => setSelectedIds(current => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -79,9 +86,12 @@ export default function ReprocessDimonTab() {
     <Typography variant="subtitle2">Histórico recente</Typography>
     {history.length === 0 ? <Typography color="text.secondary">Nenhuma execução registrada.</Typography> : history.map(item => {
       const failed = item.result_json?.failed || [];
+      const rowLabel = item.status === "COMPLETED" || item.status === "FAILED"
+        ? ` · ${(item.rows_destination ?? 0).toLocaleString()} linhas`
+        : "";
       return <Box key={item.id}>
         <Alert severity={item.status === "FAILED" ? "error" : item.status === "COMPLETED" ? (failed.length ? "warning" : "success") : "info"}>
-          #{item.id} · {item.status} · {item.phase || "Sem detalhe"}{item.rows_destination != null ? ` · ${item.rows_destination} linhas` : ""}
+          #{item.id} · {item.status} · {item.phase || "Sem detalhe"}{rowLabel}
         </Alert>
         {failed.length > 0 && <Box sx={{ mt: 0.5, ml: 2 }}>
           {failed.map((f, index) => <Typography key={`f-${index}`} variant="caption" display="block" color="error.main">
