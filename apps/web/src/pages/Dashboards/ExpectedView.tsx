@@ -20,7 +20,8 @@ export default function ExpectedView({
   departmentId: externalDepartmentId,
   directorView = false,
   table,
-}: { embedded?: boolean; director?: string; departmentId?: number; directorView?: boolean; table?: string } = {}) {
+  footer,
+}: { embedded?: boolean; director?: string; departmentId?: number; directorView?: boolean; table?: string; footer?: ReactElement } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [rows, setRows] = useState<ExpectedViewRow[]>([]);
@@ -496,6 +497,7 @@ export default function ExpectedView({
     <Box sx={workspaceSx}>
       {body}
       {acksBox}
+      {footer}
     </Box>
   ) : (
     <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>

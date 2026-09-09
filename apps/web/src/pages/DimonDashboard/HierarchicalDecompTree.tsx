@@ -35,8 +35,6 @@ const DIRECTOR_VIEW_LABELS: Record<string, string> = {
 const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo Cloud"] as const;
 
 const DEFAULT_CHILD_LIMIT = 7;
-const EXTENDED_CHILD_LIMIT = 30;
-const ASCENDING_NAME_FIELDS = new Set(["servicename", "skumeter"]);
 export const EMPTY_DIMENSION_LABEL = "Não informado";
 const MAX_EMPTY_ORG_SKIP = 6;
 
@@ -93,16 +91,13 @@ function rankTreeChildren(map: Map<string, { cost: number; byMonth: Map<string, 
       const prev = months.length > 1 ? o.byMonth.get(months[months.length - 2]) || 0 : 0;
       return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null };
     });
-  const useNameAsc = ASCENDING_NAME_FIELDS.has(field);
-  items.sort((a, b) => (
-    useNameAsc
-      ? a.key.localeCompare(b.key, "pt-BR", { sensitivity: "base" })
-      : Math.abs(b.cost) - Math.abs(a.cost)
-  ));
-  const limit = useNameAsc ? EXTENDED_CHILD_LIMIT : DEFAULT_CHILD_LIMIT;
+  // Toda a decomposição é uma visão de consumo: a ordem precisa ser
+  // materialidade (maior → menor), inclusive para Serviço e SKU.
+  items.sort((a, b) => Math.abs(b.cost) - Math.abs(a.cost));
+  const limit = DEFAULT_CHILD_LIMIT;
   const top = items.slice(0, limit);
   const rest = items.slice(limit);
-  if (rest.length && !useNameAsc) top.push({ key: "Outros", cost: rest.reduce((s, x) => s + x.cost, 0), mom: null, __other: true });
+  if (rest.length) top.push({ key: "Outros", cost: rest.reduce((s, x) => s + x.cost, 0), mom: null, __other: true });
   return top;
 }
 

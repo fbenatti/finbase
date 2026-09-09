@@ -670,7 +670,7 @@ export default function DimonDashboard() {
         <Tab value="data-quality" label="Data Quality" />
       </Tabs>
 
-      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} />}
+      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} footer={<ExecutiveMatrix table={table} filters={filters} filterKey={filterKey} />} />}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}

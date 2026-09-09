@@ -1253,7 +1253,19 @@ def publish_staged_partition(
         target = cat.load_table(target_id)
     except Exception as exc:
         from pyiceberg.exceptions import NoSuchTableError
-        missing_table = isinstance(exc, (NoSuchTableError, FileNotFoundError))
+        # A catalog entry can survive after its metadata.json was removed
+        # (for example, by an interrupted staging cleanup or by a warehouse
+        # path mismatch between API/worker and Trino).  Treat this as a broken
+        # target, not as a reason to fail the Bronze -> Gold publication.  The
+        # staged table is already the validated source of truth for this
+        # connection/month; recreate only the canonical target entry below.
+        exc_text = str(exc).lower()
+        missing_metadata = (
+            "metadata not found" in exc_text
+            or "metadata location" in exc_text
+            or "no such file or directory" in exc_text
+        )
+        missing_table = isinstance(exc, (NoSuchTableError, FileNotFoundError)) or missing_metadata
         if not missing_table:
             raise
         # Bootstrap a final canonical table.  Do not rename the staging table:
