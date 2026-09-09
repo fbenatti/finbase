@@ -73,9 +73,45 @@ def _norm(value: str) -> str:
     return str(value or "").lower().replace("_", "").replace("-", "").strip()
 
 
-def _wildcard(value: str) -> str:
-    value = value.strip()
-    return value if "*" in value else f"*{value}*"
+def _keeps_contains(terms: list[dict], scope: str) -> bool:
+    scoped = [term for term in terms if term["scope"] == scope]
+    return bool(scoped) and all(term.get("operator") in {"~", "contains", "like"} for term in scoped)
+
+
+def _canonical_arm_spelling(spellings: dict[str, int]) -> str:
+    """Pick the GOLD-observed ARM spelling with the most evidence.
+
+    Resource and resource group names are case-insensitive in ARM; Azure Policy
+    ``equals``/``like``/``contains`` are also case-insensitive. Duplicate casings
+    are the same object, so we keep one literal for the policy JSON.
+    """
+    return max(
+        spellings.items(),
+        key=lambda item: (item[1], sum(ch.isupper() for ch in item[0]), item[0]),
+    )[0]
+
+
+def _collapse_arm_values(values: list[str]) -> list[str]:
+    """Drop name/id literals that differ only by case, keeping first-seen spelling."""
+    chosen: dict[str, str] = {}
+    for value in values:
+        folded = value.casefold()
+        if folded not in chosen:
+            chosen[folded] = value
+    return list(chosen.values())
+
+
+def _collapse_tag_keys(tags: dict[str, str]) -> dict[str, str]:
+    """Tag names are case-insensitive; values remain distinct if casing differs."""
+    out: dict[str, str] = {}
+    seen: set[str] = set()
+    for key, value in tags.items():
+        folded = key.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        out[key] = value
+    return out
 
 
 def _condition(field: str, operator: str, values: list[str]) -> dict | None:
@@ -83,15 +119,18 @@ def _condition(field: str, operator: str, values: list[str]) -> dict | None:
     if not values:
         return None
     if operator == "=":
+        if field in {"name", "id"}:
+            values = _collapse_arm_values(values)
         return {"field": field, "equals": values[0]} if len(values) == 1 else {"field": field, "in": values}
     if operator == "!=":
         return {"field": field, "notEquals": values[0]} if len(values) == 1 else {"field": field, "notIn": values}
-    if operator == "~":
-        # Azure Policy like permits one wildcard. contains is safer for IDs.
-        op = "contains" if field == "id" else "like"
-        formatted = values if op == "contains" else [_wildcard(value) for value in values]
-        return {"field": field, op: formatted[0]} if len(formatted) == 1 else {
-            "anyOf": [{"field": field, op: value} for value in formatted]
+    if operator in {"~", "contains", "like"}:
+        # Subscription GUIDs stay exact; contains is for RG, resource id/name,
+        # type, SKU and location.
+        if field == "subscriptionId":
+            return {"field": field, "equals": values[0]} if len(values) == 1 else {"field": field, "in": values}
+        return {"field": field, "contains": values[0]} if len(values) == 1 else {
+            "anyOf": [{"field": field, "contains": value} for value in values]
         }
     return None
 
@@ -105,6 +144,46 @@ class AzureTagPolicyService:
         return [{"connection_id": c.id, "code": c.code, "name": c.name,
                  "tenant_id": (c.config_json or {}).get("tenant_id")}
                 for c in rows.scalars().all() if (c.config_json or {}).get("tenant_id")]
+
+    async def _subscription_home_tenants(self, billing_conn: SourceConnection) -> dict[str, str]:
+        """Map subscription GUID → ARM home tenant (never assume the billing collector).
+
+        Billing TI can list cost for subscriptions that live in Azure-4P (…8fd7).
+        Policy must be applied in the tenant that owns the subscription. GUIDs
+        come from each connection's ``subscription_ids`` and from Resource Graph
+        reachable with that connection's credentials. When TI and 4P both mention
+        the same GUID, the non-billing tenant wins.
+        """
+        billing_tenant = str((billing_conn.config_json or {}).get("tenant_id") or "").strip().casefold()
+        mapping: dict[str, str] = {}
+
+        def remember(sid: str, tenant: str) -> None:
+            sid, tenant = sid.strip(), tenant.strip()
+            if not UUID_RE.match(sid) or not tenant:
+                return
+            key = sid.casefold()
+            existing = mapping.get(key)
+            if existing and existing.casefold() != tenant.casefold():
+                if existing.casefold() == billing_tenant:
+                    mapping[key] = tenant
+                return
+            mapping[key] = tenant
+
+        rows = await self.db.execute(select(SourceConnection).where(SourceConnection.connector_type == "azure_blob"))
+        connections = list(rows.scalars().all())
+        for conn in connections:
+            tenant = str((conn.config_json or {}).get("tenant_id") or "").strip()
+            if not tenant:
+                continue
+            for raw in (conn.config_json or {}).get("subscription_ids") or []:
+                remember(str(raw), tenant)
+            try:
+                from app.services.azure_resource_graph_service import discover_scope
+                for item in await discover_scope(dict(conn.config_json or {})):
+                    remember(str(item.get("subscription_id") or ""), tenant)
+            except Exception as exc:
+                logger.warning("Azure tag policy home-tenant discovery for %s: %s", conn.code, str(exc)[:180])
+        return mapping
 
     async def _load_departments(self) -> dict[int, Department]:
         rows = await self.db.execute(select(Department).where(Department.active == True))
@@ -267,11 +346,13 @@ class AzureTagPolicyService:
 
     def _concrete_items(self, rule: ClassificationRule, terms: list[dict], evidence: list[dict], hierarchy: dict[str, str], mappings: list[dict[str, str]] | bool, selected: bool | list[dict],
                         diagnostics: list[dict] | None = None) -> list[dict]:
-        """Turn Gold rows into exact subscription/RG/resource policy targets.
+        """Turn Gold rows into subscription-scoped policy targets.
 
-        Contains rules intentionally become exact RG selectors here.  Gold is
-        the coverage contract, so a future similarly named RG is not tagged
-        until it has been classified and appears in a later preview.
+        Classification ``~`` (contains) is kept for RG name, resource id/name,
+        type, SKU and location. Gold still decides which subscription GUIDs get
+        an assignment. SubAccountName stays a GUID list with ``equals``; contains
+        is never used for subscriptions. Exact ``=`` RG or Resource ID rules
+        still pin the observed ARM literal.
         """
         # Compatibility with the former internal helper signature used by
         # focused unit tests: (..., tags, selected, diagnostics).
@@ -288,57 +369,86 @@ class AzureTagPolicyService:
             return []
         level = (SCOPE_RESOURCE if SCOPE_RESOURCE in scopes else
                  SCOPE_RG if SCOPE_RG in scopes else SCOPE_SUBSCRIPTION)
-        grouped: dict[tuple, int] = defaultdict(int)
+        rg_contains = level == SCOPE_RG and _keeps_contains(terms, SCOPE_RG)
+        resource_contains = level == SCOPE_RESOURCE and _keeps_contains(terms, SCOPE_RESOURCE)
+        grouped: dict[tuple, dict] = {}
         for row in evidence:
             subscription_id = self._gold_subscription_id(row)
             if not subscription_id:
                 continue
+            tag_values = tuple(str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings)))
+            count = int(row.get("evidence_count") or 0)
             if level == SCOPE_RESOURCE:
                 resource_id = str(row.get("resource_id") or "").strip()
                 if not resource_id or "/providers/" not in resource_id.lower():
                     continue
-                grouped[(subscription_id, resource_id, *[str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings))])] += int(row.get("evidence_count") or 0)
+                key = (subscription_id, *tag_values) if resource_contains else (subscription_id, resource_id.casefold(), *tag_values)
+                entry = grouped.setdefault(key, {"count": 0, "spellings": {}})
+                entry["count"] += count
+                entry["spellings"][resource_id] = entry["spellings"].get(resource_id, 0) + count
             elif level == SCOPE_RG:
                 resource_group = str(row.get("resource_group_name") or "").strip()
                 if not resource_group:
                     continue
-                grouped[(subscription_id, resource_group, *[str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings))])] += int(row.get("evidence_count") or 0)
+                key = (subscription_id, *tag_values) if rg_contains else (subscription_id, resource_group.casefold(), *tag_values)
+                entry = grouped.setdefault(key, {"count": 0, "spellings": {}})
+                entry["count"] += count
+                entry["spellings"][resource_group] = entry["spellings"].get(resource_group, 0) + count
             else:
-                grouped[(subscription_id, *[str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings))])] += int(row.get("evidence_count") or 0)
+                key = (subscription_id, *tag_values)
+                entry = grouped.setdefault(key, {"count": 0, "spellings": {}})
+                entry["count"] += count
 
         if not grouped:
             diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
                                 "reason": "Sem alvo Azure tagueável no último período GOLD"})
             return []
         items: list[dict] = []
-        for key, evidence_count in sorted(grouped.items()):
+        for key, entry in sorted(grouped.items()):
+            evidence_count = entry["count"]
             subscription_id = key[0]
-            value_offset = 2 if level in {SCOPE_RESOURCE, SCOPE_RG} else 1
+            value_offset = 2 if ((level == SCOPE_RESOURCE and not resource_contains) or (level == SCOPE_RG and not rg_contains)) else 1
             tags = {mapping["tag_key"]: (hierarchy.get(mapping["focus_field"]) or key[value_offset + index])
                     for index, mapping in enumerate(mappings)}
-            tags = {key: value for key, value in tags.items() if value}
+            tags = _collapse_tag_keys({key: value for key, value in tags.items() if value})
+            assignment_scope_kind = "subscription"
+            assignment_resource_group = None
             if level == SCOPE_RESOURCE:
-                concrete = {"scope": SCOPE_RESOURCE, "field": "id", "operator": "=", "values": [key[1]]}
-                item_terms = self._replace_terms(terms, SCOPE_RESOURCE, concrete, remove_all=True)
-                item_terms = self._replace_terms(item_terms, SCOPE_SUBSCRIPTION,
+                item_terms = self._replace_terms(terms, SCOPE_SUBSCRIPTION,
                                                  {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}, remove_all=True)
+                if resource_contains:
+                    patterns = [value for term in terms if term["scope"] == SCOPE_RESOURCE for value in term["values"]]
+                    observed = {"resource_id": " · ".join(patterns)}
+                else:
+                    resource_id = _canonical_arm_spelling(entry["spellings"])
+                    item_terms = self._replace_terms(item_terms, SCOPE_RESOURCE,
+                                                     {"scope": SCOPE_RESOURCE, "field": "id", "operator": "=", "values": [resource_id]}, remove_all=True)
+                    observed = {"resource_id": resource_id}
                 targets = ("resource",)
-                observed = {"resource_id": key[1]}
             elif level == SCOPE_RG:
-                concrete = {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": [key[1]]}
-                item_terms = self._replace_terms(terms, SCOPE_RG, concrete, remove_all=True)
-                item_terms = self._replace_terms(item_terms, SCOPE_SUBSCRIPTION,
+                item_terms = self._replace_terms(terms, SCOPE_SUBSCRIPTION,
                                                  {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}, remove_all=True)
+                if rg_contains:
+                    patterns = [value for term in terms if term["scope"] == SCOPE_RG for value in term["values"]]
+                    observed = {"resource_group_name": " · ".join(patterns)}
+                else:
+                    resource_group = _canonical_arm_spelling(entry["spellings"])
+                    item_terms = self._replace_terms(item_terms, SCOPE_RG,
+                                                     {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": [resource_group]}, remove_all=True)
+                    observed = {"resource_group_name": resource_group}
+                    assignment_scope_kind = "resource_group"
+                    assignment_resource_group = resource_group
                 targets = ("resource_group", "resource")
-                observed = {"resource_group_name": key[1]}
             else:
-                # SubAccountName is not an ARM field.  The observed GUID is.
+                # SubAccountName is not an ARM field. The observed GUID list is.
                 item_terms = [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}]
                 targets = ("resource_group", "resource")
                 observed = {}
             items.append({"rule": rule, "terms": item_terms, "tags": tags,
                           "scope_subscriptions": [subscription_id], "targets": targets,
                           "evidence_count": evidence_count, "observed": observed,
+                          "assignment_scope_kind": assignment_scope_kind,
+                          "assignment_resource_group": assignment_resource_group,
                           "selected": selected})
         return items
 
@@ -396,7 +506,7 @@ class AzureTagPolicyService:
             return None
         return translated
 
-    def _selector(self, terms: list[dict], target: str) -> dict | None:
+    def _selector(self, terms: list[dict], target: str, *, omit_rg_scope: bool = False) -> dict | None:
         resource_only = {SCOPE_RESOURCE, SCOPE_TYPE, SCOPE_SKU, SCOPE_LOCATION}
         if target == "resource_group" and any(term["scope"] in resource_only for term in terms):
             return None
@@ -404,6 +514,13 @@ class AzureTagPolicyService:
                                if target == "resource_group" else
                                {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"}]
         for term in terms:
+            if term["scope"] == SCOPE_SUBSCRIPTION:
+                # Assignment is already /subscriptions/{guid}. Mode All (RG) rejects
+                # field subscriptionId (InvalidPolicyAliasFormat). Indexed does not
+                # need it either.
+                continue
+            if omit_rg_scope and term["scope"] == SCOPE_RG:
+                continue
             if term["scope"] == SCOPE_RG and target == "resource":
                 raw = _condition("name", term["operator"], term["values"])
                 if raw is None: return None
@@ -536,15 +653,72 @@ class AzureTagPolicyService:
         """
         current_id = str(current.get("resource_id") or "").casefold()
         previous_id = str(previous.get("resource_id") or "").casefold()
-        current_rg = str(current.get("resource_group_name") or "").casefold()
-        previous_rg = str(previous.get("resource_group_name") or "").casefold()
+        current_rgs = cls._observed_rg_names(current)
+        previous_rgs = cls._observed_rg_names(previous)
         if current_id and previous_id:
             return current_id != previous_id
-        if current_id and previous_rg:
-            return bool(cls._resource_group_from_id(current_id) and cls._resource_group_from_id(current_id) != previous_rg)
-        if previous_id and current_rg:
-            return bool(cls._resource_group_from_id(previous_id) and cls._resource_group_from_id(previous_id) != current_rg)
-        return bool(current_rg and previous_rg and current_rg != previous_rg)
+        if current_id and previous_rgs:
+            rg = cls._resource_group_from_id(current_id)
+            return bool(rg and rg not in previous_rgs)
+        if previous_id and current_rgs:
+            rg = cls._resource_group_from_id(previous_id)
+            return bool(rg and rg not in current_rgs)
+        return bool(current_rgs and previous_rgs and current_rgs.isdisjoint(previous_rgs))
+
+    @staticmethod
+    def _observed_rg_names(observed: dict) -> set[str]:
+        raw = str((observed or {}).get("resource_group_name") or "").strip()
+        if not raw:
+            return set()
+        return {part.strip().casefold() for part in raw.split("·") if part.strip()}
+
+    @classmethod
+    def _rg_terms_match_name(cls, terms: list[dict], assigned_rg: str) -> bool:
+        """True if the previous RG-name terms could match this assigned RG."""
+        assigned = assigned_rg.casefold()
+        rg_terms = [term for term in terms if term.get("scope") == SCOPE_RG]
+        if not rg_terms:
+            return True
+        for term in rg_terms:
+            operator = term.get("operator")
+            values = [str(value).casefold() for value in term.get("values") or [] if value]
+            if not values:
+                continue
+            if operator == "=" and assigned not in set(values):
+                return False
+            if operator in {"~", "contains", "like"} and not any(fragment in assigned for fragment in values):
+                return False
+            if operator == "!=" and assigned in set(values):
+                return False
+        return True
+
+    @classmethod
+    def _exclusion_outside_assigned_rg(cls, item: dict, entry: dict) -> bool:
+        """Resource groups do not nest; an RG assignment never evaluates another RG.
+
+        Prisma ``contains PCCAGENTLESSSCANRESOURCEGROUP`` belongs on the
+        subscription-scoped policy, not inside ``azure-ti-test-fundacao-...``.
+        """
+        if item.get("assignment_scope_kind") != "resource_group":
+            return False
+        assigned = str(item.get("assignment_resource_group") or "").strip()
+        if not assigned:
+            return False
+        previous_rg = cls._resource_group_from_id(str((entry.get("observed") or {}).get("resource_id") or ""))
+        if previous_rg and previous_rg != assigned.casefold():
+            return True
+        return not cls._rg_terms_match_name(entry.get("terms") or [], assigned)
+
+    def _previous_overlap_reason(self, item: dict, entry: dict) -> str | None:
+        if entry["tags"] == item["tags"]:
+            return "same_classification"
+        if self._exclusion_outside_assigned_rg(item, entry):
+            return "assignment_scope_disjoint"
+        if self._observed_targets_disjoint(item["observed"], entry["observed"]):
+            return "gold_targets_disjoint"
+        if self._is_disjoint_by_arm_terms(item["terms"], entry["terms"]):
+            return "arm_terms_disjoint"
+        return None
 
     async def generate_tenant_policy(self, connection_id: int, department_id: int | None = None) -> dict | None:
         conn = await self.db.get(SourceConnection, connection_id)
@@ -554,6 +728,8 @@ class AzureTagPolicyService:
         rules = await self._load_classification_rules(conn)
         selected_department_ids = self._selected_department_ids(departments, department_id)
         mappings = await self._tag_mappings()
+        home_tenants = await self._subscription_home_tenants(conn)
+        billing_tenant = str((conn.config_json or {}).get("tenant_id") or "").strip()
         gold_rows, gold_error = await self._gold_evidence(conn, mappings)
         diagnostics: list[dict] = []
         if gold_error:
@@ -588,9 +764,10 @@ class AzureTagPolicyService:
         previous: dict[tuple[str, str], list[dict]] = defaultdict(list)
         for item in compiled:
             rule: ClassificationRule = item["rule"]
+            omit_rg_scope = item.get("assignment_scope_kind") == "resource_group"
             for target in item["targets"]:
                 layer = "resource_groups" if target == "resource_group" else "resources"
-                selector = self._selector(item["terms"], target)
+                selector = self._selector(item["terms"], target, omit_rg_scope=omit_rg_scope)
                 if not selector:
                     continue
                 subscription_id = item["scope_subscriptions"][0]
@@ -598,12 +775,9 @@ class AzureTagPolicyService:
                 overlapping = []
                 pruned = []
                 for entry in bucket:
-                    if entry["tags"] == item["tags"]:
-                        pruned.append({**entry["summary"], "prune_reason": "same_classification"})
-                    elif self._observed_targets_disjoint(item["observed"], entry["observed"]):
-                        pruned.append({**entry["summary"], "prune_reason": "gold_targets_disjoint"})
-                    elif self._is_disjoint_by_arm_terms(item["terms"], entry["terms"]):
-                        pruned.append({**entry["summary"], "prune_reason": "arm_terms_disjoint"})
+                    reason = self._previous_overlap_reason(item, entry)
+                    if reason:
+                        pruned.append({**entry["summary"], "prune_reason": reason})
                     else:
                         overlapping.append(entry)
                 effective = self._effective(selector, [entry["selector"] for entry in overlapping])
@@ -612,10 +786,13 @@ class AzureTagPolicyService:
                     "department_id": rule.department_id, "tags": item["tags"],
                     "condition": effective, "scope_subscriptions": [subscription_id],
                     "evidence_count": item["evidence_count"], "observed": item["observed"],
+                    "assignment_scope_kind": item.get("assignment_scope_kind", "subscription"),
+                    "assignment_resource_group": item.get("assignment_resource_group"),
                     "selected": item["selected"],
                     "excludes_rule_ids": [entry["rule_id"] for entry in overlapping],
                     "exclusions": [entry["summary"] for entry in overlapping],
                     "pruned_exclusions": pruned,
+                    "scope_tenant_id": home_tenants.get(subscription_id.casefold()) or None,
                 }
                 bucket.append({
                     "selector": selector, "terms": item["terms"],
@@ -646,10 +823,15 @@ class AzureTagPolicyService:
         selected = departments.get(department_id) if department_id else None
         emitted_scopes = sorted({subscription for values in layers.values() for item in values
                                  for subscription in item["scope_subscriptions"]})
-        return {"tenant_id": (conn.config_json or {}).get("tenant_id"), "connection_code": conn.code,
+        return {"tenant_id": billing_tenant, "connection_code": conn.code,
                 "connection_name": conn.name, "rule_count": len(rules), "department_id": department_id,
                 "department_name": selected.name if selected else None,
                 "deployment_subscriptions": emitted_scopes,
+                "subscription_tenants": {
+                    subscription: tenant
+                    for subscription in emitted_scopes
+                    if (tenant := home_tenants.get(subscription.casefold()))
+                },
                 "tag_mappings": mappings,
                 "subscription_catalog": [{"name": name, "ids": ids} for name, ids in sorted(catalog.items())],
                 "subscriptions": [

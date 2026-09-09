@@ -132,18 +132,30 @@ def consumer_main(worker_id: int):
                 time.sleep(POLL_INTERVAL)
                 continue
 
-            if not try_acquire_task_resource_locks(session, task):
-                release_task_to_queue(session, task)
-                session.commit()
-                session.close()
-                time.sleep(0.2)
-                continue
-
             session.commit()
             session.close()
             task_id = task.id
             lock_session = SyncSession()
             try:
+                # Advisory locks are session-scoped. Acquire them on the same
+                # connection kept open for the whole task; acquiring before
+                # closing ``session`` released the lock immediately.
+                if not try_acquire_task_resource_locks(lock_session, task):
+                    retry = SyncSession()
+                    try:
+                        queued = retry.get(EtlTask, task_id)
+                        if queued and queued.status == "RUNNING":
+                            wait_phase = (
+                                "Aguardando conexão de origem"
+                                if queued.task_type == "extraction"
+                                else "Aguardando escritor Gold/Dimon"
+                            )
+                            release_task_to_queue(retry, queued, phase=wait_phase)
+                            retry.commit()
+                    finally:
+                        retry.close()
+                    time.sleep(0.2)
+                    continue
 
                 if task.task_type == "forecast":
                     config_id = task.destination_table_id
@@ -182,6 +194,10 @@ def consumer_main(worker_id: int):
                         # while the forecast is already executing.
                         run.status = "RUNNING"
                         run.phase = "Validando metadados"
+                        # A retried run must not continue exposing the error
+                        # from a previous attempt while the new attempt is
+                        # healthy and still executing.
+                        run.error = None
                         run.started_at = datetime.now(timezone.utc)
                         s.commit()
                         metadata = asyncio.run(fetch_metadata(dest.physical_name))
@@ -268,12 +284,15 @@ def consumer_main(worker_id: int):
                         run = s.get(ForecastRun, run_id)
                         task_row = s.get(EtlTask, task_id)
                         error_message = _format_task_error(exc)
-                        if run:
+                        # A user cancellation may arrive while an in-flight
+                        # Trino request is unwinding.  Preserve that terminal
+                        # state instead of overwriting it with FAILED.
+                        if run and run.status != "CANCELLED":
                             run.status = "FAILED"
                             run.phase = f"Falha no forecast: {error_message[:160]}"
                             run.error = error_message[:2000]
                             run.finished_at = datetime.now(timezone.utc)
-                        if task_row:
+                        if task_row and task_row.status != "CANCELLED":
                             task_row.status = "FAILED"
                             task_row.phase = f"Erro: {error_message[:160]}"
                             task_row.finished_at = datetime.now(timezone.utc)
@@ -464,6 +483,51 @@ def consumer_main(worker_id: int):
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
+                elif task.task_type == "bronze_audit":
+                    task.status = "RUNNING"
+                    task.phase = "Auditando arquivos físicos Bronze"
+                    session.commit()
+                    session.close()
+                    try:
+                        from app.routers.etl import _audit_reprocess_group_sync
+                        result = _audit_reprocess_group_sync(
+                            task_id, task.destination_table_id,
+                            list(task.connection_ids or []), list(task.billing_periods or []),
+                        )
+                        s = SyncSession()
+                        audit_row = s.get(EtlTask, task_id)
+                        succeeded = bool(result.get("success"))
+                        if audit_row:
+                            audit_row.status = "COMPLETED" if succeeded else "FAILED"
+                            audit_row.total_blobs = int(result.get("audited_blobs") or audit_row.total_blobs)
+                            audit_row.phase = "Auditoria Bronze aprovada" if succeeded else str(result.get("error"))[:200]
+                            audit_row.errors = [] if succeeded else [str(result.get("error"))]
+                            audit_row.finished_at = datetime.now(timezone.utc)
+                            audit_row.result_json = {**(audit_row.result_json or {}), **result}
+                        if not succeeded:
+                            # A failed audit is a hard group barrier.  Mark all
+                            # children visibly blocked; leaving them QUEUED
+                            # would look like a stuck worker and invite an
+                            # unsafe manual retry.
+                            for child in s.query(EtlTask).filter(EtlTask.status == "QUEUED").all():
+                                payload = child.result_json if isinstance(child.result_json, dict) else {}
+                                if payload.get("bronze_audit_task_id") == task_id:
+                                    child.status = "FAILED"
+                                    child.phase = "Bloqueado pela auditoria Bronze"
+                                    child.errors = [str(result.get("error"))]
+                                    child.finished_at = datetime.now(timezone.utc)
+                        s.commit()
+                        s.close()
+                    except Exception as exc:
+                        s = SyncSession()
+                        audit_row = s.get(EtlTask, task_id)
+                        if audit_row:
+                            audit_row.status = "FAILED"
+                            audit_row.phase = f"Erro na auditoria Bronze: {_format_task_error(exc)[:160]}"
+                            audit_row.errors = [str(exc)]
+                            audit_row.finished_at = datetime.now(timezone.utc)
+                        s.commit(); s.close()
+
                 elif task.task_type in ("reprocess", "reclassification"):
                     dest_id = task.destination_table_id
                     conn_ids = task.connection_ids or []
@@ -472,6 +536,7 @@ def consumer_main(worker_id: int):
                     print(
                         f"Picked up reprocess task {task_id}:"
                         f" dest_table={dest_id},"
+                        f" sources={[getattr(c, 'code', cid) for cid, c in zip(conn_ids, conn_rows)] if 'conn_rows' in locals() else conn_ids},"
                         f" connections={conn_ids},"
                         f" periods={periods}"
                     )
@@ -549,6 +614,17 @@ def consumer_main(worker_id: int):
                                 "table": "dest_azure_ptu_metrics",
                             }
                         else:
+                            # Validate the exact source/month immediately before
+                            # transformation.  This avoids a second full Bronze
+                            # pass while preserving the unit-level safety barrier.
+                            if task_json.get("bronze_audit_task_id"):
+                                from app.routers.etl import _audit_reprocess_group_sync
+                                inline_audit = _audit_reprocess_group_sync(
+                                    task_id, dest_id, conn_ids, periods
+                                )
+                                if not inline_audit.get("success"):
+                                    result = inline_audit
+                                    raise RuntimeError(inline_audit.get("error") or "Auditoria Bronze bloqueada")
                             # Seed the in-memory task dict that _reprocess_destination_sync
                             # uses for progress tracking and _sync_db back into the DB row.
                             _inmemory_tasks[task_id] = {
@@ -801,10 +877,13 @@ def consumer_main(worker_id: int):
                     conn_id = task.connection_id
                     periods = task.billing_periods or []
                     selected = task.selected_blobs or []
+                    from app.models.source_connection import SourceConnection as _LogSourceConnection
+                    source_row = session.get(_LogSourceConnection, conn_id) if conn_id else None
+                    source_code = source_row.code if source_row else f"connection-{conn_id}"
 
                     print(
                         f"Picked up extraction task {task_id}:"
-                        f" connection={conn_id},"
+                        f" source={source_code} (connection={conn_id}),"
                         f" periods={periods},"
                         f" selected_blobs={len(selected)} blobs"
                     )

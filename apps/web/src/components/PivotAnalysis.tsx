@@ -347,6 +347,15 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     // Without a union, the cell belongs to the single active source, which may
     // be the planning pseudo-destination (negative id).
     const destId = matched?.id ?? (sourceIds.length === 1 ? sourceIds[0] : tableId);
+    // When the pivot auto-restricted to the latest period (no period on axes),
+    // carry that partition into drill-down so the detail scan stays bounded.
+    const autoPeriod = result?.period_auto_applied;
+    if (autoPeriod && /^\d{6}$/.test(String(autoPeriod))) {
+      const periodCol = meta?.columns.find(column => isPeriodDim(column.name))?.name;
+      if (periodCol && cellFilters[periodCol] == null) {
+        cellFilters[periodCol] = autoPeriod;
+      }
+    }
     const pagination = { page: 0, pageSize: 100 };
     setDrillQuery({ destId, cellFilters });
     setDrillPage(pagination);

@@ -71,12 +71,37 @@ a exceção puder realmente estar dentro do alcance da regra Terra Brasil.
 Menor `priority` (e, no empate, menor `id`) vence. Portanto, somente regras
 anteriores podem ser exceções: uma regra posterior não sobrescreve a principal.
 
+Nomes de Resource Group e de recurso ARM são **case-insensitive**
+([FAQ do ARM](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/frequently-asked-questions),
+[regras de nome](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules)).
+Na Azure Policy, `equals` / `like` / `contains` / `in` sobre `stringValue`
+também são case-insensitive; só `match` / `notMatch` distinguem maiúsculas
+([policy rule](https://learn.microsoft.com/en-us/azure/governance/policy/concepts/definition-structure-policy-rule)).
+O compilador agrupa evidências GOLD do mesmo RG ou Resource ID que diferem só
+por casing e, para regras com igualdade (`=`), emite **uma** condição `equals`,
+com a grafia GOLD de maior evidência (empate: a que tem mais maiúsculas).
+Regras de classificação com `~` (contains) **não** viram uma lista de
+`equals` por objeto GOLD. A policy usa `contains` no padrão para Resource
+Group (`dig-security-rg`), Resource ID (ex. Terra México / `terra-mexico`),
+nome, tipo, SKU/família e região. A GOLD ainda define **em quais
+subscriptions** a policy é atribuída. Regras `=` continuam `equals` no literal
+observado.
+
+`SubAccountName` continua lista de GUIDs com `equals`/`in`. Contains não se
+aplica a subscription: o ARM identifica assinatura pelo GUID.
+
+Chaves de tag em `addOrReplace` são colapsadas da mesma forma; **valores** de
+tag permanecem case-sensitive,
+como na [documentação de tags](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/tag-resources).
+
 As policies são diretas, em duas saídas por decisão: Resource Groups (`mode:
 All`) e recursos filhos (`mode: Indexed`). A herança global de RG não é usada,
 pois ela não representa com segurança uma exceção por recurso.
 
-Somente campos observáveis pelo ARM são implantáveis: subscription, RG,
-Resource ID, nome, tipo, SKU e localização. Regras de billing como Purchase,
+Somente campos observáveis pelo ARM são implantáveis: Resource Group, Resource
+ID, nome, tipo, SKU e localização. O GUID da subscription **não** entra no
+`if` da definition (`mode: All` rejeita `field: subscriptionId`); o assignment
+já é `/subscriptions/{guid}`. Regras de billing como Purchase,
 Return, reservas e clones aparecem no relatório de cobertura como não
 implantáveis, sem gerar tags.
 
@@ -113,11 +138,10 @@ scan, sem criar ou alterar recursos Azure.
 
 ## Execução segura do script
 
-O script cria uma definition/assignment ausente e atualiza uma existente apenas
-quando sua definition tiver `metadata.category=OpenFinops`. Uma definition ou
-assignment com o mesmo nome associado a outra policy interrompe a execução, sem
-sobrescrever recursos de terceiros. A identidade system-assigned existente é
-preservada e uma ausente é associada ao assignment.
+O script agrupa assignments em **blocos por tenant de recurso** (ex.: 4P
+`…8fd7`, depois TI `78879b00-…`). Cada bloco valida `az login --tenant` daquele
+GUID e só então aplica as subscriptions daquele tenant. O tenant da conexão de
+billing não é usado como tenant da FinOps.
 
 Cada definition possui `metadata.openfinopsContentHash`, um SHA-256
 determinístico do conteúdo efetivo (`mode`, `displayName`, `description` e
@@ -138,6 +162,12 @@ assignments, criar a identidade gerenciada, conceder `Tag Contributor` no
 escopo da assinatura e criar/consultar remediation tasks. O script faz retry
 limitado para a propagação Microsoft Entra ID e falha visivelmente em RBAC ou
 remediation.
+
+Um único arquivo `.sh` pode conter blocos de conexões Azure de tenants distintos.
+Antes de processar cada bloco, o script compara o `tenantId` da sessão Azure CLI
+com o tenant configurado no OpenFinops. Em caso de divergência, ele imprime
+`ABORT` e não aplica definitions, assignments, RBAC ou remediation daquele
+tenant; autentique-se no tenant indicado com `az login --tenant <tenant-id>`.
 
 Uma policy `modify` não corrige recursos existentes sozinha: a remediation task
 é necessária. O script dispara `az policy state trigger-scan --no-wait` na

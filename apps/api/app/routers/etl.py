@@ -1421,21 +1421,54 @@ def _reprocess_destination_sync(
                 all_blobs.append((blob_id, cid, period, path))
 
         total_blobs = len(all_blobs)
-        expected_rows_by_blob = {
-            blob_id: (session.get(IngestedBlob, blob_id).row_count or 0)
+        blob_meta = {
+            blob_id: session.get(IngestedBlob, blob_id)
             for blob_id, _, _, _ in all_blobs
-            if session.get(IngestedBlob, blob_id) is not None
+        }
+        expected_rows_by_blob = {
+            blob_id: meta.row_count if meta is not None else None
+            for blob_id, meta in blob_meta.items()
         }
         expected_input_rows = sum(
-            (session.get(IngestedBlob, blob_id).row_count or 0)
-            for blob_id, _, _, _ in all_blobs
-            if session.get(IngestedBlob, blob_id) is not None
+            int(value) for value in expected_rows_by_blob.values() if value is not None
         )
         status["total_blobs"] = total_blobs
         status["processed_blobs"] = 0
         status["rows_destination"] = 0
         _sync_db()
         _append_reprocess_log(task_id, f"Inventário concluído: {total_blobs} blobs e {expected_input_rows:,} linhas de entrada", details={"blobs": total_blobs, "input_rows": expected_input_rows})
+
+        # Validate the complete immutable Bronze input before staging one Gold
+        # batch.  A missing blob used to be discovered after tens of millions
+        # of rows from earlier blobs had already been processed.
+        bronze_audit: list[dict] = []
+        status["current_blob"] = f"Validando Bronze: {total_blobs} arquivo(s)"
+        _sync_db()
+        for blob_id, cid, bperiod, blob_path in all_blobs:
+            conn = session.get(SourceConnection, cid)
+            audit = iceberg.audit_bronze_blob(
+                conn.code if conn else str(cid),
+                blob_path=blob_path,
+                billing_period=bperiod,
+                expected_rows=expected_rows_by_blob.get(blob_id),
+                batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
+                allow_consolidated_row_count=bool(conn and conn.connector_type == "oci"),
+                allow_legitimate_empty=bool(conn and conn.connector_type == "mongodb_atlas"),
+            )
+            audit["blob_id"] = blob_id
+            bronze_audit.append(audit)
+        failed_audit = [item for item in bronze_audit if item["status"] != "PASSED"]
+        if failed_audit:
+            message = f"Preflight Bronze falhou em {len(failed_audit)}/{total_blobs} arquivo(s)"
+            status.update(status="FAILED", error=message, current_blob=message)
+            _sync_db()
+            _append_reprocess_log(
+                task_id, message, level="ERROR", details={"bronze_audit": failed_audit},
+            )
+            return {"success": False, "error": message, "rows_written": 0, "bronze_audit": bronze_audit}
+        _append_reprocess_log(
+            task_id, "Preflight Bronze concluído", details={"bronze_audit": bronze_audit},
+        )
 
         # ── Pre-load connections, rules, and hierarchy for ALL connections BEFORE the thread pool ──
         # ORM objects are loaded in the main session and become detached after session.close().
@@ -1902,8 +1935,19 @@ def _reprocess_destination_sync(
             _sync_db()
             _append_reprocess_log(task_id, "Validação concluída; iniciando publicação na Gold")
 
-            total_written = iceberg.publish_staged_by_slices(
-                phys_name, temp_name,
+            # A queue task represents exactly one destination/source/month.
+            # Publishing a whole staged destination forced a full Arrow/Pandas
+            # materialization and allowed a late Bronze error after millions
+            # of rows. Reject broad calls rather than silently merging slices.
+            if len(connection_ids) != 1 or len(billing_periods) != 1:
+                raise RuntimeError(
+                    "Reprocessamento deve publicar uma única origem+mês por tarefa"
+                )
+            total_written = iceberg.publish_staged_partition(
+                phys_name,
+                temp_name,
+                billing_period=str(billing_periods[0]),
+                connection_id=int(connection_ids[0]),
             )
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
@@ -1986,6 +2030,59 @@ def _reprocess_destination_sync(
             gc.collect()
         except Exception:
             pass
+
+
+def _audit_reprocess_group_sync(
+    task_id: int,
+    destination_table_id: int,
+    connection_ids: list[int],
+    billing_periods: list[str],
+) -> dict:
+    """Fully read Bronze before releasing any child publication in a group."""
+    from app.database import SyncSession
+    from app.models.etl_task import EtlTask
+    from app.services import iceberg_service as iceberg
+
+    session = SyncSession()
+    try:
+        stmt = (
+            select(IngestedBlob, SourceConnection.code, SourceConnection.connector_type)
+            .join(SourceConnection, SourceConnection.id == IngestedBlob.connection_id)
+            .where(IngestedBlob.connection_id.in_(connection_ids))
+            .order_by(IngestedBlob.billing_period, IngestedBlob.connection_id, IngestedBlob.blob_path)
+        )
+        if billing_periods:
+            stmt = stmt.where(IngestedBlob.billing_period.in_(billing_periods))
+        rows = session.execute(stmt).all()
+        audits: list[dict[str, Any]] = []
+        for index, (blob, code, connector_type) in enumerate(rows, start=1):
+            audit = iceberg.audit_bronze_blob(
+                code,
+                blob_path=blob.blob_path,
+                billing_period=str(blob.billing_period),
+                expected_rows=blob.row_count,
+                batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
+                allow_consolidated_row_count=connector_type == "oci",
+                allow_legitimate_empty=connector_type == "mongodb_atlas",
+            )
+            audit.update({"blob_id": blob.id, "connection_id": blob.connection_id})
+            audits.append(audit)
+            task = session.get(EtlTask, task_id)
+            if task:
+                task.total_blobs = len(rows)
+                task.processed_blobs = index
+                task.phase = f"Auditando Bronze {index}/{len(rows)}: {blob.blob_path}"[:200]
+                session.commit()
+        failed = [item for item in audits if item.get("status") != "PASSED"]
+        return {
+            "success": not failed,
+            "rows_written": 0,
+            "audited_blobs": len(audits),
+            "bronze_audit": audits,
+            "error": f"Auditoria Bronze bloqueada: {len(failed)}/{len(audits)} arquivo(s) inconsistente(s)" if failed else "",
+        }
+    finally:
+        session.close()
 
 
 def _reclassify_destination_sync(task_id: int, destination_table_id: int, connection_ids: list[int], billing_periods: list[str]) -> dict:
@@ -2131,7 +2228,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
 
     active = await db.execute(
         select(EtlTask.id).where(
-            EtlTask.task_type == "reprocess",
+            EtlTask.task_type.in_(["bronze_audit", "reprocess"]),
             EtlTask.destination_table_id == body.destination_table_id,
             EtlTask.status.in_(["QUEUED", "RUNNING"]),
         ).limit(1)
@@ -2251,11 +2348,23 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         )
 
     queue_group = str(uuid4())
+    audit_result = await db.execute(
+        insert(EtlTask).values(
+            task_type="bronze_audit", status="QUEUED", destination_table_id=body.destination_table_id,
+            connection_ids=list(body.connection_ids),
+            billing_periods=sorted({period for _, period in ordered_pairs}),
+            result_json={"queue_group": queue_group, "audit_scope": "reprocess_group"},
+            total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
+            rows_destination=0, errors=[], phase="Na fila: auditoria física Bronze",
+        ).returning(EtlTask.id)
+    )
+    audit_task_id = audit_result.scalar_one()
     task_ids: list[int] = []
     for position, (connection_id, period) in enumerate(ordered_pairs, start=1):
         details = {
             "connection_ids": [connection_id], "billing_periods": [period],
             "publish_by_partition": True, "queue_group": queue_group,
+            "bronze_audit_task_id": audit_task_id,
             "queue_position": position, "queue_total": len(ordered_pairs),
         }
         result = await db.execute(
@@ -2278,8 +2387,8 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         task_ids.append(result.scalar_one())
     await db.commit()
 
-    return {"task_id": task_ids[0], "task_ids": task_ids, "queue_group": queue_group,
-            "message": f"{len(task_ids)} publicação(ões) fonte+mês enfileiradas"}
+    return {"task_id": audit_task_id, "task_ids": [audit_task_id, *task_ids], "queue_group": queue_group,
+            "message": f"Auditoria Bronze + {len(task_ids)} publicação(ões) fonte+mês enfileiradas"}
 
 
 @router.post("/reprocess-shared-cost")

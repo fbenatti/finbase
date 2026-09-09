@@ -230,8 +230,8 @@ def _copilot_user_period_select() -> str:
     """
 
 
-async def refresh_ai_usage_dimons() -> dict[str, Any]:
-    """Reconstrói as quatro tabelas usadas por Copilot, Claude e NotebookLM."""
+async def refresh_ai_usage_dimons(only_tables: list[str] | None = None) -> dict[str, Any]:
+    """Reconstrói as Dimons auxiliares pela fila oficial de Dimon."""
     definitions = [
         (AI_CONSUMPTION_TABLE, _consumption_select()),
         (AI_LICENSE_TABLE, _license_select()),
@@ -239,6 +239,9 @@ async def refresh_ai_usage_dimons() -> dict[str, Any]:
         (COPILOT_LICENSE_TABLE, _copilot_license_select()),
         (COPILOT_USER_PERIOD_TABLE, _copilot_user_period_select()),
     ]
+    if only_tables:
+        wanted = set(only_tables)
+        definitions = [(table, sql) for table, sql in definitions if table in wanted]
     results: dict[str, int] = {}
     for table, select_sql in definitions:
         results[table] = await _publish(table, select_sql)

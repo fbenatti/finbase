@@ -15,7 +15,9 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.azure_tag_mapping import AzureTagMapping
 from app.models.destination import DestinationColumn, DestinationTable
-from app.services.azure_tag_policy_service import AzureTagPolicyService, TAG_CONTRIBUTOR_ROLE, slugify
+from app.services.azure_tag_policy_service import (
+    AzureTagPolicyService, TAG_CONTRIBUTOR_ROLE, slugify, _collapse_tag_keys,
+)
 
 router = APIRouter(prefix="/azure-tag-policy", tags=["azure-tag-policy"])
 FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -126,7 +128,7 @@ def _definition(
     source_rule: str, exclusions: list[dict],
 ) -> dict:
     operations = [{"operation": "addOrReplace", "field": f"tags['{key}']", "value": value}
-                  for key, value in tags.items() if value]
+                  for key, value in _collapse_tag_keys(tags).items() if value]
     definition = {
         "mode": mode,
         "displayName": display_name,
@@ -150,6 +152,14 @@ def _definition(
     }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     definition["metadata"]["openfinopsContentHash"] = sha256(content.encode("utf-8")).hexdigest()
     return definition
+
+
+def _assignment_scope(subscription_id: str, item: dict) -> str:
+    if item.get("assignment_scope_kind") == "resource_group":
+        resource_group = str(item.get("assignment_resource_group") or "").strip()
+        if resource_group:
+            return f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}"
+    return f"/subscriptions/{subscription_id}"
 
 
 def build_script(policies: list[dict], plan_only: bool = False) -> str:
@@ -197,7 +207,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         '    current_id=$(az policy assignment show --name "$name" --scope "$scope" --query policyDefinitionId -o tsv --only-show-errors)',
         '    [[ "${current_id,,}" == "${expected_id,,}" ]] || { action ABORT "Assignment $name aponta para outra definition."; exit 1; }',
         '    identity_type=$(az policy assignment show --name "$name" --scope "$scope" --query "identity.type" -o tsv --only-show-errors)',
-        '    if [[ "$identity_type" == *SystemAssigned* ]]; then action UNCHANGED "Assignment $name (managed identity preservada)"; else action UPDATE "Assignment $name (associar managed identity)"; plan || run_mutation az policy assignment update --name "$name" --scope "$scope" --policy "$policy_name" --mi-system-assigned --location "$LOCATION" --only-show-errors; fi',
+        '    if [[ "$identity_type" == *SystemAssigned* ]]; then action UNCHANGED "Assignment $name (managed identity preservada)"; else action UPDATE "Assignment $name (associar managed identity)"; plan || run_mutation az policy assignment identity assign --name "$name" --scope "$scope" --mi-system-assigned --only-show-errors; fi',
         '  else',
         '    action CREATE "Assignment $name com managed identity"',
         '    plan || run_mutation az policy assignment create --name "$name" --scope "$scope" --policy "$policy_name" --mi-system-assigned --location "$LOCATION" --only-show-errors',
@@ -228,15 +238,34 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         '  error "Não foi possível conceder Tag Contributor após $RETRY_ATTEMPTS tentativa(s)."; exit 1',
         '}',
         'ensure_remediation() {',
-        '  local assignment="$1" scope="$2" name state',
+        '  local assignment="$1" scope="$2" name state subscription resource_group',
+        '  subscription="${scope#/subscriptions/}"',
+        '  subscription="${subscription%%/*}"',
+        '  resource_group=""',
+        '  if [[ "$scope" == */resourceGroups/* ]]; then',
+        '    resource_group="${scope#*/resourceGroups/}"',
+        '    resource_group="${resource_group%%/*}"',
+        '  fi',
         '  REMEDIATION_SEQ=$((REMEDIATION_SEQ + 1))',
         '  name="of-rem-$(date -u +%Y%m%d%H%M%S)-${REMEDIATION_SEQ}"',
         '  action CREATE "Remediation $name (tarefa pontual; tasks anteriores são preservadas)"',
-        '  plan || run_mutation az policy remediation create --name "$name" --scope "$scope" --policy-assignment "$assignment" --resource-discovery-mode ReEvaluateCompliance --only-show-errors',
+        '  if [[ -n "$resource_group" ]]; then',
+        '    plan || run_mutation az policy remediation create --name "$name" --resource-group "$resource_group" --policy-assignment "$assignment" --resource-discovery-mode ReEvaluateCompliance --only-show-errors',
+        '  else',
+        '    plan || run_mutation az policy remediation create --name "$name" --subscription "$subscription" --policy-assignment "$assignment" --resource-discovery-mode ReEvaluateCompliance --only-show-errors',
+        '  fi',
         '  if plan; then action CREATE "Trigger scan para $scope (não executado em PLAN)"; else run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi',
         '  if [[ "$WAIT_FOR_REMEDIATION" == "true" && "$PLAN_ONLY" != "true" ]]; then',
-        '    local deadline=$((SECONDS + 300)); while (( SECONDS < deadline )); do state=$(az policy remediation show --name "$name" --scope "$scope" --query provisioningState -o tsv --only-show-errors); [[ "$state" != "Running" && "$state" != "Accepted" ]] && break; sleep 10; done; info "Status final da remediation $name: $state"; fi',
-        '  info "Acompanhe: az policy remediation show --name $name --scope $scope --query provisioningState -o tsv"',
+        '    local deadline=$((SECONDS + 300))',
+        '    while (( SECONDS < deadline )); do',
+        '      if [[ -n "$resource_group" ]]; then state=$(az policy remediation show --name "$name" --resource-group "$resource_group" --query provisioningState -o tsv --only-show-errors);',
+        '      else state=$(az policy remediation show --name "$name" --subscription "$subscription" --query provisioningState -o tsv --only-show-errors); fi',
+        '      [[ "$state" != "Running" && "$state" != "Accepted" ]] && break; sleep 10;',
+        '    done',
+        '    info "Status final da remediation $name: $state";',
+        '  fi',
+        '  if [[ -n "$resource_group" ]]; then info "Acompanhe: az policy remediation show --name $name --resource-group $resource_group --query provisioningState -o tsv";',
+        '  else info "Acompanhe: az policy remediation show --name $name --subscription $subscription --query provisioningState -o tsv"; fi',
         '}',
         'require_az',
         "",
@@ -244,9 +273,20 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
     for tenant in policies:
         code = slugify(tenant.get("connection_code", "azure"))
         test_suffix = f"-test-{slugify(tenant['department_name'])}" if tenant.get("department_name") else ""
-        lines += [f"# Tenant {tenant.get('connection_name')} ({tenant.get('connection_code')})"]
+        lines += [
+            f"# Billing connection {tenant.get('connection_name')} ({tenant.get('connection_code')})",
+            "# Assignments are grouped by RESOURCE tenant (subscription home), not billing tenant.",
+        ]
+        subscription_tenants = {str(key).casefold(): str(value).strip()
+                                for key, value in (tenant.get("subscription_tenants") or {}).items() if str(value).strip()}
         items = [("rg", "All", item) for item in tenant.get("layers", {}).get("resource_groups", [])]
         items += [("resource", "Indexed", item) for item in tenant.get("layers", {}).get("resources", [])]
+
+        def _home_for(item: dict, subscription_id: str) -> str:
+            return (str(item.get("scope_tenant_id") or "").strip()
+                    or subscription_tenants.get(subscription_id.casefold(), ""))
+
+        jobs: dict[str, list[dict]] = {}
         for index, (kind, mode, item) in enumerate(items, 1):
             subscriptions = item.get("scope_subscriptions") or []
             name = f"openfinops-{kind}-{code}{test_suffix}-{index}"
@@ -254,9 +294,18 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 lines += [f"# SKIPPED {name}: no observed Dimon subscription or explicit subscription GUID for this rule.", ""]
                 continue
             exclusions = item.get("exclusions") or []
+            assignment_scope = _assignment_scope(subscriptions[0], item) if subscriptions else ""
+            if item.get("assignment_scope_kind") == "resource_group" and item.get("assignment_resource_group"):
+                assignment_label = f"resource group {item['assignment_resource_group']}"
+                effective_target = item["assignment_resource_group"]
+            else:
+                assignment_label = "subscription"
+                effective_target = (item.get("observed", {}).get("resource_id")
+                                    or item.get("observed", {}).get("resource_group_name")
+                                    or "subscription completa")
             lines += [
                 f"# Regra de origem: #{item.get('rule_id')} {item.get('rule_name')}",
-                f"# Assignment: subscription; alvo efetivo: {item.get('observed', {}).get('resource_id') or item.get('observed', {}).get('resource_group_name') or 'subscription completa'}",
+                f"# Assignment: {assignment_label}; alvo efetivo: {effective_target}",
                 "# Exceções de maior prioridade excluídas desta policy:",
             ]
             if exclusions:
@@ -273,7 +322,6 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 item["condition"], item.get("tags", {}), mode,
                 f"#{item.get('rule_id')} {item.get('rule_name')}", exclusions,
             )
-            filename = f"{name}.json"
             rules_filename = f"{name}-rules.json"
             metadata_filename = f"{name}-metadata.json"
             lines += [
@@ -283,9 +331,42 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 json.dumps(policy["metadata"], indent=2, ensure_ascii=False), "METADATAEOF",
             ]
             for subscription_id in subscriptions:
-                scope = f"/subscriptions/{subscription_id}"
-                assignment = f"{name}-{slugify(subscription_id)[:8]}"
-                q = shlex.quote
+                home = _home_for(item, subscription_id) or "_unmapped"
+                scope = _assignment_scope(subscription_id, item)
+                assignment_suffix = slugify(item.get("assignment_resource_group") or "")[:16]
+                jobs.setdefault(home, []).append({
+                    "subscription_id": subscription_id,
+                    "scope": scope,
+                    "assignment_suffix": assignment_suffix,
+                    "name": name,
+                    "mode": mode,
+                    "policy": policy,
+                    "rules_filename": rules_filename,
+                    "metadata_filename": metadata_filename,
+                })
+
+        q = shlex.quote
+        for home_tenant in sorted(jobs, key=lambda value: (value == "_unmapped", value)):
+            block = jobs[home_tenant]
+            if home_tenant == "_unmapped":
+                lines += [
+                    "",
+                    "# === Tenant não mapeado (az account set na subscription; não usar tenant de billing) ===",
+                    'info "Bloco sem tenant home cadastrado: o az account set escolhe o tenant da subscription."',
+                ]
+            else:
+                lines += [
+                    "",
+                    f"# === Tenant de recursos {home_tenant} ===",
+                    "# O Azure CLI alterna somente a subscription; não valida nem solicita login por tenant.",
+                ]
+            for job in block:
+                subscription_id = job["subscription_id"]
+                name = job["name"]
+                policy = job["policy"]
+                scope = job["scope"]
+                suffix = job["assignment_suffix"]
+                assignment = f"{name}-{suffix}-{slugify(subscription_id)[:8]}" if suffix else f"{name}-{slugify(subscription_id)[:8]}"
                 lines += [
                     f"EXPECTED_SUBSCRIPTION={q(subscription_id)}",
                     'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
@@ -295,7 +376,9 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     'fi',
                     'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
                     '[[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }',
-                    f"ensure_definition {q(name)} {q(mode)} \"$POLICIES_DIR/{rules_filename}\" \"$POLICIES_DIR/{metadata_filename}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])}",
+                ]
+                lines += [
+                    f"ensure_definition {q(name)} {q(job['mode'])} \"$POLICIES_DIR/{job['rules_filename']}\" \"$POLICIES_DIR/{job['metadata_filename']}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])}",
                     f"ensure_assignment {q(assignment)} {q(scope)} {q(name)}",
                     f"if az policy assignment show --name {q(assignment)} --scope {q(scope)} --only-show-errors >/dev/null 2>&1 || plan; then",
                     '  PRINCIPAL_ID=""',

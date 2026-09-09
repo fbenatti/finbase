@@ -433,6 +433,13 @@ export function formatApiError(error: unknown, fallback = "Request failed"): str
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") {
+      const record = detail as Record<string, unknown>;
+      // APIs return structured operational errors for analytics.  Showing
+      // Axios's generic "Request failed" hid the only actionable diagnosis.
+      if (typeof record.message === "string") return record.message;
+      if (typeof record.code === "string") return record.code;
+    }
     if (Array.isArray(detail)) {
       return detail.map((item) => (typeof item === "object" && item && "msg" in item ? String(item.msg) : JSON.stringify(item))).join("; ");
     }
@@ -1009,9 +1016,12 @@ export interface AzurePolicyPlanItem {
   scope_subscriptions: string[];
   evidence_count: number;
   observed: { resource_group_name?: string; resource_id?: string };
+  assignment_scope_kind?: "subscription" | "resource_group";
+  assignment_resource_group?: string | null;
   tags: Record<string, string>;
   condition: Record<string, unknown>;
   exclusions: Array<{ rule_id: number; rule_name: string; department_name?: string; observed?: { resource_group_name?: string; resource_id?: string } }>;
+  scope_tenant_id?: string;
 }
 
 export interface AzureTenantPolicy {
@@ -1023,6 +1033,7 @@ export interface AzureTenantPolicy {
   department_name?: string | null;
   tag_mappings?: Array<{ tag_key: string; focus_field: string }>;
   deployment_subscriptions?: string[];
+  subscription_tenants?: Record<string, string>;
   subscription_catalog?: Array<{ name: string; ids: string[] }>;
   coverage?: {
     eligible_rules: number;
@@ -2502,7 +2513,7 @@ export interface DimonQueryMeasure {
 
 export interface DimonQueryFilter {
   column: string;
-  operator?: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS";
+  operator?: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS" | "IS_REALIZED";
   values: (string | number)[];
 }
 

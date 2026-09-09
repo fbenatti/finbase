@@ -48,7 +48,9 @@ services:
       TRINO_URL: http://trino:8080
       ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
       OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
-      OPENFINOPS_WORKER_CONCURRENCY: ${OPENFINOPS_WORKER_CONCURRENCY:-3}
+      OPENFINOPS_WORKER_CONCURRENCY: ${OPENFINOPS_WORKER_CONCURRENCY:-2}
+      AZURE_EXTRACTION_WORKERS: ${AZURE_EXTRACTION_WORKERS:-2}
+      OCI_EXTRACTION_WORKERS: ${OCI_EXTRACTION_WORKERS:-2}
       REPROCESS_CPU_WORKERS: ${REPROCESS_CPU_WORKERS:-2}
       REPROCESS_CLASSIFICATION_CHUNK_ROWS: ${REPROCESS_CLASSIFICATION_CHUNK_ROWS:-50000}
       REPROCESS_BATCH_ROWS: ${REPROCESS_BATCH_ROWS:-100000}
@@ -85,7 +87,12 @@ services:
     # Heap is 2G; cap RSS so the ~8 GiB Docker Desktop VM is not OOM-killed
     # (exit 137 → PAGE_TRANSPORT_ERROR on workers).
     restart: unless-stopped
+    # Coordinator only schedules; retain sufficient native JVM headroom.
     mem_limit: 2560m
+    # Linux hosts do not resolve host.docker.internal unless this mapping is set.
+    # Trino's Iceberg JDBC catalog reaches the canonical PostgreSQL on the host (:5433).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     volumes:
@@ -101,7 +108,12 @@ services:
   trino-worker:
     image: trinodb/trino:483
     restart: unless-stopped
-    mem_limit: 2560m
+    # Keep the whole local cluster below Docker Desktop's 7.65 GiB VM. Query
+    # concurrency is bounded in config-worker.properties; a bigger limit here
+    # only lets two workers evict the coordinator and one another.
+    mem_limit: 2500m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog:ro
       - ./infra/trino/config-worker.properties:/etc/trino/config.properties:ro
@@ -117,6 +129,27 @@ services:
     # Scale with: docker compose up -d --scale trino-worker=${TRINO_WORKERS:-1}
     deploy:
       replicas: ${TRINO_WORKERS:-1}
+
+  # A second fixed worker keeps local Compose independent of Swarm's
+  # deploy.replicas semantics. Both workers mount the same Iceberg warehouse
+  # and join the coordinator through discovery.
+  trino-worker-2:
+    image: trinodb/trino:483
+    restart: unless-stopped
+    mem_limit: 2500m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./infra/trino/catalog:/etc/trino/catalog:ro
+      - ./infra/trino/config-worker.properties:/etc/trino/config.properties:ro
+      - ./infra/trino/jvm-worker.config:/etc/trino/jvm.config:ro
+      - ./apps/data/iceberg:/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/tmp/Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+      - ./apps/data/iceberg:/data/iceberg
+      - ./apps/data/iceberg:/tmp/data/iceberg
+    depends_on:
+      trino:
+        condition: service_healthy
 
 volumes:
   pgdata:

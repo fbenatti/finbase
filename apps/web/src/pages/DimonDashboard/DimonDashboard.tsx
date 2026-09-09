@@ -289,7 +289,7 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
         row_limit: d.row_limit ?? 500,
         sort_column: d.sort_column ?? null,
         sort_direction: d.sort_direction ?? "desc",
-      }).catch(() => null)),
+      })),
     ).then(list => {
       if (!alive) return;
       const m: Record<string, DimonQueryResult | null> = {};
@@ -367,9 +367,59 @@ function ChartCard({ title, children, note }: { title: string; children: React.R
   );
 }
 
-function LoadingBlock({ loading, children }: { loading: boolean; children: React.ReactNode }) {
+function LoadingBlock({ loading, error, children }: { loading: boolean; error?: string; children: React.ReactNode }) {
   if (loading) return <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}><CircularProgress size={26} /></Box>;
+  if (error) return <Alert severity="error">{error}</Alert>;
   return <>{children}</>;
+}
+
+function ExecutiveMatrix({ table, filters, filterKey, ackMonth }: { table: string; filters: Filters; filterKey: string; ackMonth?: string }) {
+  const defs = useMemo<QueryDef[]>(() => [{ id: "matrix", rows: ["departamento_nivel_4", "departamento_nivel_5", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]), row_limit: 10000 }], [filterKey]);
+  const { results, loading, error } = useTabQueries(table, defs, "executive-matrix-" + filterKey);
+  const rows = rowsOf(results.matrix);
+  const months = [...new Set(rows.map(r => String(r._billing_period || "")))].filter(Boolean).sort();
+  const selected = filters.months.length ? months.filter(m => filters.months.includes(m)) : months;
+  const ackIndex = ackMonth ? selected.indexOf(ackMonth) : -1;
+  const periodSelected = ackIndex > 0 ? selected.slice(0, ackIndex + 1) : selected;
+  const latest = periodSelected[periodSelected.length - 1]; const previous = periodSelected[periodSelected.length - 2];
+  const points = useMemo(() => {
+    if (!latest || !previous) return [];
+    const map = new Map<string, { cur: number; prev: number }>();
+    rows.forEach(r => { const key = `${esc(r.departamento_nivel_4)} · ${esc(r.departamento_nivel_5)}`; const item = map.get(key) || { cur: 0, prev: 0 }; if (String(r._billing_period) === latest) item.cur += Number(r.realizado || 0); if (String(r._billing_period) === previous) item.prev += Number(r.realizado || 0); map.set(key, item); });
+    return [...map].map(([key, v]) => ({ key, cost: Math.abs(v.cur), growth: v.prev ? ((v.cur - v.prev) / Math.abs(v.prev)) * 100 : 0, cur: v.cur })).sort((a, b) => b.cost - a.cost).slice(0, 30);
+  }, [rows, latest, previous]);
+  const costs = points.map(p => p.cost).sort((a, b) => a - b); const growths = points.map(p => p.growth).sort((a, b) => a - b); const mc = costs[Math.floor(costs.length / 2)] || 0; const mg = growths[Math.floor(growths.length / 2)] || 0;
+  const color = (p: { cost: number; growth: number }) => p.cost >= mc && p.growth >= mg ? RED : p.cost < mc && p.growth >= mg ? YELLOW : p.cost >= mc ? BLUE : MUT;
+  const maxCost = Math.max(1, ...points.map(p => p.cost)); const minGrowth = Math.min(-1, ...points.map(p => p.growth)); const maxGrowth = Math.max(1, ...points.map(p => p.growth));
+  const W = 900, H = 430, P = 58;
+  const sx = (v: number) => P + (v / maxCost) * (W - 2 * P);
+  const sy = (v: number) => H - P - ((v - minGrowth) / (maxGrowth - minGrowth || 1)) * (H - 2 * P);
+  return <Box sx={{ mt: 2 }}><LoadingBlock loading={loading} error={error}><SectionPanel title="Prioritization Matrix" subtitle={`Mesmo widget da Decisão · Diretoria × Projeto · ${monthLabel(latest)} vs ${monthLabel(previous)} · respeita filtros globais`}>
+    {points.length < 2 ? <Typography variant="body2" color="text.secondary">São necessárias duas competências de realizado para a matriz.</Typography> : <Box sx={{ border: "1px solid #e2e8f0", borderRadius: 2.5, bgcolor: "#fff", overflow: "hidden" }}>
+      <Box sx={{ px: 1.5, pt: 1.2, color: MUT, fontSize: 11, fontWeight: 800 }}>Eixo X: custo realizado · Eixo Y: crescimento contra a competência anterior</Box>
+      <Box sx={{ width: "100%", overflowX: "auto" }}><svg viewBox={`0 0 ${W} ${H + 24}`} style={{ width: "100%", minWidth: 620, display: "block" }} role="img" aria-label="Matriz de priorização por custo e crescimento">
+        <rect x={P} y={P} width={W - 2 * P} height={H - 2 * P} rx="16" fill="#fff" stroke="#e2e8f0" />
+        <line x1={sx(mc)} y1={P} x2={sx(mc)} y2={H - P} stroke="#94a3b8" strokeDasharray="6 6" />
+        <line x1={P} y1={sy(mg)} x2={W - P} y2={sy(mg)} stroke="#94a3b8" strokeDasharray="6 6" />
+        <text x={W - P - 8} y={P + 22} textAnchor="end" fontSize="12" fontWeight="900" fill="#991b1b">ALTO CUSTO / ALTO CRESCIMENTO</text>
+        <text x={P + 8} y={P + 22} fontSize="12" fontWeight="900" fill="#b45309">BAIXO CUSTO / ALTO CRESCIMENTO</text>
+        <text x={W - P - 8} y={H - P - 10} textAnchor="end" fontSize="12" fontWeight="900" fill="#475569">ALTO CUSTO / BAIXO CRESCIMENTO</text>
+        <text x={P + 8} y={H - P - 10} fontSize="12" fontWeight="900" fill="#64748b">BAIXA PRIORIDADE</text>
+        {points.map((p, i) => <g key={p.key}><circle cx={sx(p.cost)} cy={sy(p.growth)} r={p.cost >= mc && p.growth >= mg ? 8 : 6} fill={color(p)} opacity=".84"><title>{`${p.key} · ${money(p.cost)} · ${pct(p.growth)}`}</title></circle>{i < 8 && <text x={sx(p.cost) + 9} y={sy(p.growth) - 7} fontSize="10" fontWeight="800" fill="#334155">{p.key.slice(0, 22)}</text>}</g>)}
+        <text x={W / 2} y={H + 14} textAnchor="middle" fontSize="11" fontWeight="800" fill="#64748b">Custo realizado ({monthLabel(latest)})</text>
+      </svg></Box>
+      <Typography variant="caption" sx={{ display: "block", px: 1.5, pb: 1.2, color: MUT, fontWeight: 700 }}>Linhas de corte = medianas do recorte atual. Vermelho: prioridade crítica · âmbar: risco emergente · azul: alto custo/baixo crescimento · cinza: baixa prioridade.</Typography>
+    </Box>}
+  </SectionPanel></LoadingBlock></Box>;
+}
+
+function DataQuality({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
+  const [service, setService] = useState("");
+  const base = filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]);
+  const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["departamento_nivel_4", "departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
+  const { results, loading, error } = useTabQueries(table, defs, "data-quality-" + filterKey + service);
+  const services = rowsOf(results.services); const consumers = rowsOf(results.consumers);
+  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Data Quality</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Selecione um serviço para identificar todos os projetos e diretorias consumidores, com o valor realizado no escopo filtrado.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Realizado", "% do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.departamento_nivel_4)}</TableCell><TableCell>{esc(r.departamento_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Sem consumidores no escopo selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
 }
 
 function monthlySeries(r: DimonQueryResult | null | undefined, measure: string) {
@@ -381,7 +431,7 @@ function monthlySeries(r: DimonQueryResult | null | undefined, measure: string) 
 // ─────────────────────────────────────────────────────────────────────
 // Página principal
 // ─────────────────────────────────────────────────────────────────────
-type TabId = "visao-executiva" | "geral" | "evolucao" | "organizacao" | "servicos" | "investigacao" | "decisao" | "drilldown";
+type TabId = "visao-executiva" | "geral" | "evolucao" | "organizacao" | "servicos" | "investigacao" | "decisao" | "drilldown" | "data-quality";
 
 export default function DimonDashboard() {
   const [params] = useSearchParams();
@@ -390,7 +440,7 @@ export default function DimonDashboard() {
   const [info, setInfo] = useState<DimonInfo | null>(null);
   // A aba pode vir da URL (?tab=...) — padrão: Visão Executiva.
   const urlTab = params.get("tab");
-  const initialTab: TabId = urlTab && (["visao-executiva", "geral", "evolucao", "organizacao", "servicos", "investigacao", "decisao", "drilldown"] as TabId[]).includes(urlTab as TabId)
+  const initialTab: TabId = urlTab && (["visao-executiva", "geral", "evolucao", "organizacao", "servicos", "investigacao", "decisao", "drilldown", "data-quality"] as TabId[]).includes(urlTab as TabId)
     ? urlTab as TabId
     : "visao-executiva";
   const [tab, setTab] = useState<TabId>(initialTab);
@@ -617,6 +667,7 @@ export default function DimonDashboard() {
         <Tab value="investigacao" label="Investigação" />
         <Tab value="decisao" label="Decisão" />
         <Tab value="drilldown" label="Drilldown" />
+        <Tab value="data-quality" label="Data Quality" />
       </Tabs>
 
       {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} />}
@@ -627,6 +678,7 @@ export default function DimonDashboard() {
       {tab === "investigacao" && <Investigacao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "decisao" && <Decisao table={table} filters={filters} filterKey={filterKey} setFilters={setFilters} />}
       {tab === "drilldown" && <Drilldown table={table} filters={filters} filterKey={filterKey} />}
+      {tab === "data-quality" && <DataQuality table={table} filters={filters} filterKey={filterKey} />}
         </Paper>
       </Box>
     </Box>
@@ -649,7 +701,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
     { id: "servicos", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
     { id: "categorias", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
   ], [filterKey]);
-  const { results, loading } = useTabQueries(table, defs, filterKey);
+  const { results, loading, error } = useTabQueries(table, defs, filterKey);
 
   const totalRows = rowsOf(results.totais);
   const total = {
@@ -697,7 +749,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   }, [total, mensal, mom, topDir, topCloud, topServico, top5Share, health, healthStatus, filters.months, latest, dirField, dirLabel]);
 
   return (
-    <LoadingBlock loading={loading}>
+    <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado (BRL)" value={money(total.realizado)} sub="Soma da medida realizado" color={PURPLE} full={moneyFull(total.realizado)} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Billed Cost (USD)" value={money(total.billedcost, "USD")} sub="Moeda de billing" color={ORANGE} full={moneyFull(total.billedcost, "USD")} /></Grid>
@@ -763,7 +815,7 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
     { id: "mensal", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
     { id: "drivers", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
   ], [filterKey, dim]);
-  const { results, loading } = useTabQueries(table, defs, filterKey + dim);
+  const { results, loading, error } = useTabQueries(table, defs, filterKey + dim);
 
   const mensal = monthlySeries(results.mensal, "realizado");
   const billed = monthlySeries(results.mensal, "billedcost");
@@ -793,7 +845,7 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
   const projected = annualized + (last3 - runRateAvg) * 12;
 
   return (
-    <LoadingBlock loading={loading}>
+    <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
         <Grid item xs={6} md={3}><KpiCard label="Média mensal (BRL)" value={money(runRateAvg)} full={moneyFull(runRateAvg)} color={PURPLE} /></Grid>
         <Grid item xs={6} md={3}><KpiCard label="Run Rate anualizado" value={money(annualized)} full={moneyFull(annualized)} color={BLUE} /></Grid>
@@ -889,7 +941,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
       { id: "gov", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
     ];
   }, [filterKey, filters.visaoDiretoria]);
-  const { results, loading } = useTabQueries(table, defs, filterKey);
+  const { results, loading, error } = useTabQueries(table, defs, filterKey);
 
   const hierRows = rowsOf(results.hier);
   const govRows = rowsOf(results.gov);
@@ -898,7 +950,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
   const govShare = govTotal ? govClassified / govTotal * 100 : 0;
 
   return (
-    <LoadingBlock loading={loading}>
+    <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
         <Grid item xs={6} md={3}><KpiCard label="Governança (Diretoria)" value={pct(govShare)} sub="% do Realizado classificado" color={govShare >= 90 ? GREEN : govShare >= 70 ? YELLOW : RED} /></Grid>
         <Grid item xs={6} md={3}><KpiCard label="Diretorias com custo" value={String(govRows.length)} color={PURPLE} /></Grid>
@@ -988,7 +1040,7 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
     { id: "charge", rows: ["chargecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
     { id: "heat", rows: [heatDim, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 800 },
   ], [filterKey, heatDim]);
-  const { results, loading } = useTabQueries(table, defs, filterKey + heatDim);
+  const { results, loading, error } = useTabQueries(table, defs, filterKey + heatDim);
 
   const heatRows = rowsOf(results.heat);
   const heatDims = [...new Set(heatRows.map(r => esc(r[heatDim])))].slice(0, 14);
@@ -1000,7 +1052,7 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
   const maxHeat = Math.max(...z.flat().filter(v => v !== null).map(Number), 1);
 
   return (
-    <LoadingBlock loading={loading}>
+    <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5}>
         <Grid item xs={12} md={4}><RankBars title="Top Serviços" rows={rowsOf(results.serv)} measure="realizado" limit={12} color={PURPLE} /></Grid>
         <Grid item xs={12} md={4}><RankBars title="Top Categorias" rows={rowsOf(results.cat)} measure="realizado" limit={12} color={BLUE} /></Grid>
@@ -1049,7 +1101,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
     { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
     { id: "pareto", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 300 },
   ], [filterKey, dim, filters.visaoDiretoria]);
-  const { results, loading } = useTabQueries(table, defs, filterKey + dim);
+  const { results, loading, error } = useTabQueries(table, defs, filterKey + dim);
 
   // Séries mensais por item da dimensão
   const series = useMemo(() => {
@@ -1116,7 +1168,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
   }, [topGrow, anomalies, accelerated, results.dirs, paretoCount, paretoRows.length, dim, filters.visaoDiretoria]);
 
   return (
-    <LoadingBlock loading={loading}>
+    <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
         <Grid item xs={12} md={4}>
           <Paper variant="outlined" sx={{ p: 2, height: "100%", background: "linear-gradient(135deg,#2b003d,#660099)", color: "#fff" }}>
@@ -1349,7 +1401,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, dim, filters.visaoDiretoria, govDeptLevels]);
-  const { results: base, loading: baseLoading } = useTabQueries(table, baseDefs, "decisao-base-" + filterKey + dim);
+  const { results: base, loading: baseLoading, error: baseError } = useTabQueries(table, baseDefs, "decisao-base-" + filterKey + dim);
 
   // ── séries mensais globais ──
   const pulseRows = rowsOf(base.pulse);
@@ -1629,7 +1681,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
 
   return (
     <Box>
-      <LoadingBlock loading={baseLoading}>
+      <LoadingBlock loading={baseLoading} error={baseError}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center" sx={{ mb: 2 }}>
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel>Dimensão de análise</InputLabel>
@@ -2092,7 +2144,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
       { id: "months", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersLocal, row_limit: 60 },
     ];
   }, [filterKey, path, next]);
-  const { results, loading } = useTabQueries(table, defs, filterKey + JSON.stringify(path));
+  const { results, loading, error } = useTabQueries(table, defs, filterKey + JSON.stringify(path));
 
   const children = rowsOf(results.children);
   const childTotal = children.reduce((s, r) => s + Math.abs(Number(r.realizado) || 0), 0);
@@ -2101,6 +2153,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
 
   return (
     <Grid container spacing={1.5}>
+      {error && <Grid item xs={12}><Alert severity="error">{error}</Alert></Grid>}
       <Grid item xs={12}>
         <Paper variant="outlined" sx={{ p: 1.5 }}>
           <Stack direction="row" alignItems="center" gap={0.6} flexWrap="wrap">
@@ -2122,12 +2175,12 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
       ) : (
         <>
           <Grid item xs={12} md={7}>
-            <LoadingBlock loading={loading}>
+            <LoadingBlock loading={loading} error={error}>
               <RankBars title={`${drillChain[level].label} — filhos (Top 20)`} rows={children} measure="realizado" limit={20} color={PURPLE} />
             </LoadingBlock>
           </Grid>
           <Grid item xs={12} md={5}>
-            <LoadingBlock loading={loading}>
+            <LoadingBlock loading={loading} error={error}>
               <ChartCard title="Evolução do escopo selecionado">
                 <Chart
                   data={[{ x: months.map(r => monthLabel(r.month)), y: months.map(r => r.value), type: "bar", marker: { color: BLUE } }]}
@@ -2142,7 +2195,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
             </LoadingBlock>
           </Grid>
           <Grid item xs={12}>
-            <LoadingBlock loading={loading}>
+            <LoadingBlock loading={loading} error={error}>
               <TableContainer>
                 <Table size="small">
                   <TableHead><TableRow>

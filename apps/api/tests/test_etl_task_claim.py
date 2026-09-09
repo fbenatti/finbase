@@ -28,8 +28,9 @@ def test_task_resource_lock_keys_queue_group():
         result_json={"queue_group": "group-abc"},
     )
     keys = task_resource_lock_keys(task)
-    assert len(keys) == 2
-    assert len(set(keys)) == 2
+    # queue group + global analytic writer + exact destination slice
+    assert len(keys) == 3
+    assert len(set(keys)) == 3
 
 
 def test_task_resource_lock_keys_reprocess_slice():
@@ -43,4 +44,5 @@ def test_task_resource_lock_keys_reprocess_slice():
         result_json={},
     )
     keys = task_resource_lock_keys(task)
-    assert len(keys) == 1
+    # global analytic writer + exact destination slice
+    assert len(keys) == 2

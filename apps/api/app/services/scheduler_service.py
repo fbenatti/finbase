@@ -185,15 +185,25 @@ def _azure_ptu_dimon_daily_job() -> None:
 
 
 def _ai_usage_dimon_daily_job() -> None:
-    """Atualiza as Dimons de Copilot, Claude e NotebookLM após as cargas diárias."""
+    """Enfileira as Dimons auxiliares; a publicação pertence ao escritor Dimon."""
+    session = _get_sync_session()
     try:
-        import asyncio
-        from app.services.ai_usage_dimon import refresh_ai_usage_dimons
+        from app.models.dimon_rule import DimonRule
+        from app.services.dimon_materialization import enqueue_dimons_task
 
-        result = asyncio.run(refresh_ai_usage_dimons())
-        logger.info("AI usage Dimons refreshed: %s", result)
+        codes = {
+            "ai_consumption_daily", "ai_license_snapshot", "copilot_usage_daily",
+            "copilot_license_snapshot", "copilot_user_period",
+        }
+        rules = session.query(DimonRule).filter(DimonRule.active == True, DimonRule.code.in_(codes)).all()  # noqa: E712
+        task = enqueue_dimons_task(session, rule_ids=[rule.id for rule in rules], source="ai_usage_daily")
+        session.commit()
+        logger.info("AI usage Dimons queued in Dimon writer: task=%s rules=%d", getattr(task, "id", None), len(rules))
     except Exception as exc:
         logger.warning("AI usage Dimons refresh failed: %s", exc, exc_info=True)
+        session.rollback()
+    finally:
+        session.close()
 
 
 def _azure_ptu_eventhub_job() -> None:
@@ -458,7 +468,8 @@ async def start_scheduler():
         # Daily saving refresh is intentionally independent of ETL schedules: actions
         # that start today must progress even when a source has no new blob.
         _scheduler.add_job(_refresh_savings_job, "cron", hour=2, minute=15, id="savings_daily", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
+        # Disabled: Azure PTU hourly lookback 3h (every hour at :10).
+        # _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
         _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_dimon_daily_job, "cron", hour=4, minute=30, id="azure_ptu_dimon_daily", replace_existing=True)
         _scheduler.add_job(_ai_usage_dimon_daily_job, "cron", hour=5, minute=10, id="ai_usage_dimon_daily", replace_existing=True)
@@ -476,13 +487,15 @@ async def start_scheduler():
 def _iceberg_orphan_cleanup_job() -> None:
     try:
         from app.services.iceberg_service import cleanup_orphan_staging, expire_gold_snapshots
-        result = cleanup_orphan_staging(max_age_hours=2)
+        # Staging is retained for a full seven days. It is removed only when
+        # the catalog can prove it is not an active table.
+        result = cleanup_orphan_staging(max_age_hours=24 * 7)
         logger.info(
             "Limpeza periódica de staging órfão executada: %d pastas removidas, %.2f MB liberados",
             result.get("deleted_dirs", 0),
             result.get("deleted_bytes", 0) / (1024 * 1024),
         )
-        expire_gold_snapshots("dest_modelo_focus", retention_days=1)
+        expire_gold_snapshots("dest_modelo_focus", retention_days=7)
     except Exception as exc:
         logger.error("Falha na limpeza periódica de staging órfão do Iceberg: %s", exc)
 

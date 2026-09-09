@@ -32,6 +32,9 @@ export default function ExpectedView({
   const [departmentId, setDepartmentId] = useState<number | undefined>(externalDepartmentId);
   // Filtro global de departamento: quando o pai (FinOps Intelligence) muda o
   // escopo, sincroniza e recarrega os dados.
+  // O filtro global também pode voltar para "Todos" (undefined). Nesse caso
+  // é importante limpar o escopo local, senão Variância e Ack ficam presos
+  // ao último nó selecionado na árvore.
   useEffect(() => { if (externalDirector) setDirector(externalDirector); }, [externalDirector]);
   useEffect(() => { setDepartmentId(externalDepartmentId); }, [externalDepartmentId]);
   const [organizationLoaded, setOrganizationLoaded] = useState(false);
@@ -45,6 +48,7 @@ export default function ExpectedView({
   const [showBudget, setShowBudget] = useState(true);
   const [drillOpen, setDrillOpen] = useState(false);
   const [drillPeriod, setDrillPeriod] = useState<string | undefined>();
+  const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast">("realizado");
   useEffect(() => {
     let cancelled = false;
     getDepartments().then((departments: Department[]) => {
@@ -258,12 +262,15 @@ export default function ExpectedView({
   const onMainChartClick = (event: any) => {
     const x = event?.points?.[0]?.x;
     let period: string | undefined;
-    if (x != null) {
-      const date = new Date(x);
-      if (!Number.isNaN(date.getTime())) {
-        period = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`;
-      }
+    const isoMonth = String(x ?? "").match(/^(\d{4})-(\d{2})/);
+    if (isoMonth) {
+      // Não use new Date('YYYY-MM-DD'): a data é interpretada como UTC e,
+      // em UTC−03, 2026-08-01 vira 31/jul antes de getMonth(). O eixo já
+      // informa a competência em ISO, portanto basta preservar ano e mês.
+      period = `${isoMonth[1]}${isoMonth[2]}`;
     }
+    const traceName = String(event?.points?.[0]?.data?.name || event?.points?.[0]?.fullData?.name || "").toLowerCase();
+    setDrillTipo(traceName.includes("forecast") ? "forecast" : "realizado");
     setDrillPeriod(period);
     setDrillOpen(true);
   };
@@ -476,6 +483,7 @@ export default function ExpectedView({
             directorPath={director}
             directorView={directorView}
             period={drillPeriod}
+            tipo={drillTipo}
           />
     </>
   );
@@ -508,4 +516,3 @@ export default function ExpectedView({
     </Box>
   );
 }
-

@@ -17,6 +17,11 @@ from app.services import iceberg_service as iceberg
 
 logger = logging.getLogger(__name__)
 
+# Each shard used to trigger a full partition scan. Batching keeps the
+# configured dimensions in the GROUP BY while bounding Trino's aggregation
+# cardinality and avoiding hundreds of repeated scans.
+_SHARD_BATCH_SIZE = 64
+
 
 def _series_key(key_values: dict[str, Any], key_cols: list[str]) -> tuple[tuple[str, Any], ...]:
     return tuple((col, key_values.get(col)) for col in key_cols)
@@ -819,20 +824,24 @@ async def _fetch_period_records(
     extra = f" AND {connection_filter}" if connection_filter else ""
     records: list[dict[str, Any]] = []
     if period_col:
+        # Daily facts still need the exact history boundary after partition
+        # pruning. Invoice intervals are the sole exception: their full-month
+        # amount can be stamped on day one and is expanded downstream.
+        daily_date_scope = "" if mode == "interval" else f" AND {date_filter}"
         period_values = _billing_period_values(history_start, effective_cutoff, minimum_monthly_points)
         for billing_period in period_values:
             # Partition already scopes the invoice month; do not also filter
             # ChargePeriodStart or July 1 IBM rows disappear from the window.
             sql = (
                 f"{select_sql} WHERE {type_filter} AND CAST({_q(period_col)} AS VARCHAR) = {_lit(billing_period)}"
-                f"{extra}{group_sql}"
+                f"{daily_date_scope}{extra}{group_sql}"
             )
             if not only_exclusions:
                 records.extend(await trino_execute(sql, timeout_s=300))
             if exclusion_filter:
                 excluded_sql = (
                     f"{excluded_select_sql} WHERE {type_filter} AND CAST({_q(period_col)} AS VARCHAR) = {_lit(billing_period)}"
-                    f" AND ({exclusion_filter}){group_sql}"
+                    f"{daily_date_scope} AND ({exclusion_filter}){group_sql}"
                 )
                 records.extend(await trino_execute(excluded_sql, timeout_s=300))
     else:
@@ -867,26 +876,67 @@ async def _fetch_period_records_by_cloud(
         return await _fetch_period_records(connection_filter=connection_filter, **kwargs)
     cloud_expr = f"CAST({_q(cloud_col)} AS VARCHAR)"
     records: list[dict[str, Any]] = []
+    # Shards must be discovered in the same window that will be aggregated.
+    # Previously this DISTINCT scan had no period/date predicate: every
+    # historical SubAccountName of a cloud produced three more aggregation
+    # queries, even when it had no data in the forecast window.
+    period_col = kwargs.get("period_col")
+    history_start = kwargs["history_start"]
+    effective_cutoff = kwargs["effective_cutoff"]
+    mode = kwargs.get("mode")
+    if period_col:
+        periods = _billing_period_values(
+            history_start,
+            effective_cutoff,
+            int(kwargs.get("minimum_monthly_points") or 1),
+        )
+        period_values = ", ".join(_lit(value) for value in periods)
+        shard_scope = f" AND CAST({_q(period_col)} AS VARCHAR) IN ({period_values})"
+        # Monthly IBM invoices are allocated by their charge interval, so a
+        # date predicate would incorrectly drop the invoice stamped on day 1.
+        # Daily sources retain the precise 35-day boundary.
+        if mode != "interval":
+            shard_scope += (
+                f" AND {kwargs['date_expr']} BETWEEN DATE {_lit(history_start.isoformat())}"
+                f" AND DATE {_lit(effective_cutoff.isoformat())}"
+            )
+    else:
+        shard_scope = (
+            f" AND {kwargs['date_expr']} BETWEEN DATE {_lit(history_start.isoformat())}"
+            f" AND DATE {_lit(effective_cutoff.isoformat())}"
+        )
     for cloud in cloud_names:
         cloud_filter = _and_filters(connection_filter, f"{cloud_expr} = {_lit(cloud)}")
         shard_values: list[str | None] = [None]
         if shard_col:
             shard_rows = await trino_execute(
                 f"SELECT DISTINCT CAST({_q(shard_col)} AS VARCHAR) AS shard "
-                f"FROM {kwargs['source']} WHERE {kwargs['type_filter']} AND ({cloud_filter})",
+                f"FROM {kwargs['source']} WHERE {kwargs['type_filter']} AND ({cloud_filter}){shard_scope}",
                 timeout_s=120,
             )
             shard_values = [row.get("shard") for row in shard_rows]
             # No shard values means no realized rows for this cloud/filter.
             if not shard_values:
                 continue
-        for shard in shard_values:
+        shard_batches = [
+            shard_values[index:index + _SHARD_BATCH_SIZE]
+            for index in range(0, len(shard_values), _SHARD_BATCH_SIZE)
+        ]
+        for shard_batch in shard_batches:
             shard_filter = cloud_filter
             if shard_col:
                 shard_expr = f"CAST({_q(shard_col)} AS VARCHAR)"
+                non_null_shards = [str(shard) for shard in shard_batch if shard is not None]
+                shard_predicates: list[str] = []
+                if non_null_shards:
+                    shard_predicates.append(
+                        f"{shard_expr} IN ({', '.join(_lit(shard) for shard in non_null_shards)})"
+                    )
+                if any(shard is None for shard in shard_batch):
+                    shard_predicates.append(f"{shard_expr} IS NULL")
                 shard_filter = _and_filters(
                     cloud_filter,
-                    f"{shard_expr} IS NULL" if shard is None else f"{shard_expr} = {_lit(shard)}",
+                    f"({' OR '.join(shard_predicates)})",
                 )
             records.extend(await _fetch_period_records(
                 connection_filter=shard_filter,
@@ -1012,22 +1062,19 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 raise ValueError("Não foi possível identificar a última data válida na Gold")
             collected_through = collected_timestamp.date()
             effective_cutoff = collected_through - timedelta(days=excluded_days)
-    # The longest model uses 28 days and AUTO_BACKTEST reserves seven days for
-    # validation. Keep at least `minimum_monthly_points` full calendar months so
-    # that a structural spike (e.g. Datamesh August growth) is captured by every
-    # enabled window when the forecast is re-executed after data arrives.
+    # The daily forecast uses its longest configured window plus the seven-day
+    # AUTO_BACKTEST validation set.  A monthly history is only needed for
+    # invoice-style connections (currently IBM) that allocate a full invoice
+    # by its charge interval; it must never expand the daily-cloud window.
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
     minimum_monthly = max(1, int(getattr(config, "minimum_monthly_points", 3) or 3))
-    # Start of the Nth month back from the anchor month.
-    month_history_start = effective_cutoff.replace(day=1)
+    interval_history_start = effective_cutoff.replace(day=1)
     for _ in range(minimum_monthly - 1):
-        month_history_start = (month_history_start - timedelta(days=1)).replace(day=1)
-    # Also honour the window-based minimum so backtest always has enough points.
-    window_history_start = effective_cutoff - timedelta(days=max_window + 7)
-    history_start = min(month_history_start, window_history_start)
+        interval_history_start = (interval_history_start - timedelta(days=1)).replace(day=1)
+    daily_history_start = effective_cutoff - timedelta(days=max_window + 7)
     logger.info(
-        "[forecast] history_start=%s (month_anchor=%s, window_anchor=%s, minimum_months=%d)",
-        history_start, month_history_start, window_history_start, minimum_monthly,
+        "[forecast] daily_history_start=%s (window=%dd) interval_history_start=%s (months=%d)",
+        daily_history_start, max_window + 7, interval_history_start, minimum_monthly,
     )
     query_dims = list(dims)
     for extra_col in (cloud_col, id_col):
@@ -1045,7 +1092,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     if global_interval:
         charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
         records = await _fetch_period_records_by_cloud(
-            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            source=source, type_filter=type_filter, period=period, history_start=interval_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
             mode="interval", charge_end_col=charge_end_col, period_col=period,
             connection_filter=None, exclusion_filter=None,
@@ -1059,12 +1106,12 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     elif per_connection:
         daily_filter = _connection_rule_filter(allocation_rules, cloud_col, id_col, negate=True)
         daily_records = await _fetch_period_records_by_cloud(
-            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=daily_filter, exclusion_filter=None,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
-            minimum_monthly_points=minimum_monthly,
+            minimum_monthly_points=1,
         )
         daily_frame = pd.DataFrame(daily_records)
         if not daily_frame.empty:
@@ -1073,7 +1120,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         if interval_filter:
             charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
             interval_records = await _fetch_period_records_by_cloud(
-                source=source, type_filter=type_filter, period=period, history_start=history_start,
+                source=source, type_filter=type_filter, period=period, history_start=interval_history_start,
                 effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
                 mode="interval", charge_end_col=charge_end_col, period_col=period,
                 connection_filter=interval_filter, exclusion_filter=None,
@@ -1086,23 +1133,23 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 frames.append(interval_frame)
     else:
         daily_records = await _fetch_period_records_by_cloud(
-            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=None, exclusion_filter=None,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
-            minimum_monthly_points=minimum_monthly,
+            minimum_monthly_points=1,
         )
         daily_frame = pd.DataFrame(daily_records)
         if not daily_frame.empty:
             frames.append(daily_frame)
     if source_exclusion:
         excluded_records = await _fetch_period_records(
-            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=None, exclusion_filter=source_exclusion, only_exclusions=True,
-            minimum_monthly_points=minimum_monthly,
+            minimum_monthly_points=1,
         )
         excluded_frame = pd.DataFrame(excluded_records)
         if not excluded_frame.empty:
@@ -1113,12 +1160,12 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     # overage), em vez de contaminar a janela curta do custo recorrente.
     if mean_30d_source_filter:
         overage_records = await _fetch_period_records(
-            source=source, type_filter=type_filter, period=period, history_start=history_start,
+            source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=None, exclusion_filter=mean_30d_source_filter,
             only_exclusions=True, exclusion_sign=1,
-            minimum_monthly_points=minimum_monthly,
+            minimum_monthly_points=1,
         )
         overage_frame = pd.DataFrame(overage_records)
         if not overage_frame.empty:

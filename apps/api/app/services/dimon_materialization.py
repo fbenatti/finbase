@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 # a API consultam iceberg.dimon.dest_dm_cost_*.
 DIMON_NAMESPACE = "dimon"
 
+_AI_AUXILIARY_DIMONS = {
+    "ai_consumption_daily": "dest_dm_ai_consumption_daily",
+    "ai_license_snapshot": "dest_dm_ai_license_snapshot",
+    "copilot_usage_daily": "dest_dm_copilot_usage_daily",
+    "copilot_license_snapshot": "dest_dm_copilot_license_snapshot",
+    "copilot_user_period": "dest_dm_copilot_user_period",
+}
+
 _FOCUS_FIELD_ALIASES = {
     "projectname": "x_Project",
     "project": "x_Project",
@@ -56,7 +64,10 @@ def dimon_table_name(code: str) -> str:
     """dest_dm_cost_<dimon_code> - the original code is preserved in the rule;
     the physical table name uses an underscore-safe variant (hyphens would
     break unquoted Iceberg identifiers in Trino SQL)."""
-    safe = normalize_code(code).replace("-", "_")
+    normalized = normalize_code(code)
+    if normalized in _AI_AUXILIARY_DIMONS:
+        return _AI_AUXILIARY_DIMONS[normalized]
+    safe = normalized.replace("-", "_")
     return f"dest_dm_cost_{safe}"
 
 
@@ -349,6 +360,17 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
     """Build the pre-aggregated Dimon table for one rule and swap it atomically."""
     table = dimon_table_name(rule.code)
 
+    # These five auxiliary marts have provider-specific schemas and are
+    # materialized by the same atomic publisher, but are still owned by the
+    # Dimon rule queue/UI (never by an external script or scheduler shortcut).
+    ai_code = normalize_code(rule.code)
+    if ai_code in _AI_AUXILIARY_DIMONS:
+        from app.services.ai_usage_dimon import refresh_ai_usage_dimons
+        if progress:
+            progress(0, 1, f"Agregando {ai_code} a partir da Gold de IA")
+        result = await refresh_ai_usage_dimons(only_tables=[table])
+        return int((result.get("tables") or {}).get(table) or 0)
+
     # SQL custom: o usuário fornece a query inteira. Ela deve gerar as
     # dimensões e medidas desejadas; nós apenas criamos a tabela no namespace
     # dimon e fazemos o swap atômico.
@@ -540,6 +562,25 @@ async def materialize_dimons(session: Any, *, run_id: int, progress: Any | None 
     if rule_ids:
         query = query.filter(DimonRule.id.in_(rule_ids))
     rules = query.all()
+
+    # ``copilot_user_period`` is derived from the already aggregated Copilot
+    # usage Dimon.  Rebuilding only ``copilot_usage_daily`` left the dashboard
+    # drill-down with a stale user/credit snapshot (for example, August after
+    # September usage was loaded).  Model that dependency in the materializer
+    # itself so every execution path — API, scheduler and worker chaining —
+    # keeps both tables consistent.
+    if rule_ids and any(normalize_code(rule.code) == "copilot_usage_daily" for rule in rules):
+        user_period = (
+            session.query(DimonRule)
+            .options(selectinload(DimonRule.sources))
+            .filter(
+                DimonRule.active == True,  # noqa: E712
+                DimonRule.code == "copilot_user_period",
+            )
+            .first()
+        )
+        if user_period and all(existing.id != user_period.id for existing in rules):
+            rules.append(user_period)
 
     details: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []

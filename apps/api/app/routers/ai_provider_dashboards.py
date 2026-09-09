@@ -35,15 +35,18 @@ CONS_TABLE = f"iceberg.dimon.{AI_CONSUMPTION_TABLE}"
 _PROVIDERS: dict[str, dict[str, str]] = {
     "anthropic": {
         "label": "Anthropic Claude",
-        "provider_sql": "lower(TRIM(CAST(\"Provider\" AS VARCHAR))) = 'anthropic'",
-        "product_sql": "lower(TRIM(CAST(\"ProductName\" AS VARCHAR))) = 'claude'",
+        # ai_usage_dimon publishes unquoted aliases, which Iceberg exposes in
+        # lowercase.  Quoted PascalCase identifiers make Trino look for a
+        # different column and caused both provider dashboards to fail.
+        "provider_sql": "lower(TRIM(CAST(provider AS VARCHAR))) = 'anthropic'",
+        "product_sql": "lower(TRIM(CAST(productname AS VARCHAR))) = 'claude'",
         "primary_metric": "tokens",
         "color": "#D97757",
     },
     "notebooklm": {
         "label": "Google NotebookLM",
-        "provider_sql": "lower(TRIM(CAST(\"Provider\" AS VARCHAR))) = 'google'",
-        "product_sql": "lower(TRIM(CAST(\"ProductName\" AS VARCHAR))) = 'notebooklm'",
+        "provider_sql": "lower(TRIM(CAST(provider AS VARCHAR))) = 'google'",
+        "product_sql": "lower(TRIM(CAST(productname AS VARCHAR))) = 'notebooklm'",
         "primary_metric": "cost",
         "color": "#34A853",
     },
@@ -119,16 +122,16 @@ def _provider_scope(provider: str) -> str:
 
 def _activity_status_expr(alias: str = "") -> str:
     prefix = f"{alias}." if alias else ""
-    return f"UPPER(TRIM(COALESCE(CAST({prefix}\"ActivityStatus\" AS VARCHAR), '')))"
+    return f"UPPER(TRIM(COALESCE(CAST({prefix}activitystatus AS VARCHAR), '')))"
 
 
 def _cost_expr(alias: str = "") -> str:
     """Custo normalizado: AllocatedCost (alocação do portal) > realizado > BilledCost."""
     prefix = f"{alias}." if alias else ""
     return (
-        f"COALESCE(TRY_CAST({prefix}\"AllocatedCost\" AS DOUBLE), "
-        f"TRY_CAST({prefix}\"realizado\" AS DOUBLE), "
-        f"TRY_CAST({prefix}\"BilledCost\" AS DOUBLE), 0)"
+        f"COALESCE(TRY_CAST({prefix}allocatedcost AS DOUBLE), "
+        f"TRY_CAST({prefix}realizado AS DOUBLE), "
+        f"TRY_CAST({prefix}billedcost AS DOUBLE), 0)"
     )
 
 
@@ -209,8 +212,8 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             range_rows = await _run_query(
                 f"""
                 SELECT
-                  min(substr("UsageDate", 1, 10)) AS min_day,
-                  max(substr("UsageDate", 1, 10)) AS max_day,
+                  min(substr(usagedate, 1, 10)) AS min_day,
+                  max(substr(usagedate, 1, 10)) AS max_day,
                   COUNT(DISTINCT "_billing_period") AS period_count
                 FROM {CONS_TABLE}
                 WHERE {scope}
@@ -224,24 +227,24 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
                 body, [{"day": min_day}, {"day": max_day}]
             )
             if body.billing_period:
-                date_filter = f"\"_billing_period\" = {_quote_literal(body.billing_period)}"
+                date_filter = f"_billing_period = {_quote_literal(body.billing_period)}"
             else:
                 date_filter = (
-                    f"substr(\"UsageDate\", 1, 10) BETWEEN {_quote_literal(date_from)} AND {_quote_literal(date_to)}"
+                    f"substr(usagedate, 1, 10) BETWEEN {_quote_literal(date_from)} AND {_quote_literal(date_to)}"
                 )
 
             # 2) KPIs de consumo
             kpi_sql = f"""
             SELECT
               SUM(source_rows) AS consumption_rows,
-              COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS consumption_users,
+              COUNT(DISTINCT NULLIF(TRIM(CAST(useremail AS VARCHAR)), '')) AS consumption_users,
               SUM(rows_with_tokens) AS rows_with_tokens,
               SUM(rows_with_io_tokens) AS rows_with_io_tokens,
               SUM(rows_with_cost) AS rows_with_cost,
-              SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
-              SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
-              SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
-              SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS total_requests,
+              SUM(COALESCE(TRY_CAST(inputtokens AS DOUBLE), 0)) AS input_tokens,
+              SUM(COALESCE(TRY_CAST(outputtokens AS DOUBLE), 0)) AS output_tokens,
+              SUM(COALESCE(TRY_CAST(totaltokens AS DOUBLE), 0)) AS total_tokens,
+              SUM(COALESCE(TRY_CAST(requestcount AS DOUBLE), 0)) AS total_requests,
               SUM({_cost_expr()}) AS total_cost
             FROM {CONS_TABLE}
             WHERE {scope} AND {date_filter}
@@ -263,13 +266,13 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             # 3) Série diária
             series_sql = f"""
             SELECT
-              substr("UsageDate", 1, 10) AS day,
-              SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
-              SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
-              SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
-              SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
+              substr(usagedate, 1, 10) AS day,
+              SUM(COALESCE(TRY_CAST(inputtokens AS DOUBLE), 0)) AS input_tokens,
+              SUM(COALESCE(TRY_CAST(outputtokens AS DOUBLE), 0)) AS output_tokens,
+              SUM(COALESCE(TRY_CAST(totaltokens AS DOUBLE), 0)) AS total_tokens,
+              SUM(COALESCE(TRY_CAST(requestcount AS DOUBLE), 0)) AS requests,
               SUM({_cost_expr()}) AS cost,
-              COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS users
+              COUNT(DISTINCT NULLIF(TRIM(CAST(useremail AS VARCHAR)), '')) AS users
             FROM {CONS_TABLE}
             WHERE {scope} AND {date_filter}
             GROUP BY 1
@@ -292,13 +295,13 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             # 4) Quebra por modelo / serviço
             model_sql = f"""
             SELECT
-              COALESCE(NULLIF(TRIM(CAST("ModelName" AS VARCHAR)), ''), 'não informado') AS model_name,
-              COALESCE(NULLIF(TRIM(CAST("RecordType" AS VARCHAR)), ''), '') AS record_type,
+              COALESCE(NULLIF(TRIM(CAST(modelname AS VARCHAR)), ''), 'não informado') AS model_name,
+              COALESCE(NULLIF(TRIM(CAST(recordtype AS VARCHAR)), ''), '') AS record_type,
               SUM(source_rows) AS rows,
-              SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
-              SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
-              SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
-              SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
+              SUM(COALESCE(TRY_CAST(inputtokens AS DOUBLE), 0)) AS input_tokens,
+              SUM(COALESCE(TRY_CAST(outputtokens AS DOUBLE), 0)) AS output_tokens,
+              SUM(COALESCE(TRY_CAST(totaltokens AS DOUBLE), 0)) AS total_tokens,
+              SUM(COALESCE(TRY_CAST(requestcount AS DOUBLE), 0)) AS requests,
               SUM({_cost_expr()}) AS cost
             FROM {CONS_TABLE}
             WHERE {scope} AND {date_filter}
@@ -332,28 +335,28 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
 
             # 5) Licenças — snapshot mais recente (estado atual de logon/uso)
             lic_scope_sql = f"""
-            SELECT "UserEmail", "UserName", "UserRole", "LicenseStatus", "ActivityStatus",
-                   "LastActivityAt", "DaysSinceLastActivity", "LicenseSkuName", "OrganizationId",
-                   "_billing_period"
+            SELECT useremail, username, userrole, licensestatus, activitystatus,
+                   lastactivityat, dayssincelastactivity, licenseskuname, organizationid,
+                   _billing_period
             FROM {LIC_TABLE}
             WHERE {scope}
-              AND "_billing_period" = (
-                SELECT MAX("_billing_period") FROM {LIC_TABLE} WHERE {scope}
+              AND _billing_period = (
+                SELECT MAX(_billing_period) FROM {LIC_TABLE} WHERE {scope}
               )
             """
             lic_rows = await _run_query(lic_scope_sql, interactive)
             license_table = [
                 {
-                    "user_email": _str(r.get("UserEmail")),
-                    "user_name": _str(r.get("UserName")),
-                    "user_role": _str(r.get("UserRole")),
-                    "license_status": _str(r.get("LicenseStatus")),
-                    "activity_status": _str(r.get("ActivityStatus")).upper(),
-                    "last_activity_at": r.get("LastActivityAt"),
-                    "days_since_activity": _num(r.get("DaysSinceLastActivity")) if r.get("LastActivityAt") is not None else None,
-                    "license_sku": _str(r.get("LicenseSkuName")),
-                    "organization_id": _str(r.get("OrganizationId")),
-                    "logged_in": r.get("LastActivityAt") is not None,
+                    "user_email": _str(r.get("useremail")),
+                    "user_name": _str(r.get("username")),
+                    "user_role": _str(r.get("userrole")),
+                    "license_status": _str(r.get("licensestatus")),
+                    "activity_status": _str(r.get("activitystatus")).upper(),
+                    "last_activity_at": r.get("lastactivityat"),
+                    "days_since_activity": _num(r.get("dayssincelastactivity")) if r.get("lastactivityat") is not None else None,
+                    "license_sku": _str(r.get("licenseskuname")),
+                    "organization_id": _str(r.get("organizationid")),
+                    "logged_in": r.get("lastactivityat") is not None,
                 }
                 for r in lic_rows
             ]
@@ -382,28 +385,28 @@ async def provider_overview(body: ProviderIaRequest, request: Request):
             ranking_sql = f"""
             WITH cons AS (
               SELECT
-                lower(TRIM(CAST("UserEmail" AS VARCHAR))) AS user_email,
-                SUM(COALESCE(TRY_CAST("InputTokens" AS DOUBLE), 0)) AS input_tokens,
-                SUM(COALESCE(TRY_CAST("OutputTokens" AS DOUBLE), 0)) AS output_tokens,
-                SUM(COALESCE(TRY_CAST("RequestCount" AS DOUBLE), 0)) AS requests,
+                lower(TRIM(CAST(useremail AS VARCHAR))) AS user_email,
+                SUM(COALESCE(TRY_CAST(inputtokens AS DOUBLE), 0)) AS input_tokens,
+                SUM(COALESCE(TRY_CAST(outputtokens AS DOUBLE), 0)) AS output_tokens,
+                SUM(COALESCE(TRY_CAST(requestcount AS DOUBLE), 0)) AS requests,
                 SUM({_cost_expr()}) AS cost
               FROM {CONS_TABLE}
               WHERE {scope} AND {date_filter}
-                AND NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '') IS NOT NULL
+                AND NULLIF(TRIM(CAST(useremail AS VARCHAR)), '') IS NOT NULL
               GROUP BY 1
             ),
             lic AS (
               SELECT
-                lower(TRIM(CAST("UserEmail" AS VARCHAR))) AS user_email,
-                MAX(NULLIF(TRIM(CAST("UserName" AS VARCHAR)), '')) AS user_name,
-                MAX("LastActivityAt") AS last_activity_at,
-                MAX("DaysSinceLastActivity") AS days_since_activity,
+                lower(TRIM(CAST(useremail AS VARCHAR))) AS user_email,
+                MAX(NULLIF(TRIM(CAST(username AS VARCHAR)), '')) AS user_name,
+                MAX(lastactivityat) AS last_activity_at,
+                MAX(dayssincelastactivity) AS days_since_activity,
                 MAX({_activity_status_expr()}) AS activity_status,
-                MAX(NULLIF(TRIM(CAST("LicenseStatus" AS VARCHAR)), '')) AS license_status
+                MAX(NULLIF(TRIM(CAST(licensestatus AS VARCHAR)), '')) AS license_status
               FROM {LIC_TABLE}
               WHERE {scope}
-                AND "_billing_period" = (
-                  SELECT MAX("_billing_period") FROM {LIC_TABLE} WHERE {scope}
+                AND _billing_period = (
+                  SELECT MAX(_billing_period) FROM {LIC_TABLE} WHERE {scope}
                 )
               GROUP BY 1
             )

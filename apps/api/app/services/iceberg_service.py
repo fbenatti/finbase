@@ -161,6 +161,13 @@ def _namespace_has_table(cat: Catalog, namespace: str, short_name: str) -> bool:
         return False
 
 
+def _is_staging_location(table: Any) -> bool:
+    try:
+        return "_stg_" in str(table.location())
+    except Exception:
+        return False
+
+
 def _fold_case_insensitive_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Collapse columns that differ only by case.
 
@@ -535,6 +542,54 @@ def delete_bronze_slice(
     )
 
 
+def replace_bronze_slice(
+    connection_code: str,
+    df: pd.DataFrame,
+    billing_period: str,
+    blob_path: str,
+) -> int:
+    """Atomically replace one raw source file/month in Bronze.
+
+    Downloaders must never delete a prior valid source snapshot and append the
+    replacement in separate commits: an append failure between those steps
+    turns a transient connector problem into permanent data loss.  Existing
+    Bronze tables use one Iceberg transaction for the exact provenance slice.
+    """
+    if df.empty:
+        return 0
+    table_id = _bronze_table_id(connection_code)
+    try:
+        table = _get_catalog().load_table(table_id)
+    except Exception:
+        # First import has no earlier slice to preserve.
+        return write_bronze(connection_code, df, billing_period, blob_path)
+
+    frame = _fold_case_insensitive_columns(df.copy())
+    frame["_billing_period"] = str(billing_period)
+    frame["_blob_path"] = blob_path
+    frame["_ingested_at"] = pd.Timestamp.utcnow().isoformat()
+    bronze_types = {
+        col: "TEXT" for col in frame.columns
+        if col not in {"_billing_period", "_blob_path", "_ingested_at"}
+    }
+    arrow_table = _df_to_arrow(frame, column_types=bronze_types)
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+    incoming_schema = pyarrow_to_schema(arrow_table.schema)
+    existing_names = {field.name for field in table.schema().fields}
+    incoming_names = {field.name for field in incoming_schema.fields}
+    if not incoming_names.issubset(existing_names):
+        with table.update_schema() as schema_update:
+            schema_update.union_by_name(incoming_schema)
+        table = _get_catalog().load_table(table_id)
+    arrow_table = _df_to_arrow(frame, column_types=bronze_types, target_schema=table.schema())
+    tx = table.transaction()
+    tx.delete(_bronze_slice_filter(blob_path=blob_path, billing_period=str(billing_period)))
+    tx.append(arrow_table)
+    tx.commit_transaction()
+    logger.info("Replaced Bronze slice %s/%s (%d rows)", connection_code, billing_period, len(frame))
+    return len(frame)
+
+
 def delete_destination_slice(
     physical_name: str,
     *,
@@ -562,13 +617,15 @@ def delete_destination_slice(
 
 
 def _bronze_slice_filters(blob_path: str | None, billing_period: str | None) -> list[Any]:
-    """Return slice filters to try, strict first then legacy blob-only fallback."""
+    """Return the immutable, exact Bronze provenance filter.
+
+    Falling back from ``blob_path + billing_period`` to blob path alone lets a
+    missing month silently consume another month's data. A historical table
+    must be repaired at ingestion, never guessed during reprocessing.
+    """
     if not blob_path and not billing_period:
         return [None]
-    strict = _bronze_slice_filter(blob_path=blob_path, billing_period=billing_period)
-    if blob_path and billing_period:
-        return [strict, _bronze_slice_filter(blob_path=blob_path, billing_period=None)]
-    return [strict]
+    return [_bronze_slice_filter(blob_path=blob_path, billing_period=billing_period)]
 
 
 def read_bronze(connection_code: str, blob_path: str | None = None,
@@ -629,6 +686,77 @@ def read_bronze_batches(connection_code: str, blob_path: str | None = None,
                 offset += piece.num_rows
         if found:
             return
+
+
+def audit_bronze_blob(
+    connection_code: str,
+    *,
+    blob_path: str,
+    billing_period: str,
+    expected_rows: int | None,
+    batch_size: int = 50_000,
+    allow_consolidated_row_count: bool = False,
+    allow_legitimate_empty: bool = False,
+) -> dict[str, Any]:
+    """Fully read and reconcile one immutable Bronze blob before Gold work.
+
+    This deliberately streams every batch: manifests alone cannot prove that a
+    data file belongs exclusively to one ``_blob_path`` value.
+    """
+    result: dict[str, Any] = {
+        "connection_code": connection_code,
+        "blob_path": blob_path,
+        "billing_period": str(billing_period),
+        "expected_rows": expected_rows,
+        "actual_rows": 0,
+        "status": "FAILED",
+        "error": "",
+    }
+    if expected_rows is None:
+        result["error"] = "row_count da ingestão é desconhecido"
+        return result
+    try:
+        for frame in read_bronze_batches(
+            connection_code,
+            blob_path=blob_path,
+            billing_period=billing_period,
+            batch_size=batch_size,
+        ):
+            if "_blob_path" not in frame or "_billing_period" not in frame:
+                result["error"] = "Bronze sem colunas de proveniência"
+                return result
+            if not (frame["_blob_path"].astype(str) == str(blob_path)).all():
+                result["error"] = "Bronze retornou path diferente do manifesto"
+                return result
+            if not (frame["_billing_period"].astype(str) == str(billing_period)).all():
+                result["error"] = "Bronze retornou período diferente do manifesto"
+                return result
+            result["actual_rows"] += len(frame)
+    except Exception as exc:
+        result["error"] = f"Bronze ilegível: {exc}"
+        return result
+    if result["actual_rows"] == 0:
+        if allow_legitimate_empty and int(expected_rows) == 0:
+            result["status"] = "PASSED"
+            result["source_empty"] = True
+            result["message"] = "Fonte consultada com sucesso; 0 registros"
+            return result
+        result["error"] = "nenhuma linha física encontrada para o arquivo"
+        return result
+    if allow_consolidated_row_count:
+        # OCI stores a consolidated daily dataset. Its source inventory can
+        # legitimately report the pre-aggregation row count, so equality of
+        # row numbers is not an integrity invariant for that connector.
+        result["status"] = "PASSED"
+        result["row_count_reconciled_by"] = "consolidated_source"
+        return result
+    if result["actual_rows"] != int(expected_rows):
+        result["error"] = (
+            f"contagem divergente: esperado {expected_rows}, encontrado {result['actual_rows']}"
+        )
+        return result
+    result["status"] = "PASSED"
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -978,53 +1106,69 @@ def write_destination_staged(
 
 def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold",
                       known_row_count: int | None = None) -> int:
-    """Atomically swap staged temp table → main table.
+    """Replace a final table from staging without promoting its staging path.
 
-    1. Drop original gold.{physical_name} table via catalog (if exists)
-    2. Rename temp table → main table via catalog.rename_table (atomically handles
-       metadata + file paths correctly, unlike manual SQL/fs manipulation)
-    3. Load and count rows
-
-    Returns: number of rows in the new table, or -1 if counting fails.
+    SQLCatalog ``rename_table`` only changes the catalog identity; it does not
+    move the physical table directory.  Promoting a ``*_stg_*`` table therefore
+    leaves a live table in a disposable directory.  Publish into the canonical
+    table instead and remove the staging table only after the data commit.
     """
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     main_tid = _table_id(namespace, safe_name)
     temp_tid = _table_id(namespace, temp_safe_name)
     cat = _get_catalog()
 
-    # A temporary compatibility view can remain after a pipeline migration.
-    # It is safe to remove only here, after the replacement staging table is
-    # complete and validated by the caller.
-    if namespace == "gold":
-        try:
-            from app.services.trino_service import execute_sync
-            execute_sync(f'DROP VIEW IF EXISTS iceberg.gold."{safe_name}"', timeout_s=30)
-        except Exception as exc:
-            logger.info("Gold object is not a Trino view (or Trino unavailable): %s", exc)
-
-    # 1. Drop original main table via catalog
-    _force_delete_table(main_tid, safe_name)
-
-    # 2. Rename temp → main (PyIceberg handles metadata + file paths correctly)
+    staged = cat.load_table(temp_tid)
     try:
-        cat.rename_table(temp_tid, main_tid)
-        logger.info("Renamed gold.%s → gold.%s via catalog", temp_safe_name, safe_name)
-    except Exception as e:
-        logger.error("Catalog rename_table failed: %s", e)
-        raise
+        target = cat.load_table(main_tid)
+    except Exception as exc:
+        # A catalog row with missing metadata cannot be repaired by renaming a
+        # staging table.  Its contents are unavailable, while the validated
+        # staging table is recoverable. Remove only that broken catalog entry
+        # and create a canonical destination location.
+        from pyiceberg.exceptions import NoSuchTableError
+        if not isinstance(exc, (NoSuchTableError, FileNotFoundError)):
+            raise
+        if _namespace_has_table(cat, namespace, safe_name):
+            cat.drop_table(main_tid)
+        target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec())
+
+    # This function receives a complete replacement, therefore a live legacy
+    # staging-backed target can safely be replaced by the verified full input.
+    if _is_staging_location(target):
+        cat.drop_table(main_tid)
+        target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec())
+
+    _replace_incompatible_columns(target, staged)
+    target = cat.load_table(main_tid)
+    with target.update_schema() as schema_update:
+        schema_update.union_by_name(staged.schema())
+    target = cat.load_table(main_tid)
+
+    # A table-wide replacement is one Iceberg transaction. Readers see either
+    # the previous snapshot or the complete staged result, never a directory
+    # renamed from staging.
+    from pyiceberg.expressions import AlwaysTrue
+    tx = target.transaction()
+    tx.delete(AlwaysTrue())
+    for batch in staged.scan().to_arrow_batch_reader():
+        if batch.num_rows:
+            tx.append(pa.Table.from_batches([batch]))
+    tx.commit_transaction()
+    _force_delete_table(temp_tid, temp_safe_name)
 
     # 3. Never re-read a multi-million-row table just to obtain a number we
     # already know from the writer.  The former scan().to_arrow() was an
     # unnecessary full materialization after every successful publication.
     if known_row_count is not None:
-        logger.info("Swapped %s → %s.%s (%d rows supplied by writer)", temp_safe_name, namespace, safe_name, known_row_count)
+        logger.info("Published staged %s into %s.%s (%d rows supplied by writer)", temp_safe_name, namespace, safe_name, known_row_count)
         return int(known_row_count)
 
     # Backward-compatible fallback for callers that genuinely do not know it.
     try:
         tbl = cat.load_table(main_tid)
         rows = len(tbl.scan().to_arrow())
-        logger.info("Swapped %s → gold.%s (%d rows)", temp_safe_name, safe_name, rows)
+        logger.info("Published staged %s into %s.%s (%d rows)", temp_safe_name, namespace, safe_name, rows)
         return rows
     except Exception as e:
         logger.warning("Load after swap failed (table may still be accessible): %s", e)
@@ -1112,10 +1256,20 @@ def publish_staged_partition(
         missing_table = isinstance(exc, (NoSuchTableError, FileNotFoundError))
         if not missing_table:
             raise
-        # First published slice, or catalog still pointing at a deleted
-        # warehouse path: rename staging into the destination identity.
-        cat.rename_table(staging_id, target_id)
-        return int(row_count)
+        # Bootstrap a final canonical table.  Do not rename the staging table:
+        # SQLCatalog preserves its ``*_stg_*`` filesystem location on rename.
+        if _namespace_has_table(cat, namespace, safe_name):
+            cat.drop_table(target_id)
+        target = cat.create_table(target_id, schema=staged.schema(), partition_spec=staged.spec())
+
+    if _is_staging_location(target):
+        # A one-slice write must never drop other slices merely to repair a
+        # legacy table location. The full recovery path uses swap_staged_table
+        # after staging the verified complete table.
+        raise RuntimeError(
+            f"Destino {namespace}.{safe_name} ainda aponta para staging; "
+            "execute a recuperação completa antes de publicar uma fatia"
+        )
 
     # A partial reprocess publishes one connection/month at a time.  The
     # staging table can legitimately contain newly materialized organizational
@@ -1158,52 +1312,10 @@ def publish_staged_by_slices(physical_name: str, temp_safe_name: str, namespace:
     publish_staged_partition for each slice, ensuring that other connections'
     data in the Gold destination table is NEVER overwritten or dropped.
     """
-    cat = _get_catalog()
-    staging_id = _table_id(namespace, temp_safe_name)
-    try:
-        staged = cat.load_table(staging_id)
-        df_staged = staged.scan().to_arrow().to_pandas()
-    except Exception as e:
-        logger.error("Failed to load staging table %s: %s", temp_safe_name, e)
-        return 0
-
-    if df_staged.empty:
-        _force_delete_table(staging_id, temp_safe_name)
-        return 0
-
-    # to_arrow().to_pandas() converte BIGINT nullable (Int64) para float64 quando
-    # há nulos. Como cada slice é re-escrito abaixo SEM column_types, o schema do
-    # slice staging inferiria clone_rule_id como double e a publicação na Gold
-    # (long) falharia com "Cannot change column type: long -> double".
-    for _col in ("clone_rule_id", "clone_rule_version", "source_connection_id"):
-        if _col in df_staged.columns:
-            df_staged[_col] = pd.to_numeric(df_staged[_col], errors="coerce").astype("Int64")
-
-    total_published = 0
-    grouped = df_staged.groupby(["_billing_period", "source_connection_id"])
-    for (bperiod, cid), group in grouped:
-        slice_temp_name = write_destination_staged(
-            physical_name, group, partition_col="_billing_period", namespace=namespace
-        )
-        try:
-            pub_rows = publish_staged_partition(
-                physical_name, slice_temp_name,
-                billing_period=str(bperiod),
-                connection_id=int(cid),
-                namespace=namespace,
-            )
-        except Exception:
-            # Sem isso, cada fatia cuja publicação falha vira uma tabela
-            # *_stg_* órfã acumulada na Gold.
-            try:
-                _force_delete_table(_table_id(namespace, slice_temp_name), slice_temp_name)
-            except Exception:
-                logger.warning("Falha ao remover staging órfão %s", slice_temp_name)
-            raise
-        total_published += pub_rows
-
-    _force_delete_table(staging_id, temp_safe_name)
-    return total_published
+    raise RuntimeError(
+        "Publicação multi-fatia foi desativada: enfileire uma tarefa por origem+mês "
+        "e chame publish_staged_partition."
+    )
 
 
 def append_to_staged(
@@ -1334,6 +1446,7 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
     """Force-delete Iceberg table: SQL metadata + local Parquet/metadata files."""
     import shutil, os
     target_locations: list[str] = []
+    ns = tid[0] if isinstance(tid, tuple) and len(tid) > 0 else "gold"
 
     # 1. Obter caminho físico real antes do drop no catálogo
     cat = _get_catalog()
@@ -1357,22 +1470,25 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
         from app.database import SyncSession
         from sqlalchemy import text
         pg = SyncSession()
-        pg.execute(text("DELETE FROM iceberg_tables WHERE table_name = :name"), {"name": safe_name})
+        pg.execute(text(
+            "DELETE FROM iceberg_tables WHERE table_namespace = :namespace AND table_name = :name"
+        ), {"namespace": ns, "name": safe_name})
         pg.commit()
         pg.close()
     except Exception:
         pass
 
-    # 4. Remover arquivos físicos reais do warehouse obtidos via location()
+    # 4. Remove only the resolved physical location for this exact table.
+    # Canonical /data paths have a different host spelling in local dev.
     for loc_path in target_locations:
-        if os.path.isdir(loc_path):
-            shutil.rmtree(loc_path, ignore_errors=True)
-            logger.info("Deleted warehouse dir via location: %s", loc_path)
+        physical = _normalize_pyiceberg_location(loc_path)
+        if os.path.isdir(physical):
+            shutil.rmtree(physical, ignore_errors=True)
+            logger.info("Deleted warehouse dir via location: %s", physical)
 
     # 5. Clean local warehouse files (fallback por convenção de pasta)
     warehouse = _LOCAL_WAREHOUSE
-    ns = tid[0] if isinstance(tid, tuple) and len(tid) > 0 else "gold"
-    for namespace_pattern in [ns, f"{ns}.db", "gold", "gold.db", "financial_base.db", "dimon"]:
+    for namespace_pattern in [ns, f"{ns}.db"]:
         base = str(warehouse / namespace_pattern)
         candidate = os.path.join(base, safe_name)
         if os.path.isdir(candidate):
@@ -1392,6 +1508,7 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
 
     cat = _get_catalog()
     active_locations: set[str] = set()
+    catalog_errors: list[str] = []
     warehouse_path = Path(_LOCAL_WAREHOUSE).resolve()
 
     if not warehouse_path.exists():
@@ -1402,14 +1519,17 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
         try:
             for t in cat.list_tables(ns):
                 table_name = t[1] if isinstance(t, tuple) else t
-                try:
-                    tbl = cat.load_table((ns, table_name))
-                    loc = tbl.location().replace("file://", "")
-                    active_locations.add(os.path.realpath(loc))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                tbl = cat.load_table((ns, table_name))
+                loc = _normalize_pyiceberg_location(tbl.location())
+                active_locations.add(os.path.realpath(loc))
+        except Exception as exc:
+            # A failed catalog read is not evidence that its directory is
+            # orphaned. Stop the collector rather than risking live data.
+            catalog_errors.append(f"{ns}: {exc}")
+
+    if catalog_errors:
+        logger.error("Staging cleanup skipped because catalog verification failed: %s", catalog_errors)
+        return {"deleted_dirs": 0, "deleted_bytes": 0}
 
     now = time.time()
     min_age_seconds = max_age_hours * 3600
@@ -1452,13 +1572,38 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
     return {"deleted_dirs": deleted_dirs, "deleted_bytes": deleted_bytes}
 
 
-def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days: int = 1) -> bool:
-    """Expira snapshots técnicos antigos e purga arquivos órfãos não referenciados na Gold via Trino."""
+def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days: int = 7) -> bool:
+    """Maintain historical snapshots only after proving the active table is safe."""
     from urllib.parse import urljoin
     import httpx
     from app.services.trino_service import TRINO_URL, TRINO_USER
 
-    retention_str = f"{retention_days}d"
+    # Never run maintenance against a broken/staging-backed table. Snapshot
+    # age is not data age: the active snapshot remains authoritative forever.
+    try:
+        table = _get_catalog().load_table(("gold", table_name))
+        if table.current_snapshot() is None or "_stg_" in str(table.location()):
+            logger.error("Snapshot maintenance skipped for unsafe table gold.%s", table_name)
+            return False
+    except Exception as exc:
+        logger.error("Snapshot maintenance skipped; Gold metadata is unavailable: %s", exc)
+        return False
+    try:
+        from app.database import SyncSession
+        from sqlalchemy import text
+        session = SyncSession()
+        active_writer = session.execute(text(
+            "SELECT EXISTS (SELECT 1 FROM etl_task WHERE status = 'RUNNING' "
+            "AND task_type IN ('reprocess','reclassification','dimon_reprocess','shared_cost','forecast','forecast_accuracy','ai_cost_relationship_reprocess'))"
+        )).scalar()
+        session.close()
+        if active_writer:
+            logger.info("Snapshot maintenance postponed: analytic writer is active")
+            return False
+    except Exception as exc:
+        logger.error("Snapshot maintenance skipped; writer state is unknown: %s", exc)
+        return False
+    retention_str = f"{max(7, int(retention_days))}d"
     session_prop = f"iceberg.expire_snapshots_min_retention={retention_str},iceberg.remove_orphan_files_min_retention={retention_str}"
     headers = {
         "X-Trino-User": TRINO_USER,

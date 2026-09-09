@@ -65,14 +65,18 @@ export function isEmptyOrgLevel(field: string, children: Array<{ key: string; __
 
 type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean };
 
-function aggregateTreeChildren(rows: Record<string, unknown>[], field: string): Map<string, { cost: number; byMonth: Map<string, number> }> {
+function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean): Map<string, { cost: number; byMonth: Map<string, number> }> {
   const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
   for (const r of rows) {
     const k = String(r[field] ?? EMPTY_DIMENSION_LABEL);
     if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
     const o = map.get(k)!;
     const v = Number(r.realizado || 0);
-    if (String(r.tipo ?? "") === "realizado") {
+    // No diálogo de consumo o filtro SQL já selecionou somente realizado.
+    // Não dependa do nome retornado da coluna ``tipo`` (que pode preservar a
+    // capitalização física da Dimon), pois isso descartava todas as linhas.
+    const isRealized = ["", "realizado"].includes(String(r.tipo ?? r.Tipo ?? "").trim().toLowerCase());
+    if (!filterRowTypes || isRealized) {
       o.cost += v;
       const m = String(r._billing_period || "");
       if (m) o.byMonth.set(m, (o.byMonth.get(m) || 0) + v);
@@ -183,6 +187,7 @@ export default function HierarchicalDecompTree({
   queryKey,
   onApplyContext,
   shareCaption = "participação no contexto atual",
+  filterRowTypes = true,
 }: {
   table: string;
   baseFilters: DimonQueryFilter[];
@@ -190,6 +195,8 @@ export default function HierarchicalDecompTree({
   queryKey: string;
   onApplyContext?: (path: DecompPathStep[]) => void;
   shareCaption?: string;
+  /** False quando baseFilters já restringe o tipo no servidor. */
+  filterRowTypes?: boolean;
 }) {
   const svgId = useId().replace(/:/g, "");
   const [treePath, setTreePath] = useState<DecompPathStep[]>([]);
@@ -226,6 +233,12 @@ export default function HierarchicalDecompTree({
     for (let i = 0; i <= treeStart; i++) {
       defs.push({ id: `spine${i}`, filters: [...baseFilters, ...pathFilters(i)], row_limit: 5 });
     }
+    // Rankings complementares do nó atual. Eles recebem exatamente os mesmos
+    // filtros do caminho escolhido na árvore (período, tipo e escopo).
+    defs.push(
+      { id: "topSubcategory", rows: ["servicesubcategory"], filters: [...baseFilters, ...pathFilters(treeStart)], row_limit: 10 },
+      { id: "topSku", rows: ["skumeter"], filters: [...baseFilters, ...pathFilters(treeStart)], row_limit: 10 },
+    );
     const load = async () => {
       const spineList = await Promise.all(
         defs.map(d => queryDimonTable({
@@ -234,7 +247,7 @@ export default function HierarchicalDecompTree({
           measures: [{ column: "realizado", aggregation: "SUM" }],
           filters: d.filters,
           row_limit: d.row_limit,
-        }).catch(() => null)),
+        })),
       );
       if (!alive) return;
       const m: Record<string, DimonQueryResult | null> = {};
@@ -251,9 +264,9 @@ export default function HierarchicalDecompTree({
             measures: [{ column: "realizado", aggregation: "SUM" }],
             filters: [...baseFilters, ...pathFilters(treeStart)],
             row_limit: 10000,
-          }).catch(() => null);
+          });
           if (!alive) return;
-          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field), field);
+          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes), field);
           m[`tree${treeStart}`] = treeResult;
           if (!isEmptyOrgLevel(field, children)) {
             setEmptyLevelSkip(skip);
@@ -293,10 +306,12 @@ export default function HierarchicalDecompTree({
     if (effectiveTreeIndex >= chain.length) return [];
     const rows = rowsOf(results[`tree${treeStart}`]);
     const field = chain[effectiveTreeIndex].field;
-    return rankTreeChildren(aggregateTreeChildren(rows, field), field);
-  }, [results, treeStart, effectiveTreeIndex, chain]);
+    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes), field);
+  }, [results, treeStart, effectiveTreeIndex, chain, filterRowTypes]);
   const nextField = effectiveTreeIndex < chain.length ? chain[effectiveTreeIndex].field : null;
   const nextLabel = effectiveTreeIndex < chain.length ? chain[effectiveTreeIndex].label : null;
+  const topSubcategories = rowsOf(results.topSubcategory);
+  const topSkus = rowsOf(results.topSku);
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
   const top3Share = nodeTotal ? (treeChildren.slice(0, 3).reduce((s, x) => s + Math.abs(x.cost), 0) / Math.abs(nodeTotal)) * 100 : 0;
   const shareTotal = totalAll ? (Math.abs(nodeTotal) / Math.abs(totalAll)) * 100 : 0;
@@ -456,6 +471,34 @@ export default function HierarchicalDecompTree({
               </svg>
             );
           })()}
+        </Box>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.2, p: 1.6, borderTop: "1px solid", borderColor: "divider", bgcolor: "#fcfcfd" }}>
+          {[
+            { title: "Top 10 ServiceSubcategory", field: "servicesubcategory", rows: topSubcategories },
+            { title: "Top 10 SKU name", field: "skumeter", rows: topSkus },
+          ].map(({ title, field, rows }) => (
+            <Box key={field} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
+              <Typography variant="caption" sx={{ display: "block", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#475467", mb: 0.8 }}>{title}</Typography>
+              <Stack spacing={0.55}>
+                {rows.map((row, index) => {
+                  const value = Number(row.realizado || 0);
+                  const label = String(row[field] ?? EMPTY_DIMENSION_LABEL);
+                  const share = nodeTotal ? Math.abs(value) / Math.abs(nodeTotal) * 100 : 0;
+                  return (
+                    <Box key={`${field}-${label}-${index}`} sx={{ display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", gap: 0.7, alignItems: "center" }}>
+                      <Typography variant="caption" sx={{ color: "#667085", fontWeight: 900 }}>{index + 1}</Typography>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="caption" title={label} sx={{ display: "block", fontWeight: 800, color: "#344054", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</Typography>
+                        <Box sx={{ mt: 0.25, height: 3, borderRadius: 99, bgcolor: "#eaecf0", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, share)}%`, bgcolor: "#7c3aed" }} /></Box>
+                      </Box>
+                      <Typography variant="caption" sx={{ color: "#344054", fontWeight: 950, whiteSpace: "nowrap" }}>{compact(value)}</Typography>
+                    </Box>
+                  );
+                })}
+                {!loading && rows.length === 0 && <Typography variant="caption" color="text.secondary">Sem dados no contexto atual.</Typography>}
+              </Stack>
+            </Box>
+          ))}
         </Box>
         <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="center" flexWrap="wrap" sx={{ px: 1.6, py: 1.2, color: "#667085", fontSize: 10, fontWeight: 750 }}>
           <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e skumeter.</Box>

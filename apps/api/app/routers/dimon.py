@@ -26,6 +26,26 @@ from app.services.trino_service import execute
 
 logger = logging.getLogger(__name__)
 
+
+def _raise_dimon_query_error(table: str, exc: Exception) -> None:
+    """Expose stable errors instead of leaking Trino protocol wording."""
+    message = str(exc)
+    lowered = message.lower()
+    if "metadata not found" in lowered or "metadata location" in lowered:
+        raise HTTPException(status_code=503, detail={
+            "code": "DIMON_METADATA_MISSING", "table": table,
+            "message": "A materialização Dimon está indisponível e precisa ser recuperada.",
+        }) from exc
+    if "does not exist" in lowered or "not found" in lowered:
+        raise HTTPException(status_code=404, detail={
+            "code": "DIMON_NOT_FOUND", "table": table,
+            "message": "Tabela Dimon não cadastrada.",
+        }) from exc
+    raise HTTPException(status_code=503, detail={
+        "code": "ANALYTICS_UNAVAILABLE", "table": table,
+        "message": "Consulta analítica indisponível.",
+    }) from exc
+
 router = APIRouter(prefix="/dimon", tags=["dimon"])
 
 
@@ -406,7 +426,7 @@ from typing import Literal as _Literal
 
 _DIMON_TABLE_RE = _re.compile(r"^dest_dm_[a-z0-9_]+$")
 _DIMON_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
-_DIMON_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS"})
+_DIMON_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
 # Aliases lógicos → colunas físicas da Dimon (ex.: "quantity" da UI = consumedquantity).
 _DIMON_COLUMN_ALIASES = {"quantity": "consumedquantity"}
 
@@ -439,7 +459,7 @@ async def _dimon_schema(table: str) -> dict[str, str]:
     try:
         rows = await execute(f"DESCRIBE iceberg.dimon.{table}", timeout_s=30)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=422, detail=f"Tabela Dimon não encontrada: {exc}") from exc
+        _raise_dimon_query_error(table, exc)
     schema: dict[str, str] = {}
     for row in rows:
         name = str(row.get("Column") or row.get("column_name") or row.get("column") or "")
@@ -484,6 +504,13 @@ def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]
         elif operator == "NOT_CONTAINS" and values:
             likes = " AND ".join(f"{col_sql} NOT LIKE {_quote_literal('%' + v.lower() + '%')}" for v in values)
             clauses.append(f"({likes})")
+        elif operator == "IS_REALIZED":
+            # A Dimon histórica possui linhas de realizado sem ``tipo`` ou
+            # com a coluna vazia. Esta é a mesma semântica usada pela Visão
+            # Executiva; não reduza realizado a somente tipo='realizado'.
+            clauses.append(
+                f"({_quote_ident(physical)} IS NULL OR {col_sql} IN ('realizado', ''))"
+            )
         elif operator == "IN":
             clauses.append(f"({_quote_ident(physical)} IS NULL OR TRIM(CAST({_quote_ident(physical)} AS VARCHAR)) = '')")
     return " AND ".join(clauses) if clauses else "1=1"
@@ -545,7 +572,10 @@ async def query_dimons(body: DimonQueryRequest):
         sql += f" GROUP BY {group_by}"
     sql += f" ORDER BY {_quote_ident(sort_col)} {direction} LIMIT {int(body.row_limit)}"
 
-    rows = await execute(sql, timeout_s=180)
+    try:
+        rows = await execute(sql, timeout_s=180)
+    except Exception as exc:  # noqa: BLE001
+        _raise_dimon_query_error(body.table, exc)
     columns = [*[p.lower() for p in rows_physical], *[label for _, label in measures]]
     return {"table": body.table, "columns": columns, "rows": rows, "row_count": len(rows)}
 
@@ -554,17 +584,23 @@ async def query_dimons(body: DimonQueryRequest):
 async def dimon_info(table: str = "dest_dm_cost_visao_completa"):
     """Metadata + coverage of one Dimon table: schema, rows, periods."""
     schema = await _dimon_schema(table)
-    overview = await execute(
-        f"SELECT COUNT(*) AS row_count, COUNT(DISTINCT {_quote_ident(schema['_billing_period'])}) AS period_count "
-        f"FROM iceberg.dimon.{table}",
-        timeout_s=120,
-    )
+    try:
+        overview = await execute(
+            f"SELECT COUNT(*) AS row_count, COUNT(DISTINCT {_quote_ident(schema['_billing_period'])}) AS period_count "
+            f"FROM iceberg.dimon.{table}",
+            timeout_s=120,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _raise_dimon_query_error(table, exc)
     row = overview[0] if overview else {}
-    periods_rows = await execute(
-        f"SELECT DISTINCT {_quote_ident(schema['_billing_period'])} AS period "
-        f"FROM iceberg.dimon.{table} ORDER BY period DESC LIMIT 120",
-        timeout_s=60,
-    )
+    try:
+        periods_rows = await execute(
+            f"SELECT DISTINCT {_quote_ident(schema['_billing_period'])} AS period "
+            f"FROM iceberg.dimon.{table} ORDER BY period DESC LIMIT 120",
+            timeout_s=60,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _raise_dimon_query_error(table, exc)
     return {
         "table": table,
         "row_count": int(row.get("row_count") or 0),

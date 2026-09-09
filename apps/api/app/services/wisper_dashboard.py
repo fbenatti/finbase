@@ -211,18 +211,20 @@ async def _financials(
 ) -> dict[str, Any]:
     """Return monthly series, buckets, SKUs, subaccounts and daily series."""
 
-    # 1. Monthly series (realizado) — used by the chart and to pick the closed period
+    # 1. Monthly series (realizado).  The Wisper Dimon is the canonical,
+    # pre-aggregated slice and avoids rescanning the 35M-row FOCUS table for
+    # the first query on every dashboard load.  FOCUS remains used below only
+    # for the detailed daily/SKU drill-downs that require its finer grain.
     monthly_rows = await trino_execute(
         f"""
         SELECT _billing_period AS period,
-               SUM(billedcost) AS total,
+               SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS total,
                servicename,
                servicesubcategory,
                skumeter,
-               SUM(billedcost) AS bucket_cost,
-               SUM(consumedquantity) AS bucket_qty
-        FROM {FOCUS_TABLE}
-        WHERE {scope_sql}
+               SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS bucket_cost
+        FROM {DIMON_TABLE}
+        WHERE lower(COALESCE(tipo, '')) = 'realizado'
         GROUP BY 1, 3, 4, 5
         ORDER BY 1, 3, 4, 5
         """,
@@ -283,19 +285,14 @@ async def _financials(
         ),
         _trino(
             f"""
-            SELECT f.skumeter AS sku,
-                   COALESCE(i.unit_shape, '') AS shape,
-                   COUNT(DISTINCT f.resourceid) AS recursos
-            FROM {FOCUS_TABLE} f
-            LEFT JOIN (
-                SELECT DISTINCT resource_id, unit_shape
-                FROM {OP_METRICS_TABLE}
-                WHERE record_type = 'inventory'
-            ) i ON i.resource_id = f.resourceid
-            WHERE {scope_sql}
-              AND f._billing_period = '{closed_period}'
-              AND f.skumeter IS NOT NULL
-            GROUP BY 1, 2
+            -- OCI inventory is already loaded below as fleet_rows.  A join
+            -- back to FOCUS by resource ID added a full additional financial
+            -- scan only to decorate SKU labels; keep the payload contract and
+            -- use the inventory fleet fallback instead.
+            SELECT CAST(NULL AS VARCHAR) AS sku,
+                   CAST(NULL AS VARCHAR) AS shape,
+                   CAST(0 AS BIGINT) AS recursos
+            WHERE FALSE
             """,
             timeout_s=120,
             cancel_event=cancel_event,
@@ -323,7 +320,9 @@ async def _financials(
                    COUNT(*) AS linhas
             FROM {FOCUS_TABLE}
             WHERE {scope_sql}
-              AND substr(chargeperiodstart, 1, 7) IN ('{closed_month}', '{current_month}')
+              -- _billing_period is the Iceberg partition.  Filtering with
+              -- substr(chargeperiodstart) forced a scan of every FOCUS month.
+              AND _billing_period IN ('{closed_period}', '{current_period}')
             GROUP BY 1, 2, 3, 4
             ORDER BY 1
             """,
@@ -333,9 +332,9 @@ async def _financials(
         _trino(
             f"""
             SELECT subaccountname,
-                   SUM(billedcost) AS cost
-            FROM {FOCUS_TABLE}
-            WHERE {scope_sql}
+                   SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS cost
+            FROM {DIMON_TABLE}
+            WHERE lower(COALESCE(tipo, '')) = 'realizado'
               AND _billing_period = '{closed_period}'
             GROUP BY 1
             ORDER BY 2 DESC
@@ -565,7 +564,7 @@ async def _financials(
             "closed_label": _label(closed_period),
             "current_period": current_period,
             "current_label": _label(current_period),
-            "financial_source": "FOCUS",
+            "financial_source": "Dimon Wisper (FOCUS consolidada)",
             "forecast_source": "Dimon/planning",
         },
         "executive": {
@@ -1128,30 +1127,39 @@ async def _operational(
 
 async def _wisper_compartment_ids(
     scope_sql: str,
+    current_period: str,
     cancel_event: asyncio.Event | None,
 ) -> list[str]:
-    """Discover Wisper compartment IDs from billing + GenAI inventory."""
-    focus_rows, inventory_scope_rows, inventory_name_rows = await asyncio.gather(
-        _trino(
-            f"""
-            SELECT DISTINCT subaccountid AS compartment_id
-            FROM {FOCUS_TABLE}
-            WHERE {scope_sql}
-            """,
-            timeout_s=60,
-            cancel_event=cancel_event,
-        ),
+    """Discover active Wisper compartment IDs from recent billing + inventory.
+
+    Compartment IDs are absent from the cost Dimon.  Limit the fallback FOCUS
+    lookup to the current and immediately preceding partition; the old query
+    scanned every historical FOCUS partition just to obtain stable IDs.
+    """
+    recent_period = _prev_period(current_period)
+    focus_rows = await _trino(
+        f"""
+        SELECT DISTINCT subaccountid AS compartment_id
+        FROM {FOCUS_TABLE}
+        WHERE {scope_sql}
+          AND _billing_period IN ('{recent_period}', '{current_period}')
+        """,
+        timeout_s=60,
+        cancel_event=cancel_event,
+    )
+    focus_ids = [
+        "'" + _s(row.get("compartment_id")).replace("'", "''") + "'"
+        for row in focus_rows
+        if _s(row.get("compartment_id"))
+    ]
+    inventory_scope_rows, inventory_name_rows = await asyncio.gather(
         _trino(
             f"""
             SELECT DISTINCT compartment_id
             FROM {OP_METRICS_TABLE}
             WHERE record_type = 'inventory'
               AND resource_type IN ('dedicated_ai_cluster', 'endpoint')
-              AND compartment_id IN (
-                  SELECT DISTINCT subaccountid
-                  FROM {FOCUS_TABLE}
-                  WHERE {scope_sql}
-              )
+              AND compartment_id IN ({', '.join(focus_ids) or "''"})
             """,
             timeout_s=60,
             cancel_event=cancel_event,
@@ -1187,7 +1195,7 @@ async def load(cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
 
     financials, compartment_ids = await asyncio.gather(
         _financials(scope_sql, current_period, cancel_event),
-        _wisper_compartment_ids(scope_sql, cancel_event),
+        _wisper_compartment_ids(scope_sql, current_period, cancel_event),
     )
     if financials.get("empty"):
         return {"available": True, "empty": True, "monthly": []}

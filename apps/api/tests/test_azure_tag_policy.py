@@ -1,9 +1,12 @@
+import json
+
 from app.models.rules import ClassificationRule, Department
 from app.routers.azure_tag_policy import _definition, build_script
 from app.services.azure_tag_policy_service import (
     AzureTagPolicyService,
     SCOPE_RESOURCE,
     SCOPE_RG,
+    SCOPE_SKU,
     SCOPE_SUBSCRIPTION,
 )
 
@@ -36,14 +39,27 @@ def test_resource_group_selector_applies_to_rg_and_children():
     assert resource["allOf"][1] == {"value": "[resourceGroup().name]", "equals": "rg-terra"}
 
 
+def test_rg_selector_omits_subscription_id_field():
+    service = AzureTagPolicyService(db=None)
+    terms = [
+        {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["354cc2f6-cbad-45aa-adea-045fb4602f79"]},
+        {"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["dig-security-rg"]},
+    ]
+    rg = service._selector(terms, "resource_group")
+    resource = service._selector(terms, "resource")
+    dumped = json.dumps(rg) + json.dumps(resource)
+    assert "subscriptionId" not in dumped
+    assert {"field": "name", "contains": "dig-security-rg"} in rg["allOf"]
+
+
 def test_multiple_resource_groups_create_valid_value_alternatives():
     service = AzureTagPolicyService(db=None)
     terms = [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["rg-a", "rg-b"]}]
     resource = service._selector(terms, "resource")
     alternatives = resource["allOf"][1]["anyOf"]
     assert alternatives == [
-        {"value": "[resourceGroup().name]", "like": "*rg-a*"},
-        {"value": "[resourceGroup().name]", "like": "*rg-b*"},
+        {"value": "[resourceGroup().name]", "contains": "rg-a"},
+        {"value": "[resourceGroup().name]", "contains": "rg-b"},
     ]
 
 
@@ -120,33 +136,44 @@ def test_resource_id_limits_assignment_to_its_subscription():
     assert scopes == ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]
 
 
-def test_gold_rg_contains_becomes_exact_observed_resource_group():
+def test_gold_rg_contains_keeps_classification_pattern():
     service = AzureTagPolicyService(db=None)
     diagnostics = []
     items = service._concrete_items(
-        _rule(conditions=[{"field": "source_resource_group_name", "operator": "~", "values": ["trendmicro"]}]),
-        [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["trendmicro"]}],
-        [{
-            "subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            "resource_group_name": "rg-prd-trendmicro-eastus",
-            "resource_id": None,
-            "evidence_count": 14,
-        }],
+        _rule(conditions=[{"field": "source_resource_group_name", "operator": "~", "values": ["dig-security-rg"]}]),
+        [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["dig-security-rg"]}],
+        [
+            {
+                "subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "resource_group_name": "dig-security-rg-3u2ql5dvf4su4-1162383220130775040-use1",
+                "evidence_count": 4,
+            },
+            {
+                "subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "resource_group_name": "dig-security-rg-other-suffix-use2",
+                "evidence_count": 3,
+            },
+        ],
         {"centro_custo": "CC"}, True, diagnostics,
     )
     assert len(items) == 1
-    assert items[0]["observed"] == {"resource_group_name": "rg-prd-trendmicro-eastus"}
+    assert items[0]["observed"] == {"resource_group_name": "dig-security-rg"}
+    assert items[0]["evidence_count"] == 7
     rg_term = next(term for term in items[0]["terms"] if term["scope"] == SCOPE_RG)
-    assert rg_term == {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-prd-trendmicro-eastus"]}
+    assert rg_term == {"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["dig-security-rg"]}
+    selector = service._selector(items[0]["terms"], "resource_group")
+    assert {"field": "name", "contains": "dig-security-rg"} in selector["allOf"]
+    indexed = service._selector(items[0]["terms"], "resource")
+    assert {"value": "[resourceGroup().name]", "contains": "dig-security-rg"} in indexed["allOf"]
 
 
-def test_gold_resource_exception_is_exact_and_isolated_to_its_subscription():
+def test_gold_resource_id_contains_keeps_pattern_on_its_subscription():
     service = AzureTagPolicyService(db=None)
     diagnostics = []
     resource_id = "/subscriptions/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/resourceGroups/rg-tcn/providers/Microsoft.Network/azureFirewalls/azurefirewall_vhub-tcn-mx-eastus2"
     items = service._concrete_items(
-        _rule(conditions=[{"field": "ResourceId", "operator": "~", "values": ["azurefirewall_vhub-tcn-mx"]}]),
-        [{"scope": SCOPE_RESOURCE, "field": "id", "operator": "contains", "values": ["azurefirewall_vhub-tcn-mx"]}],
+        _rule(conditions=[{"field": "ResourceId", "operator": "~", "values": ["terra-mexico"]}]),
+        [{"scope": SCOPE_RESOURCE, "field": "id", "operator": "~", "values": ["terra-mexico"]}],
         [{
             "subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "resource_group_name": "rg-tcn",
@@ -157,9 +184,80 @@ def test_gold_resource_exception_is_exact_and_isolated_to_its_subscription():
     )
     assert items[0]["scope_subscriptions"] == ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]
     assert items[0]["targets"] == ("resource",)
-    assert next(term for term in items[0]["terms"] if term["scope"] == SCOPE_RESOURCE)["values"] == [resource_id]
+    resource_term = next(term for term in items[0]["terms"] if term["scope"] == SCOPE_RESOURCE)
+    assert resource_term["operator"] == "~"
+    assert resource_term["values"] == ["terra-mexico"]
     selector = service._selector(items[0]["terms"], "resource")
-    assert {"field": "id", "equals": resource_id} in selector["allOf"]
+    assert {"field": "id", "contains": "terra-mexico"} in selector["allOf"]
+    assert service._selector(items[0]["terms"], "resource_group") is None
+
+
+def test_sku_contains_is_emitted_as_azure_policy_contains():
+    service = AzureTagPolicyService(db=None)
+    terms = [
+        {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
+        {"scope": SCOPE_SKU, "field": "Microsoft.Compute/virtualMachines/sku.name", "operator": "~", "values": ["Dsv5"]},
+    ]
+    selector = service._selector(terms, "resource")
+    assert {"field": "Microsoft.Compute/virtualMachines/sku.name", "contains": "Dsv5"} in selector["allOf"]
+
+
+def test_gold_rg_contains_collapses_case_and_suffix_variants():
+    service = AzureTagPolicyService(db=None)
+    mixed = "MC_RG-AKS-KCLI-BRSOUTH-PROD_AKS-KCLI-BRSOUTH-PROD_BRAZILSOUTH"
+    lower = "mc_rg-aks-kcli-brsouth-prod_aks-kcli-brsouth-prod_brazilsouth"
+    items = service._concrete_items(
+        _rule(id=5220, name="kcli", conditions=[{"field": "source_resource_group_name", "operator": "~", "values": ["kcli"]}]),
+        [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["kcli"]}],
+        [
+            {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "resource_group_name": lower, "evidence_count": 3},
+            {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "resource_group_name": mixed, "evidence_count": 3},
+        ],
+        {"centro_custo": "CC"}, True, [],
+    )
+    assert len(items) == 1
+    assert items[0]["observed"]["resource_group_name"] == "kcli"
+    assert items[0]["evidence_count"] == 6
+    rg_term = next(term for term in items[0]["terms"] if term["scope"] == SCOPE_RG)
+    assert rg_term["operator"] == "~"
+    assert rg_term["values"] == ["kcli"]
+    selector = service._selector(items[0]["terms"], "resource")
+    assert {"value": "[resourceGroup().name]", "contains": "kcli"} in selector["allOf"]
+
+
+def test_subscription_name_contains_is_not_used():
+    service = AzureTagPolicyService(db=None)
+    diagnostics = []
+    result = service._translate_conditions(
+        _rule(conditions=[{"field": "SubAccountName", "operator": "~", "values": ["Terra"]}]),
+        {"terra brasil": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}, diagnostics,
+    )
+    assert result is None
+    assert diagnostics[0]["reason"] == "Assinatura por nome exige igualdade exata"
+
+
+def test_gold_resource_id_case_variants_collapse_to_one_equals():
+    service = AzureTagPolicyService(db=None)
+    lower = "/subscriptions/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/resourceGroups/rg-tcn/providers/Microsoft.Network/azureFirewalls/fw"
+    mixed = "/subscriptions/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/resourceGroups/RG-TCN/providers/Microsoft.Network/azureFirewalls/fw"
+    items = service._concrete_items(
+        _rule(conditions=[{"field": "ResourceId", "operator": "=", "values": [lower]}]),
+        [{"scope": SCOPE_RESOURCE, "field": "id", "operator": "=", "values": [lower]}],
+        [
+            {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "resource_id": lower, "evidence_count": 1},
+            {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "resource_id": mixed, "evidence_count": 2},
+        ],
+        {"centro_custo": "CC"}, True, [],
+    )
+    assert len(items) == 1
+    assert items[0]["observed"]["resource_id"] == mixed
+
+
+def test_add_or_replace_collapses_tag_key_case_not_values():
+    from app.services.azure_tag_policy_service import _collapse_tag_keys
+    tags = _collapse_tag_keys({"Ambiente": "Prod", "ambiente": "prod", "projeto": "Terra"})
+    assert list(tags) == ["Ambiente", "projeto"]
+    assert tags["Ambiente"] == "Prod"
 
 
 def test_hierarchy():
@@ -190,19 +288,62 @@ def test_tag_mapping_uses_global_key_and_focus_field_value():
 
 def test_deployment_script_uses_identity_rbac_and_test_suffix():
     script = build_script([{
-        "connection_code": "azure-ti", "connection_name": "Azure TI", "department_name": "Terra Brasil",
+        "tenant_id": "11111111-1111-1111-1111-111111111111", "connection_code": "azure-ti", "connection_name": "Azure TI", "department_name": "Terra Brasil",
         "deployment_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
         "layers": {"resource_groups": [{"rule_id": 1, "rule_name": "Terra Brasil", "tags": {"centro_custo": "CC"},
                                              "condition": {"field": "name", "equals": "rg-terra"},
-                                             "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}], "resources": []},
+                                             "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+                                             "scope_tenant_id": "11111111-1111-1111-1111-111111111111"}], "resources": []},
     }])
     assert "--mi-system-assigned" in script
     assert 'role "Tag Contributor"' in script
     assert "az policy remediation create" in script
     assert "test-terra-brasil" in script
+    assert "ensure_tenant" not in script
+    assert "--query tenantId" not in script
+    assert 'az policy remediation create --name "$name" --subscription "$subscription"' in script
+    assert 'az policy remediation show --name "$name" --subscription "$subscription"' in script
+
+
+def test_deployment_script_uses_resource_home_tenant_not_billing_tenant():
+    billing = "78879b00-f0e9-486c-836f-56f314e47e7f"
+    home = "0fce1554-ffcc-4e69-aa8d-9334eb2d8fd7"
+    finops = "354cc2f6-cbad-45aa-adea-045fb4602f79"
+    script = build_script([{
+        "tenant_id": billing, "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "layers": {"resource_groups": [{"rule_id": 3028, "rule_name": "FinOps", "tags": {"projeto": "FinOps"},
+                                             "condition": {"field": "name", "equals": "rg"},
+                                             "scope_subscriptions": [finops],
+                                             "scope_tenant_id": home}], "resources": []},
+    }])
+    assert f"# === Tenant de recursos {home} ===" in script
+    assert "não valida nem solicita login por tenant" in script
+    assert "az login --tenant" not in script
+
+
+def test_deployment_script_groups_4p_and_ti_tenant_blocks():
+    billing = "78879b00-f0e9-486c-836f-56f314e47e7f"
+    four_p = "0fce1554-ffcc-4e69-aa8d-9334eb2d8fd7"
+    finops = "354cc2f6-cbad-45aa-adea-045fb4602f79"
+    terra = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    script = build_script([{
+        "tenant_id": billing, "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "subscription_tenants": {finops: four_p, terra: billing},
+        "layers": {"resource_groups": [
+            {"rule_id": 3028, "rule_name": "FinOps", "tags": {"projeto": "FinOps"},
+             "condition": {"field": "name", "contains": "rg"},
+             "scope_subscriptions": [finops], "scope_tenant_id": four_p},
+            {"rule_id": 21, "rule_name": "Terra Brasil", "tags": {"projeto": "Terra"},
+             "condition": {"field": "name", "equals": "rg-terra"},
+             "scope_subscriptions": [terra], "scope_tenant_id": billing},
+        ], "resources": []},
+    }])
+    assert script.index(f"# === Tenant de recursos {four_p} ===") < script.index(f"# === Tenant de recursos {billing} ===")
+    assert "az login --tenant" not in script
+    assert "EXPECTED_SUBSCRIPTION=" + finops in script or f"EXPECTED_SUBSCRIPTION={finops}" in script
     assert "addOrReplace" in script
     assert "az policy definition update" in script
-    assert "az policy assignment update" in script
+    assert "az policy assignment identity assign" in script
     assert "metadata.category" in script
     assert "RETRY_ATTEMPTS" in script
     assert "PLAN_ONLY" in script
@@ -275,3 +416,76 @@ def test_policy_definition_has_stable_content_hash():
     second = _definition(*args)
     assert first["metadata"]["openfinopsContentHash"] == second["metadata"]["openfinopsContentHash"]
     assert len(first["metadata"]["openfinopsContentHash"]) == 64
+
+
+def test_rg_assignment_does_not_embed_other_rg_exclusions():
+    service = AzureTagPolicyService(db=None)
+    assigned = {
+        "assignment_scope_kind": "resource_group",
+        "assignment_resource_group": "azure-ti-test-fundacao-telefonica-1",
+        "tags": {"projeto": "fundacao telefonica"},
+        "observed": {"resource_group_name": "azure-ti-test-fundacao-telefonica-1"},
+        "terms": [
+            {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
+            {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["azure-ti-test-fundacao-telefonica-1"]},
+        ],
+    }
+    prisma = {
+        "tags": {"projeto": "Prisma"},
+        "observed": {"resource_group_name": "PCCAGENTLESSSCANRESOURCEGROUP · dig-security-rg"},
+        "terms": [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["PCCAGENTLESSSCANRESOURCEGROUP", "dig-security-rg"]}],
+        "summary": {"rule_id": 78, "rule_name": "Prisma"},
+    }
+    assert service._previous_overlap_reason(assigned, prisma) == "assignment_scope_disjoint"
+    selector = service._selector(assigned["terms"], "resource_group", omit_rg_scope=True)
+    effective = service._effective(selector, [])
+    assert effective == {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+    assert "PCCAGENTLESSSCANRESOURCEGROUP" not in json.dumps(effective)
+
+
+def test_subscription_policy_still_subtracts_prisma_contains():
+    service = AzureTagPolicyService(db=None)
+    subscription_rule = {
+        "assignment_scope_kind": "subscription",
+        "assignment_resource_group": None,
+        "tags": {"projeto": "fundacao telefonica"},
+        "observed": {},
+        "terms": [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
+    }
+    prisma = {
+        "tags": {"projeto": "Prisma"},
+        "observed": {"resource_group_name": "PCCAGENTLESSSCANRESOURCEGROUP"},
+        "terms": [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["PCCAGENTLESSSCANRESOURCEGROUP"]}],
+        "summary": {"rule_id": 78},
+    }
+    assert service._previous_overlap_reason(subscription_rule, prisma) is None
+
+
+def test_rg_assignment_scope_omits_rg_name_from_selector():
+    service = AzureTagPolicyService(db=None)
+    terms = [
+        {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
+        {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-terra"]},
+    ]
+    rg = service._selector(terms, "resource_group", omit_rg_scope=True)
+    resource = service._selector(terms, "resource", omit_rg_scope=True)
+    assert rg == {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+    assert resource == {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"}
+
+
+def test_deployment_script_uses_resource_group_assignment_scope():
+    subscription = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    script = build_script([{
+        "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "layers": {"resource_groups": [{
+            "rule_id": 21, "rule_name": "Terra Brasil", "tags": {"projeto": "Terra"},
+            "condition": {"field": "type", "equals": "Microsoft.Resources/resourceGroups"},
+            "scope_subscriptions": [subscription],
+            "assignment_scope_kind": "resource_group",
+            "assignment_resource_group": "rg-terra",
+            "observed": {"resource_group_name": "rg-terra"},
+        }], "resources": []},
+    }])
+    assert f"/subscriptions/{subscription}/resourceGroups/rg-terra" in script
+    assert "# Assignment: resource group rg-terra" in script
+    assert 'az policy remediation create --name "$name" --resource-group "$resource_group"' in script

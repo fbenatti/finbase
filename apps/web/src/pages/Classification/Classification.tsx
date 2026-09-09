@@ -1165,7 +1165,7 @@ export function TagsTab() {
       )}
       <Dialog fullScreen open={flowDialogOpen} onClose={() => setFlowDialogOpen(false)}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid", borderColor: "divider" }}>
-          Fluxo de policies — {rows[selectedJsonTenantIndex]?.department_name || "projeto selecionado"}
+          Fluxo de policies — {policyFlowTitle(rows[selectedJsonTenantIndex])}
           <IconButton aria-label="Fechar fluxo de policies" onClick={() => setFlowDialogOpen(false)}><Close /></IconButton>
         </DialogTitle>
         <DialogContent sx={{ p: 3, bgcolor: "#f8fafc" }}>
@@ -1174,6 +1174,15 @@ export function TagsTab() {
       </Dialog>
     </Box>
   );
+}
+
+function policyFlowTitle(tenant?: AzureTenantPolicy): string {
+  if (!tenant) return "projeto selecionado";
+  const ids = tenant.deployment_subscriptions ?? [];
+  const names = ids.map((id) => tenant.subscription_catalog?.find((entry) => entry.ids.includes(id))?.name || id);
+  if (names.length === 1) return names[0];
+  if (names.length > 1) return names.join(" · ");
+  return tenant.department_name || "projeto selecionado";
 }
 
 function LayerSummary({ label, count }: { label: string; count: number }) {

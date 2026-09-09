@@ -24,6 +24,7 @@ export default function ConsumptionDrillDialog({
   directorPath,
   directorView,
   period,
+  tipo = "realizado",
 }: {
   open: boolean;
   onClose: () => void;
@@ -31,6 +32,7 @@ export default function ConsumptionDrillDialog({
   directorPath: string;
   directorView: boolean;
   period?: string;
+  tipo?: "realizado" | "forecast";
 }) {
   const path = useMemo(
     () => normalizeDirectorPath(
@@ -45,20 +47,25 @@ export default function ConsumptionDrillDialog({
   );
   const baseFilters = useMemo<DimonQueryFilter[]>(() => {
     const filters: DimonQueryFilter[] = [
-      { column: "tipo", operator: "IN", values: ["realizado"] },
+      // Realizado é tudo o que não é projeção/rateio; forecast precisa usar
+      // sua fatia própria. Antes o diálogo sempre fixava realizado, mesmo ao
+      // clicar na série de forecast, o que produzia uma árvore zerada.
+      tipo === "forecast"
+        ? { column: "tipo", operator: "IN", values: ["forecast"] }
+        : { column: "tipo", operator: "NOT_IN", values: ["forecast", "rateio"] },
       ...pathSegmentFilters(path, directorView),
     ];
     if (period) filters.push({ column: "_billing_period", operator: "IN", values: [period] });
     return filters;
-  }, [path, directorView, period]);
-  const queryKey = `${table}|${directorView}|${path.join(">")}|${period || ""}`;
+  }, [path, directorView, period, tipo]);
+  const queryKey = `${table}|${directorView}|${path.join(">")}|${period || ""}|${tipo}`;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
       <DialogTitle>Decomposição hierárquica de consumo</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          Escopo do departamento selecionado{path.length ? ` (${path.join(" > ")})` : ""} · {monthLabel(period || "")}.
+          Escopo do departamento selecionado{path.length ? ` (${path.join(" > ")})` : ""} · {monthLabel(period || "")} · {tipo}.
           O drill começa no próximo nível do organograma já filtrado (sem cloud). Cadeia: {chain.map(c => c.label).join(" → ")}.
         </Typography>
         {open && (
@@ -68,6 +75,7 @@ export default function ConsumptionDrillDialog({
             chain={chain}
             queryKey={queryKey}
             shareCaption="participação no contexto do diálogo"
+            filterRowTypes={false}
           />
         )}
       </DialogContent>

@@ -410,15 +410,19 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
         """
 
         # Users and Licenses query (dest_licencas_ia)
+        # A tabela pode conter mais de um snapshot da mesma licença no mês.
+        # A oportunidade de revogação é mensal por licença, portanto nunca deve
+        # somar o custo de cada linha do snapshot.
+        license_identity = "COALESCE(NULLIF(lower(CAST(\"UserEmail\" AS VARCHAR)), ''), NULLIF(lower(CAST(\"UserLogin\" AS VARCHAR)), ''))"
         lic_sql = f"""
         SELECT
           COUNT(DISTINCT "UserEmail") AS total_licenses,
           COUNT(DISTINCT "UserEmail") FILTER (WHERE lower(COALESCE(CAST("LicenseStatus" AS VARCHAR), 'active')) NOT IN ('revoked', 'cancelled', 'suspended')) AS active_licenses,
           SUM(COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), TRY_CAST("listcost" AS DOUBLE), 100)) AS total_lic_cost,
-          COUNT(DISTINCT "UserEmail") FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 60) AS inactive_30,
-          COUNT(DISTINCT "UserEmail") FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 60 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 90) AS inactive_60,
-          COUNT(DISTINCT "UserEmail") FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 90) AS inactive_90,
-          SUM(39.0 * 5.14) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30) AS potential_savings
+          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 60) AS inactive_30,
+          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 60 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 90) AS inactive_60,
+          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 90) AS inactive_90,
+          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30) * 39.0 * 5.14 AS potential_savings
         FROM {LIC_TABLE}
         WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
           AND {period_filter} AND {dept_sql}

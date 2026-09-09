@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import zlib
 from datetime import datetime, timezone
+import os
 
-from sqlalchemy import exists, or_, select, text
+from sqlalchemy import Integer, exists, or_, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.models.etl_task import EtlTask
 
 WORKER_TASK_TYPES: tuple[str, ...] = (
+    "bronze_audit",
     "reprocess",
     "reclassification",
     "extraction",
@@ -21,6 +23,13 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "dimon_reprocess",
     "reservation_collection",
 )
+
+# These task types write an Iceberg Gold, Dimon or planning table. Bronze
+# extraction remains parallel, while the analytic warehouse has one writer.
+_ANALYTIC_WRITER_TASK_TYPES = {
+    "reprocess", "reclassification", "forecast", "forecast_accuracy",
+    "shared_cost", "ai_cost_relationship_reprocess", "dimon_reprocess",
+}
 
 
 def _stable_lock_key(namespace: str, *parts: object) -> int:
@@ -36,21 +45,20 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
     if queue_group:
         keys.append(_stable_lock_key("queue_group", queue_group))
 
+    if task.task_type in _ANALYTIC_WRITER_TASK_TYPES:
+        keys.append(_stable_lock_key("iceberg_analytic_writer"))
+
     if task.task_type in {"reprocess", "reclassification"} and task.destination_table_id:
         conn_ids = list(task.connection_ids or [])
         periods = [str(p) for p in (task.billing_periods or [])]
         if conn_ids and periods:
-            keys.append(
-                _stable_lock_key(
-                    "gold_slice",
-                    task.task_type,
-                    task.destination_table_id,
-                    conn_ids[0],
-                    periods[0],
-                )
-            )
+            for connection_id in conn_ids:
+                for period in periods:
+                    keys.append(_stable_lock_key(
+                        "gold_slice", task.destination_table_id, connection_id, period,
+                    ))
         elif task.destination_table_id:
-            keys.append(_stable_lock_key("destination", task.task_type, task.destination_table_id))
+            keys.append(_stable_lock_key("destination", task.destination_table_id))
 
     if task.task_type == "extraction" and task.connection_id:
         keys.append(_stable_lock_key("extraction", task.connection_id))
@@ -58,7 +66,7 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
     if task.task_type in {"dimon_reprocess", "shared_cost"}:
         keys.append(_stable_lock_key("singleton", task.task_type))
 
-    return keys
+    return list(dict.fromkeys(keys))
 
 
 def _queue_group_busy_clause():
@@ -80,12 +88,29 @@ def _queue_group_busy_clause():
 
 def claim_next_etl_task(session: Session) -> EtlTask | None:
     """Claim one QUEUED task using ``FOR UPDATE SKIP LOCKED``."""
+    # A group child must not run before the physical Bronze audit that was
+    # persisted for that exact group.  It stays queued rather than discovering
+    # a missing file after earlier months were already transformed.
+    audit = aliased(EtlTask)
+    audit_id = EtlTask.result_json.op("->>")("bronze_audit_task_id")
+    audit_ready = or_(
+        # In inline mode validation is performed by the reprocess worker just
+        # before staging the source/month unit; the separate audit task is
+        # retained only for backwards-compatible history.
+        (True if os.getenv("OPENFINOPS_INLINE_BRONZE_AUDIT", "1").lower() in {"1", "true", "yes", "on"} else False),
+        audit_id.is_(None),
+        exists(select(1).where(
+            audit.id == audit_id.cast(Integer),
+            audit.status == "COMPLETED",
+        )),
+    )
     task = session.execute(
         select(EtlTask)
         .where(
             EtlTask.status == "QUEUED",
             EtlTask.task_type.in_(WORKER_TASK_TYPES),
             _queue_group_busy_clause(),
+            audit_ready,
         )
         .order_by(EtlTask.id)
         .limit(1)

@@ -1,10 +1,13 @@
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.forecast_service import (
     _billing_period_values,
     _charge_interval_rules,
     _connection_rule_filter,
+    _fetch_period_records_by_cloud,
     _normalize_allocation_rules,
     _series_matches_charge_interval,
     validate_connection_allocation_rules,
@@ -100,3 +103,52 @@ def test_connection_rule_filter_matches_connection_id_only():
     assert clause is not None
     assert "3" in clause
     assert "source_connection_id" in clause
+
+
+@pytest.mark.asyncio
+async def test_cloud_fetch_batches_shards_without_removing_dimensions(monkeypatch):
+    shard_names = [f"account-{index}" for index in range(65)] + [None]
+    aggregation_filters = []
+
+    async def fake_trino_execute(sql, timeout_s):
+        assert "_billing_period" in sql
+        return [{"shard": shard} for shard in shard_names]
+
+    async def fake_fetch_period_records(**kwargs):
+        aggregation_filters.append(kwargs["connection_filter"])
+        assert kwargs["dims"] == ["cloud_origem", "subaccountname", "servicename"]
+        return []
+
+    monkeypatch.setattr("app.services.forecast_service.trino_execute", fake_trino_execute)
+    monkeypatch.setattr(
+        "app.services.forecast_service._fetch_period_records",
+        fake_fetch_period_records,
+    )
+
+    await _fetch_period_records_by_cloud(
+        source="iceberg.gold.focus",
+        type_filter="tipo = 'realizado'",
+        period="_billing_period",
+        history_start=date(2026, 8, 3),
+        effective_cutoff=date(2026, 9, 7),
+        dims=["cloud_origem", "subaccountname", "servicename"],
+        measure="realizado",
+        date_expr="CAST(chargeperiodstart AS DATE)",
+        mode="daily",
+        charge_end_col=None,
+        period_col="_billing_period",
+        connection_filter=None,
+        exclusion_filter=None,
+        cloud_col="cloud_origem",
+        clouds={"azure-ti": date(2026, 9, 7)},
+        shard_col="subaccountname",
+        minimum_monthly_points=1,
+    )
+
+    # 11 shard values become two bounded batches, plus the fallback for an
+    # absent/unforeseen cloud. The configured dimensions remain untouched.
+    assert len(aggregation_filters) == 3
+    assert "account-0" in aggregation_filters[0]
+    assert "account-63" in aggregation_filters[0]
+    assert "account-64" in aggregation_filters[1]
+    assert "IS NULL" in aggregation_filters[1]

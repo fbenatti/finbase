@@ -409,7 +409,7 @@ class AzureExtractor:
         # --- Iceberg Bronze: write raw data immediately after download ---
         try:
             if not raw_df_bronze.empty and billing_period:
-                iceberg.write_bronze(
+                iceberg.replace_bronze_slice(
                     connection_code=self.connection.code,
                     df=raw_df_bronze,
                     billing_period=billing_period,

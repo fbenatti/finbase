@@ -8,6 +8,7 @@ ThreadPoolExecutor using synchronous DB sessions.
 
 import logging
 import asyncio
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from threading import Lock
@@ -204,7 +205,7 @@ def _process_blob_sync(
     if not raw_df_bronze.empty and billing_period:
         _persist_download_blob(task_id, blob_path, "BRONZE", content_length or 0, content_length or 0)
         try:
-            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, raw_df_bronze, billing_period, blob_path)
         except Exception as exc:
             logger.error("Bronze write failed (%s): %s", blob_path, exc)
 
@@ -1131,7 +1132,7 @@ def _process_oci_blob_sync(
     if not raw_df_bronze.empty and billing_period:
         _persist_download_blob(task_id, blob_path, "BRONZE", cumulative_bytes, cumulative_bytes)
         try:
-            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, raw_df_bronze, billing_period, blob_path)
         except Exception as exc:
             logger.error("Bronze write failed for OCI (%s): %s", blob_path, exc)
             session.delete(ingested)
@@ -1261,7 +1262,7 @@ def _process_mongodb_invoice_sync(
     if not raw_df_bronze.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_cents, total_cents)
         try:
-            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, raw_df_bronze, billing_period, blob_path)
         except Exception as exc:
             logger.error("Bronze write failed for MongoDB Atlas (%s): %s", blob_path, exc)
             session.delete(ingested)
@@ -1344,7 +1345,7 @@ def _process_github_report_sync(
     if not raw_df_bronze.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, raw_df_bronze, billing_period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, raw_df_bronze, billing_period, blob_path)
         except Exception as exc:
             logger.error("Bronze write failed for GitHub Billing (%s): %s", blob_path, exc)
             session.delete(ingested)
@@ -1422,7 +1423,7 @@ def _process_github_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[GithubLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1536,15 +1537,10 @@ def _process_github_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            # GitHub token reports are snapshots. Remove the prior period slice
-            # before writing the refreshed report so a metrics fallback cannot
-            # coexist with an older billing snapshot for the same month.
-            iceberg.delete_bronze_slice(
-                conn.code,
-                blob_path=blob_path,
-                billing_period=billing_period,
-            )
-            iceberg.write_bronze(conn.code, df, billing_period, blob_path)
+            # GitHub token reports are complete snapshots.  Publish the whole
+            # month atomically: a separate delete + append can leave only IDE
+            # metrics when the AI-credit report is delayed or a write fails.
+            iceberg.replace_bronze_slice(conn.code, df, billing_period, blob_path)
         except Exception as exc:
             logger.error("Bronze write failed for GitHub Token (%s): %s", blob_path, exc)
             session.delete(ingested)
@@ -1657,7 +1653,7 @@ def _process_notebooklm_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[NotebookLMLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1770,7 +1766,7 @@ def _process_notebooklm_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, period, blob_path)
         except Exception as exc:
             logger.error("[NotebookLMToken] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -1890,7 +1886,7 @@ def _process_claude_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[ClaudeLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -2003,7 +1999,7 @@ def _process_claude_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, period, blob_path)
         except Exception as exc:
             logger.error("[ClaudeToken] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -2116,7 +2112,7 @@ def _process_gemini_license_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[GeminiLicense] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -2229,7 +2225,7 @@ def _process_gemini_token_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, period, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, period, blob_path)
         except Exception as exc:
             logger.error("[GeminiToken] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -2341,7 +2337,7 @@ def _process_gemini_notebooklm_sync(
     if not df.empty:
         _persist_download_blob(task_id, blob_path, "BRONZE", total_size, total_size)
         try:
-            iceberg.write_bronze(conn.code, df, blob_path, blob_path)
+            iceberg.replace_bronze_slice(conn.code, df, blob_path, blob_path)
         except Exception as exc:
             logger.error("[GeminiNotebookLM] Bronze write failed: %s", exc)
             session.delete(ingested)
@@ -2760,7 +2756,9 @@ def _run_etl_sync(
             force_set = set(force_periods)
             to_process = [
                 item for item in scan_items 
-                if (item.billing_period in force_set or any(p in (item.billing_period or "") for p in force_set))
+                if item.status != "SKIPPED" and (
+                    item.billing_period in force_set or any(p in (item.billing_period or "") for p in force_set)
+                )
             ]
         else:
             to_process = [item for item in scan_items if item.status in ("NEW", "CHANGED")]
@@ -2799,9 +2797,21 @@ def _run_etl_sync(
         total = len(to_process)
         completed = 0
 
-        # Para OCI, GCP BigQuery, MongoDB, GitHub, NotebookLM e Claude, usar 1 worker por vez para evitar
-        # concorrência de commit OCC no Apache Iceberg e manter uso de memória mínimo.
-        max_workers = 1 if conn.connector_type in ("oci", "gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks") else 2
+        # Bronze extraction may download in parallel; analytic publication is
+        # still serialized by the global writer lock. OCI is bounded at two
+        # concurrent months to speed a verified backfill without exhausting
+        # memory or creating an unbounded number of Iceberg OCC retries.
+        if conn.connector_type == "oci":
+            max_workers = max(1, int(os.getenv("OCI_EXTRACTION_WORKERS", "2")))
+        elif conn.connector_type == "azure_blob":
+            # Cost Management part files can each be hundreds of MB. Starting
+            # two Pandas parsers at once kills the worker before it can commit
+            # a single Bronze checkpoint; make concurrency an explicit opt-in.
+            max_workers = max(1, int(os.getenv("AZURE_EXTRACTION_WORKERS", "1")))
+        elif conn.connector_type in ("gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
+            max_workers = 1
+        else:
+            max_workers = 2
 
 
 
@@ -2959,6 +2969,10 @@ def _scan_sync_extractor(self: AzureExtractor, session: Session) -> list:
     for prefix in self.blob_prefixes:
         for blob in container_client.list_blobs(name_starts_with=prefix):
             blob_path = blob.name
+            # Azure Cost Management manifests are control metadata, not raw
+            # financial CSVs. Never enqueue them as a Bronze file.
+            if not blob_path.lower().endswith(".csv"):
+                continue
             last_modified = blob.last_modified
             size = getattr(blob, "size", None)
 

@@ -290,17 +290,66 @@ def _quote_literal(value: str | int | float | bool) -> str:
 _SCHEMA_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _SCHEMA_CACHE_TTL_S = 90.0
 _SCHEMA_LOCK = asyncio.Lock()
-_SCHEMA_INFLIGHT: dict[str, asyncio.Task] = {}
+_SCHEMA_INFLIGHT: dict[str, asyncio.Task[tuple[str, dict[str, str]]]] = {}
+
+
+def _schema_cache_key(namespace: str, safe_name: str) -> str:
+    return f"{namespace}.{safe_name}"
+
+
+def _local_iceberg_schema_sync(namespace: str, safe_name: str) -> dict[str, str]:
+    from app.services import iceberg_service as iceberg
+
+    table = iceberg._get_catalog().load_table(iceberg._table_id(namespace, safe_name))
+    return {field.name: str(field.field_type) for field in table.schema().fields}
+
+
+async def _local_iceberg_schema(namespace: str, safe_name: str) -> dict[str, str]:
+    schema = await asyncio.to_thread(_local_iceberg_schema_sync, namespace, safe_name)
+    if not schema:
+        raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Iceberg local")
+    return schema
+
+
+def _local_latest_period_sync(namespace: str, table_name: str, period_col: str) -> str | None:
+    from app.services import iceberg_service as iceberg
+
+    table = iceberg._get_catalog().load_table(iceberg._table_id(namespace, table_name))
+    try:
+        frame = table.inspect.partitions().to_pandas()
+        candidates = [column for column in frame.columns if column.lower() == period_col.lower()]
+        if candidates:
+            series = frame[candidates[0]].dropna().astype(str)
+            if not series.empty:
+                return series.max()
+    except Exception:
+        logger.debug("Iceberg inspect.partitions indisponível para %s.%s", namespace, table_name, exc_info=True)
+    return None
 
 
 async def _describe_gold_schema(safe_name: str, max_retries: int | None, namespace: str = "gold") -> dict[str, str]:
-    schema = await trino_execute(f"DESCRIBE iceberg.{namespace}.{safe_name}", timeout_s=20, max_retries=max_retries)
-    columns = {str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "") for c in schema}
-    if not columns:
-        raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Trino")
-    cache_key = f"{namespace}.{safe_name}"
-    _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
-    return columns
+    cache_key = _schema_cache_key(namespace, safe_name)
+    try:
+        schema = await trino_execute(
+            f"DESCRIBE iceberg.{namespace}.{safe_name}",
+            timeout_s=20,
+            max_retries=max_retries,
+        )
+        columns = {
+            str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "")
+            for c in schema
+        }
+        if not columns:
+            raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Trino")
+        _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
+        return columns
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("DESCRIBE Trino falhou para %s (%s); usando schema Iceberg local", cache_key, exc)
+        columns = await _local_iceberg_schema(namespace, safe_name)
+        _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
+        return columns
 
 
 async def _gold_from(
@@ -339,26 +388,39 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
-    cached = _SCHEMA_CACHE.get(safe_name)
+    cache_key = _schema_cache_key("gold", safe_name)
+    cached = _SCHEMA_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
         return safe_name, cached[1]
     async with _SCHEMA_LOCK:
-        cached = _SCHEMA_CACHE.get(safe_name)
+        cached = _SCHEMA_CACHE.get(cache_key)
         if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
             return safe_name, cached[1]
-        task = _SCHEMA_INFLIGHT.get(safe_name)
+        task = _SCHEMA_INFLIGHT.get(cache_key)
         if task is None or task.done():
-            task = asyncio.create_task(_describe_gold_schema(safe_name, max_retries))
-            _SCHEMA_INFLIGHT[safe_name] = task
+            async def _load() -> dict[str, str]:
+                return await _describe_gold_schema(safe_name, max_retries)
+
+            task = asyncio.create_task(_load())
+            _SCHEMA_INFLIGHT[cache_key] = task
     try:
-        return safe_name, await task
+        schema = await task
+        return safe_name, schema
     except HTTPException:
         raise
     except Exception as exc:
+        try:
+            schema = await _local_iceberg_schema("gold", safe_name)
+            _SCHEMA_CACHE[cache_key] = (time.monotonic(), schema)
+            return safe_name, schema
+        except HTTPException:
+            raise
+        except Exception as local_exc:
+            logger.warning("Schema Iceberg local também falhou para %s: %s", cache_key, local_exc)
         raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {exc}")
     finally:
-        if _SCHEMA_INFLIGHT.get(safe_name) is task and task.done():
-            _SCHEMA_INFLIGHT.pop(safe_name, None)
+        if _SCHEMA_INFLIGHT.get(cache_key) is task and task.done():
+            _SCHEMA_INFLIGHT.pop(cache_key, None)
 
 
 def _validate_pivot_request(req: PivotRequest, schema: dict[str, str]) -> tuple[list[str], list[str], list[PivotMeasure]]:
@@ -578,12 +640,17 @@ async def _inject_latest_period_filter(
     period_col = _schema_period_column(schema)
     if not period_col or _has_period_filter(filters) or _period_on_axes(axis_names or []):
         return filters, None
-    latest_rows = await trino_execute(
-        f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
-        f"FROM iceberg.{namespace}.{table_name}",
-        **({"timeout_s": 30, **trino_kwargs} if trino_kwargs else {"timeout_s": 30}),
-    )
-    latest = latest_rows[0].get("latest") if latest_rows else None
+    latest: str | None = None
+    try:
+        latest_rows = await trino_execute(
+            f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
+            f"FROM iceberg.{namespace}.{table_name}",
+            **({"timeout_s": 30, **trino_kwargs} if trino_kwargs else {"timeout_s": 30}),
+        )
+        latest = latest_rows[0].get("latest") if latest_rows else None
+    except Exception as exc:
+        logger.warning("MAX período via Trino falhou para %s.%s (%s); tentando Iceberg local", namespace, table_name, exc)
+        latest = await asyncio.to_thread(_local_latest_period_sync, namespace, table_name, period_col)
     if not latest:
         return filters, None
     return [
@@ -1505,11 +1572,11 @@ def _local_drilldown_rows(table_name: str, ordered: list[str], req: PivotDrillDo
     """Bounded local fallback when a Trino worker is restarting/OOMing."""
     from app.services import iceberg_service as iceberg
     table = iceberg._get_catalog().load_table(iceberg._table_id("gold", table_name))
-    import pyarrow as pa
     from pyiceberg.expressions import AlwaysTrue, And, EqualTo
     scan_filter = AlwaysTrue()
-    for item in [*req.filters, *[PivotFilter(column=k, values=[v]) for k, v in cell_filters.items()]]:
-        if item.column == "_billing_period" and item.values:
+    partition_cols = set(_PERIOD_COLUMNS)
+    for item in [*req.filters, *[PivotFilter(column=k, values=[v]) for k, v in cell_filters.items() if v is not None]]:
+        if item.column in partition_cols and item.values:
             scan_filter = And(scan_filter, EqualTo(item.column, str(item.values[0])))
     wanted = list(dict.fromkeys([*ordered, *[f.column for f in req.filters], *cell_filters.keys()]))
     wanted = [column for column in wanted if column in {field.name for field in table.schema().fields}]
@@ -1967,7 +2034,15 @@ async def _expected_view_core(
     # azure-marketplace) whenever another series already had forecast rows in
     # an earlier month.
     forecast_from = f" AND {forecast_period} >= {cutoff_lit}" if cutoff_lit else ""
-    driver_level = 3 if body.director_view and len(scope_path) == 3 else min(len(scope_path) + 1, 7)
+    # A Visão Diretoria muda a ordem de navegação para 1 → 2 → 4 → 3 → 5 → 6.
+    # Aplicar a exceção apenas no terceiro nível fazia o gráfico de drivers
+    # pular para Cloud (nível 3) em escopos onde o próximo nó deveria ser a
+    # Diretoria (nível 4). Fora dessa visão, a hierarquia natural continua
+    # 1 → 2 → 3 → ...
+    if body.director_view and len(scope_path) < len(scope_level_order):
+        driver_level = scope_level_order[len(scope_path)]
+    else:
+        driver_level = min(len(scope_path) + 1, 7)
     driver_key = f"departamento_nivel_{driver_level}"
     actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
     forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
