@@ -200,6 +200,24 @@ def _schema_has_case_collisions(schema: Any) -> bool:
     return len(names) != len({name.lower() for name in names})
 
 
+def _align_columns_to_existing_schema(df: pd.DataFrame, schema: Any) -> pd.DataFrame:
+    """Use the stored spelling for incoming columns matched case-insensitively.
+
+    Iceberg stores names case-sensitively while Trino does not.  This prevents
+    a later source file that spells an existing tag differently (for example,
+    ``tags/Project`` after ``tags/project``) from evolving a second column.
+    """
+    stored_by_folded_name = {str(field.name).lower(): field.name for field in schema.fields}
+    rename = {
+        column: stored_by_folded_name.get(str(column).lower(), column)
+        for column in df.columns
+    }
+    if all(source == target for source, target in rename.items()):
+        return df
+    aligned = df.rename(columns=rename)
+    return _fold_case_insensitive_columns(aligned)
+
+
 def _bronze_table_id(connection_code: str) -> tuple[str, str]:
     safe = connection_code.replace("-", "_").replace(".", "_")
     return ("bronze", f"raw_{safe}")
@@ -417,11 +435,18 @@ def write_bronze(
 
     if tbl is not None:
         try:
+            df = _align_columns_to_existing_schema(df, tbl.schema())
+            bronze_types = {
+                col: "TEXT" for col in df.columns
+                if col not in {"_billing_period", "_blob_path", "_ingested_at"}
+            }
+            arrow_table = _df_to_arrow(df, column_types=bronze_types)
+            iceberg_schema = pyarrow_to_schema(arrow_table.schema)
             # Explicitly evolve before conversion. PyArrow/Iceberg may silently
             # project away newly introduced provenance and financial columns
             # when the existing table schema is a strict subset of the frame.
             existing_names = {field.name for field in tbl.schema().fields}
-            incoming_names = set(iceberg_schema.names())
+            incoming_names = {field.name for field in iceberg_schema.fields}
             if not incoming_names.issubset(existing_names):
                 with tbl.update_schema() as schema_update:
                     schema_update.union_by_name(iceberg_schema)
@@ -564,7 +589,17 @@ def replace_bronze_slice(
         # First import has no earlier slice to preserve.
         return write_bronze(connection_code, df, billing_period, blob_path)
 
+    # This table must be repaired once without dropping its data.  Renaming
+    # the conflicting legacy fields preserves their values and makes the
+    # table readable by Trino again.
+    if _schema_has_case_collisions(table.schema()):
+        raise RuntimeError(
+            f"Bronze schema {table_id[0]}.{table_id[1]} has case-colliding columns; "
+            "repair the schema before replacing a slice"
+        )
+
     frame = _fold_case_insensitive_columns(df.copy())
+    frame = _align_columns_to_existing_schema(frame, table.schema())
     frame["_billing_period"] = str(billing_period)
     frame["_blob_path"] = blob_path
     frame["_ingested_at"] = pd.Timestamp.utcnow().isoformat()
@@ -882,6 +917,7 @@ FACT_SCHEMA = Schema(
     NestedField(34, "data_consumo", StringType(), required=False),
     NestedField(36, "responsavel", StringType(), required=False),
     NestedField(37, "origem", StringType(), required=False),
+    NestedField(38, "id_orcamento", StringType(), required=False),
 )
 
 

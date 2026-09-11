@@ -99,6 +99,54 @@ def _resource_rows(client: Any, compartment_id: str) -> tuple[list[dict[str, Any
     return rows, errors
 
 
+def gold_frame_from_bronze(bronze: pd.DataFrame, *, connection: SourceConnection, period: str) -> pd.DataFrame:
+    """Build the operational Gold snapshot from its immutable Bronze history.
+
+    The hourly collector only asks OCI for a small rolling window.  Rebuilding
+    Gold from the current in-memory response (or from a failed/empty previous
+    Gold read) therefore silently drops older token points.  Bronze is the
+    durable history, so every Gold publication must be derived from it.
+    """
+    if bronze.empty:
+        return pd.DataFrame()
+
+    frame = bronze.copy()
+    for col in ("timestamp", "resource_id", "metric_name", "record_type"):
+        if col not in frame.columns:
+            frame[col] = None
+
+    metric_mask = frame["record_type"].eq("metric")
+    metrics = frame[metric_mask].drop_duplicates(
+        subset=["timestamp", "resource_id", "metric_name", "record_type"], keep="last"
+    )
+    inventory = frame[~metric_mask].copy()
+    if not inventory.empty:
+        if "collected_at" in inventory.columns:
+            inventory["_sort_collected_at"] = pd.to_datetime(
+                inventory["collected_at"], errors="coerce", utc=True
+            )
+            # Legacy snapshots may lack collected_at.  They must sort before
+            # dated snapshots; otherwise ``keep='last'`` selects the undated
+            # row and makes the dashboard's latest-snapshot filter return no
+            # inventory at all.
+            inventory = inventory.sort_values("_sort_collected_at", na_position="first")
+        inventory = inventory.drop_duplicates(subset=["resource_id", "record_type"], keep="last")
+        inventory = inventory.drop(columns=["_sort_collected_at"], errors="ignore")
+
+    frame = pd.concat([metrics, inventory], ignore_index=True)
+    # Legacy Gold defined ``unit`` as DOUBLE. Bronze keeps raw fields as text,
+    # so normalize it before staging instead of letting schema evolution turn a
+    # recoverable historical rebuild into a failed publication.
+    if "unit" in frame.columns:
+        frame["unit"] = pd.to_numeric(frame["unit"], errors="coerce")
+    timestamps = pd.to_datetime(frame["timestamp"], errors="coerce", utc=True)
+    frame["_billing_period"] = timestamps.dt.strftime("%Y%m").fillna(period)
+    frame["source_connection_id"] = connection.id
+    frame["cloud_origem"] = connection.code
+    frame["tipo"] = "realizado"
+    return frame
+
+
 def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = True) -> dict[str, Any]:
     """Collect inventory and metric series, retaining partial results on IAM gaps."""
     import oci
@@ -177,23 +225,10 @@ def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = Tr
     if persist and records:
         frame = pd.DataFrame(records); period = now.strftime("%Y%m")
         persisted["bronze_rows"] = iceberg.write_bronze(f"{connection.code}_operational", frame, period, blob_path=f"oci-operational://{connection.code}/{now:%Y%m%d%H}")
-        old = iceberg.read_destination(GOLD_TABLE)
-        if old is None or old.empty:
-            old = pd.DataFrame()
-        old_metrics = old[old.get("record_type") == "metric"] if not old.empty else pd.DataFrame()
-        combined = pd.concat([old_metrics, frame], ignore_index=True)
-        for col in ("timestamp", "resource_id", "metric_name", "record_type"):
-            if col not in combined: combined[col] = None
-        metrics_mask = combined["record_type"] == "metric"
-        if not metrics_mask.empty and metrics_mask.any():
-            metrics_df = combined[metrics_mask].drop_duplicates(subset=["timestamp", "resource_id", "metric_name", "record_type"], keep="last")
-            inventory_df = combined[~metrics_mask]
-            combined = pd.concat([metrics_df, inventory_df], ignore_index=True)
-        combined["_billing_period"] = pd.to_datetime(combined.get("timestamp"), errors="coerce", utc=True).dt.strftime("%Y%m").fillna(period)
-        combined["source_connection_id"] = connection.id; combined["cloud_origem"] = connection.code; combined["tipo"] = "realizado"
-        # Ensure inventory has collected_at even when it comes from old metrics (not applicable) — column exists
+        bronze = iceberg.read_bronze(f"{connection.code}_operational")
+        combined = gold_frame_from_bronze(bronze, connection=connection, period=period)
         if "collected_at" not in combined.columns:
             combined["collected_at"] = collected_at
-        staged = iceberg.write_destination_staged(GOLD_TABLE, combined, column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE"})
+        staged = iceberg.write_destination_staged(GOLD_TABLE, combined, column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"})
         iceberg.swap_staged_table(GOLD_TABLE, staged); persisted["gold_rows"] = len(combined)
     return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}

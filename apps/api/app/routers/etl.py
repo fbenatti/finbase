@@ -1478,7 +1478,7 @@ def _reprocess_destination_sync(
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
         unique_cids = set(cid for _, cid, _, _ in all_blobs)
-        output_cols = {'departamento', 'centro_custo',
+        output_cols = {'departamento', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
                        'departamento_nivel_1', 'departamento_nivel_2',
                        'departamento_nivel_3', 'departamento_nivel_4',
@@ -2172,7 +2172,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     # Rows with prior classification (or empty dimensions) are
                     # safe to recompute from the current classification rules.
                     reset_mask = was_classified | frame.get("departamento", pd.Series(None, index=frame.index)).isna()
-                    for col in ("departamento", "centro_custo", "ambiente", "custom_fields", "subscription_rg", "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5", "departamento_nivel_6", "departamento_nivel_7"):
+                    for col in ("departamento", "centro_custo", "id_orcamento", "ambiente", "custom_fields", "subscription_rg", "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5", "departamento_nivel_6", "departamento_nivel_7"):
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)
@@ -2866,16 +2866,21 @@ async def create_schedule(body: ScheduledTaskCreate, db: AsyncSession = Depends(
         croniter(body.cron_expression)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid cron expression: {body.cron_expression}")
+    if body.schedule_type not in {"backup", "collection", "reprocess"}:
+        raise HTTPException(status_code=422, detail="Tipo de schedule inválido")
+    if body.schedule_type != "backup" and not (body.connection_ids or body.connection_id):
+        raise HTTPException(status_code=422, detail="Selecione ao menos uma conexão")
 
     sched = ScheduledTask(
         name=body.name,
         connection_id=body.connection_id,
-        connection_ids=body.connection_ids or [body.connection_id],
+        connection_ids=(body.connection_ids or ([body.connection_id] if body.connection_id else [])),
         cron_expression=body.cron_expression,
         timezone=body.timezone,
         destination_reprocess=body.destination_reprocess,
         active=body.active,
         config_json=body.config_json,
+        schedule_type=body.schedule_type,
     )
     db.add(sched)
     await db.commit()
@@ -2899,6 +2904,11 @@ async def update_schedule(schedule_id: int, body: ScheduledTaskUpdate, db: Async
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     update_data = body.model_dump(exclude_unset=True)
+    if "schedule_type" in update_data and update_data["schedule_type"] not in {"backup", "collection", "reprocess"}:
+        raise HTTPException(status_code=422, detail="Tipo de schedule inválido")
+    if update_data.get("schedule_type") == "backup":
+        update_data["connection_id"] = None
+        update_data["connection_ids"] = []
     for key, value in update_data.items():
         setattr(sched, key, value)
 
@@ -2938,8 +2948,13 @@ async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db))
     if not sched:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    connection_ids = list(sched.connection_ids or []) or [sched.connection_id]
-    task_ids = await scheduler_service.run_schedule_now(connection_ids)
+    connection_ids = list(sched.connection_ids or []) or ([sched.connection_id] if sched.connection_id else [])
+    if sched.schedule_type in {"backup", "reprocess"}:
+        import asyncio
+        task_ids = await asyncio.to_thread(scheduler_service._run_etl_job, connection_ids, sched.id, sched.name)
+        task_ids = task_ids or []
+    else:
+        task_ids = await scheduler_service.run_schedule_now(connection_ids)
     return {
         "task_ids": task_ids,
         "connection_ids": connection_ids,

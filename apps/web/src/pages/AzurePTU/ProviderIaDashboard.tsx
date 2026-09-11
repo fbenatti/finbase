@@ -135,7 +135,7 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
   const [data, setData] = useState<AIProviderOverviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState(0);
-  const [days, setDays] = useState<number>(90);
+  const [days, setDays] = useState<number>(() => provider === "anthropic" ? 30 : 90);
   const [search, setSearch] = useState("");
   const abort = useRef<AbortController | null>(null);
 
@@ -176,8 +176,7 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
 
   return (
     <Stack gap={2.5}>
-      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
-        <Box>
+      <Box>
           <Typography variant="h4" gutterBottom>{data.provider_label}</Typography>
           <Typography color="text.secondary" gutterBottom>
             Visão executiva e técnica a partir das Dimons derivadas dos dados normalizados de consumo e licenças.
@@ -190,7 +189,8 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
             <Chip size="small" label={`Snapshot licenças: ${data.period.license_period || "—"}`} />
             <Chip size="small" label={`Fonte: Dimon Iceberg (${data.period.period_count} períodos)`} color={isTokens ? "primary" : "success"} variant="outlined" />
           </Stack>
-        </Box>
+      </Box>
+      <Stack direction="row" justifyContent="flex-end">
         <FormControl size="small" sx={{ minWidth: 185 }}>
           <InputLabel>Período</InputLabel>
           <Select label="Período" value={days} onChange={e => setDays(Number(e.target.value))}>

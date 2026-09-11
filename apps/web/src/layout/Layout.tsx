@@ -30,7 +30,6 @@ import {
   TableChart as TableChartIcon,
   Refresh as RefreshIcon,
   ShowChart as ForecastIcon,
-  Dashboard as DashboardIcon,
   Timeline as TimelineIcon,
   AccountBalance as AccountBalanceIcon,
   Savings as SavingsIcon,
@@ -42,6 +41,7 @@ import { cancelPendingAnalysisRequests } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForPath } from "../auth/moduleMap";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import LightbulbIcon from "@mui/icons-material/Lightbulb";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
@@ -70,7 +70,7 @@ const menuGroups = [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
-      { path: "/budgets", label: "Orçamento", icon: <AccountBalanceIcon /> },
+      { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
   },
@@ -91,6 +91,7 @@ const menuGroups = [
     color: "#b45309",
     background: "#fffbeb",
     items: [
+      { path: "/ideas", label: "Ideias", icon: <LightbulbIcon /> },
       { path: "/admin", label: "Usuários, grupos e roles", icon: <AdminPanelSettingsIcon /> },
       { path: "/admin/audit", label: "Auditoria", icon: <AdminPanelSettingsIcon /> },
       { path: "/admin/sso", label: "Provedores SSO", icon: <AdminPanelSettingsIcon /> },
@@ -104,8 +105,9 @@ export default function Layout() {
   const theme = useTheme();
   const { hasPerm, user, logout } = useAuth();
   const canAdmin = hasPerm("users", "read") || hasPerm("groups", "read") || hasPerm("roles", "read");
+  const canIdeas = hasPerm("ideas", "read");
   const visibleMenuGroups = menuGroups
-    .filter((g) => g.label !== "Administração" || canAdmin)
+    .filter((g) => g.label !== "Administração" || canAdmin || canIdeas)
     .map((g) => {
       if (g.label !== "Administração") {
         return { ...g, items: g.items.filter((item) => {
@@ -116,8 +118,10 @@ export default function Layout() {
       return {
         ...g,
         items: g.items.filter((item) => {
+          if (item.path === "/ideas") return canIdeas;
           if (item.path === "/admin/audit") return hasPerm("audit", "read");
           if (item.path === "/admin/sso") return hasPerm("auth", "read");
+          if (item.path === "/admin") return canAdmin;
           return true;
         }),
       };

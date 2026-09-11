@@ -298,6 +298,7 @@ def _build_department_path(
         "department_name": "",
         "department_path": "",
         "centro_custo": "",
+        "id_orcamento": "",
         "ambiente": "",
     }
     custom_fields: dict = {}
@@ -319,6 +320,8 @@ def _build_department_path(
             info["department_name"] = dept.name
         if dept.centro_custo:
             info["centro_custo"] = dept.centro_custo
+        if getattr(dept, "id_orcamento", None):
+            info["id_orcamento"] = dept.id_orcamento
         if dept.ambiente:
             info["ambiente"] = dept.ambiente
         if dept.custom_fields:

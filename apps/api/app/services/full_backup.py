@@ -1,0 +1,131 @@
+"""Consistent full-project backup used by the independent backup schedule."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import tarfile
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _database_parts() -> tuple[str, str, str, str, str]:
+    raw = os.getenv("DATABASE_URL_SYNC") or os.getenv("DATABASE_URL", "")
+    if not raw:
+        # The worker loads the project settings via pydantic-settings, while
+        # the URL is not necessarily exported in its process environment.
+        # Reuse that resolved value instead of falling back to localhost:5432.
+        try:
+            from app.config import settings
+            raw = settings.database_url_sync
+        except Exception:
+            raw = ""
+    raw = raw.replace("postgresql+asyncpg://", "postgresql://", 1).replace("postgresql+psycopg2://", "postgresql://", 1)
+    parsed = urlparse(raw)
+    return (
+        parsed.hostname or "localhost",
+        str(parsed.port or 5432),
+        unquote(parsed.username or ""),
+        unquote(parsed.password or ""),
+        (parsed.path or "/").lstrip("/") or "postgres",
+    )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def create_full_backup(*, retention_days: int = 30, output_dir: str | None = None) -> dict:
+    """Create one compressed archive containing DB, Iceberg and the project.
+
+    The caller is expected to hold the application-wide write lock.  The
+    backup directory itself is excluded to avoid recursively archiving prior
+    backups and the archive currently being written.
+    """
+    root = _project_root().resolve()
+    destination = Path(output_dir or os.getenv("OPENFINOPS_BACKUP_DIR", str(root / "backups" / "scheduled"))).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive = destination / f"openfinops-full-{stamp}.tar.gz"
+
+    with tempfile.TemporaryDirectory(prefix="openfinops-full-backup-") as temp_name:
+        staging = Path(temp_name)
+        warehouse = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(root / "apps" / "data" / "iceberg"))).expanduser().resolve()
+        db_dir = staging / "postgres"
+        db_dir.mkdir()
+        host, port, user, password, database = _database_parts()
+        dump = db_dir / "finops.dump"
+        env = os.environ.copy()
+        if password:
+            env["PGPASSWORD"] = password
+        subprocess.run(
+            ["pg_dump", "--format=custom", "--no-owner", "--file", str(dump), "--host", host, "--port", port, "--username", user, database],
+            check=True, env=env, capture_output=True, text=True,
+        )
+        subprocess.run(["pg_restore", "--list", str(dump)], check=True, env=env, capture_output=True, text=True)
+
+        manifest = {
+            "format": "openfinops-full-v1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "database": database,
+            "warehouse": str(warehouse),
+            "includes_env": True,
+            "project_root": str(root),
+            "archive_excludes": ["backups/scheduled", "temporary staging"],
+            "postgres_dump_sha256": _sha256(dump),
+        }
+        manifest_path = staging / "BACKUP_MANIFEST.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        backups_root = (root / "backups" / "scheduled").resolve()
+        project_warehouse = (root / "apps" / "data" / "iceberg").resolve()
+        def _filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+            name = info.name.rstrip("/")
+            if name == "openfinops/backups/scheduled" or name.startswith("openfinops/backups/scheduled/"):
+                return None
+            if project_warehouse == (root / "apps" / "data" / "iceberg").resolve() and (name == "openfinops/apps/data/iceberg" or name.startswith("openfinops/apps/data/iceberg/")):
+                return None
+            return info
+        # Stream directly into the compressed archive. The previous
+        # copytree-based implementation duplicated the 15GB warehouse before
+        # compression and made a full backup appear hung.
+        with tarfile.open(archive, "w:gz", compresslevel=1) as tar:
+            tar.add(root, arcname="openfinops", recursive=True, filter=_filter)
+            tar.add(db_dir, arcname="openfinops/postgres", recursive=True)
+            tar.add(manifest_path, arcname="openfinops/BACKUP_MANIFEST.json")
+            # When the warehouse lives inside the project, it was skipped by
+            # the project filter above and must be added explicitly.  For an
+            # external warehouse this is the sole copy as well.
+            if warehouse.exists():
+                tar.add(warehouse, arcname="openfinops/apps/data/iceberg", recursive=True)
+
+    archive.chmod(0o600)
+    checksum = archive.with_suffix(archive.suffix + ".sha256")
+    checksum.write_text(f"{_sha256(archive)}  {archive.name}\n", encoding="utf-8")
+    checksum.chmod(0o600)
+    with tarfile.open(archive, "r:gz") as tar:
+        if "openfinops/BACKUP_MANIFEST.json" not in tar.getnames():
+            raise RuntimeError("Manifesto ausente no backup compactado")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(retention_days)))
+    removed = 0
+    for old in destination.glob("openfinops-full-*.tar.gz"):
+        if old == archive:
+            continue
+        if datetime.fromtimestamp(old.stat().st_mtime, timezone.utc) < cutoff:
+            old.unlink()
+            sidecar = old.with_suffix(old.suffix + ".sha256")
+            if sidecar.exists():
+                sidecar.unlink()
+            removed += 1
+    return {"archive": str(archive), "sha256": _sha256(archive), "retention_removed": removed}

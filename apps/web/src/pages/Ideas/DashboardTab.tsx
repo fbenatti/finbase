@@ -1,0 +1,148 @@
+import { useEffect, useState } from "react";
+import Plot from "react-plotly.js";
+import { Alert, Box, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
+import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { getIdeasDashboard, type IdeasDashboard, type Idea } from "../../services/ideasApi";
+import { STATUS_LABELS, TYPE_LABELS } from "./constants";
+
+interface Props {
+  onOpen: (id: number) => void;
+  refreshKey: number;
+}
+
+function Kpi({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+  return (
+    <Card sx={{ height: "100%" }}>
+      <CardContent>
+        <Typography variant="overline" color="text.secondary">{label}</Typography>
+        <Typography variant="h4">{value}</Typography>
+        {hint && <Typography variant="caption" color="text.secondary">{hint}</Typography>}
+      </CardContent>
+    </Card>
+  );
+}
+
+const fmt = (v: number | null | undefined) => (v == null ? "—" : `${v}d`);
+
+export default function DashboardTab({ onOpen, refreshKey }: Props) {
+  const year = new Date().getFullYear();
+  const [from, setFrom] = useState(`${year}-01-01`);
+  const [to, setTo] = useState(`${year}-12-31`);
+  const [data, setData] = useState<IdeasDashboard | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getIdeasDashboard(from, to)
+      .then(setData)
+      .catch((e) => setError(String(e)));
+  }, [from, to, refreshKey]);
+
+  if (error) return <Alert severity="error">{error}</Alert>;
+  if (!data) return <Typography>Carregando dashboard...</Typography>;
+
+  const k = data.kpis;
+  const shippedCols: GridColDef[] = [
+    { field: "title", headerName: "Ideia", flex: 1, minWidth: 180 },
+    { field: "idea_type", headerName: "Tipo", width: 110, valueGetter: (_, row: Idea) => TYPE_LABELS[row.idea_type] || row.idea_type },
+    { field: "time_to_start_days", headerName: "Até iniciar", width: 100, valueGetter: (_, row: Idea) => fmt(row.time_to_start_days) },
+    { field: "time_in_impl_days", headerName: "Implementação", width: 120, valueGetter: (_, row: Idea) => fmt(row.time_in_impl_days) },
+    { field: "time_to_prod_days", headerName: "Até PROD", width: 100, valueGetter: (_, row: Idea) => fmt(row.time_to_prod_days) },
+  ];
+
+  const monthly = data.monthly_shipped;
+  const types = Array.from(new Set(monthly.flatMap((m) => Object.keys(m.by_type))));
+
+  return (
+    <Box>
+      <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+      </Stack>
+
+      <Grid container spacing={2} sx={{ mb: 2 }}>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Implementadas" value={k.implemented} hint={`${k.features_shipped} features · ${k.panels_shipped} painéis`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Bugs corrigidos" value={k.bugs_fixed} hint={`${k.bugs_critical_fixed} críticos`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Tempo até iniciar" value={fmt(k.avg_time_to_start_days)} hint={`P50: ${fmt(k.p50_time_to_start_days)}`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Tempo até PROD" value={fmt(k.avg_time_to_prod_days)} hint={`P50: ${fmt(k.p50_time_to_prod_days)} · WIP: ${k.wip}`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Em implementação" value={fmt(k.avg_time_in_impl_days)} hint={`P50: ${fmt(k.p50_time_in_impl_days)}`} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Canceladas" value={k.cancelled} /></Grid>
+        <Grid item xs={12} sm={6} md={3}><Kpi label="Fechadas" value={k.closed} /></Grid>
+      </Grid>
+
+      <Grid container spacing={2} sx={{ mb: 2 }}>
+        <Grid item xs={12} md={6}>
+          <Card><CardContent>
+            <Typography variant="subtitle1" gutterBottom>Entregas no tempo</Typography>
+            <Plot
+              data={types.map((t) => ({
+                x: monthly.map((m) => m.month),
+                y: monthly.map((m) => m.by_type[t] || 0),
+                name: TYPE_LABELS[t as keyof typeof TYPE_LABELS] || t,
+                type: "bar" as const,
+              }))}
+              layout={{ height: 300, barmode: "stack", margin: { l: 40, r: 20, t: 20, b: 40 }, paper_bgcolor: "white", plot_bgcolor: "white" }}
+              config={{ displayModeBar: false }}
+            />
+          </CardContent></Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card><CardContent>
+            <Typography variant="subtitle1" gutterBottom>Onde o tempo é gasto (média)</Typography>
+            <Plot
+              data={[{
+                x: data.dwell_by_status.map((d) => STATUS_LABELS[d.status as keyof typeof STATUS_LABELS] || d.status),
+                y: data.dwell_by_status.map((d) => d.avg_days || 0),
+                type: "bar" as const,
+                marker: { color: "#0A8FDC" },
+              }]}
+              layout={{ height: 300, margin: { l: 40, r: 20, t: 20, b: 80 }, paper_bgcolor: "white", plot_bgcolor: "white" }}
+              config={{ displayModeBar: false }}
+            />
+          </CardContent></Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card><CardContent>
+            <Typography variant="subtitle1" gutterBottom>Funil operacional</Typography>
+            <Plot
+              data={[{
+                x: data.funnel.map((f) => STATUS_LABELS[f.status as keyof typeof STATUS_LABELS] || f.status),
+                y: data.funnel.map((f) => f.count),
+                type: "bar" as const,
+                marker: { color: "#7c3aed" },
+              }]}
+              layout={{ height: 280, margin: { l: 40, r: 20, t: 20, b: 80 }, paper_bgcolor: "white", plot_bgcolor: "white" }}
+              config={{ displayModeBar: false }}
+            />
+          </CardContent></Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card><CardContent>
+            <Typography variant="subtitle1" gutterBottom>Aging (dias no status atual)</Typography>
+            <Plot
+              data={[{
+                x: data.aging_now.slice(0, 10).map((a) => a.title),
+                y: data.aging_now.slice(0, 10).map((a) => a.days_in_current_status),
+                type: "bar" as const,
+                marker: { color: "#f59e0b" },
+              }]}
+              layout={{ height: 280, margin: { l: 40, r: 20, t: 20, b: 100 }, paper_bgcolor: "white", plot_bgcolor: "white" }}
+              config={{ displayModeBar: false }}
+            />
+          </CardContent></Card>
+        </Grid>
+      </Grid>
+
+      <Typography variant="h6" gutterBottom>Entregues no período</Typography>
+      <Box sx={{ height: 360, mb: 3 }}>
+        <DataGrid rows={data.shipped_rows} columns={shippedCols} getRowId={(r) => r.id}
+          onRowClick={(p) => onOpen(p.row.id)} disableRowSelectionOnClick />
+      </Box>
+
+      <Typography variant="h6" gutterBottom>Em implementação agora</Typography>
+      <Box sx={{ height: 280, mb: 3 }}>
+        <DataGrid rows={data.wip_rows} columns={shippedCols} getRowId={(r) => r.id}
+          onRowClick={(p) => onOpen(p.row.id)} disableRowSelectionOnClick />
+      </Box>
+    </Box>
+  );
+}

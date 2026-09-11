@@ -40,13 +40,10 @@ const cash2 = (v: unknown) => money2.format(Number(v || 0));
 const num = (v: unknown, d = 0) => Number(v || 0).toLocaleString("pt-BR", { maximumFractionDigits: d });
 const pct = (v: unknown, d = 1) => `${Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d })}%`;
 
-/** Bilhões com precisão suficiente para volumes abaixo de 1 bi (ex.: 3,5M → 0,0035). */
-function formatBillions(tokens: number): string {
-  const billions = tokens / 1_000_000_000;
-  if (billions >= 1) {
-    return billions.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  return billions.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+/** Milhões de tokens, legíveis para os volumes atuais da plataforma. */
+function formatMillions(tokens: number): string {
+  const millions = tokens / 1_000_000;
+  return millions.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 const BUCKET_COLORS: Record<string, string> = {
@@ -486,9 +483,9 @@ export default function WisperDashboard() {
               </Typography>
             </Grid>
             <Grid item xs={12} md={4}>
-              <Typography variant="body2" sx={{ opacity: 0.8 }}>Bilhões de tokens</Typography>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>Milhões de tokens</Typography>
               <Typography variant="h4">
-                {totalTokens30d > 0 ? formatBillions(Number(totalTokens30d)) : "—"}
+                {totalTokens30d > 0 ? formatMillions(Number(totalTokens30d)) : "—"}
               </Typography>
               <Typography variant="caption" sx={{ opacity: 0.75 }}>
                 {totalTokens30d > 0 ? (

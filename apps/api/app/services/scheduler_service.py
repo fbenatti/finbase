@@ -98,6 +98,23 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
         sched = session.get(ScheduledTask, schedule_id)
         if sched:
             sched.last_run_at = datetime.now(timezone.utc)
+            if sched.schedule_type == "backup":
+                from app.models.etl_task import EtlTask
+                task = EtlTask(
+                    task_type="backup", status="QUEUED", phase="Na fila: backup full",
+                    connection_id=None, destination_table_id=None, connection_ids=[],
+                    billing_periods=[], selected_blobs=[], errors=[],
+                    result_json={"schedule_id": schedule_id, "retention_days": int((sched.config_json or {}).get("retention_days", 30))},
+                )
+                session.add(task)
+                session.commit()
+                logger.info("Scheduled full backup [%s] queued task %s", schedule_name, task.id)
+                return [task.id]
+            if sched.schedule_type == "reprocess":
+                queued = _queue_reclassification_schedule(sched, session)
+                session.commit()
+                logger.info("Scheduled reclassification [%s] queued tasks %s", schedule_name, queued)
+                return queued
         session.commit()
 
         queued = []
@@ -110,11 +127,49 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
             queued.append(task_id)
         session.commit()
         logger.info("Scheduled ETL [%s] queued tasks %s", schedule_name, queued)
+        return queued
     except Exception as e:
         logger.error("Scheduled ETL [%s] failed: %s", schedule_name, e)
         session.rollback()
     finally:
         session.close()
+
+
+def _queue_reclassification_schedule(schedule_row, session) -> list[int]:
+    """Expand a disabled/optional Reprocess schedule into classification tasks."""
+    from app.models.etl_task import EtlTask
+    from app.models.ingested_blob import IngestedBlob
+    from sqlalchemy import select
+    cfg = schedule_row.config_json or {}
+    connection_ids = [int(x) for x in (cfg.get("connection_ids") or schedule_row.connection_ids or []) if x is not None]
+    destination_ids = [int(x) for x in (cfg.get("destination_table_ids") or [])]
+    periods = [str(x) for x in (cfg.get("billing_periods") or [])]
+    if cfg.get("period_mode") == "all" or not periods:
+        query = select(IngestedBlob.billing_period).where(IngestedBlob.connection_id.in_(connection_ids), IngestedBlob.billing_period.is_not(None)).distinct()
+        periods = sorted({str(x) for x in session.execute(query).scalars().all() if x})
+    if not connection_ids or not destination_ids or not periods:
+        logger.warning("Reprocess schedule %s has no complete source/table/period selection", schedule_row.id)
+        return []
+    ids: list[int] = []
+    for destination_id in destination_ids:
+        for connection_id in connection_ids:
+            for period in periods:
+                task = EtlTask(
+                    task_type="reclassification", status="QUEUED", destination_table_id=destination_id,
+                    connection_ids=[connection_id], billing_periods=[period], rows_raw=0,
+                    rows_normalized=0, rows_destination=0, total_blobs=0, processed_blobs=0,
+                    errors=[], phase=f"Agendado: reclassificar fonte {connection_id}, mês {period}",
+                    result_json={"schedule_id": schedule_row.id, "scheduled_reprocess": True,
+                                 "period_mode": cfg.get("period_mode", "selected"),
+                                 "forecast_config_ids": cfg.get("forecast_config_ids", []),
+                                 "accuracy": cfg.get("accuracy", True),
+                                 "shared_cost": cfg.get("shared_cost", False),
+                                 "dimon_rule_ids": cfg.get("dimon_rule_ids", [])},
+                )
+                session.add(task)
+                session.flush()
+                ids.append(task.id)
+    return ids
 
 
 def _queue_ptu_collections(*, hours: int, lookback_note: str) -> None:

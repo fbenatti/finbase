@@ -424,6 +424,11 @@ async def _financials(
         if sku == "B97385":
             gb_hours += qty
 
+    # The executive component list is a cost ranking, not an arbitrary
+    # database grouping order.  Keep the API ordered so every consumer gets
+    # the same highest-to-lowest view.
+    skus.sort(key=lambda item: item["cost"], reverse=True)
+
     hours_in_closed = 24 * calendar.monthrange(int(closed_period[:4]), int(closed_period[4:6]))[1]
 
     daily_by_date: dict[str, dict[str, Any]] = {}

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, aliased
 from app.models.etl_task import EtlTask
 
 WORKER_TASK_TYPES: tuple[str, ...] = (
+    "backup",
     "bronze_audit",
     "reprocess",
     "reclassification",

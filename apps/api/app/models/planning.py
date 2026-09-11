@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, ForeignKey, Float, func, Index
+from sqlalchemy import Column, Integer, String, DateTime, Date, Text, JSON, Boolean, ForeignKey, Float, func, Index
 from app.database import Base
 
 
@@ -24,6 +24,15 @@ class PlanningVersion(Base):
     source_filename = Column(String(500), nullable=True)
     restored_from_id = Column(Integer, ForeignKey("planning_version.id"), nullable=True)
     classification_version_id = Column(Integer, nullable=True, index=True)
+    # Business context turns technical snapshots into an auditable financial narrative.
+    title = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    event_type = Column(String(40), nullable=True)
+    effective_date = Column(Date, nullable=True, index=True)
+    scope_id_orcamento = Column(String(80), nullable=True, index=True)
+    scope_cloud = Column(String(80), nullable=True, index=True)
+    published_to_budget_at = Column(DateTime(timezone=True), nullable=True)
+    published_budget_version_id = Column(Integer, ForeignKey("planning_version.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (Index("ix_planning_version_current", "financial_type_id", "year", "is_current"),)
 

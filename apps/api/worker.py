@@ -57,6 +57,101 @@ POLL_INTERVAL = 2  # seconds between polls when idle
 running = True
 
 
+def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: int, metadata: dict | None) -> list[int]:
+    """Queue Gold reprocessing requested by a collection schedule."""
+    if not metadata or not metadata.get("schedule_id"):
+        return []
+    session = SyncSession()
+    try:
+        from app.models.scheduled_task import ScheduledTask
+        from app.models.ingested_blob import IngestedBlob
+        from app.models.destination import SourceDestinationMapping
+        from sqlalchemy import select
+        schedule = session.get(ScheduledTask, metadata["schedule_id"])
+        if not schedule or schedule.schedule_type != "collection" or not schedule.destination_reprocess:
+            return []
+        cfg = schedule.config_json or {}
+        selected = [int(x) for x in (cfg.get("destination_table_ids") or [])]
+        if not selected:
+            selected = list(session.execute(select(SourceDestinationMapping.destination_table_id).where(
+                SourceDestinationMapping.source_connection_id == connection_id,
+                SourceDestinationMapping.active == True,  # noqa: E712
+            ).distinct()).scalars().all())
+        periods = sorted({str(x) for x in session.execute(select(IngestedBlob.billing_period).where(
+            IngestedBlob.connection_id == connection_id, IngestedBlob.billing_period.is_not(None)
+        ).distinct()).scalars().all() if x})
+        ids = []
+        for dest_id in selected:
+            child = EtlTask(
+                task_type="reprocess", status="QUEUED", destination_table_id=dest_id,
+                connection_ids=[connection_id], billing_periods=periods, rows_raw=0,
+                rows_normalized=0, rows_destination=0, errors=[],
+                phase=f"Agendado: reprocessar Gold após coleta (task {extraction_task_id})",
+                result_json={"schedule_id": schedule.id, "scheduled_pipeline": True,
+                             "forecast_config_ids": cfg.get("forecast_config_ids", []),
+                             "accuracy": cfg.get("accuracy", False), "shared_cost": cfg.get("shared_cost", False),
+                             "dimon_rule_ids": cfg.get("dimon_rule_ids", [])},
+            )
+            session.add(child)
+            session.flush()
+            ids.append(child.id)
+        session.commit()
+        return ids
+    finally:
+        session.close()
+
+
+def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) -> list[int]:
+    """Queue configured Forecasts after a scheduled Gold publication."""
+    config_ids = [int(x) for x in (task_json.get("forecast_config_ids") or []) if x]
+    if not config_ids:
+        return []
+    from app.models.forecast import ForecastConfig, ForecastRun
+    from sqlalchemy import select
+    queued: list[int] = []
+    for config_id in config_ids:
+        prior = session.execute(select(EtlTask.result_json).where(EtlTask.task_type == "forecast")).scalars().all()
+        if any(isinstance(item, dict) and item.get("scheduled_reprocess_task_id") == source_task_id and item.get("forecast_config_id") == config_id for item in prior):
+            continue
+        config = session.get(ForecastConfig, config_id)
+        if not config or not config.active:
+            continue
+        active = session.execute(select(ForecastRun.id).where(
+            ForecastRun.forecast_config_id == config_id,
+            ForecastRun.status.in_(["QUEUED", "RUNNING"]),
+        ).limit(1)).scalar_one_or_none()
+        if active:
+            continue
+        run = ForecastRun(forecast_config_id=config_id, config_version=config.version,
+                          trigger_type="SCHEDULED_REPROCESS", source_etl_task_id=source_task_id)
+        session.add(run)
+        session.flush()
+        forecast_task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id,
+                                errors=[], result_json={"forecast_run_id": run.id,
+                                "forecast_config_id": config_id, "scheduled_reprocess_task_id": source_task_id,
+                                "scheduled_pipeline": True, "shared_cost": task_json.get("shared_cost", False),
+                                "accuracy": task_json.get("accuracy", False),
+                                "accuracy_months": list(session.get(EtlTask, source_task_id).billing_periods or []) if session.get(EtlTask, source_task_id) else [],
+                                "dimon_rule_ids": task_json.get("dimon_rule_ids", [])})
+        session.add(forecast_task)
+        session.flush()
+        queued.append(forecast_task.id)
+    return queued
+
+
+def _queue_scheduled_accuracy(forecast_task_id: int, task_json: dict, session) -> None:
+    if not task_json.get("scheduled_pipeline") or not task_json.get("accuracy"):
+        return
+    config_id = task_json.get("forecast_config_id")
+    months = sorted({str(m) for m in (task_json.get("accuracy_months") or []) if len(str(m)) == 6})
+    if not config_id or not months:
+        return
+    session.add(EtlTask(task_type="forecast_accuracy", status="QUEUED", destination_table_id=int(config_id),
+                       total_blobs=len(months), errors=[], phase=f"Acurácia agendada: {len(months)} período(s)",
+                       result_json={"config_id": int(config_id), "months": months,
+                                    "scheduled_pipeline": True, "source_forecast_task_id": forecast_task_id}))
+
+
 def _format_task_error(exc: Exception) -> str:
     """Keep persisted worker errors readable when httpx raises empty messages."""
     message = str(exc).strip()
@@ -135,6 +230,20 @@ def consumer_main(worker_id: int):
             session.commit()
             session.close()
             task_id = task.id
+            # A full backup freezes all PostgreSQL/Iceberg writers. Tasks
+            # claimed while it is active are returned to the queue.
+            if task.task_type != "backup" and __import__("app.services.write_lock", fromlist=["is_locked"]).is_locked():
+                retry = SyncSession()
+                try:
+                    queued = retry.get(EtlTask, task_id)
+                    if queued and queued.status == "RUNNING":
+                        queued.status = "QUEUED"
+                        queued.phase = "Aguardando bloqueio de escrita (backup ou processamento analítico)"
+                        retry.commit()
+                finally:
+                    retry.close()
+                time.sleep(0.5)
+                continue
             lock_session = SyncSession()
             try:
                 # Advisory locks are session-scoped. Acquire them on the same
@@ -157,9 +266,53 @@ def consumer_main(worker_id: int):
                     time.sleep(0.2)
                     continue
 
+                if task.task_type == "backup":
+                    # ``session`` was closed immediately after claiming the
+                    # task.  Use a fresh session for the visible transition;
+                    # otherwise the UI kept showing "Na fila" while the
+                    # expensive archive was already running.
+                    progress = SyncSession()
+                    try:
+                        row = progress.get(EtlTask, task_id)
+                        if row:
+                            row.status = "RUNNING"
+                            row.phase = "Criando backup full do projeto"
+                            row.total_blobs = 1
+                            row.processed_blobs = 0
+                            progress.commit()
+                    finally:
+                        progress.close()
+                    try:
+                        from app.services.full_backup import create_full_backup
+                        from app.services.write_lock import exclusive_write_lock
+                        with exclusive_write_lock():
+                            result = create_full_backup(retention_days=int((task.result_json or {}).get("retention_days", 30)))
+                        terminal = SyncSession()
+                        row = terminal.get(EtlTask, task_id)
+                        if row:
+                            row.status = "COMPLETED"
+                            row.phase = "Backup full concluído"
+                            row.total_blobs = 1
+                            row.processed_blobs = 1
+                            row.result_json = {**(row.result_json or {}), **result}
+                            row.finished_at = datetime.now(timezone.utc)
+                            terminal.commit()
+                        terminal.close()
+                    except Exception as exc:
+                        failed = SyncSession()
+                        row = failed.get(EtlTask, task_id)
+                        if row:
+                            row.status = "FAILED"
+                            row.phase = f"Falha no backup: {_format_task_error(exc)}"[:200]
+                            row.errors = [_format_task_error(exc)]
+                            row.finished_at = datetime.now(timezone.utc)
+                            failed.commit()
+                        failed.close()
+                    continue
                 if task.task_type == "forecast":
                     config_id = task.destination_table_id
                     run_id = (task.result_json or {}).get("forecast_run_id")
+                    task_json = dict(task.result_json or {})
                     task.status = "RUNNING"
                     session.commit()
                     session.close()
@@ -246,8 +399,14 @@ def consumer_main(worker_id: int):
                             task_row.phase = "Forecast publicado"
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit()
+                        if task_json.get("scheduled_pipeline"):
+                            _queue_scheduled_accuracy(task_id, task_json, s)
+                            s.commit()
                         rateio: dict = {}
+                        run_scheduled_rateio = (not task_json.get("scheduled_pipeline")) or bool(task_json.get("shared_cost", False))
                         try:
+                            if not run_scheduled_rateio:
+                                raise LookupError("rateio desabilitado no schedule")
                             from app.services.shared_cost import run_shared_cost_job_sync
                             rateio = run_shared_cost_job_sync(s, allow_empty=True)
                             if task_row:
@@ -255,6 +414,8 @@ def consumer_main(worker_id: int):
                                     f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
                                 )
                                 s.commit()
+                        except LookupError:
+                            pass
                         except Exception as rateio_exc:
                             if task_row:
                                 task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
@@ -263,7 +424,10 @@ def consumer_main(worker_id: int):
                         # realizado + forecast + rateio). A planning mudou, então a
                         # Dimon pré-agregada precisa ser materializada de novo; a
                         # fila do worker executa em ordem de id (sequência real).
+                        run_scheduled_dimon = (not task_json.get("scheduled_pipeline")) or bool(task_json.get("dimon_enabled", True))
                         try:
+                            if not run_scheduled_dimon:
+                                raise LookupError("Dimon desabilitada no schedule")
                             from app.services.dimon_materialization import enqueue_dimons_task
                             dimon_task = enqueue_dimons_task(s, source="forecast")
                             if dimon_task and task_row:
@@ -272,6 +436,8 @@ def consumer_main(worker_id: int):
                                     f" · Dimon enfileirada (task #{dimon_task.id})"
                                 )
                                 s.commit()
+                        except LookupError:
+                            pass
                         except Exception as dimon_exc:
                             if task_row:
                                 task_row.phase = f"Forecast publicado · Dimon pendente: {dimon_exc}"
@@ -645,13 +811,17 @@ def consumer_main(worker_id: int):
                             _append_reprocess_log(task_id, "Worker assumiu a tarefa da fila")
 
                             if task.task_type == "reclassification":
-                                result = _reclassify_destination_sync(task_id, dest_id, conn_ids, periods)
+                                from app.services.write_lock import exclusive_write_lock
+                                with exclusive_write_lock():
+                                    result = _reclassify_destination_sync(task_id, dest_id, conn_ids, periods)
                             else:
-                                result = _reprocess_destination_sync(
-                                    task_id, dest_id, conn_ids, periods,
-                                    replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
-                                    publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
-                                )
+                                from app.services.write_lock import exclusive_write_lock
+                                with exclusive_write_lock():
+                                    result = _reprocess_destination_sync(
+                                        task_id, dest_id, conn_ids, periods,
+                                        replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
+                                        publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
+                                    )
                         print(f"Task {task_id} completed: {result}")
 
                         # Persist the terminal state explicitly.  The
@@ -687,6 +857,10 @@ def consumer_main(worker_id: int):
                                 # tarefa do grupo enfileira a Dimon (visão completa
                                 # = realizado + forecast + rateio) na fila do worker.
                                 if succeeded:
+                                    if (terminal_task.result_json or {}).get("scheduled_pipeline"):
+                                        scheduled_forecasts = _queue_scheduled_forecasts(task_id, terminal_task.result_json or {}, terminal_session)
+                                        if scheduled_forecasts:
+                                            terminal_task.phase = ((terminal_task.phase or "") + f" · Forecast(s) na fila: {len(scheduled_forecasts)}")[:200]
                                     chain = terminal_task.result_json.get("chain_dimons")
                                     if chain and isinstance(chain, dict) and chain.get("enabled"):
                                         group = terminal_task.result_json.get("queue_group")
@@ -1066,7 +1240,20 @@ def consumer_main(worker_id: int):
                         finally:
                             _ptu_session.close()
 
-                        _run_etl_sync(task_id, conn_id, selected or None, periods)
+                        from app.services.write_lock import exclusive_write_lock
+                        with exclusive_write_lock():
+                            _run_etl_sync(task_id, conn_id, selected or None, periods)
+                        followups = _queue_schedule_destination_tasks(task_id, conn_id, task.result_json or {})
+                        if followups:
+                            followup_session = SyncSession()
+                            try:
+                                completed = followup_session.get(EtlTask, task_id)
+                                if completed:
+                                    completed.phase = f"Bronze concluída · {len(followups)} Gold(s) na fila"
+                                    completed.result_json = {**(completed.result_json or {}), "followup_task_ids": followups}
+                                    followup_session.commit()
+                            finally:
+                                followup_session.close()
 
                         # Clean up in-memory entry
                         _inmemory_tasks.pop(task_id, None)

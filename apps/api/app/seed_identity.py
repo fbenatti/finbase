@@ -15,6 +15,8 @@ from app.models.identity import (
     User, Role, RolePermission, ALL_MODULES,
 )
 
+IDEAS_MODULE = "ideas"
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +43,43 @@ async def seed_identity(db: AsyncSession) -> None:
         for module in ALL_MODULES:
             db.add(RolePermission(role_id=reader_role.id, module=module, action="read"))
         logger.info("Seed: role 'Leitor Global' criada")
+
+    # Garantir permissões do módulo ideas em roles de sistema já existentes
+    for role_name, actions in (
+        ("Administrador", ("read", "create", "update", "delete")),
+        ("Leitor Global", ("read",)),
+    ):
+        result = await db.execute(select(Role).where(Role.name == role_name))
+        role = result.scalar_one_or_none()
+        if role is None:
+            continue
+        for action in actions:
+            exists = await db.execute(
+                select(RolePermission).where(
+                    RolePermission.role_id == role.id,
+                    RolePermission.module == IDEAS_MODULE,
+                    RolePermission.action == action,
+                    RolePermission.scope.is_(None),
+                )
+            )
+            if exists.scalar_one_or_none() is None:
+                db.add(RolePermission(role_id=role.id, module=IDEAS_MODULE, action=action))
+                logger.info("Seed: permissão ideas:%s adicionada à role '%s'", action, role_name)
+
+    # --- Role de sistema: Colaborador de ideias ---
+    result = await db.execute(select(Role).where(Role.name == "Colaborador de ideias"))
+    collab_role = result.scalar_one_or_none()
+    if collab_role is None:
+        collab_role = Role(
+            name="Colaborador de ideias",
+            description="Submete, vota e comenta ideias",
+            is_system=True,
+        )
+        db.add(collab_role)
+        await db.flush()
+        for action in ("read", "create"):
+            db.add(RolePermission(role_id=collab_role.id, module=IDEAS_MODULE, action=action))
+        logger.info("Seed: role 'Colaborador de ideias' criada")
 
     # --- Usuário admin ---
     result = await db.execute(select(User).where(User.username == "admin"))

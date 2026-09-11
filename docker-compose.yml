@@ -31,6 +31,7 @@ services:
     volumes:
       - ./apps/api/app:/app/app
       - ./apps/data/iceberg:/data/iceberg
+      - ./backups/scheduled:/backups/scheduled
       - worker_runtime:/run/openfinops-worker
     depends_on:
       postgres:
@@ -58,6 +59,7 @@ services:
       REPROCESS_WORKER_MAX_TASKS: ${REPROCESS_WORKER_MAX_TASKS:-6}
     volumes:
       - ./apps/data/iceberg:/data/iceberg
+      - ./backups/scheduled:/backups/scheduled
       - worker_runtime:/run/openfinops-worker
     depends_on:
       api:

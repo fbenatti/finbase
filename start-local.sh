@@ -561,6 +561,25 @@ start_worker_process() {
   write_pid_file worker "$worker_pid"
 }
 
+# Let the API finish migrations before the worker starts querying the same
+# tables.  Starting both processes at once can leave an ETL transaction holding
+# a relation lock while the API is executing ALTER TABLE during startup.
+wait_for_api_startup() {
+  local waited=0
+  until [[ "$(http_get "$API_URL/health")" == *'"status":"ok"'* ]]; do
+    if ! kill -0 "$api_pid" 2>/dev/null; then
+      echo "ERRO: processo da API encerrou durante as migrações; veja $LOG_DIR/api.log" >&2
+      return 1
+    fi
+    if (( waited >= BACKEND_WAIT_SECONDS )); then
+      echo "ERRO: API não concluiu as migrações em ${BACKEND_WAIT_SECONDS}s; veja $LOG_DIR/api.log" >&2
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+
 wait_for_backend_with_retry() {
   if wait_for_backend; then
     return 0
@@ -571,6 +590,7 @@ wait_for_backend_with_retry() {
   kill_orphan_workers
   sleep 1
   start_api_process || return 1
+  wait_for_api_startup || return 1
   start_worker_process
   if wait_for_backend; then
     return 0
@@ -601,6 +621,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 start_api_process || exit 1
+wait_for_api_startup || exit 1
 start_worker_process
 
 (cd "$ROOT_DIR/apps/web" && exec npm run dev -- --host 0.0.0.0) \

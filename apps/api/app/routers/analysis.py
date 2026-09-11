@@ -35,7 +35,7 @@ from app.models.pivot_view import PivotView
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
-from app.services.iceberg_service import list_tables, get_catalog
+from app.services.iceberg_service import list_tables, get_catalog, read_bronze
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
 
@@ -2375,6 +2375,10 @@ async def run_query(req: QueryRequest, request: Request):
         except TrinoCancelled:
             raise _cancelled_http()
         except TrinoError as e:
+            rows = _run_local_bronze_star_query(req.sql, str(e))
+            if rows is not None:
+                columns = list(rows[0].keys()) if rows else []
+                return QueryResponse(columns=columns, rows=rows, row_count=len(rows))
             # Gold may still be in the local PyIceberg catalog while Trino is
             # connected through the PostgreSQL Iceberg catalog. Support the standard destination
             # aggregations through the same local Iceberg table until the data
@@ -2449,6 +2453,30 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
     )
     result["ServiceName"] = result["ServiceName"].where(result["ServiceName"].notna(), None)
     return result.to_dict(orient="records")
+
+
+def _run_local_bronze_star_query(sql: str, trino_error: str) -> list[dict[str, Any]] | None:
+    """Read a small raw-Bronze preview when Trino cannot project a wide schema.
+
+    Trino 483 can fail with ``Invalid position ... in block with 0 positions``
+    when selecting every column from an evolved wide Iceberg table. The
+    columns and Parquet files remain valid; PyIceberg reads them by field ID.
+    """
+    if "Invalid position" not in trino_error:
+        return None
+    match = re.fullmatch(
+        r'\s*select\s+\*\s+from\s+iceberg\.bronze\.(raw_[a-z0-9_]+)\s+limit\s+(\d+)\s*;?\s*',
+        sql,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    limit = int(match.group(2))
+    if limit < 1 or limit > 1_000:
+        return None
+    table_code = match.group(1).removeprefix("raw_")
+    frame = read_bronze(table_code, max_rows=limit)
+    return json.loads(frame.to_json(orient="records", date_format="iso"))
 
 
 # ---------------------------------------------------------------------------

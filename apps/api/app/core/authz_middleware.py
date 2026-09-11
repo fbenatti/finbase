@@ -51,6 +51,7 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/users", "users"),
     ("/groups", "groups"),
     ("/roles", "roles"),
+    ("/ideas", "ideas"),
 ]
 
 PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health", "/etl/worker-health")
@@ -81,6 +82,10 @@ READ_POST_PREFIXES: list[tuple[str, str]] = [
     ("/analysis/expected-view", "analysis"),
 ]
 READ_POST_WRITE_MARKERS = ("/reprocess", "/exec", "/cancel", "/enqueue", "/run")
+# POST que altera estado (não é create)
+UPDATE_POST_MARKERS = ("/transition",)
+# DELETE que não exige delete no módulo (ex.: remover voto)
+CREATE_DELETE_MARKERS = ("/vote",)
 
 # Áreas de "aba" escopadas dentro de um módulo (kind prefix|contains).
 # kind=prefix casa path.startswith(needle); kind=contains casa needle em path.
@@ -135,6 +140,11 @@ class RBACMiddleware:
         if action is None:
             await self.app(scope, receive, send)
             return
+
+        if scope.get("method") == "POST" and any(marker in path for marker in UPDATE_POST_MARKERS):
+            action = "update"
+        elif scope.get("method") == "DELETE" and any(marker in path for marker in CREATE_DELETE_MARKERS):
+            action = "create"
 
         # Consultas por POST são leitura (documentado)
         if scope.get("method") in ("POST", "PUT", "PATCH"):

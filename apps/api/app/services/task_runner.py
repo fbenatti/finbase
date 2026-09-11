@@ -603,7 +603,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         return result
 
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
-    for col in ['departamento', 'centro_custo', 'ambiente',
+    for col in ['departamento', 'centro_custo', 'id_orcamento', 'ambiente',
                 'custom_fields', 'subscription_rg',
                 'departamento_nivel_1', 'departamento_nivel_2',
                 'departamento_nivel_3', 'departamento_nivel_4',
@@ -655,18 +655,23 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                 # (root fields serve as fallback when leaf fields are null)
                 merged_custom_fields: dict = {}
                 centro_custo_val: str | None = None
+                id_orcamento_val: str | None = None
                 ambiente_val: str | None = None
                 for d in reversed(chain):  # root → ... → leaf
                     if d.custom_fields and isinstance(d.custom_fields, dict):
                         merged_custom_fields.update(d.custom_fields)
                     if centro_custo_val is None and d.centro_custo:
                         centro_custo_val = d.centro_custo
+                    # Root supplies the fallback; each more-specific child overrides it.
+                    if getattr(d, "id_orcamento", None):
+                        id_orcamento_val = d.id_orcamento
                     if ambiente_val is None and d.ambiente:
                         ambiente_val = d.ambiente
 
                 for col_name, col_val in [
                     ('departamento', leaf.name),
                     ('centro_custo', centro_custo_val),
+                    ('id_orcamento', id_orcamento_val),
                     ('ambiente', ambiente_val),
                 ]:
                     if col_val is not None:

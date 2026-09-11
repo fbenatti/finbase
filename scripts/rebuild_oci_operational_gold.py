@@ -23,7 +23,7 @@ import pandas as pd
 from app.database import SyncSession
 from app.models.source_connection import SourceConnection
 from app.services import iceberg_service as iceberg
-from app.services.oci_operational_monitoring import GOLD_TABLE, collect
+from app.services.oci_operational_monitoring import GOLD_TABLE, collect, gold_frame_from_bronze
 
 
 def rebuild_from_bronze() -> int:
@@ -38,39 +38,12 @@ def rebuild_from_bronze() -> int:
         return 0
 
     logger.info("Bronze operational rows: %d", len(bronze_df))
-    # Keep the latest inventory snapshot per resource_id, but accumulate all metrics.
-    for col in ("timestamp", "resource_id", "metric_name", "record_type"):
-        if col not in bronze_df.columns:
-            bronze_df[col] = None
-
-    metrics_mask = bronze_df.get("record_type") == "metric"
-    metrics_df = bronze_df[metrics_mask].copy() if metrics_mask.any() else pd.DataFrame()
-    inventory_df = bronze_df[~metrics_mask].copy() if (~metrics_mask).any() else pd.DataFrame()
-
-    if not inventory_df.empty and "collected_at" in inventory_df.columns:
-        inventory_df["collected_at"] = pd.to_datetime(inventory_df["collected_at"], errors="coerce", utc=True)
-        inventory_df = inventory_df.sort_values("collected_at").drop_duplicates(
-            subset=["resource_id", "record_type"], keep="last"
-        )
-
-    if not metrics_df.empty:
-        metrics_df = metrics_df.drop_duplicates(
-            subset=["timestamp", "resource_id", "metric_name", "record_type"], keep="last"
-        )
-
-    combined = pd.concat([metrics_df, inventory_df], ignore_index=True)
-    if "_billing_period" not in combined.columns:
-        combined["_billing_period"] = pd.to_datetime(combined.get("timestamp"), errors="coerce", utc=True).dt.strftime("%Y%m").fillna("unknown")
-    if "source_connection_id" not in combined.columns:
-        combined["source_connection_id"] = 9
-    if "cloud_origem" not in combined.columns:
-        combined["cloud_origem"] = "oci-prod"
-    if "tipo" not in combined.columns:
-        combined["tipo"] = "realizado"
+    connection = SourceConnection(id=9, code="oci-prod")
+    combined = gold_frame_from_bronze(bronze_df, connection=connection, period="unknown")
 
     staged = iceberg.write_destination_staged(
         GOLD_TABLE, combined,
-        column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE"},
+        column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"},
     )
     iceberg.swap_staged_table(GOLD_TABLE, staged, known_row_count=len(combined))
     logger.info("Rebuilt gold.%s with %d rows", GOLD_TABLE, len(combined))

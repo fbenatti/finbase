@@ -25,13 +25,14 @@ import CloneRules from "./pages/CloneRules/CloneRules";
 import Tables from "./pages/Tables/Tables";
 import DashboardsIA from "./pages/Dashboards/DashboardsIA";
 import GitHubCopilotDashboard from "./pages/GitHubCopilotDashboard/GitHubCopilotDashboard";
-import Planning from "./pages/Planning/Planning";
+import FinancialPlanning from "./pages/Planning/FinancialPlanning";
 import Savings from "./pages/Savings/Savings";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
 import DimonDashboard from "./pages/DimonDashboard/DimonDashboard";
 import Admin from "./pages/Admin/Admin";
 import SsoProviders from "./pages/Admin/SsoProviders";
 import Audit from "./pages/Admin/Audit";
+import Ideas from "./pages/Ideas/Ideas";
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -61,8 +62,14 @@ function App() {
         <Route path="connections" element={<Connections />} />
         <Route path="explorer/:connectionId" element={<Explorer />} />
         <Route path="departments" element={<Departments />} />
-        <Route path="departments/financial" element={<Planning />} />
-        <Route path="budgets" element={<Planning budgetMode />} />
+        <Route path="financial-planning" element={<FinancialPlanning />} />
+        <Route path="departments/financial" element={<Navigate to="/financial-planning?tab=orcamento" replace />} />
+        <Route path="budgets" element={<Navigate to="/financial-planning?tab=orcamento" replace />} />
+        <Route path="manual-forecast" element={<Navigate to="/financial-planning?tab=forecast-manual" replace />} />
+        <Route path="contractual-baseline" element={<Navigate to="/financial-planning?tab=base-line-contratual" replace />} />
+        <Route path="credit-letter" element={<Navigate to="/financial-planning?tab=carta-credito" replace />} />
+        <Route path="budget-defense" element={<Navigate to="/financial-planning?tab=defesa-orcamentaria" replace />} />
+        <Route path="financial-dashboard" element={<Navigate to="/financial-planning?tab=dashboard" replace />} />
         <Route path="tables" element={<Tables />} />
         <Route path="destinations" element={<Navigate to="/tables?tab=destinations" replace />} />
         <Route path="relationship" element={<Navigate to="/tables?tab=relationship" replace />} />
@@ -93,6 +100,7 @@ function App() {
         <Route path="admin" element={<Admin />} />
         <Route path="admin/sso" element={<SsoProviders />} />
         <Route path="admin/audit" element={<Audit />} />
+        <Route path="ideas" element={<Ideas />} />
         </Route>
       </Routes>
     </AuthProvider>

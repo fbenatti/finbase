@@ -148,7 +148,7 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
 
   return (
     <Stack gap={2.5}>
-      <Typography variant="h4" sx={{ color: PROJECT_ACCENT[project] }}>{data?.project_label || (isVivo ? "Vivo Mais" : "Aura Brain")}</Typography>
+      <Typography variant="h4">{data?.project_label || (isVivo ? "Vivo Mais" : "Aura Brain")}</Typography>
 
       {isVivo && (
         <Alert severity="info" sx={{ borderRadius: 2 }}>

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 import {
-  Box, Button, Typography, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
+  Box, Button, Typography, Menu, List, ListItemButton, ListItemText, Collapse, IconButton, TextField,
 } from "@mui/material";
 import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import type { Department } from "../services/api";
@@ -69,6 +69,7 @@ export default function DepartmentTreePicker({
 }: DepartmentTreePickerProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [search, setSearch] = useState("");
 
   const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
 
@@ -93,8 +94,17 @@ export default function DepartmentTreePicker({
 
   const chooseDepartment = (department: Department | null) => {
     onChange(department?.id ?? null);
+    setSearch("");
     setAnchor(null);
   };
+
+  const matchedDepartments = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase("pt-BR");
+    if (!term) return [];
+    return flatDepartments.filter((department) =>
+      `${department.name} ${department.path}`.toLocaleLowerCase("pt-BR").includes(term),
+    ).slice(0, 100);
+  }, [flatDepartments, search]);
 
   const renderNode = (department: Department, depth = 0): ReactElement | null => {
     if (blockedIds.has(department.id)) return null;
@@ -157,6 +167,16 @@ export default function DepartmentTreePicker({
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
           Selecione o nível na hierarquia. O caminho completo aparece no botão.
         </Typography>
+        <Box sx={{ px: 1.5, pt: 1 }}>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar diretoria ou projeto"
+          />
+        </Box>
         <List dense disablePadding>
           {allowClear && (
             <ListItemButton
@@ -170,7 +190,14 @@ export default function DepartmentTreePicker({
               />
             </ListItemButton>
           )}
-          {departments.map((department) => renderNode(department))}
+          {search.trim()
+            ? matchedDepartments.map((department) => (
+              <ListItemButton key={department.id} selected={department.id === value} onClick={() => chooseDepartment(department)} sx={{ py: 0.5 }}>
+                <ListItemText primary={department.name} secondary={department.path} primaryTypographyProps={{ variant: "body2", fontWeight: 600 }} secondaryTypographyProps={{ variant: "caption", noWrap: true }} />
+              </ListItemButton>
+            ))
+            : departments.map((department) => renderNode(department))}
+          {search.trim() && matchedDepartments.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>Nenhum projeto ou diretoria encontrado.</Typography>}
         </List>
       </Menu>
       {helperText && (

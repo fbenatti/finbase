@@ -123,6 +123,7 @@ class DepartmentCreate(BaseModel):
     parent_id: int | None = None
     name: str
     centro_custo: str | None = None
+    id_orcamento: str | None = None
     ambiente: str | None = None
     cloud_filter: str | None = None
     custom_fields: dict[str, Any] | None = None
@@ -133,6 +134,7 @@ class DepartmentUpdate(BaseModel):
     parent_id: int | None = None
     name: str | None = None
     centro_custo: str | None = None
+    id_orcamento: str | None = None
     ambiente: str | None = None
     cloud_filter: str | None = None
     custom_fields: dict[str, Any] | None = None
@@ -144,6 +146,7 @@ class DepartmentOut(BaseModel):
     parent_id: int | None = None
     name: str
     centro_custo: str | None
+    id_orcamento: str | None
     ambiente: str | None
     cloud_filter: str | None
     custom_fields: dict[str, Any] | None
@@ -509,13 +512,14 @@ class ReprocessRequest(BaseModel):
 
 class ScheduledTaskCreate(BaseModel):
     name: str
-    connection_id: int
+    connection_id: int | None = None
     connection_ids: list[int] = []  # multi-connection scope; falls back to [connection_id]
     cron_expression: str  # e.g. "0 3 * * *"
     timezone: str = "America/Sao_Paulo"
     destination_reprocess: bool = True
     active: bool = True
     config_json: dict[str, Any] = {}
+    schedule_type: str = "collection"
 
 
 class ScheduledTaskUpdate(BaseModel):
@@ -527,12 +531,13 @@ class ScheduledTaskUpdate(BaseModel):
     destination_reprocess: bool | None = None
     active: bool | None = None
     config_json: dict[str, Any] | None = None
+    schedule_type: str | None = None
 
 
 class ScheduledTaskOut(BaseModel):
     id: int
     name: str
-    connection_id: int
+    connection_id: int | None
     connection_ids: list[int] = []
     cron_expression: str
     timezone: str
@@ -541,6 +546,7 @@ class ScheduledTaskOut(BaseModel):
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None
     config_json: dict[str, Any]
+    schedule_type: str
     created_at: datetime
     updated_at: datetime
 

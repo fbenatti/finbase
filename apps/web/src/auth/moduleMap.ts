@@ -5,6 +5,7 @@
 type PermTarget = { module: string; scope?: string | null };
 
 const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
+  { prefix: "/ideas", targets: [{ module: "ideas" }] },
   { prefix: "/admin/audit", targets: [{ module: "audit" }] },
   { prefix: "/admin/sso", targets: [{ module: "auth" }] },
   { prefix: "/admin", targets: [{ module: "users" }] },
@@ -22,7 +23,13 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   { prefix: "/azure-ptu-ops", targets: [{ module: "azure_ptu" }] },
   { prefix: "/forecast-accuracy", targets: [{ module: "forecast" }] },
   { prefix: "/forecast", targets: [{ module: "forecast" }] },
+  { prefix: "/financial-planning", targets: [{ module: "planning" }] },
   { prefix: "/budgets", targets: [{ module: "planning" }] },
+  { prefix: "/manual-forecast", targets: [{ module: "planning" }] },
+  { prefix: "/contractual-baseline", targets: [{ module: "planning" }] },
+  { prefix: "/credit-letter", targets: [{ module: "planning" }] },
+  { prefix: "/budget-defense", targets: [{ module: "planning" }] },
+  { prefix: "/financial-dashboard", targets: [{ module: "planning" }] },
   { prefix: "/departments", targets: [{ module: "planning" }] },
   { prefix: "/savings", targets: [{ module: "savings" }] },
   { prefix: "/reservations", targets: [{ module: "savings" }] },

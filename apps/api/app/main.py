@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
         from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
+        from app.models.idea import Idea, IdeaAssignee, IdeaVote, IdeaComment, IdeaStatusInterval  # noqa: F401
         from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant, SsoProvider  # noqa: F401
         from app.models.audit_log import AuditLog  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
@@ -56,9 +57,23 @@ async def lifespan(app: FastAPI):
         # asyncpg executes prepared statements and rejects multi-command SQL,
         # so each migration operation must be sent independently.
         for statement in (
+            "ALTER TABLE department ADD COLUMN IF NOT EXISTS id_orcamento VARCHAR(80)",
+            "CREATE INDEX IF NOT EXISTS ix_department_id_orcamento ON department (id_orcamento)",
+            "UPDATE department SET id_orcamento = NULLIF(BTRIM(custom_fields->>'IDOrcamento'), '') WHERE id_orcamento IS NULL AND custom_fields->>'IDOrcamento' IS NOT NULL",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS title VARCHAR(200)",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS description TEXT",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS event_type VARCHAR(40)",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS effective_date DATE",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS scope_id_orcamento VARCHAR(80)",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS scope_cloud VARCHAR(80)",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS published_to_budget_at TIMESTAMPTZ",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS published_budget_version_id INTEGER REFERENCES planning_version(id)",
+            "CREATE INDEX IF NOT EXISTS ix_planning_version_type_year_effective_date ON planning_version (financial_type_id, year, effective_date)",
             # reservation_collection (22 chars) excede o VARCHAR(20) original.
             "ALTER TABLE etl_task ALTER COLUMN task_type TYPE VARCHAR(40)",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'collection'",
+            "ALTER TABLE scheduled_task ALTER COLUMN connection_id DROP NOT NULL",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
             "ALTER TABLE forecast_ack ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'Informação'",
             "ALTER TABLE forecast_ack ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0",
@@ -217,6 +232,25 @@ async def lifespan(app: FastAPI):
             )""",
         ):
             await conn.execute(text(statement))
+        # Built-in schedules are idempotent and remain editable by users.
+        await conn.execute(text("""
+            INSERT INTO scheduled_task
+              (name, connection_id, connection_ids, destination_reprocess,
+               cron_expression, timezone, active, config_json, schedule_type)
+            SELECT 'Backup Diário Full', NULL, '[]'::jsonb, FALSE,
+                   '0 1 * * *', 'America/Sao_Paulo', TRUE,
+                   json_build_object('retention_days', 30), 'backup'
+            WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'backup')
+        """))
+        await conn.execute(text("""
+            INSERT INTO scheduled_task
+              (name, connection_id, connection_ids, destination_reprocess,
+               cron_expression, timezone, active, config_json, schedule_type)
+            SELECT 'Reprocessamento', NULL, '[]'::jsonb, FALSE,
+                   '0 2 * * 0', 'America/Sao_Paulo', FALSE,
+                   json_build_object('period_mode', 'all', 'accuracy', TRUE, 'shared_cost', FALSE, 'forecast_config_ids', '[]'::json, 'dimon_rule_ids', '[]'::json), 'reprocess'
+            WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'reprocess')
+        """))
         await conn.execute(text("""
             DO $$ BEGIN
               IF to_regclass('fact_cost') IS NOT NULL THEN
@@ -312,8 +346,9 @@ async def lifespan(app: FastAPI):
         from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules
         await ensure_default_config(db)
         await ensure_provider_forecast_rules(db)
-        from app.routers.planning import ensure_default_financial_types, ensure_planning_paths_synced
+        from app.routers.planning import ensure_default_budget_ids, ensure_default_financial_types, ensure_planning_paths_synced
         await ensure_default_financial_types(db)
+        await ensure_default_budget_ids(db)
         await ensure_planning_paths_synced(db)
         from app.routers.clone_rules import ensure_focus_templates
         await ensure_focus_templates(db)
@@ -375,6 +410,7 @@ app.include_router(reservations.router)
 app.include_router(scheduled_shutdown.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(oci_operational.router)
+app.include_router(ideas.router)
 
 
 @app.get("/health")

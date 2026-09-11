@@ -7,7 +7,8 @@ import {
 import { Schedule, Add, Edit, Delete, PlayArrow } from "@mui/icons-material";
 import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
-  ScheduledTask, SourceConnection, formatApiError,
+  ScheduledTask, SourceConnection, formatApiError, getDestinationTables, getForecastConfigs,
+  getDimonRules, DestinationTable, ForecastConfig, DimonRule,
 } from "../../services/api";
 import SortableTable from "../../components/SortableTable";
 
@@ -21,6 +22,7 @@ const cronPresets = [
 ];
 
 interface SchedForm {
+  schedule_type: "backup" | "collection" | "reprocess";
   name: string;
   connection_id: number;
   connection_ids: number[];
@@ -30,13 +32,23 @@ interface SchedForm {
   active: boolean;
   forecast_after_ingestion: boolean;
   forecast_config_id: string;
+  destination_table_ids: number[];
+  period_mode: "selected" | "all";
+  billing_periods: string;
+  forecast_config_ids: number[];
+  dimon_rule_ids: number[];
+  accuracy: boolean;
+  shared_cost: boolean;
 }
 
 const EMPTY_FORM: SchedForm = {
+  schedule_type: "collection",
   name: "", connection_id: 0, connection_ids: [],
   cron_expression: "0 3 * * *", timezone: "America/Sao_Paulo",
   destination_reprocess: true, active: true,
   forecast_after_ingestion: false, forecast_config_id: "",
+  destination_table_ids: [], period_mode: "all", billing_periods: "",
+  forecast_config_ids: [], dimon_rule_ids: [], accuracy: true, shared_cost: false,
 };
 
 export default function SchedulesPanel({ connections }: { connections: SourceConnection[] }) {
@@ -46,12 +58,33 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const [form, setForm] = useState<SchedForm>(EMPTY_FORM);
   const [running, setRunning] = useState<Set<number>>(new Set());
   const [error, setError] = useState("");
+  const [destinations, setDestinations] = useState<DestinationTable[]>([]);
+  const [forecastConfigs, setForecastConfigs] = useState<ForecastConfig[]>([]);
+  const [dimonRules, setDimonRules] = useState<DimonRule[]>([]);
+
+  const focusDimonIds = (goldIds: number[]): number[] => {
+    const goldNames = new Set(
+      destinations.filter(d => goldIds.includes(d.id)).map(d => d.physical_name.toLowerCase()),
+    );
+    return dimonRules.filter(rule => rule.active !== false && (rule.sources || []).some(source =>
+      (source.gold_tables || [source.gold_table || ""]).some(table => goldNames.has(String(table).toLowerCase())),
+    )).map(rule => rule.id).filter((id): id is number => id != null);
+  };
+
+  const forecastCandidates = forecastConfigs.filter(config =>
+    config.active && (!form.destination_table_ids.length || form.destination_table_ids.includes(config.destination_table_id)),
+  );
 
   const loadSchedules = () => {
     getSchedules().then(setSchedules).catch((e) => setError(formatApiError(e, "Falha ao carregar agendamentos")));
   };
 
-  useEffect(() => { loadSchedules(); }, []);
+  useEffect(() => {
+    loadSchedules();
+    getDestinationTables(true).then(setDestinations).catch(() => {});
+    getForecastConfigs().then(setForecastConfigs).catch(() => {});
+    getDimonRules().then(setDimonRules).catch(() => {});
+  }, []);
 
   const openNew = () => {
     setEditing(null);
@@ -62,26 +95,56 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const openEdit = (s: ScheduledTask) => {
     setEditing(s);
     const cfg = s.config_json || {};
-    const ids = Array.isArray(s.connection_ids) && s.connection_ids.length ? s.connection_ids : [s.connection_id];
+    const primary = s.connection_id ?? 0;
+    const ids = Array.isArray(s.connection_ids) && s.connection_ids.length ? s.connection_ids : (primary ? [primary] : []);
     setForm({
-      name: s.name, connection_id: s.connection_id, connection_ids: ids,
+      schedule_type: s.schedule_type || "collection",
+      name: s.name, connection_id: primary, connection_ids: ids,
       cron_expression: s.cron_expression, timezone: s.timezone,
       destination_reprocess: s.destination_reprocess, active: s.active,
       forecast_after_ingestion: Boolean(cfg.forecast_after_ingestion),
       forecast_config_id: String(cfg.forecast_config_id || ""),
+      destination_table_ids: Array.isArray(cfg.destination_table_ids) ? cfg.destination_table_ids.map(Number) : [],
+      period_mode: cfg.period_mode === "selected" ? "selected" : "all",
+      billing_periods: Array.isArray(cfg.billing_periods) ? cfg.billing_periods.join(", ") : "",
+      forecast_config_ids: Array.isArray(cfg.forecast_config_ids) && cfg.forecast_config_ids.length
+        ? cfg.forecast_config_ids.map(Number)
+        : (cfg.forecast_config_id ? [Number(cfg.forecast_config_id)] : []),
+      dimon_rule_ids: Array.isArray(cfg.dimon_rule_ids) && cfg.dimon_rule_ids.length
+        ? cfg.dimon_rule_ids.map(Number)
+        : focusDimonIds(Array.isArray(cfg.destination_table_ids) ? cfg.destination_table_ids.map(Number) : []),
+      accuracy: cfg.accuracy !== false, shared_cost: cfg.shared_cost === true,
     });
     setDialogOpen(true);
   };
+
+  // Existing Cloud schedules historically stored an empty Dimon list to mean
+  // "automatic". Surface the actual FOCUS-related rules as checked items.
+  useEffect(() => {
+    if (!dialogOpen || !editing || form.schedule_type === "backup" || form.dimon_rule_ids.length) return;
+    const inferred = focusDimonIds(form.destination_table_ids);
+    if (inferred.length) setForm(current => ({ ...current, dimon_rule_ids: inferred }));
+  }, [dialogOpen, editing, destinations, dimonRules]);
 
   const save = async () => {
     try {
       const payload = {
         ...form,
-        connection_id: form.connection_id,
-        connection_ids: form.connection_ids.length ? form.connection_ids : [form.connection_id],
+        connection_id: form.schedule_type === "backup" ? null : form.connection_id,
+        connection_ids: form.schedule_type === "backup" ? [] : (form.connection_ids.length ? form.connection_ids : [form.connection_id]),
+        schedule_type: form.schedule_type,
         config_json: {
           forecast_after_ingestion: form.forecast_after_ingestion,
-          forecast_config_id: form.forecast_config_id ? Number(form.forecast_config_id) : null,
+          forecast_config_id: form.forecast_after_ingestion || form.schedule_type === "reprocess"
+            ? (form.forecast_config_ids[0] || (form.forecast_config_id ? Number(form.forecast_config_id) : null))
+            : null,
+          destination_table_ids: form.destination_table_ids,
+          period_mode: form.period_mode,
+          billing_periods: form.billing_periods.split(",").map(v => v.trim()).filter(Boolean),
+          forecast_config_ids: form.forecast_after_ingestion || form.schedule_type === "reprocess" ? form.forecast_config_ids : [],
+          dimon_rule_ids: form.dimon_rule_ids,
+          accuracy: form.accuracy,
+          shared_cost: form.shared_cost,
         },
       };
       if (editing) {
@@ -154,6 +217,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               render: (s: ScheduledTask) => (
                 <Box>
                   <Typography variant="body2" fontWeight={500}>{s.name}</Typography>
+                  <Chip size="small" variant="outlined" label={s.schedule_type === "backup" ? "Backup full" : s.schedule_type === "reprocess" ? "Reprocessamento" : "Coleta"} sx={{ mt: 0.5 }} />
                   <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
                     {s.cron_expression}
                   </Typography>
@@ -163,9 +227,9 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
             {
               key: "connection_id", label: "Conexoes", width: 200,
               render: (s: ScheduledTask) => {
-                const ids = Array.isArray(s.connection_ids) && s.connection_ids.length ? s.connection_ids : [s.connection_id];
+                const ids = Array.isArray(s.connection_ids) && s.connection_ids.length ? s.connection_ids : (s.connection_id ? [s.connection_id] : []);
                 const codes = ids.map(id => connections.find(c => c.id === id)?.code || `ID ${id}`);
-                return codes.length === 1 ? codes[0] : codes.join(", ");
+                return codes.length ? (codes.length === 1 ? codes[0] : codes.join(", ")) : "—";
               },
             },
             {
@@ -248,6 +312,18 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
             <TextField label="Nome" value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })} />
             <FormControl size="small">
+              <InputLabel>Tipo</InputLabel>
+              <Select value={form.schedule_type} label="Tipo" onChange={e => {
+                const type = e.target.value as SchedForm["schedule_type"];
+                setForm({ ...form, schedule_type: type, name: form.name || (type === "backup" ? "Backup Diário Full" : type === "reprocess" ? "Reprocessamento" : "") });
+              }}>
+                <MenuItem value="collection">Coleta</MenuItem>
+                <MenuItem value="reprocess">Reprocessamento</MenuItem>
+                <MenuItem value="backup">Backup Full</MenuItem>
+              </Select>
+            </FormControl>
+            {form.schedule_type === "backup" && <Alert severity="info">Backup completo do projeto, PostgreSQL e warehouse Iceberg. Não requer conexão.</Alert>}
+            {form.schedule_type !== "backup" && <FormControl size="small">
               <InputLabel>Conexoes (uma ou varias)</InputLabel>
               <Select
                 multiple
@@ -266,9 +342,47 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                 {connections.map(c => (
                   <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
                 ))}
-              </Select>
+            </Select>
               <FormHelperText>Selecione todas as origens que este agendamento deve coletar.</FormHelperText>
-            </FormControl>
+            </FormControl>}
+
+            {form.schedule_type === "collection" && <>
+              <FormControlLabel control={<Switch checked={form.destination_reprocess} onChange={e => setForm({ ...form, destination_reprocess: e.target.checked })} />} label="Auto-reprocessar tabela destino após extração" />
+              <FormHelperText>Se desligado, a execução termina na Bronze e as etapas seguintes ficam indisponíveis.</FormHelperText>
+            </>}
+
+            {form.schedule_type !== "backup" && (form.schedule_type !== "collection" || form.destination_reprocess) && <>
+              <Box>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Golds</InputLabel>
+                  <Select multiple value={form.destination_table_ids} label="Golds"
+                    onChange={e => setForm({ ...form, destination_table_ids: e.target.value as number[] })}
+                    renderValue={ids => (ids as number[]).map(id => destinations.find(d => d.id === id)?.name || `ID ${id}`).join(", ")}>
+                    {destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
+                  </Select>
+                  <FormHelperText>Golds reprocessadas após a Bronze (ou relidas na reclassificação).</FormHelperText>
+                </FormControl>
+                <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
+                  <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: destinations.map(d => d.id) })}>Selecionar todas</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: [] })}>Limpar</Button>
+                </Box>
+              </Box>
+              {form.schedule_type === "collection" && <FormControlLabel control={<Switch checked={form.forecast_after_ingestion} onChange={e => setForm({ ...form, forecast_after_ingestion: e.target.checked })} />} label="Executar Forecast após ingestão e reprocessamento" />}
+              {form.schedule_type === "reprocess" && <>
+                <FormControl size="small"><InputLabel>Períodos</InputLabel><Select value={form.period_mode} label="Períodos" onChange={e => setForm({ ...form, period_mode: e.target.value as "selected" | "all" })}><MenuItem value="all">Todos disponíveis</MenuItem><MenuItem value="selected">Selecionados</MenuItem></Select></FormControl>
+                {form.period_mode === "selected" && <TextField label="Períodos (YYYYMM)" value={form.billing_periods} onChange={e => setForm({ ...form, billing_periods: e.target.value })} helperText="Ex.: 202601, 202602, 202603" />}
+              </>}
+              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatos</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatos" onChange={e => setForm({ ...form, forecast_config_ids: e.target.value as number[], forecast_config_id: String((e.target.value as number[])[0] || "") })} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === id); return candidate ? `${candidate.name} — ${candidate.table_name || `Gold ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `Gold ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>Somente configurações ativas compatíveis com as Golds selecionadas.</FormHelperText></FormControl>}
+              <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acurácia" />
+              <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar custo compartilhado" />
+              <Box>
+                <FormControl size="small" fullWidth><InputLabel>Dimons</InputLabel><Select multiple value={form.dimon_rule_ids} label="Dimons" onChange={e => setForm({ ...form, dimon_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => dimonRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{dimonRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>Dimons relacionadas à Gold selecionada já aparecem marcadas.</FormHelperText></FormControl>
+                <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
+                  <Button size="small" onClick={() => setForm({ ...form, dimon_rule_ids: dimonRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Selecionar todas</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, dimon_rule_ids: [] })}>Limpar</Button>
+                </Box>
+              </Box>
+            </>}
 
             <Typography variant="subtitle2" sx={{ mt: 1 }}>Expressao Cron</Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
@@ -289,19 +403,6 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               helperText="Formato: minuto hora dia mes dia_semana. Ex: 0 3 * * * (diario as 3h)" />
 
             <FormControlLabel
-              control={<Switch checked={form.destination_reprocess}
-                onChange={e => setForm({ ...form, destination_reprocess: e.target.checked })} />}
-              label="Auto-reprocessar tabela destino apos extracao"
-            />
-            <FormControlLabel
-              control={<Switch checked={form.forecast_after_ingestion}
-                onChange={e => setForm({ ...form, forecast_after_ingestion: e.target.checked })} />}
-              label="Executar Forecast após ingestão e reprocessamento"
-            />
-            {form.forecast_after_ingestion && <TextField label="ID da configuração Forecast" type="number" value={form.forecast_config_id}
-              onChange={e => setForm({ ...form, forecast_config_id: e.target.value })}
-              helperText="Crie a configuração no menu Forecast e informe o ID exibido." />}
-            <FormControlLabel
               control={<Switch checked={form.active}
                 onChange={e => setForm({ ...form, active: e.target.checked })} />}
               label="Ativo"
@@ -310,7 +411,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={save} variant="contained" disabled={!form.name || form.connection_ids.length === 0}>
+          <Button onClick={save} variant="contained" disabled={!form.name || (form.schedule_type !== "backup" && form.connection_ids.length === 0)}>
             Salvar
           </Button>
         </DialogActions>

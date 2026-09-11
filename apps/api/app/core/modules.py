@@ -9,7 +9,7 @@ ALL_MODULES = [
     "ai_provider_dashboards", "azure_ptu", "azure_resource_graph",
     "azure_tag_policy", "oci_operational", "scheduled_shutdown",
     # módulos de administração
-    "auth", "users", "groups", "roles", "audit",
+    "auth", "users", "groups", "roles", "audit", "ideas",
 ]
 
 ALL_ACTIONS = ("read", "create", "update", "delete")

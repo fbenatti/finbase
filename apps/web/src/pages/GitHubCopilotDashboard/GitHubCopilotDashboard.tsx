@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Box, Typography, Paper, Stack, Card, CardContent, FormControl, InputLabel,
   Select, MenuItem, CircularProgress, Chip, TextField, InputAdornment,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Grid,
   TablePagination, Alert, Drawer, IconButton, Divider
 } from "@mui/material";
 import {
@@ -71,6 +71,8 @@ interface CopilotMetrics {
   cloud_cost: number;
   cloud_cost_usd: number;
   cost_period_label?: string;
+  processed_tokens?: number;
+  cost_per_million_tokens?: number | null;
   current_period?: string;
   current_realized_brl?: number;
   projected_cost_brl?: number;
@@ -236,6 +238,7 @@ interface FinancialInsightRow {
 interface FinancialInsights {
   github: FinancialInsightRow[];
   github_alerts?: FinancialInsightRow[];
+  reference?: { period?: string; token_date_from?: string | null; token_date_to?: string | null; last_collected_at?: string | null };
   azure: Array<{ meter_subcategory: string; meter_name: string; product_name: string; cost_category: string; usage_start_date?: string; usage_end_date?: string; quantity: number; unit_cost_brl: number | null; cost_brl: number; cost_usd: number; rows: number }>;
   totals?: { github_total_tokens: number; github_cost_per_million_tokens: number | null; github_cost_per_million_tokens_market_usd?: number | null; github_cost_per_million_tokens_market_brl?: number | null; github_credits?: number; azure_cost_brl: number; reconciliation_delta_brl: number; reconciliation_market_vs_paid_brl?: number; github_market_cost_brl?: number; current_period?: string; current_realized_brl?: number; current_forecast_brl?: number; current_projection_brl?: number; current_projection_total_brl?: number };
 }
@@ -341,6 +344,11 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
   });
 
   const paginatedUsers = sortedUsers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const tokenReference = financialInsights?.reference;
+  const tokenPeriodLabel = periodLabel(tokenReference?.period || period);
+  const tokenWindowLabel = tokenReference?.token_date_from && tokenReference?.token_date_to
+    ? `${tokenReference.token_date_from} até ${tokenReference.token_date_to}`
+    : "janela ainda não informada pela coleta";
 
   const card = (label: string, value: string, color: string) => (
     <Card sx={{ flex: 1, minWidth: 170, borderTop: `3px solid ${color}` }}>
@@ -361,13 +369,13 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
       )}
       <Box sx={embedded ? undefined : { p: 3 }}>
         <Paper elevation={0} sx={embedded ? undefined : { p: 2.5, borderRadius: 2, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
-      <Stack direction={{ xs: "column", sm: "row" }} justifyContent={embedded ? "space-between" : "flex-end"} alignItems={{ xs: "flex-start", sm: "center" }} gap={2} sx={embedded ? { mb: 3 } : { mb: 2 }}>
-        {embedded && (
-          <Box>
-            <Typography variant="h4" fontWeight="bold" color="primary.main">GitHub Copilot — Dashboard</Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>Métricas de adoção, governança de licenças e consumo financeiro de IA por desenvolvedor.</Typography>
-          </Box>
-        )}
+      {embedded && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h4">GitHub Copilot — Dashboard</Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>Métricas de adoção, governança de licenças e consumo financeiro de IA por desenvolvedor.</Typography>
+        </Box>
+      )}
+      <Stack direction="row" justifyContent="flex-end" sx={{ mb: 3 }}>
         <FormControl size="small" sx={{ minWidth: 220, bgcolor: "background.paper" }}>
           <InputLabel id="copilot-period-label">Período / Mês de Referência</InputLabel>
           <Select labelId="copilot-period-label" value={period} onChange={(e) => setPeriod(e.target.value)}>
@@ -383,12 +391,34 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
         </Box>
       ) : (
         <>
+          <Card sx={{ color: "white", background: "linear-gradient(120deg, #24292F, #0969DA)", mb: 3 }}>
+            <CardContent>
+              <Typography variant="overline" sx={{ opacity: 0.85 }}>Eficiência econômica do GitHub Copilot</Typography>
+              <Grid container spacing={2} mt={0.25}>
+                <Grid item xs={12} md={4}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Custo realizado</Typography>
+                  <Typography variant="h4">{money.format(metrics?.cloud_cost || 0)}</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.75 }}>{periodLabel(metrics?.cost_period_label || "")} · SKUs GitHub Copilot faturados</Typography>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Tokens processados</Typography>
+                  <Typography variant="h4">{compact(metrics?.processed_tokens || 0)}</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.75 }}>input + output + cache · {periodLabel(metrics?.cost_period_label || "")}</Typography>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Custo por MM de tokens</Typography>
+                  <Typography variant="h4">{metrics?.cost_per_million_tokens == null ? "—" : money.format(metrics.cost_per_million_tokens)}</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.75 }}>custo realizado ÷ milhões de tokens</Typography>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+
           <Stack direction="row" gap={2} flexWrap="wrap" mb={4}>
             {card("Licenças Ativas", `${metrics?.active_licenses || 0}`, "#64748B")}
             {card("Linhas Aceitas", compact(metrics?.lines_accepted || 0), "#2563EB")}
             {card("Interações", compact(metrics?.chat_turns || 0), "#0284C7")}
             {card("Créditos de IA", `${compact(metrics?.total_credits || 0)}`, "#F59E0B")}
-            {card("Custo realizado (BRL)", money.format(metrics?.cloud_cost || 0), "#16A34A")}
             {metrics?.current_period && (metrics?.projected_cost_brl || 0) > 0 && (
               <Card sx={{ flex: 1, minWidth: 170, borderTop: "3px solid #0284C7" }}>
                 <CardContent>
@@ -403,27 +433,15 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, mb: 4 }}>
             <Typography variant="h5" fontWeight="bold" color="primary.main" mb={1}>FinOps: GitHub × Azure</Typography>
             <Typography variant="body2" color="text.secondary" mb={2}>
-              Custos reconciliados por SKU (Dimon <b>dest_dm_cost_copilot_custo</b>). A Microsoft concedeu créditos extras até
-              setembro/2026 — o líquido faturado fica ~0; o <b>custo de mercado</b> (US$ 0,01/crédito, derivado do relatório de AI Credits)
-              reflete o valor real consumido.
+              Custo realizado e consumo processado são conciliados pelo mês fechado: SKUs faturados de GitHub Copilot na Dimon
+              <b> dest_dm_cost_copilot_custo</b> ÷ input + output + cache do relatório financeiro.
             </Typography>
 
             <Stack direction={{ xs: "column", md: "row" }} gap={2} mb={3}>
               <Box sx={{ flex: 1, p: 2, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
-                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">Custo por MM de tokens (mercado)</Typography>
-                <Typography variant="h5" fontWeight={800} color="primary.main">
-                  {financialInsights?.totals?.github_cost_per_million_tokens_market_brl == null
-                    ? "Não disponível"
-                    : money.format(financialInsights.totals.github_cost_per_million_tokens_market_brl)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  US$ {financialInsights?.totals?.github_cost_per_million_tokens_market_usd?.toLocaleString("pt-BR", { style: "currency", currency: "USD" }) ?? "—"}/MM · líquido faturado {money.format(financialInsights?.totals?.github_cost_per_million_tokens || 0)} (promo)
-                </Typography>
-              </Box>
-              <Box sx={{ flex: 1, p: 2, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
                 <Typography variant="subtitle2" fontWeight={700} color="text.secondary">Tokens processados</Typography>
                 <Typography variant="h5" fontWeight={800}>{compact(financialInsights?.totals?.github_total_tokens || 0)}</Typography>
-                <Typography variant="caption" color="text.secondary">input + output + cache (relatório financeiro)</Typography>
+                <Typography variant="caption" color="text.secondary">{tokenWindowLabel} · input + output + cache</Typography>
               </Box>
               <Box sx={{ flex: 1, p: 2, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
                 <Typography variant="subtitle2" fontWeight={700} color="text.secondary">Créditos de IA consumidos</Typography>
@@ -434,7 +452,10 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
 
             <Stack direction={{ xs: "column", md: "row" }} gap={3}>
               <Box flex={1}>
-                <Typography variant="subtitle2" fontWeight={700} mb={1}>Custos Azure por SKU</Typography>
+                <Typography variant="subtitle2" fontWeight={700} mb={0.25}>Custos Azure por SKU</Typography>
+                <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                  Realizado parcial · referência operacional: {tokenWindowLabel}
+                </Typography>
                 <TableContainer sx={{ border: "1px solid #e2e8f0", borderRadius: 1.5 }}>
                   <Table size="small">
                     <TableHead>
@@ -478,11 +499,6 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                     </TableBody>
                   </Table>
                 </TableContainer>
-                {financialInsights?.azure?.[0]?.usage_end_date && (
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                    Cobertura Azure: {financialInsights.azure[0].usage_start_date} a {financialInsights.azure[0].usage_end_date} — mês parcial não é custo realizado.
-                  </Typography>
-                )}
               </Box>
               <Box flex={1}>
                 <Typography variant="subtitle2" fontWeight={700} mb={1}>Alertas de qualidade</Typography>
@@ -656,7 +672,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
             <TablePagination component="div" count={engagementUsers.length} page={page} onPageChange={(_, p) => setPage(p)} rowsPerPage={rowsPerPage} onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }} rowsPerPageOptions={[10, 25, 50, 100]} />
           </Paper>
 
-          <Drawer anchor="right" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: { xs: "100%", sm: 540 }, p: 3, bgcolor: "#f8fafc" } }}>
+          <Drawer anchor="right" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: { xs: "100%", sm: 756 }, p: 3, bgcolor: "#f8fafc" } }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Stack direction="row" alignItems="center" gap={1}><Psychology color="primary" /><Typography variant="h6" fontWeight="bold">Perfil de Consumo</Typography></Stack>
               <IconButton onClick={() => setDrawerOpen(false)}><Close /></IconButton>
@@ -764,7 +780,9 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                 useResizeHandler
                 style={{ width: "100%" }}
               />
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
+              {/* Cards de resumo de créditos removidos da UI a pedido do negócio.
+                  O código é preservado para eventual reativação. */}
+              {/* <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
                 {(() => {
                   const last = history[history.length - 1];
                   const totalConsumed = history.reduce((s, h) => s + (h.total_credits || 0), 0);
@@ -789,7 +807,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                     </>
                   );
                 })()}
-              </Stack>
+              </Stack> */}
             </Paper>
           )}
 

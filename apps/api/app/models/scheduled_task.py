@@ -8,7 +8,8 @@ class ScheduledTask(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
-    connection_id = Column(Integer, nullable=False)
+    # Backup schedules do not have a source connection.
+    connection_id = Column(Integer, nullable=True)
     # Multi-connection schedules: when non-empty, the schedule covers every
     # connection in this list (e.g. all cloud sources, all tool sources).
     # Falls back to [connection_id] when empty for backward compatibility.
@@ -20,5 +21,6 @@ class ScheduledTask(Base):
     last_run_at = Column(DateTime(timezone=True), nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
     config_json = Column(JSON, nullable=False, default=dict)
+    schedule_type = Column(String(30), nullable=False, default="collection")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

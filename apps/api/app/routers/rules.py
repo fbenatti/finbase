@@ -748,6 +748,7 @@ async def list_departments_grid(
             Department.name.ilike(needle),
             parent.name.ilike(needle),
             Department.centro_custo.ilike(needle),
+            Department.id_orcamento.ilike(needle),
             Department.ambiente.ilike(needle),
             Department.cloud_filter.ilike(needle),
         ))
@@ -756,6 +757,7 @@ async def list_departments_grid(
         "name": Department.name,
         "parent_name": parent.name,
         "centro_custo": Department.centro_custo,
+        "id_orcamento": Department.id_orcamento,
         "ambiente": Department.ambiente,
         "cloud_filter": Department.cloud_filter,
         "shared_cost": shared_enabled,
@@ -808,6 +810,7 @@ async def list_departments_grid(
         "name": department.name,
         "parent_name": parent_name,
         "centro_custo": department.centro_custo,
+        "id_orcamento": department.id_orcamento,
         "ambiente": department.ambiente,
         "cloud_filter": department.cloud_filter,
         "custom_fields": department.custom_fields,
@@ -1184,6 +1187,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     parent_id=parent_id,
                     name=dn,
                     centro_custo=row.get("CentrodeCusto", "").strip() or None,
+                    id_orcamento=row.get("IDOrcamento", "").strip() or None,
                     cloud_filter=cloud_name or None,
                     ambiente=row.get("Origem", "").strip() or None,
                     custom_fields={
@@ -1238,6 +1242,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 parent_id=parent_id,
                 name=pn,
                 centro_custo=row.get("CentrodeCusto", "").strip() or None,
+                id_orcamento=row.get("IDOrcamento", "").strip() or None,
                 cloud_filter=row.get("Cloud", "").strip() or None,
                 ambiente=row.get("Origem", "").strip() or None,
                 custom_fields={

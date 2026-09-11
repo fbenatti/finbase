@@ -375,7 +375,7 @@ export default function Connections() {
         oci_fingerprint: cfg.fingerprint || "",
         oci_region: cfg.region || "sa-saopaulo-1",
         oci_private_key: cfg.private_key || cfg.key_content || "",
-        oci_genai_compartments: (cfg.generative_ai_compartment_ids || []).join("\n"),
+        oci_genai_compartments: (Array.isArray(cfg.generative_ai_compartment_ids) ? cfg.generative_ai_compartment_ids : []).join("\n"),
         blob_prefixes: (conn.blob_prefixes || []).join("\n"),
       });
     } else if (conn.connector_type === "mongodb_atlas") {

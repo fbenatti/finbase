@@ -5,64 +5,176 @@ export const api = axios.create({
   timeout: 120000,
 });
 
-export async function getAzurePtuOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/overview", params, { signal });
+export async function getAzurePtuOverview(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/overview",
+    params,
+    { signal },
+  );
   return data;
 }
-export async function getAzurePtuOpsOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/ops-overview", params, { signal });
+export async function getAzurePtuOpsOverview(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/ops-overview",
+    params,
+    { signal },
+  );
   return data;
 }
-export async function getAzurePtuOpsHeatmap(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/ops-heatmap", params, { signal });
+export async function getAzurePtuOpsHeatmap(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/ops-heatmap",
+    params,
+    { signal },
+  );
   return data;
 }
 
-export async function getAzurePtuExecutiveOverview(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/executive-overview", params, { signal });
+export async function getAzurePtuExecutiveOverview(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/executive-overview",
+    params,
+    { signal },
+  );
   return data;
 }
-export async function getAzurePtuView(view: "projects"|"deployments"|"subprojects"|"trends"|"reconciliation"|"recommendations", params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.post(`/visoes-consumo-ia/dashboard/${view}`, params, { signal }); return data;
+export async function getAzurePtuView(
+  view:
+    | "projects"
+    | "deployments"
+    | "subprojects"
+    | "trends"
+    | "reconciliation"
+    | "recommendations",
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post(
+    `/visoes-consumo-ia/dashboard/${view}`,
+    params,
+    { signal },
+  );
+  return data;
 }
 
 /** Dashboard executivo de custo de Aura Brain ou Vivo Mais, usando a Dimon específica de cada projeto. */
-export async function getProjectCostDashboard(params: { project_key: "aura-brain" | "vivo-mais"; period_range?: "current_year" | "all" }, signal?: AbortSignal) {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/project-costs", params, { signal });
+export async function getProjectCostDashboard(
+  params: {
+    project_key: "aura-brain" | "vivo-mais";
+    period_range?: "current_year" | "all";
+  },
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/project-costs",
+    params,
+    { signal },
+  );
   return data;
 }
 
 export type SinfoniaDashboard = {
-  available: boolean; empty?: boolean; table: string;
-  reference?: { period: string; label: string; source: "realizado" | "forecast" };
+  available: boolean;
+  empty?: boolean;
+  table: string;
+  reference?: {
+    period: string;
+    label: string;
+    source: "realizado" | "forecast";
+  };
   kpis?: { total: number; ibm: number; factory: number; forecast: number };
-  monthly: Array<{ period: string; label: string; ibm: number; factory: number; total: number; forecast_total: number; source: string }>;
-  projects?: Array<{ project: string; group: string; cloud: string; cost: number }>;
+  monthly: Array<{
+    period: string;
+    label: string;
+    ibm: number;
+    factory: number;
+    total: number;
+    forecast_total: number;
+    source: string;
+  }>;
+  projects?: Array<{
+    project: string;
+    group: string;
+    cloud: string;
+    cost: number;
+  }>;
   clouds?: Array<{ cloud: string; cost: number }>;
   ai_families?: Array<{ family: string; cost: number }>;
   services?: Array<{ cloud: string; service: string; cost: number }>;
   notes?: string[];
 };
 
-export async function getSinfoniaDashboard(signal?: AbortSignal): Promise<SinfoniaDashboard> {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/sinfonia", {}, { signal });
+export async function getSinfoniaDashboard(
+  signal?: AbortSignal,
+): Promise<SinfoniaDashboard> {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/sinfonia",
+    {},
+    { signal },
+  );
   return data;
 }
 
 export type DatameshDashboard = {
-  available: boolean; empty?: boolean; table: string;
-  reference?: { period: string; label: string; source: "realizado" | "forecast" };
-  kpis?: { total: number; databricks: number; data: number; infra: number; forecast: number };
-  monthly: Array<{ period: string; label: string; buckets: Record<string, number>; total: number; forecast_total: number; source: string }>;
-  projects?: Array<{ project: string; cost: number; dominant_bucket: string; buckets: Record<string, number> }>;
-  coverage?: { project_periods: string[]; reference_has_projects: boolean; project_reference?: string | null };
+  available: boolean;
+  empty?: boolean;
+  table: string;
+  reference?: {
+    period: string;
+    label: string;
+    source: "realizado" | "forecast";
+  };
+  kpis?: {
+    total: number;
+    databricks: number;
+    data: number;
+    infra: number;
+    forecast: number;
+  };
+  monthly: Array<{
+    period: string;
+    label: string;
+    buckets: Record<string, number>;
+    total: number;
+    forecast_total: number;
+    source: string;
+  }>;
+  projects?: Array<{
+    project: string;
+    cost: number;
+    dominant_bucket: string;
+    buckets: Record<string, number>;
+  }>;
+  coverage?: {
+    project_periods: string[];
+    reference_has_projects: boolean;
+    project_reference?: string | null;
+  };
   cuts?: Record<string, Array<{ name: string; cost: number }>>;
   services?: Array<{ bucket: string; service: string; cost: number }>;
   notes?: string[];
 };
 
-export async function getDatameshDashboard(signal?: AbortSignal): Promise<DatameshDashboard> {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/datamesh", {}, { signal });
+export async function getDatameshDashboard(
+  signal?: AbortSignal,
+): Promise<DatameshDashboard> {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/datamesh",
+    {},
+    { signal },
+  );
   return data;
 }
 export type WisperDashboardPayload = {
@@ -93,11 +205,24 @@ export type WisperDashboardPayload = {
     hosting_dedicated?: {
       total?: number;
       share_pct?: number;
-      generative_ai?: { cost?: number; share_pct?: number; bucket?: string; source?: string };
-      gpu_hosting?: { cost?: number; share_pct?: number; bucket?: string; source?: string };
+      generative_ai?: {
+        cost?: number;
+        share_pct?: number;
+        bucket?: string;
+        source?: string;
+      };
+      gpu_hosting?: {
+        cost?: number;
+        share_pct?: number;
+        bucket?: string;
+        source?: string;
+      };
     };
   };
-  buckets?: Record<string, { cost?: number; share_pct?: number; prev?: number }>;
+  buckets?: Record<
+    string,
+    { cost?: number; share_pct?: number; prev?: number }
+  >;
   capacity?: {
     gpu_hours?: number;
     gpu_average?: number;
@@ -105,8 +230,21 @@ export type WisperDashboardPayload = {
     ai_unit_average?: number;
     ocpu_hours?: number;
     gb_hours?: number;
-    daily?: Array<{ date: string; cost: number; gpu_hours?: number; ai_unit_hours?: number; buckets?: Record<string, number>; is_partial?: boolean }>;
-    daily_closed?: Array<{ date: string; cost: number; gpu_hours?: number; ai_unit_hours?: number; buckets?: Record<string, number> }>;
+    daily?: Array<{
+      date: string;
+      cost: number;
+      gpu_hours?: number;
+      ai_unit_hours?: number;
+      buckets?: Record<string, number>;
+      is_partial?: boolean;
+    }>;
+    daily_closed?: Array<{
+      date: string;
+      cost: number;
+      gpu_hours?: number;
+      ai_unit_hours?: number;
+      buckets?: Record<string, number>;
+    }>;
     reconciliation?: { note?: string };
   };
   monthly?: Array<{
@@ -143,7 +281,11 @@ export type WisperDashboardPayload = {
       date_from?: string | null;
       date_to?: string | null;
     };
-    daily?: Array<{ date: string; input_tokens?: number; output_tokens?: number }>;
+    daily?: Array<{
+      date: string;
+      input_tokens?: number;
+      output_tokens?: number;
+    }>;
     kpis?: {
       input_tokens?: number;
       output_tokens?: number;
@@ -176,9 +318,23 @@ export type WisperDashboardPayload = {
         compartment_id?: string;
         compartment_name?: string;
       }>;
-      endpoints_by_model?: Array<{ model: string; count: number; states?: Record<string, number> }>;
-      compute_gpu?: Array<{ shape: string; count: number; states?: Record<string, number>; source?: string }>;
-      compute_support?: Array<{ shape: string; count: number; states?: Record<string, number>; financial_bucket?: string }>;
+      endpoints_by_model?: Array<{
+        model: string;
+        count: number;
+        states?: Record<string, number>;
+      }>;
+      compute_gpu?: Array<{
+        shape: string;
+        count: number;
+        states?: Record<string, number>;
+        source?: string;
+      }>;
+      compute_support?: Array<{
+        shape: string;
+        count: number;
+        states?: Record<string, number>;
+        financial_bucket?: string;
+      }>;
       by_compartment?: Array<{
         compartment: string;
         ai_clusters: number;
@@ -186,7 +342,11 @@ export type WisperDashboardPayload = {
         compute_instances: number;
         gpu_units?: number;
       }>;
-      totals?: { gpu_units_dedicated?: number; endpoints?: number; compute_instances?: number };
+      totals?: {
+        gpu_units_dedicated?: number;
+        endpoints?: number;
+        compute_instances?: number;
+      };
       collected_at?: string | null;
     };
   };
@@ -205,8 +365,14 @@ export type WisperDashboardPayload = {
   notes?: string[];
 };
 
-export async function getWisperDashboard(signal?: AbortSignal): Promise<WisperDashboardPayload> {
-  const { data } = await api.post("/visoes-consumo-ia/dashboard/wisper", {}, { signal });
+export async function getWisperDashboard(
+  signal?: AbortSignal,
+): Promise<WisperDashboardPayload> {
+  const { data } = await api.post(
+    "/visoes-consumo-ia/dashboard/wisper",
+    {},
+    { signal },
+  );
   return data;
 }
 
@@ -216,42 +382,77 @@ export async function getReservationSources(signal?: AbortSignal) {
   return data;
 }
 export async function testReservationConnection(connectionId: number) {
-  const { data } = await api.post(`/reservations/connections/${connectionId}/test`);
+  const { data } = await api.post(
+    `/reservations/connections/${connectionId}/test`,
+  );
   return data;
 }
 export async function collectReservations(connectionIds: number[] = []) {
-  const { data } = await api.post("/reservations/collect", { connection_ids: connectionIds });
+  const { data } = await api.post("/reservations/collect", {
+    connection_ids: connectionIds,
+  });
   return data;
 }
-export async function getReservationsDashboard(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+export async function getReservationsDashboard(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
   const { data } = await api.get("/reservations/dashboard", { params, signal });
   return data;
 }
-export async function getReservationsCatalog(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+export async function getReservationsCatalog(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
   const { data } = await api.get("/reservations/catalog", { params, signal });
   return data;
 }
-export async function getReservationsUtilization(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.get("/reservations/utilization", { params, signal });
+export async function getReservationsUtilization(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get("/reservations/utilization", {
+    params,
+    signal,
+  });
   return data;
 }
-export async function getReservationsAdvisor(params: Record<string, unknown> = {}, signal?: AbortSignal) {
+export async function getReservationsAdvisor(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
   const { data } = await api.get("/reservations/advisor", { params, signal });
   return data;
 }
-export async function getReservationsRecommendations(params: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const { data } = await api.get("/reservations/recommendations", { params, signal });
+export async function getReservationsRecommendations(
+  params: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const { data } = await api.get("/reservations/recommendations", {
+    params,
+    signal,
+  });
   return data;
 }
 
-const CANCELLABLE_ANALYSIS = /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|visoes-consumo-ia\/dashboard|reservations\/dashboard)/;
+const CANCELLABLE_ANALYSIS =
+  /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|visoes-consumo-ia\/dashboard|reservations\/dashboard)/;
 const pendingAnalysis = new Set<AbortController>();
-type ExpectedViewInflight = { count: number; controller: AbortController; promise: Promise<unknown>; abortTimer?: number };
+type ExpectedViewInflight = {
+  count: number;
+  controller: AbortController;
+  promise: Promise<unknown>;
+  abortTimer?: number;
+};
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
 
 export function trackAnalysisAbort(controller: AbortController) {
   pendingAnalysis.add(controller);
-  controller.signal.addEventListener("abort", () => pendingAnalysis.delete(controller), { once: true });
+  controller.signal.addEventListener(
+    "abort",
+    () => pendingAnalysis.delete(controller),
+    { once: true },
+  );
 }
 
 /** Abort in-flight Trino/analysis HTTP requests (e.g. when leaving a page). */
@@ -269,7 +470,11 @@ export function cancelPendingAnalysisRequests() {
 
 api.interceptors.request.use((config) => {
   const url = config.url || "";
-  if (config.method?.toLowerCase() !== "post" || !CANCELLABLE_ANALYSIS.test(url) || config.signal) {
+  if (
+    config.method?.toLowerCase() !== "post" ||
+    !CANCELLABLE_ANALYSIS.test(url) ||
+    config.signal
+  ) {
     return config;
   }
   const controller = new AbortController();
@@ -312,7 +517,11 @@ async function tryRefresh(): Promise<string | null> {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       try {
-        const { data } = await axios.post("/api/auth/refresh", {}, { withCredentials: true });
+        const { data } = await axios.post(
+          "/api/auth/refresh",
+          {},
+          { withCredentials: true },
+        );
         setAccessToken(data.access_token);
         return data.access_token as string;
       } catch {
@@ -347,11 +556,18 @@ api.interceptors.response.use(
       sessionExpiredHandler?.();
     }
     return Promise.reject(error);
-  }
+  },
 );
 
-export async function apiLogin(username: string, password: string): Promise<{ must_change_password: boolean }> {
-  const { data } = await axios.post("/api/auth/login", { username, password }, { withCredentials: true });
+export async function apiLogin(
+  username: string,
+  password: string,
+): Promise<{ must_change_password: boolean }> {
+  const { data } = await axios.post(
+    "/api/auth/login",
+    { username, password },
+    { withCredentials: true },
+  );
   setAccessToken(data.access_token);
   return data;
 }
@@ -381,15 +597,25 @@ export async function bootSession(): Promise<AuthUser> {
   }
 }
 
-export async function apiChangePassword(currentPassword: string, newPassword: string): Promise<void> {
-  await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
+export async function apiChangePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await api.post("/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
 }
 
 // ── Auditoria ─────────────────────────────────────────────────────────────────
 export interface AuditLogItem {
   id: number;
   created_at: string | null;
-  user: { id: number | null; username: string | null; full_name?: string | null };
+  user: {
+    id: number | null;
+    username: string | null;
+    full_name?: string | null;
+  };
   action: string;
   method: string;
   module: string;
@@ -400,36 +626,87 @@ export interface AuditLogItem {
   changes?: Array<{ field: string; old: unknown; new: unknown }> | null;
   has_full_snapshot?: boolean;
 }
-export type GridFilterOp = "equals" | "notEquals" | "contains" | "notContains" | "after" | "before";
-export type GridFilter = { field: string; operator: GridFilterOp; value: string };
+export type GridFilterOp =
+  | "equals"
+  | "notEquals"
+  | "contains"
+  | "notContains"
+  | "after"
+  | "before";
+export type GridFilter = {
+  field: string;
+  operator: GridFilterOp;
+  value: string;
+};
 
-export async function getAuditLogs(params: {
-  limit?: number;
-  offset?: number;
-  search?: string;
-  sort_field?: string;
-  sort_direction?: "asc" | "desc";
-  filters?: GridFilter[];
-} = {}): Promise<{ items: AuditLogItem[]; total: number }> {
+export async function getAuditLogs(
+  params: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    sort_field?: string;
+    sort_direction?: "asc" | "desc";
+    filters?: GridFilter[];
+  } = {},
+): Promise<{ items: AuditLogItem[]; total: number }> {
   const { filters, search, ...query } = params;
   const effectiveFilters = search
-    ? [...(filters ?? []), { field: "username", operator: "contains" as GridFilterOp, value: search }]
-    : filters ?? [];
+    ? [
+        ...(filters ?? []),
+        {
+          field: "username",
+          operator: "contains" as GridFilterOp,
+          value: search,
+        },
+      ]
+    : (filters ?? []);
   const { data } = await api.get("/audit/logs", {
-    params: { ...query, ...(effectiveFilters.length ? { filters: JSON.stringify(effectiveFilters) } : {}) },
+    params: {
+      ...query,
+      ...(effectiveFilters.length
+        ? { filters: JSON.stringify(effectiveFilters) }
+        : {}),
+    },
   });
   return data;
 }
 
-export async function getAuditLog(id: number): Promise<AuditLogItem & { before_json?: unknown; after_json?: unknown; ip?: string | null; user_agent?: string | null; request_id?: string | null }> {
+export async function getAuditLog(
+  id: number,
+): Promise<
+  AuditLogItem & {
+    before_json?: unknown;
+    after_json?: unknown;
+    ip?: string | null;
+    user_agent?: string | null;
+    request_id?: string | null;
+  }
+> {
   const { data } = await api.get(`/audit/logs/${id}`);
   return data;
 }
 
 /** Connector types that support blob/month scan in Extracao & Monitoramento. */
-export const SCANNABLE_CONNECTOR_TYPES = new Set(["azure_blob", "azure_openai_ptu", "azure_automation_jobs", "gcp_bigquery", "oci", "mongodb_atlas", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "databricks"]);
+export const SCANNABLE_CONNECTOR_TYPES = new Set([
+  "azure_blob",
+  "azure_openai_ptu",
+  "azure_automation_jobs",
+  "gcp_bigquery",
+  "oci",
+  "mongodb_atlas",
+  "github_license",
+  "github_token",
+  "notebooklm_license",
+  "notebooklm_token",
+  "claude_license",
+  "claude_token",
+  "databricks",
+]);
 
-export function formatApiError(error: unknown, fallback = "Request failed"): string {
+export function formatApiError(
+  error: unknown,
+  fallback = "Request failed",
+): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === "string") return detail;
@@ -441,7 +718,13 @@ export function formatApiError(error: unknown, fallback = "Request failed"): str
       if (typeof record.code === "string") return record.code;
     }
     if (Array.isArray(detail)) {
-      return detail.map((item) => (typeof item === "object" && item && "msg" in item ? String(item.msg) : JSON.stringify(item))).join("; ");
+      return detail
+        .map((item) =>
+          typeof item === "object" && item && "msg" in item
+            ? String(item.msg)
+            : JSON.stringify(item),
+        )
+        .join("; ");
     }
     return error.message;
   }
@@ -567,6 +850,7 @@ export interface Department {
   parent_name?: string | null;
   shared_cost?: boolean;
   centro_custo: string | null;
+  id_orcamento: string | null;
   ambiente: string | null;
   cloud_filter: string | null;
   custom_fields: Record<string, unknown> | null;
@@ -575,8 +859,6 @@ export interface Department {
   created_at: string;
   updated_at: string;
 }
-
-
 
 export interface EtlRunStatus {
   connection_id: number;
@@ -588,7 +870,9 @@ export interface EtlRunStatus {
 }
 
 // Connections
-export async function getConnections(withData?: boolean): Promise<SourceConnection[]> {
+export async function getConnections(
+  withData?: boolean,
+): Promise<SourceConnection[]> {
   const params = withData ? { with_data: true } : {};
   const { data } = await api.get("/connections/", { params });
   return data;
@@ -615,19 +899,39 @@ export async function getConnectionsGrid(params: {
   filter_field?: string;
   filter_operator?: "equals" | "notEquals";
   filter_value?: string;
-  filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
+  filters?: Array<{
+    field: string;
+    operator:
+      | "equals"
+      | "notEquals"
+      | "contains"
+      | "notContains"
+      | "after"
+      | "before";
+    value: string;
+  }>;
 }): Promise<ConnectionsGridResponse> {
   const { filters, ...query } = params;
-  const { data } = await api.get("/connections/grid", { params: { ...query, ...(filters?.length ? { filters: JSON.stringify(filters) } : {}) } });
+  const { data } = await api.get("/connections/grid", {
+    params: {
+      ...query,
+      ...(filters?.length ? { filters: JSON.stringify(filters) } : {}),
+    },
+  });
   return data;
 }
 
-export async function createConnection(body: Partial<SourceConnection>): Promise<SourceConnection> {
+export async function createConnection(
+  body: Partial<SourceConnection>,
+): Promise<SourceConnection> {
   const { data } = await api.post("/connections/", body);
   return data;
 }
 
-export async function updateConnection(id: number, body: Partial<SourceConnection>): Promise<SourceConnection> {
+export async function updateConnection(
+  id: number,
+  body: Partial<SourceConnection>,
+): Promise<SourceConnection> {
   const { data } = await api.put(`/connections/${id}`, body);
   return data;
 }
@@ -648,18 +952,28 @@ export interface SourcePreview {
   rows: Record<string, unknown>[];
 }
 
-export async function getSourcePreview(connectionId: number, limit = 20): Promise<SourcePreview> {
-  const { data } = await api.get(`/etl/connections/${connectionId}/preview`, { params: { limit } });
+export async function getSourcePreview(
+  connectionId: number,
+  limit = 20,
+): Promise<SourcePreview> {
+  const { data } = await api.get(`/etl/connections/${connectionId}/preview`, {
+    params: { limit },
+  });
   return data;
 }
 
-export async function getIngestedBlobs(connectionId?: number): Promise<IngestedBlob[]> {
+export async function getIngestedBlobs(
+  connectionId?: number,
+): Promise<IngestedBlob[]> {
   const params = connectionId ? { connection_id: connectionId } : {};
   const { data } = await api.get("/etl/blobs/", { params });
   return data;
 }
 
-export async function downloadIngestedBlob(blobId: number, format: "csv" | "xlsx" = "csv"): Promise<void> {
+export async function downloadIngestedBlob(
+  blobId: number,
+  format: "csv" | "xlsx" = "csv",
+): Promise<void> {
   const response = await api.get(`/etl/blobs/${blobId}/download`, {
     params: { format },
     responseType: "blob",
@@ -671,9 +985,10 @@ export async function downloadIngestedBlob(blobId: number, format: "csv" | "xlsx
     filename = match[1];
   }
   const blob = new Blob([response.data], {
-    type: format === "xlsx"
-      ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      : "text/csv;charset=utf-8;",
+    type:
+      format === "xlsx"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "text/csv;charset=utf-8;",
   });
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -684,7 +999,6 @@ export async function downloadIngestedBlob(blobId: number, format: "csv" | "xlsx
   window.URL.revokeObjectURL(url);
   document.body.removeChild(a);
 }
-
 
 export async function runEtl(body: {
   connection_id: number;
@@ -698,8 +1012,12 @@ export async function runEtl(body: {
   return data;
 }
 
-export async function resetSourceForReimport(connectionId: number): Promise<{ status: string; message: string }> {
-  const { data } = await api.post(`/etl/connections/${connectionId}/reset-source`);
+export async function resetSourceForReimport(
+  connectionId: number,
+): Promise<{ status: string; message: string }> {
+  const { data } = await api.post(
+    `/etl/connections/${connectionId}/reset-source`,
+  );
   return data;
 }
 
@@ -723,7 +1041,12 @@ export interface TaskStatus {
   downloaded_bytes_total?: number;
   total_download_bytes?: number;
   active_downloads?: number;
-  download_blobs?: Array<{ blob_path: string; size: number; downloaded: number; status: string }>;
+  download_blobs?: Array<{
+    blob_path: string;
+    size: number;
+    downloaded: number;
+    status: string;
+  }>;
   phase?: string;
   table?: string;
   error?: string;
@@ -740,7 +1063,10 @@ export async function getRunningTasks(): Promise<TaskStatus[]> {
   return data;
 }
 
-export interface WorkerHealth { status: "ok" | "stale" | "offline"; heartbeat_age_seconds: number | null }
+export interface WorkerHealth {
+  status: "ok" | "stale" | "offline";
+  heartbeat_age_seconds: number | null;
+}
 export async function getWorkerHealth(): Promise<WorkerHealth> {
   const { data } = await api.get("/etl/worker-health");
   return data;
@@ -750,18 +1076,26 @@ export async function cancelEtl(taskId: number): Promise<void> {
   await api.post(`/etl/cancel/${taskId}`);
 }
 
-export async function testConnection(connectionId: number): Promise<{ status: string; message: string }> {
+export async function testConnection(
+  connectionId: number,
+): Promise<{ status: string; message: string }> {
   const { data } = await api.post(`/etl/connections/${connectionId}/test`);
   return data;
 }
 
-export async function testConnectionConfig(body: Partial<SourceConnection>): Promise<{ status: string; message: string }> {
+export async function testConnectionConfig(
+  body: Partial<SourceConnection>,
+): Promise<{ status: string; message: string }> {
   const { data } = await api.post("/etl/connections/test-config", body);
   return data;
 }
 
-export async function processDestinationTables(connectionId: number): Promise<{ success: boolean; rows_written: number; error?: string }> {
-  const { data } = await api.post(`/etl/connections/${connectionId}/process-destination`);
+export async function processDestinationTables(
+  connectionId: number,
+): Promise<{ success: boolean; rows_written: number; error?: string }> {
+  const { data } = await api.post(
+    `/etl/connections/${connectionId}/process-destination`,
+  );
   return data;
 }
 
@@ -771,17 +1105,30 @@ export interface AvailablePeriod {
   label?: string;
 }
 
-export async function getAvailablePeriods(connectionId: number): Promise<AvailablePeriod[]> {
-  const { data } = await api.get("/etl/periods", { params: { connection_id: connectionId } });
+export async function getAvailablePeriods(
+  connectionId: number,
+): Promise<AvailablePeriod[]> {
+  const { data } = await api.get("/etl/periods", {
+    params: { connection_id: connectionId },
+  });
   return data;
 }
 
-export async function reprocessSharedCost(): Promise<{ task_id: number; status: string; message: string }> {
+export async function reprocessSharedCost(): Promise<{
+  task_id: number;
+  status: string;
+  message: string;
+}> {
   const { data } = await api.post("/etl/reprocess-shared-cost");
   return data;
 }
 
-export async function reprocessAICostRelationships(): Promise<{ task_id: number; status: string; message: string; warnings?: string[] }> {
+export async function reprocessAICostRelationships(): Promise<{
+  task_id: number;
+  status: string;
+  message: string;
+  warnings?: string[];
+}> {
   const { data } = await api.post("/etl/reprocess-ai-cost-relationships");
   return data;
 }
@@ -800,7 +1147,9 @@ export interface AICostRelationshipHistoryItem {
   };
 }
 
-export async function getAICostRelationshipHistory(): Promise<AICostRelationshipHistoryItem[]> {
+export async function getAICostRelationshipHistory(): Promise<
+  AICostRelationshipHistoryItem[]
+> {
   const { data } = await api.get("/etl/ai-cost-relationship-history");
   return data;
 }
@@ -832,7 +1181,12 @@ export async function reprocessDest(body: {
   billing_periods?: string[];
   replace_existing?: boolean;
   chain_dimons?: { enabled: boolean; rule_ids: number[] };
-}): Promise<{ task_id: number; task_ids?: number[]; queue_group?: string; message: string }> {
+}): Promise<{
+  task_id: number;
+  task_ids?: number[];
+  queue_group?: string;
+  message: string;
+}> {
   const { data } = await api.post("/etl/reprocess", body);
   return data;
 }
@@ -862,39 +1216,80 @@ export interface ReprocessStatus {
   connection_ids: number[];
   error: string;
   errors?: string[];
-  event_log?: Array<{ at: string; level: string; message: string; details?: Record<string, unknown> }>;
+  event_log?: Array<{
+    at: string;
+    level: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }>;
   billing_periods?: string[];
   started_at?: string;
   finished_at?: string;
 }
 
-export async function getReprocessStatus(taskId: number): Promise<ReprocessStatus> {
+export async function getReprocessStatus(
+  taskId: number,
+): Promise<ReprocessStatus> {
   const { data } = await api.get(`/etl/reprocess-status/${taskId}`);
   return data;
 }
-export async function getReprocessHistory(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }> } = {}): Promise<{ items: ReprocessStatus[]; total: number }> {
-  const { data } = await api.get("/etl/reprocess-history", { params: { ...params, filters: params.filters ? JSON.stringify(params.filters) : undefined } });
+export async function getReprocessHistory(
+  params: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    sort_field?: string;
+    sort_direction?: "asc" | "desc";
+    filters?: Array<{
+      field: string;
+      operator:
+        | "equals"
+        | "notEquals"
+        | "contains"
+        | "notContains"
+        | "after"
+        | "before";
+      value: string;
+    }>;
+  } = {},
+): Promise<{ items: ReprocessStatus[]; total: number }> {
+  const { data } = await api.get("/etl/reprocess-history", {
+    params: {
+      ...params,
+      filters: params.filters ? JSON.stringify(params.filters) : undefined,
+    },
+  });
   return data;
 }
 
-export async function cancelReprocess(taskId: number): Promise<{ message: string }> {
+export async function cancelReprocess(
+  taskId: number,
+): Promise<{ message: string }> {
   const { data } = await api.post(`/etl/reprocess/cancel/${taskId}`);
   return data;
 }
 
 // Mappings
-export async function getMappings(connectionId?: number): Promise<EtlMapping[]> {
-  const params = connectionId !== undefined ? { connection_id: connectionId } : {};
+export async function getMappings(
+  connectionId?: number,
+): Promise<EtlMapping[]> {
+  const params =
+    connectionId !== undefined ? { connection_id: connectionId } : {};
   const { data } = await api.get("/mappings/", { params });
   return data;
 }
 
-export async function createMapping(body: Partial<EtlMapping>): Promise<EtlMapping> {
+export async function createMapping(
+  body: Partial<EtlMapping>,
+): Promise<EtlMapping> {
   const { data } = await api.post("/mappings/", body);
   return data;
 }
 
-export async function updateMapping(id: number, body: Partial<EtlMapping>): Promise<EtlMapping> {
+export async function updateMapping(
+  id: number,
+  body: Partial<EtlMapping>,
+): Promise<EtlMapping> {
   const { data } = await api.put(`/mappings/${id}`, body);
   return data;
 }
@@ -904,20 +1299,29 @@ export async function deleteMapping(id: number): Promise<void> {
 }
 
 // Business Rules
-export async function getBusinessRules(connectionId?: number, destinationTableId?: number): Promise<BusinessRule[]> {
+export async function getBusinessRules(
+  connectionId?: number,
+  destinationTableId?: number,
+): Promise<BusinessRule[]> {
   const params: Record<string, string | number> = {};
   if (connectionId !== undefined) params.connection_id = connectionId;
-  if (destinationTableId !== undefined) params.destination_table_id = destinationTableId;
+  if (destinationTableId !== undefined)
+    params.destination_table_id = destinationTableId;
   const { data } = await api.get("/business-rules/", { params });
   return data;
 }
 
-export async function createBusinessRule(body: Partial<BusinessRule>): Promise<BusinessRule> {
+export async function createBusinessRule(
+  body: Partial<BusinessRule>,
+): Promise<BusinessRule> {
   const { data } = await api.post("/business-rules/", body);
   return data;
 }
 
-export async function updateBusinessRule(id: number, body: Partial<BusinessRule>): Promise<BusinessRule> {
+export async function updateBusinessRule(
+  id: number,
+  body: Partial<BusinessRule>,
+): Promise<BusinessRule> {
   const { data } = await api.put(`/business-rules/${id}`, body);
   return data;
 }
@@ -935,37 +1339,62 @@ export async function getClassifications(
   const params: Record<string, string | number> = {};
   if (connectionId !== undefined) params.connection_id = connectionId;
   if (departmentId !== undefined) params.department_id = departmentId;
-  if (destinationTableId !== undefined) params.destination_table_id = destinationTableId;
+  if (destinationTableId !== undefined)
+    params.destination_table_id = destinationTableId;
   const { data } = await api.get("/classifications/", { params });
   return data;
 }
 
-export interface ClassificationsGridResponse { items: ClassificationRule[]; total: number; }
-export async function getClassificationsGrid(params: {
-  limit?: number;
-  offset?: number;
-  search?: string;
-  sort_field?: string;
-  sort_direction?: "asc" | "desc";
-  filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
-  destination_table_id?: number;
-  cloud?: string;
-} = {},
+export interface ClassificationsGridResponse {
+  items: ClassificationRule[];
+  total: number;
+}
+export async function getClassificationsGrid(
+  params: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    sort_field?: string;
+    sort_direction?: "asc" | "desc";
+    filters?: Array<{
+      field: string;
+      operator:
+        | "equals"
+        | "notEquals"
+        | "contains"
+        | "notContains"
+        | "after"
+        | "before";
+      value: string;
+    }>;
+    destination_table_id?: number;
+    cloud?: string;
+  } = {},
   signal?: AbortSignal,
 ): Promise<ClassificationsGridResponse> {
   const { data } = await api.get("/classifications/grid", {
-    params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined },
+    params: {
+      ...params,
+      filters: params.filters?.length
+        ? JSON.stringify(params.filters)
+        : undefined,
+    },
     signal,
   });
   return data;
 }
 
-export async function createClassification(body: Partial<ClassificationRule>): Promise<ClassificationRule> {
+export async function createClassification(
+  body: Partial<ClassificationRule>,
+): Promise<ClassificationRule> {
   const { data } = await api.post("/classifications/", body);
   return data;
 }
 
-export async function updateClassification(id: number, body: Partial<ClassificationRule>): Promise<ClassificationRule> {
+export async function updateClassification(
+  id: number,
+  body: Partial<ClassificationRule>,
+): Promise<ClassificationRule> {
   const { data } = await api.put(`/classifications/${id}`, body);
   return data;
 }
@@ -974,7 +1403,10 @@ export async function deleteClassification(id: number): Promise<void> {
   await api.delete(`/classifications/${id}`);
 }
 
-export interface ClassificationFieldValue { value: string; count: number }
+export interface ClassificationFieldValue {
+  value: string;
+  count: number;
+}
 
 export async function getClassificationFieldValues(params: {
   destination_table_id: number;
@@ -987,10 +1419,16 @@ export async function getClassificationFieldValues(params: {
   return data;
 }
 
-export async function refreshClassificationFieldValues(destination_table_id?: number): Promise<{ status: string; destination_table_id?: number | null }> {
-  const { data } = await api.post("/classifications/refresh-field-values", null, {
-    params: destination_table_id ? { destination_table_id } : {},
-  });
+export async function refreshClassificationFieldValues(
+  destination_table_id?: number,
+): Promise<{ status: string; destination_table_id?: number | null }> {
+  const { data } = await api.post(
+    "/classifications/refresh-field-values",
+    null,
+    {
+      params: destination_table_id ? { destination_table_id } : {},
+    },
+  );
   return data;
 }
 
@@ -1020,7 +1458,12 @@ export interface AzurePolicyPlanItem {
   assignment_resource_group?: string | null;
   tags: Record<string, string>;
   condition: Record<string, unknown>;
-  exclusions: Array<{ rule_id: number; rule_name: string; department_name?: string; observed?: { resource_group_name?: string; resource_id?: string } }>;
+  exclusions: Array<{
+    rule_id: number;
+    rule_name: string;
+    department_name?: string;
+    observed?: { resource_group_name?: string; resource_id?: string };
+  }>;
   scope_tenant_id?: string;
 }
 
@@ -1038,7 +1481,13 @@ export interface AzureTenantPolicy {
   coverage?: {
     eligible_rules: number;
     emitted_policies: number;
-    diagnostics: Array<{ status: string; reason: string; rule_id?: number; rule_name?: string; value?: string }>;
+    diagnostics: Array<{
+      status: string;
+      reason: string;
+      rule_id?: number;
+      rule_name?: string;
+      value?: string;
+    }>;
   };
   subscriptions?: Array<{
     subscription_id: string;
@@ -1048,7 +1497,11 @@ export interface AzureTenantPolicy {
       priority: number;
       evidence_count: number;
       observed?: { resource_group_name?: string; resource_id?: string };
-      exclusions?: Array<{ rule_id: number; rule_name: string; department_name?: string }>;
+      exclusions?: Array<{
+        rule_id: number;
+        rule_name: string;
+        department_name?: string;
+      }>;
     }>;
   }>;
   layers: {
@@ -1067,17 +1520,25 @@ export async function getAzureTenants(): Promise<AzureTenant[]> {
   return data;
 }
 
-export async function getAzureTagMappings(): Promise<{ mappings: AzureTagMapping[]; focus_fields: string[] }> {
+export async function getAzureTagMappings(): Promise<{
+  mappings: AzureTagMapping[];
+  focus_fields: string[];
+}> {
   const { data } = await api.get("/azure-tag-policy/tag-mappings");
   return data;
 }
 
-export async function createAzureTagMapping(body: Omit<AzureTagMapping, "id">): Promise<AzureTagMapping> {
+export async function createAzureTagMapping(
+  body: Omit<AzureTagMapping, "id">,
+): Promise<AzureTagMapping> {
   const { data } = await api.post("/azure-tag-policy/tag-mappings", body);
   return data;
 }
 
-export async function updateAzureTagMapping(id: number, body: Omit<AzureTagMapping, "id">): Promise<AzureTagMapping> {
+export async function updateAzureTagMapping(
+  id: number,
+  body: Omit<AzureTagMapping, "id">,
+): Promise<AzureTagMapping> {
   const { data } = await api.put(`/azure-tag-policy/tag-mappings/${id}`, body);
   return data;
 }
@@ -1096,7 +1557,11 @@ export async function exportAzureTagPolicy(
   return data;
 }
 
-export function downloadText(filename: string, content: string, mime = "application/json"): void {
+export function downloadText(
+  filename: string,
+  content: string,
+  mime = "application/json",
+): void {
   const blob = new Blob([content], { type: `${mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1109,7 +1574,10 @@ export function downloadText(filename: string, content: string, mime = "applicat
 }
 
 // Departments
-export async function getDepartments(flat?: boolean, parentId?: number): Promise<Department[]> {
+export async function getDepartments(
+  flat?: boolean,
+  parentId?: number,
+): Promise<Department[]> {
   const params: Record<string, string | number | boolean> = {};
   if (flat !== undefined) params.flat = flat;
   if (parentId !== undefined) params.parent_id = parentId;
@@ -1117,12 +1585,17 @@ export async function getDepartments(flat?: boolean, parentId?: number): Promise
   return data;
 }
 
-export async function createDepartment(body: Partial<Department>): Promise<Department> {
+export async function createDepartment(
+  body: Partial<Department>,
+): Promise<Department> {
   const { data } = await api.post("/departments/", body);
   return data;
 }
 
-export async function updateDepartment(id: number, body: Partial<Department>): Promise<Department> {
+export async function updateDepartment(
+  id: number,
+  body: Partial<Department>,
+): Promise<Department> {
   const { data } = await api.put(`/departments/${id}`, body);
   return data;
 }
@@ -1150,18 +1623,32 @@ export async function getSharedCosts(): Promise<SharedCostConfig[]> {
   const { data } = await api.get("/departments/shared-costs");
   return data;
 }
-export async function getDepartmentSharedCost(id: number): Promise<SharedCostConfig> {
+export async function getDepartmentSharedCost(
+  id: number,
+): Promise<SharedCostConfig> {
   const { data } = await api.get(`/departments/${id}/shared-cost`);
   return data;
 }
-export async function upsertDepartmentSharedCost(id: number, body: { enabled: boolean; mode: SharedCostMode; targets: Array<{ department_id: number; percent?: number | null }> }): Promise<SharedCostConfig> {
+export async function upsertDepartmentSharedCost(
+  id: number,
+  body: {
+    enabled: boolean;
+    mode: SharedCostMode;
+    targets: Array<{ department_id: number; percent?: number | null }>;
+  },
+): Promise<SharedCostConfig> {
   const { data } = await api.put(`/departments/${id}/shared-cost`, body);
   return data;
 }
 
 export interface CloudOrganizationBootstrapResult {
   message: string;
-  moved_directories: Array<{ id: number; name: string; old_path: string[]; new_path: string[] }>;
+  moved_directories: Array<{
+    id: number;
+    name: string;
+    old_path: string[];
+    new_path: string[];
+  }>;
   planning_entries_updated: number;
   reprocess_required: boolean;
 }
@@ -1176,10 +1663,29 @@ export interface GridParams {
   search?: string;
   sort_field?: string;
   sort_direction?: "asc" | "desc";
-  filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
+  filters?: Array<{
+    field: string;
+    operator:
+      | "equals"
+      | "notEquals"
+      | "contains"
+      | "notContains"
+      | "after"
+      | "before";
+    value: string;
+  }>;
 }
-export async function getDepartmentsGrid(params: GridParams = {}): Promise<{ items: Department[]; total: number }> {
-  const { data } = await api.get("/departments/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+export async function getDepartmentsGrid(
+  params: GridParams = {},
+): Promise<{ items: Department[]; total: number }> {
+  const { data } = await api.get("/departments/grid", {
+    params: {
+      ...params,
+      filters: params.filters?.length
+        ? JSON.stringify(params.filters)
+        : undefined,
+    },
+  });
   return data;
 }
 // CSV Import
@@ -1207,23 +1713,43 @@ export interface PeriodStatusOut {
   classified_pct: number;
 }
 
-export async function getPeriods(connectionId: number): Promise<PeriodStatusOut[]> {
-  const { data } = await api.get("/etl/periods/", { params: { connection_id: connectionId } });
+export async function getPeriods(
+  connectionId: number,
+): Promise<PeriodStatusOut[]> {
+  const { data } = await api.get("/etl/periods/", {
+    params: { connection_id: connectionId },
+  });
   return data;
 }
 
-export async function closePeriod(connectionId: number, billingPeriod: string): Promise<PeriodStatusOut> {
-  const { data } = await api.post("/etl/periods/close", { connection_id: connectionId, billing_period: billingPeriod });
+export async function closePeriod(
+  connectionId: number,
+  billingPeriod: string,
+): Promise<PeriodStatusOut> {
+  const { data } = await api.post("/etl/periods/close", {
+    connection_id: connectionId,
+    billing_period: billingPeriod,
+  });
   return data;
 }
 
-export async function reopenPeriod(connectionId: number, billingPeriod: string): Promise<PeriodStatusOut> {
-  const { data } = await api.post("/etl/periods/reopen", { connection_id: connectionId, billing_period: billingPeriod });
+export async function reopenPeriod(
+  connectionId: number,
+  billingPeriod: string,
+): Promise<PeriodStatusOut> {
+  const { data } = await api.post("/etl/periods/reopen", {
+    connection_id: connectionId,
+    billing_period: billingPeriod,
+  });
   return data;
 }
 
-export async function autoClosePeriods(connectionId: number): Promise<string[]> {
-  const { data } = await api.post("/etl/periods/auto-close", null, { params: { connection_id: connectionId } });
+export async function autoClosePeriods(
+  connectionId: number,
+): Promise<string[]> {
+  const { data } = await api.post("/etl/periods/auto-close", null, {
+    params: { connection_id: connectionId },
+  });
   return data;
 }
 
@@ -1232,19 +1758,42 @@ export async function deleteIngestedBlob(blobId: number): Promise<void> {
   await api.delete(`/etl/blobs/${blobId}`);
 }
 
-export async function deleteAllIngestedBlobs(connectionId: number, billingPeriod?: string): Promise<void> {
-  await api.delete("/etl/blobs/", { params: { connection_id: connectionId, billing_period: billingPeriod } });
+export async function deleteAllIngestedBlobs(
+  connectionId: number,
+  billingPeriod?: string,
+): Promise<void> {
+  await api.delete("/etl/blobs/", {
+    params: { connection_id: connectionId, billing_period: billingPeriod },
+  });
 }
 
 // Skipped Blobs (ack/ignore)
-export async function getSkippedBlobs(connectionId: number): Promise<SkippedBlob[]> {
-  return (await api.get("/etl/blobs/skipped", { params: { connection_id: connectionId } })).data;
+export async function getSkippedBlobs(
+  connectionId: number,
+): Promise<SkippedBlob[]> {
+  return (
+    await api.get("/etl/blobs/skipped", {
+      params: { connection_id: connectionId },
+    })
+  ).data;
 }
-export async function skipBlob(connectionId: number, blobPath: string, reason?: string): Promise<SkippedBlob> {
-  return (await api.post("/etl/blobs/skip", { connection_id: connectionId, blob_path: blobPath, reason })).data;
+export async function skipBlob(
+  connectionId: number,
+  blobPath: string,
+  reason?: string,
+): Promise<SkippedBlob> {
+  return (
+    await api.post("/etl/blobs/skip", {
+      connection_id: connectionId,
+      blob_path: blobPath,
+      reason,
+    })
+  ).data;
 }
 export async function clearSkippedBlobs(connectionId: number): Promise<void> {
-  await api.delete("/etl/blobs/skipped", { params: { connection_id: connectionId } });
+  await api.delete("/etl/blobs/skipped", {
+    params: { connection_id: connectionId },
+  });
 }
 export async function unskipBlob(skipId: number): Promise<void> {
   await api.delete(`/etl/blobs/skip/${skipId}`);
@@ -1291,31 +1840,45 @@ export interface SourceDestinationMapping {
   updated_at: string;
 }
 
-export async function getDestinationTables(activeOnly = true): Promise<DestinationTable[]> {
-  const { data } = await api.get("/destinations/tables/", { params: { active_only: activeOnly } });
+export async function getDestinationTables(
+  activeOnly = true,
+): Promise<DestinationTable[]> {
+  const { data } = await api.get("/destinations/tables/", {
+    params: { active_only: activeOnly },
+  });
   return data;
 }
 
-export async function getDestinationTable(tableId: number): Promise<DestinationTableDetail> {
+export async function getDestinationTable(
+  tableId: number,
+): Promise<DestinationTableDetail> {
   const { data } = await api.get(`/destinations/tables/${tableId}`);
   return data;
 }
 
-export async function createDestinationTable(body: { name: string; description?: string }): Promise<DestinationTable> {
+export async function createDestinationTable(body: {
+  name: string;
+  description?: string;
+}): Promise<DestinationTable> {
   const { data } = await api.post("/destinations/tables/", body);
   return data;
 }
 
-export async function getDestinationColumns(tableId: number): Promise<DestinationColumn[]> {
+export async function getDestinationColumns(
+  tableId: number,
+): Promise<DestinationColumn[]> {
   const { data } = await api.get(`/destinations/tables/${tableId}/columns/`);
   return data;
 }
 
 export async function addDestinationColumn(
   tableId: number,
-  body: { column_name: string; data_type?: string; is_required?: boolean }
+  body: { column_name: string; data_type?: string; is_required?: boolean },
 ): Promise<DestinationColumn> {
-  const { data } = await api.post(`/destinations/tables/${tableId}/columns/`, body);
+  const { data } = await api.post(
+    `/destinations/tables/${tableId}/columns/`,
+    body,
+  );
   return data;
 }
 
@@ -1328,8 +1891,10 @@ export async function getSourceDestMappings(
   destinationTableId?: number,
 ): Promise<SourceDestinationMapping[]> {
   const params: Record<string, number> = {};
-  if (sourceConnectionId !== undefined) params.source_connection_id = sourceConnectionId;
-  if (destinationTableId !== undefined) params.destination_table_id = destinationTableId;
+  if (sourceConnectionId !== undefined)
+    params.source_connection_id = sourceConnectionId;
+  if (destinationTableId !== undefined)
+    params.destination_table_id = destinationTableId;
   const { data } = await api.get("/destinations/mappings/", { params });
   return data;
 }
@@ -1354,7 +1919,9 @@ export async function deleteSourceDestMapping(id: number): Promise<void> {
 }
 
 export async function getDestinationSchema(tableId: number): Promise<{
-  table_id: number; table_name: string; physical_name: string;
+  table_id: number;
+  table_name: string;
+  physical_name: string;
   columns: { name: string; type: string; required: boolean }[];
 }> {
   const { data } = await api.get(`/destinations/tables/${tableId}/schema`);
@@ -1362,173 +1929,758 @@ export async function getDestinationSchema(tableId: number): Promise<{
 }
 
 // ── Savings actions ──
-export type SavingStatus = "EM_FILA" | "EM_ANALISE" | "FINALIZADA" | "ERRO" | "CANCELADA";
-export interface SavingFilter { column: string; operator: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS"; values: Array<string | number> }
-export interface SavingAction { id: number; name: string; description?: string | null; category?: string | null; owner?: string | null; destination_table_id: number; date_column: string; cost_column: string; currency_column?: string | null; filters: SavingFilter[]; start_date: string; duration_days: number; baseline_monthly: number; projected_monthly: number; status: SavingStatus; outcome?: string | null; final_realized?: number | null; final_projected?: number | null; error_message?: string | null; completed_at?: string | null; }
-export interface SavingMeasurement { id: number; action_id: number; measured_date: string; actual_cost: number; baseline_value: number; projected_saving: number; realized_saving: number }
-export interface SavingsDashboard { historic: Record<string, number>; year: Record<string, number>; monthly: Array<{month:string;projected:number;realized:number}>; status: Record<string,number>; top_savings: SavingAction[]; top_growth: SavingAction[] }
-export async function getSavingActions(): Promise<SavingAction[]> { return (await api.get("/savings/actions")).data; }
-export async function createSavingAction(body: Omit<SavingAction, "id"|"status"|"outcome"|"final_realized"|"final_projected"|"error_message"|"completed_at">): Promise<SavingAction> { return (await api.post("/savings/actions", body)).data; }
-export async function updateSavingAction(id:number, body: Record<string, unknown>): Promise<SavingAction> { return (await api.put(`/savings/actions/${id}`, body)).data; }
-export async function cancelSavingAction(id:number): Promise<SavingAction> { return (await api.post(`/savings/actions/${id}/cancel`)).data; }
-export async function refreshSavingAction(id:number): Promise<SavingAction> { return (await api.post(`/savings/actions/${id}/refresh`)).data; }
-export async function getSavingMeasurements(id:number): Promise<SavingMeasurement[]> { return (await api.get(`/savings/actions/${id}/measurements`)).data; }
-export async function getSavingsDashboard(year?:number): Promise<SavingsDashboard> { return (await api.get("/savings/dashboard", {params:{year}})).data; }
-export async function getSavingsMetadata(tableId:number): Promise<{columns:Array<{name:string;type:string}>}> { return (await api.get(`/savings/metadata/${tableId}`)).data; }
+export type SavingStatus =
+  | "EM_FILA"
+  | "EM_ANALISE"
+  | "FINALIZADA"
+  | "ERRO"
+  | "CANCELADA";
+export interface SavingFilter {
+  column: string;
+  operator: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS";
+  values: Array<string | number>;
+}
+export interface SavingAction {
+  id: number;
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  owner?: string | null;
+  destination_table_id: number;
+  date_column: string;
+  cost_column: string;
+  currency_column?: string | null;
+  filters: SavingFilter[];
+  start_date: string;
+  duration_days: number;
+  baseline_monthly: number;
+  projected_monthly: number;
+  status: SavingStatus;
+  outcome?: string | null;
+  final_realized?: number | null;
+  final_projected?: number | null;
+  error_message?: string | null;
+  completed_at?: string | null;
+}
+export interface SavingMeasurement {
+  id: number;
+  action_id: number;
+  measured_date: string;
+  actual_cost: number;
+  baseline_value: number;
+  projected_saving: number;
+  realized_saving: number;
+}
+export interface SavingsDashboard {
+  historic: Record<string, number>;
+  year: Record<string, number>;
+  monthly: Array<{ month: string; projected: number; realized: number }>;
+  status: Record<string, number>;
+  top_savings: SavingAction[];
+  top_growth: SavingAction[];
+}
+export async function getSavingActions(): Promise<SavingAction[]> {
+  return (await api.get("/savings/actions")).data;
+}
+export async function createSavingAction(
+  body: Omit<
+    SavingAction,
+    | "id"
+    | "status"
+    | "outcome"
+    | "final_realized"
+    | "final_projected"
+    | "error_message"
+    | "completed_at"
+  >,
+): Promise<SavingAction> {
+  return (await api.post("/savings/actions", body)).data;
+}
+export async function updateSavingAction(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<SavingAction> {
+  return (await api.put(`/savings/actions/${id}`, body)).data;
+}
+export async function cancelSavingAction(id: number): Promise<SavingAction> {
+  return (await api.post(`/savings/actions/${id}/cancel`)).data;
+}
+export async function refreshSavingAction(id: number): Promise<SavingAction> {
+  return (await api.post(`/savings/actions/${id}/refresh`)).data;
+}
+export async function getSavingMeasurements(
+  id: number,
+): Promise<SavingMeasurement[]> {
+  return (await api.get(`/savings/actions/${id}/measurements`)).data;
+}
+export async function getSavingsDashboard(
+  year?: number,
+): Promise<SavingsDashboard> {
+  return (await api.get("/savings/dashboard", { params: { year } })).data;
+}
+export async function getSavingsMetadata(
+  tableId: number,
+): Promise<{ columns: Array<{ name: string; type: string }> }> {
+  return (await api.get(`/savings/metadata/${tableId}`)).data;
+}
 
-export interface ForecastMetadata { destination_table_id: number; destination_table: string; suggestion_profile?: string | null; columns: { name: string; type: string; numeric: boolean; temporal: boolean }[]; measures: string[]; date_columns: string[]; period_columns: string[]; dimensions: string[]; recommended_dimensions: string[]; default_measure: string | null; default_date: string | null; default_period: string | null; default_period_allocation?: string | null; default_charge_end_column?: string | null; }
-export interface ConnectionAllocationRule { connection_id?: number | null; connection_code?: string | null; period_allocation?: "charge_interval"; charge_end_column?: string | null; }
-export interface ForecastConfig { id: number; name: string; table_name?: string | null; destination_table_id: number; measure_column: string; currency_column: string | null; date_column: string; period_column: string | null; type_column: string | null; dimensions: string[]; cutoff_days: number; horizon_months: number; growth_rate: number; model_mode: string; enabled_windows: number[]; period_allocation?: string; charge_end_column?: string | null; connection_allocation_rules?: ConnectionAllocationRule[]; version: number; active: boolean; updated_at?: string; }
-export interface ForecastRun { id: number; forecast_config_id: number; config_name?: string | null; status: string; phase: string | null; rows_written: number; total_series?: number; processed_series?: number; result_table: string | null; error: string | null; started_at?: string; finished_at?: string | null; }
-export interface ForecastHistoryMetadata { run_id: number; result_table: string; cutoff_date: string; snapshot: Record<string, unknown>; columns: { name: string; type: string }[]; dimensions: string[]; default_rows: string[]; default_columns: string[]; types: string[]; }
-export interface ForecastHistoryPivot { run_id: number; comparison: boolean; rows: string[]; columns: string[]; records: Record<string, unknown>[]; wape?: number | null; compared_at?: string; }
-export interface ForecastIdentificationClause { column: string; values: string[]; }
-export interface ForecastBusinessRule { id: number; forecast_config_id: number; name: string; identification_column: string; identification_values: string[]; identification_clauses?: ForecastIdentificationClause[]; charge_type: string; behavior: string; reference_column?: string | null; reference_values: string[]; value_column?: string | null; start_period: string; end_period?: string | null; growth_rate: number; replacement_value?: number | null; cancel_on_refund: boolean; scope: Record<string, string>; priority: number; active: boolean; version: number; }
-export async function getForecastMetadata(tableId: number): Promise<ForecastMetadata> { const { data } = await api.get(`/forecast/metadata/${tableId}`); return data; }
-export async function getForecastConfigs(): Promise<ForecastConfig[]> { const { data } = await api.get("/forecast/configs"); return data; }
-export async function createForecastConfig(body: Record<string, unknown>): Promise<ForecastConfig> { const { data } = await api.post("/forecast/configs", body); return data; }
-export async function updateForecastConfig(id: number, body: Record<string, unknown>): Promise<ForecastConfig> { const { data } = await api.put(`/forecast/configs/${id}`, body); return data; }
-export async function deleteForecastConfig(id: number): Promise<void> { await api.delete(`/forecast/configs/${id}`); }
-export async function validateForecastConfig(id: number): Promise<{ valid: boolean; errors: string[]; metadata: ForecastMetadata }> { const { data } = await api.post(`/forecast/configs/${id}/validate`); return data; }
-export async function createForecastRun(configId: number): Promise<{ run_id: number; task_id: number; status: string }> { const { data } = await api.post(`/forecast/runs?config_id=${configId}`); return data; }
-export async function getForecastRuns(): Promise<ForecastRun[]> { const { data } = await api.get("/forecast/runs"); return data; }
-export interface ForecastRunsGridResponse { items: ForecastRun[]; total: number; }
-export async function getForecastRunsGrid(params: { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }> } = {}): Promise<ForecastRunsGridResponse> {
-  const { data } = await api.get("/forecast/runs/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+export interface ForecastMetadata {
+  destination_table_id: number;
+  destination_table: string;
+  suggestion_profile?: string | null;
+  columns: {
+    name: string;
+    type: string;
+    numeric: boolean;
+    temporal: boolean;
+  }[];
+  measures: string[];
+  date_columns: string[];
+  period_columns: string[];
+  dimensions: string[];
+  recommended_dimensions: string[];
+  default_measure: string | null;
+  default_date: string | null;
+  default_period: string | null;
+  default_period_allocation?: string | null;
+  default_charge_end_column?: string | null;
+}
+export interface ConnectionAllocationRule {
+  connection_id?: number | null;
+  connection_code?: string | null;
+  period_allocation?: "charge_interval";
+  charge_end_column?: string | null;
+}
+export interface ForecastConfig {
+  id: number;
+  name: string;
+  table_name?: string | null;
+  destination_table_id: number;
+  measure_column: string;
+  currency_column: string | null;
+  date_column: string;
+  period_column: string | null;
+  type_column: string | null;
+  dimensions: string[];
+  cutoff_days: number;
+  horizon_months: number;
+  growth_rate: number;
+  model_mode: string;
+  enabled_windows: number[];
+  period_allocation?: string;
+  charge_end_column?: string | null;
+  connection_allocation_rules?: ConnectionAllocationRule[];
+  version: number;
+  active: boolean;
+  updated_at?: string;
+}
+export interface ForecastRun {
+  id: number;
+  forecast_config_id: number;
+  config_name?: string | null;
+  status: string;
+  phase: string | null;
+  rows_written: number;
+  total_series?: number;
+  processed_series?: number;
+  result_table: string | null;
+  error: string | null;
+  started_at?: string;
+  finished_at?: string | null;
+}
+export interface ForecastHistoryMetadata {
+  run_id: number;
+  result_table: string;
+  cutoff_date: string;
+  snapshot: Record<string, unknown>;
+  columns: { name: string; type: string }[];
+  dimensions: string[];
+  default_rows: string[];
+  default_columns: string[];
+  types: string[];
+}
+export interface ForecastHistoryPivot {
+  run_id: number;
+  comparison: boolean;
+  rows: string[];
+  columns: string[];
+  records: Record<string, unknown>[];
+  wape?: number | null;
+  compared_at?: string;
+}
+export interface ForecastIdentificationClause {
+  column: string;
+  values: string[];
+}
+export interface ForecastBusinessRule {
+  id: number;
+  forecast_config_id: number;
+  name: string;
+  identification_column: string;
+  identification_values: string[];
+  identification_clauses?: ForecastIdentificationClause[];
+  charge_type: string;
+  behavior: string;
+  reference_column?: string | null;
+  reference_values: string[];
+  value_column?: string | null;
+  start_period: string;
+  end_period?: string | null;
+  growth_rate: number;
+  replacement_value?: number | null;
+  cancel_on_refund: boolean;
+  scope: Record<string, string>;
+  priority: number;
+  active: boolean;
+  version: number;
+}
+export async function getForecastMetadata(
+  tableId: number,
+): Promise<ForecastMetadata> {
+  const { data } = await api.get(`/forecast/metadata/${tableId}`);
   return data;
 }
-export async function cancelForecastRun(runId: number): Promise<{ run_id: number; status: string }> {
+export async function getForecastConfigs(): Promise<ForecastConfig[]> {
+  const { data } = await api.get("/forecast/configs");
+  return data;
+}
+export async function createForecastConfig(
+  body: Record<string, unknown>,
+): Promise<ForecastConfig> {
+  const { data } = await api.post("/forecast/configs", body);
+  return data;
+}
+export async function updateForecastConfig(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<ForecastConfig> {
+  const { data } = await api.put(`/forecast/configs/${id}`, body);
+  return data;
+}
+export async function deleteForecastConfig(id: number): Promise<void> {
+  await api.delete(`/forecast/configs/${id}`);
+}
+export async function validateForecastConfig(
+  id: number,
+): Promise<{ valid: boolean; errors: string[]; metadata: ForecastMetadata }> {
+  const { data } = await api.post(`/forecast/configs/${id}/validate`);
+  return data;
+}
+export async function createForecastRun(
+  configId: number,
+): Promise<{ run_id: number; task_id: number; status: string }> {
+  const { data } = await api.post(`/forecast/runs?config_id=${configId}`);
+  return data;
+}
+export async function getForecastRuns(): Promise<ForecastRun[]> {
+  const { data } = await api.get("/forecast/runs");
+  return data;
+}
+export interface ForecastRunsGridResponse {
+  items: ForecastRun[];
+  total: number;
+}
+export async function getForecastRunsGrid(
+  params: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    sort_field?: string;
+    sort_direction?: "asc" | "desc";
+    filters?: Array<{
+      field: string;
+      operator:
+        | "equals"
+        | "notEquals"
+        | "contains"
+        | "notContains"
+        | "after"
+        | "before";
+      value: string;
+    }>;
+  } = {},
+): Promise<ForecastRunsGridResponse> {
+  const { data } = await api.get("/forecast/runs/grid", {
+    params: {
+      ...params,
+      filters: params.filters?.length
+        ? JSON.stringify(params.filters)
+        : undefined,
+    },
+  });
+  return data;
+}
+export async function cancelForecastRun(
+  runId: number,
+): Promise<{ run_id: number; status: string }> {
   const { data } = await api.post(`/forecast/runs/${runId}/cancel`);
   return data;
 }
-export async function getForecastHistoryMetadata(runId: number): Promise<ForecastHistoryMetadata> { const { data } = await api.get(`/forecast/runs/${runId}/history/metadata`); return data; }
-export type HistoryFilter = string[] | { operator: string; value: string | string[] };
+export async function getForecastHistoryMetadata(
+  runId: number,
+): Promise<ForecastHistoryMetadata> {
+  const { data } = await api.get(`/forecast/runs/${runId}/history/metadata`);
+  return data;
+}
+export type HistoryFilter =
+  | string[]
+  | { operator: string; value: string | string[] };
 export type HistorySort = { field: string; direction: "asc" | "desc" };
-export async function runForecastHistoryPivot(runId: number, body: { rows: string[]; columns: string[]; filters?: Record<string, HistoryFilter>; row_limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc" }): Promise<ForecastHistoryPivot> { const { data } = await api.post(`/forecast/runs/${runId}/history/pivot`, body); return data; }
-export async function compareForecastHistory(runId: number, body: { rows: string[]; columns: string[]; filters?: Record<string, HistoryFilter>; row_limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc" }): Promise<ForecastHistoryPivot> { const { data } = await api.post(`/forecast/runs/${runId}/history/comparison`, body); return data; }
-export async function getForecastBusinessRules(configId: number): Promise<ForecastBusinessRule[]> { const { data } = await api.get(`/forecast/configs/${configId}/business-rules`); return data; }
+export async function runForecastHistoryPivot(
+  runId: number,
+  body: {
+    rows: string[];
+    columns: string[];
+    filters?: Record<string, HistoryFilter>;
+    row_limit?: number;
+    offset?: number;
+    search?: string;
+    sort_field?: string;
+    sort_direction?: "asc" | "desc";
+  },
+): Promise<ForecastHistoryPivot> {
+  const { data } = await api.post(
+    `/forecast/runs/${runId}/history/pivot`,
+    body,
+  );
+  return data;
+}
+export async function compareForecastHistory(
+  runId: number,
+  body: {
+    rows: string[];
+    columns: string[];
+    filters?: Record<string, HistoryFilter>;
+    row_limit?: number;
+    offset?: number;
+    search?: string;
+    sort_field?: string;
+    sort_direction?: "asc" | "desc";
+  },
+): Promise<ForecastHistoryPivot> {
+  const { data } = await api.post(
+    `/forecast/runs/${runId}/history/comparison`,
+    body,
+  );
+  return data;
+}
+export async function getForecastBusinessRules(
+  configId: number,
+): Promise<ForecastBusinessRule[]> {
+  const { data } = await api.get(
+    `/forecast/configs/${configId}/business-rules`,
+  );
+  return data;
+}
 
 // ── Acurácia de Forecast ──────────────────────────────────────────────────
 export interface ForecastAccuracyMonth {
-  run_id: number; config_id: number; simulated_as_of: string; target_month: string;
-  cutoff_date: string; result_table: string; started_at?: string; closed: boolean;
-  forecast_value?: number | null; actual_value?: number | null; wape?: number | null;
-  accuracy?: number | null; variance?: number | null; variance_pct?: number | null; bias?: number | null;
+  run_id: number;
+  config_id: number;
+  simulated_as_of: string;
+  target_month: string;
+  cutoff_date: string;
+  result_table: string;
+  started_at?: string;
+  closed: boolean;
+  forecast_value?: number | null;
+  actual_value?: number | null;
+  wape?: number | null;
+  accuracy?: number | null;
+  variance?: number | null;
+  variance_pct?: number | null;
+  bias?: number | null;
 }
 export interface ForecastAccuracySummary {
-  run_id: number; config_id: number; simulated_as_of: string; target_month: string;
-  cutoff_date: string; result_table: string; closed: boolean; compared_at?: string;
-  rows_forecast?: number; forecast_value?: number | null; actual_value?: number | null;
-  variance?: number | null; variance_pct?: number | null; wape?: number | null;
-  accuracy?: number | null; bias?: number | null;
+  run_id: number;
+  config_id: number;
+  simulated_as_of: string;
+  target_month: string;
+  cutoff_date: string;
+  result_table: string;
+  closed: boolean;
+  compared_at?: string;
+  rows_forecast?: number;
+  forecast_value?: number | null;
+  actual_value?: number | null;
+  variance?: number | null;
+  variance_pct?: number | null;
+  wape?: number | null;
+  accuracy?: number | null;
+  bias?: number | null;
 }
 export interface ForecastAccuracyDimensionRow {
-  dimension_value: string; forecast_value?: number | null; actual_value?: number | null;
-  variance?: number | null; variance_pct?: number | null; wape?: number | null; accuracy?: number | null; bias?: number | null;
+  dimension_value: string;
+  forecast_value?: number | null;
+  actual_value?: number | null;
+  variance?: number | null;
+  variance_pct?: number | null;
+  wape?: number | null;
+  accuracy?: number | null;
+  bias?: number | null;
 }
-export interface ForecastAccuracyDimensions { run_id: number; target_month: string; dimension: string; simulated_as_of: string; records: ForecastAccuracyDimensionRow[]; }
-export interface ForecastAccuracyHistory { items: ForecastAccuracySummary[]; }
-export async function getForecastAccuracyMonths(configId?: number, department?: string, mode?: string): Promise<ForecastAccuracyMonth[]> { const { data } = await api.get("/forecast/accuracy/months", { params: { config_id: configId, department, mode } }); return data; }
-export async function getForecastAccuracySummary(runId: number, targetMonth?: string, department?: string, mode?: string): Promise<ForecastAccuracySummary> { const { data } = await api.get("/forecast/accuracy/summary", { params: { run_id: runId, target_month: targetMonth, department, mode } }); return data; }
-export async function getForecastAccuracyDimensions(runId: number, targetMonth?: string, dimension?: string, department?: string, mode?: string): Promise<ForecastAccuracyDimensions> { const { data } = await api.get("/forecast/accuracy/dimensions", { params: { run_id: runId, target_month: targetMonth, dimension, department, mode } }); return data; }
-export async function getForecastAccuracyHistory(configId?: number): Promise<ForecastAccuracyHistory> { const { data } = await api.get("/forecast/accuracy/history", { params: configId ? { config_id: configId } : {} }); return data; }
+export interface ForecastAccuracyDimensions {
+  run_id: number;
+  target_month: string;
+  dimension: string;
+  simulated_as_of: string;
+  records: ForecastAccuracyDimensionRow[];
+}
+export interface ForecastAccuracyHistory {
+  items: ForecastAccuracySummary[];
+}
+export async function getForecastAccuracyMonths(
+  configId?: number,
+  department?: string,
+  mode?: string,
+): Promise<ForecastAccuracyMonth[]> {
+  const { data } = await api.get("/forecast/accuracy/months", {
+    params: { config_id: configId, department, mode },
+  });
+  return data;
+}
+export async function getForecastAccuracySummary(
+  runId: number,
+  targetMonth?: string,
+  department?: string,
+  mode?: string,
+): Promise<ForecastAccuracySummary> {
+  const { data } = await api.get("/forecast/accuracy/summary", {
+    params: { run_id: runId, target_month: targetMonth, department, mode },
+  });
+  return data;
+}
+export async function getForecastAccuracyDimensions(
+  runId: number,
+  targetMonth?: string,
+  dimension?: string,
+  department?: string,
+  mode?: string,
+): Promise<ForecastAccuracyDimensions> {
+  const { data } = await api.get("/forecast/accuracy/dimensions", {
+    params: {
+      run_id: runId,
+      target_month: targetMonth,
+      dimension,
+      department,
+      mode,
+    },
+  });
+  return data;
+}
+export async function getForecastAccuracyHistory(
+  configId?: number,
+): Promise<ForecastAccuracyHistory> {
+  const { data } = await api.get("/forecast/accuracy/history", {
+    params: configId ? { config_id: configId } : {},
+  });
+  return data;
+}
 export interface ForecastAccuracyDeltaRow {
-  name: string; subcategory?: string; path?: string[]; forecast_value?: number | null; actual_value?: number | null;
-  variance?: number | null; variance_pct?: number | null; wape?: number | null;
-  accuracy?: number | null; bias?: number | null;
+  name: string;
+  subcategory?: string;
+  path?: string[];
+  forecast_value?: number | null;
+  actual_value?: number | null;
+  variance?: number | null;
+  variance_pct?: number | null;
+  wape?: number | null;
+  accuracy?: number | null;
+  bias?: number | null;
 }
 export interface ForecastAccuracyDelta {
-  run_id: number; target_month: string; mode: string; department: string;
-  level: number; level_label: string; dimension: string; leaf?: boolean; records: ForecastAccuracyDeltaRow[];
+  run_id: number;
+  target_month: string;
+  mode: string;
+  department: string;
+  level: number;
+  level_label: string;
+  dimension: string;
+  leaf?: boolean;
+  records: ForecastAccuracyDeltaRow[];
 }
-export async function getForecastAccuracyDelta(runId: number, targetMonth?: string, mode?: string, department?: string): Promise<ForecastAccuracyDelta> {
-  const { data } = await api.get("/forecast/accuracy/delta", { params: { run_id: runId, target_month: targetMonth, mode, department } });
+export async function getForecastAccuracyDelta(
+  runId: number,
+  targetMonth?: string,
+  mode?: string,
+  department?: string,
+): Promise<ForecastAccuracyDelta> {
+  const { data } = await api.get("/forecast/accuracy/delta", {
+    params: { run_id: runId, target_month: targetMonth, mode, department },
+  });
   return data;
 }
 export interface ForecastAccuracyDeltaSeriesPoint {
-  day: number; actual: number; actual_cum: number; forecast_rate: number; forecast_cum: number;
+  day: number;
+  actual: number;
+  actual_cum: number;
+  forecast_rate: number;
+  forecast_cum: number;
 }
 export interface ForecastAccuracyDeltaSeries {
-  run_id: number; target_month: string; department: string; subcategory: string;
-  days_in_month: number; forecast_total: number; actual_total: number;
-  variance: number; variance_pct?: number | null; accuracy?: number | null;
-  deviation_day: number | null; daily_deviation_day?: number | null; points: ForecastAccuracyDeltaSeriesPoint[];
+  run_id: number;
+  target_month: string;
+  department: string;
+  subcategory: string;
+  days_in_month: number;
+  forecast_total: number;
+  actual_total: number;
+  variance: number;
+  variance_pct?: number | null;
+  accuracy?: number | null;
+  deviation_day: number | null;
+  daily_deviation_day?: number | null;
+  points: ForecastAccuracyDeltaSeriesPoint[];
 }
-export async function getForecastAccuracyDeltaSeries(runId: number, targetMonth?: string, department?: string, subcategory?: string): Promise<ForecastAccuracyDeltaSeries> {
-  const { data } = await api.get("/forecast/accuracy/delta/series", { params: { run_id: runId, target_month: targetMonth, department, subcategory }, timeout: 60000 });
+export async function getForecastAccuracyDeltaSeries(
+  runId: number,
+  targetMonth?: string,
+  department?: string,
+  subcategory?: string,
+): Promise<ForecastAccuracyDeltaSeries> {
+  const { data } = await api.get("/forecast/accuracy/delta/series", {
+    params: {
+      run_id: runId,
+      target_month: targetMonth,
+      department,
+      subcategory,
+    },
+    timeout: 60000,
+  });
   return data;
 }
 export interface ForecastDesvioItem {
-  path: string[]; name: string; forecast_value: number; actual_value: number;
-  variance: number; variance_pct?: number | null; accuracy?: number | null; wape?: number | null; bias?: number | null;
+  path: string[];
+  name: string;
+  forecast_value: number;
+  actual_value: number;
+  variance: number;
+  variance_pct?: number | null;
+  accuracy?: number | null;
+  wape?: number | null;
+  bias?: number | null;
 }
-export interface ForecastDesvios { run_id: number; target_month: string; department: string; positive: ForecastDesvioItem[]; negative: ForecastDesvioItem[]; }
-export interface ForecastDesvioSubcat { subcategory: string; forecast_value: number; actual_value: number; variance: number; variance_pct?: number | null; accuracy?: number | null; }
+export interface ForecastDesvios {
+  run_id: number;
+  target_month: string;
+  department: string;
+  positive: ForecastDesvioItem[];
+  negative: ForecastDesvioItem[];
+}
+export interface ForecastDesvioSubcat {
+  subcategory: string;
+  forecast_value: number;
+  actual_value: number;
+  variance: number;
+  variance_pct?: number | null;
+  accuracy?: number | null;
+}
 export interface ForecastAck {
-  id: number; run_id: number | null; target_month: string; department_path: string[]; department_name: string;
-  forecast_value: number; actual_value: number; variance: number; accuracy?: number | null;
-  category: string; reason: string; severity?: string; ordem?: number | null;
-  registered_at?: string | null; active?: boolean; created_at: string;
-  history?: Array<{ id: number; category: string; reason: string; changed_at: string }>;
+  id: number;
+  run_id: number | null;
+  target_month: string;
+  department_path: string[];
+  department_name: string;
+  forecast_value: number;
+  actual_value: number;
+  variance: number;
+  accuracy?: number | null;
+  category: string;
+  reason: string;
+  severity?: string;
+  ordem?: number | null;
+  registered_at?: string | null;
+  active?: boolean;
+  created_at: string;
+  history?: Array<{
+    id: number;
+    category: string;
+    reason: string;
+    changed_at: string;
+  }>;
 }
-export async function getForecastAccuracyDesvios(runId: number, targetMonth?: string, department?: string): Promise<ForecastDesvios> {
-  const { data } = await api.get("/forecast/accuracy/desvios", { params: { run_id: runId, target_month: targetMonth, department }, timeout: 60000 });
+export async function getForecastAccuracyDesvios(
+  runId: number,
+  targetMonth?: string,
+  department?: string,
+): Promise<ForecastDesvios> {
+  const { data } = await api.get("/forecast/accuracy/desvios", {
+    params: { run_id: runId, target_month: targetMonth, department },
+    timeout: 60000,
+  });
   return data;
 }
-export async function getForecastAccuracyDesviosSubcategories(runId: number, targetMonth?: string, department?: string, scope?: string): Promise<{ records: ForecastDesvioSubcat[] }> {
-  const { data } = await api.get("/forecast/accuracy/desvios/subcategories", { params: { run_id: runId, target_month: targetMonth, department, scope }, timeout: 45000 });
+export async function getForecastAccuracyDesviosSubcategories(
+  runId: number,
+  targetMonth?: string,
+  department?: string,
+  scope?: string,
+): Promise<{ records: ForecastDesvioSubcat[] }> {
+  const { data } = await api.get("/forecast/accuracy/desvios/subcategories", {
+    params: { run_id: runId, target_month: targetMonth, department, scope },
+    timeout: 45000,
+  });
   return data;
 }
 export async function createForecastAck(body: {
-  run_id?: number | null; target_month?: string; department: string; category: string; reason: string;
-  severity?: string; ordem?: number; registered_at?: string;
+  run_id?: number | null;
+  target_month?: string;
+  department: string;
+  category: string;
+  reason: string;
+  severity?: string;
+  ordem?: number;
+  registered_at?: string;
 }): Promise<ForecastAck> {
   const { data } = await api.post("/forecast/accuracy/acks", body);
   return data;
 }
-export async function updateForecastAck(ackId: number, body: {
-  category: string; reason: string; severity?: string; ordem?: number; registered_at?: string;
-}): Promise<ForecastAck> {
+export async function updateForecastAck(
+  ackId: number,
+  body: {
+    category: string;
+    reason: string;
+    severity?: string;
+    ordem?: number;
+    registered_at?: string;
+  },
+): Promise<ForecastAck> {
   const { data } = await api.put(`/forecast/accuracy/acks/${ackId}`, body);
   return data;
 }
-export async function getForecastAcks(targetMonth?: string, department?: string, active?: boolean): Promise<{ items: ForecastAck[] }> {
-  const { data } = await api.get("/forecast/accuracy/acks", { params: { target_month: targetMonth, department, active } });
+export async function getForecastAcks(
+  targetMonth?: string,
+  department?: string,
+  active?: boolean,
+): Promise<{ items: ForecastAck[] }> {
+  const { data } = await api.get("/forecast/accuracy/acks", {
+    params: { target_month: targetMonth, department, active },
+  });
   return data;
 }
-export async function deactivateForecastAck(ackId: number): Promise<ForecastAck> {
-  const { data } = await api.post(`/forecast/accuracy/acks/${ackId}/deactivate`);
+export async function deactivateForecastAck(
+  ackId: number,
+): Promise<ForecastAck> {
+  const { data } = await api.post(
+    `/forecast/accuracy/acks/${ackId}/deactivate`,
+  );
   return data;
 }
 export async function activateForecastAck(ackId: number): Promise<ForecastAck> {
   const { data } = await api.post(`/forecast/accuracy/acks/${ackId}/activate`);
   return data;
 }
-export async function deleteForecastAck(ackId: number): Promise<void> { await api.delete(`/forecast/accuracy/acks/${ackId}`); }
-export async function createSimulatedForecastRun(configId: number, simulatedAsOf: string): Promise<{ run_id: number; task_id: number; status: string }> { const { data } = await api.post(`/forecast/runs?config_id=${configId}&simulated_as_of=${simulatedAsOf}`); return data; }
-export interface ForecastAccuracyReprocessResult { task_id: number; status: string; months: string[]; }
-export async function getForecastAccuracyAvailableMonths(configId?: number): Promise<string[]> {
-  const { data } = await api.get("/forecast/accuracy/available-months", { params: configId ? { config_id: configId } : {} });
+export async function deleteForecastAck(ackId: number): Promise<void> {
+  await api.delete(`/forecast/accuracy/acks/${ackId}`);
+}
+export async function createSimulatedForecastRun(
+  configId: number,
+  simulatedAsOf: string,
+): Promise<{ run_id: number; task_id: number; status: string }> {
+  const { data } = await api.post(
+    `/forecast/runs?config_id=${configId}&simulated_as_of=${simulatedAsOf}`,
+  );
+  return data;
+}
+export interface ForecastAccuracyReprocessResult {
+  task_id: number;
+  status: string;
+  months: string[];
+}
+export async function getForecastAccuracyAvailableMonths(
+  configId?: number,
+): Promise<string[]> {
+  const { data } = await api.get("/forecast/accuracy/available-months", {
+    params: configId ? { config_id: configId } : {},
+  });
   return data.months;
 }
-export async function reprocessForecastAccuracy(configId: number, months: string[]): Promise<ForecastAccuracyReprocessResult> {
-  const { data } = await api.post("/forecast/accuracy/reprocess", { config_id: configId, months });
+export async function reprocessForecastAccuracy(
+  configId: number,
+  months: string[],
+): Promise<ForecastAccuracyReprocessResult> {
+  const { data } = await api.post("/forecast/accuracy/reprocess", {
+    config_id: configId,
+    months,
+  });
   return data;
 }
-export type ForecastGridParams = { limit?: number; offset?: number; search?: string; sort_field?: string; sort_direction?: "asc" | "desc"; filters?: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }> };
-export interface ForecastConfigsGridResponse { items: ForecastConfig[]; total: number; }
-export async function getForecastConfigsGrid(params: ForecastGridParams = {}): Promise<ForecastConfigsGridResponse> {
-  const { data } = await api.get("/forecast/configs/grid", { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+export type ForecastGridParams = {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  sort_field?: string;
+  sort_direction?: "asc" | "desc";
+  filters?: Array<{
+    field: string;
+    operator:
+      | "equals"
+      | "notEquals"
+      | "contains"
+      | "notContains"
+      | "after"
+      | "before";
+    value: string;
+  }>;
+};
+export interface ForecastConfigsGridResponse {
+  items: ForecastConfig[];
+  total: number;
+}
+export async function getForecastConfigsGrid(
+  params: ForecastGridParams = {},
+): Promise<ForecastConfigsGridResponse> {
+  const { data } = await api.get("/forecast/configs/grid", {
+    params: {
+      ...params,
+      filters: params.filters?.length
+        ? JSON.stringify(params.filters)
+        : undefined,
+    },
+  });
   return data;
 }
-export interface ForecastRulesGridResponse { items: ForecastBusinessRule[]; total: number; }
-export async function getForecastBusinessRulesGrid(configId: number, params: ForecastGridParams = {}): Promise<ForecastRulesGridResponse> {
-  const { data } = await api.get(`/forecast/configs/${configId}/business-rules/grid`, { params: { ...params, filters: params.filters?.length ? JSON.stringify(params.filters) : undefined } });
+export interface ForecastRulesGridResponse {
+  items: ForecastBusinessRule[];
+  total: number;
+}
+export async function getForecastBusinessRulesGrid(
+  configId: number,
+  params: ForecastGridParams = {},
+): Promise<ForecastRulesGridResponse> {
+  const { data } = await api.get(
+    `/forecast/configs/${configId}/business-rules/grid`,
+    {
+      params: {
+        ...params,
+        filters: params.filters?.length
+          ? JSON.stringify(params.filters)
+          : undefined,
+      },
+    },
+  );
   return data;
 }
-export async function createForecastBusinessRule(configId: number, body: Record<string, unknown>): Promise<ForecastBusinessRule> { const { data } = await api.post(`/forecast/configs/${configId}/business-rules`, body); return data; }
-export async function updateForecastBusinessRule(id: number, body: Record<string, unknown>): Promise<ForecastBusinessRule> { const { data } = await api.put(`/forecast/business-rules/${id}`, body); return data; }
-export async function deleteForecastBusinessRule(id: number): Promise<void> { await api.delete(`/forecast/business-rules/${id}`); }
+export async function createForecastBusinessRule(
+  configId: number,
+  body: Record<string, unknown>,
+): Promise<ForecastBusinessRule> {
+  const { data } = await api.post(
+    `/forecast/configs/${configId}/business-rules`,
+    body,
+  );
+  return data;
+}
+export async function updateForecastBusinessRule(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<ForecastBusinessRule> {
+  const { data } = await api.put(`/forecast/business-rules/${id}`, body);
+  return data;
+}
+export async function deleteForecastBusinessRule(id: number): Promise<void> {
+  await api.delete(`/forecast/business-rules/${id}`);
+}
 
 // ── Extraction History & Bronze DataGrid ──
 export interface ExtractionHistoryItem {
@@ -1578,14 +2730,20 @@ export interface ExtractionHistoryQueryResponse {
   limit: number;
 }
 
-export async function getExtractionHistory(connectionId?: number, limit = 50, offset = 0): Promise<ExtractionHistoryItem[]> {
+export async function getExtractionHistory(
+  connectionId?: number,
+  limit = 50,
+  offset = 0,
+): Promise<ExtractionHistoryItem[]> {
   const params: Record<string, unknown> = { limit, offset };
   if (connectionId !== undefined) params.connection_id = connectionId;
   const { data } = await api.get("/etl/history", { params });
   return data;
 }
 
-export async function getExtractionHistoryMetadata(taskId: number): Promise<ExtractionHistoryMetadata> {
+export async function getExtractionHistoryMetadata(
+  taskId: number,
+): Promise<ExtractionHistoryMetadata> {
   const { data } = await api.get(`/etl/history/${taskId}/metadata`);
   return data;
 }
@@ -1599,32 +2757,285 @@ export async function queryExtractionHistoryData(
     filters?: Record<string, HistoryFilter>;
     sort_field?: string;
     sort_direction?: "asc" | "desc";
-  }
+  },
 ): Promise<ExtractionHistoryQueryResponse> {
   const { data } = await api.post(`/etl/history/${taskId}/query`, body);
   return data;
 }
 
 // Financial planning / type catalog
-export interface FinancialType { id: number; code: string; name: string; active: boolean; created_at: string; updated_at: string; }
-export interface PlanningVersion { id: number; financial_type_id: number; year: number; version: number; is_current: boolean; source: string; source_filename?: string | null; created_at: string; }
-export interface PlanningRow { entity_type: "department"; department_id: number; department_levels: string[]; values: number[]; }
-export interface PlanningGrid { type: FinancialType; version: PlanningVersion | null; rows: PlanningRow[]; }
-export async function getFinancialTypes(): Promise<FinancialType[]> { return (await api.get("/planning/types")).data; }
-export async function getPlanningGrid(type: string, year: number, versionId?: number): Promise<PlanningGrid> { return (await api.get(`/planning/${type}/${year}`, { params: versionId ? { version_id: versionId } : {} })).data; }
-export async function savePlanningGrid(type: string, year: number, rows: PlanningRow[]): Promise<{ version: PlanningVersion; rows: number }> { return (await api.post(`/planning/${type}/${year}`, { rows })).data; }
-export async function getPlanningVersions(type: string, year: number): Promise<PlanningVersion[]> { return (await api.get(`/planning/${type}/${year}/versions`)).data; }
-export async function restorePlanningVersion(type: string, year: number, id: number): Promise<{ version: PlanningVersion }> { return (await api.post(`/planning/${type}/${year}/versions/${id}/restore`)).data; }
-export async function importPlanningExcel(type: string, year: number, file: File): Promise<{ version: PlanningVersion; rows: number }> { const data = new FormData(); data.append("file", file); return (await api.post(`/planning/${type}/${year}/import`, data)).data; }
-export async function downloadPlanningTemplate(year: number): Promise<Blob> { return (await api.get("/planning/template", { params: { year }, responseType: "blob" })).data; }
-export async function downloadSimulatedBudget(year: number, basePeriod = `${year}01`, detailed = false, detailColumn?: string, cloud?: string): Promise<Blob> { return (await api.get(`/planning/orcamento/${year}/simulado`, { params: { base_period: basePeriod, detailed, detail_column: detailColumn, cloud: cloud || undefined }, responseType: "blob" })).data; }
+export interface FinancialType {
+  id: number;
+  code: string;
+  name: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export type PlanningEventType =
+  | "CARGA_INICIAL"
+  | "DEFESA"
+  | "APROVACAO"
+  | "CORTE"
+  | "AJUSTE"
+  | "INCLUSAO_PROJETO"
+  | "REALOCACAO"
+  | "RESTAURACAO"
+  | "OUTRO";
+export interface PlanningPublication {
+  title: string;
+  description: string;
+  event_type: PlanningEventType;
+  effective_date: string;
+  scope_id_orcamento?: string | null;
+  scope_cloud?: string | null;
+}
+export interface PlanningVersion {
+  id: number;
+  financial_type_id: number;
+  year: number;
+  version: number;
+  is_current: boolean;
+  source: string;
+  source_filename?: string | null;
+  created_at: string;
+  title?: string | null;
+  description?: string | null;
+  event_type?: PlanningEventType | null;
+  effective_date?: string | null;
+  annual_total?: number;
+  delta?: number | null;
+  delta_pct?: number | null;
+  scope_id_orcamento?: string | null;
+  scope_cloud?: string | null;
+  published_to_budget_at?: string | null;
+  published_budget_version_id?: number | null;
+}
+export interface PlanningRow {
+  entity_type: "department";
+  department_id: number;
+  department_levels: string[];
+  values: number[];
+}
+export interface PlanningGrid {
+  type: FinancialType;
+  version: PlanningVersion | null;
+  rows: PlanningRow[];
+}
+export async function getFinancialTypes(): Promise<FinancialType[]> {
+  return (await api.get("/planning/types")).data;
+}
+export async function getPlanningGrid(
+  type: string,
+  year: number,
+  versionId?: number,
+  scopeId?: string,
+  scopeCloud?: string,
+): Promise<PlanningGrid> {
+  return (
+    await api.get(`/planning/${type}/${year}`, {
+      params: {
+        version_id: versionId,
+        scope_id_orcamento: scopeId || undefined,
+        scope_cloud: scopeCloud || undefined,
+      },
+    })
+  ).data;
+}
+export async function savePlanningGrid(
+  type: string,
+  year: number,
+  rows: PlanningRow[],
+  publication: PlanningPublication,
+): Promise<{ version: PlanningVersion; rows: number }> {
+  return (await api.post(`/planning/${type}/${year}`, { rows, ...publication }))
+    .data;
+}
+export async function getPlanningVersions(
+  type: string,
+  year: number,
+): Promise<PlanningVersion[]> {
+  return (await api.get(`/planning/${type}/${year}/versions`)).data;
+}
+export async function restorePlanningVersion(
+  type: string,
+  year: number,
+  id: number,
+  publication: PlanningPublication,
+): Promise<{ version: PlanningVersion }> {
+  return (
+    await api.post(
+      `/planning/${type}/${year}/versions/${id}/restore`,
+      publication,
+    )
+  ).data;
+}
+export async function importPlanningExcel(
+  type: string,
+  year: number,
+  file: File,
+  publication: PlanningPublication,
+): Promise<{ version: PlanningVersion; rows: number }> {
+  const data = new FormData();
+  data.append("file", file);
+  Object.entries(publication).forEach(([key, value]) => {
+    if (value != null) data.append(key, String(value));
+  });
+  return (await api.post(`/planning/${type}/${year}/import`, data)).data;
+}
+export async function downloadPlanningTemplate(year: number): Promise<Blob> {
+  return (
+    await api.get("/planning/template", {
+      params: { year },
+      responseType: "blob",
+    })
+  ).data;
+}
+export async function getPlanningYears(type: string): Promise<number[]> {
+  return (await api.get(`/planning/type-years/${type}`)).data;
+}
+export async function getPlanningTimeline(
+  type: string,
+  year: number,
+): Promise<PlanningVersion[]> {
+  return (await api.get(`/planning/${type}/${year}/timeline`)).data;
+}
+export interface PlanningScope {
+  id_orcamento: string;
+  cloud: string | null;
+}
+export async function getPlanningScopes(): Promise<PlanningScope[]> {
+  return (await api.get("/planning/scopes/options")).data;
+}
+export async function publishDefenseToBudget(
+  year: number,
+  versionId: number,
+  body: {
+    id_orcamento: string;
+    cloud_scope?: string | null;
+    title: string;
+    description: string;
+    effective_date: string;
+  },
+): Promise<{
+  budget_version: PlanningVersion;
+  defense_version: PlanningVersion;
+  rows: number;
+}> {
+  return (
+    await api.post(
+      `/planning/defesa-orcamentaria/${year}/versions/${versionId}/publish-budget`,
+      body,
+    )
+  ).data;
+}
+export interface FinancialDashboardOverview {
+  year: number;
+  scope?: {
+    department_id: number | null;
+    path: string[] | null;
+    included_departments: number;
+  };
+  cards: Array<{
+    code: string;
+    name: string;
+    annual_total: number;
+    monthly: number[];
+    current: PlanningVersion;
+  }>;
+  series: Record<string, number[]>;
+  events: Array<
+    PlanningVersion & { type_code: string; type_name: string; route: string }
+  >;
+}
+export async function getFinancialDashboardOverview(
+  year: number,
+  typeCodes?: string,
+  departmentId?: number | null,
+): Promise<FinancialDashboardOverview> {
+  return (
+    await api.get("/planning/dashboard/overview", {
+      params: { year, type_codes: typeCodes, department_id: departmentId ?? undefined },
+    })
+  ).data;
+}
+export async function downloadSimulatedBudget(
+  year: number,
+  basePeriod = `${year}01`,
+  detailed = false,
+  detailColumn?: string,
+  cloud?: string,
+): Promise<Blob> {
+  return (
+    await api.get(`/planning/orcamento/${year}/simulado`, {
+      params: {
+        base_period: basePeriod,
+        detailed,
+        detail_column: detailColumn,
+        cloud: cloud || undefined,
+      },
+      responseType: "blob",
+    })
+  ).data;
+}
 
-export interface CloneRule { id: number; destination_table_id: number; connection_id?: number | null; name: string; description?: string | null; provider?: string | null; conditions: { field: string; op: string; value?: string | number | string[] }[]; roles: Record<string, string>; original_changes: Record<string, unknown>; clone_changes: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; priority: number; active: boolean; version: number; }
-export async function getCloneRules(destinationTableId?: number): Promise<CloneRule[]> { return (await api.get("/clone-rules", { params: destinationTableId ? { destination_table_id: destinationTableId } : {} })).data; }
-export async function createCloneRule(body: Record<string, unknown>): Promise<CloneRule> { return (await api.post("/clone-rules", body)).data; }
-export async function updateCloneRule(id: number, body: Record<string, unknown>): Promise<CloneRule> { return (await api.put(`/clone-rules/${id}`, body)).data; }
-export async function deleteCloneRule(id: number): Promise<void> { await api.delete(`/clone-rules/${id}`); }
-export async function getClonePendencies(destinationTableId?: number): Promise<Record<string, unknown>[]> { return (await api.get("/clone-rules/price-pendencies", { params: destinationTableId ? { destination_table_id: destinationTableId } : {} })).data; }
+export interface CloneRule {
+  id: number;
+  destination_table_id: number;
+  connection_id?: number | null;
+  name: string;
+  description?: string | null;
+  provider?: string | null;
+  conditions: {
+    field: string;
+    op: string;
+    value?: string | number | string[];
+  }[];
+  roles: Record<string, string>;
+  original_changes: Record<string, unknown>;
+  clone_changes: Record<string, unknown>;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  priority: number;
+  active: boolean;
+  version: number;
+}
+export async function getCloneRules(
+  destinationTableId?: number,
+): Promise<CloneRule[]> {
+  return (
+    await api.get("/clone-rules", {
+      params: destinationTableId
+        ? { destination_table_id: destinationTableId }
+        : {},
+    })
+  ).data;
+}
+export async function createCloneRule(
+  body: Record<string, unknown>,
+): Promise<CloneRule> {
+  return (await api.post("/clone-rules", body)).data;
+}
+export async function updateCloneRule(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<CloneRule> {
+  return (await api.put(`/clone-rules/${id}`, body)).data;
+}
+export async function deleteCloneRule(id: number): Promise<void> {
+  await api.delete(`/clone-rules/${id}`);
+}
+export async function getClonePendencies(
+  destinationTableId?: number,
+): Promise<Record<string, unknown>[]> {
+  return (
+    await api.get("/clone-rules/price-pendencies", {
+      params: destinationTableId
+        ? { destination_table_id: destinationTableId }
+        : {},
+    })
+  ).data;
+}
 
 // Fact Table — Query & Summary
 export interface FactRow {
@@ -1669,7 +3080,12 @@ export interface FactSummary {
   total_tax_base: number;
   available_periods: string[];
   by_diretoria: { diretoria: string; count: number; cost_brl: number }[];
-  by_connection: { connection_id: number; connection_name: string; count: number; cost_brl: number }[];
+  by_connection: {
+    connection_id: number;
+    connection_name: string;
+    count: number;
+    cost_brl: number;
+  }[];
 }
 
 export async function queryFact(params: {
@@ -1683,17 +3099,33 @@ export async function queryFact(params: {
   return data;
 }
 
-export async function summaryFact(params: { connection_ids?: string; billing_period?: string }): Promise<FactSummary> {
+export async function summaryFact(params: {
+  connection_ids?: string;
+  billing_period?: string;
+}): Promise<FactSummary> {
   const { data } = await api.get("/fact/summary", { params });
   return data;
 }
-export async function populateFact(connectionId: number, billingPeriod?: string): Promise<{ status: string; rows_inserted: number; connection_id: number; billing_period: string }> {
+export async function populateFact(
+  connectionId: number,
+  billingPeriod?: string,
+): Promise<{
+  status: string;
+  rows_inserted: number;
+  connection_id: number;
+  billing_period: string;
+}> {
   const params = billingPeriod ? { billing_period: billingPeriod } : {};
-  const { data } = await api.post(`/fact/populate/${connectionId}`, null, { params });
+  const { data } = await api.post(`/fact/populate/${connectionId}`, null, {
+    params,
+  });
   return data;
 }
 
-export function getExportUrl(connectionId?: number, billingPeriod?: string): string {
+export function getExportUrl(
+  connectionId?: number,
+  billingPeriod?: string,
+): string {
   const params = new URLSearchParams();
   if (connectionId) params.set("connection_id", String(connectionId));
   if (billingPeriod) params.set("billing_period", billingPeriod);
@@ -1718,7 +3150,9 @@ export interface SchemaDiscovery {
   message?: string;
 }
 
-export async function discoverSchema(connectionId: number): Promise<SchemaDiscovery> {
+export async function discoverSchema(
+  connectionId: number,
+): Promise<SchemaDiscovery> {
   const { data } = await api.get(`/schema/${connectionId}`);
   return data;
 }
@@ -1769,12 +3203,16 @@ export async function getAnalysisTables(): Promise<TrinoTableList> {
   return data;
 }
 
-export async function getAnalysisStagingTables(): Promise<AnalysisStagingTable[]> {
+export async function getAnalysisStagingTables(): Promise<
+  AnalysisStagingTable[]
+> {
   const { data } = await api.get("/analysis/staging-tables");
   return data.tables || [];
 }
 
-export async function deleteAnalysisStagingTable(tableName: string): Promise<void> {
+export async function deleteAnalysisStagingTable(
+  tableName: string,
+): Promise<void> {
   await api.delete(`/analysis/staging-tables/${encodeURIComponent(tableName)}`);
 }
 
@@ -1789,7 +3227,11 @@ export async function getAnalysisSummary(
   layer: "bronze" | "silver" | "gold" = "gold",
 ): Promise<{ summary: TrinoSummaryRow[] }> {
   const { data } = await api.get("/analysis/summary", {
-    params: { connection_code: connectionCode, billing_period: billingPeriod, layer },
+    params: {
+      connection_code: connectionCode,
+      billing_period: billingPeriod,
+      layer,
+    },
   });
   return data;
 }
@@ -1829,7 +3271,9 @@ export async function queryAnalysisSource(
   connectionId: number,
   options?: { limit?: number; offset?: number; billing_period?: string },
 ): Promise<SourceDataResult> {
-  const { data } = await api.get(`/analysis/sources/${connectionId}/data`, { params: options });
+  const { data } = await api.get(`/analysis/sources/${connectionId}/data`, {
+    params: options,
+  });
   return data;
 }
 
@@ -1853,7 +3297,9 @@ export interface DestinationDataResult {
   rows: Record<string, unknown>[];
 }
 
-export async function getAnalysisDestinations(): Promise<DestinationAnalysis[]> {
+export async function getAnalysisDestinations(): Promise<
+  DestinationAnalysis[]
+> {
   const { data } = await api.get("/analysis/destinations");
   return data;
 }
@@ -1862,42 +3308,96 @@ export async function queryAnalysisDestination(
   tableId: number,
   options?: { limit?: number; offset?: number },
 ): Promise<DestinationDataResult> {
-  const { data } = await api.get(`/analysis/destinations/${tableId}/data`, { params: options });
+  const { data } = await api.get(`/analysis/destinations/${tableId}/data`, {
+    params: options,
+  });
   return data;
 }
 
 // ── Server-side Pivot ──
-export type PivotAggregation = "SUM" | "COUNT" | "COUNT_DISTINCT" | "AVG" | "MIN" | "MAX";
-export interface PivotMeasure { column: string; aggregation: PivotAggregation; label?: string | null }
-export type PivotFilterOperator = "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS" | "IS_NULL" | "IS_NOT_NULL";
-export interface PivotFilter { column: string; values: Array<string | number | boolean>; operator?: PivotFilterOperator }
-export interface PivotSort { column: string; direction: "asc" | "desc" }
+export type PivotAggregation =
+  | "SUM"
+  | "COUNT"
+  | "COUNT_DISTINCT"
+  | "AVG"
+  | "MIN"
+  | "MAX";
+export interface PivotMeasure {
+  column: string;
+  aggregation: PivotAggregation;
+  label?: string | null;
+}
+export type PivotFilterOperator =
+  | "IN"
+  | "NOT_IN"
+  | "CONTAINS"
+  | "NOT_CONTAINS"
+  | "IS_NULL"
+  | "IS_NOT_NULL";
+export interface PivotFilter {
+  column: string;
+  values: Array<string | number | boolean>;
+  operator?: PivotFilterOperator;
+}
+export interface PivotSort {
+  column: string;
+  direction: "asc" | "desc";
+}
 export interface PivotRequest {
-  destination_table_id: number; rows: string[]; columns: string[];
-  measures: PivotMeasure[]; filters: PivotFilter[];
-  row_limit?: number; column_limit?: number; include_totals?: boolean;
-  sort_rows?: PivotSort[]; sort_columns?: PivotSort[];
+  destination_table_id: number;
+  rows: string[];
+  columns: string[];
+  measures: PivotMeasure[];
+  filters: PivotFilter[];
+  row_limit?: number;
+  column_limit?: number;
+  include_totals?: boolean;
+  sort_rows?: PivotSort[];
+  sort_columns?: PivotSort[];
 }
 export interface PivotMetadata {
   destination_table_id: number;
   columns: { name: string; type: string; numeric: boolean }[];
-  dimensions: string[]; measures: string[]; recommended_dimensions: string[];
+  dimensions: string[];
+  measures: string[];
+  recommended_dimensions: string[];
   default_measure: string | null;
 }
-export interface PivotUnionTable { id: number; physical_name: string; origin: string }
+export interface PivotUnionTable {
+  id: number;
+  physical_name: string;
+  origin: string;
+}
 export interface PivotResult {
-  rows: string[]; columns: string[]; measures: PivotMeasure[];
-  row_keys: unknown[][]; column_keys: unknown[][];
+  rows: string[];
+  columns: string[];
+  measures: PivotMeasure[];
+  row_keys: unknown[][];
+  column_keys: unknown[][];
   cells: { row: unknown[]; column: unknown[]; values: Array<number | null> }[];
-  totals: { rows: Record<string, Array<number | null>>; columns: Record<string, Array<number | null>>; grand: Array<number | null> } | null;
-  record_count: number; currency_added: boolean;
+  totals: {
+    rows: Record<string, Array<number | null>>;
+    columns: Record<string, Array<number | null>>;
+    grand: Array<number | null>;
+  } | null;
+  record_count: number;
+  currency_added: boolean;
   period_auto_applied?: string | null;
   origin_column?: string;
   origin_values?: string[];
   tables?: PivotUnionTable[];
 }
-export interface PivotView { id: number; name: string; destination_table_id: number; config: PivotRequest & { perspective_config?: unknown }; created_at?: string; updated_at?: string }
-export async function getPivotMetadata(tableId: number): Promise<PivotMetadata> {
+export interface PivotView {
+  id: number;
+  name: string;
+  destination_table_id: number;
+  config: PivotRequest & { perspective_config?: unknown };
+  created_at?: string;
+  updated_at?: string;
+}
+export async function getPivotMetadata(
+  tableId: number,
+): Promise<PivotMetadata> {
   return (await api.get(`/analysis/pivot/metadata/${tableId}`)).data;
 }
 export async function runPivot(body: PivotRequest): Promise<PivotResult> {
@@ -1906,21 +3406,41 @@ export async function runPivot(body: PivotRequest): Promise<PivotResult> {
 
 // ── Server-side Pivot — union of two (or N) tables (realizado + forecast) ──
 export interface PivotUnionRequest {
-  destination_table_ids: number[]; rows: string[]; columns: string[];
-  measures: PivotMeasure[]; filters: PivotFilter[];
-  row_limit?: number; column_limit?: number; include_totals?: boolean;
+  destination_table_ids: number[];
+  rows: string[];
+  columns: string[];
+  measures: PivotMeasure[];
+  filters: PivotFilter[];
+  row_limit?: number;
+  column_limit?: number;
+  include_totals?: boolean;
   origin_column?: string;
-  sort_rows?: PivotSort[]; sort_columns?: PivotSort[];
+  sort_rows?: PivotSort[];
+  sort_columns?: PivotSort[];
 }
 export interface PivotUnionResult extends PivotResult {
   origin_column: string;
   origin_values: string[];
   tables: PivotUnionTable[];
 }
-export async function runPivotUnion(body: PivotUnionRequest): Promise<PivotUnionResult> {
+export async function runPivotUnion(
+  body: PivotUnionRequest,
+): Promise<PivotUnionResult> {
   return (await api.post("/analysis/pivot/union", body)).data;
 }
-export async function drillDownPivot(body: PivotRequest & { cell_filters: Record<string, unknown>; limit?: number; offset?: number }): Promise<{ columns: string[]; rows: Record<string, unknown>[]; total: number; limit: number; offset: number }> {
+export async function drillDownPivot(
+  body: PivotRequest & {
+    cell_filters: Record<string, unknown>;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
   return (await api.post("/analysis/pivot/drill-down", body)).data;
 }
 export interface PivotRecordRequest {
@@ -1937,43 +3457,134 @@ export interface PivotRecordsResult {
   limit: number;
   offset: number;
 }
-export async function getPivotRecords(body: PivotRecordRequest): Promise<PivotRecordsResult> {
+export async function getPivotRecords(
+  body: PivotRecordRequest,
+): Promise<PivotRecordsResult> {
   return (await api.post("/analysis/pivot/records", body)).data;
 }
-export async function getPivotViews(destinationTableId?: number): Promise<PivotView[]> {
-  return (await api.get("/analysis/pivot/views", { params: { destination_table_id: destinationTableId } })).data;
+export async function getPivotViews(
+  destinationTableId?: number,
+): Promise<PivotView[]> {
+  return (
+    await api.get("/analysis/pivot/views", {
+      params: { destination_table_id: destinationTableId },
+    })
+  ).data;
 }
-export async function savePivotView(name: string, config: PivotRequest & { perspective_config?: unknown }): Promise<PivotView> {
-  return (await api.post("/analysis/pivot/views", { name, destination_table_id: config.destination_table_id, config })).data;
+export async function savePivotView(
+  name: string,
+  config: PivotRequest & { perspective_config?: unknown },
+): Promise<PivotView> {
+  return (
+    await api.post("/analysis/pivot/views", {
+      name,
+      destination_table_id: config.destination_table_id,
+      config,
+    })
+  ).data;
 }
-export async function deletePivotView(viewId: number): Promise<void> { await api.delete(`/analysis/pivot/views/${viewId}`); }
+export async function deletePivotView(viewId: number): Promise<void> {
+  await api.delete(`/analysis/pivot/views/${viewId}`);
+}
 export interface LakehouseSearchResult {
-  columns: string[]; rows: Record<string, unknown>[]; total: number; limit: number; offset: number;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  limit: number;
+  offset: number;
   total_is_estimate?: boolean;
-  matched_columns: string[][]; searched_columns?: string[];
+  matched_columns: string[][];
+  searched_columns?: string[];
 }
-export async function searchPivotTable(destinationTableId: number, term: string, limit = 100, offset = 0, filters: PivotFilter[] = []): Promise<LakehouseSearchResult> {
-  return (await api.post("/analysis/pivot/search", { destination_table_id: destinationTableId, term, limit, offset, filters })).data;
+export async function searchPivotTable(
+  destinationTableId: number,
+  term: string,
+  limit = 100,
+  offset = 0,
+  filters: PivotFilter[] = [],
+): Promise<LakehouseSearchResult> {
+  return (
+    await api.post("/analysis/pivot/search", {
+      destination_table_id: destinationTableId,
+      term,
+      limit,
+      offset,
+      filters,
+    })
+  ).data;
 }
 
-
-export interface ExpectedViewRow { period: string; actual_value: number | null; forecast_value: number | null; forecast_manual_value?: number | null; shared_value?: number | null; shared_received?: number | null; shared_given?: number | null; budget_value: number; expected_value: number; cumulative_value: number; }
-export interface ExpectedViewDriver { name: string; budget_value: number; forecast_value: number; variance: number; actual_value?: number; forecast_manual_value?: number; shared_value?: number; }
+export interface ExpectedViewRow {
+  period: string;
+  actual_value: number | null;
+  forecast_value: number | null;
+  forecast_manual_value?: number | null;
+  shared_value?: number | null;
+  shared_received?: number | null;
+  shared_given?: number | null;
+  budget_value: number;
+  expected_value: number;
+  cumulative_value: number;
+}
+export interface ExpectedViewDriver {
+  name: string;
+  budget_value: number;
+  forecast_value: number;
+  variance: number;
+  actual_value?: number;
+  forecast_manual_value?: number;
+  shared_value?: number;
+}
 // Pseudo-destination id for the operational Forecast manual (Planning) exposed in the pivot.
 export const FORECAST_MANUAL_PIVOT_ID = -1000000;
 
-type ExpectedViewResult = { director: string; department_id?: number; rows: ExpectedViewRow[]; drivers: ExpectedViewDriver[] };
+type ExpectedViewResult = {
+  director: string;
+  department_id?: number;
+  rows: ExpectedViewRow[];
+  drivers: ExpectedViewDriver[];
+};
 
-export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIFICIAL", year = new Date().getFullYear(), departmentId?: number, signal?: AbortSignal, includeSharedCost = false, directorView = false): Promise<ExpectedViewResult> {
-  const key = director + "|" + year + "|" + (departmentId ?? "") + "|" + (includeSharedCost ? 1 : 0) + "|" + (directorView ? 1 : 0);
+export async function getExpectedView(
+  director = "DIR DADOS E INTELIGENCIA ARTIFICIAL",
+  year = new Date().getFullYear(),
+  departmentId?: number,
+  signal?: AbortSignal,
+  includeSharedCost = false,
+  directorView = false,
+): Promise<ExpectedViewResult> {
+  const key =
+    director +
+    "|" +
+    year +
+    "|" +
+    (departmentId ?? "") +
+    "|" +
+    (includeSharedCost ? 1 : 0) +
+    "|" +
+    (directorView ? 1 : 0);
   let entry = expectedViewInflight.get(key);
   if (!entry || entry.controller.signal.aborted) {
     const controller = new AbortController();
     trackAnalysisAbort(controller);
-    const promise = api.post("/analysis/expected-view", { director, year, department_id: departmentId, include_shared_cost: includeSharedCost, director_view: directorView }, { timeout: 120000, signal: controller.signal }).then(result => result.data as ExpectedViewResult).finally(() => {
-      const current = expectedViewInflight.get(key);
-      if (current?.controller === controller) expectedViewInflight.delete(key);
-    });
+    const promise = api
+      .post(
+        "/analysis/expected-view",
+        {
+          director,
+          year,
+          department_id: departmentId,
+          include_shared_cost: includeSharedCost,
+          director_view: directorView,
+        },
+        { timeout: 120000, signal: controller.signal },
+      )
+      .then((result) => result.data as ExpectedViewResult)
+      .finally(() => {
+        const current = expectedViewInflight.get(key);
+        if (current?.controller === controller)
+          expectedViewInflight.delete(key);
+      });
     entry = { count: 0, controller, promise };
     expectedViewInflight.set(key, entry);
   }
@@ -1984,7 +3595,8 @@ export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIF
     if (entry.count > 0) return;
     if (entry.abortTimer) window.clearTimeout(entry.abortTimer);
     const abortNow = () => {
-      if (entry.count <= 0 && !entry.controller.signal.aborted) entry.controller.abort();
+      if (entry.count <= 0 && !entry.controller.signal.aborted)
+        entry.controller.abort();
     };
     if (signal?.aborted) abortNow();
     else entry.abortTimer = window.setTimeout(abortNow, 50);
@@ -1995,7 +3607,7 @@ export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIF
   }
   signal?.addEventListener("abort", release, { once: true });
   try {
-    return await entry.promise as Promise<ExpectedViewResult>;
+    return (await entry.promise) as Promise<ExpectedViewResult>;
   } finally {
     signal?.removeEventListener("abort", release);
   }
@@ -2006,7 +3618,7 @@ export async function getExpectedView(director = "DIR DADOS E INTELIGENCIA ARTIF
 export interface ScheduledTask {
   id: number;
   name: string;
-  connection_id: number;
+  connection_id: number | null;
   connection_ids: number[];
   cron_expression: string;
   timezone: string;
@@ -2015,6 +3627,7 @@ export interface ScheduledTask {
   last_run_at: string | null;
   next_run_at: string | null;
   config_json: Record<string, unknown>;
+  schedule_type: "backup" | "collection" | "reprocess";
   created_at: string;
   updated_at: string;
 }
@@ -2026,19 +3639,23 @@ export async function getSchedules(): Promise<ScheduledTask[]> {
 
 export async function createSchedule(body: {
   name: string;
-  connection_id: number;
+  connection_id?: number | null;
   connection_ids?: number[];
   cron_expression: string;
   timezone?: string;
   destination_reprocess?: boolean;
   active?: boolean;
   config_json?: Record<string, unknown>;
+  schedule_type?: "backup" | "collection" | "reprocess";
 }): Promise<ScheduledTask> {
   const { data } = await api.post("/etl/schedules", body);
   return data;
 }
 
-export async function updateSchedule(id: number, body: Partial<ScheduledTask>): Promise<ScheduledTask> {
+export async function updateSchedule(
+  id: number,
+  body: Partial<ScheduledTask>,
+): Promise<ScheduledTask> {
   const { data } = await api.put(`/etl/schedules/${id}`, body);
   return data;
 }
@@ -2047,7 +3664,13 @@ export async function deleteSchedule(id: number): Promise<void> {
   await api.delete(`/etl/schedules/${id}`);
 }
 
-export async function runScheduleNow(id: number): Promise<{ task_ids: number[]; connection_ids: number[]; schedule_name: string }> {
+export async function runScheduleNow(
+  id: number,
+): Promise<{
+  task_ids: number[];
+  connection_ids: number[];
+  schedule_name: string;
+}> {
   const { data } = await api.post(`/etl/schedules/${id}/run`);
   return data;
 }
@@ -2062,14 +3685,28 @@ export interface MappedConnection {
   mapping_count: number;
 }
 
-export async function getConnectionsForDestination(destTableId: number): Promise<MappedConnection[]> {
+export async function getConnectionsForDestination(
+  destTableId: number,
+): Promise<MappedConnection[]> {
   const { data } = await api.get(`/etl/connections-for-dest/${destTableId}`);
   return data;
 }
 
 // ── Manual CSV Upload (Bronze) ──
-export interface CsvUploadConnection { id: number; code: string; name: string; connector_type: string; cloud_name: string | null; }
-export interface CsvColumnPreview { name: string; inferred_type: string; sample_values: unknown[]; null_count: number; total_count: number; }
+export interface CsvUploadConnection {
+  id: number;
+  code: string;
+  name: string;
+  connector_type: string;
+  cloud_name: string | null;
+}
+export interface CsvColumnPreview {
+  name: string;
+  inferred_type: string;
+  sample_values: unknown[];
+  null_count: number;
+  total_count: number;
+}
 export interface CsvPreview {
   row_count: number;
   column_count: number;
@@ -2093,7 +3730,9 @@ export interface CsvIngestResult {
   skip_gold_realizado?: boolean;
 }
 
-export async function getCsvUploadConnections(): Promise<CsvUploadConnection[]> {
+export async function getCsvUploadConnections(): Promise<
+  CsvUploadConnection[]
+> {
   const { data } = await api.get("/csv-upload/connections");
   return data;
 }
@@ -2107,7 +3746,12 @@ export async function previewCsv(file: File): Promise<CsvPreview> {
   return data;
 }
 
-export async function ingestCsv(file: File, connectionId: number, billingPeriod: string, columnTypes: Array<{ name: string; data_type: string }>): Promise<CsvIngestResult> {
+export async function ingestCsv(
+  file: File,
+  connectionId: number,
+  billingPeriod: string,
+  columnTypes: Array<{ name: string; data_type: string }>,
+): Promise<CsvIngestResult> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("connection_id", String(connectionId));
@@ -2119,12 +3763,17 @@ export async function ingestCsv(file: File, connectionId: number, billingPeriod:
   return data;
 }
 
-export async function getCsvUploadHistory(connectionId: number): Promise<IngestedBlob[]> {
+export async function getCsvUploadHistory(
+  connectionId: number,
+): Promise<IngestedBlob[]> {
   const { data } = await api.get(`/csv-upload/history/${connectionId}`);
   return data;
 }
 
-export async function ingestCsvBatch(files: File[], connectionId: number): Promise<CsvIngestResult[]> {
+export async function ingestCsvBatch(
+  files: File[],
+  connectionId: number,
+): Promise<CsvIngestResult[]> {
   const formData = new FormData();
   files.forEach((f) => formData.append("files", f));
   formData.append("connection_id", String(connectionId));
@@ -2165,9 +3814,23 @@ export interface AIOverviewResult {
     mom_change_pct: number;
   };
   monthly_series: Array<{ period: string; provider: string; value: number }>;
-  license_utilization_by_dept: Array<{ department: string; licenses: number; active_users: number; utilization_rate: number }>;
-  adoption_funnel: { assigned: number; logged_in: number; used: number; healthy: number };
-  provider_bubble: Array<{ provider: string; licenses: number; usage_value: number }>;
+  license_utilization_by_dept: Array<{
+    department: string;
+    licenses: number;
+    active_users: number;
+    utilization_rate: number;
+  }>;
+  adoption_funnel: {
+    assigned: number;
+    logged_in: number;
+    used: number;
+    healthy: number;
+  };
+  provider_bubble: Array<{
+    provider: string;
+    licenses: number;
+    usage_value: number;
+  }>;
 }
 
 export interface AILicensesResult {
@@ -2200,10 +3863,33 @@ export interface AIConsumptionResult {
   cost_coverage_pct: AICostCoveragePct;
   percentiles: { p10: number; p95: number };
   pareto: Array<{ provider: string; value: number }>;
-  cost_per_million_tokens: Array<{ provider: string; model_name: string; cost_per_million: number }>;
-  outliers: Array<{ user_email: string; provider: string; metric_value: number; usage_index: number; percent_rank: number }>;
-  zombies: Array<{ user_email: string; provider: string; metric_value: number; usage_index: number; percent_rank: number }>;
-  ranked_users: Array<{ user_email: string; provider: string; metric_value: number; total_tokens: number; usage_index: number; percent_rank: number }>;
+  cost_per_million_tokens: Array<{
+    provider: string;
+    model_name: string;
+    cost_per_million: number;
+  }>;
+  outliers: Array<{
+    user_email: string;
+    provider: string;
+    metric_value: number;
+    usage_index: number;
+    percent_rank: number;
+  }>;
+  zombies: Array<{
+    user_email: string;
+    provider: string;
+    metric_value: number;
+    usage_index: number;
+    percent_rank: number;
+  }>;
+  ranked_users: Array<{
+    user_email: string;
+    provider: string;
+    metric_value: number;
+    total_tokens: number;
+    usage_index: number;
+    percent_rank: number;
+  }>;
   heatmap: Array<{ usage_date: string; user_email: string; value: number }>;
 }
 
@@ -2237,24 +3923,42 @@ export interface AIUserResult {
   }>;
 }
 
-async function postAIDashboard<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const { data } = await api.post(`/ai-dashboards/${path}`, body, { signal, timeout: 120000 });
+async function postAIDashboard<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const { data } = await api.post(`/ai-dashboards/${path}`, body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
 
-export async function getAIDashboardOverview(body: AIDashboardFilter, signal?: AbortSignal): Promise<AIOverviewResult> {
+export async function getAIDashboardOverview(
+  body: AIDashboardFilter,
+  signal?: AbortSignal,
+): Promise<AIOverviewResult> {
   return postAIDashboard("overview", body, signal);
 }
 
 export async function getAIDashboardLicenses(
-  body: AIDashboardFilter & { limit?: number; offset?: number; reclaim_only?: boolean },
+  body: AIDashboardFilter & {
+    limit?: number;
+    offset?: number;
+    reclaim_only?: boolean;
+  },
   signal?: AbortSignal,
 ): Promise<AILicensesResult> {
   return postAIDashboard("licenses", body, signal);
 }
 
 export async function getAIDashboardConsumption(
-  body: AIDashboardFilter & { limit?: number; outliers_only?: boolean; zombie_only?: boolean },
+  body: AIDashboardFilter & {
+    limit?: number;
+    outliers_only?: boolean;
+    zombie_only?: boolean;
+  },
   signal?: AbortSignal,
 ): Promise<AIConsumptionResult> {
   return postAIDashboard("consumption", body, signal);
@@ -2351,7 +4055,12 @@ export interface AIProviderOverviewResult {
     organization_id: string;
     logged_in: boolean;
   }>;
-  adoption_funnel: { assigned: number; logged_in: number; used: number; healthy: number };
+  adoption_funnel: {
+    assigned: number;
+    logged_in: number;
+    used: number;
+    healthy: number;
+  };
   data_quality: {
     consumption_rows: number;
     consumption_with_user: number;
@@ -2378,32 +4087,72 @@ export async function getAIProviderOverview(
   body: AIProviderOverviewFilter,
   signal?: AbortSignal,
 ): Promise<AIProviderOverviewResult> {
-  const { data } = await api.post("/visoes-consumo-ia/provider/overview", body, { signal, timeout: 120000 });
+  const { data } = await api.post(
+    "/visoes-consumo-ia/provider/overview",
+    body,
+    { signal, timeout: 120000 },
+  );
   return data;
 }
 
-export async function getAICopilotOverview(body: Record<string, unknown>, signal?: AbortSignal) {
-  const { data } = await api.post("/ai-copilot/overview", body, { signal, timeout: 120000 });
+export async function getAICopilotOverview(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post("/ai-copilot/overview", body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
-export async function getAICopilotModels(body: Record<string, unknown>, signal?: AbortSignal) {
-  const { data } = await api.post("/ai-copilot/models", body, { signal, timeout: 120000 });
+export async function getAICopilotModels(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post("/ai-copilot/models", body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
-export async function getAICopilotHistory(body: Record<string, unknown>, signal?: AbortSignal) {
-  const { data } = await api.post("/ai-copilot/history", body, { signal, timeout: 120000 });
+export async function getAICopilotHistory(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post("/ai-copilot/history", body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
-export async function getAICopilotFinancialInsights(body: Record<string, unknown>, signal?: AbortSignal) {
-  const { data } = await api.post("/ai-copilot/financial-insights", body, { signal, timeout: 120000 });
+export async function getAICopilotFinancialInsights(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post("/ai-copilot/financial-insights", body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
-export async function getAICopilotEngagementUsers(body: Record<string, unknown>, signal?: AbortSignal) {
-  const { data } = await api.post("/ai-copilot/engagement-users", body, { signal, timeout: 120000 });
+export async function getAICopilotEngagementUsers(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post("/ai-copilot/engagement-users", body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
-export async function getAICopilotUserModelDetails(body: Record<string, unknown>, signal?: AbortSignal) {
-  const { data } = await api.post("/ai-copilot/user-model-details", body, { signal, timeout: 120000 });
+export async function getAICopilotUserModelDetails(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  const { data } = await api.post("/ai-copilot/user-model-details", body, {
+    signal,
+    timeout: 120000,
+  });
   return data;
 }
 
@@ -2429,14 +4178,24 @@ export interface DimonRule {
   snapshot_mode?: boolean;
   snapshot_col?: string;
   materialization_table?: string | null;
-  materialization_status?: "PENDING" | "UPDATED" | "EMPTY" | "ERROR" | string | null;
+  materialization_status?:
+    | "PENDING"
+    | "UPDATED"
+    | "EMPTY"
+    | "ERROR"
+    | string
+    | null;
   materialization_rows?: number | null;
   materialized_at?: string | null;
   materialization_error?: string | null;
   sources?: DimonRuleSource[];
 }
 
-export interface GoldTable { id: number; name: string; physical_name: string }
+export interface GoldTable {
+  id: number;
+  name: string;
+  physical_name: string;
+}
 
 export interface DimonHistoryItem {
   id: number;
@@ -2444,7 +4203,9 @@ export interface DimonHistoryItem {
   phase?: string;
   rows_destination?: number;
   errors?: string[];
-  result_json?: { failed?: Array<{ rule_id: number; code?: string; error?: string }> };
+  result_json?: {
+    failed?: Array<{ rule_id: number; code?: string; error?: string }>;
+  };
 }
 
 export async function getDimonRules(): Promise<DimonRule[]> {
@@ -2452,7 +4213,9 @@ export async function getDimonRules(): Promise<DimonRule[]> {
   return data;
 }
 
-export async function saveDimonRule(rule: Partial<DimonRule>): Promise<DimonRule> {
+export async function saveDimonRule(
+  rule: Partial<DimonRule>,
+): Promise<DimonRule> {
   const body = {
     code: rule.code,
     name: rule.name,
@@ -2463,12 +4226,19 @@ export async function saveDimonRule(rule: Partial<DimonRule>): Promise<DimonRule
     sql_template: rule.sql_template ?? null,
     snapshot_mode: rule.snapshot_mode ?? false,
     snapshot_col: rule.snapshot_col ?? "_snapshot_date",
-    sources: (rule.sources || []).map(s => {
-      const golds = (s.gold_tables && s.gold_tables.length ? s.gold_tables : (s.gold_table ? [s.gold_table] : []));
+    sources: (rule.sources || []).map((s) => {
+      const golds =
+        s.gold_tables && s.gold_tables.length
+          ? s.gold_tables
+          : s.gold_table
+            ? [s.gold_table]
+            : [];
       return {
         gold_tables: golds,
         gold_table: golds[0] || null,
-        filter_json: Array.isArray(s.filter_json) ? { conditions: s.filter_json } : s.filter_json,
+        filter_json: Array.isArray(s.filter_json)
+          ? { conditions: s.filter_json }
+          : s.filter_json,
         value_column: s.value_column,
         percent: s.percent ?? 100,
       };
@@ -2495,7 +4265,14 @@ export async function deleteDimonTable(tableName: string): Promise<void> {
   await api.delete("/dimon/tables/" + encodeURIComponent(tableName));
 }
 
-export async function reprocessDimons(ruleIds: number[] = []): Promise<{ task_id: number; status: string; message: string; rules: number }> {
+export async function reprocessDimons(
+  ruleIds: number[] = [],
+): Promise<{
+  task_id: number;
+  status: string;
+  message: string;
+  rules: number;
+}> {
   const { data } = await api.post("/dimon/reprocess", { rule_ids: ruleIds });
   return data;
 }
@@ -2552,11 +4329,17 @@ export async function getDimonInfo(table: string): Promise<DimonInfo> {
   return data;
 }
 
+export interface DimonGoldColumn {
+  name: string;
+  type: string;
+}
 
-export interface DimonGoldColumn { name: string; type: string }
-
-export async function getDimonGoldSchema(goldTable: string): Promise<DimonGoldColumn[]> {
-  const { data } = await api.get("/dimon/gold-schema", { params: { gold_table: goldTable } });
+export async function getDimonGoldSchema(
+  goldTable: string,
+): Promise<DimonGoldColumn[]> {
+  const { data } = await api.get("/dimon/gold-schema", {
+    params: { gold_table: goldTable },
+  });
   return data.columns || [];
 }
 
@@ -2567,8 +4350,12 @@ export interface ScheduledShutdownSetup {
   message: string;
 }
 
-export async function setupScheduledShutdown(connection_id?: number): Promise<ScheduledShutdownSetup> {
-  const { data } = await api.post("/scheduled-shutdown/setup", { connection_id });
+export async function setupScheduledShutdown(
+  connection_id?: number,
+): Promise<ScheduledShutdownSetup> {
+  const { data } = await api.post("/scheduled-shutdown/setup", {
+    connection_id,
+  });
   return data;
 }
 
@@ -2613,7 +4400,9 @@ export interface SavingsResponse {
   vm_with_shutdown: number;
 }
 
-export async function getShutdownSavings(filter: SavingsFilter = {}): Promise<SavingsResponse> {
+export async function getShutdownSavings(
+  filter: SavingsFilter = {},
+): Promise<SavingsResponse> {
   const { data } = await api.post("/scheduled-shutdown/savings", filter);
   return data;
 }
@@ -2644,7 +4433,9 @@ export interface PadroesResponse {
 }
 
 export async function getPadroes(period?: string): Promise<PadroesResponse> {
-  const { data } = await api.get("/scheduled-shutdown/padroes", { params: period ? { period } : {} });
+  const { data } = await api.get("/scheduled-shutdown/padroes", {
+    params: period ? { period } : {},
+  });
   return data;
 }
 
@@ -2674,8 +4465,13 @@ export interface PadraoRecursosResponse {
   rows: PadraoRecursoItem[];
 }
 
-export async function getPadroesRecursos(period: string, padrao: string): Promise<PadraoRecursosResponse> {
-  const { data } = await api.get("/scheduled-shutdown/padroes-recursos", { params: { period, padrao } });
+export async function getPadroesRecursos(
+  period: string,
+  padrao: string,
+): Promise<PadraoRecursosResponse> {
+  const { data } = await api.get("/scheduled-shutdown/padroes-recursos", {
+    params: { period, padrao },
+  });
   return data;
 }
 
@@ -2692,8 +4488,12 @@ export interface SavingDepartamentoResponse {
   rows: SavingDepartamentoItem[];
 }
 
-export async function getSavingDepartamento(period?: string): Promise<SavingDepartamentoResponse> {
-  const { data } = await api.get("/scheduled-shutdown/saving-departamento", { params: period ? { period } : {} });
+export async function getSavingDepartamento(
+  period?: string,
+): Promise<SavingDepartamentoResponse> {
+  const { data } = await api.get("/scheduled-shutdown/saving-departamento", {
+    params: period ? { period } : {},
+  });
   return data;
 }
 
@@ -2729,8 +4529,13 @@ export interface VmDailyUsageResponse {
   rows: VmDailyUsageItem[];
 }
 
-export async function getVmDailyUsage(resourceName: string, days = 30): Promise<VmDailyUsageResponse> {
-  const { data } = await api.get("/scheduled-shutdown/vm-usage-daily", { params: { resource_name: resourceName, days } });
+export async function getVmDailyUsage(
+  resourceName: string,
+  days = 30,
+): Promise<VmDailyUsageResponse> {
+  const { data } = await api.get("/scheduled-shutdown/vm-usage-daily", {
+    params: { resource_name: resourceName, days },
+  });
   return data;
 }
 
@@ -2819,7 +4624,9 @@ export interface OpportunityResponse {
   vmss_count: number;
 }
 
-export async function getOpportunity(filter: SavingsFilter): Promise<OpportunityResponse> {
+export async function getOpportunity(
+  filter: SavingsFilter,
+): Promise<OpportunityResponse> {
   const { data } = await api.post("/scheduled-shutdown/opportunity", filter);
   return data;
 }
@@ -2836,7 +4643,9 @@ export interface OpportunitySubscriptionsResponse {
 }
 
 export async function getOpportunitySubscriptions(): Promise<OpportunitySubscriptionsResponse> {
-  const { data } = await api.get("/scheduled-shutdown/opportunity-subscriptions");
+  const { data } = await api.get(
+    "/scheduled-shutdown/opportunity-subscriptions",
+  );
   return data;
 }
 
@@ -2854,14 +4663,23 @@ export interface ShutdownExceptionRule {
   is_active?: boolean;
 }
 
-export async function listShutdownExceptions(active_only = false): Promise<ShutdownExceptionRule[]> {
-  const { data } = await api.get("/scheduled-shutdown/exceptions", { params: { active_only } });
+export async function listShutdownExceptions(
+  active_only = false,
+): Promise<ShutdownExceptionRule[]> {
+  const { data } = await api.get("/scheduled-shutdown/exceptions", {
+    params: { active_only },
+  });
   return data;
 }
 
-export async function saveShutdownException(rule: ShutdownExceptionRule): Promise<ShutdownExceptionRule> {
+export async function saveShutdownException(
+  rule: ShutdownExceptionRule,
+): Promise<ShutdownExceptionRule> {
   if (rule.id) {
-    const { data } = await api.put("/scheduled-shutdown/exceptions/" + rule.id, rule);
+    const { data } = await api.put(
+      "/scheduled-shutdown/exceptions/" + rule.id,
+      rule,
+    );
     return data;
   }
   const { data } = await api.post("/scheduled-shutdown/exceptions", rule);
@@ -2880,11 +4698,15 @@ export interface ExceptionFromDeltaInput {
   reason?: string;
 }
 
-export async function createExceptionFromDelta(input: ExceptionFromDeltaInput): Promise<ShutdownExceptionRule> {
-  const { data } = await api.post("/scheduled-shutdown/exceptions/from-delta", input);
+export async function createExceptionFromDelta(
+  input: ExceptionFromDeltaInput,
+): Promise<ShutdownExceptionRule> {
+  const { data } = await api.post(
+    "/scheduled-shutdown/exceptions/from-delta",
+    input,
+  );
   return data;
 }
-
 
 // ── Azure Resource Graph — Recursos Órfãos (Governança) ─────────────────
 export interface OrphanSummary {
@@ -2932,25 +4754,51 @@ export interface OrphanRow {
   governance_reason?: string | null;
 }
 
-export async function getOrphanSummary(params: {
-  period?: string; snapshot_date?: string; orphan_rule?: string; tipo_recurso?: string;
-  subscription_id?: string; resource_group?: string;
-} = {}, signal?: AbortSignal): Promise<OrphanSummary> {
-  const { data } = await api.get("/azure-resource-graph/summary", { params, signal });
+export async function getOrphanSummary(
+  params: {
+    period?: string;
+    snapshot_date?: string;
+    orphan_rule?: string;
+    tipo_recurso?: string;
+    subscription_id?: string;
+    resource_group?: string;
+  } = {},
+  signal?: AbortSignal,
+): Promise<OrphanSummary> {
+  const { data } = await api.get("/azure-resource-graph/summary", {
+    params,
+    signal,
+  });
   return data;
 }
 
-export async function getOrphans(params: {
-  period?: string; snapshot_date?: string; orphan_rule?: string; tipo_recurso?: string; subscription_id?: string;
-  resource_group?: string; status?: string; limit?: number;
-} = {}, signal?: AbortSignal): Promise<{ rows: OrphanRow[]; total: number; error?: string }> {
-  const { data } = await api.get("/azure-resource-graph/orphans", { params, signal });
+export async function getOrphans(
+  params: {
+    period?: string;
+    snapshot_date?: string;
+    orphan_rule?: string;
+    tipo_recurso?: string;
+    subscription_id?: string;
+    resource_group?: string;
+    status?: string;
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<{ rows: OrphanRow[]; total: number; error?: string }> {
+  const { data } = await api.get("/azure-resource-graph/orphans", {
+    params,
+    signal,
+  });
   return data;
 }
 
 export async function setOrphanAnnotation(body: {
-  resource_id: string; orphan_rule: string; snapshot_date: string;
-  status: "ORFAO" | "EM_ANALISE" | "EXCECAO"; reason?: string; updated_by?: string;
+  resource_id: string;
+  orphan_rule: string;
+  snapshot_date: string;
+  status: "ORFAO" | "EM_ANALISE" | "EXCECAO";
+  reason?: string;
+  updated_by?: string;
 }): Promise<{ status: string; removed: boolean }> {
   const { data } = await api.post("/azure-resource-graph/annotations", body);
   return data;
@@ -2983,10 +4831,19 @@ export interface OrphanSavings {
   error?: string;
 }
 
-export async function getOrphanSavings(params: {
-  orphan_rule?: string; tipo_recurso?: string; subscription_id?: string;
-  resource_group?: string; limit?: number;
-} = {}, signal?: AbortSignal): Promise<OrphanSavings> {
-  const { data } = await api.get("/azure-resource-graph/orphan-savings", { params, signal });
+export async function getOrphanSavings(
+  params: {
+    orphan_rule?: string;
+    tipo_recurso?: string;
+    subscription_id?: string;
+    resource_group?: string;
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<OrphanSavings> {
+  const { data } = await api.get("/azure-resource-graph/orphan-savings", {
+    params,
+    signal,
+  });
   return data;
 }
