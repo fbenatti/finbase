@@ -31,6 +31,10 @@ backups/scheduled/
 /backups/*.sql
 /FinOps_v2.5.3_FROZEN_LOCAL_CORRIGIDO/report-cloud-full-azure.csv
 
+# Files created when restoring a full backup on a host.
+/postgres/
+/BACKUP_MANIFEST.json
+
 # OS/editor files
 .DS_Store
 .idea/
