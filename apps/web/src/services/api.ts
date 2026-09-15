@@ -446,7 +446,23 @@ type ExpectedViewInflight = {
 };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
 const expectedViewCache = new Map<string, { expiresAt: number; data: ExpectedViewResult }>();
-const EXPECTED_VIEW_CACHE_MS = 45_000;
+const EXPECTED_VIEW_CACHE_MS = 8 * 60 * 60 * 1000;
+const analyticsCache = new Map<string, { expiresAt: number; data: unknown }>();
+
+async function cachedAnalytics<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const cached = analyticsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.data as T;
+  if (cached) analyticsCache.delete(key);
+  const data = await loader();
+  analyticsCache.set(key, { expiresAt: Date.now() + EXPECTED_VIEW_CACHE_MS, data });
+  return data;
+}
+
+/** Invalidate executive-view results after a Gold/Dimon mutation. */
+export function purgeExpectedViewCache(): void {
+  expectedViewCache.clear();
+  analyticsCache.clear();
+}
 
 export function trackAnalysisAbort(controller: AbortController) {
   pendingAnalysis.add(controller);
@@ -1122,6 +1138,7 @@ export async function reprocessSharedCost(): Promise<{
   message: string;
 }> {
   const { data } = await api.post("/etl/reprocess-shared-cost");
+  purgeExpectedViewCache();
   return data;
 }
 
@@ -1190,6 +1207,7 @@ export async function reprocessDest(body: {
   message: string;
 }> {
   const { data } = await api.post("/etl/reprocess", body);
+  purgeExpectedViewCache();
   return data;
 }
 
@@ -1199,6 +1217,7 @@ export async function reclassifyDest(body: {
   billing_periods: string[];
 }): Promise<{ task_id: number; task_ids?: number[]; message: string }> {
   const { data } = await api.post("/etl/reclassify", body);
+  purgeExpectedViewCache();
   return data;
 }
 
@@ -3473,10 +3492,12 @@ export async function queryAnalysisDestination(
   tableId: number,
   options?: { limit?: number; offset?: number },
 ): Promise<DestinationDataResult> {
-  const { data } = await api.get(`/analysis/destinations/${tableId}/data`, {
-    params: options,
+  return cachedAnalytics(`gold-destination:${tableId}:${JSON.stringify(options || {})}`, async () => {
+    const { data } = await api.get(`/analysis/destinations/${tableId}/data`, {
+      params: options,
+    });
+    return data as DestinationDataResult;
   });
-  return data;
 }
 
 // ── Server-side Pivot ──
@@ -3566,7 +3587,9 @@ export async function getPivotMetadata(
   return (await api.get(`/analysis/pivot/metadata/${tableId}`)).data;
 }
 export async function runPivot(body: PivotRequest): Promise<PivotResult> {
-  return (await api.post("/analysis/pivot", body)).data;
+  return cachedAnalytics(`gold-pivot:${JSON.stringify(body)}`, async () =>
+    (await api.post("/analysis/pivot", body)).data as PivotResult,
+  );
 }
 
 // ── Server-side Pivot — union of two (or N) tables (realizado + forecast) ──
@@ -4420,9 +4443,11 @@ export async function saveDimonRule(
   };
   if (rule.id) {
     const { data } = await api.put(`/dimon/rules/${rule.id}`, body);
+    purgeExpectedViewCache();
     return data;
   }
   const { data } = await api.post("/dimon/rules", body);
+  purgeExpectedViewCache();
   return data;
 }
 
@@ -4433,10 +4458,12 @@ export async function getDimonGoldTables(): Promise<GoldTable[]> {
 
 export async function deleteDimonRule(ruleId: number): Promise<void> {
   await api.delete("/dimon/rules/" + ruleId);
+  purgeExpectedViewCache();
 }
 
 export async function deleteDimonTable(tableName: string): Promise<void> {
   await api.delete("/dimon/tables/" + encodeURIComponent(tableName));
+  purgeExpectedViewCache();
 }
 
 export async function reprocessDimons(
@@ -4448,6 +4475,7 @@ export async function reprocessDimons(
   rules: number;
 }> {
   const { data } = await api.post("/dimon/reprocess", { rule_ids: ruleIds });
+  purgeExpectedViewCache();
   return data;
 }
 
@@ -4494,13 +4522,18 @@ export async function queryDimonTable(body: {
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
 }): Promise<DimonQueryResult> {
-  const { data } = await api.post("/dimon/query", body, { timeout: 180000 });
-  return data;
+  const key = `dimon-query:${JSON.stringify(body)}`;
+  return cachedAnalytics(key, async () => {
+    const { data } = await api.post("/dimon/query", body, { timeout: 180000 });
+    return data as DimonQueryResult;
+  });
 }
 
 export async function getDimonInfo(table: string): Promise<DimonInfo> {
-  const { data } = await api.get("/dimon/info", { params: { table } });
-  return data;
+  return cachedAnalytics(`dimon-info:${table}`, async () => {
+    const { data } = await api.get("/dimon/info", { params: { table } });
+    return data as DimonInfo;
+  });
 }
 
 export interface DimonGoldColumn {
@@ -4511,10 +4544,12 @@ export interface DimonGoldColumn {
 export async function getDimonGoldSchema(
   goldTable: string,
 ): Promise<DimonGoldColumn[]> {
-  const { data } = await api.get("/dimon/gold-schema", {
-    params: { gold_table: goldTable },
+  return cachedAnalytics(`gold-schema:${goldTable}`, async () => {
+    const { data } = await api.get("/dimon/gold-schema", {
+      params: { gold_table: goldTable },
+    });
+    return (data.columns || []) as DimonGoldColumn[];
   });
-  return data.columns || [];
 }
 
 // ── Scheduled Shutdown (Desligue Programado) ──
