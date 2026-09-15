@@ -26,6 +26,11 @@ worker.log
 .runtime-logs/
 backups/scheduled/
 
+# Large legacy/export artifacts stay on the local filesystem and must never
+# re-enter Git history (GitHub rejects individual files above 100 MiB).
+/backups/*.sql
+/FinOps_v2.5.3_FROZEN_LOCAL_CORRIGIDO/report-cloud-full-azure.csv
+
 # OS/editor files
 .DS_Store
 .idea/
