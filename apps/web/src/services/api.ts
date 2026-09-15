@@ -2808,6 +2808,7 @@ export interface PlanningVersion {
   delta_pct?: number | null;
   scope_id_orcamento?: string | null;
   scope_cloud?: string | null;
+  defense_request_id?: number | null;
   published_to_budget_at?: string | null;
   published_budget_version_id?: number | null;
 }
@@ -2821,6 +2822,54 @@ export interface PlanningGrid {
   type: FinancialType;
   version: PlanningVersion | null;
   rows: PlanningRow[];
+  individual_lines?: BudgetDefenseRequest[];
+  defense_request?: BudgetDefenseRequest | null;
+}
+export type BudgetDefenseStatus =
+  | "RASCUNHO"
+  | "SOLICITADA"
+  | "APROVADA"
+  | "PUBLICADA"
+  | "REJEITADA";
+export interface BudgetDefenseRequest {
+  id: number;
+  year: number;
+  department_id: number;
+  parent_department_id: number | null;
+  is_new_project: boolean;
+  requested_id_orcamento: string;
+  requested_cloud: string | null;
+  title: string | null;
+  description: string | null;
+  status: BudgetDefenseStatus;
+  requested_by_id: number | null;
+  requested_at: string | null;
+  decided_by_id: number | null;
+  decided_at: string | null;
+  final_id_orcamento: string | null;
+  final_cloud: string | null;
+  decision_note: string | null;
+  defense_version_id: number | null;
+  published_budget_version_id: number | null;
+  published_at: string | null;
+  annual_total: number;
+  project_name: string | null;
+  project_active: boolean;
+  project_path: string[];
+  organograma_id_orcamento: string | null;
+  organograma_cloud: string | null;
+  /** Projeto defendido fora da linha herdada: o organograma só muda ao publicar. */
+  is_individual_line: boolean;
+}
+export interface BudgetDefenseDepartment {
+  id: number;
+  parent_id: number | null;
+  name: string;
+  path: string[];
+  centro_custo: string | null;
+  id_orcamento: string | null;
+  budget_id: string | null;
+  cloud: string | null;
 }
 export async function getFinancialTypes(): Promise<FinancialType[]> {
   return (await api.get("/planning/types")).data;
@@ -2831,6 +2880,7 @@ export async function getPlanningGrid(
   versionId?: number,
   scopeId?: string,
   scopeCloud?: string,
+  defenseRequestId?: number,
 ): Promise<PlanningGrid> {
   return (
     await api.get(`/planning/${type}/${year}`, {
@@ -2838,6 +2888,7 @@ export async function getPlanningGrid(
         version_id: versionId,
         scope_id_orcamento: scopeId || undefined,
         scope_cloud: scopeCloud || undefined,
+        defense_request_id: defenseRequestId || undefined,
       },
     })
   ).data;
@@ -2847,9 +2898,20 @@ export async function savePlanningGrid(
   year: number,
   rows: PlanningRow[],
   publication: PlanningPublication,
-): Promise<{ version: PlanningVersion; rows: number }> {
-  return (await api.post(`/planning/${type}/${year}`, { rows, ...publication }))
-    .data;
+  options?: { defenseRequestId?: number; submit?: boolean },
+): Promise<{
+  version: PlanningVersion;
+  rows: number;
+  defense_request?: BudgetDefenseRequest | null;
+}> {
+  return (
+    await api.post(`/planning/${type}/${year}`, {
+      rows,
+      ...publication,
+      defense_request_id: options?.defenseRequestId,
+      submit: options?.submit ?? false,
+    })
+  ).data;
 }
 export async function getPlanningVersions(
   type: string,
@@ -2875,12 +2937,14 @@ export async function importPlanningExcel(
   year: number,
   file: File,
   publication: PlanningPublication,
+  defenseRequestId?: number,
 ): Promise<{ version: PlanningVersion; rows: number }> {
   const data = new FormData();
   data.append("file", file);
   Object.entries(publication).forEach(([key, value]) => {
     if (value != null) data.append(key, String(value));
   });
+  if (defenseRequestId) data.append("defense_request_id", String(defenseRequestId));
   return (await api.post(`/planning/${type}/${year}/import`, data)).data;
 }
 export async function downloadPlanningTemplate(year: number): Promise<Blob> {
@@ -2927,6 +2991,105 @@ export async function publishDefenseToBudget(
       `/planning/defesa-orcamentaria/${year}/versions/${versionId}/publish-budget`,
       body,
     )
+  ).data;
+}
+
+// --- Defesa orçamentária de projeto (linha individual / merge) --------------
+export async function getDefenseRequests(
+  year: number,
+  status?: BudgetDefenseStatus[],
+): Promise<BudgetDefenseRequest[]> {
+  return (
+    await api.get("/planning/budget-defense/requests", {
+      params: { year, status: status?.length ? status.join(",") : undefined },
+    })
+  ).data;
+}
+export async function getDefenseDepartmentOptions(): Promise<
+  BudgetDefenseDepartment[]
+> {
+  return (await api.get("/planning/budget-defense/departments")).data;
+}
+export async function createDefenseProject(body: {
+  year: number;
+  parent_id: number;
+  name: string;
+  id_orcamento: string;
+  centro_custo?: string | null;
+  ambiente?: string | null;
+  cloud_filter?: string | null;
+  title?: string | null;
+  description?: string | null;
+}): Promise<{ department: Department; request: BudgetDefenseRequest }> {
+  return (await api.post("/planning/budget-defense/projects", body)).data;
+}
+export async function createDefenseRequest(body: {
+  year: number;
+  department_id: number;
+  requested_id_orcamento: string;
+  requested_cloud?: string | null;
+  title?: string | null;
+  description?: string | null;
+}): Promise<BudgetDefenseRequest> {
+  return (await api.post("/planning/budget-defense/requests", body)).data;
+}
+export async function updateDefenseRequest(
+  id: number,
+  body: {
+    requested_id_orcamento?: string;
+    requested_cloud?: string | null;
+    title?: string | null;
+    description?: string | null;
+  },
+): Promise<BudgetDefenseRequest> {
+  return (await api.put(`/planning/budget-defense/requests/${id}`, body)).data;
+}
+export async function submitDefenseRequest(
+  id: number,
+): Promise<BudgetDefenseRequest> {
+  return (
+    await api.post(`/planning/budget-defense/requests/${id}/submit`)
+  ).data;
+}
+export async function approveDefenseRequest(
+  id: number,
+  body: {
+    final_id_orcamento: string;
+    final_cloud?: string | null;
+    decision_note: string;
+    effective_date?: string;
+  },
+): Promise<BudgetDefenseRequest> {
+  return (
+    await api.post(`/planning/budget-defense/requests/${id}/approve`, body)
+  ).data;
+}
+export async function rejectDefenseRequest(
+  id: number,
+  body: { decision_note: string },
+): Promise<BudgetDefenseRequest> {
+  return (
+    await api.post(`/planning/budget-defense/requests/${id}/reject`, body)
+  ).data;
+}
+export async function publishDefenseRequest(
+  id: number,
+  body: {
+    title: string;
+    description: string;
+    effective_date: string;
+    final_id_orcamento?: string | null;
+    final_cloud?: string | null;
+    decision_note?: string | null;
+  },
+): Promise<{
+  request: BudgetDefenseRequest;
+  budget_version: PlanningVersion;
+  department: Department;
+  rows: number;
+}> {
+  return (
+    await api.post(`/planning/budget-defense/requests/${id}/publish`, body)
   ).data;
 }
 export interface FinancialDashboardOverview {

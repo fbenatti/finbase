@@ -3,7 +3,6 @@ import { useAuth } from "../../auth/AuthContext";
 import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
-import VisaoContabil, { EMPTY_FILTERS } from "../DimonDashboard/VisaoContabil";
 import CloneRules from "../CloneRules/CloneRules";
 import Dimon from "../Dimon/Dimon";
 
@@ -12,7 +11,6 @@ const TABS = [
   { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Camada Dimon de Custo", perms: [{ module: "dimon", scope: null }] },
-  { id: "visao-contabil", label: "Visão Contábil", perms: [{ module: "dimon", scope: "visao-contabil" }, { module: "forecast", scope: "visao-contabil" }] },
   { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
 ] as const;
 
@@ -43,7 +41,7 @@ export default function Governance() {
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Governança</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Regras de negócio, reservas e Savings Plans, classificação organizacional, políticas de tags e visão contábil.
+            Regras de negócio, reservas e Savings Plans, classificação organizacional e políticas de tags.
           </Typography>
         </Box>
         <Tabs value={tab} onChange={(_, value: TabId) => setTab(value)} aria-label="Governança" sx={{ mb: 0, minHeight: 42 }}>
@@ -87,11 +85,6 @@ export default function Governance() {
         {tab === "tags" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <TagsTab />
-          </Paper>
-        )}
-        {tab === "visao-contabil" && (
-          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="governance" />
           </Paper>
         )}
       </Box>

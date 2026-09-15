@@ -117,6 +117,12 @@ def aggregate_worker_health(*, max_age: float = 15.0) -> dict:
     healthy = [worker for worker in workers if worker.get("status") == "ok"]
     best = min(healthy, key=lambda item: item.get("heartbeat_age_seconds") or 0) if healthy else workers[0]
     status = "ok" if healthy else ("stale" if workers else "offline")
+    warehouse_write_locked = False
+    try:
+        from app.services.write_lock import is_locked
+        warehouse_write_locked = is_locked()
+    except Exception:
+        pass
     return {
         "status": status,
         "heartbeat_age_seconds": best.get("heartbeat_age_seconds"),
@@ -124,4 +130,5 @@ def aggregate_worker_health(*, max_age: float = 15.0) -> dict:
         "workers": workers,
         "concurrency": len(workers),
         "orphaned_tasks_cleared": 0,
+        "warehouse_write_locked": warehouse_write_locked,
     }

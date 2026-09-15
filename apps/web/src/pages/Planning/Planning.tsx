@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -29,6 +30,7 @@ import {
 } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import {
+  BudgetDefenseRequest,
   Department,
   downloadPlanningTemplate,
   downloadSimulatedBudget,
@@ -49,6 +51,8 @@ import {
   savePlanningGrid,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
+import { useAuth } from "../../auth/AuthContext";
+import BudgetDefensePanel from "./BudgetDefensePanel";
 
 const MONTHS = [
   "Jan",
@@ -75,6 +79,38 @@ const EVENTS: PlanningEventType[] = [
   "RESTAURACAO",
   "OUTRO",
 ];
+const EXPANDED_DEPARTMENTS_STORAGE_KEY =
+  "openfinops.financialPlanning.expandedDepartments";
+
+const loadExpandedDepartments = (): Set<number> => {
+  try {
+    const stored = window.localStorage.getItem(
+      EXPANDED_DEPARTMENTS_STORAGE_KEY,
+    );
+    if (!stored) return new Set();
+    const values: unknown = JSON.parse(stored);
+    if (!Array.isArray(values)) return new Set();
+    return new Set(
+      values.filter(
+        (value): value is number => Number.isInteger(value) && value > 0,
+      ),
+    );
+  } catch {
+    return new Set();
+  }
+};
+
+const saveExpandedDepartments = (expanded: Set<number>) => {
+  try {
+    window.localStorage.setItem(
+      EXPANDED_DEPARTMENTS_STORAGE_KEY,
+      JSON.stringify([...expanded]),
+    );
+  } catch {
+    // Storage may be unavailable in restricted/private browser contexts.
+  }
+};
+
 const money = (value: number) =>
   Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -107,6 +143,14 @@ export default function Planning({
 }: PlanningModuleProps) {
   const currentYear = new Date().getFullYear();
   const fileInput = useRef<HTMLInputElement>(null);
+  const { hasPerm } = useAuth();
+  const isDefense = type === "defesa-orcamentaria";
+  const canRequestDefense =
+    hasPerm("planning", "create", "defesa-solicitar") ||
+    hasPerm("planning", "update", "defesa-solicitar");
+  const canPublishDefense =
+    hasPerm("planning", "create", "defesa-publicar") ||
+    hasPerm("planning", "update", "defesa-publicar");
   const [year, setYear] = useState(currentYear),
     [years, setYears] = useState<number[]>([currentYear]),
     [departments, setDepartments] = useState<Department[]>([]),
@@ -115,7 +159,7 @@ export default function Planning({
     [timeline, setTimeline] = useState<PlanningVersion[]>([]),
     [snapshotId, setSnapshotId] = useState(""),
     [search, setSearch] = useState(""),
-    [expanded, setExpanded] = useState<Set<number>>(new Set()),
+    [expanded, setExpanded] = useState<Set<number>>(loadExpandedDepartments),
     [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false),
     [message, setMessage] = useState(""),
@@ -136,6 +180,9 @@ export default function Planning({
   const [scopes, setScopes] = useState<PlanningScope[]>([]);
   const [idOrcamentoFilter, setIdOrcamentoFilter] = useState("");
   const [cloudFilter, setCloudFilter] = useState("");
+  const [defenseRequest, setDefenseRequest] = useState<BudgetDefenseRequest | null>(null);
+  const [individualLines, setIndividualLines] = useState<BudgetDefenseRequest[]>([]);
+  const [defenseRefreshKey, setDefenseRefreshKey] = useState(0);
   const [approveVersion, setApproveVersion] = useState<PlanningVersion | null>(
     null,
   );
@@ -156,12 +203,14 @@ export default function Planning({
           type === "defesa-orcamentaria" && idOrcamentoFilter
             ? cloudFilter
             : undefined,
+          type === "defesa-orcamentaria" ? defenseRequest?.id : undefined,
         ),
         getPlanningVersions(type, year),
         getPlanningTimeline(type, year),
         getPlanningYears(type),
       ]);
       setRows(grid.rows);
+      setIndividualLines(grid.individual_lines || []);
       setVersions(history);
       setTimeline(events);
       setYears(
@@ -173,6 +222,14 @@ export default function Planning({
       setError(String(e));
     } finally {
       setLoading(false);
+    }
+  };
+  const loadDepartments = async () => {
+    try {
+      const data = await getDepartments(false);
+      setDepartments(flatten(data));
+    } catch (e) {
+      setError(String(e));
     }
   };
   useEffect(() => {
@@ -187,20 +244,11 @@ export default function Planning({
     setSnapshotId("");
     setIdOrcamentoFilter("");
     setCloudFilter("");
+    setDefenseRequest(null);
   }, [year, type]);
   useEffect(() => {
     void load();
-  }, [year, snapshotId, type, idOrcamentoFilter, cloudFilter]);
-  useEffect(() => {
-    if (!rows.length || !departments.length) return;
-    const parentIds = new Set<number>();
-    departments.forEach((department) => {
-      if (department.parent_id != null) parentIds.add(department.parent_id);
-    });
-    // A defesa chega em linhas de projeto; deixar a árvore recolhida fazia a
-    // grade parecer vazia mesmo com os valores retornados pela API.
-    setExpanded(parentIds);
-  }, [rows, departments]);
+  }, [year, snapshotId, type, idOrcamentoFilter, cloudFilter, defenseRequest?.id]);
   const displayRows = useMemo(() => {
     const own = new Map(rows.map((row) => [row.department_id, row.values]));
     const byId = new Map(departments.map((d) => [d.id, d]));
@@ -262,31 +310,77 @@ export default function Planning({
       });
     return walk(null);
   }, [departments, displayRows, expanded, search]);
-  const editable = !snapshotId;
-  const scopedRows = useMemo(
-    () =>
-      (idOrcamentoFilter || cloudFilter ? displayRows : visibleRows).filter(
-        (row) => {
-          if (!idOrcamentoFilter && !cloudFilter) return true;
-          const byId = new Map(departments.map((item) => [item.id, item]));
-          const chain: Department[] = [];
-          let current = byId.get(row.department_id);
-          while (current) {
-            chain.unshift(current);
-            current = byId.get(current.parent_id || -1);
-          }
-          const inheritedId =
-            [...chain].reverse().find((item) => item.id_orcamento)
-              ?.id_orcamento || "";
-          const inheritedCloud = chain[2]?.name || "";
-          return (
-            (!idOrcamentoFilter || inheritedId === idOrcamentoFilter) &&
-            (!cloudFilter || inheritedCloud === cloudFilter)
-          );
-        },
-      ),
-    [visibleRows, displayRows, departments, idOrcamentoFilter, cloudFilter],
+  const defenseLocked =
+    isDefense &&
+    Boolean(defenseRequest) &&
+    defenseRequest?.status !== "RASCUNHO" &&
+    defenseRequest?.status !== "SOLICITADA";
+  const editable = !snapshotId && !defenseLocked;
+  // Na Defesa Orçamentária a grade só faz sentido depois de escolher o escopo:
+  // sem ID Orçamento não há linha para defender.
+  const gridReady = !isDefense || Boolean(idOrcamentoFilter);
+  // Linhas individuais: projetos defendidos fora do ID Orçamento herdado. Elas
+  // não aparecem no recorte normal do organograma, mas pertencem à defesa.
+  const individualLineIds = useMemo(
+    () => new Set(individualLines.map((item) => item.department_id)),
+    [individualLines],
   );
+  const defenseProjectIds = useMemo(() => {
+    if (!defenseRequest) return new Set<number>();
+    const result = new Set<number>();
+    const pending = [defenseRequest.department_id];
+    const childrenByParent = new Map<number | null, number[]>();
+    departments.forEach((item) =>
+      childrenByParent.set(item.parent_id, [
+        ...(childrenByParent.get(item.parent_id) || []),
+        item.id,
+      ]),
+    );
+    while (pending.length) {
+      const current = pending.pop() as number;
+      if (result.has(current)) continue;
+      result.add(current);
+      pending.push(...(childrenByParent.get(current) || []));
+    }
+    return result;
+  }, [defenseRequest, departments]);
+  const scopedRows = useMemo(() => {
+    const source = idOrcamentoFilter || cloudFilter ? displayRows : visibleRows;
+    // Com uma solicitação selecionada a grade é o projeto defendido: o backend
+    // grava somente esse subtree, então editar outras linhas da conta seria
+    // descartado silenciosamente.
+    if (defenseRequest) {
+      return source.filter((row) => defenseProjectIds.has(row.department_id));
+    }
+    return source.filter((row) => {
+      if (!idOrcamentoFilter && !cloudFilter) return true;
+      if (individualLineIds.has(row.department_id)) return true;
+      const byId = new Map(departments.map((item) => [item.id, item]));
+      const chain: Department[] = [];
+      let current = byId.get(row.department_id);
+      while (current) {
+        chain.unshift(current);
+        current = byId.get(current.parent_id || -1);
+      }
+      const inheritedId =
+        [...chain].reverse().find((item) => item.id_orcamento)?.id_orcamento ||
+        "";
+      const inheritedCloud = chain[2]?.name || "";
+      return (
+        (!idOrcamentoFilter || inheritedId === idOrcamentoFilter) &&
+        (!cloudFilter || inheritedCloud === cloudFilter)
+      );
+    });
+  }, [
+    visibleRows,
+    displayRows,
+    departments,
+    idOrcamentoFilter,
+    cloudFilter,
+    individualLineIds,
+    defenseProjectIds,
+    defenseRequest,
+  ]);
   const openEdit = (row: DisplayRow) => {
     setEdit(row);
     setEditValues([...row.values]);
@@ -344,19 +438,30 @@ export default function Planning({
       setError("Preencha título, descrição, tipo e data efetiva.");
       return;
     }
-    if (type === "defesa-orcamentaria" && !idOrcamentoFilter) {
-      setError("Selecione um ID Orçamento antes de publicar a defesa.");
+    if (type === "defesa-orcamentaria" && !idOrcamentoFilter && !defenseRequest) {
+      setError("Selecione um ID Orçamento antes de salvar a defesa.");
       return;
     }
     const scopedPublication: PlanningPublication = {
       ...publication,
-      scope_id_orcamento: idOrcamentoFilter || null,
-      scope_cloud: cloudFilter || null,
+      scope_id_orcamento:
+        defenseRequest?.requested_id_orcamento || idOrcamentoFilter || null,
+      scope_cloud: defenseRequest?.requested_cloud ?? (cloudFilter || null),
     };
+    const defenseOptions =
+      type === "defesa-orcamentaria" && defenseRequest
+        ? { defenseRequestId: defenseRequest.id }
+        : undefined;
     setSaving(true);
     try {
       if (publishAction === "import" && importFile)
-        await importPlanningExcel(type, year, importFile, scopedPublication);
+        await importPlanningExcel(
+          type,
+          year,
+          importFile,
+          scopedPublication,
+          defenseRequest?.id,
+        );
       else if (publishAction === "save")
         await savePlanningGrid(
           type,
@@ -368,12 +473,18 @@ export default function Planning({
             values: row.values,
           })),
           scopedPublication,
+          defenseOptions,
         );
       else if (publishAction === "restore" && restoreId)
         await restorePlanningVersion(type, year, restoreId, scopedPublication);
-      setMessage("Movimentação publicada como novo snapshot.");
+      setMessage(
+        isDefense
+          ? "Defesa salva. Use Publicar no Orçamento na solicitação para efetivar o merge."
+          : "Movimentação publicada como novo snapshot.",
+      );
       setPublishAction(null);
       setImportFile(null);
+      if (isDefense) setDefenseRefreshKey((key) => key + 1);
       await load();
     } catch (e) {
       setError(String(e));
@@ -429,7 +540,7 @@ export default function Planning({
     },
     {
       field: "name",
-      headerName: "Hierarquia de departamentos",
+      headerName: "Hierarquia organizacional",
       minWidth: 330,
       flex: 1.2,
       renderCell: ({ row }: { row: DisplayRow }) => (
@@ -443,6 +554,7 @@ export default function Planning({
                 next.has(row.department_id)
                   ? next.delete(row.department_id)
                   : next.add(row.department_id);
+                saveExpandedDepartments(next);
                 return next;
               })
             }
@@ -454,6 +566,26 @@ export default function Planning({
               {row.name}
             </Typography>
           </Tooltip>
+          {individualLineIds.has(row.department_id) && (
+            <Tooltip title="Projeto defendido em um ID Orçamento diferente do organograma. Ao publicar, ele passa a pertencer ao ID final.">
+              <Chip
+                size="small"
+                color="warning"
+                variant="outlined"
+                label="Linha individual"
+                sx={{ ml: 1 }}
+              />
+            </Tooltip>
+          )}
+          {defenseRequest?.department_id === row.department_id && (
+            <Chip
+              size="small"
+              color="primary"
+              variant="outlined"
+              label={`Defesa · ${defenseRequest.requested_id_orcamento}`}
+              sx={{ ml: 1 }}
+            />
+          )}
         </Stack>
       ),
     },
@@ -513,6 +645,30 @@ export default function Planning({
           >
             {message}
           </Alert>
+        )}
+        {isDefense && (
+          <BudgetDefensePanel
+            year={year}
+            selectedRequestId={defenseRequest?.id ?? null}
+            canRequest={canRequestDefense}
+            canPublish={canPublishDefense}
+            refreshKey={defenseRefreshKey}
+            onSelectRequest={(request) => {
+              setDefenseRequest(request);
+              if (request) {
+                setIdOrcamentoFilter(request.requested_id_orcamento);
+                setCloudFilter(request.requested_cloud || "");
+              } else {
+                setIdOrcamentoFilter("");
+                setCloudFilter("");
+              }
+            }}
+            onChanged={() => {
+              // O organograma muda ao incluir projeto ou publicar a linha
+              // individual; recarregue-o junto com a grade.
+              void loadDepartments().then(() => load());
+            }}
+          />
         )}
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Stack
@@ -596,7 +752,7 @@ export default function Planning({
               )}
               <Button
                 startIcon={<UploadFile />}
-                disabled={!editable}
+                disabled={!editable || !gridReady}
                 onClick={() => fileInput.current?.click()}
               >
                 Importar
@@ -604,10 +760,10 @@ export default function Planning({
               <Button
                 variant="contained"
                 startIcon={<Save />}
-                disabled={!editable}
+                disabled={!editable || !gridReady}
                 onClick={() => startPublish("save")}
               >
-                Publicar
+                {isDefense ? "Salvar" : "Publicar"}
               </Button>
               <input
                 ref={fileInput}
@@ -624,7 +780,7 @@ export default function Planning({
           </Alert>
           {(type === "orcamento" || type === "defesa-orcamentaria") && (
             <Stack direction="row" gap={1.5} sx={{ mb: 2 }} flexWrap="wrap">
-              <FormControl sx={{ minWidth: 180 }}>
+              <FormControl sx={{ minWidth: 180 }} disabled={Boolean(defenseRequest)}>
                 <InputLabel>Cloud</InputLabel>
                 <Select
                   label="Cloud"
@@ -644,7 +800,7 @@ export default function Planning({
                   ))}
                 </Select>
               </FormControl>
-              <FormControl sx={{ minWidth: 220 }} disabled={!cloudFilter}>
+              <FormControl sx={{ minWidth: 220 }} disabled={!cloudFilter || Boolean(defenseRequest)}>
                 <InputLabel>ID Orçamento</InputLabel>
                 <Select
                   label="ID Orçamento"
@@ -669,45 +825,103 @@ export default function Planning({
               </FormControl>
             </Stack>
           )}
-          <TextField
-            label="Buscar departamento"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ mb: 2, minWidth: 330 }}
-          />
-          {snapshotId && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Snapshot histórico em modo somente leitura.
-            </Alert>
-          )}
-          {!departments.length ? (
-            <EmptyState message="Nenhum departamento cadastrado." />
-          ) : (
-            <Box
-              sx={{
-                "& .planning-empty": { bgcolor: "#fff" },
-                "& .planning-own": { bgcolor: "#e8f5e9" },
-                "& .planning-mixed": { bgcolor: "#fff3e0" },
-              }}
-            >
-              <DataGrid
-                rows={scopedRows}
-                columns={columns}
-                loading={loading}
-                autoHeight
-                disableVirtualization
-                hideFooter
-                getRowClassName={({ row }) => {
-                  const item = row as DisplayRow;
-                  return !item.hasOwn
-                    ? "planning-empty"
-                    : item.hasChild
-                      ? "planning-mixed"
-                      : "planning-own";
-                }}
-                disableRowSelectionOnClick
+          {gridReady ? (
+            <>
+              <Stack
+                direction="row"
+                gap={2}
+                flexWrap="wrap"
+                alignItems="center"
+                sx={{ mb: 2 }}
+              >
+                <Typography variant="body2" fontWeight={700} color="text.secondary">
+                  Legenda
+                </Typography>
+                {[
+                  {
+                    swatch: "#ffffff",
+                    border: "#cfd8e3",
+                    label: "Somente valores dos filhos",
+                  },
+                  {
+                    swatch: "#e8f5e9",
+                    border: "#a5d6a7",
+                    label: "Valor próprio do nó",
+                  },
+                  {
+                    swatch: "#fff3e0",
+                    border: "#ffcc80",
+                    label: "Valor próprio somado aos filhos",
+                  },
+                ].map((item) => (
+                  <Stack
+                    key={item.label}
+                    direction="row"
+                    alignItems="center"
+                    gap={0.75}
+                  >
+                    <Box
+                      sx={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: "4px",
+                        bgcolor: item.swatch,
+                        border: `1px solid ${item.border}`,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {item.label}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+              <TextField
+                label="Buscar departamento"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                sx={{ mb: 2, minWidth: 330 }}
               />
-            </Box>
+              {snapshotId && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Snapshot histórico em modo somente leitura.
+                </Alert>
+              )}
+              {!departments.length ? (
+                <EmptyState message="Nenhum departamento cadastrado." />
+              ) : (
+                <Box
+                  sx={{
+                    "& .planning-empty": { bgcolor: "#fff" },
+                    "& .planning-own": { bgcolor: "#e8f5e9" },
+                    "& .planning-mixed": { bgcolor: "#fff3e0" },
+                  }}
+                >
+                  <DataGrid
+                    rows={scopedRows}
+                    columns={columns}
+                    loading={loading}
+                    autoHeight
+                    disableVirtualization
+                    hideFooter
+                    getRowClassName={({ row }) => {
+                      const item = row as DisplayRow;
+                      return !item.hasOwn
+                        ? "planning-empty"
+                        : item.hasChild
+                          ? "planning-mixed"
+                          : "planning-own";
+                    }}
+                    disableRowSelectionOnClick
+                  />
+                </Box>
+              )}
+            </>
+          ) : (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Selecione um <b>ID Orçamento</b> para listar os departamentos e editar a
+              defesa. Você também pode escolher uma solicitação na lista acima.
+            </Alert>
           )}
         </Paper>
         <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
@@ -762,7 +976,8 @@ export default function Planning({
                     Restaurar
                   </Button>
                   {type === "defesa-orcamentaria" &&
-                    !version.published_to_budget_at && (
+                    !version.published_to_budget_at &&
+                    !version.defense_request_id && (
                       <Button
                         size="small"
                         variant="contained"
@@ -783,6 +998,11 @@ export default function Planning({
                         Carregar no Orçamento
                       </Button>
                     )}
+                  {type === "defesa-orcamentaria" && version.defense_request_id && (
+                    <Typography variant="caption" color="primary.main">
+                      Solicitação #{version.defense_request_id} — publique na lista de solicitações
+                    </Typography>
+                  )}
                   {version.published_to_budget_at && (
                     <Typography variant="caption" color="success.main">
                       Carregada no Orçamento
@@ -863,7 +1083,7 @@ export default function Planning({
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Publicar movimentação</DialogTitle>
+        <DialogTitle>{isDefense ? "Salvar defesa" : "Publicar movimentação"}</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <TextField
@@ -928,7 +1148,7 @@ export default function Planning({
             disabled={saving}
             onClick={() => void publish()}
           >
-            Publicar
+            {isDefense ? "Salvar" : "Publicar"}
           </Button>
         </DialogActions>
       </Dialog>

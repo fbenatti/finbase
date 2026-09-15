@@ -8,9 +8,40 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.parse import unquote, urlparse
+
+BackupAbort = Callable[[], bool]
+
+
+class BackupCancelledError(RuntimeError):
+    """Raised when a full backup is cancelled while holding the write lock."""
+
+
+def _abort_if(should_abort: BackupAbort | None) -> None:
+    if should_abort and should_abort():
+        raise BackupCancelledError("Backup cancelado pelo usuário")
+
+
+def _run_subprocess_abortable(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    should_abort: BackupAbort | None,
+) -> None:
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    while proc.poll() is None:
+        if should_abort and should_abort():
+            proc.kill()
+            proc.wait()
+            raise BackupCancelledError("Backup cancelado pelo usuário")
+        time.sleep(0.5)
+    stdout, stderr = proc.communicate(timeout=1)
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[4]
@@ -46,7 +77,12 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def create_full_backup(*, retention_days: int = 30, output_dir: str | None = None) -> dict:
+def create_full_backup(
+    *,
+    retention_days: int = 30,
+    output_dir: str | None = None,
+    should_abort: BackupAbort | None = None,
+) -> dict:
     """Create one compressed archive containing DB, Iceberg and the project.
 
     The caller is expected to hold the application-wide write lock.  The
@@ -59,6 +95,8 @@ def create_full_backup(*, retention_days: int = 30, output_dir: str | None = Non
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     archive = destination / f"openfinops-full-{stamp}.tar.gz"
 
+    _abort_if(should_abort)
+
     with tempfile.TemporaryDirectory(prefix="openfinops-full-backup-") as temp_name:
         staging = Path(temp_name)
         warehouse = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(root / "apps" / "data" / "iceberg"))).expanduser().resolve()
@@ -69,11 +107,17 @@ def create_full_backup(*, retention_days: int = 30, output_dir: str | None = Non
         env = os.environ.copy()
         if password:
             env["PGPASSWORD"] = password
-        subprocess.run(
+        _run_subprocess_abortable(
             ["pg_dump", "--format=custom", "--no-owner", "--file", str(dump), "--host", host, "--port", port, "--username", user, database],
-            check=True, env=env, capture_output=True, text=True,
+            env=env,
+            should_abort=should_abort,
         )
-        subprocess.run(["pg_restore", "--list", str(dump)], check=True, env=env, capture_output=True, text=True)
+        _abort_if(should_abort)
+        _run_subprocess_abortable(
+            ["pg_restore", "--list", str(dump)],
+            env=env,
+            should_abort=should_abort,
+        )
 
         manifest = {
             "format": "openfinops-full-v1",
@@ -96,6 +140,7 @@ def create_full_backup(*, retention_days: int = 30, output_dir: str | None = Non
             if project_warehouse == (root / "apps" / "data" / "iceberg").resolve() and (name == "openfinops/apps/data/iceberg" or name.startswith("openfinops/apps/data/iceberg/")):
                 return None
             return info
+        _abort_if(should_abort)
         # Stream directly into the compressed archive. The previous
         # copytree-based implementation duplicated the 15GB warehouse before
         # compression and made a full backup appear hung.

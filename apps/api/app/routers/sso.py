@@ -209,19 +209,18 @@ def _saml_toolkit(cfg: dict):
         )
 
 
-def _saml_request(request: Request, prov: SsoProvider) -> dict:
+def _saml_request(request: Request, prov: SsoProvider, post_data: dict | None = None) -> dict:
     """Converte o request FastAPI no formato esperado pelo python3-saml."""
     http_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
     https = (request.headers.get("x-forwarded-proto") or request.url.scheme) == "https"
     script_name = request.url.path
     get_data = dict(request.query_params)
-    post_data = {}
     return {
         "https": https,
         "http_host": http_host,
         "script_name": script_name,
         "get_data": get_data,
-        "post_data": post_data,
+        "post_data": post_data or {},
     }
 
 
@@ -279,7 +278,13 @@ async def saml_acs(provider: str, request: Request, response: Response, db: Asyn
         # Usa OneLogin_Saml2_Auth com settings criadas a partir da config
         from onelogin.saml2.settings import OneLogin_Saml2_Settings
         settings_dict = _build_saml_settings(prov, cfg, request)
-        req = _saml_request(request, prov)
+        # python3-saml validates the assertion from the request dictionary.
+        # The endpoint had already read the form but previously passed an
+        # empty post_data mapping, causing every SAML ACS response to fail.
+        req = _saml_request(request, prov, {
+            "SAMLResponse": str(saml_response),
+            **({"RelayState": str(form["RelayState"])} if form.get("RelayState") else {}),
+        })
         auth = OneLogin_Saml2_Auth(req, settings_dict)
         auth.process_response()
         if auth.get_errors():

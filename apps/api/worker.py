@@ -57,6 +57,60 @@ POLL_INTERVAL = 2  # seconds between polls when idle
 running = True
 
 
+def _resolve_collection_reprocess_periods(
+    session,
+    *,
+    connection_id: int,
+    extraction_task_id: int,
+    cfg: dict,
+) -> list[str]:
+    """Billing periods for Gold after a scheduled collection (not full Bronze history by default)."""
+    from app.models.ingested_blob import IngestedBlob
+    from sqlalchemy import select
+
+    period_mode = cfg.get("period_mode", "ingestion")
+    if period_mode == "all":
+        return sorted({
+            str(x) for x in session.execute(
+                select(IngestedBlob.billing_period).where(
+                    IngestedBlob.connection_id == connection_id,
+                    IngestedBlob.billing_period.is_not(None),
+                ).distinct()
+            ).scalars().all() if x
+        })
+    if period_mode == "selected":
+        return sorted({str(x) for x in (cfg.get("billing_periods") or []) if x})
+
+    extraction = session.get(EtlTask, extraction_task_id)
+    touched: list[str] = []
+    if extraction:
+        touched = [str(p) for p in (extraction.billing_periods or []) if p]
+        if not touched:
+            rj = extraction.result_json if isinstance(extraction.result_json, dict) else {}
+            touched = [str(p) for p in (rj.get("billing_periods") or []) if p]
+        blob_paths = [str(p) for p in (extraction.selected_blobs or []) if p]
+        if not touched and blob_paths:
+            touched = list(session.execute(
+                select(IngestedBlob.billing_period).where(
+                    IngestedBlob.connection_id == connection_id,
+                    IngestedBlob.blob_path.in_(blob_paths),
+                    IngestedBlob.billing_period.is_not(None),
+                ).distinct()
+            ).scalars().all())
+        if not touched and extraction.started_at:
+            touched = list(session.execute(
+                select(IngestedBlob.billing_period).where(
+                    IngestedBlob.connection_id == connection_id,
+                    IngestedBlob.billing_period.is_not(None),
+                    IngestedBlob.ingested_at >= extraction.started_at,
+                ).distinct()
+            ).scalars().all())
+    periods = sorted({str(p) for p in touched if p and len(str(p)) >= 6})
+    if not periods:
+        periods = [datetime.now(timezone.utc).strftime("%Y%m")]
+    return periods
+
+
 def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: int, metadata: dict | None) -> list[int]:
     """Queue Gold reprocessing requested by a collection schedule."""
     if not metadata or not metadata.get("schedule_id"):
@@ -64,7 +118,6 @@ def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: in
     session = SyncSession()
     try:
         from app.models.scheduled_task import ScheduledTask
-        from app.models.ingested_blob import IngestedBlob
         from app.models.destination import SourceDestinationMapping
         from sqlalchemy import select
         schedule = session.get(ScheduledTask, metadata["schedule_id"])
@@ -77,9 +130,12 @@ def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: in
                 SourceDestinationMapping.source_connection_id == connection_id,
                 SourceDestinationMapping.active == True,  # noqa: E712
             ).distinct()).scalars().all())
-        periods = sorted({str(x) for x in session.execute(select(IngestedBlob.billing_period).where(
-            IngestedBlob.connection_id == connection_id, IngestedBlob.billing_period.is_not(None)
-        ).distinct()).scalars().all() if x})
+        periods = _resolve_collection_reprocess_periods(
+            session,
+            connection_id=connection_id,
+            extraction_task_id=extraction_task_id,
+            cfg=cfg,
+        )
         ids = []
         for dest_id in selected:
             child = EtlTask(
@@ -126,13 +182,16 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
                           trigger_type="SCHEDULED_REPROCESS", source_etl_task_id=source_task_id)
         session.add(run)
         session.flush()
+        source_reprocess = session.get(EtlTask, source_task_id)
+        pipeline_periods = list(source_reprocess.billing_periods or []) if source_reprocess else []
+        dimon_rule_ids = [int(x) for x in (task_json.get("dimon_rule_ids") or []) if x]
         forecast_task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id,
                                 errors=[], result_json={"forecast_run_id": run.id,
                                 "forecast_config_id": config_id, "scheduled_reprocess_task_id": source_task_id,
                                 "scheduled_pipeline": True, "shared_cost": task_json.get("shared_cost", False),
                                 "accuracy": task_json.get("accuracy", False),
-                                "accuracy_months": list(session.get(EtlTask, source_task_id).billing_periods or []) if session.get(EtlTask, source_task_id) else [],
-                                "dimon_rule_ids": task_json.get("dimon_rule_ids", [])})
+                                "accuracy_months": pipeline_periods,
+                                "dimon_rule_ids": dimon_rule_ids})
         session.add(forecast_task)
         session.flush()
         queued.append(forecast_task.id)
@@ -161,6 +220,15 @@ def _format_task_error(exc: Exception) -> str:
     if name in {"ReadError", "ConnectError", "RemoteProtocolError"}:
         return f"{name}: conexão com Trino foi fechada (coordinator reiniciando ou sob carga)"
     return name
+
+
+def _is_etl_task_cancelled(task_id: int) -> bool:
+    session = SyncSession()
+    try:
+        row = session.get(EtlTask, task_id)
+        return row is not None and row.status == "CANCELLED"
+    finally:
+        session.close()
 
 
 def shutdown(sig, frame):
@@ -232,17 +300,20 @@ def consumer_main(worker_id: int):
             task_id = task.id
             # A full backup freezes all PostgreSQL/Iceberg writers. Tasks
             # claimed while it is active are returned to the queue.
-            if task.task_type != "backup" and __import__("app.services.write_lock", fromlist=["is_locked"]).is_locked():
+            from app.services.write_lock import is_locked, task_waits_on_warehouse_flock
+            if task_waits_on_warehouse_flock(task.task_type) and is_locked():
                 retry = SyncSession()
                 try:
                     queued = retry.get(EtlTask, task_id)
                     if queued and queued.status == "RUNNING":
-                        queued.status = "QUEUED"
-                        queued.phase = "Aguardando bloqueio de escrita (backup ou processamento analítico)"
+                        release_task_to_queue(
+                            retry,
+                            queued,
+                            phase="Aguardando bloqueio de escrita (backup ou Bronze/Gold)",
+                        )
                         retry.commit()
                 finally:
                     retry.close()
-                time.sleep(0.5)
                 continue
             lock_session = SyncSession()
             try:
@@ -263,10 +334,11 @@ def consumer_main(worker_id: int):
                             retry.commit()
                     finally:
                         retry.close()
-                    time.sleep(0.2)
                     continue
 
                 if task.task_type == "backup":
+                    if _is_etl_task_cancelled(task_id):
+                        continue
                     # ``session`` was closed immediately after claiming the
                     # task.  Use a fresh session for the visible transition;
                     # otherwise the UI kept showing "Na fila" while the
@@ -274,6 +346,8 @@ def consumer_main(worker_id: int):
                     progress = SyncSession()
                     try:
                         row = progress.get(EtlTask, task_id)
+                        if row and row.status == "CANCELLED":
+                            continue
                         if row:
                             row.status = "RUNNING"
                             row.phase = "Criando backup full do projeto"
@@ -283,10 +357,17 @@ def consumer_main(worker_id: int):
                     finally:
                         progress.close()
                     try:
-                        from app.services.full_backup import create_full_backup
+                        from app.services.full_backup import BackupCancelledError, create_full_backup
                         from app.services.write_lock import exclusive_write_lock
+                        if _is_etl_task_cancelled(task_id):
+                            continue
                         with exclusive_write_lock():
-                            result = create_full_backup(retention_days=int((task.result_json or {}).get("retention_days", 30)))
+                            if _is_etl_task_cancelled(task_id):
+                                raise BackupCancelledError("Backup cancelado pelo usuário")
+                            result = create_full_backup(
+                                retention_days=int((task.result_json or {}).get("retention_days", 30)),
+                                should_abort=lambda: _is_etl_task_cancelled(task_id),
+                            )
                         terminal = SyncSession()
                         row = terminal.get(EtlTask, task_id)
                         if row:
@@ -298,6 +379,15 @@ def consumer_main(worker_id: int):
                             row.finished_at = datetime.now(timezone.utc)
                             terminal.commit()
                         terminal.close()
+                    except BackupCancelledError:
+                        cancelled = SyncSession()
+                        row = cancelled.get(EtlTask, task_id)
+                        if row:
+                            row.status = "CANCELLED"
+                            row.phase = "Backup cancelado pelo usuário"
+                            row.finished_at = datetime.now(timezone.utc)
+                            cancelled.commit()
+                        cancelled.close()
                     except Exception as exc:
                         failed = SyncSession()
                         row = failed.get(EtlTask, task_id)
@@ -424,12 +514,15 @@ def consumer_main(worker_id: int):
                         # realizado + forecast + rateio). A planning mudou, então a
                         # Dimon pré-agregada precisa ser materializada de novo; a
                         # fila do worker executa em ordem de id (sequência real).
-                        run_scheduled_dimon = (not task_json.get("scheduled_pipeline")) or bool(task_json.get("dimon_enabled", True))
+                        dimon_rule_ids = [int(x) for x in (task_json.get("dimon_rule_ids") or []) if x]
+                        run_scheduled_dimon = (not task_json.get("scheduled_pipeline")) or bool(dimon_rule_ids)
                         try:
                             if not run_scheduled_dimon:
                                 raise LookupError("Dimon desabilitada no schedule")
                             from app.services.dimon_materialization import enqueue_dimons_task
-                            dimon_task = enqueue_dimons_task(s, source="forecast")
+                            dimon_task = enqueue_dimons_task(
+                                s, rule_ids=dimon_rule_ids, source="forecast",
+                            )
                             if dimon_task and task_row:
                                 task_row.phase = (
                                     f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
@@ -1240,8 +1333,14 @@ def consumer_main(worker_id: int):
                         finally:
                             _ptu_session.close()
 
+                        if _is_etl_task_cancelled(task_id):
+                            _inmemory_tasks.pop(task_id, None)
+                            continue
                         from app.services.write_lock import exclusive_write_lock
                         with exclusive_write_lock():
+                            if _is_etl_task_cancelled(task_id):
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             _run_etl_sync(task_id, conn_id, selected or None, periods)
                         followups = _queue_schedule_destination_tasks(task_id, conn_id, task.result_json or {})
                         if followups:

@@ -1,0 +1,45 @@
+# Linux VM deployment overlay. Apply together with docker-compose.yml.
+services:
+  postgres:
+    # The full backup was produced by pg_dump 17 (custom format 1.16).
+    image: postgres:17-alpine
+
+  api:
+    environment:
+      # SAML completes over the HTTPS reverse proxy on this VM.
+      SSO_COOKIE_SECURE: "true"
+
+  trino:
+    # VM capacity: 16 vCPU / 128 GiB RAM. Keep a CPU core available to the
+    # API, PostgreSQL, ETL and the operating system.
+    cpus: "1.0"
+    mem_limit: 8g
+    volumes:
+      - ./infra/trino/catalog/iceberg.vm.properties:/etc/trino/catalog/iceberg.properties:ro
+      - ./infra/trino/config.vm.properties:/etc/trino/config.properties:ro
+      - ./infra/trino/jvm.vm.config:/etc/trino/jvm.config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  trino-worker:
+    # Four scalable workers plus trino-worker-2 below form a five-worker
+    # cluster.  2.75 vCPU x 5 = 13.75 vCPU; with the coordinator this stays
+    # below the VM's 16 vCPU while allowing high parallelism.
+    cpus: "2.75"
+    mem_limit: 16g
+    scale: 4
+    deploy:
+      replicas: 4
+    volumes:
+      - ./infra/trino/catalog/iceberg.vm.properties:/etc/trino/catalog/iceberg.properties:ro
+      - ./infra/trino/config-worker.vm.properties:/etc/trino/config.properties:ro
+      - ./infra/trino/jvm-worker.vm.config:/etc/trino/jvm.config:ro
+
+  trino-worker-2:
+    cpus: "2.75"
+    mem_limit: 16g
+    volumes:
+      - ./infra/trino/catalog/iceberg.vm.properties:/etc/trino/catalog/iceberg.properties:ro
+      - ./infra/trino/config-worker.vm.properties:/etc/trino/config.properties:ro
+      - ./infra/trino/jvm-worker.vm.config:/etc/trino/jvm.config:ro

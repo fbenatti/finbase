@@ -54,6 +54,10 @@ interface DepartmentTreePickerProps {
   allowClear?: boolean;
   clearLabel?: string;
   blockedIds?: Set<number>;
+  /** Texto de orientação exibido no topo do menu. */
+  menuHint?: string;
+  /** Ícone opcional à esquerda do botão (ex.: Business no filtro global). */
+  startIcon?: ReactElement;
 }
 
 export default function DepartmentTreePicker({
@@ -66,6 +70,8 @@ export default function DepartmentTreePicker({
   allowClear = false,
   clearLabel = "Nenhum",
   blockedIds = new Set<number>(),
+  menuHint = "Selecione o nível na hierarquia. O caminho completo aparece no botão.",
+  startIcon,
 }: DepartmentTreePickerProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -150,6 +156,7 @@ export default function DepartmentTreePicker({
       <Button
         variant="outlined"
         fullWidth
+        startIcon={startIcon}
         onClick={openMenu}
         sx={{ mt: 0.5, justifyContent: "flex-start", textTransform: "none", textAlign: "left" }}
       >
@@ -165,7 +172,7 @@ export default function DepartmentTreePicker({
         PaperProps={{ sx: { width: 430, maxHeight: 520 } }}
       >
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
-          Selecione o nível na hierarquia. O caminho completo aparece no botão.
+          {menuHint}
         </Typography>
         <Box sx={{ px: 1.5, pt: 1 }}>
           <TextField

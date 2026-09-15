@@ -13,9 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import get_current_user, require
 from app.database import get_db
 from app.models.destination import DestinationTable
-from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
+from app.models.identity import User
+from app.models.planning import BudgetDefenseRequest, FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
 from app.services.trino_service import execute as trino_execute
 
@@ -27,6 +29,15 @@ HEADERS = [*LEVELS, *MONTHS]
 SYSTEM_CODES = {"realizado", "forecast"}
 DEFAULT_TYPES = [("realizado", "Realizado"), ("forecast", "Forecast (projetado)"), ("saldo-contratual", "Saldo contratual"), ("orcamento", "Orçamento"), ("forecast-manual", "Forecast manual"), ("base-line-contratual", "Base Line Contratual"), ("carta-credito", "Carta de Credito"), ("defesa-orcamentaria", "Defesa Orçamentária")]
 EVENT_TYPES = {"CARGA_INICIAL", "DEFESA", "APROVACAO", "CORTE", "AJUSTE", "INCLUSAO_PROJETO", "REALOCACAO", "RESTAURACAO", "OUTRO"}
+
+# Defesa orçamentária de projeto.  A solicitação vive entre o organograma e o
+# orçamento: enquanto aberta, o projeto defendido pode ocupar uma "linha
+# individual" no ID Orçamento pedido sem alterar o organograma; ao publicar, o
+# ID final é gravado no nó, garantindo que o projeto pertença a uma única linha.
+DEFENSE_OPEN_STATUSES = ("RASCUNHO", "SOLICITADA", "APROVADA")
+DEFENSE_STATUSES = ("RASCUNHO", "SOLICITADA", "APROVADA", "PUBLICADA", "REJEITADA")
+DEFENSE_SCOPE_REQUEST = "defesa-solicitar"
+DEFENSE_SCOPE_PUBLISH = "defesa-publicar"
 
 
 class PlanningRowIn(BaseModel):
@@ -43,6 +54,10 @@ class PlanningSaveIn(BaseModel):
     effective_date: date
     scope_id_orcamento: str | None = None
     scope_cloud: str | None = None
+    # Quando informado, a defesa pertence a uma solicitação: o escopo vem dela e
+    # a versão vigente é controlada por solicitação, não por (ID, cloud).
+    defense_request_id: int | None = None
+    submit: bool = False
 
 
 class PlanningRestoreIn(BaseModel):
@@ -60,6 +75,58 @@ class BudgetPublishIn(BaseModel):
     title: str
     description: str
     effective_date: date
+
+
+class DefenseProjectIn(BaseModel):
+    """Novo projeto criado dentro da Defesa Orçamentária."""
+
+    year: int
+    parent_id: int
+    name: str
+    id_orcamento: str
+    centro_custo: str | None = None
+    ambiente: str | None = None
+    cloud_filter: str | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+class DefenseRequestIn(BaseModel):
+    """Solicitação de defesa de um projeto já existente no organograma."""
+
+    year: int
+    department_id: int
+    requested_id_orcamento: str
+    requested_cloud: str | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+class DefenseRequestUpdateIn(BaseModel):
+    requested_id_orcamento: str | None = None
+    requested_cloud: str | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+class DefenseApproveIn(BaseModel):
+    final_id_orcamento: str
+    final_cloud: str | None = None
+    decision_note: str
+    effective_date: date | None = None
+
+
+class DefensePublishIn(BaseModel):
+    title: str
+    description: str
+    effective_date: date
+    final_id_orcamento: str | None = None
+    final_cloud: str | None = None
+    decision_note: str | None = None
+
+
+class DefenseRejectIn(BaseModel):
+    decision_note: str
 
 
 def _out(row: Any) -> dict[str, Any]:
@@ -151,11 +218,100 @@ def _department_scope(department: Department, departments: dict[int, Department]
     return budget_id, cloud
 
 
-async def _scope_rows(rows: list[dict[str, Any]], budget_id: str | None, cloud: str | None, db: AsyncSession) -> list[dict[str, Any]]:
+async def _scope_rows(rows: list[dict[str, Any]], budget_id: str | None, cloud: str | None, db: AsyncSession, allow_department_ids: set[int] | None = None) -> list[dict[str, Any]]:
+    """Restrict rows to the selected budget scope.
+
+    ``allow_department_ids`` keeps departments that live outside the inherited
+    scope but are legitimately part of it — an *individual line* from an open
+    defense request, or the project being defended.
+    """
     if not budget_id and not cloud:
         return rows
     departments, _ = await _organization(db)
-    return [row for row in rows if row.get("department_id") in departments and (not budget_id or _department_scope(departments[row["department_id"]], departments)[0] == budget_id) and (not cloud or _department_scope(departments[row["department_id"]], departments)[1] == cloud)]
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        department = departments.get(row.get("department_id"))
+        if department is None:
+            continue
+        row_budget, row_cloud = _department_scope(department, departments)
+        in_scope = (not budget_id or row_budget == budget_id) and (not cloud or row_cloud == cloud)
+        if in_scope or (allow_department_ids and department.id in allow_department_ids):
+            result.append(row)
+    return result
+
+
+def _subtree_ids(root_id: int, children: dict[int | None, list[Department]]) -> set[int]:
+    result: set[int] = set()
+    pending = [root_id]
+    while pending:
+        current = pending.pop()
+        if current in result:
+            continue
+        result.add(current)
+        pending.extend(child.id for child in children.get(current, []))
+    return result
+
+
+def _defense_request_out(request: BudgetDefenseRequest, departments: dict[int, Department]) -> dict[str, Any]:
+    department = departments.get(request.department_id)
+    org_id, org_cloud = _department_scope(department, departments) if department else (None, None)
+    # A new project is created already carrying its own ID Orçamento, so it is
+    # not an individual line.  An existing project defended under a different ID
+    # Orçamento is: the organograma still points at another line until publish.
+    is_individual_line = bool(department) and not (
+        org_id == request.requested_id_orcamento
+        and (org_cloud or None) == (request.requested_cloud or None)
+    )
+    return {
+        **_out(request),
+        "project_name": department.name if department else None,
+        "project_active": bool(department.active) if department else False,
+        "project_path": _levels(department, departments) if department else [],
+        "organograma_id_orcamento": org_id,
+        "organograma_cloud": org_cloud,
+        "is_individual_line": is_individual_line,
+    }
+
+
+async def _load_defense_request(db: AsyncSession, request_id: int, year: int | None = None) -> BudgetDefenseRequest:
+    request = await db.get(BudgetDefenseRequest, request_id)
+    if not request or (year is not None and request.year != year):
+        raise HTTPException(404, "Solicitação de defesa orçamentária não encontrada")
+    return request
+
+
+async def _defense_requests_for_scope(db: AsyncSession, year: int, budget_id: str | None, cloud: str | None, statuses: tuple[str, ...] = DEFENSE_OPEN_STATUSES) -> list[BudgetDefenseRequest]:
+    if not budget_id:
+        return []
+    query = select(BudgetDefenseRequest).where(
+        BudgetDefenseRequest.year == year,
+        BudgetDefenseRequest.requested_id_orcamento == budget_id,
+        BudgetDefenseRequest.status.in_(statuses),
+    ).order_by(BudgetDefenseRequest.id)
+    rows = (await db.execute(query)).scalars().all()
+    if cloud:
+        # Requests created before cloud scoping keep requested_cloud null and
+        # still belong to the selected cloud.
+        rows = [row for row in rows if not row.requested_cloud or row.requested_cloud == cloud]
+    return list(rows)
+
+
+async def _individual_line_map(db: AsyncSession, year: int, budget_id: str | None, cloud: str | None, departments: dict[int, Department]) -> dict[int, BudgetDefenseRequest]:
+    """department_id -> open request for projects defended outside their line.
+
+    These are the "individual lines": the project is defended under the
+    requested ID Orçamento while the organograma keeps its current one.
+    """
+    result: dict[int, BudgetDefenseRequest] = {}
+    for request in await _defense_requests_for_scope(db, year, budget_id, cloud):
+        department = departments.get(request.department_id)
+        if not department:
+            continue
+        org_id, org_cloud = _department_scope(department, departments)
+        if org_id == request.requested_id_orcamento and (org_cloud or None) == (request.requested_cloud or None):
+            continue
+        result[department.id] = request
+    return result
 
 
 async def _ensure_defense_open(year: int, budget_id: str, cloud: str | None, db: AsyncSession) -> None:
@@ -227,12 +383,16 @@ def _validate_event(title: str, description: str, event_type: str, effective_dat
     return title, description, event_type, effective_date
 
 
-async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[str, Any]], source: str, db: AsyncSession, *, title: str, description: str, event_type: str, effective_date: date, filename: str | None = None, restored_from: int | None = None, scope_id_orcamento: str | None = None, scope_cloud: str | None = None) -> PlanningVersion:
+async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[str, Any]], source: str, db: AsyncSession, *, title: str, description: str, event_type: str, effective_date: date, filename: str | None = None, restored_from: int | None = None, scope_id_orcamento: str | None = None, scope_cloud: str | None = None, defense_request_id: int | None = None) -> PlanningVersion:
     if year <= 0:
         raise HTTPException(422, "Ano inválido")
     title, description, event_type, effective_date = _validate_event(title, description, event_type, effective_date)
     current_query = select(PlanningVersion).where(PlanningVersion.financial_type_id == fin_type.id, PlanningVersion.year == year, PlanningVersion.is_current == True)
-    if fin_type.code == "defesa-orcamentaria" and scope_id_orcamento:
+    if defense_request_id is not None:
+        # Uma solicitação de defesa tem a própria linha vigente: dois projetos
+        # podem defender o mesmo ID Orçamento sem sobrescrever um ao outro.
+        current_query = current_query.where(PlanningVersion.defense_request_id == defense_request_id)
+    elif fin_type.code == "defesa-orcamentaria" and scope_id_orcamento:
         current_query = current_query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento, PlanningVersion.scope_cloud == scope_cloud)
     current = (await db.execute(current_query)).scalars().all()
     next_version = max((v.version for v in current), default=0)
@@ -240,7 +400,7 @@ async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[s
     version = int(all_versions or 0) + 1
     for old in current:
         old.is_current = False
-    snapshot = PlanningVersion(financial_type_id=fin_type.id, year=year, version=version, is_current=True, source=source, source_filename=filename, restored_from_id=restored_from, classification_version_id=None, title=title, description=description, event_type=event_type, effective_date=effective_date, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud)
+    snapshot = PlanningVersion(financial_type_id=fin_type.id, year=year, version=version, is_current=True, source=source, source_filename=filename, restored_from_id=restored_from, classification_version_id=None, title=title, description=description, event_type=event_type, effective_date=effective_date, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud, defense_request_id=defense_request_id)
     db.add(snapshot)
     await db.flush()
     for row in rows:
@@ -422,17 +582,41 @@ async def planning_scope_options(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{type_code}/{year}/import")
-async def import_excel(type_code: str, year: int, file: UploadFile = File(...), title: str = Form(...), description: str = Form(...), event_type: str = Form(...), effective_date: date = Form(...), scope_id_orcamento: str | None = Form(None), scope_cloud: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+async def import_excel(type_code: str, year: int, file: UploadFile = File(...), title: str = Form(...), description: str = Form(...), event_type: str = Form(...), effective_date: date = Form(...), scope_id_orcamento: str | None = Form(None), scope_cloud: str | None = Form(None), defense_request_id: int | None = Form(None), db: AsyncSession = Depends(get_db)):
     if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(422, "Envie um arquivo .xlsx")
     fin_type = await _type_for_write(type_code, db)
+    defense_request: BudgetDefenseRequest | None = None
+    if defense_request_id:
+        if type_code != "defesa-orcamentaria":
+            raise HTTPException(422, "Solicitação de defesa só se aplica à Defesa Orçamentária")
+        defense_request = await _load_defense_request(db, defense_request_id, year)
+        if defense_request.status not in ("RASCUNHO", "SOLICITADA"):
+            raise HTTPException(422, "Esta solicitação não aceita mais alterações de valores")
+        scope_id_orcamento = defense_request.requested_id_orcamento
+        scope_cloud = defense_request.requested_cloud
     rows = await _parse_excel(await file.read(), db)
     prepared = await _validate_rows(rows, db)
     if type_code == "defesa-orcamentaria" and not scope_id_orcamento:
         raise HTTPException(422, "ID Orçamento é obrigatório para publicar uma defesa")
-    if type_code == "defesa-orcamentaria": await _ensure_defense_open(year, scope_id_orcamento, scope_cloud, db)
-    prepared = await _scope_rows(prepared, scope_id_orcamento, scope_cloud, db)
+    if type_code == "defesa-orcamentaria" and defense_request is None:
+        await _ensure_defense_open(year, scope_id_orcamento, scope_cloud, db)
+    allow: set[int] = set()
+    if defense_request is not None:
+        departments, children = await _organization(db)
+        allow = _subtree_ids(defense_request.department_id, children)
+        prepared = [row for row in prepared if row["department_id"] in allow]
+    else:
+        departments, _ = await _organization(db)
+        individual = await _individual_line_map(db, year, scope_id_orcamento, scope_cloud, departments) if type_code == "defesa-orcamentaria" else {}
+        allow = set(individual.keys())
+    prepared = await _scope_rows(prepared, scope_id_orcamento, scope_cloud, db, allow or None)
     if not prepared: raise HTTPException(422, "A carga não possui departamentos no escopo selecionado")
-    snapshot = await _publish_version(fin_type, year, prepared, "IMPORT_EXCEL", db, title=title, description=description, event_type=event_type, effective_date=effective_date, filename=file.filename, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud)
+    snapshot = await _publish_version(fin_type, year, prepared, "IMPORT_EXCEL", db, title=title, description=description, event_type=event_type, effective_date=effective_date, filename=file.filename, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud, defense_request_id=defense_request.id if defense_request else None)
+    if defense_request is not None:
+        defense_request.defense_version_id = snapshot.id
+        if defense_request.status == "SOLICITADA":
+            defense_request.status = "RASCUNHO"
+        await db.commit()
     return {"version": _out(snapshot), "rows": len(prepared)}
 
 
@@ -446,6 +630,20 @@ async def _timeline(fin_type: FinancialType, year: int, db: AsyncSession) -> lis
         result.append({**_out(version), "title": version.title or f"Versão legada v{version.version}", "description": version.description or "Snapshot sem narrativa cadastrada.", "event_type": version.event_type or "OUTRO", "effective_date": version.effective_date or version.created_at.date(), "annual_total": total, "delta": delta, "delta_pct": None if previous_total in (None, 0) else delta / previous_total * 100})
         previous_total = total
     return result
+
+
+def _timeline_event_matches_budget_scope(event: dict[str, Any], scoped_budget_ids: set[str] | None) -> bool:
+    """Return whether a snapshot can affect the selected organizational scope.
+
+    Older and organization-wide budget snapshots do not carry an explicit
+    ``scope_id_orcamento``.  They still contain entries for every department,
+    so excluding them from a department-filtered dashboard hides their changes
+    and breaks the historical delta chain.
+    """
+    if scoped_budget_ids is None:
+        return True
+    event_budget_id = str(event.get("scope_id_orcamento") or "")
+    return not event_budget_id or event_budget_id in scoped_budget_ids
 
 
 @router.get("/dashboard/overview")
@@ -503,8 +701,10 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
         # arbitrariamente a última versão de outro ID.
         scoped_timeline = [
             row for row in timeline
-            if scoped_department_ids is None
-            or str(row.get("scope_id_orcamento") or "") in scoped_budget_ids
+            if _timeline_event_matches_budget_scope(
+                row,
+                None if scoped_department_ids is None else scoped_budget_ids,
+            )
         ]
         if not scoped_timeline:
             continue
@@ -554,18 +754,410 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
     return {"year": year, "cards": cards, "series": series, "events": events, "scope": {"department_id": department_id, "path": scope_path, "included_departments": len(scoped_department_ids or departments)}}
 
 
+def _group_entries(entries: list[PlanningEntry]) -> dict[int, dict[str, Any]]:
+    grouped: dict[int, dict[str, Any]] = {}
+    for entry in entries:
+        if entry.department_id is None:
+            continue
+        grouped.setdefault(entry.department_id, {"entity_type": "department", "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] = float(entry.value or 0)
+    return grouped
+
+
+async def _defense_totals(db: AsyncSession, requests: list[BudgetDefenseRequest]) -> dict[int, float]:
+    version_ids = [row.defense_version_id for row in requests if row.defense_version_id]
+    if not version_ids:
+        return {}
+    rows = (await db.execute(
+        select(PlanningEntry.planning_version_id, func.coalesce(func.sum(PlanningEntry.value), 0))
+        .where(PlanningEntry.planning_version_id.in_(version_ids))
+        .group_by(PlanningEntry.planning_version_id)
+    )).all()
+    return {int(version_id): float(total or 0) for version_id, total in rows}
+
+
+@router.get("/budget-defense/requests")
+async def list_defense_requests(
+    year: int,
+    status: str | None = None,
+    department_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "read")),
+):
+    """Solicitações de defesa do exercício, com status e linha solicitada."""
+    query = select(BudgetDefenseRequest).where(BudgetDefenseRequest.year == year)
+    if status:
+        statuses = tuple(item.strip().upper() for item in status.split(",") if item.strip())
+        if statuses:
+            query = query.where(BudgetDefenseRequest.status.in_(statuses))
+    if department_id:
+        query = query.where(BudgetDefenseRequest.department_id == department_id)
+    requests = list((await db.execute(query.order_by(BudgetDefenseRequest.id.desc()))).scalars().all())
+    departments, _ = await _organization(db)
+    totals = await _defense_totals(db, requests)
+    return [
+        {**_defense_request_out(row, departments), "annual_total": totals.get(row.defense_version_id, 0.0)}
+        for row in requests
+    ]
+
+
+@router.get("/budget-defense/departments")
+async def defense_department_options(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "read")),
+):
+    """Organograma (com ID Orçamento herdado) para ancorar projeto novo ou escolher um existente."""
+    departments, _ = await _organization(db)
+    items = []
+    for department in sorted((item for item in departments.values() if item.active), key=lambda item: _levels(item, departments)):
+        budget_id, cloud = _department_scope(department, departments)
+        items.append({
+            "id": department.id,
+            "parent_id": department.parent_id,
+            "name": department.name,
+            "path": _levels(department, departments),
+            "centro_custo": department.centro_custo,
+            "id_orcamento": department.id_orcamento,
+            "budget_id": budget_id,
+            "cloud": cloud,
+        })
+    return items
+
+
+@router.post("/budget-defense/projects", status_code=201)
+async def create_defense_project(
+    body: DefenseProjectIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "create", DEFENSE_SCOPE_REQUEST)),
+):
+    """Cria o projeto no organograma e abre a solicitação de defesa dele."""
+    departments, _ = await _organization(db)
+    parent = departments.get(body.parent_id)
+    if not parent or not parent.active:
+        raise HTTPException(422, "Selecione um nó ativo do organograma para receber o projeto")
+    if len(_levels(parent, departments)) >= 7:
+        raise HTTPException(422, "A hierarquia suporta no máximo 7 níveis")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(422, "Informe o nome do projeto")
+    new_id = (body.id_orcamento or "").strip()
+    if not new_id:
+        raise HTTPException(422, "Informe o novo ID Orçamento do projeto")
+    duplicate = next((item for item in departments.values() if item.active and item.parent_id == parent.id and (item.name or "").strip().lower() == name.lower()), None)
+    if duplicate:
+        raise HTTPException(422, "Já existe um projeto com este nome neste nó do organograma")
+    department = Department(parent_id=parent.id, name=name, id_orcamento=new_id, centro_custo=body.centro_custo, ambiente=body.ambiente, cloud_filter=body.cloud_filter, active=True)
+    db.add(department)
+    await db.flush()
+    departments[department.id] = department
+    cloud = _department_scope(parent, departments)[1]
+    request = BudgetDefenseRequest(
+        year=body.year,
+        department_id=department.id,
+        parent_department_id=parent.id,
+        is_new_project=True,
+        requested_id_orcamento=new_id,
+        requested_cloud=cloud,
+        title=body.title or f"Inclusão de projeto — {name}",
+        description=body.description or "Projeto criado dentro da Defesa Orçamentária.",
+        status="RASCUNHO",
+        requested_by_id=user.id,
+    )
+    db.add(request)
+    await db.commit()
+    await db.refresh(department)
+    await db.refresh(request)
+    return {"department": _out(department), "request": _defense_request_out(request, departments)}
+
+
+@router.post("/budget-defense/requests", status_code=201)
+async def create_defense_request(
+    body: DefenseRequestIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "create", DEFENSE_SCOPE_REQUEST)),
+):
+    """Abre a defesa de um projeto existente — sem alterar o organograma."""
+    department = await db.get(Department, body.department_id)
+    if not department or not department.active:
+        raise HTTPException(422, "Projeto inválido ou inativo no organograma")
+    requested_id = (body.requested_id_orcamento or "").strip()
+    if not requested_id:
+        raise HTTPException(422, "Informe o ID Orçamento solicitado")
+    departments, _ = await _organization(db)
+    org_id, org_cloud = _department_scope(department, departments)
+    existing = (await db.execute(
+        select(BudgetDefenseRequest).where(
+            BudgetDefenseRequest.year == body.year,
+            BudgetDefenseRequest.department_id == department.id,
+            BudgetDefenseRequest.status.in_(DEFENSE_OPEN_STATUSES),
+        )
+    )).scalars().all()
+    if existing:
+        raise HTTPException(422, "Este projeto já possui uma solicitação de defesa em andamento")
+    request = BudgetDefenseRequest(
+        year=body.year,
+        department_id=department.id,
+        parent_department_id=department.parent_id,
+        is_new_project=False,
+        requested_id_orcamento=requested_id,
+        requested_cloud=(body.requested_cloud or org_cloud or None),
+        title=body.title or f"Defesa de {department.name}",
+        description=body.description,
+        status="RASCUNHO",
+        requested_by_id=user.id,
+    )
+    db.add(request)
+    await db.commit()
+    await db.refresh(request)
+    return _defense_request_out(request, departments)
+
+
+@router.put("/budget-defense/requests/{request_id}")
+async def update_defense_request(
+    request_id: int,
+    body: DefenseRequestUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "update", DEFENSE_SCOPE_REQUEST)),
+):
+    request = await _load_defense_request(db, request_id)
+    if request.status not in ("RASCUNHO", "SOLICITADA"):
+        raise HTTPException(422, "Solicitação já decidida; não é possível alterar a linha pedida")
+    data = body.model_dump(exclude_unset=True)
+    if "requested_id_orcamento" in data:
+        value = (data["requested_id_orcamento"] or "").strip()
+        if not value:
+            raise HTTPException(422, "Informe o ID Orçamento solicitado")
+        request.requested_id_orcamento = value
+    if "requested_cloud" in data:
+        request.requested_cloud = (data["requested_cloud"] or None)
+    if "title" in data:
+        request.title = data["title"]
+    if "description" in data:
+        request.description = data["description"]
+    await db.commit()
+    await db.refresh(request)
+    departments, _ = await _organization(db)
+    return _defense_request_out(request, departments)
+
+
+@router.post("/budget-defense/requests/{request_id}/submit")
+async def submit_defense_request(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "update", DEFENSE_SCOPE_REQUEST)),
+):
+    request = await _load_defense_request(db, request_id)
+    if request.status not in ("RASCUNHO", "SOLICITADA"):
+        raise HTTPException(422, "Solicitação já decidida")
+    if not request.defense_version_id:
+        raise HTTPException(422, "Salve os valores da defesa antes de enviar para aprovação")
+    request.status = "SOLICITADA"
+    request.requested_by_id = request.requested_by_id or user.id
+    await db.commit()
+    await db.refresh(request)
+    departments, _ = await _organization(db)
+    totals = await _defense_totals(db, [request])
+    return {**_defense_request_out(request, departments), "annual_total": totals.get(request.defense_version_id, 0.0)}
+
+
+@router.post("/budget-defense/requests/{request_id}/approve")
+async def approve_defense_request(
+    request_id: int,
+    body: DefenseApproveIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "update", DEFENSE_SCOPE_PUBLISH)),
+):
+    """Aprova a defesa escolhendo o ID Orçamento final (mantém ou troca o pedido)."""
+    request = await _load_defense_request(db, request_id)
+    if request.status in ("PUBLICADA", "REJEITADA"):
+        raise HTTPException(422, "Solicitação já encerrada")
+    if request.status == "RASCUNHO":
+        raise HTTPException(422, "A defesa ainda é rascunho; solicite o envio antes de aprovar")
+    final_id = (body.final_id_orcamento or "").strip()
+    if not final_id:
+        raise HTTPException(422, "Informe o ID Orçamento final")
+    note = (body.decision_note or "").strip()
+    if not note:
+        raise HTTPException(422, "Descreva o motivo e as observações da aprovação")
+    request.decided_by_id = user.id
+    request.decided_at = datetime.now(timezone.utc)
+    request.final_id_orcamento = final_id
+    request.final_cloud = body.final_cloud if body.final_cloud is not None else request.requested_cloud
+    request.decision_note = note
+    request.status = "APROVADA"
+    await db.commit()
+    await db.refresh(request)
+    departments, _ = await _organization(db)
+    totals = await _defense_totals(db, [request])
+    return {**_defense_request_out(request, departments), "annual_total": totals.get(request.defense_version_id, 0.0)}
+
+
+@router.post("/budget-defense/requests/{request_id}/reject")
+async def reject_defense_request(
+    request_id: int,
+    body: DefenseRejectIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "update", DEFENSE_SCOPE_PUBLISH)),
+):
+    request = await _load_defense_request(db, request_id)
+    if request.status == "PUBLICADA":
+        raise HTTPException(422, "Solicitação já publicada no orçamento")
+    note = (body.decision_note or "").strip()
+    if not note:
+        raise HTTPException(422, "Descreva o motivo da rejeição")
+    request.decided_by_id = user.id
+    request.decided_at = datetime.now(timezone.utc)
+    request.decision_note = note
+    request.status = "REJEITADA"
+    await db.commit()
+    await db.refresh(request)
+    departments, _ = await _organization(db)
+    return _defense_request_out(request, departments)
+
+
+@router.post("/budget-defense/requests/{request_id}/publish")
+async def publish_defense_request(
+    request_id: int,
+    body: DefensePublishIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "update", DEFENSE_SCOPE_PUBLISH)),
+):
+    """Publica a defesa no Orçamento e materializa o ID Orçamento no organograma.
+
+    É aqui que a "linha individual" deixa de existir: o projeto passa a
+    pertencer a um único ID Orçamento, o final escolhido na aprovação.
+    """
+    request = await _load_defense_request(db, request_id)
+    if request.status == "PUBLICADA":
+        raise HTTPException(422, "Solicitação já publicada no orçamento")
+    if request.status == "REJEITADA":
+        raise HTTPException(422, "Solicitação rejeitada não pode ser publicada")
+    if request.status == "RASCUNHO":
+        raise HTTPException(422, "Envie a defesa para aprovação antes de publicar no orçamento")
+    if request.status == "SOLICITADA":
+        raise HTTPException(422, "Aprove a defesa (definindo o ID Orçamento final) antes de publicar no orçamento")
+    defense_type = (await db.execute(select(FinancialType).where(FinancialType.code == "defesa-orcamentaria"))).scalar_one_or_none()
+    budget_type = (await db.execute(select(FinancialType).where(FinancialType.code == "orcamento"))).scalar_one_or_none()
+    if not defense_type or not budget_type:
+        raise HTTPException(404, "Tipificações financeiras não encontradas")
+    defense_version = await db.get(PlanningVersion, request.defense_version_id) if request.defense_version_id else None
+    if not defense_version:
+        defense_version = (await db.execute(
+            select(PlanningVersion).where(
+                PlanningVersion.defense_request_id == request.id,
+                PlanningVersion.financial_type_id == defense_type.id,
+            ).order_by(PlanningVersion.version.desc())
+        )).scalars().first()
+    if not defense_version:
+        raise HTTPException(422, "Salve a defesa antes de publicar no orçamento")
+    final_id = (body.final_id_orcamento or request.final_id_orcamento or request.requested_id_orcamento or "").strip()
+    if not final_id:
+        raise HTTPException(422, "Informe o ID Orçamento final")
+    final_cloud = body.final_cloud if body.final_cloud is not None else (request.final_cloud or request.requested_cloud)
+    departments, children = await _organization(db)
+    department = departments.get(request.department_id)
+    if not department:
+        raise HTTPException(404, "Projeto da solicitação não existe mais no organograma")
+    subtree = _subtree_ids(request.department_id, children)
+    defense_entries = (await db.execute(
+        select(PlanningEntry).where(
+            PlanningEntry.planning_version_id == defense_version.id,
+            PlanningEntry.department_id.in_(subtree),
+        )
+    )).scalars().all()
+    if not defense_entries:
+        raise HTTPException(422, "A defesa não possui valores salvos para este projeto")
+    # Consolida o orçamento vigente e substitui somente o subtree do projeto.
+    budget_versions = (await db.execute(
+        select(PlanningVersion).where(
+            PlanningVersion.financial_type_id == budget_type.id,
+            PlanningVersion.year == request.year,
+            PlanningVersion.is_current == True,
+        )
+    )).scalars().all()
+    budget_entries: list[PlanningEntry] = []
+    for version in budget_versions:
+        budget_entries.extend((await db.execute(select(PlanningEntry).where(PlanningEntry.planning_version_id == version.id))).scalars().all())
+    merged = _group_entries(budget_entries)
+    for department_id in subtree:
+        merged.pop(department_id, None)
+    merged.update(_group_entries(defense_entries))
+    snapshot = await _publish_version(
+        budget_type, request.year, list(merged.values()), "DEFESA_APROVADA", db,
+        title=body.title, description=body.description, event_type="APROVACAO",
+        effective_date=body.effective_date, scope_id_orcamento=final_id, scope_cloud=final_cloud,
+    )
+    now = datetime.now(timezone.utc)
+    # Materializa a linha: o projeto passa a pertencer ao ID Orçamento final.
+    department.id_orcamento = final_id
+    if final_cloud and not department.cloud_filter:
+        department.cloud_filter = final_cloud
+    request.status = "PUBLICADA"
+    request.final_id_orcamento = final_id
+    request.final_cloud = final_cloud
+    request.published_budget_version_id = snapshot.id
+    request.published_at = now
+    request.decided_by_id = request.decided_by_id or user.id
+    request.decided_at = request.decided_at or now
+    if body.decision_note:
+        request.decision_note = body.decision_note.strip()
+    defense_version.published_to_budget_at = now
+    defense_version.published_budget_version_id = snapshot.id
+    await db.commit()
+    await db.refresh(request)
+    await db.refresh(department)
+    return {
+        "request": _defense_request_out(request, departments),
+        "budget_version": _out(snapshot),
+        "department": _out(department),
+        "rows": len(defense_entries),
+    }
+
+
 @router.get("/{type_code}/{year}")
-async def planning_grid(type_code: str, year: int, version_id: int | None = None, scope_id_orcamento: str | None = None, scope_cloud: str | None = None, db: AsyncSession = Depends(get_db)):
+async def planning_grid(type_code: str, year: int, version_id: int | None = None, scope_id_orcamento: str | None = None, scope_cloud: str | None = None, defense_request_id: int | None = None, db: AsyncSession = Depends(get_db)):
     fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == type_code))).scalar_one_or_none()
     if not fin_type: raise HTTPException(404, "Tipificação financeira não encontrada")
-    query = select(PlanningVersion).where(PlanningVersion.financial_type_id == fin_type.id, PlanningVersion.year == year)
+    defense_request: BudgetDefenseRequest | None = None
+    if defense_request_id and type_code == "defesa-orcamentaria":
+        candidate = await db.get(BudgetDefenseRequest, defense_request_id)
+        if candidate and candidate.year == year:
+            defense_request = candidate
+            # A grade de uma solicitação sempre usa a linha pedida por ela.
+            scope_id_orcamento = candidate.requested_id_orcamento
+            scope_cloud = candidate.requested_cloud
+    base_query = select(PlanningVersion).where(PlanningVersion.financial_type_id == fin_type.id, PlanningVersion.year == year)
+    query = base_query
     if version_id: query = query.where(PlanningVersion.id == version_id)
+    elif defense_request is not None:
+        query = query.where(PlanningVersion.is_current == True, PlanningVersion.defense_request_id == defense_request.id)
     else:
         query = query.where(PlanningVersion.is_current == True)
         if scope_id_orcamento: query = query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento)
         if scope_cloud: query = query.where(PlanningVersion.scope_cloud == scope_cloud)
     versions = (await db.execute(query.order_by(PlanningVersion.effective_date.desc(), PlanningVersion.version.desc()))).scalars().all()
-    if not versions: return {"type": _out(fin_type), "version": None, "rows": []}
+    # Snapshots anteriores ao recorte por Cloud guardam o ID Orçamento, mas
+    # possuem scope_cloud nulo. Ao selecionar Azure/GCP, use esse snapshot como
+    # fallback e restrinja suas linhas pela hierarquia logo abaixo.
+    if not versions and not version_id and defense_request is None and scope_cloud:
+        fallback_query = base_query.where(
+            PlanningVersion.is_current == True,
+            PlanningVersion.scope_cloud.is_(None),
+        )
+        if scope_id_orcamento:
+            fallback_query = fallback_query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento)
+        versions = (await db.execute(fallback_query.order_by(PlanningVersion.effective_date.desc(), PlanningVersion.version.desc()))).scalars().all()
+    departments, children = await _organization(db)
+    individual = await _individual_line_map(db, year, scope_id_orcamento, scope_cloud, departments) if type_code == "defesa-orcamentaria" else {}
+    allow: set[int] = set(individual.keys())
+    if defense_request is not None:
+        # A solicitação pode acontecer fora da linha herdada; inclua o projeto.
+        allow |= _subtree_ids(defense_request.department_id, children)
+    payload: dict[str, Any] = {"type": _out(fin_type), "version": None, "rows": []}
+    if type_code == "defesa-orcamentaria":
+        payload["individual_lines"] = [_defense_request_out(item, departments) for item in individual.values()]
+        payload["defense_request"] = _defense_request_out(defense_request, departments) if defense_request is not None else None
+    if not versions:
+        return payload
     # Orçamento/defesa podem ter uma versão vigente por ID de orçamento. Sem
     # filtro de ID, a grade deve compor todas elas; selecionar apenas a primeira
     # fazia os demais projetos parecerem zerados.
@@ -575,20 +1167,59 @@ async def planning_grid(type_code: str, year: int, version_id: int | None = None
     for entry in entries:
         key = (entry.entity_type, entry.department_id, None)
         grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] = entry.value
-    return {"type": _out(fin_type), "version": _out(version), "rows": list(grouped.values())}
+    scoped_rows = await _scope_rows(list(grouped.values()), scope_id_orcamento, scope_cloud, db, allow or None)
+    payload["version"] = _out(version)
+    payload["rows"] = scoped_rows
+    return payload
 
 
 @router.post("/{type_code}/{year}")
-async def save_planning(type_code: str, year: int, body: PlanningSaveIn, db: AsyncSession = Depends(get_db)):
+async def save_planning(type_code: str, year: int, body: PlanningSaveIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     fin_type = await _type_for_write(type_code, db)
+    defense_request: BudgetDefenseRequest | None = None
+    scope_id_orcamento = body.scope_id_orcamento
+    scope_cloud = body.scope_cloud
+    if body.defense_request_id:
+        if type_code != "defesa-orcamentaria":
+            raise HTTPException(422, "Solicitação de defesa só se aplica à Defesa Orçamentária")
+        defense_request = await _load_defense_request(db, body.defense_request_id, year)
+        if defense_request.status not in ("RASCUNHO", "SOLICITADA"):
+            raise HTTPException(422, "Esta solicitação não aceita mais alterações de valores")
+        scope_id_orcamento = defense_request.requested_id_orcamento
+        scope_cloud = defense_request.requested_cloud
     prepared = await _validate_rows(body.rows, db)
-    if type_code == "defesa-orcamentaria" and not body.scope_id_orcamento:
-        raise HTTPException(422, "ID Orçamento é obrigatório para publicar uma defesa")
-    if type_code == "defesa-orcamentaria": await _ensure_defense_open(year, body.scope_id_orcamento, body.scope_cloud, db)
-    prepared = await _scope_rows(prepared, body.scope_id_orcamento, body.scope_cloud, db)
+    if type_code == "defesa-orcamentaria" and not scope_id_orcamento:
+        raise HTTPException(422, "ID Orçamento é obrigatório para salvar uma defesa")
+    if type_code == "defesa-orcamentaria" and defense_request is None:
+        await _ensure_defense_open(year, scope_id_orcamento, scope_cloud, db)
+    allow: set[int] = set()
+    if defense_request is not None:
+        departments, children = await _organization(db)
+        # A defesa de uma solicitação grava somente o projeto solicitado; a
+        # linha individual existe no organograma apenas como leitura.
+        allow = _subtree_ids(defense_request.department_id, children)
+        if not any(row["department_id"] in allow for row in prepared):
+            raise HTTPException(422, "Inclua o projeto da solicitação na grade antes de salvar a defesa")
+        prepared = [row for row in prepared if row["department_id"] in allow]
+    else:
+        departments, _ = await _organization(db)
+        individual = await _individual_line_map(db, year, scope_id_orcamento, scope_cloud, departments) if type_code == "defesa-orcamentaria" else {}
+        allow = set(individual.keys())
+    prepared = await _scope_rows(prepared, scope_id_orcamento, scope_cloud, db, allow or None)
     if not prepared: raise HTTPException(422, "A grade não possui departamentos no escopo selecionado")
-    snapshot = await _publish_version(fin_type, year, prepared, "EDICAO_GRID", db, title=body.title, description=body.description, event_type=body.event_type, effective_date=body.effective_date, scope_id_orcamento=body.scope_id_orcamento, scope_cloud=body.scope_cloud)
-    return {"version": _out(snapshot), "rows": len(prepared)}
+    snapshot = await _publish_version(fin_type, year, prepared, "EDICAO_GRID", db, title=body.title, description=body.description, event_type=body.event_type, effective_date=body.effective_date, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud, defense_request_id=defense_request.id if defense_request else None)
+    if defense_request is not None:
+        defense_request.defense_version_id = snapshot.id
+        if not defense_request.requested_by_id:
+            defense_request.requested_by_id = user.id
+        if body.submit and defense_request.status == "RASCUNHO":
+            defense_request.status = "SOLICITADA"
+        elif not body.submit and defense_request.status == "SOLICITADA":
+            # Editar valores de uma solicitação já enviada volta para rascunho.
+            defense_request.status = "RASCUNHO"
+        await db.commit()
+        await db.refresh(defense_request)
+    return {"version": _out(snapshot), "rows": len(prepared), "defense_request": _defense_request_out(defense_request, departments) if defense_request else None}
 
 
 @router.get("/{type_code}/{year}/versions")
@@ -604,6 +1235,8 @@ async def planning_timeline(type_code: str, year: int, db: AsyncSession = Depend
     fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == type_code))).scalar_one_or_none()
     if not fin_type: raise HTTPException(404, "Tipificação financeira não encontrada")
     return await _timeline(fin_type, year, db)
+
+
 
 
 @router.post("/defesa-orcamentaria/{year}/versions/{version_id}/publish-budget")

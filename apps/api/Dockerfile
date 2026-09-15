@@ -1,8 +1,9 @@
 FROM python:3.12-slim
 
 # Full backups use pg_dump/pg_restore against the configured PostgreSQL.
+# xmlsec1 is required by python3-saml to validate signed SAML assertions.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client \
+    && apt-get install -y --no-install-recommends postgresql-client xmlsec1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

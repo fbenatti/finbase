@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
         from app.models.pivot_view import PivotView  # noqa: F401
         from app.models.dashboard import Dashboard, DashboardWidget  # noqa: F401
         from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun  # noqa: F401
-        from app.models.planning import FinancialType, PlanningVersion, PlanningEntry  # noqa: F401
+        from app.models.planning import FinancialType, PlanningVersion, PlanningEntry, BudgetDefenseRequest  # noqa: F401
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
@@ -69,8 +69,43 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS published_to_budget_at TIMESTAMPTZ",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS published_budget_version_id INTEGER REFERENCES planning_version(id)",
             "CREATE INDEX IF NOT EXISTS ix_planning_version_type_year_effective_date ON planning_version (financial_type_id, year, effective_date)",
+            # Defesa orçamentária de projeto: a solicitação guarda a linha
+            # individual (ID Orçamento pedido) antes de tocar o organograma.
+            """CREATE TABLE IF NOT EXISTS budget_defense_request (
+              id SERIAL PRIMARY KEY,
+              year INTEGER NOT NULL,
+              department_id INTEGER NOT NULL REFERENCES department(id) ON DELETE CASCADE,
+              parent_department_id INTEGER REFERENCES department(id) ON DELETE SET NULL,
+              is_new_project BOOLEAN NOT NULL DEFAULT FALSE,
+              requested_id_orcamento VARCHAR(80) NOT NULL,
+              requested_cloud VARCHAR(80),
+              title VARCHAR(200),
+              description TEXT,
+              status VARCHAR(30) NOT NULL DEFAULT 'RASCUNHO',
+              requested_by_id INTEGER REFERENCES user_account(id) ON DELETE SET NULL,
+              requested_at TIMESTAMPTZ DEFAULT now(),
+              decided_by_id INTEGER REFERENCES user_account(id) ON DELETE SET NULL,
+              decided_at TIMESTAMPTZ,
+              final_id_orcamento VARCHAR(80),
+              final_cloud VARCHAR(80),
+              decision_note TEXT,
+              defense_version_id INTEGER REFERENCES planning_version(id) ON DELETE SET NULL,
+              published_budget_version_id INTEGER REFERENCES planning_version(id) ON DELETE SET NULL,
+              published_at TIMESTAMPTZ,
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_budget_defense_request_year ON budget_defense_request (year)",
+            "CREATE INDEX IF NOT EXISTS ix_budget_defense_request_department_id ON budget_defense_request (department_id)",
+            "CREATE INDEX IF NOT EXISTS ix_budget_defense_request_status ON budget_defense_request (status)",
+            "CREATE INDEX IF NOT EXISTS ix_budget_defense_request_requested_id_orcamento ON budget_defense_request (requested_id_orcamento)",
+            "CREATE INDEX IF NOT EXISTS ix_budget_defense_request_requested_cloud ON budget_defense_request (requested_cloud)",
+            "CREATE INDEX IF NOT EXISTS ix_budget_defense_request_scope ON budget_defense_request (year, requested_id_orcamento, status)",
+            "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS defense_request_id INTEGER REFERENCES budget_defense_request(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS ix_planning_version_defense_request_id ON planning_version (defense_request_id)",
             # reservation_collection (22 chars) excede o VARCHAR(20) original.
             "ALTER TABLE etl_task ALTER COLUMN task_type TYPE VARCHAR(40)",
+            "ALTER TABLE etl_task ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'collection'",
             "ALTER TABLE scheduled_task ALTER COLUMN connection_id DROP NOT NULL",

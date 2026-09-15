@@ -117,8 +117,24 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
                 return queued
         session.commit()
 
+        from app.models.etl_task import EtlTask
+        from sqlalchemy import select
+
         queued = []
         for connection_id in connection_ids:
+            active = session.execute(
+                select(EtlTask.id).where(
+                    EtlTask.connection_id == connection_id,
+                    EtlTask.task_type == "extraction",
+                    EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                ).limit(1)
+            ).scalar_one_or_none()
+            if active:
+                logger.info(
+                    "Scheduled ETL [%s] skipped connection %s — extraction task %s already active",
+                    schedule_name, connection_id, active,
+                )
+                continue
             task_id = _queue_extraction_sync(
                 connection_id, session,
                 phase=f"Agendado: {schedule_name}",

@@ -93,7 +93,6 @@ def setup_oci_focus_mapping():
             ("cost/myCost", "EffectiveCost", "RENAME", None),
             ("cost/myCost", "ContractedCost", "RENAME", None),
             ("cost/myCost", "ListCost", "RENAME", None),
-            ("cost/myCost", "realizado", "RENAME", None),
             ("cost/myCost", "PaymentCurrencyBilledCost", "RENAME", None),
             ("cost/myCost", "PricingCurrencyEffectiveCost", "RENAME", None),
 

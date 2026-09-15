@@ -3,7 +3,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+# In local development this module lives at
+# ``<repository>/apps/api/app/schemas``.  The Docker image, on the other hand,
+# deliberately copies only the API to ``/app``.  Do not assume the fourth
+# parent exists or the API cannot even import when running in Docker.
+_MODULE_PATH = Path(__file__).resolve()
+_REPOSITORY_ROOT = next(
+    (
+        parent
+        for parent in _MODULE_PATH.parents
+        if (parent / "apps" / "api").is_dir()
+    ),
+    _MODULE_PATH.parents[2],
+)
 
 class SourceConnectionCreate(BaseModel):
     code: str

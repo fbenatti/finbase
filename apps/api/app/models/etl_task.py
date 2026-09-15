@@ -31,3 +31,5 @@ class EtlTask(Base):
     result_json = Column(JSON, nullable=True)  # extra result data
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
+    # Worker defers tasks that cannot acquire locks so FIFO claim does not spin on the head.
+    available_at = Column(DateTime(timezone=True), nullable=True)

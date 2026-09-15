@@ -56,7 +56,7 @@ PATH_MODULE: list[tuple[str, str]] = [
 
 PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health", "/etl/worker-health")
 # já protegidos por Depends(require(...)) nos próprios routers
-SKIP_PREFIXES = ("/auth", "/users", "/groups", "/roles")
+SKIP_PREFIXES = ("/auth", "/users", "/groups", "/roles", "/planning/budget-defense")
 
 METHOD_ACTION = {
     "GET": "read",
@@ -91,12 +91,19 @@ CREATE_DELETE_MARKERS = ("/vote",)
 # kind=prefix casa path.startswith(needle); kind=contains casa needle em path.
 # Regras de consulta (query POST) redefinem a ação para "read" — apenas nessas
 # áreas exatas (não afetam cancel/execuções sob o mesmo prefixo).
-SCOPED_PATH_RULES: list[tuple[str, str, str, str, bool]] = [
-    # (kind, needle, module, scope, post_é_leitura)
-    ("prefix", "/forecast/accuracy/months", "forecast", "visao-contabil", True),
-    ("contains", "/history/", "forecast", "visao-contabil", True),
-    ("prefix", "/dimon/query", "dimon", "visao-contabil", True),
-    ("prefix", "/dimon/info", "dimon", "visao-contabil", True),
+# escopo_vale_para_leitura=False mantém a leitura no escopo do módulo: quem pode
+# solicitar ou publicar uma defesa precisa ler a grade, e a leitura não deve ser
+# restringida à área da permissão de escrita.
+SCOPED_PATH_RULES: list[tuple[str, str, str, str, bool, bool]] = [
+    # (kind, needle, module, scope, post_é_leitura, escopo_vale_para_leitura)
+    ("prefix", "/forecast/accuracy/months", "forecast", "visao-contabil", True, True),
+    ("contains", "/history/", "forecast", "visao-contabil", True, True),
+    ("prefix", "/dimon/query", "dimon", "visao-contabil", True, True),
+    ("prefix", "/dimon/info", "dimon", "visao-contabil", True, True),
+    # Publicar a defesa no orçamento é a permissão de merge/aprovação.
+    ("contains", "/publish-budget", "planning", "defesa-publicar", False, False),
+    # Salvar/solicitar a defesa exige a permissão de solicitação.
+    ("prefix", "/planning/defesa-orcamentaria", "planning", "defesa-solicitar", False, False),
 ]
 
 
@@ -157,7 +164,7 @@ class RBACMiddleware:
         # Regra escopada (aba) tem precedência e pode redefinir a ação
         rbac_scope: str | None = None
         method_action = METHOD_ACTION.get(scope.get("method", ""))
-        for kind, needle, rule_module, rule_scope, post_is_read in SCOPED_PATH_RULES:
+        for kind, needle, rule_module, rule_scope, post_is_read, scope_on_read in SCOPED_PATH_RULES:
             matched = path.startswith(needle) if kind == "prefix" else needle in path
             if not matched:
                 continue
@@ -169,6 +176,8 @@ class RBACMiddleware:
                 action = "read"
             else:
                 action = method_action or "read"
+            if action == "read" and not scope_on_read:
+                rbac_scope = None
             break
 
         headers = dict(scope.get("headers") or [])

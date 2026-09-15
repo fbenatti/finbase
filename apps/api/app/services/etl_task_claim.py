@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import zlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 
 from sqlalchemy import Integer, exists, or_, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.models.etl_task import EtlTask
+
+TASK_DEFER_SECONDS = 3
 
 WORKER_TASK_TYPES: tuple[str, ...] = (
     "backup",
@@ -105,6 +107,7 @@ def claim_next_etl_task(session: Session) -> EtlTask | None:
             audit.status == "COMPLETED",
         )),
     )
+    now = datetime.now(timezone.utc)
     task = session.execute(
         select(EtlTask)
         .where(
@@ -112,6 +115,10 @@ def claim_next_etl_task(session: Session) -> EtlTask | None:
             EtlTask.task_type.in_(WORKER_TASK_TYPES),
             _queue_group_busy_clause(),
             audit_ready,
+            or_(
+                EtlTask.available_at.is_(None),
+                EtlTask.available_at <= now,
+            ),
         )
         .order_by(EtlTask.id)
         .limit(1)
@@ -122,7 +129,8 @@ def claim_next_etl_task(session: Session) -> EtlTask | None:
 
     task.status = "RUNNING"
     task.phase = task.phase or "Worker assumiu a tarefa"
-    task.started_at = datetime.now(timezone.utc)
+    task.started_at = now
+    task.available_at = None
     session.flush()
     return task
 
@@ -159,10 +167,18 @@ def release_task_resource_locks(session: Session, task: EtlTask) -> None:
             pass
 
 
-def release_task_to_queue(session: Session, task: EtlTask, *, phase: str | None = None) -> None:
+def release_task_to_queue(
+    session: Session,
+    task: EtlTask,
+    *,
+    phase: str | None = None,
+    defer_seconds: int = TASK_DEFER_SECONDS,
+) -> None:
     task.status = "QUEUED"
     task.phase = phase or "Aguardando recurso exclusivo"
     task.started_at = None
+    if defer_seconds > 0:
+        task.available_at = datetime.now(timezone.utc) + timedelta(seconds=defer_seconds)
     session.flush()
 
 
@@ -190,6 +206,11 @@ def reconcile_stale_running_tasks(session: Session) -> None:
             row.status = "QUEUED"
             row.phase = "Reenfileirado após reinício do worker"
             row.finished_at = None
+            continue
+        if row.task_type == "backup":
+            row.status = "FAILED"
+            row.phase = "Worker reiniciado durante backup; tarefa encerrada"
+            row.finished_at = datetime.now(timezone.utc)
             continue
         row.status = "FAILED"
         row.phase = "Worker reiniciado; tarefa RUNNING anterior foi encerrada"

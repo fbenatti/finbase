@@ -288,7 +288,10 @@ export default function Layout() {
           bgcolor: "background.default",
           p: 3,
           mt: 8,
-          minHeight: "100vh",
+          // A altura desconta o deslocamento do AppBar (mt: 8). Antes, com
+          // minHeight: 100vh, o main ultrapassava o container e criava uma
+          // segunda barra de rolagem na janela além da interna.
+          height: "calc(100% - 64px)",
         }}
       >
         {(() => {
