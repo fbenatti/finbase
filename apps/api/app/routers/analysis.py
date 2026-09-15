@@ -2069,8 +2069,12 @@ async def _expected_view_core(
       GROUP BY 1, 2
     """
     try:
-        actual_fact_rows = await trino_execute(actual_sql, **interactive)
-        forecast_fact_rows = await trino_execute(forecast_sql, **interactive)
+        # These scans are independent after the cutoff query. Running them in
+        # parallel removes one full Trino round-trip from the dashboard path.
+        actual_fact_rows, forecast_fact_rows = await asyncio.gather(
+            trino_execute(actual_sql, **interactive),
+            trino_execute(forecast_sql, **interactive),
+        )
     except TrinoCancelled:
         raise
     except Exception as exc:

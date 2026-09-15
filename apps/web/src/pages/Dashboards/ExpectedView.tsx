@@ -74,17 +74,22 @@ export default function ExpectedView({
     // duplicating a costly seven-level Trino aggregation.
     if (!organizationLoaded) return;
     const controller = new AbortController();
-    setLoading(true);
-    setError("");
-    const selectedId = directorView ? undefined : departmentOptions.find(department => department.path === director)?.id;
-    // "Todos os períodos" envia year=0: o backend remove o recorte de ano e
-    // traz todo o realizado + forecast disponível (inclusive meses futuros).
-    const year = periodFilter === "all" ? 0 : periodFilter === "current" ? new Date().getFullYear() : Number(periodFilter);
-    getExpectedView(director, year, departmentId ?? selectedId, controller.signal, includeSharedCost, directorView).then(result => { setRows(result.rows); setDrivers(result.drivers); }).catch(e => {
-      if ((e as { code?: string }).code === "ERR_CANCELED" || controller.signal.aborted) return;
-      setError(formatApiError(e, "Não foi possível carregar a Visão Esperada"));
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+    // Several controlled filters settle during mount. Debounce them so only
+    // the final state reaches Trino; cancellation also stops an in-flight
+    // request when the user changes the selection again.
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      const selectedId = directorView ? undefined : departmentOptions.find(department => department.path === director)?.id;
+      // "Todos os períodos" envia year=0: o backend remove o recorte de ano e
+      // traz todo o realizado + forecast disponível (inclusive meses futuros).
+      const year = periodFilter === "all" ? 0 : periodFilter === "current" ? new Date().getFullYear() : Number(periodFilter);
+      getExpectedView(director, year, departmentId ?? selectedId, controller.signal, includeSharedCost, directorView).then(result => { setRows(result.rows); setDrivers(result.drivers); }).catch(e => {
+        if ((e as { code?: string }).code === "ERR_CANCELED" || controller.signal.aborted) return;
+        setError(formatApiError(e, "Não foi possível carregar a Visão Esperada"));
+      }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [director, departmentId, organizationLoaded, periodFilter, reloadNonce, includeSharedCost, directorView]);
   const years = [...new Set(rows.map(row => row.period.slice(0, 4)))].sort();
   const filteredRows = periodFilter === "all" ? rows : periodFilter === "current" ? rows.filter(row => row.period.startsWith(String(new Date().getFullYear()))) : rows.filter(row => row.period.startsWith(periodFilter));

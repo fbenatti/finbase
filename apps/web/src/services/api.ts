@@ -445,6 +445,8 @@ type ExpectedViewInflight = {
   abortTimer?: number;
 };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
+const expectedViewCache = new Map<string, { expiresAt: number; data: ExpectedViewResult }>();
+const EXPECTED_VIEW_CACHE_MS = 45_000;
 
 export function trackAnalysisAbort(controller: AbortController) {
   pendingAnalysis.add(controller);
@@ -3726,6 +3728,11 @@ export async function getExpectedView(
     (includeSharedCost ? 1 : 0) +
     "|" +
     (directorView ? 1 : 0);
+  const cached = expectedViewCache.get(key);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) return cached.data;
+    expectedViewCache.delete(key);
+  }
   let entry = expectedViewInflight.get(key);
   if (!entry || entry.controller.signal.aborted) {
     const controller = new AbortController();
@@ -3742,7 +3749,11 @@ export async function getExpectedView(
         },
         { timeout: 120000, signal: controller.signal },
       )
-      .then((result) => result.data as ExpectedViewResult)
+      .then((result) => {
+        const data = result.data as ExpectedViewResult;
+        expectedViewCache.set(key, { expiresAt: Date.now() + EXPECTED_VIEW_CACHE_MS, data });
+        return data;
+      })
       .finally(() => {
         const current = expectedViewInflight.get(key);
         if (current?.controller === controller)
