@@ -11,12 +11,27 @@ services:
       ENV: production
       # SAML completes over the HTTPS reverse proxy on this VM.
       SSO_COOKIE_SECURE: "true"
+      BOOTSTRAP_ENABLED: "false"
+      SCHEDULER_ENABLED: "false"
+    scale: 6
+
+  scheduler:
+    env_file:
+      - .env.production
+    environment:
+      ENV: production
+      SSO_COOKIE_SECURE: "true"
+      BOOTSTRAP_ENABLED: "true"
+      SCHEDULER_ENABLED: "true"
 
   worker:
     env_file:
       - .env.production
     environment:
       ENV: production
+
+  web:
+    scale: 6
 
   trino:
     # VM capacity: 16 vCPU / 128 GiB RAM. Keep a CPU core available to the

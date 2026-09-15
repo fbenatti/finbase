@@ -216,9 +216,9 @@ stop_compose_dev_conflicts() {
   if ! docker_daemon_ready; then
     return 0
   fi
-  echo "Parando containers Docker api/web deste projeto (Docker Desktop permanece ativo)..."
-  compose_cmd stop -t 2 api web >/dev/null 2>&1 || true
-  compose_cmd kill api web >/dev/null 2>&1 || true
+  echo "Parando containers Docker api/web/gateway deste projeto (Docker Desktop permanece ativo)..."
+  compose_cmd stop -t 2 api web gateway scheduler >/dev/null 2>&1 || true
+  compose_cmd kill api web gateway scheduler >/dev/null 2>&1 || true
 }
 
 free_listeners_on_port() {

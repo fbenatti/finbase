@@ -17,6 +17,17 @@ async def lifespan(app: FastAPI):
         _log.warning("AUTH_ENABLED=false ignorado em production: autenticação sempre ligada em produção")
     if settings.env == "production" and settings.jwt_secret_key == "dev-insecure-secret-change-me":
         raise RuntimeError("JWT_SECRET_KEY deve ser configurada em production")
+
+    # Scaled API replicas must not race database bootstrapping/migrations.
+    # The dedicated scheduler service performs this once before replicas start.
+    if not settings.bootstrap_enabled:
+        if settings.scheduler_enabled:
+            await scheduler_service.start_scheduler()
+        yield
+        if settings.scheduler_enabled:
+            await scheduler_service.stop_scheduler()
+        return
+
     async with engine.begin() as conn:
         from app.models.source_connection import SourceConnection  # noqa: F401
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
@@ -390,13 +401,14 @@ async def lifespan(app: FastAPI):
         from seed_marketplace_focus import ensure_marketplace_focus
         ensure_marketplace_focus()
 
-    # Start the ETL scheduler
-    await scheduler_service.start_scheduler()
+    # Only the dedicated scheduler service owns APScheduler in production.
+    if settings.scheduler_enabled:
+        await scheduler_service.start_scheduler()
 
     yield
 
-    # Stop the scheduler
-    await scheduler_service.stop_scheduler()
+    if settings.scheduler_enabled:
+        await scheduler_service.stop_scheduler()
 
 
 app = FastAPI(title="FinOps ETL Platform", version="0.1.0", lifespan=lifespan)

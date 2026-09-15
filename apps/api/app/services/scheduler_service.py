@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _scheduler: Optional[AsyncIOScheduler] = None
 _scheduler_thread: Optional[threading.Thread] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
+_schedule_versions: dict[int, tuple] = {}
 
 
 def _get_sync_session():
@@ -536,6 +537,10 @@ async def start_scheduler():
                 count += 1
 
         _scheduler.start()
+        # API replicas are intentionally stateless, so edits made through any
+        # replica are reconciled from PostgreSQL by this singleton scheduler.
+        _scheduler.add_job(_sync_schedules_job, "interval", seconds=15,
+                           id="schedule_sync", replace_existing=True)
         # Daily saving refresh is intentionally independent of ETL schedules: actions
         # that start today must progress even when a source has no new blob.
         _scheduler.add_job(_refresh_savings_job, "cron", hour=2, minute=15, id="savings_daily", replace_existing=True)
@@ -551,6 +556,45 @@ async def start_scheduler():
         logger.info("Scheduler started with %d active schedules", count)
     except Exception as e:
         logger.error("Failed to start scheduler: %s", e)
+    finally:
+        session.close()
+
+
+def _schedule_version(row) -> tuple:
+    """Fields which alter a cron job; used to avoid replacing unchanged jobs."""
+    return (
+        row.name,
+        row.active,
+        row.cron_expression,
+        row.timezone,
+        tuple(_schedule_connection_ids(row)),
+    )
+
+
+def _sync_schedules_job() -> None:
+    """Reconcile DB schedule edits made through stateless API replicas."""
+    if not _scheduler:
+        return
+    session = _get_sync_session()
+    try:
+        from app.models.scheduled_task import ScheduledTask
+        from sqlalchemy import select
+
+        rows = session.execute(select(ScheduledTask)).scalars().all()
+        active = {row.id: row for row in rows if row.active}
+        for schedule_id in set(_schedule_versions) - set(active):
+            try:
+                _scheduler.remove_job(f"sched_{schedule_id}")
+            except JobLookupError:
+                pass
+            _schedule_versions.pop(schedule_id, None)
+        for schedule_id, row in active.items():
+            version = _schedule_version(row)
+            if _schedule_versions.get(schedule_id) != version:
+                if _register_schedule(_scheduler, row, session):
+                    _schedule_versions[schedule_id] = version
+    except Exception as exc:
+        logger.warning("Could not reconcile schedules: %s", exc)
     finally:
         session.close()
 

@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     # Environment control
     env: str = os.getenv("ENV", "development")
     skip_seed: bool = os.getenv("SKIP_SEED", "false").lower() == "true"
+    # Production replicas are stateless.  A single dedicated scheduler service
+    # performs startup/bootstrap work and owns APScheduler.
+    bootstrap_enabled: bool = os.getenv("BOOTSTRAP_ENABLED", "true").lower() == "true"
+    scheduler_enabled: bool = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
 
     # --- Auth / RBAC ---
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "dev-insecure-secret-change-me")
