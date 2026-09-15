@@ -22,6 +22,16 @@ fi
 git fetch origin main
 git merge --ff-only origin/main
 
+# This file is deliberately local to the VM and ignored by Git. It prevents
+# the application from ever falling back to the development JWT signing key.
+if [[ ! -s .env.production ]]; then
+  umask 077
+  jwt_secret="$(openssl rand -hex 48)"
+  printf 'ENV=production\nJWT_SECRET_KEY=%s\nSSO_COOKIE_SECURE=true\n' "$jwt_secret" > .env.production
+  chmod 600 .env.production
+  echo "Criado .env.production com segredo JWT exclusivo da VM."
+fi
+
 docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build
 
 if [[ -f infra/nginx/openfinops.conf ]]; then

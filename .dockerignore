@@ -1,0 +1,17 @@
+/.git/
+/.venv/
+/.runtime-logs/
+/node_modules/
+/**/node_modules/
+/apps/data/
+/backups/
+/data/
+/FinOps_v2.5.3_FROZEN_LOCAL_CORRIGIDO/
+/.env
+/.env-*
+*.log
+*.csv
+*.sql
+*.xlsx
+__pycache__/
+**/__pycache__/

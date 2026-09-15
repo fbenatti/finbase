@@ -29,7 +29,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./apps/api/app:/app/app
       - ./apps/data/iceberg:/data/iceberg
       - ./backups/scheduled:/backups/scheduled
       - worker_runtime:/run/openfinops-worker
@@ -74,11 +73,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
-      - "5173:5173"
-    environment:
-      VITE_API_PROXY_TARGET: http://api:8000
-    volumes:
-      - ./apps/web/src:/app/src
+      - "5173:80"
     depends_on:
       - api
 

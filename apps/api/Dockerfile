@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
 # Full backups use pg_dump/pg_restore against the configured PostgreSQL.
 # xmlsec1 is required by python3-saml to validate signed SAML assertions.
 RUN apt-get update \
@@ -16,4 +20,6 @@ COPY apps/api/*.py ./
 COPY apps/api/alembic.ini .
 COPY apps/api/alembic ./alembic
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# The worker is a separate service. Keep one API process so the scheduler
+# lifecycle is not duplicated, and never enable the development file reloader.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]

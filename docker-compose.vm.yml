@@ -5,9 +5,18 @@ services:
     image: postgres:17-alpine
 
   api:
+    env_file:
+      - .env.production
     environment:
+      ENV: production
       # SAML completes over the HTTPS reverse proxy on this VM.
       SSO_COOKIE_SECURE: "true"
+
+  worker:
+    env_file:
+      - .env.production
+    environment:
+      ENV: production
 
   trino:
     # VM capacity: 16 vCPU / 128 GiB RAM. Keep a CPU core available to the
