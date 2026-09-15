@@ -23,8 +23,12 @@ pandas==2.2.3
 pyarrow>=19.0.0
 openpyxl==3.1.5
 pyiceberg>=0.8.0
-s3fs>=2024.10.0
-boto3>=1.35.0
+# Keep the AWS SDK family compatible and deterministic. Unbounded versions
+# make pip explore hundreds of s3fs/aiobotocore/boto3 combinations at build.
+s3fs==2024.10.0
+aiobotocore==2.15.2
+botocore==1.35.36
+boto3==1.35.36
 google-cloud-bigquery>=3.27.0
 google-cloud-bigquery-storage>=2.27.0
 google-auth>=2.36.0
