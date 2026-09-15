@@ -10,7 +10,7 @@ import {
   AccessTime, Person, ArrowDownward, ArrowUpward, Close,
   Psychology, Bolt, Code, ChatBubbleOutline
 } from "@mui/icons-material";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import {
   getAICopilotEngagementUsers,
   getAICopilotFinancialInsights,

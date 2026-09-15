@@ -8,7 +8,7 @@ import {
   FormControlLabel, Switch,
 } from "@mui/material";
 import { Refresh, ContentCopy, FilterAltOff, ExpandMore, ChevronRight, Business, FileDownload } from "@mui/icons-material";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 // Wrapper: react-plotly.js Data/DataTitle typings são excessivamente rígidos
 // para traces com name/text customizados; mantém o restante tipado.
 function Chart(props: any) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, Grid,

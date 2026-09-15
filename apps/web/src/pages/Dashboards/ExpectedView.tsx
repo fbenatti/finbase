@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import { Alert, Box, Breadcrumbs, Button, Card, CardContent, Chip, CircularProgress, Collapse, FormControl, FormControlLabel, Grid, IconButton, InputLabel, Link, List, ListItemButton, ListItemText, Menu, MenuItem, Paper, Select, Stack, Switch, Typography } from "@mui/material";
 import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";

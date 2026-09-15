@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, Grid, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from "@mui/material";
 import { getAzurePtuOpsHeatmap, getAzurePtuOpsOverview } from "../../services/api";

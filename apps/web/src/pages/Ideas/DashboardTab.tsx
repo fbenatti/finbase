@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { getIdeasDashboard, type IdeasDashboard, type Idea } from "../../services/ideasApi";

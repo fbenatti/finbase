@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Chip, CircularProgress, Grid, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from "@mui/material";
 import { InfoOutlined } from "@mui/icons-material";
 import { getDatameshDashboard, type DatameshDashboard } from "../../services/api";

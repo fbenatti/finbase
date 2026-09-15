@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { Add, Cancel, Refresh } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";

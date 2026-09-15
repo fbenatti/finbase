@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import { useSearchParams } from "react-router-dom";
 import {
   Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,

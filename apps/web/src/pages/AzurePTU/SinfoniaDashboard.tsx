@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Chip, CircularProgress, Grid, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import { getSinfoniaDashboard, type SinfoniaDashboard } from "../../services/api";
 

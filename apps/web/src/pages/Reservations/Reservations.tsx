@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import {
   Alert, Box, Button, Card, Chip, CircularProgress, FormControl,
   Grid, InputLabel, MenuItem, Select, Stack, Tab, Tabs, Table, TableBody,

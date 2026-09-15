@@ -1,4 +1,4 @@
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import {
   Alert, Box, Card, CardContent, Chip, Grid, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, Typography,

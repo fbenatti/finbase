@@ -6,7 +6,7 @@ import {
   InputLabel, Select, MenuItem, IconButton, Stack,
 } from "@mui/material";
 import { Refresh, Add, Delete, Edit } from "@mui/icons-material";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 // Wrapper: typings do react-plotly são rígidos para títulos/textos customizados.
 function Chart(props: any) {
   return <Plot {...props} />;

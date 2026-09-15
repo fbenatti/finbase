@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import Plot from "react-plotly.js";
+import Plot from "@/components/Plot";
 import {
   Alert, Box, Breadcrumbs, Button, Card, CardContent, Chip, CircularProgress, Collapse,
   FormControl, IconButton, InputLabel, Link, List, ListItemButton, ListItemText, Menu,
