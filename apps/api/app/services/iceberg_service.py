@@ -1330,6 +1330,7 @@ def publish_staged_partition(
     with target.update_schema() as schema_update:
         schema_update.union_by_name(staged.schema())
     target = cat.load_table(target_id)
+    target_column_names = [field.name for field in target.schema().fields]
 
     overwrite_filter = And(
         EqualTo("_billing_period", str(billing_period)),
@@ -1344,7 +1345,10 @@ def publish_staged_partition(
     for batch in staged.scan().to_arrow_batch_reader():
         if batch.num_rows:
             import pyarrow as pa
-            tx.append(pa.Table.from_batches([batch]))
+            # Arrow batches preserve staging order, while the target schema
+            # may have evolved by name. Reorder before the native append so
+            # fields with different positions cannot be paired by position.
+            tx.append(pa.Table.from_batches([batch]).select(target_column_names))
     tx.commit_transaction()
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
