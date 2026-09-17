@@ -23,7 +23,7 @@ mkdir -p "$LOG_DIR"
 
 if ! az account show --subscription "$SUBSCRIPTION_ID" >/dev/null 2>&1; then
   echo "Azure CLI não está autenticado na subscription $SUBSCRIPTION_ID." >&2
-  echo "Execute: az login --use-device-code --tenant telefonicabigdata.onmicrosoft.com" >&2
+  echo "Execute: az login --use-device-code --tenant telefonicati.onmicrosoft.com" >&2
   exit 1
 fi
 az account set --subscription "$SUBSCRIPTION_ID" >/dev/null
