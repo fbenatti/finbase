@@ -6,8 +6,9 @@ set -Eeuo pipefail
 # Run in a terminal (Ctrl+C stops both processes):
 #   ./scripts/keep_bastion_tunnel.sh
 #
-# The default HTTPS port is 8443 so the script does not require sudo. Use
-# LOCAL_HTTPS_PORT=443 only when a privileged SSH forward is already allowed.
+# The default HTTPS port is 8443 so the script does not require sudo. When
+# LOCAL_HTTPS_PORT is a privileged port (e.g. 443), only the SSH forward is
+# elevated; Azure CLI/Bastion still run as the logged-in user.
 
 SUBSCRIPTION_ID="${BASTION_SUBSCRIPTION_ID:-71cc41f4-8e37-4c60-abbb-b9003b91c554}"
 BASTION_RG="${BASTION_RESOURCE_GROUP:-rg-network-production}"
@@ -18,8 +19,27 @@ SSH_USER="${BASTION_SSH_USER:-finops}"
 LOCAL_HTTPS_PORT="${LOCAL_HTTPS_PORT:-8443}"
 LOCAL_TRINO_PORT="${LOCAL_TRINO_PORT:-18080}"
 LOG_DIR="${BASTION_LOG_DIR:-$PWD/.runtime-logs}"
+LOCK_DIR="$LOG_DIR/.bastion-tunnel.lock"
 
 mkdir -p "$LOG_DIR"
+
+# Não permita dois processos brigando pelo túnel do Bastion e pelos forwards.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if [[ -f "$LOCK_DIR/pid" ]] && kill -0 "$(<"$LOCK_DIR/pid")" 2>/dev/null; then
+    echo "Já existe um keep_bastion_tunnel.sh em execução (PID $(<"$LOCK_DIR/pid"))." >&2
+    exit 1
+  fi
+  rm -rf "$LOCK_DIR"
+  mkdir "$LOCK_DIR"
+fi
+printf '%s\n' "$$" >"$LOCK_DIR/pid"
+
+SSH_PREFIX=()
+if [[ "$LOCAL_HTTPS_PORT" =~ ^[0-9]+$ ]] && (( LOCAL_HTTPS_PORT < 1024 )); then
+  echo "A porta HTTPS $LOCAL_HTTPS_PORT requer privilégio administrativo local."
+  sudo -v
+  SSH_PREFIX=(sudo)
+fi
 
 if ! az account show --subscription "$SUBSCRIPTION_ID" >/dev/null 2>&1; then
   echo "Azure CLI não está autenticado na subscription $SUBSCRIPTION_ID." >&2
@@ -33,8 +53,26 @@ cleanup() {
   [[ -n "${SSH_PID:-}" ]] && kill "$SSH_PID" 2>/dev/null || true
   [[ -n "${BASTION_PID:-}" ]] && kill "$BASTION_PID" 2>/dev/null || true
   wait 2>/dev/null || true
+  rm -rf "$LOCK_DIR"
 }
 trap cleanup EXIT INT TERM
+
+SSH_FORWARDS=()
+add_forward_if_available() {
+  local local_port="$1" remote_port="$2" label="$3"
+  if nc -z 127.0.0.1 "$local_port" >/dev/null 2>&1; then
+    echo "Porta local $local_port ($label) já está em uso; forward ignorado." >&2
+    return
+  fi
+  SSH_FORWARDS+=(-L "127.0.0.1:$local_port:127.0.0.1:$remote_port")
+}
+
+# A máquina de desenvolvimento pode já estar usando 5173/8000. Isso não deve
+# impedir o HTTPS do ambiente remoto nem o acesso ao Trino pelo túnel.
+add_forward_if_available 5173 5173 "frontend"
+add_forward_if_available 8000 8000 "API"
+add_forward_if_available "$LOCAL_TRINO_PORT" 8080 "Trino"
+add_forward_if_available "$LOCAL_HTTPS_PORT" 443 "HTTPS"
 
 while :; do
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Abrindo túnel Bastion..."
@@ -62,19 +100,17 @@ while :; do
   fi
 
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Bastion ativo; mantendo forwards SSH."
-  ssh -N \
+  "${SSH_PREFIX[@]}" ssh -N \
     -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=30 \
     -o ServerAliveCountMax=3 \
     -o ConnectTimeout=15 \
     -o StrictHostKeyChecking=yes \
+    -o "UserKnownHostsFile=$HOME/.ssh/known_hosts" \
     -o IdentitiesOnly=yes \
     -i "$HOME/.ssh/id_ed25519" \
     -p "$BASTION_PORT" \
-    -L "127.0.0.1:5173:127.0.0.1:5173" \
-    -L "127.0.0.1:8000:127.0.0.1:8000" \
-    -L "127.0.0.1:$LOCAL_TRINO_PORT:127.0.0.1:8080" \
-    -L "127.0.0.1:$LOCAL_HTTPS_PORT:127.0.0.1:443" \
+    "${SSH_FORWARDS[@]}" \
     "$SSH_USER@127.0.0.1" \
     >>"$LOG_DIR/ssh-forwards.log" 2>&1 &
   SSH_PID=$!

@@ -136,6 +136,14 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
     if row is None:
         raise HTTPException(status_code=401, detail="Refresh token inválido")
     if row.revoked_at is not None:
+        # A rotação pode receber duas requisições quase simultâneas (por
+        # exemplo, ao restaurar uma aba ou quando o polling da tela inicia).
+        # A primeira já emitiu o sucessor; tratar a segunda como ataque e
+        # revogar toda a família derrubava também a sessão recém-criada.
+        # Um token que já tem sucessor só é rejeitado; a sessão válida segue
+        # usando o refresh novo que o navegador recebeu na primeira resposta.
+        if row.replaced_by_id is not None:
+            raise HTTPException(status_code=401, detail="Refresh token já rotacionado")
         # Reutilização de refresh revogado → revogar toda a família do usuário
         logger.warning("Refresh revogado reutilizado — revogando família do usuário %s", row.user_id)
         result2 = await db.execute(
