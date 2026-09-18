@@ -255,7 +255,9 @@ async def _saml_login(prov: SsoProvider, request: Request):
     url = cfg["idp_sso_url"] + ("&" if "?" in cfg["idp_sso_url"] else "?") + "SAMLRequest=" + urllib.parse.quote(compressed)
     response = RedirectResponse(url=url, status_code=303)
     # guarda request_id esperado
-    response.set_cookie(key=f"sso_saml:{prov.name}", value=request_id, max_age=600,
+    # Nome exibido do provedor pode conter espaços/caracteres que não são
+    # permitidos em nomes de cookie. O id persistido é estável e seguro.
+    response.set_cookie(key=f"sso_saml_{prov.id}", value=request_id, max_age=600,
                         httponly=True, samesite="lax", path="/", secure=settings.sso_cookie_secure or settings.env == "production")
     return response
 
