@@ -220,6 +220,12 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
         raise HTTPException(status_code=400, detail="Claims sem sub")
     groups = claims.get(cfg.get("groups_claim") or "groups") or []
 
+    email = claims.get("email") or claims.get("preferred_username") or claims.get("upn")
+    if not email:
+        # A stable human identifier is mandatory for automatic provisioning.
+        # Never expose an opaque Entra subject as a local username.
+        raise HTTPException(status_code=422, detail="OIDC não retornou e-mail ou UPN; usuário não foi provisionado")
+
     return await _finish_login(
         db, request, provider=prov,
         external_id=external_id,
@@ -227,7 +233,7 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
         # ``email`` é opcional e pode não existir mesmo com o scope email.
         # Usá-lo evita criar uma conta JIT pelo ``sub`` opaco para uma pessoa
         # que já possui conta SAML/local com o mesmo UPN.
-        email=claims.get("email") or claims.get("preferred_username") or claims.get("upn"),
+        email=email,
         full_name=claims.get("name") or claims.get("displayName"),
         group_names=groups if isinstance(groups, list) else [groups],
     )

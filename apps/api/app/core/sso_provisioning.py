@@ -1,5 +1,6 @@
 """Provisionamento JIT e mapeamento de grupos — compartilhado por OIDC e SAML."""
 import logging
+import hashlib
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -9,6 +10,20 @@ from sqlalchemy.orm import selectinload
 from app.models.identity import Group, User
 
 logger = logging.getLogger(__name__)
+
+
+def _jit_username(email: str | None, external_id: str) -> str:
+    """Return a readable, deterministic username for an SSO account.
+
+    The IdP ``sub`` is intentionally opaque and must remain only as the
+    identity key. When Entra supplies an e-mail/UPN, that is the operator
+    visible username. A hash suffix keeps the exceptional long value unique.
+    """
+    candidate = (email or external_id).strip().lower().replace(" ", "_")
+    if len(candidate) <= 120:
+        return candidate
+    digest = hashlib.sha256(candidate.encode()).hexdigest()[:12]
+    return f"{candidate[:107]}-{digest}"
 
 
 async def jit_provision_user(
@@ -39,7 +54,7 @@ async def jit_provision_user(
     created = user is None
     if created:
         user = User(
-            username=external_id.lower().replace(" ", "_")[:120],
+            username=_jit_username(email, external_id),
             email=email,
             full_name=full_name,
             auth_provider=auth_provider,
