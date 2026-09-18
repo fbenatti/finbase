@@ -1369,8 +1369,6 @@ async def copilot_engagement_users(
         SELECT m.*, cb.credit_period_start, cb.credit_period_end, cb.credit_period_days
         FROM merged m
         CROSS JOIN credit_bounds cb
-        {search_sql}
-        {engagement_sql}
         ORDER BY total_interactions DESC, total_credits DESC, days_inactive ASC
         """
 
