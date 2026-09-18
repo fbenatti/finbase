@@ -646,6 +646,29 @@ async def copilot_users(body: CopilotDashboardRequest, request: Request, db: Asy
         dept_sql = _dept_filter(scope_path)
 
         # Get top users by suggestions + acceptances
+        search_sql = ""
+        if body.search.strip():
+            search_value = body.search.strip().lower().replace("'", "''")
+            search_sql = f"""
+        WHERE lower(COALESCE(m.email, '')) LIKE '%{search_value}%'
+           OR lower(COALESCE(m.user_login, '')) LIKE '%{search_value}%'
+           OR lower(COALESCE(m.user_name, '')) LIKE '%{search_value}%'
+           OR lower(COALESCE(m.dept, '')) LIKE '%{search_value}%'
+            """
+
+        engagement_sql = ""
+        if body.engagement_filter in {"high", "low", "zero", "financial_only"}:
+            engagement_sql = (
+                f"{'AND' if search_sql else 'WHERE'} "
+                f"m.engagement_level = '{body.engagement_filter}'"
+            )
+        elif body.engagement_filter == "inactive_30":
+            engagement_sql = f"{'AND' if search_sql else 'WHERE'} m.days_inactive >= 30 AND m.days_inactive < 60"
+        elif body.engagement_filter == "inactive_60":
+            engagement_sql = f"{'AND' if search_sql else 'WHERE'} m.days_inactive >= 60 AND m.days_inactive < 90"
+        elif body.engagement_filter == "inactive_90":
+            engagement_sql = f"{'AND' if search_sql else 'WHERE'} m.days_inactive >= 90"
+
         sql = f"""
         WITH cons AS (
           SELECT 
@@ -1346,6 +1369,8 @@ async def copilot_engagement_users(
         SELECT m.*, cb.credit_period_start, cb.credit_period_end, cb.credit_period_days
         FROM merged m
         CROSS JOIN credit_bounds cb
+        {search_sql}
+        {engagement_sql}
         ORDER BY total_interactions DESC, total_credits DESC, days_inactive ASC
         """
 

@@ -187,6 +187,18 @@ services:
       trino:
         condition: service_healthy
 
+  trino-worker-3:
+    extends:
+      service: trino-worker-2
+
+  trino-worker-4:
+    extends:
+      service: trino-worker-2
+
+  trino-worker-5:
+    extends:
+      service: trino-worker-2
+
 volumes:
   pgdata:
   worker_runtime:

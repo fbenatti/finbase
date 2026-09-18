@@ -37,7 +37,7 @@ services:
     # VM capacity: 16 vCPU / 128 GiB RAM. Keep a CPU core available to the
     # API, PostgreSQL, ETL and the operating system.
     cpus: "1.0"
-    mem_limit: 8g
+    mem_limit: 12g
     volumes:
       - ./infra/trino/catalog/iceberg.vm.properties:/etc/trino/catalog/iceberg.properties:ro
       - ./infra/trino/config.vm.properties:/etc/trino/config.properties:ro
@@ -48,10 +48,10 @@ services:
 
   trino-worker:
     # Four scalable workers plus trino-worker-2 below form a five-worker
-    # cluster.  2.75 vCPU x 5 = 13.75 vCPU; with the coordinator this stays
-    # below the VM's 16 vCPU while allowing high parallelism.
-    cpus: "2.75"
-    mem_limit: 16g
+    # cluster.  3.0 vCPU x 5 = 15 vCPU; with the coordinator this uses the
+    # available VM CPU while leaving a small scheduling margin.
+    cpus: "3.0"
+    mem_limit: 12g
     scale: 4
     deploy:
       replicas: 4
@@ -61,9 +61,21 @@ services:
       - ./infra/trino/jvm-worker.vm.config:/etc/trino/jvm.config:ro
 
   trino-worker-2:
-    cpus: "2.75"
-    mem_limit: 16g
+    cpus: "3.0"
+    mem_limit: 12g
     volumes:
       - ./infra/trino/catalog/iceberg.vm.properties:/etc/trino/catalog/iceberg.properties:ro
       - ./infra/trino/config-worker.vm.properties:/etc/trino/config.properties:ro
       - ./infra/trino/jvm-worker.vm.config:/etc/trino/jvm.config:ro
+
+  trino-worker-3:
+    extends:
+      service: trino-worker-2
+
+  trino-worker-4:
+    extends:
+      service: trino-worker-2
+
+  trino-worker-5:
+    extends:
+      service: trino-worker-2
