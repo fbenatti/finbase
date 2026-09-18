@@ -128,8 +128,8 @@ async def _oidc_authorize(prov: SsoProvider, request: Request, login_hint: str |
     cfg = decrypt_config(prov.config_json)
     from authlib.integrations.httpx_client import AsyncOAuth2Client
 
-    issuer = cfg.get("issuer") or ""
-    discovery = cfg.get("discovery_url") or (issuer.rstrip("/") + "/.well-known/openid-configuration")
+    discovery, metadata = await _oidc_metadata(cfg)
+    authorization_endpoint = metadata["authorization_endpoint"]
     client = AsyncOAuth2Client(
         client_id=cfg.get("client_id"),
         client_secret=cfg.get("client_secret"),
@@ -142,11 +142,37 @@ async def _oidc_authorize(prov: SsoProvider, request: Request, login_hint: str |
     authorization_kwargs = {"state": state, "nonce": nonce}
     if hint:
         authorization_kwargs["login_hint"] = hint
-    uri, _ = client.create_authorization_url(discovery, **authorization_kwargs)
+    uri, _ = client.create_authorization_url(authorization_endpoint, **authorization_kwargs)
     response = RedirectResponse(url=uri, status_code=303)
     _set_cookie(response, _oidc_cookie_key(_STATE_COOKIE, prov), state)
     _set_cookie(response, _oidc_cookie_key(_NONCE_COOKIE, prov), nonce)
     return response
+
+
+async def _oidc_metadata(cfg: dict) -> tuple[str, dict]:
+    """Load the provider discovery document and validate required endpoints.
+
+    Authlib receives actual authorization/token endpoints, never the discovery
+    document URL itself. Keeping the discovery URL also makes the callback and
+    signature validation use the same issuer metadata.
+    """
+    import httpx
+
+    issuer = str(cfg.get("issuer") or "").rstrip("/")
+    discovery = str(cfg.get("discovery_url") or (issuer + "/.well-known/openid-configuration"))
+    if not discovery.startswith("https://"):
+        raise HTTPException(status_code=422, detail="Discovery OIDC deve usar HTTPS")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            response = await http.get(discovery)
+            response.raise_for_status()
+            metadata = response.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao carregar discovery OIDC %s: %s", discovery, exc)
+        raise HTTPException(status_code=502, detail="Não foi possível carregar a configuração OIDC") from exc
+    if not metadata.get("authorization_endpoint") or not metadata.get("token_endpoint"):
+        raise HTTPException(status_code=422, detail="Discovery OIDC sem endpoints obrigatórios")
+    return discovery, metadata
 
 
 def _base_url(request: Request) -> str:
@@ -172,13 +198,13 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
         raise HTTPException(status_code=400, detail="Código de autorização ausente")
 
     from authlib.integrations.httpx_client import AsyncOAuth2Client
-    discovery = cfg.get("discovery_url") or (cfg.get("issuer", "").rstrip("/") + "/.well-known/openid-configuration")
+    discovery, metadata = await _oidc_metadata(cfg)
     client = AsyncOAuth2Client(
         client_id=cfg.get("client_id"),
         client_secret=cfg.get("client_secret"),
         redirect_uri=cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback",
     )
-    token = await client.fetch_token(discovery, code=code)
+    token = await client.fetch_token(metadata["token_endpoint"], code=code)
 
     id_token = token.get("id_token")
     if not id_token:
