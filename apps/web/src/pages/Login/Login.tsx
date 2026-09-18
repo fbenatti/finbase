@@ -6,7 +6,7 @@ import {
 import { useAuth } from "../../auth/AuthContext";
 import { api } from "../../services/api";
 
-interface SsoPublicProvider { name: string; protocol: string }
+interface SsoPublicProvider { name: string; protocol: string; username_domain?: string }
 interface LoginConfig { allow_local_login: boolean }
 
 export default function Login() {
@@ -17,6 +17,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<SsoPublicProvider[]>([]);
+  const [ssoIdentifier, setSsoIdentifier] = useState("");
   const [config, setConfig] = useState<LoginConfig>({ allow_local_login: true });
   const params = new URLSearchParams(window.location.search);
   const breakGlass = params.get("local") === "1";
@@ -52,9 +53,19 @@ export default function Login() {
     }
   };
 
-  const ssoLogin = (name: string) => {
-    window.location.href = `/api/auth/sso/${encodeURIComponent(name)}/login`;
+  const ssoLogin = (provider: SsoPublicProvider) => {
+    setError(null);
+    if (provider.protocol === "oidc" && !ssoIdentifier.trim()) {
+      setError("Informe seu usuário corporativo para continuar.");
+      return;
+    }
+    const query = provider.protocol === "oidc"
+      ? `?login_hint=${encodeURIComponent(ssoIdentifier.trim())}`
+      : "";
+    window.location.href = `/api/auth/sso/${encodeURIComponent(provider.name)}/login${query}`;
   };
+
+  const oidcProviders = providers.filter((p) => p.protocol === "oidc");
 
   return (
     <Box
@@ -70,12 +81,23 @@ export default function Login() {
             Entre com suas credenciais
           </Typography>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {oidcProviders.length > 0 && (
+            <Box sx={{ mb: 1.5 }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Conta corporativa</Typography>
+              <TextField
+                label="Usuário ou e-mail" fullWidth autoFocus
+                value={ssoIdentifier} onChange={(e) => setSsoIdentifier(e.target.value)}
+                autoComplete="username"
+                helperText="O domínio informado será substituído automaticamente pelo domínio corporativo."
+              />
+            </Box>
+          )}
           {providers.map((p) => (
             <Button
               key={p.name} fullWidth variant="outlined" sx={{ mb: 1.5, py: 1.2 }}
-              onClick={() => ssoLogin(p.name)}
+              onClick={() => ssoLogin(p)}
             >
-              Entrar com {p.name}
+              {p.protocol === "oidc" ? "Continuar com conta corporativa" : `Entrar com ${p.name}`}
             </Button>
           ))}
           {providers.length > 0 && showLocal && <Divider sx={{ my: 2 }}>ou</Divider>}

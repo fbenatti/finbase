@@ -1,6 +1,7 @@
 """Fluxos SSO: OIDC e SAML2. Provisionamento JIT e grupos compartilhados."""
 import base64
 import logging
+import re
 import secrets
 import urllib.parse
 import uuid
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/auth/sso", tags=["sso"])
 _STATE_COOKIE = "sso_state"
 _NONCE_COOKIE = "sso_nonce"
 _FRONTEND_REDIRECT = "/"
+_LOGIN_IDENTIFIER_RE = re.compile(r"^[^@\s]+(?:@[^@\s]+)?$")
 
 
 async def _get_provider(db: AsyncSession, name: str, enabled_only: bool = True) -> SsoProvider:
@@ -61,19 +63,31 @@ async def _finish_login(
 @router.get("/providers")
 async def public_providers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SsoProvider).where(SsoProvider.enabled == True).order_by(SsoProvider.name))  # noqa: E712
-    return [
-        {"name": p.name, "protocol": p.protocol}
-        for p in result.scalars().all()
-    ]
+    providers = []
+    for p in result.scalars().all():
+        cfg = decrypt_config(p.config_json)
+        providers.append({
+            "name": p.name,
+            "protocol": p.protocol,
+            # Exposto apenas como dica visual; não é segredo. O backend é a
+            # fonte de verdade e sempre normaliza o login_hint.
+            "username_domain": cfg.get("username_domain", "") if p.protocol == "oidc" else "",
+        })
+    return providers
 
 
 # ── OIDC ──────────────────────────────────────────────────────────────────────
 
 @router.get("/{provider}/login")
-async def sso_login(provider: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def sso_login(
+    provider: str,
+    request: Request,
+    login_hint: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     prov = await _get_provider(db, provider)
     if prov.protocol == "oidc":
-        return await _oidc_authorize(prov, request)
+        return await _oidc_authorize(prov, request, login_hint=login_hint)
     if prov.protocol == "saml":
         return await _saml_login(prov, request)
     raise HTTPException(status_code=422, detail="Protocolo desconhecido")
@@ -84,7 +98,33 @@ def _set_cookie(response: Response, key: str, value: str) -> None:
                         samesite="lax", path="/", secure=settings.sso_cookie_secure or settings.env == "production")
 
 
-async def _oidc_authorize(prov: SsoProvider, request: Request):
+def _oidc_cookie_key(prefix: str, prov: SsoProvider) -> str:
+    """Cookie names cannot contain spaces or ':' from a display provider name."""
+    return f"{prefix}_{prov.id}"
+
+
+def _normalize_login_hint(value: str | None, cfg: dict) -> str | None:
+    """Use only the local part entered by the user plus the configured domain.
+
+    This deliberately discards any supplied domain. It offers a simple branded
+    login screen without trusting client-side domain selection.
+    """
+    if not value:
+        return None
+    identifier = value.strip().lower()
+    if not _LOGIN_IDENTIFIER_RE.fullmatch(identifier):
+        raise HTTPException(status_code=422, detail="Informe um usuário ou e-mail válido")
+    domain = str(cfg.get("username_domain") or "").strip().lower().lstrip("@")
+    if not domain:
+        return identifier
+    if "@" in domain or not re.fullmatch(r"[a-z0-9.-]+", domain):
+        logger.error("Provedor OIDC %s possui username_domain inválido", cfg.get("client_id", "?"))
+        raise HTTPException(status_code=500, detail="Domínio corporativo OIDC inválido")
+    local_part = identifier.split("@", 1)[0]
+    return f"{local_part}@{domain}"
+
+
+async def _oidc_authorize(prov: SsoProvider, request: Request, login_hint: str | None = None):
     cfg = decrypt_config(prov.config_json)
     from authlib.integrations.httpx_client import AsyncOAuth2Client
 
@@ -98,10 +138,14 @@ async def _oidc_authorize(prov: SsoProvider, request: Request):
     )
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
-    uri, _ = client.create_authorization_url(discovery, state=state, nonce=nonce)
+    hint = _normalize_login_hint(login_hint, cfg)
+    authorization_kwargs = {"state": state, "nonce": nonce}
+    if hint:
+        authorization_kwargs["login_hint"] = hint
+    uri, _ = client.create_authorization_url(discovery, **authorization_kwargs)
     response = RedirectResponse(url=uri, status_code=303)
-    _set_cookie(response, f"{_STATE_COOKIE}:{prov.name}", state)
-    _set_cookie(response, f"{_NONCE_COOKIE}:{prov.name}", nonce)
+    _set_cookie(response, _oidc_cookie_key(_STATE_COOKIE, prov), state)
+    _set_cookie(response, _oidc_cookie_key(_NONCE_COOKIE, prov), nonce)
     return response
 
 
@@ -118,7 +162,7 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
     if prov.protocol != "oidc":
         raise HTTPException(status_code=422, detail="Callback inválido para este provedor")
     cfg = decrypt_config(prov.config_json)
-    state_cookie = request.cookies.get(f"{_STATE_COOKIE}:{prov.name}")
+    state_cookie = request.cookies.get(_oidc_cookie_key(_STATE_COOKIE, prov))
     expected_state = request.query_params.get("state")
     if not state_cookie or not expected_state or not secrets.compare_digest(state_cookie, expected_state):
         raise HTTPException(status_code=401, detail="State inválido")
@@ -141,7 +185,7 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
         raise HTTPException(status_code=400, detail="id_token ausente na resposta")
     claims = await _verify_id_token(prov, cfg, id_token, discovery)
 
-    nonce_cookie = request.cookies.get(f"{_NONCE_COOKIE}:{prov.name}")
+    nonce_cookie = request.cookies.get(_oidc_cookie_key(_NONCE_COOKIE, prov))
     if not nonce_cookie or not claims.get("nonce") or not secrets.compare_digest(nonce_cookie, claims.get("nonce", "")):
         raise HTTPException(status_code=401, detail="Nonce inválido")
 

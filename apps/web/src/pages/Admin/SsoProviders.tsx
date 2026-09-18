@@ -22,6 +22,7 @@ const OIDC_FIELDS: Array<{ key: string; label: string; secret?: boolean; help?: 
   { key: "client_id", label: "Client ID" },
   { key: "client_secret", label: "Client secret", secret: true },
   { key: "redirect_uri", label: "Redirect URI (callback)" },
+  { key: "username_domain", label: "Domínio corporativo para login_hint", help: "Opcional. Quando preenchido, a tela aceita apenas o usuário e substitui qualquer domínio informado por este domínio." },
   { key: "scopes", label: "Scopes (default: openid profile email)" },
   { key: "groups_claim", label: "Claim de grupos (default: groups)" },
 ];
