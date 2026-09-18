@@ -223,7 +223,11 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
     return await _finish_login(
         db, request, provider=prov,
         external_id=external_id,
-        email=claims.get("email"),
+        # Entra ID normalmente emite ``preferred_username`` no ID token;
+        # ``email`` é opcional e pode não existir mesmo com o scope email.
+        # Usá-lo evita criar uma conta JIT pelo ``sub`` opaco para uma pessoa
+        # que já possui conta SAML/local com o mesmo UPN.
+        email=claims.get("email") or claims.get("preferred_username") or claims.get("upn"),
         full_name=claims.get("name") or claims.get("displayName"),
         group_names=groups if isinstance(groups, list) else [groups],
     )
