@@ -7,6 +7,7 @@ services:
   api:
     env_file:
       - .env.production
+      - .env-databriks
     environment:
       ENV: production
       # SAML completes over the HTTPS reverse proxy on this VM.
@@ -18,6 +19,7 @@ services:
   scheduler:
     env_file:
       - .env.production
+      - .env-databriks
     environment:
       ENV: production
       SSO_COOKIE_SECURE: "true"
@@ -27,6 +29,7 @@ services:
   worker:
     env_file:
       - .env.production
+      - .env-databriks
     environment:
       ENV: production
 

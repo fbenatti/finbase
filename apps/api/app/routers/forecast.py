@@ -395,8 +395,12 @@ async def metadata(destination_table_id: int, db: AsyncSession = Depends(get_db)
 
 @router.get("/configs")
 async def list_configs(db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(select(ForecastConfig).order_by(ForecastConfig.updated_at.desc()))).scalars().all()
-    return [_out(r) for r in rows]
+    rows = (await db.execute(
+        select(ForecastConfig, DestinationTable.name)
+        .outerjoin(DestinationTable, DestinationTable.id == ForecastConfig.destination_table_id)
+        .order_by(ForecastConfig.updated_at.desc())
+    )).all()
+    return [{**_out(row), "table_name": table_name} for row, table_name in rows]
 
 @router.get("/configs/grid")
 async def list_configs_grid(

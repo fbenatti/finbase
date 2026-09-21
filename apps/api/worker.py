@@ -226,6 +226,19 @@ def _format_task_error(exc: Exception) -> str:
     return name
 
 
+def _failure_context(result: dict) -> dict:
+    """Return bounded diagnostic context from a failed task result."""
+    context = result.get("failure_context")
+    if not isinstance(context, dict):
+        return {}
+    return {
+        "exception_type": str(context.get("exception_type") or "UnknownError"),
+        "traceback": str(context.get("traceback") or "")[-12000:],
+        "phase": str(context.get("phase") or "")[:200],
+        "current_blob": str(context.get("current_blob") or "")[:500],
+    }
+
+
 def _is_etl_task_cancelled(task_id: int) -> bool:
     session = SyncSession()
     try:
@@ -271,14 +284,13 @@ def consumer_main(worker_id: int):
     def _maybe_recycle_reprocess_worker(*, failed: bool = False) -> None:
         nonlocal reprocess_tasks_since_restart
         reprocess_tasks_since_restart += 1
-        if failed or (reprocess_restart_after and reprocess_tasks_since_restart >= reprocess_restart_after):
+        if reprocess_restart_after and reprocess_tasks_since_restart >= reprocess_restart_after:
             print(
-                "Recycling worker after a failed reprocess"
-                if failed
-                else f"Recycling worker after {reprocess_tasks_since_restart} reprocess task(s) to release memory.",
+                f"Recycling worker after {reprocess_tasks_since_restart} reprocess task(s)"
+                + ("; the last task failed." if failed else " to release memory."),
                 flush=True,
             )
-            sys.exit(1 if failed else 0)
+            sys.exit(0)
 
     runtime_dir().mkdir(parents=True, exist_ok=True)
     write_pid(worker_id)
@@ -949,6 +961,13 @@ def consumer_main(worker_id: int):
                                     "rows_written": terminal_task.rows_destination,
                                     "error": "" if succeeded else str(result.get("error") or "Falha ao reprocessar"),
                                 }
+                                if not succeeded:
+                                    context = _failure_context(result)
+                                    terminal_task.errors = [
+                                        str(result.get("error") or "Falha ao reprocessar")[:2000]
+                                    ]
+                                    terminal_task.result_json["failure_context"] = context
+                                    terminal_task.result_json["failure_kind"] = "reprocess_error"
                                 # Opção "Materializar Dimon na sequência": quando o
                                 # reprocessamento pediu chain_dimons, só a ÚLTIMA
                                 # tarefa do grupo enfileira a Dimon (visão completa
@@ -1023,6 +1042,12 @@ def consumer_main(worker_id: int):
                                 t2.status = "FAILED"
                                 t2.phase = f"Erro: {e}"[:200]
                                 t2.current_blob = f"Erro: {e}"[:500]
+                                t2.errors = [str(e)[:2000]]
+                                t2.result_json = {
+                                    **(t2.result_json or {}),
+                                    "error": str(e),
+                                    "failure_kind": "worker_exception",
+                                }
                                 s2.commit()
                             try:
                                 from app.routers.etl import _append_reprocess_log

@@ -290,12 +290,12 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(delete(DimonRuleSource).where(DimonRuleSource.rule_id == rule_id))
     await db.delete(rule)
     await db.commit()
-    # Drop the physical Gold owned exclusively by this code.
+    # Drop the physical Dimon table owned exclusively by this rule.
     import asyncio
     from app.services import iceberg_service as iceberg
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: iceberg._force_delete_table(iceberg._table_id("gold", table), table),
+        lambda: iceberg._force_delete_table(iceberg._table_id(DIMON_NAMESPACE, table), table),
     )
 
 
@@ -308,6 +308,8 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
     if not table_name or "/" in table_name or "\\" in table_name:
         raise HTTPException(status_code=400, detail="Nome de tabela inválido")
     safe = table_name.strip().replace('"', "")
+    if not _DIMON_TABLE_RE.fullmatch(safe):
+        raise HTTPException(status_code=400, detail="Somente tabelas Dimon podem ser removidas")
 
     # Remove the rule (and its sources) that owns this table, if any.
     code_guess = safe
@@ -322,10 +324,10 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
         await db.commit()
         logger.info("delete_table: removed rule #%s for %s", rule.id, safe)
 
-    # Drop the physical Iceberg table.
+    # Drop only the physical Dimon table. Gold tables are managed by ETL.
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: iceberg._force_delete_table(iceberg._table_id("gold", safe), safe),
+        lambda: iceberg._force_delete_table(iceberg._table_id(DIMON_NAMESPACE, safe), safe),
     )
 
 
