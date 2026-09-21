@@ -137,20 +137,24 @@ def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: in
             cfg=cfg,
         )
         ids = []
+        # Gold publication is intentionally scoped to one source and one
+        # billing month per task.  Keeping all collected periods in a single
+        # child task makes the worker reject it after claiming it.
         for dest_id in selected:
-            child = EtlTask(
-                task_type="reprocess", status="QUEUED", destination_table_id=dest_id,
-                connection_ids=[connection_id], billing_periods=periods, rows_raw=0,
-                rows_normalized=0, rows_destination=0, errors=[],
-                phase=f"Agendado: reprocessar Gold após coleta (task {extraction_task_id})",
-                result_json={"schedule_id": schedule.id, "scheduled_pipeline": True,
-                             "forecast_config_ids": cfg.get("forecast_config_ids", []),
-                             "accuracy": cfg.get("accuracy", False), "shared_cost": cfg.get("shared_cost", False),
-                             "dimon_rule_ids": cfg.get("dimon_rule_ids", [])},
-            )
-            session.add(child)
-            session.flush()
-            ids.append(child.id)
+            for period in periods:
+                child = EtlTask(
+                    task_type="reprocess", status="QUEUED", destination_table_id=dest_id,
+                    connection_ids=[connection_id], billing_periods=[period], rows_raw=0,
+                    rows_normalized=0, rows_destination=0, errors=[],
+                    phase=f"Agendado: reprocessar Gold {period} após coleta (task {extraction_task_id})",
+                    result_json={"schedule_id": schedule.id, "scheduled_pipeline": True,
+                                 "forecast_config_ids": cfg.get("forecast_config_ids", []),
+                                 "accuracy": cfg.get("accuracy", False), "shared_cost": cfg.get("shared_cost", False),
+                                 "dimon_rule_ids": cfg.get("dimon_rule_ids", [])},
+                )
+                session.add(child)
+                session.flush()
+                ids.append(child.id)
         session.commit()
         return ids
     finally:
