@@ -23,3 +23,15 @@ def test_any_worker_healthy_with_fresh_heartbeat(tmp_path, monkeypatch):
     payload = aggregate_worker_health(max_age=15.0)
     assert payload["status"] == "ok"
     assert payload["concurrency"] == 1
+
+
+def test_fresh_heartbeat_does_not_require_api_namespace_pid(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENFINOPS_WORKER_RUNTIME_DIR", str(tmp_path))
+    (tmp_path / "worker-0.heartbeat").touch()
+    (tmp_path / "worker-0.pid").write_text("987654321")
+
+    payload = aggregate_worker_health(max_age=15.0)
+
+    assert payload["status"] == "ok"
+    assert payload["workers"][0]["status"] == "ok"
+    assert payload["workers"][0]["worker_pid"] == 987654321

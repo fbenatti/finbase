@@ -45,16 +45,15 @@ def write_pid(worker_id: int) -> None:
 
 def _probe_worker_file(heartbeat_file: Path, pid_file: Path, *, max_age: float) -> dict:
     worker_id = heartbeat_file.stem.replace("worker-", "")
+    # The API and ETL worker normally run in separate containers.  Their PID
+    # namespaces are therefore different, so os.kill(pid, 0) from the API
+    # cannot validate a worker PID written by the worker.  The heartbeat file
+    # is the cross-container liveness signal; an old heartbeat is sufficient
+    # to classify the worker as stale.
     try:
         pid = int(pid_file.read_text().strip())
-        os.kill(pid, 0)
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        return {
-            "worker_id": worker_id,
-            "status": "offline",
-            "heartbeat_age_seconds": None,
-            "worker_pid": None,
-        }
+    except (FileNotFoundError, ValueError):
+        pid = None
     try:
         age = max(0.0, time.time() - heartbeat_file.stat().st_mtime)
         status = "ok" if age <= max_age else "stale"
