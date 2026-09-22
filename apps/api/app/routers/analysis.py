@@ -1988,9 +1988,9 @@ async def _expected_view_core(
         # only the small chargeback allocation. Historical Dimon snapshots
         # also contain both orders for the Azure/Diretoria levels.
         pairs = list(zip(scope_level_order, scope_path))
-        if body.director_view and len(scope_path) >= 5 and scope_path[1] in _CLOUD_BRANCHES:
+        if len(scope_path) >= 5 and scope_path[1] in _CLOUD_BRANCHES:
             pairs = [(level, name) for level, name in pairs if level != 2]
-            if "departamento_nivel_3" in columns and "departamento_nivel_4" in columns:
+            if body.director_view and "departamento_nivel_3" in columns and "departamento_nivel_4" in columns:
                 first = _quote_literal(scope_path[2])
                 second = _quote_literal(scope_path[3])
                 level3 = _quote_ident(columns["departamento_nivel_3"])
