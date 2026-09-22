@@ -17,6 +17,7 @@ from app.schemas.schemas import (
     ScheduledTaskCreate, ScheduledTaskUpdate, ScheduledTaskOut, SourceConnectionCreate,
 )
 from app.services.azure_extractor import AzureExtractor
+from app.services.cost_sources import mapping_rejection_reason
 from app.services.task_runner import get_task_status as _get_task_status, cancel_task, get_running_tasks
 import httpx
 from httpx import DigestAuth
@@ -2403,6 +2404,20 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         available_stmt = available_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
     available = {(int(connection_id), str(period)) for connection_id, period in (await db.execute(available_stmt)).all()
                  if connection_id is not None and period}
+    # Fonte operacional nunca publica no livro financeiro, mesmo que um mapping
+    # antigo ainda exista. O bloqueio na criação do mapping
+    # (routers/destinations.py) é a primeira linha de defesa; esta é a segunda.
+    rejected_pairs = {
+        (connection_id, period)
+        for connection_id, period in available
+        if mapping_rejection_reason(conn_by_id.get(connection_id), body.destination_table_id)
+    }
+    if rejected_pairs:
+        logger.warning(
+            "Reprocess do destino %s ignorou fontes operacionais não-custo: %s",
+            body.destination_table_id, sorted({cid for cid, _ in rejected_pairs}),
+        )
+        available -= rejected_pairs
     ordered_pairs = [
         (connection_id, period)
         for period in sorted({period for _, period in available})

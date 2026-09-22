@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from app.database import get_db
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
+from app.models.source_connection import SourceConnection
+from app.services.cost_sources import mapping_rejection_reason
 from app.schemas.schemas import (
     DestinationTableCreate, DestinationTableUpdate, DestinationTableOut,
     DestinationColumnCreate, DestinationColumnOut,
@@ -174,6 +176,15 @@ async def create_source_dest_mapping(
     data: SourceDestinationMappingCreate,
     db: AsyncSession = Depends(get_db),
 ):
+    # O FOCUS é o livro financeiro: fontes operacionais (Automation, Resource
+    # Graph, PTU) não podem alimentá-lo. Ver services/cost_sources.py.
+    connection = (await db.execute(
+        select(SourceConnection).where(SourceConnection.id == data.source_connection_id)
+    )).scalar_one_or_none()
+    rejection = mapping_rejection_reason(connection, data.destination_table_id)
+    if rejection:
+        raise HTTPException(status_code=422, detail=rejection)
+
     mapping = SourceDestinationMapping(**data.model_dump())
     db.add(mapping)
     await db.commit()
