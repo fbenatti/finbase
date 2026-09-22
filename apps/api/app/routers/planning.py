@@ -1056,6 +1056,11 @@ async def budget_accuracy_detail(
     candidates = [list(range(1, len(escaped_path) + 1))]
     if len(escaped_path) >= 3:
         candidates.append([1, 2, 4, 3, *range(5, len(escaped_path) + 2)])
+    if len(escaped_path) >= 5 and escaped_path[1] in {"Showback", "Chargeback"}:
+        candidates.extend([
+            [1, 3, 4, *range(5, len(escaped_path) + 2)],
+            [1, 4, 3, *range(5, len(escaped_path) + 2)],
+        ])
     scope_checks = []
     for order in candidates:
         scope_checks.append(" AND ".join(
