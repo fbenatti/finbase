@@ -2320,6 +2320,8 @@ async def get_tables():
     for layer in ("bronze", "silver", "gold", "dimon"):
         try:
             tables = list_tables(layer)
+            if layer in {"gold", "dimon"}:
+                tables = [name for name in tables if name.startswith("dest_dm_")]
             result[layer] = tables
         except Exception as e:
             result[layer] = [f"error: {e}"]
