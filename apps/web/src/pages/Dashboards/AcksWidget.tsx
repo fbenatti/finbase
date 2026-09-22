@@ -45,6 +45,18 @@ function severityColor(severity?: string): "info" | "warning" | "error" | "succe
   }
 }
 
+function splitByVariance(items: ForecastDesvioItem[]) {
+  const unique = new Map<string, ForecastDesvioItem>();
+  items.forEach(item => unique.set(item.path.join(" > "), item));
+  const ordered = [...unique.values()].sort((a, b) =>
+    Math.abs(Number(b.variance || 0)) - Math.abs(Number(a.variance || 0))
+  );
+  return {
+    positive: ordered.filter(item => Number(item.variance || 0) > 0).slice(0, 5),
+    negative: ordered.filter(item => Number(item.variance || 0) < 0).slice(0, 5),
+  };
+}
+
 // Ordem dos highlights: Crítico > Perigo > Informação > Sucesso; empate por data (mais recente primeiro).
 const SEVERITY_ORDER: Record<string, number> = {
   "crítico": 0, "critico": 0, "perigo": 1, "informação": 2, "informacao": 2, "sucesso": 3,
@@ -288,8 +300,9 @@ export default function AcksWidget({ department }: { department?: string }) {
         return getForecastAccuracyDesvios(run.run_id, month, department || undefined)
           .then(desvios => {
             if (cancelled) return;
-            setPositive(desvios.positive);
-            setNegative(desvios.negative);
+            const split = splitByVariance([...desvios.positive, ...desvios.negative]);
+            setPositive(split.positive);
+            setNegative(split.negative);
           })
           .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
       })
@@ -318,10 +331,10 @@ export default function AcksWidget({ department }: { department?: string }) {
     try {
       const desvios = await getForecastAccuracyDesvios(runId, month, department || undefined, direction, 0);
       if (direction === "positive") {
-        setPositive(desvios.positive);
+        setPositive(splitByVariance([...desvios.positive, ...desvios.negative]).positive);
         setPositiveExpanded(true);
       } else {
-        setNegative(desvios.negative);
+        setNegative(splitByVariance([...desvios.positive, ...desvios.negative]).negative);
         setNegativeExpanded(true);
       }
     } catch (e) {
@@ -333,10 +346,10 @@ export default function AcksWidget({ department }: { department?: string }) {
     try {
       const desvios = await getForecastAccuracyDesvios(runId, month, department || undefined, direction, 5);
       if (direction === "positive") {
-        setPositive(desvios.positive);
+        setPositive(splitByVariance([...desvios.positive, ...desvios.negative]).positive);
         setPositiveExpanded(false);
       } else {
-        setNegative(desvios.negative);
+        setNegative(splitByVariance([...desvios.positive, ...desvios.negative]).negative);
         setNegativeExpanded(false);
       }
     } catch (e) {
