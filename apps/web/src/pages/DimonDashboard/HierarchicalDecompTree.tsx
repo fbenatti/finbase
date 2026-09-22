@@ -146,9 +146,8 @@ export function buildDecompChain(visaoDiretoria: boolean): DecompChainItem[] {
     { field: "cloud_origem", label: "Cloud" },
     ...org,
     { field: "servicename", label: "Serviço" },
-    { field: "servicecategory", label: "Categoria" },
     { field: "servicesubcategory", label: "ServiceSubcategory" },
-    { field: "skumeter", label: "skumeter" },
+    { field: "skumeter", label: "Sub Serviço (SKU name)" },
     { field: "subaccountname", label: "Subconta" },
   ];
 }
@@ -169,9 +168,8 @@ export function buildExecutiveDecompChain(visaoDiretoria: boolean, scopedPathDep
   return [
     ...orgTail,
     { field: "servicename", label: "Serviço" },
-    { field: "servicecategory", label: "Categoria" },
     { field: "servicesubcategory", label: "ServiceSubcategory" },
-    { field: "skumeter", label: "skumeter" },
+    { field: "skumeter", label: "Sub Serviço (SKU name)" },
   ];
 }
 
@@ -249,10 +247,15 @@ export default function HierarchicalDecompTree({
       defs.forEach((d, i) => { m[d.id] = spineList[i]; });
 
       let skip = 0;
+      const selectedField = treePath[treePath.length - 1]?.field;
       if (treeStart < chain.length) {
         for (; skip < MAX_EMPTY_ORG_SKIP && treeStart + skip < chain.length; skip++) {
           const idx = treeStart + skip;
           const field = chain[idx].field;
+          // A seleção pode já ter sido gravada com o mesmo campo do próximo
+          // nível (por exemplo, duas entradas de Serviço). Não consulte esse
+          // campo novamente: o resultado precisa ser do ServiceSubcategory.
+          if (selectedField && field === selectedField) continue;
           const treeResult = await queryDimonTable({
             table,
             rows: [field, "_billing_period", "tipo"],
