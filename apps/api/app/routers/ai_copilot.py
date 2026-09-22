@@ -25,16 +25,17 @@ from app.services.ai_usage_dimon import (
     refresh_ai_usage_dimons,
 )
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai-copilot", tags=["ai-copilot"])
 
-CONS_TABLE = f"iceberg.gold.{AI_CONSUMPTION_TABLE}"
-LIC_TABLE = f"iceberg.gold.{AI_LICENSE_TABLE}"
-COPILOT_USAGE_DIMON = f"iceberg.gold.{COPILOT_USAGE_TABLE}"
-COPILOT_LICENSE_DIMON = f"iceberg.gold.{COPILOT_LICENSE_TABLE}"
-COPILOT_USER_PERIOD_DIMON = f"iceberg.gold.{COPILOT_USER_PERIOD_TABLE}"
+CONS_TABLE = f"iceberg.{DIMON_NAMESPACE}.{AI_CONSUMPTION_TABLE}"
+LIC_TABLE = f"iceberg.{DIMON_NAMESPACE}.{AI_LICENSE_TABLE}"
+COPILOT_USAGE_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_USAGE_TABLE}"
+COPILOT_LICENSE_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_LICENSE_TABLE}"
+COPILOT_USER_PERIOD_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_USER_PERIOD_TABLE}"
 # Custo de referência do Copilot: a Dimon pré-agregada (iceberg.dimon.dest_dm_cost_copilot_custo)
 # é gerada a partir de iceberg.gold.dest_modelo_focus (+ planning) filtrada por
 # ServiceName='GitHub'. Os dashboards consultam a Dimon em vez de varrer a Gold/raw.

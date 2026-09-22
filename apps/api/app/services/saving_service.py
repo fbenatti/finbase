@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.models.saving import SavingAction, SavingMeasurement
 from app.models.destination import DestinationTable
 from app.services.trino_service import execute_sync
+from app.services import lakehouse_layers as layers
 
 SAFE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 OPS = {"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS"}
@@ -42,7 +43,7 @@ def refresh_actions(session, today: date | None = None):
             while day <= min(today, end):
                 key = day.isoformat()
                 if key not in existing:
-                    sql = f"SELECT COALESCE(SUM(TRY_CAST({_ident(action.cost_column)} AS DOUBLE)), 0) AS cost FROM iceberg.gold.{dest.physical_name.replace('-', '_').replace('.', '_')} WHERE CAST({_ident(action.date_column)} AS DATE) = DATE '{key}' AND {_where(action)}"
+                    sql = f"SELECT COALESCE(SUM(TRY_CAST({_ident(action.cost_column)} AS DOUBLE)), 0) AS cost FROM iceberg.{layers.detail_layer()}.{dest.physical_name.replace('-', '_').replace('.', '_')} WHERE CAST({_ident(action.date_column)} AS DATE) = DATE '{key}' AND {_where(action)}"
                     cost = float((execute_sync(sql, timeout_s=90) or [{"cost": 0}])[0].get("cost") or 0)
                     baseline = float(action.baseline_monthly) / 30
                     projected = float(action.projected_monthly) / 30

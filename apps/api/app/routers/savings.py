@@ -9,6 +9,7 @@ from app.models.saving import SavingAction, SavingMeasurement
 from app.models.destination import DestinationTable
 from app.services.trino_service import execute as trino_execute
 from app.services.saving_service import refresh_actions
+from app.services import lakehouse_layers as layers
 
 router = APIRouter(prefix="/savings", tags=["savings"])
 class ActionIn(BaseModel):
@@ -18,7 +19,7 @@ def out(a): return {c.name:getattr(a,c.name) for c in a.__table__.columns}
 async def metadata(table_id:int, db:AsyncSession=Depends(get_db)):
  d=await db.get(DestinationTable,table_id)
  if not d: raise HTTPException(404,"Tabela não encontrada")
- rows=await trino_execute(f"DESCRIBE iceberg.gold.{d.physical_name.replace('-', '_').replace('.', '_')}")
+ rows=await trino_execute(f"DESCRIBE iceberg.{layers.detail_layer()}.{d.physical_name.replace('-', '_').replace('.', '_')}")
  return {"columns":[{"name":str(x.get('Column') or x.get('column_name')),"type":str(x.get('Type') or x.get('data_type') or '')} for x in rows]}
 @router.get("/actions")
 async def actions(db:AsyncSession=Depends(get_db)):

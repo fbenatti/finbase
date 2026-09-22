@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from app.models.ai_cost import AiCostLink
+from app.services import lakehouse_layers as layers
 from app.services.ai_cost_attribution import (
     FOCUS_TABLE, _connection_clause, _filter_clause, _quote_ident,
     load_focus_schema, link_applies,
@@ -55,7 +56,7 @@ def drop_link_gold_table(link_id: int) -> None:
     from app.services import iceberg_service as iceberg
     table = link_gold_table_name(link_id)
     try:
-        iceberg._force_delete_table(iceberg._table_id("gold", table), table)
+        iceberg._force_delete_table(iceberg._table_id(layers.detail_layer(), table), table)
     except Exception as exc:
         logger.warning("Could not remove relationship Gold %s: %s", table, exc)
 

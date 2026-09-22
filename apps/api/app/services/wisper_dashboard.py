@@ -14,14 +14,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 
 # Source of truth for Wisper financials: FOCUS gold filtered by SubAccountName
-FOCUS_TABLE = "iceberg.gold.dest_modelo_focus"
+FOCUS_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
 # Operational/inventory source
-OP_METRICS_TABLE = "iceberg.gold.dest_oci_operational_metrics"
+OP_METRICS_TABLE = f"iceberg.{layers.detail_layer()}.dest_oci_operational_metrics"
 # Legacy dimon table (kept only for current-month forecast comparison)
-DIMON_TABLE = "iceberg.gold.dest_dm_cost_custo_wisper"
+DIMON_TABLE = f"iceberg.{layers.detail_layer()}.dest_dm_cost_custo_wisper"
 
 WISPER_SUBACCOUNT_RE = "whisper|llm|poc-stt"
 

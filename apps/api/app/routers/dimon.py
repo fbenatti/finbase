@@ -295,7 +295,7 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     from app.services import iceberg_service as iceberg
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: iceberg._force_delete_table(iceberg._table_id("gold", table), table),
+        lambda: iceberg._force_delete_table(iceberg._table_id(DIMON_NAMESPACE, table), table),
     )
 
 
@@ -325,7 +325,7 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
     # Drop the physical Iceberg table.
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: iceberg._force_delete_table(iceberg._table_id("gold", safe), safe),
+        lambda: iceberg._force_delete_table(iceberg._table_id(DIMON_NAMESPACE, safe), safe),
     )
 
 
@@ -457,7 +457,7 @@ async def _dimon_schema(table: str) -> dict[str, str]:
     if not _DIMON_TABLE_RE.match(table):
         raise HTTPException(status_code=422, detail=f"Nome de tabela Dimon inválido: {table}")
     try:
-        rows = await execute(f"DESCRIBE iceberg.dimon.{table}", timeout_s=30)
+        rows = await execute(f"DESCRIBE iceberg.{DIMON_NAMESPACE}.{table}", timeout_s=30)
     except Exception as exc:  # noqa: BLE001
         _raise_dimon_query_error(table, exc)
     schema: dict[str, str] = {}
@@ -565,7 +565,7 @@ async def query_dimons(body: DimonQueryRequest):
     direction = "ASC" if str(body.sort_direction or "desc").lower() == "asc" else "DESC"
 
     sql = (
-        f"SELECT {', '.join(select_parts)} FROM iceberg.dimon.{body.table} "
+        f"SELECT {', '.join(select_parts)} FROM iceberg.{DIMON_NAMESPACE}.{body.table} "
         f"WHERE {where}"
     )
     if group_by:
@@ -587,7 +587,7 @@ async def dimon_info(table: str = "dest_dm_cost_visao_completa"):
     try:
         overview = await execute(
             f"SELECT COUNT(*) AS row_count, COUNT(DISTINCT {_quote_ident(schema['_billing_period'])}) AS period_count "
-            f"FROM iceberg.dimon.{table}",
+            f"FROM iceberg.{DIMON_NAMESPACE}.{table}",
             timeout_s=120,
         )
     except Exception as exc:  # noqa: BLE001
@@ -596,7 +596,7 @@ async def dimon_info(table: str = "dest_dm_cost_visao_completa"):
     try:
         periods_rows = await execute(
             f"SELECT DISTINCT {_quote_ident(schema['_billing_period'])} AS period "
-            f"FROM iceberg.dimon.{table} ORDER BY period DESC LIMIT 120",
+            f"FROM iceberg.{DIMON_NAMESPACE}.{table} ORDER BY period DESC LIMIT 120",
             timeout_s=60,
         )
     except Exception as exc:  # noqa: BLE001

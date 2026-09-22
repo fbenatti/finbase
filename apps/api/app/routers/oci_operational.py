@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models.source_connection import SourceConnection
 from app.services.oci_operational_monitoring import GOLD_TABLE, collect, discover_compartments
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 router = APIRouter(prefix="/oci-operational", tags=["oci-operational"])
 COLLECTION_STATUS: dict[int, dict] = {}
@@ -53,7 +54,7 @@ async def collection_status(connection_id: int):
 @router.get("/overview")
 async def overview(hours: int = 24 * 90):
     try:
-        rows = await trino_execute(f"SELECT timestamp, resource_type, resource_id, metric_name, metric_value, model_id, unit_shape, unit_count, lifecycle_state FROM iceberg.gold.{GOLD_TABLE} WHERE from_iso8601_timestamp(timestamp) >= current_timestamp - INTERVAL '{max(1, min(hours, 2160))}' HOUR ORDER BY timestamp")
+        rows = await trino_execute(f"SELECT timestamp, resource_type, resource_id, metric_name, metric_value, model_id, unit_shape, unit_count, lifecycle_state FROM iceberg.{layers.detail_layer()}.{GOLD_TABLE} WHERE from_iso8601_timestamp(timestamp) >= current_timestamp - INTERVAL '{max(1, min(hours, 2160))}' HOUR ORDER BY timestamp")
     except Exception as exc:
         raise HTTPException(503, f"Dados operacionais OCI indisponíveis: {exc}") from exc
     return {"table": GOLD_TABLE, "rows": rows}

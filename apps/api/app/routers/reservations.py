@@ -32,6 +32,7 @@ from app.services.azure_reservation_service import (
     run_reservation_collection, resolve_config, test_connection,
 )
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ CATALOG_TABLE = "azure_reservations_catalog"
 UTILIZATION_TABLE = "azure_benefit_utilization"
 ADVISOR_TABLE = "azure_advisor_recommendations"
 BENEFIT_REC_TABLE = "azure_benefit_recommendations"
-FOCUS_GOLD_TABLE = "iceberg.gold.dest_modelo_focus"
+FOCUS_DETAIL_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
 TRINO_TIMEOUT_S = 60.0
 
 _CATALOG_COLUMNS = [

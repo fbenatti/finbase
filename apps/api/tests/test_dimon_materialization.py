@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from app.services import lakehouse_layers as layers
 
 from app.services.dimon_materialization import (
     _desligue_validation_dates,
@@ -49,7 +50,7 @@ def test_merged_dimensions_honors_configured():
 
 
 @pytest.mark.asyncio
-async def test_preview_source_queries_gold(monkeypatch):
+async def test_preview_source_reads_the_detail_layer(monkeypatch):
     calls = []
 
     async def fake_execute(sql, **_kwargs):
@@ -65,7 +66,8 @@ async def test_preview_source_queries_gold(monkeypatch):
     )
     assert result["row_count"] == 10
     assert result["total_value"] == 123.45
-    assert "iceberg.gold.dest_modelo_focus" in calls[-1]
+    # A fonte do mart é o detalhe (Silver), resolvido em um único ponto.
+    assert f"iceberg.{layers.detail_layer()}.dest_modelo_focus" in calls[-1]
 
 
 def test_source_gold_tables_list_kept_in_order():

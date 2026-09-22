@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services import lakehouse_layers as layers
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ def realized_cutoff_source(
     policy: RealizedCutoffPolicy | None,
 ) -> str:
     del schema, policy
-    return f"iceberg.gold.{physical_name}"
+    return f"iceberg.{layers.detail_layer()}.{physical_name}"
 
 
 async def fetch_realized_cutoff_policy(

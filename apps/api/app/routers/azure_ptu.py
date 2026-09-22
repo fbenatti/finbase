@@ -58,6 +58,7 @@ from app.services.sinfonia_dashboard import load_sinfonia_dashboard
 from app.services.datamesh_dashboard import load_datamesh_dashboard
 from app.services.wisper_dashboard import load as load_wisper_dashboard
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 router = APIRouter(prefix="/visoes-consumo-ia", tags=["visoes-consumo-ia"])
 logger = logging.getLogger(__name__)

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.rules import Department
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,7 @@ async def _cost_coverage(period_filter: str, dept_sql: str, interactive: dict[st
           WHERE COALESCE(TRY_CAST("AllocatedCost" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE)) IS NOT NULL
             AND COALESCE(TRY_CAST("AllocatedCost" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0) > 0
         ) AS with_cost
-      FROM iceberg.gold.{CONS_TABLE}
+      FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
       WHERE {period_filter} AND {dept_sql} AND {prov_sql}
     ),
     lic AS (
@@ -223,7 +224,7 @@ async def _cost_coverage(period_filter: str, dept_sql: str, interactive: dict[st
         COUNT(*) FILTER (
           WHERE COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), 0) > 0
         ) AS with_cost
-      FROM iceberg.gold.{LIC_TABLE}
+      FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
       WHERE {period_filter} AND {dept_sql} AND {prov_sql}
         AND lower(COALESCE(CAST("LicenseStatus" AS VARCHAR), 'active')) NOT IN ('revoked', 'cancelled', 'suspended')
     )
@@ -259,7 +260,7 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
               SELECT
                 SUM({_cons_metric_expr(body.metric)}) AS total_usage,
                 COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) AS active_users
-              FROM iceberg.gold.{CONS_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
               WHERE {period_filter} AND {dept_sql} AND {prov_sql}
             ),
             lic AS (
@@ -268,23 +269,23 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
                 COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) FILTER (
                   WHERE lower(COALESCE(CAST("ActivityStatus" AS VARCHAR), '')) IN ('ativo', 'active')
                 ) AS healthy_licenses
-              FROM iceberg.gold.{LIC_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
               WHERE {period_filter} AND {dept_sql} AND {prov_sql}
                 AND lower(COALESCE(CAST("LicenseStatus" AS VARCHAR), 'active')) NOT IN ('revoked', 'cancelled')
             ),
             prev AS (
               SELECT SUM({_cons_metric_expr(body.metric)}) AS prev_usage
-              FROM iceberg.gold.{CONS_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
               WHERE "_billing_period" = CAST(
                 date_format(date_add('month', -1, date_parse(
-                  (SELECT MAX("_billing_period") FROM iceberg.gold.{CONS_TABLE} WHERE {dept_sql} AND {prov_sql}),
+                  (SELECT MAX("_billing_period") FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE} WHERE {dept_sql} AND {prov_sql}),
                   '%Y%m'
                 )), '%Y%m') AS VARCHAR)
                 AND {dept_sql} AND {prov_sql}
             ),
             waste AS (
               SELECT SUM({_lic_cost_expr()}) AS waste_cost
-              FROM iceberg.gold.{LIC_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
               WHERE {period_filter} AND {dept_sql} AND {prov_sql}
                 AND lower(COALESCE(CAST("ActivityStatus" AS VARCHAR), '')) IN (
                   'nunca_usou', 'inativo_30d', 'inativo_60d', 'inativo_90d'
@@ -323,7 +324,7 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
               CAST("_billing_period" AS VARCHAR) AS period,
               COALESCE(NULLIF(TRIM(CAST("Provider" AS VARCHAR)), ''), 'unknown') AS provider,
               SUM({metric_expr}) AS value
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
             WHERE {series_period_filter} AND {dept_sql} AND {prov_sql}
             GROUP BY 1, 2
             ORDER BY 1, 2
@@ -339,7 +340,7 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
               COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) FILTER (
                 WHERE lower(COALESCE(CAST("ActivityStatus" AS VARCHAR), '')) IN ('ativo', 'active')
               ) AS active_users
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
             GROUP BY 1
             ORDER BY licenses DESC
@@ -359,7 +360,7 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
               COUNT(DISTINCT NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '')) FILTER (
                 WHERE lower(COALESCE(CAST("ActivityStatus" AS VARCHAR), '')) IN ('ativo', 'active')
               ) AS healthy
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
             """
             funnel_rows = await _run_query(funnel_sql, interactive)
@@ -371,10 +372,10 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
               COALESCE(NULLIF(TRIM(CAST(l."Provider" AS VARCHAR)), ''), 'unknown') AS provider,
               COUNT(DISTINCT l."UserEmail") AS licenses,
               COALESCE(SUM(c.metric_value), 0) AS usage_value
-            FROM iceberg.gold.{LIC_TABLE} l
+            FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE} l
             LEFT JOIN (
               SELECT "UserEmail", "Provider", SUM({metric_expr}) AS metric_value
-              FROM iceberg.gold.{CONS_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
               WHERE {period_filter} AND {prov_sql}
               GROUP BY 1, 2
             ) c ON TRIM(CAST(l."UserEmail" AS VARCHAR)) = TRIM(CAST(c."UserEmail" AS VARCHAR))
@@ -451,7 +452,7 @@ async def ai_licenses(body: AILicensesRequest, request: Request, db: AsyncSessio
                   'nunca_usou', 'inativo_30d', 'inativo_60d', 'inativo_90d'
                 )
               ) AS reclaim_potential
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
             """
             summary_rows = await _run_query(summary_sql, interactive)
@@ -475,7 +476,7 @@ async def ai_licenses(body: AILicensesRequest, request: Request, db: AsyncSessio
               COALESCE(TRY_CAST("DaysSinceLastActivity" AS BIGINT), 0) AS days_since_activity,
               {_lic_cost_expr()} AS allocated_cost,
               "LastActivityAt" AS last_activity_at
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
               {reclaim_filter}
             ORDER BY allocated_cost DESC, days_since_activity DESC
@@ -534,7 +535,7 @@ async def ai_consumption(body: AIConsumptionRequest, request: Request, db: Async
                 COALESCE(NULLIF(TRIM(CAST("Provider" AS VARCHAR)), ''), 'unknown') AS provider,
                 SUM({metric_expr}) AS metric_value,
                 SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens
-              FROM iceberg.gold.{CONS_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
               WHERE {period_filter} AND {dept_sql} AND {prov_sql}
               GROUP BY 1, 2
             ),
@@ -561,7 +562,7 @@ async def ai_consumption(body: AIConsumptionRequest, request: Request, db: Async
             SELECT
               COALESCE(NULLIF(TRIM(CAST("Provider" AS VARCHAR)), ''), 'unknown') AS provider,
               SUM({metric_expr}) AS value
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
             GROUP BY 1
             ORDER BY value DESC
@@ -594,7 +595,7 @@ async def ai_consumption(body: AIConsumptionRequest, request: Request, db: Async
               CAST("UsageDate" AS VARCHAR) AS usage_date,
               NULLIF(TRIM(CAST("UserEmail" AS VARCHAR)), '') AS user_email,
               SUM({metric_expr}) AS value
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
               AND "UsageDate" IS NOT NULL
             GROUP BY 1, 2
@@ -609,7 +610,7 @@ async def ai_consumption(body: AIConsumptionRequest, request: Request, db: Async
               COALESCE(NULLIF(TRIM(CAST("ModelName" AS VARCHAR)), ''), 'all') AS model_name,
               SUM(COALESCE(TRY_CAST("AllocatedCost" AS DOUBLE), TRY_CAST("realizado" AS DOUBLE), TRY_CAST("BilledCost" AS DOUBLE), 0)) AS cost,
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS tokens
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
             GROUP BY 1, 2
             HAVING SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) > 0
@@ -697,7 +698,7 @@ async def ai_user(body: AIUserRequest, request: Request, db: AsyncSession = Depe
               "LastActivityAt" AS last_activity_at,
               COALESCE(TRY_CAST("DaysSinceLastActivity" AS BIGINT), 0) AS days_since_activity,
               {_lic_cost_expr()} AS allocated_cost
-            FROM iceberg.gold.{LIC_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{LIC_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
               AND lower(TRIM(CAST("UserEmail" AS VARCHAR))) = {email_lit}
             """
@@ -711,7 +712,7 @@ async def ai_user(body: AIUserRequest, request: Request, db: AsyncSession = Depe
               SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)) AS total_tokens,
               SUM(COALESCE(TRY_CAST("BilledCost" AS DOUBLE), TRY_CAST("AllocatedCost" AS DOUBLE), 0)) AS cost,
               SUM({metric_expr}) AS metric_value
-            FROM iceberg.gold.{CONS_TABLE}
+            FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
             WHERE {period_filter} AND {dept_sql} AND {prov_sql}
               AND lower(TRIM(CAST("UserEmail" AS VARCHAR))) = {email_lit}
             GROUP BY 1, 2, 3
@@ -724,7 +725,7 @@ async def ai_user(body: AIUserRequest, request: Request, db: AsyncSession = Depe
               SELECT
                 lower(TRIM(CAST("UserEmail" AS VARCHAR))) AS user_email,
                 SUM({metric_expr}) AS metric_value
-              FROM iceberg.gold.{CONS_TABLE}
+              FROM iceberg.{DIMON_NAMESPACE}.{CONS_TABLE}
               WHERE {period_filter} AND {dept_sql}
               GROUP BY 1
             )

@@ -25,6 +25,7 @@ from app.services.cloud_scope import (
     resolve_connection_scope, rule_matches_cloud, rule_matches_connection,
     rule_matches_destination,
 )
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger("openfinops.azure_tag_policy")
 
@@ -283,7 +284,7 @@ class AzureTagPolicyService:
             rows = await trino_execute(f"""
                 WITH latest AS (
                     SELECT max(_billing_period) AS period
-                    FROM iceberg.gold.dest_modelo_focus
+                    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
                     WHERE cloud_origem = '{safe_code}'
                       AND CAST(source_connection_id AS bigint) = {int(conn.id)}
                 )
@@ -295,7 +296,7 @@ class AzureTagPolicyService:
                     trim(resourceid) AS resource_id,
                     {dynamic_fields + ',' if dynamic_fields else ''}
                     count(*) AS evidence_count
-                FROM iceberg.gold.dest_modelo_focus
+                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
                 WHERE cloud_origem = '{safe_code}'
                   AND CAST(source_connection_id AS bigint) = {int(conn.id)}
                   AND _billing_period = (SELECT period FROM latest)

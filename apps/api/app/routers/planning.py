@@ -20,6 +20,7 @@ from app.models.identity import User
 from app.models.planning import BudgetDefenseRequest, FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 
@@ -457,7 +458,7 @@ async def download_simulated_budget(
         raise HTTPException(404, "Tabela Gold de realizado não encontrada")
     safe_table = destination.physical_name.replace("-", "_").replace(".", "_")
     try:
-        schema_rows = await trino_execute(f"DESCRIBE iceberg.gold.{safe_table}", timeout_s=30)
+        schema_rows = await trino_execute(f"DESCRIBE iceberg.{layers.detail_layer()}.{safe_table}", timeout_s=30)
         columns = {str(row.get("Column") or row.get("column_name") or "").lower(): str(row.get("Column") or row.get("column_name") or "") for row in schema_rows}
         if "_billing_period" not in columns or "realizado" not in columns:
             raise HTTPException(422, "A tabela Gold selecionada não possui _billing_period e realizado")
@@ -472,7 +473,7 @@ async def download_simulated_budget(
         source_rows = await trino_execute(f"""
             SELECT {', '.join(level_select)}{detail_select},
               SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS value
-            FROM iceberg.gold.{safe_table}
+            FROM iceberg.{layers.detail_layer()}.{safe_table}
             WHERE CAST(_billing_period AS VARCHAR) = '{base_period}'
               {type_filter}
               {cloud_filter}

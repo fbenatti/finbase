@@ -1,7 +1,8 @@
 from app.routers.forecast import _daily_gold_actual_context
+from app.services import lakehouse_layers as layers
 
 
-def test_daily_drilldown_uses_original_gold_date_not_monthly_dimon():
+def test_daily_drilldown_uses_original_detail_date_not_monthly_mart():
     source, date_expr, measure, type_column, type_filter = _daily_gold_actual_context({
         "destination_physical_name": "dest_modelo_focus",
         "date_column": "chargeperiodstart",
@@ -10,7 +11,7 @@ def test_daily_drilldown_uses_original_gold_date_not_monthly_dimon():
         "type_column": "tipo",
     })
 
-    assert source == "iceberg.gold.dest_modelo_focus"
+    assert source == f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
     assert '"chargeperiodstart"' in date_expr
     assert measure == "realizado"
     assert type_column == "tipo"

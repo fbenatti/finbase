@@ -12,8 +12,9 @@ from datetime import datetime
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
-DIMON_TABLE = "iceberg.gold.dest_dm_cost_projeto_sinfonia"
+DIMON_TABLE = f"iceberg.{DIMON_NAMESPACE}.dest_dm_cost_projeto_sinfonia"
 
 _PROJECTS = {
     "sinfonia - watson": ("IBM", "Sinfonia IBM", "Watson"),

@@ -24,13 +24,14 @@ from pydantic import BaseModel, Field
 
 from app.services.ai_usage_dimon import AI_CONSUMPTION_TABLE, AI_LICENSE_TABLE, refresh_ai_usage_dimons
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/visoes-consumo-ia/provider", tags=["visoes-consumo-ia"])
 
-LIC_TABLE = f"iceberg.gold.{AI_LICENSE_TABLE}"
-CONS_TABLE = f"iceberg.gold.{AI_CONSUMPTION_TABLE}"
+LIC_TABLE = f"iceberg.{DIMON_NAMESPACE}.{AI_LICENSE_TABLE}"
+CONS_TABLE = f"iceberg.{DIMON_NAMESPACE}.{AI_CONSUMPTION_TABLE}"
 
 _PROVIDERS: dict[str, dict[str, str]] = {
     "anthropic": {

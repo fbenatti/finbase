@@ -26,6 +26,7 @@ from app.models.destination import DestinationTable, DestinationColumn, SourceDe
 from app.models.source_connection import SourceConnection
 from app.models.orphan_annotation import OrphanAnnotation
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/azure-resource-graph", tags=["azure-resource-graph"])
@@ -134,7 +135,7 @@ WITH orphan_ids AS (
     SELECT resourceid, "_billing_period", billedcost, effectivecost, realizado
     FROM (
         SELECT *, MIN(resourceid) OVER (PARTITION BY lower(resourceid), "_billing_period") AS canonical
-        FROM iceberg.gold.dest_modelo_focus
+        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
         WHERE lower(resourceid) IN (SELECT rid FROM orphan_ids)
     ) WHERE resourceid = canonical
 )
@@ -564,7 +565,7 @@ async def orphan_savings(
                LEAD(snapshot_date) OVER (ORDER BY snapshot_date) AS next_snapshot
         FROM (
           SELECT DISTINCT snapshot_date
-          FROM iceberg.gold.{ORPHAN_DEST_PHYSICAL}
+          FROM iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL}
         )
       ), presence_ranked AS (
         SELECT o.*,
@@ -572,7 +573,7 @@ async def orphan_savings(
                  PARTITION BY lower(o.resource_id), o.orphan_rule, o.snapshot_date
                  ORDER BY o.source_connection_id
                ) AS rn
-        FROM iceberg.gold.{ORPHAN_DEST_PHYSICAL} o
+        FROM iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL} o
         {presence_filter}
       ), presence AS (
         SELECT * FROM presence_ranked WHERE rn = 1
@@ -611,7 +612,7 @@ async def orphan_savings(
     try:
         rows = await trino_execute(sql, timeout_s=180)
         latest_rows = await trino_execute(
-            f"SELECT MAX(snapshot_date) AS snapshot_date FROM iceberg.gold.{ORPHAN_DEST_PHYSICAL}"
+            f"SELECT MAX(snapshot_date) AS snapshot_date FROM iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL}"
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Saving de órfãos indisponível: %s", exc)

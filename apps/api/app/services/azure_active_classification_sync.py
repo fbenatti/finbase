@@ -24,6 +24,7 @@ from app.models.rules import ClassificationRule, Department
 from app.models.source_connection import SourceConnection
 from app.services.classification_engine import normalize_rule_conditions
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 
 AZURE_CLOUDS = frozenset({"Azure-4P", "Azure-TI"})
@@ -105,7 +106,7 @@ def _candidates(project_rows: list[dict[str, str]]) -> list[Candidate]:
 
 async def _active_pairs() -> tuple[list[str], list[dict[str, Any]]]:
     periods = await trino_execute(
-        "SELECT DISTINCT _billing_period FROM iceberg.gold.dest_modelo_focus "
+        f"SELECT DISTINCT _billing_period FROM iceberg.{layers.detail_layer()}.dest_modelo_focus "
         "WHERE _billing_period IS NOT NULL ORDER BY _billing_period DESC LIMIT 3",
         timeout_s=120,
     )
@@ -121,7 +122,7 @@ async def _active_pairs() -> tuple[list[str], list[dict[str, Any]]]:
                    "SubAccountId" AS subscription_id,
                    source_resource_group_name,
                    SUM(COALESCE("BilledCost", 0)) AS billed_cost
-            FROM iceberg.gold.dest_modelo_focus
+            FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
             WHERE _billing_period IN ({period_list})
               AND lower(cloud_origem) IN ('azure-4p', 'azure-ti')
               AND source_resource_group_name IS NOT NULL

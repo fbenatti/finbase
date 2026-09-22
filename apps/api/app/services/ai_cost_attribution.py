@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+from app.services import lakehouse_layers as layers
 
 from app.models.ai_cost import (
     AiCostAllocation,
