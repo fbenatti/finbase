@@ -432,16 +432,50 @@ CPU baixa com RAM insuficiente deve vetar; preço de destino ausente deve dar
 
 ## 7. Pendências e próxima ação
 
-1. **Divergência de versão do plano** entre a instrução recebida e `planDataCollector.md`
-   (camadas, Dimon e numeração dos pacotes). Assumido o arquivo em disco; confirmar.
-2. **D8 bloqueia P2**: o export Cost Management 4P precisa ser verificado no tenant antes de
-   qualquer análise de VM 4P.
-3. **D12 bloqueia P1**: implementar a resolução real de `credential_profile` antes de criar
-   conexões-filhas.
-4. **D1–D5 definem o escopo de P1**: é uma migração grande (~140 referências, ~31 arquivos,
-   101 arquivos com o nome `dimon`), com bugs de perda de dado já identificados.
-5. Próximo passo imediato, se autorizado: **P1**, começando por `merge_planning_rateio`
-   (perda de dado ativa) e pelo caminho de leitura de pivô/análise, que é o mais exposto.
+### 7.1 Decisões confirmadas pelo usuário
+
+- **Fonte de verdade:** `planDataCollector.md` no workspace, complementado por
+  este log. Arquitetura alvo: **Bronze → Silver detalhada → Gold de cubos**. A
+  camada Dimon será removida. Telemetria começa com **15 dias**, configurável e
+  expansível até 90. Instruções anteriores que contradigam o arquivo são
+  ignoradas.
+- **Ordem:** P1 antes de P2 e de qualquer coletor novo, em checkpoints
+  P1A → P1B → P1C → P1D e gate final de P1. P2 só começa após o fechamento de P1.
+
+### 7.2 Impacto dos achados do P0 sobre P2+
+
+| Achado | Impacto | Quando tratar |
+|---|---|---|
+| Export Cost Management 4P vazio desde abr/2026 (D8) | **Não bloqueia P1 nem P2.** Bloqueia **recomendação 4P a partir de P3** | P2 marca a fonte como `DEGRADED`/`STALE` quando coletas sucessivas retornam zero e impede recomendação com dado vencido |
+| Ambiente TI saudável | Pode ser usado para continuar a validação enquanto o 4P está degradado | P2 em diante |
+| Resolução de `credential_profile` (D12/D13/D15) | Fica em **P2**; deve **centralizar** todas as credenciais em `azure_identity` | Nenhuma fonte nova pode duplicar `client_secret` |
+| Variante de caixa do Resource ID (§3.3, ~116 mil IDs em 202608) | **Canonicalização case-insensitive é obrigatória em P3**, antes de qualquer join | P3 |
+
+### 7.3 Ações herdadas por checkpoint
+
+- **P1B** — remover Automation e Resource Graph dos mappings do destino FOCUS;
+  identificar fonte de custo por metadata/`source_key` (nunca prefixo `azure-`);
+  impedir nova associação operacional ao FOCUS; reprocessar os períodos
+  afetados; confirmar realizado inalterado e redução de linhas igual às
+  não-custo removidas.
+- **P1C** — tratar `silver.dest_modelo_focus` como baseline; corrigir todas as
+  leituras/escritas que ainda esperam detalhe em `iceberg.gold`; migrar os
+  **templates SQL persistidos** (`dimon_rule.sql_template`, ids 11/12/15/16) de
+  forma idempotente guardando o SQL anterior; centralizar a resolução de
+  namespace. **Recuperar a tabela de planejamento órfã** (§8.5 item 1).
+- **P1D** — materializar cubos finais na Gold lendo o detalhe da Silver (custo,
+  planning, Automation, órfãos, PTU, IA); atualizar worker/APIs/frontend;
+  validar contra os resultados legados; **só depois** remover namespace, models,
+  services, routers, endpoints `/dimon`, componentes de frontend e atualizar
+  README + `docs/ai`.
+
+### 7.4 Fila de trabalho imediata
+
+1. Aguardar o término do forecast em execução e reiniciar API + worker para
+   carregar o código de P1A (§8.7).
+2. Reconstruir o planejamento na camada de detalhe — item de P1C, mas
+   necessário antes de qualquer `shared_cost` rodar.
+3. P1B.
 
 ---
 
