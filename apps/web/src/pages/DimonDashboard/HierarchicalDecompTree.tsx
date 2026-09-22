@@ -206,6 +206,15 @@ export default function HierarchicalDecompTree({
   const treeStart = treePath.length;
   const effectiveTreeIndex = treeStart + emptyLevelSkip;
   const treePathKey = treePath.map(p => `${p.field}=${p.value}`).join("|");
+  // Um nível organizacional vazio pode fazer o índice efetivo apontar
+  // novamente para o campo já selecionado (ex.: Serviço → Serviço).
+  // Avance até o próximo campo distinto para manter a decomposição encadeada.
+  const lastSelectedField = treePath[treePath.length - 1]?.field;
+  const nextDistinctIndex = (() => {
+    let index = treeStart + emptyLevelSkip;
+    while (lastSelectedField && chain[index]?.field === lastSelectedField) index += 1;
+    return index;
+  })();
   const chainKey = chain.map(c => c.field).join(",");
   useEffect(() => {
     setEmptyLevelSkip(0);
@@ -290,13 +299,13 @@ export default function HierarchicalDecompTree({
     return out;
   }, [treePath, spineCosts, totalAll, chain]);
   const treeChildren = useMemo(() => {
-    if (effectiveTreeIndex >= chain.length) return [];
+    if (nextDistinctIndex >= chain.length) return [];
     const rows = rowsOf(results[`tree${treeStart}`]);
-    const field = chain[effectiveTreeIndex].field;
+    const field = chain[nextDistinctIndex].field;
     return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes), field);
-  }, [results, treeStart, effectiveTreeIndex, chain, filterRowTypes]);
-  const nextField = effectiveTreeIndex < chain.length ? chain[effectiveTreeIndex].field : null;
-  const nextLabel = effectiveTreeIndex < chain.length ? chain[effectiveTreeIndex].label : null;
+  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes]);
+  const nextField = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].field : null;
+  const nextLabel = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].label : null;
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
   const top3Share = nodeTotal ? (treeChildren.slice(0, 3).reduce((s, x) => s + Math.abs(x.cost), 0) / Math.abs(nodeTotal)) * 100 : 0;
   const shareTotal = totalAll ? (Math.abs(nodeTotal) / Math.abs(totalAll)) * 100 : 0;
