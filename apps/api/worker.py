@@ -1315,6 +1315,48 @@ def consumer_main(worker_id: int):
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
                                 continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_vm_inventory":
+                                # Identidade de VM/VMSS via Resource Graph: base do
+                                # custo por VM (a chave é o resource_id).
+                                from app.services.azure_vm_inventory_service import (
+                                    run_vm_inventory_collection,
+                                )
+                                try:
+                                    _vm_result = run_vm_inventory_collection(
+                                        _ptu_session,
+                                        _ptu_conn.id,
+                                        task_id=task_id,
+                                    )
+                                except Exception as _vm_exc:
+                                    import traceback as _tb_vm
+                                    _tb_vm.print_exc()
+                                    _t_vm_fail = _ptu_session.get(EtlTask, task_id)
+                                    if _t_vm_fail:
+                                        _t_vm_fail.status = "FAILED"
+                                        _t_vm_fail.phase = (
+                                            f"Inventário de VM falhou: {str(_vm_exc)[:400]}"
+                                        )
+                                        _t_vm_fail.errors = [str(_vm_exc)[:1000]]
+                                        _t_vm_fail.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_vm = _ptu_session.get(EtlTask, task_id)
+                                if _t_vm:
+                                    _t_vm.status = "COMPLETED"
+                                    _t_vm.phase = (
+                                        f"Inventário de VM: {_vm_result.get('rows_bronze', 0)} linha(s) "
+                                        f"em {_vm_result.get('bronze_table', '')}"
+                                    )
+                                    _t_vm.rows_raw = _vm_result.get("rows_bronze", 0)
+                                    _t_vm.billing_periods = [_vm_result.get("period")] if _vm_result.get("period") else []
+                                    _t_vm.result_json = _vm_result
+                                    _t_vm.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_resource_graph":
                                 # Azure Resource Graph é coletado via ARG (inventário
                                 # e regras de órfãos) e persistido na Bronze, seguindo

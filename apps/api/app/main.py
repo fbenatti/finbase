@@ -220,6 +220,19 @@ async def lifespan(app: FastAPI):
                SELECT seed.tag_key, seed.focus_field, TRUE
                FROM (VALUES ('projeto', 'departamento_nivel_5'), ('diretoria', 'departamento_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
                WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
+            """CREATE TABLE IF NOT EXISTS azure_connection_source (
+              id SERIAL PRIMARY KEY,
+              connection_id INTEGER NOT NULL REFERENCES source_connection(id) ON DELETE CASCADE,
+              source_key VARCHAR(60) NOT NULL,
+              enabled BOOLEAN NOT NULL DEFAULT FALSE,
+              window_days INTEGER,
+              metrics VARCHAR(2000),
+              subscription_ids VARCHAR(4000),
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now(),
+              CONSTRAINT uq_azure_conn_source UNIQUE (connection_id, source_key)
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_azure_connection_source_conn ON azure_connection_source (connection_id)",
             # Nomes de tabela históricos (`dimon_rule*`): são o registro das regras de
             # cubo Gold. Renomear exigiria migração; o conteúdo já vive na Gold.
             """CREATE TABLE IF NOT EXISTS dimon_rule (

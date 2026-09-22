@@ -19,6 +19,7 @@ Nada aqui expõe segredo: o estado devolvido é sanitizado.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.etl_task import EtlTask
 from app.models.ingested_blob import IngestedBlob
+from app.models.azure_connection_source import AzureConnectionSource
 from app.models.source_connection import SourceConnection
 from app.services.azure_source_registry import (
     AZURE_SOURCE_CATALOG,
@@ -36,7 +38,10 @@ from app.services.azure_source_registry import (
     catalog_entry,
     environment_slug,
     is_telemetry,
+    bronze_table_for,
+    shared_credential_key,
     sanitized_bronze,
+    source_code,
     source_key_for,
 )
 from app.services.cost_sources import is_cost_source
@@ -104,12 +109,25 @@ def _source_state(connection: SourceConnection, *, last_blob, running: int) -> s
     return STATE_PARTIAL
 
 
-def _source_payload(connection: SourceConnection, entry: dict | None, *, last_blob, running: int) -> dict:
+def _source_payload(
+    connection: SourceConnection,
+    selection,
+    entry: dict | None,
+    *,
+    last_blob,
+    running: int,
+) -> dict:
+    """Uma **fonte selecionada** de uma conexão.
+
+    A conexão é o ambiente/credencial; a `selection` é a fonte ligada nela. O
+    `code` da fonte é derivado (`source_code`) porque é ele que define a tabela
+    Bronze — uma conexão escreve várias.
+    """
     config = dict(connection.config_json or {})
-    key = source_key_for(connection)
+    key = selection.source_key
     return {
         "connection_id": connection.id,
-        "code": connection.code,
+        "code": source_code(connection.code, key),
         "name": connection.name,
         "source_key": key,
         "display_name": (entry or {}).get("display_name") or connection.name,
@@ -117,13 +135,17 @@ def _source_payload(connection: SourceConnection, entry: dict | None, *, last_bl
         "connector_type": connection.connector_type,
         "environment_slug": environment_slug(connection),
         "state": _source_state(connection, last_blob=last_blob, running=running),
-        "enabled": _enabled(connection),
+        "enabled": bool(selection.enabled),
         "is_cost_source": is_cost_source(connection),
-        "credential_profile": config.get("credential_profile"),
+        # A credencial é do ambiente: derivada do tenant/cliente, nunca digitada
+        # por fonte (era o que repetia o mesmo segredo em cada card).
+        "credential_profile": (
+            config.get("credential_profile") or shared_credential_key(connection)
+        ),
         "credential_configured": bool(
             config.get("client_secret") or config.get("credential_profile")
         ),
-        "bronze_table": f"bronze.{sanitized_bronze(connection)}",
+        "bronze_table": f"bronze.{bronze_table_for(connection.code, key)}",
         "silver_target": (entry or {}).get("silver_target"),
         "gold_target": (entry or {}).get("gold_target"),
         "api_reference": (entry or {}).get("api_reference"),
@@ -137,9 +159,9 @@ def _source_payload(connection: SourceConnection, entry: dict | None, *, last_bl
         "last_ingested_at": last_blob.ingested_at.isoformat() if last_blob and last_blob.ingested_at else None,
         "last_billing_period": last_blob.billing_period if last_blob else None,
         "rows": last_blob.row_count if last_blob else None,
-        "window_days": config.get("window_days"),
-        "metrics": config.get("metrics"),
-        "subscription_count": len(config.get("subscription_ids") or []),
+        "window_days": selection.window_days if selection.window_days is not None else entry.get("default_window_days") if entry else None,
+        "metrics": [m for m in (selection.metrics or "").split(",") if m] or (entry or {}).get("default_metrics"),
+        "subscription_count": len([s for s in (selection.subscription_ids or "").split(",") if s.strip()]) or len(config.get("subscription_ids") or []),
         "running_tasks": running,
     }
 
@@ -188,6 +210,18 @@ async def list_azure_sources(
     )).scalars().all()
 
     connection_ids = [c.id for c in connections]
+
+    selections: list[AzureConnectionSource] = []
+    if connection_ids:
+        selections = (await db.execute(
+            select(AzureConnectionSource)
+            .where(AzureConnectionSource.connection_id.in_(connection_ids))
+            .order_by(AzureConnectionSource.connection_id, AzureConnectionSource.source_key)
+        )).scalars().all()
+    by_connection: dict[int, list[AzureConnectionSource]] = {}
+    for selection in selections:
+        by_connection.setdefault(selection.connection_id, []).append(selection)
+
     last_blobs: dict[int, IngestedBlob] = {}
     running: dict[int, int] = {}
     if connection_ids:
@@ -213,23 +247,39 @@ async def list_azure_sources(
     groups: dict[str, dict] = {}
     for connection in connections:
         slug = environment_slug(connection)
-        entry = catalog_entry(source_key_for(connection) or "")
-        payload = _source_payload(
-            connection, entry,
-            last_blob=last_blobs.get(connection.id),
-            running=running.get(connection.id, 0),
-        )
-        group = groups.setdefault(slug, {
-            "environment_slug": slug,
-            "credential_profiles": set(),
-            "cloud_names": set(),
-            "sources": [],
-        })
-        if payload["credential_profile"]:
-            group["credential_profiles"].add(payload["credential_profile"])
-        if connection.cloud_name:
-            group["cloud_names"].add(connection.cloud_name)
-        group["sources"].append(payload)
+        # Uma entrada por fonte ligada nesta conexão. Conexão sem seleção ainda
+        # aparece (com a fonte de custo implícita) para não sumir da tela antes
+        # de o operador escolher.
+        connection_selections = by_connection.get(connection.id) or []
+        if not connection_selections:
+            legacy_key = source_key_for(connection)
+            if not legacy_key:
+                continue
+            connection_selections = [
+                SimpleNamespace(source_key=legacy_key, enabled=True, window_days=None,
+                                metrics=None, subscription_ids=None)
+            ]
+        for selection in connection_selections:
+            entry = catalog_entry(selection.source_key or "")
+            if entry is None and selection.source_key != "cost_exports":
+                # Fonte fora do catálogo não é oferecida.
+                continue
+            payload = _source_payload(
+                connection, selection, entry,
+                last_blob=last_blobs.get(connection.id),
+                running=running.get(connection.id, 0),
+            )
+            group = groups.setdefault(slug, {
+                "environment_slug": slug,
+                "credential_profiles": set(),
+                "cloud_names": set(),
+                "sources": [],
+            })
+            if payload["credential_profile"]:
+                group["credential_profiles"].add(payload["credential_profile"])
+            if connection.cloud_name:
+                group["cloud_names"].add(connection.cloud_name)
+            group["sources"].append(payload)
 
     result = []
     for slug, group in sorted(groups.items()):
@@ -272,6 +322,13 @@ async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_d
             capability = {
                 "subscriptions": len(subs),
                 "resources": sum(int(s.get("resource_count") or 0) for s in subs),
+            }
+        elif connector == "azure_vm_inventory":
+            from app.services.azure_vm_inventory_service import discover_scope as discover_vms
+            subs = await discover_vms(config)
+            capability = {
+                "subscriptions": len(subs),
+                "vms": sum(int(s.get("vm_count") or 0) for s in subs),
             }
         elif connector == "azure_automation_jobs":
             from app.services.azure_automation_service import discover_accounts
@@ -418,6 +475,17 @@ async def collect_environment(
                 "code": connection.code,
                 "source_key": source_key,
                 "reason": "fonte planejada, ainda sem coletor",
+            })
+            continue
+        # Carga manual não tem coleta automática: o dado entra por upload.
+        # Sem esta guarda a carga full enfileiraria uma extração que não tem
+        # de onde ler.
+        if str(connection.connector_type) == "manual_csv":
+            skipped.append({
+                "connection_id": connection.id,
+                "code": connection.code,
+                "source_key": source_key,
+                "reason": "carga manual (upload de arquivo), sem coleta automática",
             })
             continue
 

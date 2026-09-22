@@ -93,6 +93,22 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "implementation_status": "implemented",
     },
     {
+        "source_key": "vm_inventory",
+        "display_name": "VM — identidade e inventário",
+        "description": "VMs e VMSS com assinatura, resource group, região, SKU, estado de energia, SO e tags. Chave do custo por VM.",
+        "position": 50,
+        "connector_type": "azure_vm_inventory",
+        "code_pattern": "azure-{env}-vm-inventory",
+        "bronze_pattern": "raw_azure_{env}_vm_inventory",
+        "silver_target": "silver.azure_vm_inventory",
+        "gold_target": None,
+        "is_cost_source": False,
+        "api_reference": "Resource Graph resources | where type =~ microsoft.compute/virtualmachines",
+        "required_permission": "Reader na subscription",
+        "azure_scope": "subscription",
+        "implementation_status": "implemented",
+    },
+    {
         "source_key": "compute_skus",
         "display_name": "Catálogo de SKUs de compute",
         "description": "SKUs disponíveis por região/subscription — elegibilidade de resize.",
@@ -244,6 +260,7 @@ CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
     "azure_resource_graph": "resource_graph",
     "azure_automation_jobs": "automation_jobs",
     "azure_monitor_vm_metrics": "monitor_vm_metrics",
+    "azure_vm_inventory": "vm_inventory",
     "azure_openai_ptu": "openai_ptu",
     "azure_compute_skus": "compute_skus",
     "azure_compute_quota": "compute_quota",
@@ -360,4 +377,47 @@ def accepted_code_pattern(entry: dict[str, Any], env: str) -> str:
 def sanitized_bronze(connection: Any) -> str:
     """Nome físico da tabela Bronze, como `iceberg_service._bronze_table_id`."""
     code = re.sub(r"[-.]", "_", str(getattr(connection, "code", "") or ""))
+    return f"raw_{code}"
+
+# Sufixo do `code` por fonte. O nome físico da Bronze é `raw_{code}`, então o
+# sufixo define a tabela: manter o histórico exige preservar os nomes já em uso
+# (raw_azure_4p, raw_azure_4p_monitor_vm, ...). Uma conexão só passa a escrever
+# várias tabelas por causa deste mapa — antes cada fonte era um `code` próprio.
+SOURCE_CODE_SUFFIX: dict[str, str] = {
+    "cost_exports": "",
+    "vm_inventory": "vm-inventory",
+    "monitor_vm_metrics": "monitor-vm",
+    "resource_graph": "resource-graph",
+    "automation_jobs": "automation",
+    "openai_ptu": "ptu",
+    "compute_skus": "compute-skus",
+    "compute_quota": "compute-quota",
+    "retail_price": "retail-price",
+    "customer_price": "customer-price",
+    "aks_inventory": "aks-inventory",
+    "aks_cost_allocation": "aks-cost-allocation",
+    "container_insights": "container-insights",
+    "region_policy": "region-policy",
+}
+
+
+def source_code(connection_code: str, source_key: str) -> str:
+    """`code` que a coleta de uma fonte usa.
+
+    É a identidade da Bronze daquela fonte: `raw_{source_code}`. Com uma conexão
+    coletando várias fontes, cada uma precisa do seu próprio nome para não
+    sobrescrever a tabela da outra. Para `cost_exports` o sufixo é vazio, então
+    o `code` continua sendo o da conexão e os nomes históricos não mudam.
+    """
+    suffix = SOURCE_CODE_SUFFIX.get(source_key)
+    if suffix is None:
+        suffix = re.sub(r"[^a-z0-9]+", "-", source_key.lower()).strip("-")
+    if not suffix:
+        return connection_code
+    return f"{connection_code}-{suffix}"
+
+
+def bronze_table_for(connection_code: str, source_key: str) -> str:
+    """Nome físico da tabela Bronze da fonte."""
+    code = re.sub(r"[-.]", "_", source_code(connection_code, source_key))
     return f"raw_{code}"
