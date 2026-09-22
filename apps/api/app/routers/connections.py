@@ -213,7 +213,10 @@ async def create_connection(data: SourceConnectionCreate, request: Request, db: 
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Code '{data.code}' already exists")
 
-    conn = SourceConnection(**data.model_dump())
+    connection_data = data.model_dump()
+    if connection_data.get("connector_type"):
+        connection_data["connector_type"] = connection_data["connector_type"].strip().lower()
+    conn = SourceConnection(**connection_data)
     db.add(conn)
     await db.flush()
     audit_user = await resolve_user_from_request(request, db)

@@ -29,6 +29,7 @@ import {
   UploadFile,
 } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import * as XLSX from "xlsx";
 import {
   BudgetDefenseRequest,
   Department,
@@ -41,11 +42,13 @@ import {
   getPlanningVersions,
   getPlanningYears,
   importPlanningExcel,
+  getPlanningMissingDepartments,
   PlanningEventType,
   PlanningPublication,
   PlanningRow,
   PlanningScope,
   PlanningVersion,
+  PlanningMissingDepartment,
   publishDefenseToBudget,
   restorePlanningVersion,
   savePlanningGrid,
@@ -171,6 +174,10 @@ export default function Planning({
     [publishAction, setPublishAction] = useState<PublishAction>(null),
     [importFile, setImportFile] = useState<File | null>(null),
     [restoreId, setRestoreId] = useState<number | null>(null);
+  const [missingDepartments, setMissingDepartments] = useState<PlanningMissingDepartment[]>([]);
+  const [selectedMissing, setSelectedMissing] = useState<string[][]>([]);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportYear, setExportYear] = useState(currentYear);
   const [publication, setPublication] = useState<PlanningPublication>({
     title: "",
     description: "",
@@ -461,6 +468,7 @@ export default function Planning({
           importFile,
           scopedPublication,
           defenseRequest?.id,
+          selectedMissing.length ? selectedMissing : undefined,
         );
       else if (publishAction === "save")
         await savePlanningGrid(
@@ -487,7 +495,11 @@ export default function Planning({
       if (isDefense) setDefenseRefreshKey((key) => key + 1);
       await load();
     } catch (e) {
-      setError(String(e));
+      const missing = getPlanningMissingDepartments(e);
+      if (missing.length) {
+        setMissingDepartments(missing);
+        setSelectedMissing(missing.map((item) => item.path));
+      } else setError(String(e));
     } finally {
       setSaving(false);
     }
@@ -607,6 +619,20 @@ export default function Planning({
       return setError("Informe um ano positivo válido.");
     setYear(value);
     setAddYearOpen(false);
+  };
+  const exportBudget = () => {
+    const headers = ["Nivel 1", "Nivel 2", "Nivel 3", "Nivel 4", "Nivel 5", "Nivel 6", "Nivel 7", ...MONTHS];
+    const sheet = XLSX.utils.aoa_to_sheet([
+      headers,
+      ...rows.map((row) => [
+        ...row.department_levels,
+        ...Array(7 - row.department_levels.length).fill(""),
+        ...row.values,
+      ]),
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Orçamento");
+    XLSX.writeFile(workbook, `orcamento-${type}-${year}.xlsx`);
   };
   return (
     <Box
@@ -756,6 +782,16 @@ export default function Planning({
                 onClick={() => fileInput.current?.click()}
               >
                 Importar
+              </Button>
+              <Button
+                startIcon={<CloudDownload />}
+                disabled={!gridReady || loading}
+                onClick={() => {
+                  setExportYear(year);
+                  setExportOpen(true);
+                }}
+              >
+                Exportar orçamento
               </Button>
               <Button
                 variant="contained"
@@ -1058,6 +1094,40 @@ export default function Planning({
           </Button>
         </DialogActions>
       </Dialog>
+      <Dialog open={exportOpen} onClose={() => setExportOpen(false)}>
+        <DialogTitle>Exportar orçamento</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth sx={{ mt: 1 }}>
+            <InputLabel>Ano</InputLabel>
+            <Select
+              label="Ano"
+              value={String(exportYear)}
+              onChange={(event) => setExportYear(Number(event.target.value))}
+            >
+              {years.map((value) => (
+                <MenuItem key={value} value={String(value)}>{value}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExportOpen(false)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setExportOpen(false);
+              if (exportYear === year) {
+                exportBudget();
+              } else {
+                setYear(exportYear);
+                setMessage(`Ano ${exportYear} carregado. Abra Exportar orçamento novamente para baixar os dados.`);
+              }
+            }}
+          >
+            Exportar
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Dialog open={addYearOpen} onClose={() => setAddYearOpen(false)}>
         <DialogTitle>Adicionar ano</DialogTitle>
         <DialogContent>
@@ -1143,6 +1213,39 @@ export default function Planning({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPublishAction(null)}>Cancelar</Button>
+      <Dialog open={missingDepartments.length > 0} maxWidth="md" fullWidth>
+        <DialogTitle>Departamentos ausentes no organograma</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Selecione os caminhos que devem ser criados antes da carga. Os caminhos desmarcados não serão importados.
+          </Typography>
+          <Stack gap={1}>
+            {missingDepartments.map((item) => {
+              const key = item.path.join(" > ");
+              const checked = selectedMissing.some((path) => path.join(" > ") === key);
+              return (
+                <Box key={key} sx={{ display: "flex", gap: 1, alignItems: "flex-start", p: 1, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => setSelectedMissing((current) => checked ? current.filter((path) => path.join(" > ") !== key) : [...current, item.path])}
+                  />
+                  <Box>
+                    <Typography variant="body2" fontWeight={700}>{item.path.join(" > ")}</Typography>
+                    <Typography variant="caption" color="text.secondary">Linhas: {item.lines.join(", ")}</Typography>
+                  </Box>
+                </Box>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setMissingDepartments([]); setSelectedMissing([]); }}>Cancelar</Button>
+          <Button variant="contained" disabled={saving} onClick={() => { setMissingDepartments([]); void publish(); }}>
+            Criar selecionados e continuar
+          </Button>
+        </DialogActions>
+      </Dialog>
           <Button
             variant="contained"
             disabled={saving}

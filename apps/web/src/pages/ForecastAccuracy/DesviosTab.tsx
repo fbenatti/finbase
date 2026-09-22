@@ -79,7 +79,9 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
               {open ? <Remove fontSize="small" /> : <Add fontSize="small" />}
             </IconButton>
             <Typography variant="body2" fontWeight={600}>{item.name}</Typography>
-            <Chip size="small" variant="outlined" label={item.path.join(" > ")} sx={{ maxWidth: 260 }} />
+            <Tooltip title={item.path.join(" > ")}>
+              <Chip size="small" variant="outlined" label={item.path.join(" > ")} sx={{ maxWidth: 260 }} />
+            </Tooltip>
             {ack && <Chip size="small" color="info" label={`✓ Ack: ${ack.category}`} />}
           </Stack>
           {ack && (

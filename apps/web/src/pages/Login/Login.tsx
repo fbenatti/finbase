@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box, Button, Card, CardContent, TextField, Typography, Alert, CircularProgress, Divider,
@@ -12,12 +12,11 @@ interface LoginConfig { allow_local_login: boolean }
 export default function Login() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [providers, setProviders] = useState<SsoPublicProvider[]>([]);
-  const [ssoIdentifier, setSsoIdentifier] = useState("");
   const [config, setConfig] = useState<LoginConfig>({ allow_local_login: true });
   const params = new URLSearchParams(window.location.search);
   const breakGlass = params.get("local") === "1";
@@ -29,12 +28,34 @@ export default function Login() {
     api.get("/auth/login-config").then((r) => setConfig(r.data)).catch(() => {});
   }, [user, navigate]);
 
+  // Usuários locais nunca têm "@" no username; contas corporativas (OIDC) são
+  // sempre um e-mail. Isso basta para decidir o fluxo sem uma segunda tela.
+  const isCorporate = identifier.includes("@");
+  const oidcProvider = useMemo(() => providers.find((p) => p.protocol === "oidc"), [providers]);
+  const samlProviders = useMemo(() => providers.filter((p) => p.protocol === "saml"), [providers]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (isCorporate) {
+      if (!oidcProvider) {
+        setError("Login com conta corporativa não está disponível no momento.");
+        return;
+      }
+      const query = `?login_hint=${encodeURIComponent(identifier.trim())}`;
+      window.location.href = `/api/auth/sso/${encodeURIComponent(oidcProvider.name)}/login${query}`;
+      return;
+    }
+
+    if (!showLocal) {
+      setError("Login local desabilitado. Use seu e-mail corporativo.");
+      return;
+    }
+
     setBusy(true);
     try {
-      await login(username, password);
+      await login(identifier, password);
       navigate("/", { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
@@ -53,19 +74,12 @@ export default function Login() {
     }
   };
 
-  const ssoLogin = (provider: SsoPublicProvider) => {
+  const samlLogin = (provider: SsoPublicProvider) => {
     setError(null);
-    if (provider.protocol === "oidc" && !ssoIdentifier.trim()) {
-      setError("Informe seu usuário corporativo para continuar.");
-      return;
-    }
-    const query = provider.protocol === "oidc"
-      ? `?login_hint=${encodeURIComponent(ssoIdentifier.trim())}`
-      : "";
-    window.location.href = `/api/auth/sso/${encodeURIComponent(provider.name)}/login${query}`;
+    window.location.href = `/api/auth/sso/${encodeURIComponent(provider.name)}/login`;
   };
 
-  const oidcProviders = providers.filter((p) => p.protocol === "oidc");
+  const canSubmit = isCorporate ? Boolean(identifier.trim()) : Boolean(identifier && password);
 
   return (
     <Box
@@ -78,52 +92,47 @@ export default function Login() {
         <CardContent sx={{ p: 4 }}>
           <Typography variant="h5" gutterBottom>OpenFinops</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Entre com suas credenciais
+            Entre com seu usuário local ou e-mail corporativo
           </Typography>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-          {oidcProviders.length > 0 && (
-            <Box sx={{ mb: 1.5 }}>
-              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Conta corporativa</Typography>
-              <TextField
-                label="Usuário ou e-mail" fullWidth autoFocus
-                value={ssoIdentifier} onChange={(e) => setSsoIdentifier(e.target.value)}
-                autoComplete="username"
-                helperText="O domínio informado será substituído automaticamente pelo domínio corporativo."
-              />
-            </Box>
-          )}
-          {providers.map((p) => (
-            <Button
-              key={p.name} fullWidth variant="outlined" sx={{ mb: 1.5, py: 1.2 }}
-              onClick={() => ssoLogin(p)}
-            >
-              {p.protocol === "oidc" ? "Continuar com conta corporativa" : `Entrar com ${p.name}`}
-            </Button>
-          ))}
-          {providers.length > 0 && showLocal && <Divider sx={{ my: 2 }}>ou</Divider>}
-          {showLocal ? (
-            <form onSubmit={submit}>
-              <TextField
-                label="Usuário" fullWidth margin="normal" autoFocus
-                value={username} onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-              />
+          <form onSubmit={submit}>
+            <TextField
+              label="Usuário ou e-mail corporativo" fullWidth margin="normal" autoFocus
+              value={identifier} onChange={(e) => setIdentifier(e.target.value)}
+              autoComplete="username"
+              helperText={isCorporate ? "Você será redirecionado para o login corporativo." : undefined}
+            />
+            {!isCorporate && (
               <TextField
                 label="Senha" type="password" fullWidth margin="normal"
                 value={password} onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
               />
-              <Button
-                type="submit" variant="contained" fullWidth sx={{ mt: 3 }}
-                disabled={busy || !username || !password}
-              >
-                {busy ? <CircularProgress size={22} /> : "Entrar"}
-              </Button>
-            </form>
-          ) : (
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center" }}>
-              Login local desabilitado. {breakGlass ? "(modo break-glass)" : "Acesse com SSO corporativo."}
+            )}
+            <Button
+              type="submit" variant="contained" fullWidth sx={{ mt: 3 }}
+              disabled={busy || !canSubmit || (!isCorporate && !showLocal)}
+            >
+              {busy ? <CircularProgress size={22} /> : isCorporate ? "Continuar com conta corporativa" : "Entrar"}
+            </Button>
+          </form>
+          {!isCorporate && !showLocal && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center", mt: 1.5 }}>
+              Login local desabilitado. {breakGlass ? "(modo break-glass)" : "Acesse com seu e-mail corporativo."}
             </Typography>
+          )}
+          {samlProviders.length > 0 && (
+            <>
+              <Divider sx={{ my: 2 }}>ou</Divider>
+              {samlProviders.map((p) => (
+                <Button
+                  key={p.name} fullWidth variant="outlined" sx={{ mb: 1.5, py: 1.2 }}
+                  onClick={() => samlLogin(p)}
+                >
+                  {`Entrar com ${p.name}`}
+                </Button>
+              ))}
+            </>
           )}
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
 from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
         from app.models.dashboard import Dashboard, DashboardWidget  # noqa: F401
         from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun  # noqa: F401
         from app.models.planning import FinancialType, PlanningVersion, PlanningEntry, BudgetDefenseRequest  # noqa: F401
+        from app.models.budget_accuracy import BudgetAccuracyAck, BudgetAccuracyAckHistory  # noqa: F401
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
@@ -387,6 +388,23 @@ async def lifespan(app: FastAPI):
 
     async with async_session() as db:
         await seed(db)
+        # Reconcile ARG destinations for connections created before the
+        # automatic setup hook existed. The setup is idempotent and also
+        # repairs missing mappings for existing Azure TI/4P connections,
+        # including deployments that keep cost ingestion as azure_blob.
+        from app.models.source_connection import SourceConnection
+        from app.routers.azure_resource_graph import _setup_for_connection as setup_arg_connection
+        arg_connections = (await db.execute(
+          select(SourceConnection).where(
+            (SourceConnection.connector_type == "azure_resource_graph")
+            | (
+              (SourceConnection.connector_type == "azure_blob")
+              & SourceConnection.code.in_(("azure-4p", "azure-ti"))
+            )
+          )
+        )).scalars().all()
+        for arg_connection in arg_connections:
+            await setup_arg_connection(db, arg_connection)
         from app.seed_identity import seed_identity
         await seed_identity(db)
         from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules

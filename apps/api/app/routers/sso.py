@@ -65,7 +65,10 @@ async def public_providers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SsoProvider).where(SsoProvider.enabled == True).order_by(SsoProvider.name))  # noqa: E712
     providers = []
     for p in result.scalars().all():
-        cfg = decrypt_config(p.config_json)
+        # username_domain nunca é cifrado (só client_secret/x509 o são) — não há
+        # motivo para decifrar segredos aqui, e uma chave de cifra desatualizada
+        # não pode derrubar a listagem pública de provedores.
+        cfg = p.config_json or {}
         providers.append({
             "name": p.name,
             "protocol": p.protocol,
