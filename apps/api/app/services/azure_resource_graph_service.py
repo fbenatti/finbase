@@ -314,15 +314,16 @@ def _snapshot_period(snapshot_date: str) -> str:
     return snapshot_date[:7].replace("-", "")
 
 
-def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: str, blob_path: str) -> int:
+def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: str, blob_path: str, *, source_code: str | None = None) -> int:
     """Escreve um DataFrame na Bronze e registra o IngestedBlob (padrão automation)."""
     if df.empty:
         return 0
     from app.services import iceberg_service as iceberg
 
-    iceberg.delete_bronze_slice(connection.code, blob_path=blob_path, billing_period=period)
+    code = source_code or connection.code
+    iceberg.delete_bronze_slice(code, blob_path=blob_path, billing_period=period)
     rows = iceberg.write_bronze(
-        connection_code=connection.code,
+        connection_code=code,
         df=df,
         billing_period=period,
         blob_path=blob_path,
@@ -374,6 +375,7 @@ def run_resource_graph_collection(
     *,
     snapshot_date: str | None = None,
     task_id: int | None = None,
+    source_code: str | None = None,
 ) -> dict[str, Any]:
     """Coleta inventário + órfãos via ARG e persiste na Bronze (por período)."""
     from app.database import SyncSession as _Sync
@@ -403,7 +405,7 @@ def run_resource_graph_collection(
         inventory = frames.get("inventory")
         if inventory is not None:
             blob_path = f"arg/inventory/{snapshot_date}.csv"
-            n = _write_bronze_and_register(s, conn, inventory, period, blob_path)
+            n = _write_bronze_and_register(s, conn, inventory, period, blob_path, source_code=source_code)
             bronze_rows += n
             slices.append(blob_path)
 
@@ -414,7 +416,7 @@ def run_resource_graph_collection(
             if df is None:
                 continue
             blob_path = f"arg/orphans/{name}/{snapshot_date}.csv"
-            n = _write_bronze_and_register(s, conn, df, period, blob_path)
+            n = _write_bronze_and_register(s, conn, df, period, blob_path, source_code=source_code)
             bronze_rows += n
             orphan_counts[name] = n
             slices.append(blob_path)

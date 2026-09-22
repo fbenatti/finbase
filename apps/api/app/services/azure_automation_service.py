@@ -196,16 +196,17 @@ async def collect_schedules(client: httpx.AsyncClient, headers: dict[str, str], 
     return rows
 
 
-def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: str, blob_name: str) -> int:
+def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: str, blob_name: str, *, source_code: str | None = None) -> int:
     """Escreve um DataFrame na Bronze e registra o IngestedBlob."""
     if df.empty:
         return 0
     from app.services import iceberg_service as iceberg
 
     blob_path = f"automation/{blob_name}"
-    iceberg.delete_bronze_slice(connection.code, blob_path=blob_path, billing_period=period)
+    code = source_code or connection.code
+    iceberg.delete_bronze_slice(code, blob_path=blob_path, billing_period=period)
     rows = iceberg.write_bronze(
-        connection_code=connection.code,
+        connection_code=code,
         df=df,
         billing_period=period,
         blob_path=blob_path,
@@ -232,7 +233,7 @@ def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: st
     return rows
 
 
-def run_automation_collection(session, connection_id: int, *, backfill_days: int | None = None, task_id: int | None = None) -> dict[str, Any]:
+def run_automation_collection(session, connection_id: int, *, backfill_days: int | None = None, task_id: int | None = None, source_code: str | None = None) -> dict[str, Any]:
     """Coleta jobs e schedules de todas as Automation Accounts e persiste na Bronze."""
     from app.database import SyncSession as _Sync
     from app.models.source_connection import SourceConnection
@@ -284,7 +285,7 @@ def run_automation_collection(session, connection_id: int, *, backfill_days: int
         periods: list[str] = []
         for bp, rows in jobs_by_period.items():
             df = pd.DataFrame(rows)
-            n = _write_bronze_and_register(s, conn, df, bp, f"jobs/{bp}.csv")
+            n = _write_bronze_and_register(s, conn, df, bp, f"jobs/{bp}.csv", source_code=source_code)
             bronze_jobs += n
             periods.append(bp)
 
@@ -292,7 +293,7 @@ def run_automation_collection(session, connection_id: int, *, backfill_days: int
         if sched_all:
             bp = datetime.now(timezone.utc).strftime("%Y%m")
             df = pd.DataFrame(sched_all)
-            bronze_scheds = _write_bronze_and_register(s, conn, df, bp, f"schedules/{bp}.csv")
+            bronze_scheds = _write_bronze_and_register(s, conn, df, bp, f"schedules/{bp}.csv", source_code=source_code)
         else:
             bronze_scheds = 0
 
@@ -644,7 +645,7 @@ def run_automation_inventory_collection(
         # Persistir na Bronze como snapshot (usar YYYYMM para billing_period)
         bp = datetime.now(timezone.utc).strftime("%Y%m")
         df = pd.DataFrame(rows_all)
-        bronze_rows = _write_bronze_and_register(s, conn, df, bp, f"inventory/{bp}.csv")
+        bronze_rows = _write_bronze_and_register(s, conn, df, bp, f"inventory/{bp}.csv", source_code=source_code)
 
         s.commit()
 

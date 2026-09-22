@@ -5221,8 +5221,16 @@ export interface AzureEnvironmentGroup {
   sources: AzureSourceItem[];
 }
 
-export async function getAzureSources(environment?: string): Promise<{ environments: AzureEnvironmentGroup[]; total_environments: number }> {
-  const { data } = await api.get("/azure-sources/", { params: environment ? { environment } : {} });
+export async function getAzureSources(
+  environment?: string,
+  connectionId?: number,
+): Promise<{ environments: AzureEnvironmentGroup[]; total_environments: number }> {
+  const params: Record<string, string | number> = {};
+  if (environment) params.environment = environment;
+  // Cada conexão tem as suas próprias fontes: sem este filtro o painel de uma
+  // conexão listaria as fontes das outras.
+  if (connectionId != null) params.connection_id = connectionId;
+  const { data } = await api.get("/azure-sources/", { params });
   return data;
 }
 
@@ -5238,9 +5246,13 @@ export async function testAzureSource(connectionId: number): Promise<{
 
 export async function updateAzureSourceSelection(
   connectionId: number,
+  sourceKey: string,
   body: { enabled?: boolean; window_days?: number; metrics?: string[] | null; subscription_ids?: string[] | null },
 ): Promise<AzureSourceItem> {
-  const { data } = await api.put(`/azure-sources/${connectionId}/selection`, body);
+  const { data } = await api.put(
+    `/azure-sources/${connectionId}/sources/${encodeURIComponent(sourceKey)}/selection`,
+    body,
+  );
   return data;
 }
 

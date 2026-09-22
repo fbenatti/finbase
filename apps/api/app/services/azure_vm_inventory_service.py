@@ -166,16 +166,17 @@ async def collect_vm_inventory(config: dict[str, Any]) -> pd.DataFrame:
     return frame
 
 
-def _write_bronze(session, connection, frame: pd.DataFrame, period: str, blob_path: str) -> int:
+def _write_bronze(session, connection, frame: pd.DataFrame, period: str, blob_path: str, *, source_code: str | None = None) -> int:
     """Escreve o inventário na Bronze e registra o blob ingerido."""
     if frame.empty:
         return 0
     from app.models.ingested_blob import IngestedBlob
     from app.services import iceberg_service as iceberg
 
-    iceberg.delete_bronze_slice(connection.code, blob_path=blob_path, billing_period=period)
+    code = source_code or connection.code
+    iceberg.delete_bronze_slice(code, blob_path=blob_path, billing_period=period)
     rows = iceberg.write_bronze(
-        connection_code=connection.code,
+        connection_code=code,
         df=frame,
         billing_period=period,
         blob_path=blob_path,
@@ -232,6 +233,7 @@ def run_vm_inventory_collection(
     *,
     snapshot_date: str | None = None,
     task_id: int | None = None,
+    source_code: str | None = None,
 ) -> dict[str, Any]:
     """Coleta o inventário de VM e persiste na Bronze, ancorado no dia.
 
@@ -260,7 +262,7 @@ def run_vm_inventory_collection(
     if "snapshot_date" not in frame.columns:
         frame["snapshot_date"] = day
 
-    rows = _write_bronze(s, conn, frame, period, blob_path)
+    rows = _write_bronze(s, conn, frame, period, blob_path, source_code=source_code)
     conn.last_test_status = "OK"
     conn.last_tested_at = datetime.now(timezone.utc)
     s.commit()

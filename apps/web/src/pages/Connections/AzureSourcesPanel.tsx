@@ -162,7 +162,7 @@ function EnvironmentCard({
   const toggle = useCallback(async (source: AzureSourceItem, enabled: boolean) => {
     setBusyId(source.connection_id);
     try {
-      await updateAzureSourceSelection(source.connection_id, { enabled });
+      await updateAzureSourceSelection(source.connection_id, source.source_key ?? "", { enabled });
       onChanged();
     } catch (error) {
       setMessage({ severity: "error", text: error instanceof Error ? error.message : String(error) });
@@ -174,7 +174,7 @@ function EnvironmentCard({
   const changeWindow = useCallback(async (source: AzureSourceItem, days: number) => {
     setBusyId(source.connection_id);
     try {
-      await updateAzureSourceSelection(source.connection_id, { window_days: days });
+      await updateAzureSourceSelection(source.connection_id, source.source_key ?? "", { window_days: days });
       setMessage({ severity: "success", text: `Janela de ${source.display_name} ajustada para ${days} dias.` });
       onChanged();
     } catch (error) {
@@ -266,14 +266,14 @@ function EnvironmentCard({
   );
 }
 
-export default function AzureSourcesPanel({ environment }: { environment?: string }) {
+export default function AzureSourcesPanel({ environment, connectionId }: { environment?: string; connectionId?: number }) {
   const [groups, setGroups] = useState<AzureEnvironmentGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await getAzureSources(environment);
+      const data = await getAzureSources(environment, connectionId);
       setGroups(data.environments || []);
       setError(null);
     } catch (err) {
@@ -281,7 +281,7 @@ export default function AzureSourcesPanel({ environment }: { environment?: strin
     } finally {
       setLoading(false);
     }
-  }, [environment]);
+  }, [environment, connectionId]);
 
   useEffect(() => { void load(); }, [load]);
 

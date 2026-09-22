@@ -1361,10 +1361,13 @@ export default function Connections() {
               </>
             )}
 
-            {editing && form.cloud_scope === "azure" && (
+            {/* Fontes coletáveis só existem para conexão com coleta automática.
+                Carga manual (CSV) não tem o que ligar nem disparar, então o painel
+                não aparece — a entrada é por upload de arquivo. */}
+            {editing && form.cloud_scope === "azure" && form.connector_type !== "manual_csv" && (
               <>
                 <Divider sx={{ my: 1 }} />
-                <AzureSourcesPanel />
+                <AzureSourcesPanel connectionId={editing?.id} />
               </>
             )}
           </Box>

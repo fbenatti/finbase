@@ -536,6 +536,7 @@ def run_monitor_vm_collection(
     window_days: int | None = None,
     until: datetime | None = None,
     task_id: int | None = None,
+    source_code: str | None = None,
 ) -> dict[str, Any]:
     """Coleta completa de uma conexão e escrita na Bronze exclusiva.
 
@@ -605,6 +606,7 @@ def run_monitor_vm_collection(
         period = until_dt.strftime("%Y%m")
         written += _write_bronze_and_register(
             session, connection, group.reset_index(drop=True), period, blob_path,
+            source_code=source_code,
         )
         slices.append(blob_path)
         periods.add(period)
@@ -628,16 +630,17 @@ def run_monitor_vm_collection(
     }
 
 
-def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: str, blob_path: str) -> int:
+def _write_bronze_and_register(session, connection, df: pd.DataFrame, period: str, blob_path: str, *, source_code: str | None = None) -> int:
     """Escreve a fatia na Bronze e registra o `IngestedBlob` (padrão ARG)."""
     if df.empty:
         return 0
     from app.models.ingested_blob import IngestedBlob
     from app.services import iceberg_service as iceberg
 
-    iceberg.delete_bronze_slice(connection.code, blob_path=blob_path, billing_period=period)
+    code = source_code or connection.code
+    iceberg.delete_bronze_slice(code, blob_path=blob_path, billing_period=period)
     rows = iceberg.write_bronze(
-        connection_code=connection.code,
+        connection_code=code,
         df=df,
         billing_period=period,
         blob_path=blob_path,

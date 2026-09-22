@@ -1176,6 +1176,27 @@ def consumer_main(worker_id: int):
                     from app.models.source_connection import SourceConnection as _LogSourceConnection
                     source_row = session.get(_LogSourceConnection, conn_id) if conn_id else None
                     source_code = source_row.code if source_row else f"connection-{conn_id}"
+                    # Com uma conexão hospedando várias fontes, quem define a
+                    # Bronze e o coletor é a fonte da task — não o connector da
+                    # conexão, que descreve só o transporte principal dela.
+                    _task_source_key = str(
+                        (getattr(task, "result_json", None) or {}).get("source_key") or ""
+                    )
+                    _source_connector = ""
+                    if _task_source_key:
+                        try:
+                            from app.services.azure_source_registry import (
+                                AZURE_SOURCE_CATALOG as _AZ_CATALOG,
+                                source_code as _source_code_of,
+                            )
+                            source_code = _source_code_of(source_code, _task_source_key)
+                            _entry = next(
+                                (e for e in _AZ_CATALOG if e["source_key"] == _task_source_key),
+                                None,
+                            )
+                            _source_connector = (_entry or {}).get("connector_type") or ""
+                        except Exception:
+                            pass
 
                     print(
                         f"Picked up extraction task {task_id}:"
@@ -1221,6 +1242,15 @@ def consumer_main(worker_id: int):
                         try:
                             from app.models.source_connection import SourceConnection as _PtuConnection
                             _ptu_conn = _ptu_session.get(_PtuConnection, conn_id)
+                            if _ptu_conn is not None and _source_connector:
+                                class _SourceConn:
+                                    """Vista da conexão com o connector da fonte."""
+                                    def __init__(self, base, connector):
+                                        self._base = base
+                                        self.connector_type = connector
+                                    def __getattr__(self, name):
+                                        return getattr(self._base, name)
+                                _ptu_conn = _SourceConn(_ptu_conn, _source_connector)
                             if _ptu_conn and _ptu_conn.connector_type == "azure_automation_jobs":
                                 # Azure Automation é coletado via ARM (jobs e
                                 # schedules) e persistido na Bronze, seguindo o
@@ -1234,6 +1264,7 @@ def consumer_main(worker_id: int):
                                         _ptu_conn.id,
                                         backfill_days=_backfill,
                                         task_id=task_id,
+                                        source_code=source_code,
                                     )
                                 except Exception as _coll_exc:
                                     import traceback as _tb
@@ -1279,6 +1310,7 @@ def consumer_main(worker_id: int):
                                         _ptu_conn.id,
                                         window_days=_mon_days,
                                         task_id=task_id,
+                                        source_code=source_code,
                                     )
                                 except Exception as _mon_exc:
                                     import traceback as _tb_mon
@@ -1326,6 +1358,7 @@ def consumer_main(worker_id: int):
                                         _ptu_session,
                                         _ptu_conn.id,
                                         task_id=task_id,
+                                        source_code=source_code,
                                     )
                                 except Exception as _vm_exc:
                                     import traceback as _tb_vm
@@ -1367,6 +1400,7 @@ def consumer_main(worker_id: int):
                                         _ptu_session,
                                         _ptu_conn.id,
                                         task_id=task_id,
+                                        source_code=source_code,
                                     )
                                 except Exception as _arg_exc:
                                     import traceback as _tb_arg

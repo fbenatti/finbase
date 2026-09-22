@@ -88,13 +88,13 @@ def _enabled(connection: SourceConnection) -> bool:
     return True
 
 
-def _source_state(connection: SourceConnection, *, last_blob, running: int) -> str:
+def _source_state(connection: SourceConnection, *, enabled: bool, last_blob, running: int) -> str:
     """Estado da fonte a partir de dados que já existem.
 
     Não inventa saúde: usa o último teste, o último blob ingerido e se há coleta
     em andamento. Um erro de uma fonte não afeta as outras.
     """
-    if not _enabled(connection):
+    if not enabled:
         return STATE_NOT_CONFIGURED
     status = (connection.last_test_status or "").upper()
     if status in {"FAILED", "ERRO", "ERROR"}:
@@ -134,7 +134,9 @@ def _source_payload(
         "description": (entry or {}).get("description"),
         "connector_type": connection.connector_type,
         "environment_slug": environment_slug(connection),
-        "state": _source_state(connection, last_blob=last_blob, running=running),
+        "state": _source_state(
+            connection, enabled=bool(selection.enabled), last_blob=last_blob, running=running,
+        ),
         "enabled": bool(selection.enabled),
         "is_cost_source": is_cost_source(connection),
         # A credencial é do ambiente: derivada do tenant/cliente, nunca digitada
@@ -196,6 +198,10 @@ async def get_catalog():
 @router.get("/")
 async def list_azure_sources(
     environment: str | None = Query(None, description="Filtra por slug de ambiente (ex.: 4p)"),
+    connection_id: int | None = Query(
+        None,
+        description="Filtra por conexão: cada conexão tem as suas próprias fontes",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Catálogo agrupado por ambiente, com o estado real de cada fonte.
@@ -203,10 +209,13 @@ async def list_azure_sources(
     Um ambiente reúne todas as suas fontes sob **uma** credencial, que é o que
     evita configurar dezenas de cards com o mesmo segredo.
     """
+    connection_query = select(SourceConnection).where(SourceConnection.cloud_scope == "azure")
+    if connection_id is not None:
+        # Isola a conexão: editar a 4P não pode mostrar fontes da TI nem do
+        # Marketplace, mesmo que compartilhem o mesmo ambiente.
+        connection_query = connection_query.where(SourceConnection.id == connection_id)
     connections = (await db.execute(
-        select(SourceConnection)
-        .where(SourceConnection.cloud_scope == "azure")
-        .order_by(SourceConnection.code)
+        connection_query.order_by(SourceConnection.code)
     )).scalars().all()
 
     connection_ids = [c.id for c in connections]
@@ -247,26 +256,31 @@ async def list_azure_sources(
     groups: dict[str, dict] = {}
     for connection in connections:
         slug = environment_slug(connection)
-        # Uma entrada por fonte ligada nesta conexão. Conexão sem seleção ainda
-        # aparece (com a fonte de custo implícita) para não sumir da tela antes
-        # de o operador escolher.
+        # A tela mostra **todo o catálogo** para a conexão: o analista escolhe o
+        # que coletar. O que já foi ligado vem marcado; o resto vem desligado e
+        # pronto para ser ativado. Mostrar só o que já existe obrigaria a criar
+        # uma conexão nova para cada fonte adicional.
         connection_selections = by_connection.get(connection.id) or []
+        por_fonte = {sel.source_key: sel for sel in connection_selections}
         if not connection_selections:
             legacy_key = source_key_for(connection)
-            if not legacy_key:
-                continue
-            connection_selections = [
-                SimpleNamespace(source_key=legacy_key, enabled=True, window_days=None,
-                                metrics=None, subscription_ids=None)
-            ]
-        for selection in connection_selections:
-            entry = catalog_entry(selection.source_key or "")
-            if entry is None and selection.source_key != "cost_exports":
-                # Fonte fora do catálogo não é oferecida.
-                continue
+            if legacy_key:
+                # Conexões antigas: a fonte de custo segue ligada por padrão.
+                por_fonte[legacy_key] = SimpleNamespace(
+                    source_key=legacy_key, enabled=True, window_days=None,
+                    metrics=None, subscription_ids=None,
+                )
+
+        catalogadas = sorted(AZURE_SOURCE_CATALOG, key=lambda e: e.get("position", 500))
+        for entry in catalogadas:
+            key = entry["source_key"]
+            selection = por_fonte.get(key) or SimpleNamespace(
+                source_key=key, enabled=False, window_days=None,
+                metrics=None, subscription_ids=None,
+            )
             payload = _source_payload(
                 connection, selection, entry,
-                last_blob=last_blobs.get(connection.id),
+                last_blob=last_blobs.get(connection.id) if selection.enabled else None,
                 running=running.get(connection.id, 0),
             )
             group = groups.setdefault(slug, {
@@ -393,38 +407,59 @@ async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_d
     }
 
 
-@router.put("/{connection_id}/selection")
+@router.put("/{connection_id}/sources/{source_key}/selection")
 async def update_source_selection(
     connection_id: int,
+    source_key: str,
     body: SourceSelectionUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Liga/desliga a fonte e ajusta janela/métricas/subscriptions."""
+    """Liga/desliga **uma fonte** da conexão e ajusta janela/métricas/subs.
+
+    A seleção vive em `azure_connection_source`: a conexão é o ambiente e a
+    credencial, então ligar uma fonte não pode alterar o estado das outras.
+    """
     connection = await db.get(SourceConnection, connection_id)
     if connection is None:
         raise HTTPException(status_code=404, detail="Conexão não encontrada")
 
-    source_key = source_key_for(connection)
-    config = dict(connection.config_json or {})
+    entry = catalog_entry(source_key)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Fonte '{source_key}' não existe no catálogo")
+
+    selection = (await db.execute(
+        select(AzureConnectionSource).where(
+            AzureConnectionSource.connection_id == connection_id,
+            AzureConnectionSource.source_key == source_key,
+        )
+    )).scalar_one_or_none()
+    if selection is None:
+        selection = AzureConnectionSource(
+            connection_id=connection_id, source_key=source_key, enabled=False,
+        )
+        db.add(selection)
+        await db.flush()
+
     if body.enabled is not None:
-        config["collection_enabled"] = bool(body.enabled)
+        selection.enabled = bool(body.enabled)
     if is_telemetry(source_key):
         if body.window_days is not None:
-            config["window_days"] = int(body.window_days)
+            if not 1 <= int(body.window_days) <= 90:
+                raise HTTPException(status_code=422, detail="A janela deve estar entre 1 e 90 dias.")
+            selection.window_days = int(body.window_days)
         if body.metrics is not None:
-            config["metrics"] = list(body.metrics)
+            selection.metrics = ",".join(str(m) for m in body.metrics)
     elif body.window_days is not None:
         raise HTTPException(
             status_code=422,
             detail="Fonte não é de telemetria: janela em dias só se aplica a métricas.",
         )
     if body.subscription_ids is not None:
-        config["subscription_ids"] = list(body.subscription_ids)
+        selection.subscription_ids = ",".join(str(x) for x in body.subscription_ids)
 
-    connection.config_json = config
     await db.commit()
-    await db.refresh(connection)
-    return _source_payload(connection, catalog_entry(source_key or ""), last_blob=None, running=0)
+    await db.refresh(selection)
+    return _source_payload(connection, selection, entry, last_blob=None, running=0)
 
 
 @router.post("/environments/{environment_slug_value}/collect")
@@ -446,14 +481,23 @@ async def collect_environment(
     connections = (await db.execute(
         select(SourceConnection).where(SourceConnection.cloud_scope == "azure")
     )).scalars().all()
+    connections = [c for c in connections if environment_slug(c) == environment_slug_value]
 
-    selected = [
-        c for c in connections
-        if environment_slug(c) == environment_slug_value
-        and _enabled(c)
-        and (not body.source_keys or source_key_for(c) in set(body.source_keys))
+    connection_ids = [c.id for c in connections]
+    selections: list[AzureConnectionSource] = []
+    if connection_ids:
+        selections = (await db.execute(
+            select(AzureConnectionSource).where(
+                AzureConnectionSource.connection_id.in_(connection_ids),
+                AzureConnectionSource.enabled.is_(True),
+            )
+        )).scalars().all()
+    requested = set(body.source_keys or [])
+    selecionadas = [
+        selection for selection in selections
+        if not requested or selection.source_key in requested
     ]
-    if not selected:
+    if not selecionadas:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -462,12 +506,18 @@ async def collect_environment(
             ),
         )
 
+    from sqlalchemy import insert as _insert
+
+    by_id = {c.id: c for c in connections}
+    # Uma task por fonte: cada fonte tem a sua própria Bronze e o seu coletor.
+    selected = [(by_id[sel.connection_id], sel) for sel in selecionadas if sel.connection_id in by_id]
+
     from sqlalchemy import insert
 
     queued: list[dict] = []
     skipped: list[dict] = []
-    for connection in selected:
-        source_key = source_key_for(connection)
+    for connection, selection in selected:
+        source_key = selection.source_key
         entry = catalog_entry(source_key or "") or {}
         if entry.get("implementation_status") == "planned":
             skipped.append({
@@ -490,10 +540,14 @@ async def collect_environment(
             continue
 
         config = dict(connection.config_json or {})
-        days = body.window_days or (
-            int(config["window_days"]) if is_telemetry(source_key) and config.get("window_days") else None
-        )
-        result_json: dict = {"user_triggered": True, "environment_slug": environment_slug_value}
+        days = body.window_days or (selection.window_days if is_telemetry(source_key) else None)
+        result_json: dict = {
+            "user_triggered": True,
+            "environment_slug": environment_slug_value,
+            # A fonte vai na task: é ela que define a tabela Bronze e o coletor.
+            "source_key": source_key,
+            "source_code": source_code(connection.code, source_key),
+        }
         phase = "Na fila: coleta"
         if is_telemetry(source_key):
             window = max(1, min(int(days or entry.get("default_window_days") or 15), 90))

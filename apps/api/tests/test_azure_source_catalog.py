@@ -158,26 +158,26 @@ def test_sanitized_bronze_matches_the_pipeline_convention():
 def test_state_is_not_configured_when_source_is_disabled():
     from app.routers.azure_sources import STATE_NOT_CONFIGURED, _source_state
 
-    assert _source_state(conn(config_json={"collection_enabled": False}), last_blob=None, running=0) == STATE_NOT_CONFIGURED
+    assert _source_state(conn(config_json={"collection_enabled": False}), enabled=False, last_blob=None, running=0) == STATE_NOT_CONFIGURED
 
 
 def test_state_reports_error_on_failed_test():
     from app.routers.azure_sources import STATE_ERROR, _source_state
 
-    assert _source_state(conn(last_test_status="FAILED"), last_blob=None, running=0) == STATE_ERROR
+    assert _source_state(conn(last_test_status="FAILED"), enabled=True, last_blob=None, running=0) == STATE_ERROR
 
 
 def test_state_is_available_when_it_has_ingested():
     from app.routers.azure_sources import STATE_AVAILABLE, _source_state
 
     blob = SimpleNamespace(ingested_at=None, billing_period="202609", row_count=10)
-    assert _source_state(conn(last_test_status="OK"), last_blob=blob, running=0) == STATE_AVAILABLE
+    assert _source_state(conn(last_test_status="OK"), enabled=True, last_blob=blob, running=0) == STATE_AVAILABLE
 
 
 def test_state_is_not_configured_when_never_tested_and_never_ingested():
     from app.routers.azure_sources import STATE_NOT_CONFIGURED, _source_state
 
-    assert _source_state(conn(last_test_status=None), last_blob=None, running=0) == STATE_NOT_CONFIGURED
+    assert _source_state(conn(last_test_status=None), enabled=True, last_blob=None, running=0) == STATE_NOT_CONFIGURED
 
 
 def test_enabled_defaults_to_true_for_existing_rows():
