@@ -250,10 +250,15 @@ export default function HierarchicalDecompTree({
       defs.forEach((d, i) => { m[d.id] = spineList[i]; });
 
       let skip = 0;
+      const selectedField = treePath[treePath.length - 1]?.field;
       if (treeStart < chain.length) {
         for (; skip < MAX_EMPTY_ORG_SKIP && treeStart + skip < chain.length; skip++) {
           const idx = treeStart + skip;
           const field = chain[idx].field;
+          // A seleção pode já ter sido gravada com o mesmo campo do próximo
+          // nível (por exemplo, duas entradas de Serviço). Não consulte esse
+          // campo novamente: o resultado precisa ser do ServiceSubcategory.
+          if (selectedField && field === selectedField) continue;
           const treeResult = await queryDimonTable({
             table,
             rows: [field, "_billing_period", "tipo"],
