@@ -16,7 +16,7 @@ const TABS = [
   { id: "forecast", label: "Forecast" },
   { id: "accuracy", label: "Acurácia de Forecast" },
   { id: "shared", label: "Custo compartilhado" },
-  { id: "dimon", label: "Dimon (Custo pré-agregado)" },
+  { id: "gold", label: "Gold (Marts analíticos)" },
   { id: "extraction", label: "Extração & Monitoramento" },
   { id: "schedules", label: "Agendamentos" },
 ] as const;
@@ -25,7 +25,8 @@ export default function Reprocess() {
   const [params, setParams] = useSearchParams();
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [schedulesError, setSchedulesError] = useState("");
-  const tab = TABS.some(item => item.id === params.get("tab")) ? params.get("tab")! : "data";
+  const requestedTab = params.get("tab") === "dimon" ? "gold" : params.get("tab");
+  const tab = TABS.some(item => item.id === requestedTab) ? requestedTab! : "data";
 
   useEffect(() => {
     if (tab === "schedules") {
@@ -59,7 +60,7 @@ export default function Reprocess() {
           {tab === "forecast" && <ReprocessForecastTab />}
           {tab === "accuracy" && <ReprocessAccuracyTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}
-          {tab === "dimon" && <ReprocessDimonTab />}
+          {tab === "gold" && <ReprocessDimonTab />}
           {tab === "extraction" && <Extraction embedded />}
           {tab === "schedules" && (
             <>

@@ -7,7 +7,7 @@ LOG_DIR="$ROOT_DIR/.runtime-logs"
 LOCK_FILE="$LOG_DIR/start-local.lock"
 mkdir -p "$LOG_DIR"
 
-api_pid=""; worker_pid=""; web_pid=""
+api_pid=""; worker_pid=""; supervisor_pid=""; web_pid=""
 worker_restarts=0
 
 # ── Infra validation: Trino must answer before the worker starts. ──
@@ -168,7 +168,7 @@ stop_pid_files() {
   shopt -s nullglob
   for f in "$LOG_DIR"/*.pid; do
     case "$(basename "$f")" in
-      api.pid|worker.pid|web.pid) ;;
+      api.pid|worker.pid|supervisor.pid|web.pid) ;;
       *) continue ;;
     esac
     pid="$(tr -d '[:space:]' < "$f")"
@@ -602,18 +602,18 @@ wait_for_backend_with_retry() {
 cleanup() {
   trap - INT TERM EXIT
   rm -f "$LOCK_FILE" "$LOG_DIR/start-local.pid" "$LOG_DIR/api.pid" "$LOG_DIR/worker.pid" "$LOG_DIR/web.pid"
-  for process_pid in "$web_pid" "$worker_pid" "$api_pid"; do
+  for process_pid in "$web_pid" "$worker_pid" "$supervisor_pid" "$api_pid"; do
     if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then kill "$process_pid" 2>/dev/null || true; fi
   done
   for _ in {1..10}; do
     alive=0
-    for process_pid in "$web_pid" "$worker_pid" "$api_pid"; do
+    for process_pid in "$web_pid" "$worker_pid" "$supervisor_pid" "$api_pid"; do
       if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then alive=1; fi
     done
     (( alive == 0 )) && break
     sleep 0.5
   done
-  for process_pid in "$web_pid" "$worker_pid" "$api_pid"; do
+  for process_pid in "$web_pid" "$worker_pid" "$supervisor_pid" "$api_pid"; do
     if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then kill -9 "$process_pid" 2>/dev/null || true; fi
   done
   wait 2>/dev/null || true
@@ -623,6 +623,11 @@ trap cleanup INT TERM EXIT
 start_api_process || exit 1
 wait_for_api_startup || exit 1
 start_worker_process
+
+(cd "$ROOT_DIR/apps/api" && DATABASE_URL_SYNC="${DATABASE_URL_SYNC:-postgresql://finops:finops@localhost:5433/finops}" DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://finops:finops@localhost:5433/finops}" exec "$ROOT_DIR/.venv/bin/python" -u supervisor.py) \
+  >"$LOG_DIR/supervisor.log" 2>&1 &
+supervisor_pid=$!
+write_pid_file supervisor "$supervisor_pid"
 
 (cd "$ROOT_DIR/apps/web" && exec npm run dev -- --host 0.0.0.0) \
   >"$LOG_DIR/web.log" 2>&1 &

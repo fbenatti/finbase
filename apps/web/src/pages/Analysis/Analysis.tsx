@@ -523,7 +523,6 @@ export default function Analysis() {
               <Tab label={`Bronze (${(tables.bronze || []).length})`} value="bronze" icon={<Storage />} iconPosition="start" />
               <Tab label={`Silver (${(tables.silver || []).length})`} value="silver" icon={<Tune />} iconPosition="start" />
               <Tab label={`Gold (${(tables.gold || []).length})`} value="gold" icon={<AttachMoney />} iconPosition="start" />
-              <Tab label={`Dimon (${dimonTablesCount})`} value="dimon" icon={<SchemaIcon />} iconPosition="start" />
             </Tabs>
           </Paper>
 

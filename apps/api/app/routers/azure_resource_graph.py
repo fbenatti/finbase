@@ -126,9 +126,9 @@ ORPHAN_COST_SQL_TEMPLATE = """
 -- FOCUS inteiro (~15-20M linhas) — apenas as linhas que casam com órfãos.
 WITH orphan_ids AS (
     SELECT DISTINCT lower(resource_id) AS rid
-    FROM iceberg.gold.dest_cloud_orphan_resources
+    FROM iceberg.silver.dest_cloud_orphan_resources
     WHERE "_billing_period" = (
-        SELECT MAX("_billing_period") FROM iceberg.gold.dest_cloud_orphan_resources
+        SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources
     )
 ), focus_dedup AS (
     SELECT resourceid, "_billing_period", billedcost, effectivecost, realizado
@@ -155,7 +155,7 @@ SELECT
     -- Custo canônico da plataforma: coluna "realizado" (BRL com taxas/markup
     -- aplicados pelas regras de negócio; tipo='realizado' no FOCUS gold).
     ROUND(SUM(COALESCE(TRY_CAST(f.realizado AS DOUBLE), 0)), 2) AS cost_brl
-FROM iceberg.gold.dest_cloud_orphan_resources o
+FROM iceberg.silver.dest_cloud_orphan_resources o
 LEFT JOIN focus_dedup f
   -- case-insensitive: o ARG devolve o resource group no case armazenado,
   -- enquanto o export de custo FOCUS normaliza para UPPER/lower.
@@ -163,7 +163,7 @@ LEFT JOIN focus_dedup f
  AND f."_billing_period" = o."_billing_period"
 -- Restringe ao período mais recente dos órfãos (poda de partição no FOCUS).
 WHERE o."_billing_period" = (
-    SELECT MAX("_billing_period") FROM iceberg.gold.dest_cloud_orphan_resources
+    SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources
 )
 GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 """
@@ -387,12 +387,12 @@ async def orphan_summary(
     tipos = _split_csv(tipo_recurso)
     try:
         periods_rows = await trino_execute(
-            'SELECT DISTINCT "_billing_period" FROM iceberg.gold.dest_cloud_orphan_resources '
+            'SELECT DISTINCT "_billing_period" FROM iceberg.silver.dest_cloud_orphan_resources '
             'ORDER BY "_billing_period" DESC'
         )
         snapshot_period_where = _build_orphan_where(period, None, None, None)
         snapshots_rows = await trino_execute(
-            'SELECT DISTINCT snapshot_date FROM iceberg.gold.dest_cloud_orphan_resources'
+            'SELECT DISTINCT snapshot_date FROM iceberg.silver.dest_cloud_orphan_resources'
             + snapshot_period_where + ' ORDER BY snapshot_date DESC'
         )
         snapshot_dates = [r.get("snapshot_date") for r in snapshots_rows if r.get("snapshot_date")]
@@ -402,11 +402,11 @@ async def orphan_summary(
             tipos=tipos, snapshot_date=selected_snapshot,
         )
         by_rule = await trino_execute(
-            "SELECT orphan_rule, COUNT(*) AS cnt FROM iceberg.gold.dest_cloud_orphan_resources"
+            "SELECT orphan_rule, COUNT(*) AS cnt FROM iceberg.silver.dest_cloud_orphan_resources"
             + where + " GROUP BY orphan_rule ORDER BY cnt DESC"
         )
         by_tipo = await trino_execute(
-            "SELECT tipo_recurso, COUNT(*) AS cnt FROM iceberg.gold.dest_cloud_orphan_resources"
+            "SELECT tipo_recurso, COUNT(*) AS cnt FROM iceberg.silver.dest_cloud_orphan_resources"
             + where + " GROUP BY tipo_recurso ORDER BY cnt DESC"
         )
         cost_total = await trino_execute(
@@ -478,7 +478,7 @@ async def list_orphans(
         try:
             latest = await trino_execute(
                 "SELECT MAX(snapshot_date) AS snapshot_date "
-                "FROM iceberg.gold.dest_cloud_orphan_resources" + snapshot_where
+                "FROM iceberg.silver.dest_cloud_orphan_resources" + snapshot_where
             )
             snapshot_date = (latest[0] if latest else {}).get("snapshot_date")
         except Exception as exc:  # noqa: BLE001
@@ -498,7 +498,7 @@ async def list_orphans(
     # LEFT JOIN com a Dimon pré-agregada (custo via FOCUS) quando existir.
     # Tabela pode não existir ainda (materialização não executada) → custo 0.
     sql = (
-        "SELECT " + columns + " FROM iceberg.gold.dest_cloud_orphan_resources o "
+        "SELECT " + columns + " FROM iceberg.silver.dest_cloud_orphan_resources o "
         f"LEFT JOIN iceberg.dimon.{ORPHAN_COST_DIMON_TABLE} c "
         "ON c.resource_id = o.resource_id AND c.orphan_rule = o.orphan_rule "
         "AND c.\"_billing_period\" = o.\"_billing_period\" "

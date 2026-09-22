@@ -731,12 +731,12 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
     # the Trino coordinator was down, producing zero-row failed Forecasts.
     try:
         safe_name = destination.physical_name.replace('"', '""')
-        await trino_execute(f'SELECT 1 FROM iceberg.gold."{safe_name}" LIMIT 1', timeout_s=15)
-        await fetch_metadata(destination.physical_name, "gold")
+        await trino_execute(f'SELECT 1 FROM iceberg.silver."{safe_name}" LIMIT 1', timeout_s=15)
+        await fetch_metadata(destination.physical_name, "silver")
     except Exception as exc:
         raise HTTPException(503, f"Trino ou a Gold FOCUS estão indisponíveis: {exc}")
     snapshot = _config_snapshot(config, destination)
-    source_name, source_namespace = destination.physical_name, "gold"
+    source_name, source_namespace = destination.physical_name, "silver"
     snapshot.update(destination_physical_name=source_name, source_namespace=source_namespace)
     if simulated_date is not None:
         snapshot["simulated_as_of"] = simulated_date.isoformat()
@@ -1006,12 +1006,8 @@ def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, s
     Returns (actual_source, date_expr, measure, type_col, type_filter).
     """
     dest = str(snapshot.get("destination_physical_name") or "")
-    dimon = "dest_dm_cost_visao_completa"
     if dest.replace("-", "_").replace(".", "_").lower() == "dest_modelo_focus":
-        actual_source = f"iceberg.dimon.{dimon}"
-        # Dimon não tem chargeperiodstart: o mês vive em _billing_period /
-        # period (YYYYMM). O date_expr precisa derivar da própria coluna de
-        # período, senão a query referencia uma coluna inexistente.
+        actual_source = f"iceberg.silver.{dest}"
         period_col = snapshot.get("period_column") or "_billing_period"
         date_expr = gold_date_expr(period_col, period_col)
         measure = snapshot.get("measure_column") or "realizado"
@@ -1040,7 +1036,7 @@ def _daily_gold_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str,
     measure = str(snapshot.get("measure_column") or "realizado")
     if not dest or not date_col:
         raise HTTPException(422, "Snapshot sem origem Gold ou coluna de data para o detalhamento diário")
-    actual_source = f"iceberg.gold.{dest}"
+    actual_source = f"iceberg.silver.{dest}"
     date_expr = gold_date_expr(date_col, snapshot.get("period_column"))
     type_col = snapshot.get("type_column")
     type_filter = f" AND ({_qi(type_col)} = 'realizado' OR {_qi(type_col)} IS NULL)" if type_col else ""
@@ -2083,7 +2079,7 @@ async def _accuracy_eligible_months(config: ForecastConfig, dest: DestinationTab
     )
     records = await trino_execute(
         f"SELECT DISTINCT CAST({_qi(period_col)} AS VARCHAR) AS period "
-        f"FROM iceberg.gold.\"{safe_name}\" "
+        f"FROM iceberg.silver.\"{safe_name}\" "
         f"WHERE {type_filter} AND CAST({_qi(period_col)} AS VARCHAR) <> ''",
         timeout_s=90,
     )

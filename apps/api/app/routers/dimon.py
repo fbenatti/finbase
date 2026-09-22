@@ -402,7 +402,7 @@ async def reprocess_dimons(body: DimonReprocessRequest, db: AsyncSession = Depen
         db.add(task)
         tasks.append(task)
     await db.commit()
-    return {"task_id": tasks[0].id, "task_ids": [task.id for task in tasks], "status": "QUEUED", "message": f"{len(tasks)} Dimon(s) colocada(s) em fila individual", "rules": len(tasks)}
+    return {"task_id": tasks[0].id, "task_ids": [task.id for task in tasks], "status": "QUEUED", "message": f"{len(tasks)} Gold mart(s) colocada(s) em fila individual", "rules": len(tasks)}
 
 
 @router.get("/history")

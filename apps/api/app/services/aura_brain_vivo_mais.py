@@ -42,7 +42,7 @@ from app.services.azure_ptu_dimon import (
 
 logger = logging.getLogger(__name__)
 
-DIMON_NAMESPACE = "iceberg.dimon"
+DIMON_NAMESPACE = "iceberg.gold"
 PROJECT_LABELS = {"aura-brain": "Aura Brain", "vivo-mais": "Vivo Mais"}
 PROJECTS = ("Aura Brain", "Vivo Mais")
 PROJECT_SOURCES = {
@@ -222,7 +222,7 @@ async def _query_cost_rows(
                     THEN 1 ELSE 0 END AS is_ondemand_ptu,
                COALESCE(SUM(TRY_CAST(realizado AS DOUBLE)), 0) AS realized
         FROM {table_sql}
-        WHERE lower(CAST(departamento_nivel_5 AS VARCHAR)) = '{source_project}'
+        WHERE lower(CAST(organograma_nivel_5 AS VARCHAR)) = '{source_project}'
           AND {_COST_CLASS_SQL} <> '__excluded__'
         GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
     """
@@ -243,7 +243,7 @@ async def _query_subaccounts(
         SELECT subaccountname,
                COALESCE(SUM(TRY_CAST(realizado AS DOUBLE)), 0) AS realized
         FROM {table_sql}
-        WHERE lower(CAST(departamento_nivel_5 AS VARCHAR)) = '{source_project}'
+        WHERE lower(CAST(organograma_nivel_5 AS VARCHAR)) = '{source_project}'
           AND _billing_period = '{period}'
           AND tipo = 'realizado'
           AND {_COST_CLASS_SQL} <> '__excluded__'

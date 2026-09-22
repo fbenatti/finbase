@@ -620,7 +620,7 @@ async def load_weight_aggregates(
       SELECT {gold_period} AS period,
              {_hierarchy_select_sql(gold_columns)},
              SUM(COALESCE(TRY_CAST({gold_value} AS DOUBLE), 0)) AS value
-      FROM iceberg.gold.{gold_table}
+      FROM iceberg.silver.{gold_table}
       WHERE 1=1
         {_tipo_realizado_sql(gold_columns)}
         {_cloud_sql(prefixes, gold_columns)}
@@ -633,7 +633,7 @@ async def load_weight_aggregates(
       SELECT {forecast_period} AS period,
              {_hierarchy_select_sql(planning_columns)},
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
-      FROM iceberg.gold.{planning_table}
+      FROM iceberg.silver.{planning_table}
       WHERE lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
         {_cloud_sql(prefixes, planning_columns)}
       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
@@ -674,11 +674,11 @@ async def run_shared_cost_job(session: Any, *, allow_empty: bool = False) -> dic
         raise RuntimeError("Nenhum custo compartilhado habilitado com cloud de origem e projetos para ratear")
     if dest is None:
         raise RuntimeError("Nenhuma tabela destino ativa para gravar o rateio")
-    gold_schema = _schema_map(await trino_execute(f"DESCRIBE iceberg.gold.{gold_table}", timeout_s=30))
+    gold_schema = _schema_map(await trino_execute(f"DESCRIBE iceberg.silver.{gold_table}", timeout_s=30))
     if "realizado" not in gold_schema or ("_billing_period" not in gold_schema and "period" not in gold_schema):
         raise RuntimeError("A tabela Gold não possui as colunas necessárias para o rateio")
     try:
-        planning_schema = _schema_map(await trino_execute(f"DESCRIBE iceberg.gold.{planning_table}", timeout_s=30))
+        planning_schema = _schema_map(await trino_execute(f"DESCRIBE iceberg.silver.{planning_table}", timeout_s=30))
     except Exception:
         planning_schema = {
             "period": "period",
@@ -709,4 +709,3 @@ async def run_shared_cost_job(session: Any, *, allow_empty: bool = False) -> dic
 def run_shared_cost_job_sync(session: Any, *, allow_empty: bool = False) -> dict[str, Any]:
     import asyncio
     return asyncio.run(run_shared_cost_job(session, allow_empty=allow_empty))
-

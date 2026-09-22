@@ -59,8 +59,8 @@ export default function ReprocessDimonTab() {
   };
 
   return <Stack spacing={2}>
-    <Typography variant="h6">Camada Dimon de Custo</Typography>
-    <Typography color="text.secondary">Lê as Golds (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica a tabela pré-agregada dest_dm_cost_&lt;code&gt; no namespace iceberg.dimon. Escolha reprocessar <b>todas (full)</b> ou apenas uma regra/fonte.</Typography>
+    <Typography variant="h6">Materialização Gold</Typography>
+    <Typography color="text.secondary">Lê a Silver (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica marts agregados no namespace iceberg.gold. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
     {error && <Alert severity="error">{error}</Alert>}
 
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
@@ -70,7 +70,7 @@ export default function ReprocessDimonTab() {
 
     {/* Regras ativas com status */}
     <Box>
-      <Typography variant="subtitle2" mb={1}>Regras Dimon ({rules.length}) · {selectedIds.size} selecionada(s)</Typography>
+      <Typography variant="subtitle2" mb={1}>Regras Gold ({rules.length}) · {selectedIds.size} selecionada(s)</Typography>
       {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra criada — use o editor em Relacionamentos de custo IA.</Typography> : <Stack spacing={1}>
         {rules.map(r => <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, border: "1px solid", borderColor: selectedIds.has(r.id!) ? "primary.main" : "divider", borderRadius: 1, bgcolor: selectedIds.has(r.id!) ? "action.selected" : "transparent", cursor: "pointer" }} onClick={() => r.id != null && toggleRule(r.id)}>
           <Checkbox size="small" checked={r.id != null && selectedIds.has(r.id)} onChange={() => r.id != null && toggleRule(r.id)} onClick={e => e.stopPropagation()} />

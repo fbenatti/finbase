@@ -1110,6 +1110,7 @@ def _process_blob_for_reprocess(
     source_frame: "pd.DataFrame | None" = None,
     batch_callback=None,
     connection_cloud_name: str | None = None,
+    blob_path: str | None = None,
 ) -> "pd.DataFrame | None":
     """Process a single blob in a thread — reads from DB, applies rules/mappings/classifications.
 
@@ -1152,6 +1153,14 @@ def _process_blob_for_reprocess(
             )
         elif source is not None:
             source = source[source["_billing_period"].astype(str) == str(billing_period)].copy()
+        else:
+            # Physical Bronze slices may have no IngestedBlob manifest row.
+            # Read them by provenance path instead of leaving source=None.
+            source = iceberg.read_bronze_batches(
+                connection_code, blob_path=blob_path,
+                billing_period=billing_period,
+                batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
+            )
 
         chunks: list[pd.DataFrame] = []
         rows_in_blob = 0
@@ -1421,6 +1430,8 @@ def _reprocess_destination_sync(
         # Gather Bronze blobs per connection. Azure deduplicates stale export
         # executions; GCP keeps the configured current BigQuery table.
         all_blobs: list[tuple[int, int, str, str]] = []  # (blob_id, connection_id, billing_period, blob_path)
+        physical_expected_rows: dict[int, int] = {}
+        physical_blob_seq = -1
         for cid in connection_ids:
             conn = session.get(SourceConnection, cid)
             connector_type = conn.connector_type if conn else ""
@@ -1446,6 +1457,26 @@ def _reprocess_destination_sync(
                 candidates = [c for c in candidates if c[2].startswith("arg/inventory/")]
             elif phys_name.lower() == "dest_cloud_orphan_resources":
                 candidates = [c for c in candidates if c[2].startswith("arg/orphans/")]
+            # The SQL manifest is only an index. After a crash it may contain
+            # fewer rows than the immutable Bronze table. Reconcile it with
+            # physical provenance before selecting Azure's latest run.
+            physical = []
+            if billing_periods:
+                for period in billing_periods:
+                    physical.extend(iceberg.list_bronze_slices(conn.code if conn else str(cid), str(period)))
+            if physical:
+                manifest_paths = {str(row[2]) for row in candidates}
+                physical_paths = {str(item["blob_path"]) for item in physical}
+                if physical_paths - manifest_paths:
+                    by_path = {str(row[2]): row for row in candidates}
+                    for item in physical:
+                        path = str(item["blob_path"])
+                        if path not in by_path:
+                            synthetic_id = physical_blob_seq
+                            physical_blob_seq -= 1
+                            by_path[path] = (synthetic_id, item["billing_period"], path, None)
+                            physical_expected_rows[synthetic_id] = int(item["row_count"])
+                    candidates = list(by_path.values())
             for blob_id, period, path in _select_reprocess_blobs(
                 candidates,
                 connector_type=connector_type,
@@ -1462,6 +1493,7 @@ def _reprocess_destination_sync(
             blob_id: meta.row_count if meta is not None else None
             for blob_id, meta in blob_meta.items()
         }
+        expected_rows_by_blob.update(physical_expected_rows)
         expected_input_rows = sum(
             int(value) for value in expected_rows_by_blob.values() if value is not None
         )
@@ -1773,10 +1805,12 @@ def _reprocess_destination_sync(
                 if temp_name is None:
                     temp_name = iceberg.write_destination_staged(
                         phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
+                        namespace="silver",
                     )
                 else:
                     iceberg.append_to_staged(
                         temp_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
+                        namespace="silver",
                     )
                 staged_rows += len(chunk)
             del prepared
@@ -1840,10 +1874,13 @@ def _reprocess_destination_sync(
                             conn.code,
                             blob_path=blob_path,
                             billing_period=bperiod,
-                            max_rows=min(expected_rows_by_blob.get(blob_id, 5000), 5000),
+                            max_rows=min(int(expected_rows_by_blob.get(blob_id) or 5000), 5000),
                         )
                     except Exception:
-                        skip_sample = None
+                        # A physical Bronze slice may not have a manifest row;
+                        # classification must still receive an empty frame,
+                        # never None (which makes the skip predicate fail).
+                        skip_sample = pd.DataFrame()
                 skip_gold, skip_message = should_skip_gold_realizado(
                     bperiod,
                     connection_config=conn.config_json or {},
@@ -1887,6 +1924,7 @@ def _reprocess_destination_sync(
                     output_cols, task_id,
                     clone_engine=clone_engines.get(cid), batch_callback=_write_batch,
                     connection_cloud_name=conn_cloud,
+                    blob_path=blob_path,
                 )
                 expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
                 if blob_input_rows == 0:
@@ -1924,14 +1962,14 @@ def _reprocess_destination_sync(
                 status["current_blob"] = error_msg
                 _sync_db()
                 if temp_name:
-                    iceberg.cleanup_staged_table(temp_name)
+                    iceberg.cleanup_staged_table(temp_name, namespace="silver")
                 return {"success": False, "error": error_msg, "rows_written": total_rows_processed}
 
         if errors:
             status.setdefault("errors", []).extend(errors)
         if total_rows_processed == 0:
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name)
+                iceberg.cleanup_staged_table(temp_name, namespace="silver")
             if errors:
                 status["status"] = "FAILED"
                 status["error"] = errors[0]
@@ -1955,7 +1993,7 @@ def _reprocess_destination_sync(
             _sync_db()
             _append_reprocess_log(task_id, msg, level="ERROR", details={"input_rows": expected_input_rows, "output_rows": total_rows_processed})
             if temp_name:
-                iceberg.cleanup_staged_table(temp_name)
+                iceberg.cleanup_staged_table(temp_name, namespace="silver")
             return {"success": False, "error": msg, "rows_written": 0}
 
         # Price gaps do not invalidate a reprocess; they remain auditable.
@@ -1981,6 +2019,7 @@ def _reprocess_destination_sync(
                 temp_name,
                 billing_period=str(billing_periods[0]),
                 connection_id=int(connection_ids[0]),
+                namespace="silver",
             )
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
@@ -2006,7 +2045,7 @@ def _reprocess_destination_sync(
                 )
                 _append_reprocess_log(
                     task_id,
-                    f"Dimon publicada: {dimon_rows:,} linhas agregadas",
+                    f"Gold publicada: {dimon_rows:,} linhas agregadas",
                     details={"dimon_table": dimon_builder.DIMON_TABLE, "dimon_rows": dimon_rows},
                 )
             except Exception as exc:  # noqa: BLE001
@@ -2209,13 +2248,13 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)
-                    if staged is None: staged = iceberg.write_destination_staged(dest.physical_name, frame)
-                    else: iceberg.append_to_staged(staged, frame)
+                    if staged is None: staged = iceberg.write_destination_staged(dest.physical_name, frame, namespace="silver")
+                    else: iceberg.append_to_staged(staged, frame, namespace="silver")
                     rows += len(frame)
                     _progress(f"Reclassificando {conn.code}/{period}", total + rows, expected_total)
                 if staged is None:
                     return {"success": False, "error": f"Nenhuma linha Gold para {conn.code}/{period}", "rows_written": total}
-                iceberg.publish_staged_partition(dest.physical_name, staged, billing_period=str(period), connection_id=cid)
+                iceberg.publish_staged_partition(dest.physical_name, staged, billing_period=str(period), connection_id=cid, namespace="silver")
                 total += rows
                 staged = None
         _progress("Publicação Gold concluída", total, expected_total)

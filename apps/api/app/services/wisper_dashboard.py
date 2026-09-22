@@ -21,7 +21,7 @@ FOCUS_TABLE = "iceberg.gold.dest_modelo_focus"
 # Operational/inventory source
 OP_METRICS_TABLE = "iceberg.gold.dest_oci_operational_metrics"
 # Legacy dimon table (kept only for current-month forecast comparison)
-DIMON_TABLE = "iceberg.dimon.dest_dm_cost_custo_wisper"
+DIMON_TABLE = "iceberg.gold.dest_dm_cost_custo_wisper"
 
 WISPER_SUBACCOUNT_RE = "whisper|llm|poc-stt"
 

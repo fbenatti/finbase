@@ -393,7 +393,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         saving_brl,
         padrao,
         is_desligue_programado
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.gold.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     ORDER BY saving_brl DESC
@@ -408,7 +408,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         COUNT(DISTINCT CASE WHEN saved_hours > 0 THEN resource_id END) AS vm_with_shutdown,
         COALESCE(SUM(saved_hours), 0) AS total_saved_hours,
         COALESCE(SUM(saving_brl), 0) AS total_saving_brl
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.gold.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     """
@@ -1407,7 +1407,7 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
     # realizado; NUNCA varre a Gold por requisição (evita OOM no Trino).
     sql = f"""
     SELECT day, hours, cost_brl
-    FROM iceberg.dimon.dest_dm_cost_consumo_diario_vm
+    FROM iceberg.gold.dest_dm_cost_consumo_diario_vm
     WHERE LOWER(TRIM(resource_name)) = LOWER(TRIM('{name.replace("'", "''")}'))
       AND _billing_period IN ({period_literals})
       AND day >= '{start}' AND day <= '{end_date.isoformat()}'

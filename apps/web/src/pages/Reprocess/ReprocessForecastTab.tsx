@@ -83,7 +83,7 @@ export default function ReprocessForecastTab() {
     <Box>
       <Alert severity="info" sx={{ mb: 2 }}>
         Reprocessa o forecast da tabela Gold configurada. Na sequência, o worker também publica o rateio
-        de custo compartilhado e enfileira a materialização da <strong>Dimon visão completa</strong>
+        de custo compartilhado e enfileira a materialização do <strong>Gold de visão completa</strong>
         (realizado + forecast + rateio) automaticamente. Acompanhe o andamento no sino de notificações
         (canto superior direito).
       </Alert>

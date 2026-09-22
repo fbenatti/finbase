@@ -13,7 +13,7 @@ from typing import Any
 
 from app.services.trino_service import execute as trino_execute
 
-DIMON_TABLE = "iceberg.dimon.dest_dm_cost_projeto_sinfonia"
+DIMON_TABLE = "iceberg.gold.dest_dm_cost_projeto_sinfonia"
 
 _PROJECTS = {
     "sinfonia - watson": ("IBM", "Sinfonia IBM", "Watson"),
@@ -38,8 +38,8 @@ def _text(value: Any) -> str:
 
 def normalize_row(row: dict[str, Any]) -> dict[str, str] | None:
     """Map a Dimon row to the portfolio hierarchy, excluding Sinfonia IA."""
-    level5 = _text(row.get("departamento_nivel_5"))
-    level6 = _text(row.get("departamento_nivel_6"))
+    level5 = _text(row.get("organograma_nivel_5"))
+    level6 = _text(row.get("organograma_nivel_6"))
     key5 = level5.lower()
     mapping = _PROJECTS.get(key5)
     if not mapping:
@@ -148,7 +148,8 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
 
 async def load_sinfonia_dashboard(*, cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
     rows = await trino_execute(f"""
-        SELECT _billing_period AS period, tipo, cloud_origem, departamento_nivel_5, departamento_nivel_6,
+        SELECT _billing_period AS period, tipo, cloud_origem,
+               departamento AS organograma_nivel_5, CAST(NULL AS VARCHAR) AS organograma_nivel_6,
                servicename, servicesubcategory, skumeter, SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
         FROM {DIMON_TABLE}
         GROUP BY 1,2,3,4,5,6,7,8

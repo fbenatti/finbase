@@ -97,6 +97,22 @@ services:
       trino:
         condition: service_healthy
 
+  supervisor:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-u", "supervisor.py"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
+      SUPERVISOR_INTERVAL_SECONDS: ${SUPERVISOR_INTERVAL_SECONDS:-15}
+    volumes:
+      - worker_runtime:/run/openfinops-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
     build:
       context: .

@@ -14,7 +14,7 @@ from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
-DIMON_NAMESPACE = "dimon"
+DIMON_NAMESPACE = "gold"
 AI_CONSUMPTION_TABLE = "dest_dm_ai_consumption_daily"
 AI_LICENSE_TABLE = "dest_dm_ai_license_snapshot"
 COPILOT_USAGE_TABLE = "dest_dm_copilot_usage_daily"
@@ -87,7 +87,7 @@ def _consumption_select() -> str:
         SUM(CASE WHEN {_number('totaltokens')} > 0 THEN 1 ELSE 0 END) AS rows_with_tokens,
         SUM(CASE WHEN {_number('inputtokens')} + {_number('outputtokens')} > 0 THEN 1 ELSE 0 END) AS rows_with_io_tokens,
         SUM(CASE WHEN COALESCE(NULLIF({_number('allocatedcost')}, 0), NULLIF({_number('realizado')}, 0), {_number('billedcost')}) > 0 THEN 1 ELSE 0 END) AS rows_with_cost
-      FROM iceberg.gold.dest_consumo_ia
+      FROM iceberg.silver.dest_consumo_ia
       WHERE usagedate IS NOT NULL AND _billing_period IS NOT NULL
       GROUP BY {group_positions}
     """
@@ -130,7 +130,7 @@ def _license_select() -> str:
             ORDER BY snapshotdate DESC NULLS LAST, licenseupdatedat DESC NULLS LAST,
                      lastactivityat DESC NULLS LAST
           ) AS dimon_rn
-        FROM iceberg.gold.dest_licencas_ia source
+        FROM iceberg.silver.dest_licencas_ia source
         WHERE _billing_period IS NOT NULL
       ) ranked
       WHERE dimon_rn = 1
@@ -222,7 +222,7 @@ def _copilot_user_period_select() -> str:
         MIN(CAST(day AS VARCHAR)) AS period_start,
         MAX(CAST(day AS VARCHAR)) AS period_end,
         COUNT(DISTINCT day) AS period_days
-      FROM iceberg.dimon.dest_dm_copilot_usage_daily
+      FROM iceberg.gold.dest_dm_copilot_usage_daily
       WHERE assignee_login IS NOT NULL AND assignee_login <> ''
         AND source_kind IN ('ai_usage_report', 'billing_report')
         AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')

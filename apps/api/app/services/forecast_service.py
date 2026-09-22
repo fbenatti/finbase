@@ -985,7 +985,7 @@ def validate_config(config: Any, metadata: dict[str, Any]) -> list[str]:
 
 async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None = None, progress=None, business_rules: list[Any] | None = None, result_table: str | None = None, simulated_as_of: date | None = None) -> dict[str, Any]:
     table = config.destination_physical_name
-    namespace = getattr(config, "source_namespace", "gold")
+    namespace = getattr(config, "source_namespace", "silver")
     dims = list(config.dimensions or [])
     date_col = config.date_column
     measure = config.measure_column

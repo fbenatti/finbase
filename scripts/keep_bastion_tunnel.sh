@@ -18,6 +18,9 @@ BASTION_PORT="${BASTION_PORT:-2022}"
 SSH_USER="${BASTION_SSH_USER:-finops}"
 LOCAL_HTTPS_PORT="${LOCAL_HTTPS_PORT:-8443}"
 LOCAL_TRINO_PORT="${LOCAL_TRINO_PORT:-18080}"
+# O frontend local do OpenFinops usa a porta 5173. Para manter o túnel ativo
+# simultaneamente, exponha o frontend remoto em outra porta local.
+LOCAL_REMOTE_FRONTEND_PORT="${LOCAL_REMOTE_FRONTEND_PORT:-5175}"
 LOG_DIR="${BASTION_LOG_DIR:-$PWD/.runtime-logs}"
 LOCK_DIR="$LOG_DIR/.bastion-tunnel.lock"
 
@@ -69,7 +72,7 @@ add_forward_if_available() {
 
 # A máquina de desenvolvimento pode já estar usando 5173/8000. Isso não deve
 # impedir o HTTPS do ambiente remoto nem o acesso ao Trino pelo túnel.
-add_forward_if_available 5173 5173 "frontend"
+add_forward_if_available "$LOCAL_REMOTE_FRONTEND_PORT" 5173 "frontend remoto"
 add_forward_if_available 8000 8000 "API"
 add_forward_if_available "$LOCAL_TRINO_PORT" 8080 "Trino"
 add_forward_if_available "$LOCAL_HTTPS_PORT" 443 "HTTPS"

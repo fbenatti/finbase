@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # As Dimons vivem em um namespace Iceberg próprio (iceberg.dimon.*), separado
 # das Golds (iceberg.gold.*). O materializador cria/swap aqui; os dashboards e
 # a API consultam iceberg.dimon.dest_dm_cost_*.
-DIMON_NAMESPACE = "dimon"
+DIMON_NAMESPACE = "gold"
 
 _AI_AUXILIARY_DIMONS = {
     "ai_consumption_daily": "dest_dm_ai_consumption_daily",
@@ -96,7 +96,13 @@ def _schema_map(rows: list[dict[str, Any]]) -> dict[str, str]:
 
 
 def _resolve_column(schema: dict[str, str], name: str) -> str | None:
-    return schema.get(str(name or "").lower())
+    key = str(name or "").lower()
+    found = schema.get(key)
+    if found:
+        return found
+    if key.startswith("organograma_nivel_"):
+        return schema.get(key.replace("organograma_", "departamento_"))
+    return None
 
 
 def _normalized_conditions(schema: dict[str, str], raw_conditions: Any) -> tuple[list[dict[str, Any]], list[str]]:
@@ -165,6 +171,13 @@ def _source_clause(schema: dict[str, str], source: DimonRuleSource, gold_table: 
     conditions, missing = _normalized_conditions(schema, raw_conditions)
     if missing:
         gold = gold_table or source.gold_table or "?"
+        # Planning is a deliberately narrow Silver mirror (period, measure,
+        # type, cloud and hierarchy).  A rule may also union it with FOCUS;
+        # dimensions that only exist on FOCUS cannot be evaluated on planning.
+        # Treat those predicates as unconstrained for the planning leg instead
+        # of aborting the entire Gold mart.
+        if str(gold).lower().endswith("_planning"):
+            return "1=1"
         # Sugere colunas equivalentes que a Gold realmente possui, para o usuário
         # ajustar o filtro ou a regra (ex.: planning tem subaccountname, não subaccountid).
         existing = sorted({m.lower(): schema.get(m.lower()) for m in missing if m.lower() in schema})
@@ -194,7 +207,7 @@ def _numeric_columns(schema: dict[str, str]) -> set[str]:
 
 
 async def load_gold_schema(gold_table: str) -> dict[str, str]:
-    rows = await execute(f"DESCRIBE iceberg.gold.{gold_table}", timeout_s=30)
+    rows = await execute(f"DESCRIBE iceberg.silver.{gold_table}", timeout_s=30)
     return _schema_map(rows)
 
 
@@ -205,7 +218,7 @@ async def load_gold_schema_typed(gold_table: str) -> dict[str, dict[str, str]]:
     /dimon/gold-schema report type = column name and broke the
     numeric-measure filter in the pivot editor. This variant preserves it.
     """
-    rows = await execute(f"DESCRIBE iceberg.gold.{gold_table}", timeout_s=30)
+    rows = await execute(f"DESCRIBE iceberg.silver.{gold_table}", timeout_s=30)
     out: dict[str, dict[str, str]] = {}
     for row in rows:
         name = str(row.get("Column") or row.get("column_name") or row.get("column") or "")
@@ -234,7 +247,7 @@ async def preview_source(*, gold_table: str, filter_json: dict[str, Any] | None,
     sql = f"""
       SELECT COUNT(*) AS row_count,
              SUM({_value_expr(schema, value_col)}) AS total_value
-      FROM iceberg.gold.{gold_table}
+      FROM iceberg.silver.{gold_table}
       WHERE {where}
     """
     rows = await execute(sql, timeout_s=120)
@@ -258,13 +271,13 @@ _ANALYTIC_DIMENSIONS = (
     "tipo",
     "cloud_origem",
     "departamento",
-    "departamento_nivel_1",
-    "departamento_nivel_2",
-    "departamento_nivel_3",
-    "departamento_nivel_4",
-    "departamento_nivel_5",
-    "departamento_nivel_6",
-    "departamento_nivel_7",
+    "organograma_nivel_1",
+    "organograma_nivel_2",
+    "organograma_nivel_3",
+    "organograma_nivel_4",
+    "organograma_nivel_5",
+    "organograma_nivel_6",
+    "organograma_nivel_7",
     "servicecategory",
     "servicename",
     "servicesubcategory",
@@ -336,16 +349,17 @@ def _side_select(gold: str, schema: dict[str, str], dims: list[str], measure_ali
     exprs: list[str] = []
     for dim in dims:
         key = dim.lower()
-        if key in schema:
-            ref = f"{table_alias}.{_quote_ident(schema[key])}" if table_alias else _quote_ident(schema[key])
-            exprs.append(f"{ref} AS {_quote_ident(dim)}")
+        resolved = _resolve_column(schema, dim)
+        if resolved:
+            ref = f"{table_alias}.{_quote_ident(resolved)}" if table_alias else _quote_ident(resolved)
+            exprs.append(f"CAST({ref} AS VARCHAR) AS {_quote_ident(dim)}")
         elif key in {"period", "_billing_period"} and period_physical.get(gold) and period_physical[gold] != dim:
             ref = f"{table_alias}.{_quote_ident(period_physical[gold])}" if table_alias else _quote_ident(period_physical[gold])
-            exprs.append(f"{ref} AS {_quote_ident(dim)}")
+            exprs.append(f"CAST({ref} AS VARCHAR) AS {_quote_ident(dim)}")
         elif key == "centro_custo" and centro_map and "subaccountname" in schema:
             # Fonte sem centro_custo (ex.: espelho de planning): herda o
             # centro de custo da subconta através do mapa derivado do Gold.
-            exprs.append(f"cm.{_quote_ident(centro_map['cc'])} AS {_quote_ident(dim)}")
+            exprs.append(f"CAST(cm.{_quote_ident(centro_map['cc'])} AS VARCHAR) AS {_quote_ident(dim)}")
         else:
             exprs.append(f"CAST(NULL AS VARCHAR) AS {_quote_ident(dim)}")
     for measure, alias in measure_aliases:
@@ -503,9 +517,9 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
                     f"TRIM(lower(CAST(src.{_quote_ident(sa)} AS VARCHAR))) = "
                     f"TRIM(lower(CAST(cm.cc_subaccount AS VARCHAR)))"
                 )
-                parts.append(f"SELECT {select_exprs} FROM iceberg.gold.{gold} AS src {join} WHERE {where}")
+                parts.append(f"SELECT {select_exprs} FROM iceberg.silver.{gold} AS src {join} WHERE {where}")
             else:
-                parts.append(f"SELECT {select_exprs} FROM iceberg.gold.{gold} WHERE {where}")
+                parts.append(f"SELECT {select_exprs} FROM iceberg.silver.{gold} WHERE {where}")
 
     if not parts:
         return 0
@@ -516,7 +530,7 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
         map_sql = (
             f"SELECT {_quote_ident(centro_map['sa'])} AS cc_subaccount, "
             f"max({_quote_ident(centro_map['cc'])}) AS {_quote_ident(centro_map['cc'])} "
-            f"FROM iceberg.gold.{centro_map['gold']} "
+            f"FROM iceberg.silver.{centro_map['gold']} "
             f"WHERE {_quote_ident(centro_map['cc'])} IS NOT NULL "
             f"AND TRIM(CAST({_quote_ident(centro_map['cc'])} AS VARCHAR)) <> '' "
             f"GROUP BY {_quote_ident(centro_map['sa'])}"
@@ -658,17 +672,14 @@ async def prepare_vm_monthly(
     """, timeout_s=120)
 
     if months is None:
-        months = []
-        from datetime import date as _date
-        today = _date.today()
-        y, m = today.year, today.month
-        for i in range(VM_MONTHLY_HISTORY_MONTHS, 0, -1):
-            ym = m - i
-            yy = y
-            while ym <= 0:
-                ym += 12
-                yy -= 1
-            months.append(f"{yy:04d}{ym:02d}")
+        # Use periods actually present in Silver. A rolling calendar window
+        # can silently exclude the only imported month (e.g. 202512 in DEV).
+        available = await execute(
+            "SELECT DISTINCT _billing_period AS p FROM iceberg.silver.dest_modelo_focus "
+            "WHERE _billing_period IS NOT NULL ORDER BY 1",
+            timeout_s=120,
+        )
+        months = [str(row.get("p")) for row in available if row.get("p")]
 
     source_filters: list[str] = []
     if sources:
@@ -704,7 +715,7 @@ async def prepare_vm_monthly(
             b._billing_period AS billing_period,
             SUM(COALESCE(TRY_CAST(b."ConsumedQuantity" AS DOUBLE), 0)) AS total_hours,
             SUM(COALESCE(TRY_CAST(b."BilledCost" AS DOUBLE), 0)) AS total_cost
-        FROM iceberg.gold.dest_modelo_focus b
+        FROM iceberg.silver.dest_modelo_focus b
         WHERE b._billing_period = '{period}'
           AND b.cloud_origem IN ('azure-ti', 'azure-4p')
           AND LOWER(CAST(b."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
@@ -769,7 +780,7 @@ async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | 
             SUM(COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0)) AS hours,
             SUM(COALESCE(TRY_CAST(g."BilledCost" AS DOUBLE), 0)) AS cost_brl,
             g._billing_period
-        FROM iceberg.gold.dest_modelo_focus g
+        FROM iceberg.silver.dest_modelo_focus g
         WHERE g._billing_period = '{period}'
           AND g."ChargePeriodStart" IS NOT NULL
           AND LOWER(CAST(g."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
@@ -982,7 +993,7 @@ def _lifecycle_sql_cte(
                     THEN COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0)
                     ELSE 0
                 END) AS window_hours
-            FROM iceberg.gold.dest_modelo_focus g
+            FROM iceberg.silver.dest_modelo_focus g
             WHERE g."ChargePeriodStart" IS NOT NULL
               AND LOWER(CAST(g."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
               AND (g."ChargeCategory" = 'Usage' OR g."ChargeCategory" IS NULL)
@@ -1060,7 +1071,7 @@ async def materialize_saving_history(
     if periods is None:
         # Períodos disponíveis na Gold até o mês anterior ao atual.
         avail = await execute(
-            "SELECT DISTINCT _billing_period FROM iceberg.gold.dest_modelo_focus ORDER BY 1",
+            "SELECT DISTINCT _billing_period FROM iceberg.silver.dest_modelo_focus ORDER BY 1",
             timeout_s=240,
         )
         periods = [str(r["_billing_period"]) for r in avail if str(r["_billing_period"]) < cur]
@@ -1148,7 +1159,7 @@ async def materialize_saving_history(
                 LOWER(TRIM(g."ResourceId")) AS rid,
                 MAX(g.departamento_nivel_4) AS n4,
                 MAX(g.departamento_nivel_5) AS n5
-            FROM iceberg.gold.dest_modelo_focus g
+            FROM iceberg.silver.dest_modelo_focus g
             JOIN stats s ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(s.resource_id))
             WHERE g._billing_period = '{target}'
             GROUP BY 1
@@ -1282,7 +1293,7 @@ def enqueue_dimons_task(session: Any, *, rule_ids: list[int] | None = None, sour
         return None
     now = datetime.now(timezone.utc)
     task = EtlTask(task_type="dimon_reprocess", status="QUEUED", errors=[])
-    task.phase = f"Na fila: materializar {len(rules)} Dimon(s) (após {source})"
+    task.phase = f"Na fila: materializar {len(rules)} Gold mart(s) (após {source})"
     task.started_at = now
     task.total_blobs = len(rules)
     task.processed_blobs = 0

@@ -226,7 +226,7 @@ def rebuild_dimons_from_gold(*, table: str | None = None, gold: str | None = Non
     table = (table or DIMON_TABLE).replace("-", "_").replace(".", "_")
     gold = (gold or DIMON_GOLD_SOURCE).replace("-", "_").replace(".", "_")
 
-    schema_rows = execute_sync(f"DESCRIBE iceberg.gold.{gold}", timeout_s=60)
+    schema_rows = execute_sync(f"DESCRIBE iceberg.silver.{gold}", timeout_s=60)
     schema = {str(r.get("Column") or "").lower() for r in schema_rows}
     dims = [d for d in DIMON_DIMENSIONS if d in schema]
     if not dims:
@@ -248,7 +248,7 @@ def rebuild_dimons_from_gold(*, table: str | None = None, gold: str | None = Non
     create_sql = (
         f"CREATE TABLE iceberg.gold.{staging} "
         f"WITH (partitioning = ARRAY['_billing_period']) AS "
-        f"SELECT {select_dims}, {sums} FROM iceberg.gold.{gold} "
+        f"SELECT {select_dims}, {sums} FROM iceberg.silver.{gold} "
         f"GROUP BY {group_by}"
     )
     logger.info("Rebuild Dimon %s a partir de %s", table, gold)

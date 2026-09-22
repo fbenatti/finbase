@@ -447,7 +447,7 @@ def consumer_main(worker_id: int):
                         run.error = None
                         run.started_at = datetime.now(timezone.utc)
                         s.commit()
-                        metadata = asyncio.run(fetch_metadata(dest.physical_name))
+                        metadata = asyncio.run(fetch_metadata(dest.physical_name, "silver"))
                         errors = validate_config(config, metadata)
                         if errors:
                             raise RuntimeError("; ".join(errors))
@@ -456,7 +456,7 @@ def consumer_main(worker_id: int):
                             task_row.phase = "Agregando histórico no Trino"
                         s.commit()
                         config.destination_physical_name = dest.physical_name
-                        config.source_namespace = "gold"
+                        config.source_namespace = "silver"
                         config.gold_metadata = metadata
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
                         simulated_as_of = None
@@ -595,19 +595,19 @@ def consumer_main(worker_id: int):
                             ForecastBusinessRule.forecast_config_id == config_id,
                             ForecastBusinessRule.active == True,
                         ).all()
-                        metadata = asyncio.run(fetch_metadata(dest.physical_name))
+                        metadata = asyncio.run(fetch_metadata(dest.physical_name, "silver"))
                         errors = validate_config(config, metadata)
                         if errors:
                             raise RuntimeError("; ".join(errors))
                         config.destination_physical_name = dest.physical_name
-                        config.source_namespace = "gold"
+                        config.source_namespace = "silver"
                         config.gold_metadata = metadata
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
                         snapshot = {
                             "config_id": config.id, "config_version": config.version,
                             "destination_table_id": dest.id,
                             "destination_physical_name": dest.physical_name,
-                            "source_namespace": "gold",
+                            "source_namespace": "silver",
                             "measure_column": config.measure_column, "date_column": config.date_column,
                             "period_column": config.period_column, "type_column": config.type_column,
                             "dimensions": list(config.dimensions or []), "currency_column": config.currency_column,
@@ -721,13 +721,13 @@ def consumer_main(worker_id: int):
                             rows = int(result.get("rows") or 0)
                             if failed and rows == 0 and not result.get("details"):
                                 task_row.status = "FAILED"
-                                task_row.phase = "Nenhuma Dimon publicada: " + "; ".join(
+                                task_row.phase = "Nenhuma Gold publicada: " + "; ".join(
                                     f"{f.get('code', f.get('rule_id'))}: {f.get('error', 'erro')}" for f in failed
                                 )[:160]
                                 task_row.errors = [f.get("error", "") for f in failed]
                             else:
                                 task_row.status = "COMPLETED"
-                                task_row.phase = f"Dimon publicada: {rows} linhas" + (
+                                task_row.phase = f"Gold publicada: {rows} linhas" + (
                                     f" · {len(failed)} regra(s) com erro" if failed else ""
                                 )
                                 task_row.rows_destination = rows

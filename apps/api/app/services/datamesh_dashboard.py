@@ -9,7 +9,7 @@ from typing import Any
 
 from app.services.trino_service import execute as trino_execute
 
-DIMON_TABLE = "iceberg.dimon.dest_dm_cost_projeto_datamesh"
+DIMON_TABLE = "iceberg.gold.dest_dm_cost_projeto_datamesh"
 BUCKETS = ("Databricks", "Dados associados", "Infraestrutura")
 _DATA_TERMS = (
     "storage", "database", "sql", "synapse", "data factory", "datafactory",
@@ -77,9 +77,9 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
     # Keep project attribution honest: it uses the newest period with level 6
     # data, which can be the August realized load while the executive headline
     # already uses the August forecast.
-    project_periods = [key for key in scoped if key <= period and any(_text(row.get("departamento_nivel_6")) for row in scoped[key])]
+    project_periods = [key for key in scoped if key <= period and any(_text(row.get("organograma_nivel_6")) for row in scoped[key])]
     project_period = max(project_periods) if project_periods else None
-    project_type = "forecast" if project_period and project_period >= open_period and any(_text(row.get("tipo")).lower() == "forecast" and _text(row.get("departamento_nivel_6")) for row in scoped[project_period]) else None
+    project_type = "forecast" if project_period and project_period >= open_period and any(_text(row.get("tipo")).lower() == "forecast" and _text(row.get("organograma_nivel_6")) for row in scoped[project_period]) else None
     for row in scoped[period]:
         tipo = _text(row.get("tipo")).lower()
         if (chosen_type and tipo != chosen_type) or (not chosen_type and tipo not in ("realizado", "rateio")):
@@ -93,7 +93,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
             tipo = _text(row.get("tipo")).lower()
             if (project_type and tipo != project_type) or (not project_type and tipo not in ("realizado", "rateio")):
                 continue
-            project = _text(row.get("departamento_nivel_6")) or "Não informado"
+            project = _text(row.get("organograma_nivel_6")) or "Não informado"
             project_costs[project][row["bucket"]] += row["amount"]
     projects = []
     for name, composition in sorted(project_costs.items(), key=lambda item: sum(item[1].values()), reverse=True):
@@ -114,7 +114,8 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
 
 async def load_datamesh_dashboard(*, cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
     rows = await trino_execute(f"""
-        SELECT _billing_period AS period, tipo, cloud_origem, departamento_nivel_6,
+        SELECT _billing_period AS period, tipo, cloud_origem,
+               departamento AS organograma_nivel_6,
                centro_custo, subaccountname, regionname, servicename, servicesubcategory, skumeter,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
         FROM {DIMON_TABLE}

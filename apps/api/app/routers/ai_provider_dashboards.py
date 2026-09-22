@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/visoes-consumo-ia/provider", tags=["visoes-consumo-ia"])
 
-LIC_TABLE = f"iceberg.dimon.{AI_LICENSE_TABLE}"
-CONS_TABLE = f"iceberg.dimon.{AI_CONSUMPTION_TABLE}"
+LIC_TABLE = f"iceberg.gold.{AI_LICENSE_TABLE}"
+CONS_TABLE = f"iceberg.gold.{AI_CONSUMPTION_TABLE}"
 
 _PROVIDERS: dict[str, dict[str, str]] = {
     "anthropic": {
