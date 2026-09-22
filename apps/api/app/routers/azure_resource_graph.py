@@ -27,6 +27,7 @@ from app.models.source_connection import SourceConnection
 from app.models.orphan_annotation import OrphanAnnotation
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/azure-resource-graph", tags=["azure-resource-graph"])
@@ -465,7 +466,7 @@ async def orphan_summary(
             cost_where = _latest_snapshot_per_origin_where(cost_where, "", period)
         cost_total = await trino_execute(
             "SELECT COALESCE(SUM(cost_brl), 0) AS cost_brl, COUNT(*) AS n "
-            f"FROM iceberg.dimon.{ORPHAN_COST_DIMON_TABLE}"
+            f"FROM iceberg.{DIMON_NAMESPACE}.{ORPHAN_COST_DIMON_TABLE}"
             + cost_where
         )
     except Exception as exc:  # noqa: BLE001 — Trino pode estar fora/ tabela ainda não criada
@@ -552,7 +553,7 @@ async def list_orphans(
     # Tabela pode não existir ainda (materialização não executada) → custo 0.
     sql = (
         "SELECT " + columns + " FROM iceberg.silver.dest_cloud_orphan_resources o "
-        f"LEFT JOIN iceberg.dimon.{ORPHAN_COST_DIMON_TABLE} c "
+        f"LEFT JOIN iceberg.{DIMON_NAMESPACE}.{ORPHAN_COST_DIMON_TABLE} c "
         "ON c.resource_id = o.resource_id AND c.orphan_rule = o.orphan_rule "
         "AND c.\"_billing_period\" = o.\"_billing_period\" "
         "AND c.snapshot_date = o.snapshot_date "
@@ -637,7 +638,7 @@ async def orphan_savings(
       ), costs AS (
         SELECT lower(resource_id) AS rid, orphan_rule, snapshot_date,
                MAX(COALESCE(cost_brl, 0)) AS cost_brl
-        FROM iceberg.dimon.{ORPHAN_COST_DIMON_TABLE}
+        FROM iceberg.{DIMON_NAMESPACE}.{ORPHAN_COST_DIMON_TABLE}
         GROUP BY 1, 2, 3
       )
       SELECT p.resource_id, p.resource_name, p.resource_type, p.subscription_id,

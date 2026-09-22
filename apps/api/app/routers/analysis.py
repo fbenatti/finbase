@@ -39,6 +39,7 @@ from app.services.iceberg_service import list_tables, get_catalog, read_bronze
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
 from app.services import lakehouse_layers as layers
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
@@ -1091,7 +1092,7 @@ async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
     """
     try:
         rows = await trino_execute(
-            "SELECT DISTINCT _billing_period FROM iceberg.dimon.dest_dm_cost_visao_completa "
+            "SELECT DISTINCT _billing_period FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_visao_completa "
             "WHERE tipo = 'realizado'",
             **trino_kwargs,
         )
@@ -1885,7 +1886,7 @@ async def _expected_view_period_detail_core(
     cloud_filter = _expected_view_cloud_filter(scope_path, selected, columns)
     sql = f"""
       SELECT {', '.join(group_cols)}, SUM(COALESCE(TRY_CAST({value_col} AS DOUBLE), 0)) AS value
-      FROM iceberg.dimon.{table}
+      FROM iceberg.{DIMON_NAMESPACE}.{table}
       WHERE {scope_filter()}{cloud_filter}
         AND {period_col} = {_quote_literal(body.period)}
         AND {tipo_sql}
@@ -2031,7 +2032,7 @@ async def _expected_view_core(
         cutoff_rows = await trino_execute(
             f"""
             SELECT MIN({forecast_period}) AS period
-            FROM iceberg.dimon.{forecast_name}
+            FROM iceberg.{DIMON_NAMESPACE}.{forecast_name}
             WHERE {forecast_scope_filter}{forecast_cloud_filter}
               {forecast_year_clause}
               AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
@@ -2061,7 +2062,7 @@ async def _expected_view_core(
     driver_key = f"departamento_nivel_{driver_level}"
     actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
     forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
-    actual_from = f"iceberg.dimon.{actual_name}"
+    actual_from = f"iceberg.{DIMON_NAMESPACE}.{actual_name}"
     actual_sql = f"""
       SELECT {actual_period} AS period,
              COALESCE(NULLIF(TRIM(CAST({actual_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
@@ -2076,7 +2077,7 @@ async def _expected_view_core(
       SELECT {forecast_period} AS period,
              COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
-      FROM iceberg.dimon.{forecast_name}
+      FROM iceberg.{DIMON_NAMESPACE}.{forecast_name}
       WHERE {forecast_scope_filter}{forecast_cloud_filter}
         {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
@@ -2128,7 +2129,7 @@ async def _expected_view_core(
                  COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
                  {medida_sql},
                  SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
-          FROM iceberg.dimon.{forecast_name}
+          FROM iceberg.{DIMON_NAMESPACE}.{forecast_name}
           WHERE {forecast_scope_filter}{forecast_cloud_filter}
             {forecast_year_clause}
             AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'

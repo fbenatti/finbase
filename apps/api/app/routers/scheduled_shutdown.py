@@ -1119,7 +1119,7 @@ async def savings_monthly():
     # Todos os períodos disponíveis na Dimon, a partir de 202601.
     periods_sql = """
     SELECT DISTINCT _billing_period AS p
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period >= '202601'
     ORDER BY 1
     """
@@ -1135,7 +1135,7 @@ async def savings_monthly():
         COUNT(DISTINCT resource_id) AS resources,
         COALESCE(SUM(saved_hours), 0) AS saved_hours,
         COALESCE(SUM(saving_brl), 0) AS saving_brl
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE saved_hours > 0
       AND is_desligue_programado = TRUE
     GROUP BY 1
@@ -1178,7 +1178,7 @@ async def padroes_periodos():
     sql = f"""
     SELECT _billing_period AS period,
            COUNT(*) AS resources
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE {list_filter}
     GROUP BY 1
     ORDER BY 1
@@ -1207,7 +1207,7 @@ async def padroes_distribuicao(period: str | None = None):
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm",
+                "SELECT MAX(_billing_period) AS p FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1224,7 +1224,7 @@ async def padroes_distribuicao(period: str | None = None):
         COALESCE(SUM(saved_hours), 0) AS saved_hours,
         COALESCE(SUM(saving_brl), 0) AS saving_brl,
         MAX(is_desligue_programado) AS dp
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND {list_filter}
     GROUP BY 1
@@ -1275,7 +1275,7 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm",
+                "SELECT MAX(_billing_period) AS p FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1293,7 +1293,7 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
         saved_hours,
         saving_brl,
         is_desligue_programado
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND padrao = '{padrao.replace("'", "''")}'
       AND {list_filter}
@@ -1439,7 +1439,7 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
             f"""
             SELECT padrao, is_desligue_programado, active_days, window_hours,
                    window_uptime_pct, monthly_uptime_pct
-            FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+            FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
             WHERE _billing_period = '{done_period}'
               AND LOWER(TRIM(resource_name)) = LOWER(TRIM('{name.replace("'", "''")}'))
             LIMIT 1
@@ -1512,7 +1512,7 @@ async def saving_departamento(period: str | None = None):
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm",
+                "SELECT MAX(_billing_period) AS p FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1526,7 +1526,7 @@ async def saving_departamento(period: str | None = None):
     sql = f"""
     WITH dimon_vms AS (
         SELECT d.resource_id, d.saved_hours, d.saving_brl
-        FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm d
+        FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm d
         WHERE d._billing_period = '{period}'
           AND d.is_desligue_programado = TRUE
     ),
@@ -1655,7 +1655,7 @@ async def opportunity_subscriptions():
         subscription_name,
         COUNT(*) AS resources,
         COALESCE(SUM(CASE WHEN resource_type = 'VMSS' THEN 1 ELSE 0 END), 0) AS vmss
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND LOWER(COALESCE(CAST(resource_name AS VARCHAR), '')) NOT LIKE 'azure plan%'
     GROUP BY subscription_name
@@ -1703,7 +1703,7 @@ async def opportunity_savings(body: SavingsFilter, db: AsyncSession = Depends(ge
         saved_hours,
         saving_brl,
         is_new_vm
-    FROM iceberg.dimon.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND LOWER(COALESCE(CAST(resource_name AS VARCHAR), '')) NOT LIKE 'azure plan%'
     """
@@ -1923,7 +1923,7 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
     """
     dates_sql = """
     SELECT DISTINCT CAST(_snapshot_date AS VARCHAR) AS d
-    FROM iceberg.dimon.dest_dm_cost_snapshot_tags_automacao
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
     ORDER BY d DESC
     """
     try:
@@ -1942,7 +1942,7 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
                 st_rows = await execute(f"""
                 SELECT COUNT(*) AS total,
                        COUNT(CASE WHEN has_shutdown_auto THEN 1 END) AS with_tag
-                FROM iceberg.dimon.dest_dm_cost_snapshot_tags_automacao
+                FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
                 WHERE CAST(_snapshot_date AS VARCHAR) LIKE '{latest}%'
                 """, timeout_s=60)
                 if st_rows:
@@ -1965,12 +1965,12 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
     delta_sql = f"""
     WITH hoje AS (
         SELECT resource_id, resource_name, connection_code, has_shutdown_auto
-        FROM iceberg.dimon.dest_dm_cost_snapshot_tags_automacao
+        FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
         WHERE CAST(_snapshot_date AS VARCHAR) LIKE '{latest}%'
     ),
     ontem AS (
         SELECT resource_id, resource_name, connection_code, has_shutdown_auto
-        FROM iceberg.dimon.dest_dm_cost_snapshot_tags_automacao
+        FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
         WHERE CAST(_snapshot_date AS VARCHAR) LIKE '{previous}%'
     )
     SELECT

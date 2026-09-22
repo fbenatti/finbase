@@ -18,9 +18,9 @@ from app.services.trino_service import execute
 
 logger = logging.getLogger(__name__)
 
-# As Dimons vivem em um namespace Iceberg próprio (iceberg.dimon.*), separado
+# Os marts vivem no namespace canônico DIMON_NAMESPACE (hoje `gold`), separado
 # das Golds (iceberg.gold.*). O materializador cria/swap aqui; os dashboards e
-# a API consultam iceberg.dimon.dest_dm_cost_*.
+# a API consultam {DIMON_NAMESPACE}.dest_dm_cost_*.
 DIMON_NAMESPACE = "gold"
 
 _AI_AUXILIARY_DIMONS = {
@@ -544,7 +544,7 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
 
     staging = f"{table}_stg_{time.time_ns()}"
     period = period_physical.get((rule.sources or [])[0].gold_table) if rule.sources else None
-    # Garante que iceberg.dimon.* exista antes do CREATE (namespace próprio das Dimons).
+    # Garante que o namespace dos marts exista antes do CREATE.
     iceberg.ensure_namespace(DIMON_NAMESPACE)
     create_sql = f"CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging} AS {full_sql}"
     if period:
