@@ -146,9 +146,8 @@ export function buildDecompChain(visaoDiretoria: boolean): DecompChainItem[] {
     { field: "cloud_origem", label: "Cloud" },
     ...org,
     { field: "servicename", label: "Serviço" },
-    { field: "servicecategory", label: "Categoria" },
     { field: "servicesubcategory", label: "ServiceSubcategory" },
-    { field: "skumeter", label: "skumeter" },
+    { field: "skumeter", label: "Sub Serviço (SKU name)" },
     { field: "subaccountname", label: "Subconta" },
   ];
 }
@@ -169,9 +168,8 @@ export function buildExecutiveDecompChain(visaoDiretoria: boolean, scopedPathDep
   return [
     ...orgTail,
     { field: "servicename", label: "Serviço" },
-    { field: "servicecategory", label: "Categoria" },
     { field: "servicesubcategory", label: "ServiceSubcategory" },
-    { field: "skumeter", label: "skumeter" },
+    { field: "skumeter", label: "Sub Serviço (SKU name)" },
   ];
 }
 
@@ -228,12 +226,6 @@ export default function HierarchicalDecompTree({
     for (let i = 0; i <= treeStart; i++) {
       defs.push({ id: `spine${i}`, filters: [...baseFilters, ...pathFilters(i)], row_limit: 5 });
     }
-    // Rankings complementares do nó atual. Eles recebem exatamente os mesmos
-    // filtros do caminho escolhido na árvore (período, tipo e escopo).
-    defs.push(
-      { id: "topSubcategory", rows: ["servicesubcategory"], filters: [...baseFilters, ...pathFilters(treeStart)], row_limit: 10 },
-      { id: "topSku", rows: ["skumeter"], filters: [...baseFilters, ...pathFilters(treeStart)], row_limit: 10 },
-    );
     const load = async () => {
       const spineList = await Promise.all(
         defs.map(d => queryDimonTable({
@@ -305,8 +297,6 @@ export default function HierarchicalDecompTree({
   }, [results, treeStart, effectiveTreeIndex, chain, filterRowTypes]);
   const nextField = effectiveTreeIndex < chain.length ? chain[effectiveTreeIndex].field : null;
   const nextLabel = effectiveTreeIndex < chain.length ? chain[effectiveTreeIndex].label : null;
-  const topSubcategories = rowsOf(results.topSubcategory);
-  const topSkus = rowsOf(results.topSku);
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
   const top3Share = nodeTotal ? (treeChildren.slice(0, 3).reduce((s, x) => s + Math.abs(x.cost), 0) / Math.abs(nodeTotal)) * 100 : 0;
   const shareTotal = totalAll ? (Math.abs(nodeTotal) / Math.abs(totalAll)) * 100 : 0;
@@ -467,36 +457,8 @@ export default function HierarchicalDecompTree({
             );
           })()}
         </Box>
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.2, p: 1.6, borderTop: "1px solid", borderColor: "divider", bgcolor: "#fcfcfd" }}>
-          {[
-            { title: "Top 10 ServiceSubcategory", field: "servicesubcategory", rows: topSubcategories },
-            { title: "Top 10 SKU name", field: "skumeter", rows: topSkus },
-          ].map(({ title, field, rows }) => (
-            <Box key={field} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-              <Typography variant="caption" sx={{ display: "block", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: "#475467", mb: 0.8 }}>{title}</Typography>
-              <Stack spacing={0.55}>
-                {rows.map((row, index) => {
-                  const value = Number(row.realizado || 0);
-                  const label = String(row[field] ?? EMPTY_DIMENSION_LABEL);
-                  const share = nodeTotal ? Math.abs(value) / Math.abs(nodeTotal) * 100 : 0;
-                  return (
-                    <Box key={`${field}-${label}-${index}`} sx={{ display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", gap: 0.7, alignItems: "center" }}>
-                      <Typography variant="caption" sx={{ color: "#667085", fontWeight: 900 }}>{index + 1}</Typography>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="caption" title={label} sx={{ display: "block", fontWeight: 800, color: "#344054", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</Typography>
-                        <Box sx={{ mt: 0.25, height: 3, borderRadius: 99, bgcolor: "#eaecf0", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, share)}%`, bgcolor: "#7c3aed" }} /></Box>
-                      </Box>
-                      <Typography variant="caption" sx={{ color: "#344054", fontWeight: 950, whiteSpace: "nowrap" }}>{compact(value)}</Typography>
-                    </Box>
-                  );
-                })}
-                {!loading && rows.length === 0 && <Typography variant="caption" color="text.secondary">Sem dados no contexto atual.</Typography>}
-              </Stack>
-            </Box>
-          ))}
-        </Box>
         <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="center" flexWrap="wrap" sx={{ px: 1.6, py: 1.2, color: "#667085", fontSize: 10, fontWeight: 750 }}>
-          <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e skumeter.</Box>
+          <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e Sub Serviço (SKU name).</Box>
           <Stack direction="row" gap={1.5} alignItems="center">
             <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#7c3aed", mr: 0.6 }} />estrutura / share</Box>
             <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#dc2626", mr: 0.6 }} />MoM positivo</Box>
