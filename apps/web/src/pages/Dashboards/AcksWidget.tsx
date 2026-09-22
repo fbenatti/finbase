@@ -88,19 +88,17 @@ function DesvioRow({ item, ack, open, subcategories, loading, onToggle, onOpen }
           <Chip size="small" color="warning" label="Desvio não justificado" variant="outlined" />
         )}
       </TableCell>
-      <TableCell align="right">{money.format(Number(item.forecast_value || 0))}</TableCell>
       <TableCell align="right">{money.format(Number(item.actual_value || 0))}</TableCell>
       <TableCell align="right" sx={{ color: Number(item.variance || 0) >= 0 ? "#DC2626" : "#16A34A", fontWeight: 600 }}>
         {money.format(Number(item.variance || 0))}
       </TableCell>
     </TableRow>
     {open && <TableRow>
-      <TableCell colSpan={5} sx={{ bgcolor: "#f8fafc" }}>
+      <TableCell colSpan={4} sx={{ bgcolor: "#f8fafc" }}>
         {loading ? <Box sx={{ py: 1, display: "flex", justifyContent: "center" }}><CircularProgress size={18} /></Box> : subcategories && subcategories.length > 0 ? (
           <Table size="small">
             <TableHead><TableRow>
               <TableCell>ServiceSubcategory</TableCell>
-              <TableCell align="right">Projetado</TableCell>
               <TableCell align="right">Realizado</TableCell>
               <TableCell align="right">Delta (R$)</TableCell>
             </TableRow></TableHead>
@@ -111,7 +109,6 @@ function DesvioRow({ item, ack, open, subcategories, loading, onToggle, onOpen }
                 <IconButton size="small" aria-label={`Detalhar ${sub.subcategory}`} onClick={() => onOpen(sub.subcategory)}><Add fontSize="small" /></IconButton>
                 <Typography variant="body2">{sub.subcategory}</Typography>
               </Stack></TableCell>
-              <TableCell align="right">{money.format(Number(sub.forecast_value || 0))}</TableCell>
               <TableCell align="right">{money.format(Number(sub.actual_value || 0))}</TableCell>
               <TableCell align="right" sx={{ color: Number(sub.variance || 0) >= 0 ? "#DC2626" : "#16A34A" }}>{money.format(Number(sub.variance || 0))}</TableCell>
             </TableRow>)}</TableBody>
@@ -291,8 +288,8 @@ export default function AcksWidget({ department }: { department?: string }) {
         return getForecastAccuracyDesvios(run.run_id, month, department || undefined)
           .then(desvios => {
             if (cancelled) return;
-            setPositive(desvios.negative);
-            setNegative(desvios.positive);
+            setPositive(desvios.positive);
+            setNegative(desvios.negative);
           })
           .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
       })
@@ -321,10 +318,10 @@ export default function AcksWidget({ department }: { department?: string }) {
     try {
       const desvios = await getForecastAccuracyDesvios(runId, month, department || undefined, direction, 0);
       if (direction === "positive") {
-        setPositive(desvios.negative);
+        setPositive(desvios.positive);
         setPositiveExpanded(true);
       } else {
-        setNegative(desvios.positive);
+        setNegative(desvios.negative);
         setNegativeExpanded(true);
       }
     } catch (e) {
@@ -336,10 +333,10 @@ export default function AcksWidget({ department }: { department?: string }) {
     try {
       const desvios = await getForecastAccuracyDesvios(runId, month, department || undefined, direction, 5);
       if (direction === "positive") {
-        setPositive(desvios.negative);
+        setPositive(desvios.positive);
         setPositiveExpanded(false);
       } else {
-        setNegative(desvios.positive);
+        setNegative(desvios.negative);
         setNegativeExpanded(false);
       }
     } catch (e) {
@@ -403,7 +400,6 @@ export default function AcksWidget({ department }: { department?: string }) {
                     <TableRow>
                       <TableCell>Departamento</TableCell>
                       <TableCell>Motivo</TableCell>
-                      <TableCell align="right">Projetado</TableCell>
                       <TableCell align="right">Realizado</TableCell>
                       <TableCell align="right">Delta (R$)</TableCell>
                     </TableRow>
@@ -415,7 +411,7 @@ export default function AcksWidget({ department }: { department?: string }) {
                         subcategories={subcategories[path]} loading={subcategoriesLoading && expandedPath === path}
                         onToggle={() => void toggleSubcategories(item)} onOpen={subcategory => setSelectedDesvio({ item, subcategory })} />;
                     })}
-                    {positive.length === 0 && <TableRow><TableCell colSpan={5}>Nenhum desvio encontrado.</TableCell></TableRow>}
+                    {positive.length === 0 && <TableRow><TableCell colSpan={4}>Nenhum desvio encontrado.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -436,7 +432,6 @@ export default function AcksWidget({ department }: { department?: string }) {
                     <TableRow>
                       <TableCell>Departamento</TableCell>
                       <TableCell>Motivo</TableCell>
-                      <TableCell align="right">Projetado</TableCell>
                       <TableCell align="right">Realizado</TableCell>
                       <TableCell align="right">Delta (R$)</TableCell>
                     </TableRow>
@@ -448,7 +443,7 @@ export default function AcksWidget({ department }: { department?: string }) {
                         subcategories={subcategories[path]} loading={subcategoriesLoading && expandedPath === path}
                         onToggle={() => void toggleSubcategories(item)} onOpen={subcategory => setSelectedDesvio({ item, subcategory })} />;
                     })}
-                    {negative.length === 0 && <TableRow><TableCell colSpan={5}>Nenhum desvio encontrado.</TableCell></TableRow>}
+                    {negative.length === 0 && <TableRow><TableCell colSpan={4}>Nenhum desvio encontrado.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </TableContainer>
