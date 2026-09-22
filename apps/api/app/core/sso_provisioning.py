@@ -3,7 +3,7 @@ import logging
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -44,18 +44,23 @@ async def jit_provision_user(
       auto_create_groups; remove vínculos de grupos externos ausentes do claim.
       Vínculos manuais (grupos sem external_id) nunca são tocados.
     """
+    # IdPs não garantem a capitalização do endereço; tratar o e-mail como
+    # identificador case-insensitive evita criar uma segunda conta JIT.
+    normalized_email = email.strip().lower() if email and email.strip() else None
     user = None
     result = await db.execute(select(User).where(User.external_id == external_id))
     user = result.scalar_one_or_none()
-    if user is None and email:
-        result = await db.execute(select(User).where(User.email == email))
+    if user is None and normalized_email:
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == normalized_email)
+        )
         user = result.scalar_one_or_none()
 
     created = user is None
     if created:
         user = User(
-            username=_jit_username(email, external_id),
-            email=email,
+            username=_jit_username(normalized_email, external_id),
+            email=normalized_email,
             full_name=full_name,
             auth_provider=auth_provider,
             external_id=external_id,
@@ -65,7 +70,7 @@ async def jit_provision_user(
         db.add(user)
     else:
         user.full_name = full_name or user.full_name
-        user.email = email or user.email
+        user.email = normalized_email or user.email
         user.external_id = user.external_id or external_id
         user.is_active = True
 
