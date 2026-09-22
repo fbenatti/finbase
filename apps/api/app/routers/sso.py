@@ -137,10 +137,14 @@ async def _oidc_authorize(prov: SsoProvider, request: Request, login_hint: str |
 
     discovery, metadata = await _oidc_metadata(cfg)
     authorization_endpoint = metadata["authorization_endpoint"]
+    redirect_uri = cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback"
+    # Older provider records stored the space in the display name as %20.
+    # Decode before Authlib encodes the redirect URI again.
+    redirect_uri = urllib.parse.unquote(redirect_uri)
     client = AsyncOAuth2Client(
         client_id=cfg.get("client_id"),
         client_secret=cfg.get("client_secret"),
-        redirect_uri=cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback",
+        redirect_uri=redirect_uri,
         scope=cfg.get("scopes") or "openid profile email",
     )
     state = secrets.token_urlsafe(24)
@@ -206,10 +210,12 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
 
     from authlib.integrations.httpx_client import AsyncOAuth2Client
     discovery, metadata = await _oidc_metadata(cfg)
+    redirect_uri = cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback"
+    redirect_uri = urllib.parse.unquote(redirect_uri)
     client = AsyncOAuth2Client(
         client_id=cfg.get("client_id"),
         client_secret=cfg.get("client_secret"),
-        redirect_uri=cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback",
+        redirect_uri=redirect_uri,
     )
     token = await client.fetch_token(metadata["token_endpoint"], code=code)
 
