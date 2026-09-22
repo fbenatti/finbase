@@ -33,6 +33,8 @@ from pyiceberg.types import (
 from pyiceberg.partitioning import PartitionSpec, PartitionField
 from pyiceberg.transforms import IdentityTransform
 
+from app.services import lakehouse_layers as layers
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -223,6 +225,33 @@ def _bronze_table_id(connection_code: str) -> tuple[str, str]:
     return ("bronze", f"raw_{safe}")
 
 
+def list_bronze_slices(connection_code: str, billing_period: str) -> list[dict[str, Any]]:
+    """Enumerate physical Bronze provenance, independently of the SQL manifest.
+
+    The manifest can be stale after an interrupted import. Reprocessing must
+    still see every blob physically present in Iceberg and use its actual row
+    count as the immutable input contract.
+    """
+    try:
+        from pyiceberg.expressions import EqualTo
+        table = _get_catalog().load_table(_bronze_table_id(connection_code))
+        scan = table.scan(
+            row_filter=EqualTo("_billing_period", str(billing_period)),
+            selected_fields=("_blob_path", "_billing_period"),
+        )
+        frame = scan.to_pandas()
+        if frame.empty:
+            return []
+        return [
+            {"blob_path": str(path), "billing_period": str(billing_period), "row_count": int(n)}
+            for path, n in frame.groupby("_blob_path", dropna=False).size().items()
+            if path is not None and str(path) not in {"", "nan"}
+        ]
+    except Exception:
+        logger.exception("Failed to enumerate physical Bronze slices for %s/%s", connection_code, billing_period)
+        return []
+
+
 def _df_to_arrow(
     df: pd.DataFrame,
     column_types: Optional[dict[str, str]] = None,
@@ -388,6 +417,14 @@ def write_bronze(
     """
     if df.empty:
         return 0
+
+    # Ingestion is idempotent per source blob.  Re-running the same extraction
+    # must replace its previous snapshot instead of appending a second copy.
+    # Callers that stream a blob in chunks use a distinct merged frame before
+    # invoking this function; the delete therefore happens exactly once per
+    # logical blob.
+    if blob_path:
+        delete_bronze_slice(connection_code, blob_path=blob_path, billing_period=billing_period)
 
     table_id = _bronze_table_id(connection_code)
     table_name = f"{table_id[0]}.{table_id[1]}"
@@ -630,7 +667,7 @@ def delete_destination_slice(
     *,
     billing_period: str,
     connection_id: int,
-    namespace: str = "gold",
+    namespace: str = "silver",
 ) -> None:
     """Remove one source/month from a Gold destination table."""
     from pyiceberg.expressions import And, EqualTo
@@ -771,7 +808,10 @@ def audit_bronze_blob(
         result["error"] = f"Bronze ilegível: {exc}"
         return result
     if result["actual_rows"] == 0:
-        if allow_legitimate_empty and int(expected_rows) == 0:
+        # A manifest with zero expected rows represents an empty source
+        # snapshot. It must not block a full reconstruction merely because no
+        # physical parquet rows were written for that snapshot.
+        if int(expected_rows or 0) == 0:
             result["status"] = "PASSED"
             result["source_empty"] = True
             result["message"] = "Fonte consultada com sucesso; 0 registros"
@@ -929,7 +969,7 @@ def write_gold(df: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 # Destination tables — dynamic Iceberg tables in the gold namespace
 # ---------------------------------------------------------------------------
-def read_destination(physical_name: str, namespace: str = "gold") -> pd.DataFrame:
+def read_destination(physical_name: str, namespace: str = "silver") -> pd.DataFrame:
     """Read all data from an existing Iceberg destination table.
 
     Loads the gold.{physical_name} table and returns its contents as a pandas
@@ -961,7 +1001,7 @@ def read_destination(physical_name: str, namespace: str = "gold") -> pd.DataFram
 
 def read_destination_batches(physical_name: str, excluded_periods: set[str] | None = None,
                              excluded_connection_ids: set[int] | None = None,
-                             batch_size: int = 25_000, namespace: str = "gold"):
+                             batch_size: int = 25_000, namespace: str = "silver"):
     """Yield destination rows in bounded batches, optionally pruning partitions."""
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     tid = _table_id(namespace, safe_name)
@@ -1002,7 +1042,7 @@ def read_destination_slice_batches(
     billing_period: str,
     connection_id: int,
     batch_size: int = 50_000,
-    namespace: str = "gold",
+    namespace: str = "silver",
 ):
     """Yield one exact Gold source/month slice in bounded pandas batches."""
     safe_name = physical_name.replace("-", "_").replace(".", "_")
@@ -1037,7 +1077,7 @@ def estimate_destination_slice_rows(
     *,
     billing_period: str,
     connection_id: int,
-    namespace: str = "gold",
+    namespace: str = "silver",
 ) -> int:
     """Return the manifest-level row count for one Gold source/month slice.
 
@@ -1064,7 +1104,7 @@ def write_destination_staged(
     *,
     partition_col: str = "_billing_period",
     column_types: Optional[dict[str, str]] = None,
-    namespace: str = "gold",
+    namespace: str = "silver",
     add_tipo: bool = True,
 ) -> str:
     """Write a destination DataFrame to a temporary Iceberg table (staged).
@@ -1140,7 +1180,7 @@ def write_destination_staged(
     return temp_safe_name
 
 
-def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold",
+def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "silver",
                       known_row_count: int | None = None) -> int:
     """Replace a final table from staging without promoting its staging path.
 
@@ -1211,7 +1251,7 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
         return -1
 
 
-def cleanup_staged_table(temp_safe_name: str, namespace: str = "gold") -> None:
+def cleanup_staged_table(temp_safe_name: str, namespace: str = "silver") -> None:
     """Remove a staged temp table (rollback on failure)."""
     try:
         tid = _table_id(namespace, temp_safe_name)
@@ -1266,7 +1306,7 @@ def publish_staged_partition(
     *,
     billing_period: str,
     connection_id: int,
-    namespace: str = "gold",
+    namespace: str = "silver",
 ) -> int:
     """Atomically replace one source/month slice with files from staging.
 
@@ -1331,6 +1371,7 @@ def publish_staged_partition(
         schema_update.union_by_name(staged.schema())
     target = cat.load_table(target_id)
     target_column_names = [field.name for field in target.schema().fields]
+    target_arrow_fields = {field.name: field for field in target.schema().as_arrow()}
 
     overwrite_filter = And(
         EqualTo("_billing_period", str(billing_period)),
@@ -1348,7 +1389,19 @@ def publish_staged_partition(
             # Arrow batches preserve staging order, while the target schema
             # may have evolved by name. Reorder before the native append so
             # fields with different positions cannot be paired by position.
-            tx.append(pa.Table.from_batches([batch]).select(target_column_names))
+            # The target can also carry a legacy optional field absent from a
+            # newly rebuilt slice.  Selecting it directly used to raise
+            # ``Field <name> does not exist in schema`` after all Bronze work
+            # had completed.  Materialize such fields as nulls so the table
+            # contract remains stable while the slice is atomically replaced.
+            arrow_table = pa.Table.from_batches([batch])
+            for column_name in target_column_names:
+                if column_name not in arrow_table.column_names:
+                    arrow_table = arrow_table.append_column(
+                        column_name,
+                        pa.nulls(arrow_table.num_rows, type=target_arrow_fields[column_name].type),
+                    )
+            tx.append(arrow_table.select(target_column_names))
     tx.commit_transaction()
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
@@ -1376,7 +1429,7 @@ def append_to_staged(
     *,
     partition_col: str = "_billing_period",
     column_types: Optional[dict[str, str]] = None,
-    namespace: str = "gold",
+    namespace: str = "silver",
 ) -> None:
     """Append data to an existing staged temp table."""
     if df.empty:
@@ -1420,9 +1473,9 @@ def write_destination(
     if df.empty:
         return 0
 
-    _ensure_namespace("gold")
+    _ensure_namespace("silver")
     safe_name = physical_name.replace("-", "_").replace(".", "_")
-    tid = _table_id("gold", safe_name)
+    tid = _table_id("silver", safe_name)
 
     df = df.copy()
     if partition_col not in df.columns:
@@ -1739,9 +1792,13 @@ def planning_table_name(physical_name: str) -> str:
 
 
 def _publish_planning_dataframe(safe_name: str, df: pd.DataFrame, value_column: str) -> str:
-    _ensure_namespace("gold")
+    # Planejamento é detalhe (série mensal por dimensão), não cubo: vive na
+    # camada de detalhe. A resolução vem de lakehouse_layers para que o escritor
+    # e o merge de rateio nunca divirjam (ver merge_planning_rateio).
+    namespace = layers.detail_layer()
+    _ensure_namespace(namespace)
     arrow_table = _df_to_arrow(df, column_types={value_column: "DOUBLE"})
-    tid = ("gold", safe_name)
+    tid = (namespace, safe_name)
     cat = _get_catalog()
     try:
         cat.drop_table(tid)
@@ -1750,7 +1807,7 @@ def _publish_planning_dataframe(safe_name: str, df: pd.DataFrame, value_column: 
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     table = cat.create_table(tid, schema=pyarrow_to_schema(arrow_table.schema))
     table.append(arrow_table)
-    logger.info("Published %d planning rows to gold.%s", len(df), safe_name)
+    logger.info("Published %d planning rows to %s.%s", len(df), namespace, safe_name)
     return safe_name
 
 
@@ -1773,31 +1830,98 @@ def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: 
     return _publish_planning_dataframe(safe_name, planning, measure_name)
 
 
-def merge_planning_rateio(planning_name: str, rateio_df: pd.DataFrame, value_column: str = "realizado") -> int:
-    """Replace ``tipo='rateio'`` rows in the planning table, keeping forecast/realizado."""
+def merge_planning_rateio(
+    planning_name: str,
+    rateio_df: pd.DataFrame,
+    value_column: str = "realizado",
+    *,
+    preserve_types: tuple[str, ...] = ("realizado", "forecast"),
+) -> int:
+    """Substitui as linhas ``tipo='rateio'`` preservando realizado e forecast.
+
+    A leitura da tabela existente usa o **mesmo** resolvedor de camada da
+    publicação (``lakehouse_layers.detail_layer``). Antes disso, a publicação
+    gravava em ``silver`` e esta função lia de ``gold``: a leitura voltava vazia
+    e cada execução de rateio republicava a tabela apenas com ``tipo='rateio'``,
+    descartando silenciosamente realizado e forecast.
+
+    Se a tabela existente não puder ser lida, o merge **não** destrói o que não
+    conseguiu ler: levanta erro em vez de publicar um subconjunto.
+    """
     safe_name = planning_name.replace("-", "_").replace(".", "_")
+    namespace = layers.detail_layer()
     cat = _get_catalog()
-    tid = ("gold", safe_name)
+    tid = (namespace, safe_name)
+
+    read_error: Exception | None = None
     existing = pd.DataFrame()
     try:
         table = cat.load_table(tid)
         existing = table.scan().to_pandas()
-    except Exception:
-        existing = pd.DataFrame()
+    except Exception as exc:  # noqa: BLE001 - distinguimos "não existe" de "falhou"
+        read_error = exc
+
+    if rateio_df is None:
+        rateio_df = pd.DataFrame()
+
+    if read_error is not None and not rateio_df.empty:
+        # Tabela ausente é aceitável apenas quando não há linhas prévias a
+        # preservar; qualquer outra falha de leitura aborta o merge.
+        missing = "NoSuchTable" in type(read_error).__name__ or "does not exist" in str(read_error).lower()
+        if not missing:
+            raise RuntimeError(
+                f"Falha ao ler {namespace}.{safe_name} antes do merge de rateio; "
+                f"recusando publicar para não perder realizado/forecast: {read_error}"
+            )
+        logger.info(
+            "Planning %s.%s ainda não existe; publicando somente as linhas de rateio",
+            namespace, safe_name,
+        )
+
     if existing.empty:
         keep = existing
     elif "tipo" in existing.columns:
         keep = existing[existing["tipo"].astype(str).str.lower() != "rateio"].copy()
     else:
         keep = existing.copy()
-    if rateio_df is None:
-        rateio_df = pd.DataFrame()
+
     if keep.empty and rateio_df.empty:
         return 0
+
+    # Sem rateio novo e sem rateio anterior não há nada a fazer: republicar
+    # reescreveria a tabela inteira e poderia perder linhas se qualquer etapa
+    # da escrita falhasse.
+    if rateio_df.empty and _type_counts(existing).get("rateio", 0) == 0:
+        return 0
+
     frames = [frame for frame in (keep, rateio_df) if frame is not None and not frame.empty]
     combined = pd.concat(frames, ignore_index=True, sort=False)
+
+    # Guarda de perda de dado: um tipo preservado que existia antes não pode
+    # desaparecer do resultado por causa do merge.
+    before = _type_counts(existing)
+    after = _type_counts(combined)
+    for tipo in preserve_types:
+        if before.get(tipo, 0) > 0 and after.get(tipo, 0) == 0:
+            raise RuntimeError(
+                f"Merge de rateio descartaria tipo='{tipo}' de {namespace}.{safe_name} "
+                f"(antes={before.get(tipo, 0)} linhas, depois=0); publicação abortada"
+            )
+
     _publish_planning_dataframe(safe_name, combined, value_column)
+    logger.info(
+        "Merged rateio into %s.%s: before=%s after=%s",
+        namespace, safe_name, before, after,
+    )
     return 0 if rateio_df.empty else int(len(rateio_df))
+
+
+def _type_counts(frame: pd.DataFrame) -> dict[str, int]:
+    """Contagem de linhas por ``tipo`` (case-insensitive); vazio sem a coluna."""
+    if frame is None or frame.empty or "tipo" not in frame.columns:
+        return {}
+    counts = frame["tipo"].astype(str).str.lower().value_counts()
+    return {str(key): int(value) for key, value in counts.items()}
 
 
 def _append_or_create_table(namespace: str, table_name: str, df: pd.DataFrame, partition_col: str) -> int:

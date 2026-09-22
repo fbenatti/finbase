@@ -7,14 +7,28 @@ Não copia o plano inteiro; aponta para ele.
 Contexto desta auditoria:
 
 - Repositório: `/Users/fernandohenriquebenatti/projetos/OpenFinops`
-- Branch: `novo_dev` — HEAD `43b4d802`
-- Árvore de trabalho: **19 arquivos modificados + 4 não rastreados** (`planDataCollector.md`,
-  `apps/api/supervisor.py`, `apps/api/scripts/reset_derived_layers.py`, `.jev-finops`).
-  Alterações do usuário foram preservadas; nada foi modificado nesta etapa.
+- Branch: **`novo_dev`** (remoto `origin` = `git@github.com:fbenatti/finops-intelligence.git`)
+- Commit do P0: **`e4e78b76`** — `docs(azure-finops): add execution plan and P0 audit artifact`
+  (push `43b4d802..e4e78b76` em `novo_dev`), contendo apenas `planDataCollector.md` e este log.
+- Árvore de trabalho no momento do P0: **19 arquivos modificados + 4 não rastreados**.
+  Alterações do usuário foram preservadas; **nenhum código funcional foi alterado no P0**.
 - Ambiente vivo: PostgreSQL `localhost:5433/finops`, API `:8001`, Web `:5173`,
   Trino `:8080` (1 coordinator + 2 workers), Iceberg SQL catalog no mesmo PostgreSQL,
   warehouse em `apps/data/iceberg/`.
 - Data de referência da coleta: **2026-09-22**.
+
+### Classificação dos 19 arquivos modificados (decidida no início de P1)
+
+| Grupo | Arquivos | Destino |
+|---|---|---|
+| **Refatoração P1** (namespace Gold→Silver, Dimon→Gold) | `apps/api/app/services/iceberg_service.py`, `dimon_materialization.py`, `dimon_builder.py`, `forecast_service.py`, `shared_cost.py`, `ai_usage_dimon.py`, `apps/api/app/routers/etl.py`, `analysis.py`, `forecast.py`, `dimon.py`, `apps/api/worker.py`, `apps/web/src/pages/Analysis/Analysis.tsx`, `Reprocess/Reprocess.tsx`, `Reprocess/ReprocessDimonTab.tsx`, `Reprocess/ReprocessForecastTab.tsx` (15 arquivos) | **Preservar e concluir** em P1B–P1D |
+| **Alteração do usuário, não relacionada** (serviço `supervisor` + túnel do bastion) | `docker-compose.yml`, `infra/trino/catalog/iceberg.properties`, `scripts/keep_bastion_tunnel.sh`, `start-local.sh` (4 arquivos) | **Preservar sem tocar**; não entra em commit de P1 |
+| **Não rastreado, do usuário** | `apps/api/supervisor.py` (recovery de fila), `.jev-finops` (contém chave de API — permanece fora do git) | **Preservar sem tocar** |
+| **Não rastreado, utilitário de migração** | `apps/api/scripts/reset_derived_layers.py` (dropa Silver/Gold/Dimon/forecast, preserva Bronze) | Usar **somente** como rollback de P1D, depois do cutover validado |
+
+> Nota: `infra/trino/catalog/iceberg.properties` já está aplicado no container em execução
+> (`host.docker.internal:5433`), então o Trino lê o catálogo correto. Não é preciso reiniciar
+> o Trino por causa desse arquivo.
 
 > **Nota de versão do plano.** O plan em `planDataCollector.md` (14:50) é mais recente que a
 > cópia recebida na instrução. O plan em disco (a) move a camada detalhada de Gold para
@@ -431,7 +445,153 @@ CPU baixa com RAM insuficiente deve vetar; preço de destino ausente deve dar
 
 ---
 
-## Anexo A — queries reproduzíveis
+## 8. P1A — Conter os bugs ativos
+
+**Entrada:** decisões confirmadas do usuário; P0 fechado em `e4e78b76`.
+**Escopo:** corrigir a perda de dado do rateio e o caminho de leitura de pivô/análise.
+Explicitamente **fora** desta etapa: excluir tabelas, namespace legado ou Dimon.
+
+| # | Item pedido | Situação | Evidência |
+|---|---|---|---|
+| 1 | Snapshot/backup antes de qualquer escrita | **Feito** | §8.2 |
+| 2 | `merge_planning_rateio` lê e escreve na Silver | **Feito** | `iceberg_service.py:1827+` usa `layers.detail_layer()` |
+| 3 | Publicação preserva realizado + forecast + rateio | **Feito** | guarda `_type_counts` + 8 testes |
+| 4 | Pivô/análise lê detalhe da Silver | **Feito** | `analysis.py` sem `iceberg.gold` no caminho de detalhe |
+| 5 | Teste de regressão que falha se um tipo desaparecer | **Feito** | `tests/test_planning_rateio_preservation.py` |
+| 6 | Não excluir tabela/namespace legado | **Respeitado** | nenhuma exclusão executada |
+
+### 8.1 Causa-raiz
+
+`_publish_planning_dataframe` gravava em `silver`
+(`iceberg_service.py:1793/1795`) enquanto `merge_planning_rateio` **lia** de
+`("gold", safe_name)` (`:1831`). Como nada registrado existe em `gold`, a leitura
+voltava vazia, `keep` ficava vazio e cada execução de rateio republicava a tabela
+de planejamento **somente com `tipo='rateio'`** — apagando realizado e forecast.
+O `shared_cost` chama esse merge em toda execução (`shared_cost.py:699`).
+
+Agrava: **não existe tabela de planejamento registrada no catálogo** hoje. O
+objeto físico sobrevive em `apps/data/iceberg/gold.db/dest_modelo_focus_planning`
+(146 parquets, 79,4 MB, 291 arquivos de metadata), mas `iceberg_tables` não tem
+nenhuma linha de planning. Ou seja, o merge também não encontrava nada porque a
+tabela havia sido dropada do catálogo em uma execução anterior e a recriação
+apontou para outro diretório (`silver/…`). Ver §9 (P1C).
+
+### 8.2 Snapshot feito antes de qualquer escrita
+
+Diretório `backups/azure-finops-p1a/` (artefatos de auditoria, não versionados):
+
+- `metadata_p1a_20260922.sql` — `pg_dump` de `source_connection`,
+  `source_destination_mapping`, `destination_table`, `dimon_rule`,
+  `forecast_config`, `forecast_run` (500 KB);
+- `dimon_rule_sql_templates_20260922.json` — os 4 templates SQL persistidos
+  (ids 11, 12, 15, 16) em JSON, para rollback de P1C item 3;
+- `planning_orphan_manifest_20260922.json` — inventário dos 146 parquets com
+  `sha256` do manifesto (integridade da tabela órfã).
+
+Nenhum arquivo do warehouse foi alterado ou removido nesta etapa.
+
+### 8.3 Mudanças de código
+
+**Novo: `apps/api/app/services/lakehouse_layers.py`** — resolvedor único de
+camada. Define `BRONZE/SILVER/GOLD/FORECAST`, marca `dimon` como legado,
+normaliza `silver.db` → `silver`, e expõe `detail_layer()` / `cube_layer()`.
+É o ponto único de virada da arquitetura: `merge_planning_rateio` e
+`_publish_planning_dataframe` passam a resolver a mesma camada por construção,
+tornando a divergência impossível sem alterar um único arquivo.
+
+**`app/services/iceberg_service.py`**
+
+- importa `lakehouse_layers as layers`;
+- `_publish_planning_dataframe` resolve a camada por `layers.detail_layer()`;
+- `merge_planning_rateio` lê da mesma camada, e ganhou duas proteções:
+  - **aborta** (em vez de publicar subconjunto) quando a leitura da tabela
+    existente falha por motivo que não seja "tabela ausente";
+  - **guarda de perda**: se um `tipo` preservado existia antes e some do
+    resultado, levanta `RuntimeError` antes de publicar;
+  - não republica quando não há rateio novo nem rateio anterior.
+
+**`app/routers/analysis.py`**
+
+- `_describe_gold_schema` → `_describe_layer_schema` e
+  `_gold_from` → `_layer_from`, resolvendo `layers.detail_layer()`;
+- as 5 chamadas de `_inject_latest_period_filter("gold", …)` passam a usar a
+  camada de detalhe (é o `MAX(período)` sobre a tabela do destino);
+- staging tables (`list/describe/drop`) e `/analysis/summary` passam a apontar
+  para a camada de detalhe;
+- `_run_local_gold_query` reconhece o SQL que o próprio endpoint agora monta
+  (antes o fallback local nunca casava, porque procurava `iceberg.gold`);
+- union de pivot: o lado forecast usa a mesma camada do lado realizado.
+
+`analysis.py` ficou **sem nenhuma referência a `iceberg.gold`** no caminho de
+detalhe. Permanecem apenas: a heurística de rótulo `{"realizado","actual","gold"}`
+(aceita o nome da camada como sinônimo de "valor realizado" no gráfico) e a lista
+de namespaces do endpoint **Dimon** (`:2306`), que só sai em P1D.
+
+### 8.4 Testes
+
+Novo arquivo `apps/api/tests/test_planning_rateio_preservation.py` — 8 testes:
+
+| Teste | O que trava |
+|---|---|
+| `test_merge_reads_from_the_detail_layer` | a leitura tem de ocorrer na camada em que se publica |
+| `test_merge_preserves_realizado_forecast_and_rateio` | os três tipos sobrevivem; rateio antigo é substituído, não somado |
+| `test_merge_aborts_when_it_cannot_read_existing_rows` | falha de leitura não vira publicação parcial |
+| `test_merge_guard_blocks_dropping_a_preserved_type` | guarda explícita dispara antes de publicar |
+| `test_merge_creates_table_when_absent` | tabela ausente com rateio novo cria do zero |
+| `test_nothing_to_merge_returns_zero` | sem rateio não republica |
+| `test_empty_rateio_clears_previous_rateio_rows` | rateio vazio remove rateio anterior |
+| `test_layer_resolver_declares_silver_as_detail` | trava a arquitetura Silver= detalhe, Gold= cubo |
+
+**Os testes foram validados contra o bug**: reintroduzindo `namespace = "gold"` e
+removendo a guarda em `merge_planning_rateio`, **5 dos 8 falham** — a suíte
+realmente detecta a regressão em vez de passar por acidente.
+
+**Prova de integração no Iceberg real** (tabela de teste `p1a_selftest_planning`,
+criada e dropada no mesmo script): publicar base com realizado+forecast+rateio,
+rodar o merge com rateio novo → resultado `{realizado: 1, forecast: 1, rateio: 1}`
+com o rateio novo no valor correto. Antes da correção esse caminho produzia
+`{rateio: 1}`.
+
+**Suíte completa:** `5 failed, 337 passed` (era `5 failed, 329 passed`).
+O **conjunto de falhas é idêntico** ao baseline — nenhuma falha nova:
+
+| Falha | Natureza | Tratamento |
+|---|---|---|
+| `test_dimon_materialization.py::test_merged_dimensions_uses_analytic_default` | migração P1 | corrigir em P1D |
+| `test_dimon_materialization.py::test_preview_source_queries_gold` | migração P1 | corrigir em P1D (o SQL agora é `iceberg.silver.*`) |
+| `test_forecast_daily_drilldown.py::test_daily_drilldown_uses_original_gold_date_not_monthly_dimon` | migração P1 | corrigir em P1D |
+| `test_auth_unit.py::test_dev_defaults_safe` | **pré-existente** | documentada; `auth_enabled=False` no ambiente |
+| `test_azure_ptu_finops.py::test_license_pool_default_target_type` | **pré-existente** | documentada; importa `app.routers.ai_cost_origin`, que não existe |
+
+### 8.5 Pendências que P1A expôs (para P1C)
+
+1. **Recuperar a tabela de planejamento órfã.** O objeto físico existe
+   (`gold.db/dest_modelo_focus_planning`, 146 parquets) mas não está registrado.
+   Enquanto isso, o primeiro merge ou o próximo forecast a recria do zero,
+   começando sem o par realizado+forecast. P1C deve registrar/republicar essa
+   tabela na camada de detalhe antes de qualquer rateio rodar — usando o
+   snapshot imutável de `forecast.result_run_*` como fonte, e conferindo contra o
+   manifesto de integridade de §8.2.
+2. **Rateio não deve rodar antes disso.** `shared_cost` chama o merge direto;
+   com a guarda nova ele não destrói nada que consiga ler, mas se a tabela não
+   existe ele a cria só com rateio. O `admin` deve evitar rodar `shared_cost`
+   até o item 1 ser concluído.
+3. **Worker e API em memória.** Os processos em execução (API :8001, 2 workers)
+   carregaram os módulos antigos. Não havia task RUNNING/QUEUED no momento da
+   mudança, mas o código novo só passa a valer após reiniciar API e worker —
+   reinício a fazer no fechamento deste checkpoint, quando não houver fila.
+
+### 8.6 Rollback de P1A
+
+- Código: `git revert` do commit deste checkpoint (mudanças isoladas em
+  `lakehouse_layers.py`, `iceberg_service.py`, `analysis.py` e o teste novo).
+- Dados: **nenhuma escrita em dado real foi feita em P1A**. A tabela de teste da
+  prova de integração foi criada e dropada no mesmo script; a tabela órfã de
+  planejamento não foi tocada (manifesto com `sha256` em §8.2).
+- Configuração: `dimon_rule` e `forecast_*` não foram alterados; o `pg_dump`
+  está em `backups/azure-finops-p1a/`.
+
+
 
 ```sql
 -- Baseline FOCUS por período e origem (Trino, schema iceberg.silver)

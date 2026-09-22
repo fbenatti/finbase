@@ -38,6 +38,7 @@ from app.models.rules import Department
 from app.services.iceberg_service import list_tables, get_catalog, read_bronze
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +328,10 @@ def _local_latest_period_sync(namespace: str, table_name: str, period_col: str) 
     return None
 
 
-async def _describe_gold_schema(safe_name: str, max_retries: int | None, namespace: str = "gold") -> dict[str, str]:
+async def _describe_layer_schema(safe_name: str, max_retries: int | None, namespace: str | None = None) -> dict[str, str]:
+    # O detalhe vive na camada de detalhe (Silver). A resolução é central para
+    # não repetir o bug de ler Gold enquanto o reprocess grava Silver.
+    namespace = namespace or layers.detail_layer()
     cache_key = _schema_cache_key(namespace, safe_name)
     try:
         schema = await trino_execute(
@@ -352,14 +356,15 @@ async def _describe_gold_schema(safe_name: str, max_retries: int | None, namespa
         return columns
 
 
-async def _gold_from(
+async def _layer_from(
     db: AsyncSession,
     destination_table_id: int,
     table_name: str,
     schema: dict[str, str],
 ) -> str:
-    """Gold scan target. D-n overlay is disabled; forecast overwrites overlapping days."""
-    return f"iceberg.gold.{table_name}"
+    """Alvo de leitura de detalhe. O overlay D-n está desabilitado; o forecast
+    sobrescreve os dias sobrepostos. A camada vem do resolvedor central."""
+    return f"iceberg.{layers.detail_layer()}.{table_name}"
 
 
 # Forecast manual lives in the operational PostgreSQL database, not in
@@ -388,7 +393,7 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
-    cache_key = _schema_cache_key("gold", safe_name)
+    cache_key = _schema_cache_key(layers.detail_layer(), safe_name)
     cached = _SCHEMA_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
         return safe_name, cached[1]
@@ -399,7 +404,7 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
         task = _SCHEMA_INFLIGHT.get(cache_key)
         if task is None or task.done():
             async def _load() -> dict[str, str]:
-                return await _describe_gold_schema(safe_name, max_retries)
+                return await _describe_layer_schema(safe_name, max_retries)
 
             task = asyncio.create_task(_load())
             _SCHEMA_INFLIGHT[cache_key] = task
@@ -410,7 +415,7 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
         raise
     except Exception as exc:
         try:
-            schema = await _local_iceberg_schema("gold", safe_name)
+            schema = await _local_iceberg_schema(layers.detail_layer(), safe_name)
             _SCHEMA_CACHE[cache_key] = (time.monotonic(), schema)
             return safe_name, schema
         except HTTPException:
@@ -835,9 +840,9 @@ async def _search_pivot_table_core(
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
     effective_filters, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, filter_request.filters, trino_kwargs=trino_kwargs,
+        layers.detail_layer(), table_name, schema, filter_request.filters, trino_kwargs=trino_kwargs,
     )
-    gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
+    gold_from = await _layer_from(db, req.destination_table_id, table_name, schema)
     filter_sql = _where_clause(effective_filters)
     text_columns = [name for name, typ in schema.items() if any(token in typ.lower() for token in ("varchar", "char", "json"))]
     if not text_columns:
@@ -1203,7 +1208,7 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
         req.filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
     rows, columns, measures = _validate_pivot_request(req, schema)
     req.filters, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
+        layers.detail_layer(), table_name, schema, req.filters, trino_kwargs=trino_kwargs,
         axis_names=[*rows, *columns],
     )
     dimensions = rows + columns
@@ -1216,7 +1221,7 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
     else:
         order_by = _dimension_order_by(len(rows), len(columns))
     # A bounded aggregated result is deliberate: it protects Trino and the UI.
-    gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
+    gold_from = await _layer_from(db, req.destination_table_id, table_name, schema)
     inner_sql = f"SELECT {', '.join([*select_dims, *measure_parts])} FROM {gold_from}{where}{group_by}"
     sql = _apply_pivot_axis_limits(
         inner_sql, rows, columns, len(measures), req.row_limit, req.column_limit, order_by,
@@ -1283,7 +1288,7 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         for _table_id, safe_name, schema in sides:
             if _table_id >= 0 and not safe_name.endswith("_planning"):
                 req.filters, auto_period = await _inject_latest_period_filter(
-                    "gold", safe_name, schema, req.filters, trino_kwargs=trino_kwargs,
+                    layers.detail_layer(), safe_name, schema, req.filters, trino_kwargs=trino_kwargs,
                     axis_names=[*rows, *columns],
                 )
                 break
@@ -1367,13 +1372,9 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         if origin == "forecast" and "tipo" in schema:
             extra_filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
         filter_sql = _where_clause(extra_filters)
-        gold_from = (
-            f"iceberg.gold.{safe_name}"
-            if origin == "forecast"
-            else await _gold_from(db, _table_id, safe_name, schema)
-        )
+        layer_from = await _layer_from(db, _table_id, safe_name, schema)
         union_parts.append(
-            f"SELECT {', '.join(exprs)} FROM {gold_from}{filter_sql}"
+            f"SELECT {', '.join(exprs)} FROM {layer_from}{filter_sql}"
         )
 
     # The outer query aliases the aligned columns back to d0..dn / m0..mk and
@@ -1450,7 +1451,7 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
     filter_items, auto_period = await _inject_latest_period_filter(
-        "gold", table_name, schema, filter_items, trino_kwargs=trino_kwargs,
+        layers.detail_layer(), table_name, schema, filter_items, trino_kwargs=trino_kwargs,
     )
     where = _where_clause(filter_items)
     limit = max(1, min(req.limit, 50000))
@@ -1461,7 +1462,7 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     # 30M-row table forces Trino to materialize/sort everything before the
     # LIMIT and was killing the worker with exit 137 (OOM).
     order_by = ""
-    gold_from = await _gold_from(db, req.destination_table_id, table_name, schema)
+    gold_from = await _layer_from(db, req.destination_table_id, table_name, schema)
     sql = f"SELECT {select_expr} FROM {gold_from}{where}{order_by} OFFSET {offset} LIMIT {limit}"
     try:
         rows = await trino_execute(sql, **trino_kwargs)
@@ -1503,7 +1504,7 @@ async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, t
     auto_period: str | None = None
     if not period_in_cell:
         req.filters, auto_period = await _inject_latest_period_filter(
-            "gold", table_name, schema, req.filters, trino_kwargs=trino_kwargs,
+            layers.detail_layer(), table_name, schema, req.filters, trino_kwargs=trino_kwargs,
             axis_names=list(cell_filters),
         )
     where = _where_clause(req.filters, cell_filters)
@@ -1515,7 +1516,7 @@ async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, t
     # located by its key and limited below; sorting first can OOM the Trino
     # worker before LIMIT is applied.
     order_by = ""
-    gold_from = await _gold_from(db, table_id, table_name, schema)
+    gold_from = await _layer_from(db, table_id, table_name, schema)
     # Locate a bounded page using only the stable source key first. Selecting
     # all ~150 Gold columns while scanning a large Parquet partition makes the
     # Trino worker decode far more data than the detail page needs and was
@@ -1571,7 +1572,7 @@ def _local_drilldown_rows(table_name: str, ordered: list[str], req: PivotDrillDo
                           cell_filters: dict[str, Any], offset: int, limit: int) -> list[dict[str, Any]]:
     """Bounded local fallback when a Trino worker is restarting/OOMing."""
     from app.services import iceberg_service as iceberg
-    table = iceberg._get_catalog().load_table(iceberg._table_id("gold", table_name))
+    table = iceberg._get_catalog().load_table(iceberg._table_id(layers.detail_layer(), table_name))
     from pyiceberg.expressions import AlwaysTrue, And, EqualTo
     scan_filter = AlwaysTrue()
     partition_cols = set(_PERIOD_COLUMNS)
@@ -1834,7 +1835,7 @@ async def _expected_view_period_detail_core(
     de todos os níveis (1..7), dentro do escopo selecionado."""
     await wait_until_ready(timeout_s=20)
     table = body.dimon_table.strip().replace('"', "")
-    schema = await _describe_gold_schema(table, max_retries=2, namespace="dimon")
+    schema = await _describe_layer_schema(table, max_retries=2, namespace="dimon")
     columns = {name.lower(): name for name in schema}
     for required in ("period", "realizado", "tipo", "departamento_nivel_1"):
         if required not in columns:
@@ -1946,7 +1947,7 @@ async def _expected_view_core(
     # forecast e rateio na mesma granularidade de departamento. Uma única
     # tabela pré-agregada substitui a varredura da Gold (31M linhas) e da planning.
     actual_name = forecast_name = body.dimon_table.strip().replace('"', "")
-    dimon_schema = await _describe_gold_schema(actual_name, max_retries=2, namespace="dimon")
+    dimon_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace="dimon")
     actual_schema = forecast_schema = dimon_schema
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = actual_columns
@@ -2316,7 +2317,7 @@ async def get_staging_tables(db: AsyncSession = Depends(get_db)):
     """List generated Gold staging tables and protect active reprocesses."""
     catalog = get_catalog()
     rows: list[dict[str, Any]] = []
-    for table_name in sorted(list_tables("gold")):
+    for table_name in sorted(list_tables(layers.detail_layer())):
         parts = _staging_table_parts(str(table_name))
         if not parts:
             continue
@@ -2324,7 +2325,7 @@ async def get_staging_tables(db: AsyncSession = Depends(get_db)):
         active = await _staging_base_has_active_reprocess(db, base_name)
         row_count: int | None = None
         try:
-            table = catalog.load_table(("gold", table_name))
+            table = catalog.load_table((layers.detail_layer(), table_name))
             row_count = sum(task.file.record_count for task in table.scan().plan_files())
         except Exception as exc:
             logger.warning("Could not inspect staging table gold.%s: %s", table_name, exc)
@@ -2346,7 +2347,7 @@ async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_d
     if not parts:
         raise HTTPException(status_code=422, detail="Nome de tabela staging inválido")
     base_name, _ = parts
-    if table_name not in set(list_tables("gold")):
+    if table_name not in set(list_tables(layers.detail_layer())):
         raise HTTPException(status_code=404, detail="Tabela staging não encontrada")
     if await _staging_base_has_active_reprocess(db, base_name):
         raise HTTPException(
@@ -2355,7 +2356,7 @@ async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_d
         )
     try:
         await trino_execute(
-            f'DROP TABLE iceberg.gold.{_quote_ident(table_name)}',
+            f'DROP TABLE iceberg.{layers.detail_layer()}.{_quote_ident(table_name)}',
             timeout_s=90,
             max_retries=1,
         )
@@ -2371,7 +2372,7 @@ async def run_query(req: QueryRequest, request: Request):
 
     Examples:
       SELECT * FROM iceberg.bronze.raw_azure_4p WHERE _billing_period = '202504' LIMIT 10
-      SELECT SUM("BilledCost") AS total_billed FROM iceberg.gold.dest_modelo_focus WHERE "_billing_period" = '202504'
+      SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_modelo_focus WHERE "_billing_period" = '202504'
     """
     async with _ClientCancelScope(request) as scope:
         try:
@@ -2383,10 +2384,9 @@ async def run_query(req: QueryRequest, request: Request):
             if rows is not None:
                 columns = list(rows[0].keys()) if rows else []
                 return QueryResponse(columns=columns, rows=rows, row_count=len(rows))
-            # Gold may still be in the local PyIceberg catalog while Trino is
-            # connected through the PostgreSQL Iceberg catalog. Support the standard destination
-            # aggregations through the same local Iceberg table until the data
-            # catalog migration is complete.
+            # O detalhe pode estar no catálogo PyIceberg local enquanto o Trino
+            # lê pelo catálogo PostgreSQL. Suporta as agregações padrão do
+            # destino pela mesma tabela Iceberg local.
             rows = _run_local_gold_query(req.sql)
             if rows is None:
                 raise HTTPException(status_code=502, detail=str(e))
@@ -2403,12 +2403,12 @@ async def run_query(req: QueryRequest, request: Request):
 def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
     """Fallback for the supported Gold analysis query when Trino has no table."""
     normalized = " ".join(sql.split())
-    if not re.search(r"from\s+iceberg\.gold\.dest_modelo_focus\b", normalized, re.I):
+    if not re.search(rf"from\s+iceberg\.{layers.detail_layer()}\.dest_modelo_focus\b", normalized, re.I):
         return None
 
     generic = re.search(r"select\s+\*.*?limit\s+(\d+)", normalized, re.I)
     if generic:
-        table = get_catalog().load_table(("gold", "dest_modelo_focus"))
+        table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
         frame = table.scan().to_pandas().head(int(generic.group(1)))
         return json.loads(frame.to_json(orient="records", date_format="iso"))
 
@@ -2420,7 +2420,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
     if not match:
         # Generic FinOps aggregation used by the predefined queries.
         generic = re.search(
-            r"select\s+(.+?)\s*,\s*sum\(\s*\"?BilledCost\"?\s*\)\s+as\s+total_billed.*?count\(\s*\*\s*\).*?from\s+iceberg\.gold\.dest_modelo_focus\s+group\s+by\s+(.+?)(?:\s+order\s+by|\s+limit|$)",
+            rf"select\s+(.+?)\s*,\s*sum\(\s*\"?BilledCost\"?\s*\)\s+as\s+total_billed.*?count\(\s*\*\s*\).*?from\s+iceberg\.{layers.detail_layer()}\.dest_modelo_focus\s+group\s+by\s+(.+?)(?:\s+order\s+by|\s+limit|$)",
             normalized,
             re.I,
         )
@@ -2430,7 +2430,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
         allowed = {"departamento", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
         if not fields or any(f not in allowed for f in fields):
             return None
-        table = get_catalog().load_table(("gold", "dest_modelo_focus"))
+        table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
         needed = fields + ["BilledCost"]
         if "EffectiveCost" in normalized:
             needed.append("EffectiveCost")
@@ -2445,7 +2445,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
             grouped = grouped.join(extra)
         return json.loads(grouped.reset_index().to_json(orient="records"))
 
-    table = get_catalog().load_table(("gold", "dest_modelo_focus"))
+    table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
     frame = table.scan().select("ServiceName", "BilledCost").to_pandas()
     frame["BilledCost"] = pd.to_numeric(frame["BilledCost"], errors="coerce").fillna(0)
     result = (
@@ -2490,14 +2490,14 @@ def _run_local_bronze_star_query(sql: str, trino_error: str) -> list[dict[str, A
 async def get_summary(
     connection_code: str | None = Query(None),
     billing_period: str | None = Query(None),
-    layer: str = Query("gold", regex="^(bronze|silver|gold)$"),
+    layer: str = Query(layers.detail_layer(), regex="^(bronze|silver|gold)$"),
 ):
     """
     Return a summary of available data for analysis.
     When layer='gold', queries the active destination table.
     When layer='silver' or 'bronze', returns table row counts.
     """
-    if layer == "gold":
+    if layer == layers.detail_layer():
         where = ["1=1"]
         if connection_code:
             if connection_code.isdigit():
@@ -2516,7 +2516,7 @@ async def get_summary(
                 SUM(COALESCE("EffectiveCost", 0)) AS total_effective,
                 COUNT(DISTINCT "departamento_nivel_1") AS num_diretorias,
                 COUNT(DISTINCT "ServiceName") AS num_services
-            FROM iceberg.gold.dest_modelo_focus
+            FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
             WHERE {' AND '.join(where)}
             GROUP BY "cloud_origem", "source_connection_id", "_billing_period"
             ORDER BY "_billing_period" DESC, "cloud_origem"
@@ -2642,7 +2642,7 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
     for t in tables:
         tid, tname, phys, desc = t[0], t[1], t[2], t[3]
         safe_name = phys.replace("-", "_").replace(".", "_")
-        table_name = f"gold.{safe_name}"
+        table_name = f"silver.{safe_name}"
         row_cnt = 0
         periods: list[dict] = []
         try:
@@ -2688,11 +2688,11 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
         planning_name = f"{safe_name}_planning"
         try:
             planning_count = await trino_execute(
-                f"SELECT COUNT(*) AS cnt FROM iceberg.gold.{planning_name}"
+                f"SELECT COUNT(*) AS cnt FROM iceberg.silver.{planning_name}"
             )
             planning_rows = planning_count[0]["cnt"] if planning_count else 0
             planning_periods = await trino_execute(
-                f"SELECT period, COUNT(*) AS cnt FROM iceberg.gold.{planning_name} "
+                f"SELECT period, COUNT(*) AS cnt FROM iceberg.silver.{planning_name} "
                 "GROUP BY period ORDER BY period DESC LIMIT 20"
             )
             planning_period_list = [
@@ -2727,7 +2727,7 @@ async def query_destination_data(
     if not phys:
         raise HTTPException(status_code=404, detail="Destination table not found")
 
-    table_name = f"gold.{phys.replace('-', '_').replace('.', '_')}"
+    table_name = f"silver.{phys.replace('-', '_').replace('.', '_')}"
     safe_name = phys.replace("-", "_").replace(".", "_")
 
     # Read the record count from Iceberg metadata.  A full COUNT(*) over Gold
