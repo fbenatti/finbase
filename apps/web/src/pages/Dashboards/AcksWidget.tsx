@@ -13,6 +13,7 @@ import {
 } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+const pct = (value: number | null | undefined) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
 const prettyMonth = (month: string) => `${MONTH_NAMES[Number(month.slice(4, 6)) - 1]}/${month.slice(2, 4)}`;
@@ -104,15 +105,17 @@ function DesvioRow({ item, ack, open, subcategories, loading, onToggle, onOpen }
       <TableCell align="right" sx={{ color: Number(item.variance || 0) >= 0 ? "#DC2626" : "#16A34A", fontWeight: 600 }}>
         {money.format(Number(item.variance || 0))}
       </TableCell>
+      <TableCell align="right">{pct(item.variance_pct)}</TableCell>
     </TableRow>
     {open && <TableRow>
-      <TableCell colSpan={4} sx={{ bgcolor: "#f8fafc" }}>
+      <TableCell colSpan={5} sx={{ bgcolor: "#f8fafc" }}>
         {loading ? <Box sx={{ py: 1, display: "flex", justifyContent: "center" }}><CircularProgress size={18} /></Box> : subcategories && subcategories.length > 0 ? (
           <Table size="small">
             <TableHead><TableRow>
               <TableCell>ServiceSubcategory</TableCell>
               <TableCell align="right">Realizado</TableCell>
               <TableCell align="right">Delta (R$)</TableCell>
+              <TableCell align="right">Desvio (%)</TableCell>
             </TableRow></TableHead>
             <TableBody>{[...subcategories].sort((a, b) =>
               Number(b.variance || 0) - Number(a.variance || 0) || a.subcategory.localeCompare(b.subcategory)
@@ -123,6 +126,7 @@ function DesvioRow({ item, ack, open, subcategories, loading, onToggle, onOpen }
               </Stack></TableCell>
               <TableCell align="right">{money.format(Number(sub.actual_value || 0))}</TableCell>
               <TableCell align="right" sx={{ color: Number(sub.variance || 0) >= 0 ? "#DC2626" : "#16A34A" }}>{money.format(Number(sub.variance || 0))}</TableCell>
+              <TableCell align="right">{pct(sub.variance_pct)}</TableCell>
             </TableRow>)}</TableBody>
           </Table>
         ) : <Typography variant="body2" color="text.secondary">Sem ServiceSubcategory para este projeto.</Typography>}
@@ -415,6 +419,7 @@ export default function AcksWidget({ department }: { department?: string }) {
                       <TableCell>Motivo</TableCell>
                       <TableCell align="right">Realizado</TableCell>
                       <TableCell align="right">Delta (R$)</TableCell>
+                      <TableCell align="right">Desvio (%)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -424,7 +429,7 @@ export default function AcksWidget({ department }: { department?: string }) {
                         subcategories={subcategories[path]} loading={subcategoriesLoading && expandedPath === path}
                         onToggle={() => void toggleSubcategories(item)} onOpen={subcategory => setSelectedDesvio({ item, subcategory })} />;
                     })}
-                    {positive.length === 0 && <TableRow><TableCell colSpan={4}>Nenhum desvio encontrado.</TableCell></TableRow>}
+                    {positive.length === 0 && <TableRow><TableCell colSpan={5}>Nenhum desvio encontrado.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -447,6 +452,7 @@ export default function AcksWidget({ department }: { department?: string }) {
                       <TableCell>Motivo</TableCell>
                       <TableCell align="right">Realizado</TableCell>
                       <TableCell align="right">Delta (R$)</TableCell>
+                      <TableCell align="right">Desvio (%)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -456,7 +462,7 @@ export default function AcksWidget({ department }: { department?: string }) {
                         subcategories={subcategories[path]} loading={subcategoriesLoading && expandedPath === path}
                         onToggle={() => void toggleSubcategories(item)} onOpen={subcategory => setSelectedDesvio({ item, subcategory })} />;
                     })}
-                    {negative.length === 0 && <TableRow><TableCell colSpan={4}>Nenhum desvio encontrado.</TableCell></TableRow>}
+                    {negative.length === 0 && <TableRow><TableCell colSpan={5}>Nenhum desvio encontrado.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </TableContainer>
