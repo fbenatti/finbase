@@ -1078,7 +1078,19 @@ fatores somados:
 2. setembro ainda não tem o mês completo carregado (e as fontes manuais não
    foram atualizadas).
 
-### 13.5 Correção proposta (a confirmar)
+### 13.5 Causa confirmada (corrige a conclusão de 13.2–13.4)
+
+**A causa é operacional, não do motor.** As cargas de setembro tinham sido
+apagadas durante a fase de limpeza do Silver (a remoção em massa de
+`202609`). Com setembro incompleto na Silver, qualquer baseline que use a
+janela recente fica deprimido — e o run-rate de agosto aparece 32% acima.
+
+Fica **como está, por decisão**: o forecast se corrige sozinho quando as cargas
+de setembro forem refeitas. A observação sobre o mês parcial na janela (13.2)
+continua válida como característica do motor, mas **não é o que causou este
+caso** e não deve ser alterada sem necessidade.
+
+### 13.6 Correção proposta (descartada neste momento)
 
 Não alterar a fórmula sem decisão: mudar o baseline muda todo o forecast.
 Opções levantadas:
