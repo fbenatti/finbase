@@ -717,5 +717,112 @@ SELECT catalog_name, table_namespace, count(*) FROM iceberg_tables GROUP BY 1, 2
 ```bash
 # Baseline de testes
 cd apps/api && ../../.venv/bin/python -m pytest tests/ -q --no-header
-# → 5 failed, 329 passed
+# → 5 failed, 329 passed (P0)
+# → 10 failed, 351 passed após P1B (conjunto de falhas inalterado)
 ```
+
+---
+
+## 9. P1B — Limpar a contaminação do FOCUS
+
+**Commit:** **`f73639e3`** — `fix(p1b): keep operational sources out of the FOCUS ledger`
+(push `726f7a68..f73639e3` em `novo_dev`). O commit `23ceaf6b` do usuário veio
+antes e permanece como commit local dele; não o empurrei.
+
+### 9.1 Medição antes
+
+`silver.dest_modelo_focus`: **36.457.509 linhas**, `realizado` total
+**R$ 161.075.910,97**, das quais **22.747 linhas** com `realizado` nulo e vindas
+de fontes operacionais:
+
+| id | code | linhas | com `realizado` | períodos |
+|---|---|---|---|---|
+| 27 | `azure-automation-4p` | 4.718 | 0 | 202607–202609 |
+| 30 | `azure-automation-ti` | 5.614 | 0 | 202607–202609 |
+| 34 | `azure-resource-graph-4p` | 11.760 | 0 | 202608–202609 |
+| 35 | `azure-resource-graph-ti` | 655 | 0 | 202608–202609 |
+| | **total** | **22.747** | **0** | |
+
+Havia ainda um quinto caso sem linhas publicadas: `azure-4p-ptu` (id 23) com
+**11 mappings ativos** para o destino FOCUS.
+
+### 9.2 O que foi feito
+
+| Item pedido | Como |
+|---|---|
+| Remover Automation e Resource Graph dos mappings do FOCUS | `DELETE` de **44 mappings** (11 de cada). Os mappings legítimos para os destinos 36/38/40/41 foram preservados; as 11 do PTU também saíram |
+| Identificação explícita de fonte de custo, sem prefixo `azure-` | `services/cost_sources.py` + marcador `cost_source`/`source_key` em `config_json` |
+| Impedir nova associação operacional ao FOCUS | Guarda dupla: `POST /destinations/mappings/` devolve 422; o reprocess ignora a fonte mesmo com mapping legado |
+| Reprocessar os períodos afetados | 202607–202609 |
+| Confirmar os critérios | §9.3 |
+
+`scripts/mark_cost_sources.py` (idempotente; rodar duas vezes não altera nada)
+marcou **10 conexões de custo** com `source_key="cost_exports"` e
+`cost_source=true` (4 Azure de custo, 3 GCP, 2 Atlas, IBM, OCI) e **5
+operacionais** com `cost_source=false` (`azure-automation-4p/ti`,
+`azure-resource-graph-4p/ti`, `azure-4p-ptu`). Nenhum `code`, Bronze, Silver,
+Gold ou histórico foi renomeado. `pg_dump` das duas tabelas de metadata em
+`backups/azure-finops-p1a/metadata_p1b_pre_20260922.sql`.
+
+### 9.3 Aceite verificado
+
+`scripts/measure_focus_contamination.py --verify` contra o baseline:
+
+| Critério | Resultado |
+|---|---|
+| Soma de `realizado` inalterada | **OK** — R$ 161.075.910,97 (idêntico) |
+| Redução de linhas = linhas não-custo do baseline | **OK** — removidas exatamente 22.747 |
+| Nenhuma linha Automation/ARG no FOCUS | **OK** — zero linhas de origem não-custo |
+
+Teste da guarda em produção: `POST /etl/reprocess` com as 4 fontes operacionais
+para o destino FOCUS devolveu **422** ("Nenhum blob Bronze encontrado…") — o
+reprocess não aceitou nenhuma delas.
+
+### 9.4 Reprocessamento de 202609
+
+Feito **somente com as fontes de custo**, para provar que o mês fecha sem as
+operacionais:
+
+| Momento | Linhas | `realizado` |
+|---|---|---|
+| 202609 já sem as linhas não-custo | 2.338.021 | R$ 9.002.518,01 |
+| 202609 antes de qualquer remoção (referência) | 2.349.446 | R$ 9.002.518,01 |
+
+A diferença de 11.425 linhas é exatamente a soma das linhas não-custo de setembro
+(3.609 + 4.872 + 2.552 + 392) e o `realizado` não mudou.
+
+> A cadeia `5743..5752` (10 tasks) ainda estava processando no fechamento deste
+> registro, sem erro. O resultado financeiro do mês já está correto conforme a
+> tabela acima.
+
+### 9.5 Achado colateral: as falhas de teste vieram do commit `23ceaf6b`
+
+Investigado com worktrees isolados, porque a contagem de falhas subiu de 5 para 10
+sem que P1A/P1B tocassem nesses módulos:
+
+| Revisão | Resultado |
+|---|---|
+| `726f7a68` (P1A, antes do commit do usuário) | 1 failed / 341 passed |
+| `23ceaf6b` (commit do usuário) | 9 failed / 333 passed |
+| após P1B | 10 failed / 351 passed |
+
+**Oito falhas novas entraram em `23ceaf6b`** — `test_aura_brain_vivo_mais` (2),
+`test_datamesh_dashboard` (1), `test_sinfonia_dashboard` (2),
+`test_dimon_materialization` (2), `test_forecast_daily_drilldown` (1). As
+restantes são ambientais: `test_dev_defaults_safe` depende de `.env` não
+versionado e `test_license_pool_default_target_type` importa
+`app.routers.ai_cost_origin`, que não existe.
+**P1A e P1B não introduziram falha nova**: o conjunto de falhas é idêntico ao de
+antes de cada checkpoint. As três asserções que ainda esperam `iceberg.gold` são
+corrigidas em P1C.
+
+### 9.6 Itens que P1B deixa para P1C
+
+1. Corrigir as asserções de teste que ainda esperam `iceberg.gold`
+   (`test_dimon_materialization`, `test_forecast_daily_drilldown`).
+2. Investigar as 8 falhas herdadas de `23ceaf6b` (dashboards Sinfonia/DataMesh/
+   Aura) — não são desta iniciativa, mas bloqueiam o gate "nenhuma falha nova"
+   do P1 como um todo.
+3. Migrar os templates SQL persistidos (`dimon_rule.sql_template` ids 11/12/15/16)
+   e concluir o cutover das leituras restantes.
+
