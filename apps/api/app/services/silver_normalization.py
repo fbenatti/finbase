@@ -183,6 +183,10 @@ def materialise_metric_series(session, *, source_key: str, bronze_table: str, cl
 
     written = 0
     periods: list[str] = []
+    # `write_silver` faz append: sem apagar a fatia antes, reprocessar o mesmo
+    # mês duplicaria as linhas. A remoção é por período, então recarregar é
+    # idempotente como na Bronze.
+    _delete_silver_periods(sorted({str(p) for p in frame["_billing_period"].unique() if str(p)}))
     for period, chunk in frame.groupby("_billing_period", dropna=False):
         period_key = str(period or "")
         if not period_key:
@@ -205,6 +209,24 @@ def materialise_metric_series(session, *, source_key: str, bronze_table: str, cl
         "rows_with_value": int(frame["value"].notna().sum()),
         "rows_without_value": int(frame["value"].isna().sum()),
     }
+
+
+def _delete_silver_periods(periods: list[str]) -> None:
+    """Remove a fatia da Silver canônica antes de reescrevê-la."""
+    if not periods:
+        return
+    from app.services import iceberg_service as iceberg
+    from app.services import lakehouse_layers as layers
+
+    try:
+        table = iceberg._get_catalog().load_table((layers.SILVER, METRIC_SERIES_TABLE))
+    except Exception:
+        return
+    from pyiceberg.expressions import EqualTo, In
+
+    row_filter = In("_billing_period", periods) if len(periods) > 1 else EqualTo("_billing_period", periods[0])
+    table.delete(row_filter)
+    logger.info("Silver %s: fatia(s) %s removida(s) antes de reescrever", METRIC_SERIES_TABLE, periods)
 
 
 def _register_mapping(session, *, source_key: str, bronze_table: str) -> None:

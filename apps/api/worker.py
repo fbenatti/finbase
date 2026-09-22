@@ -1327,6 +1327,24 @@ def consumer_main(worker_id: int):
                                     _inmemory_tasks[task_id]["status"] = "FAILED"
                                     _inmemory_tasks.pop(task_id, None)
                                     continue
+                                # Bronze → Silver: a série entra na tabela canônica
+                                # `silver.resource_metric_series`, que é a mesma para
+                                # qualquer cloud com métricas equivalentes.
+                                try:
+                                    from app.services.silver_normalization import (
+                                        materialise_metric_series,
+                                    )
+                                    _silver = materialise_metric_series(
+                                        _ptu_session,
+                                        source_key=_task_source_key or "monitor_vm_metrics",
+                                        bronze_table=source_code.replace("-", "_"),
+                                    )
+                                    _mon_result["silver_rows"] = _silver.get("rows_silver", 0)
+                                    _mon_result["silver_table"] = _silver.get("silver_table")
+                                except Exception as _sv_exc:
+                                    import traceback as _tb_sv
+                                    _tb_sv.print_exc()
+                                    _mon_result["silver_error"] = str(_sv_exc)[:300]
                                 _t_mon = _ptu_session.get(EtlTask, task_id)
                                 if _t_mon:
                                     _t_mon.status = "COMPLETED"
