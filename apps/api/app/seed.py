@@ -318,7 +318,9 @@ async def _seed_ptu_cost_links(db: AsyncSession) -> None:
     db.add_all([vivo, aura])
     mapping_exists = await db.execute(select(AzurePtuProjectMapping))
     if not mapping_exists.scalars().first():
-        conn_id = await db.execute(text("SELECT id FROM source_connection WHERE code = 'azure-4p-ptu'"))
+        # Os mappings do PTU apontam para a conexão do ambiente que hospeda a
+        # fonte, não para uma conexão exclusiva de PTU (que não existe mais).
+        conn_id = await db.execute(text("SELECT id FROM source_connection WHERE code = 'azure-4p'"))
         row = conn_id.fetchone()
         if row:
             db.add_all([
@@ -333,30 +335,9 @@ async def seed(db: AsyncSession):
     if settings.skip_seed:
         return
 
-    # Operational Azure OpenAI PTU source.  It reuses the existing 4P
-    # credential profile and deliberately does not copy the client secret into
-    # the connection metadata.
-    ptu_exists = await db.execute(text("SELECT id FROM source_connection WHERE code = 'azure-4p-ptu'"))
-    if not ptu_exists.fetchone() and settings.azure_4p_tenant_id:
-        db.add(SourceConnection(
-            code="azure-4p-ptu",
-            name="Azure 4P — OpenAI PTU",
-            connector_type="azure_openai_ptu",
-            cloud_name="Azure-4P",
-            cloud_scope="azure",
-            config_json={
-                "credential_profile": "azure-4p",
-                "metric_interval": "PT1M",
-                "rollup_interval": "PT1H",
-                "lookback_hours": 3,
-                "backfill_days": 93,
-                "subscription_ids": [],
-                "account_resource_ids": [],
-            },
-            blob_prefixes=[],
-        ))
-        await db.flush()
-
+    # O PTU deixou de ser conexão própria: é uma **fonte** dentro da conexão do
+    # ambiente (`azure_connection_source`), escolhida pelo operador. Recriar
+    # `azure-4p-ptu` aqui duplicava as fontes da 4P a cada startup.
     await _seed_ptu_cost_links(db)
 
     existing = await db.execute(

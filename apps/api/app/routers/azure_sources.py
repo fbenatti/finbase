@@ -262,16 +262,22 @@ async def list_azure_sources(
         # uma conexão nova para cada fonte adicional.
         connection_selections = by_connection.get(connection.id) or []
         por_fonte = {sel.source_key: sel for sel in connection_selections}
-        if not connection_selections:
-            legacy_key = source_key_for(connection)
-            if legacy_key:
-                # Conexões antigas: a fonte de custo segue ligada por padrão.
-                por_fonte[legacy_key] = SimpleNamespace(
-                    source_key=legacy_key, enabled=True, window_days=None,
-                    metrics=None, subscription_ids=None,
-                )
-
-        catalogadas = sorted(AZURE_SOURCE_CATALOG, key=lambda e: e.get("position", 500))
+        if connection_selections:
+            # Conexão de ambiente (tem fontes escolhidas): oferece o catálogo
+            # inteiro, com o que já está ligado marcado.
+            catalogadas = sorted(AZURE_SOURCE_CATALOG, key=lambda e: e.get("position", 500))
+        else:
+            # Conexão que não escolheu nada só responde pela sua própria fonte.
+            # Oferecer o catálogo inteiro aqui duplicaria as fontes do ambiente
+            # (foi o que aconteceu com uma conexão residual de PTU).
+            primaria = source_key_for(connection)
+            catalogadas = [e for e in AZURE_SOURCE_CATALOG if e["source_key"] == primaria]
+            if not catalogadas:
+                continue
+            por_fonte[primaria] = SimpleNamespace(
+                source_key=primaria, enabled=True, window_days=None,
+                metrics=None, subscription_ids=None,
+            )
         for entry in catalogadas:
             key = entry["source_key"]
             selection = por_fonte.get(key) or SimpleNamespace(
