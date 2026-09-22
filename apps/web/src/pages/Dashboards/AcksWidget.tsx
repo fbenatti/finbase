@@ -9,7 +9,7 @@ import Plot from "@/components/Plot";
 import {
   ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvioSubcat, createForecastAck,
   getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories,
-  getForecastAccuracyMonths, getForecastAcks, updateForecastAck,
+  getForecastAccuracyMonths, getForecastAcks, updateForecastAck, getBudgetAccuracy,
 } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
@@ -290,25 +290,24 @@ export default function AcksWidget({ department }: { department?: string }) {
       .then(result => { if (!cancelled) setAcks(result.items); })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    // Top 5 positivos/negativos dos desvios do mês: os sem ack ativo são
-    // marcados como "Desvio não justificado" e aparecem junto aos justificados.
-    getForecastAccuracyMonths(undefined, department || undefined, "all")
-      .then(months => {
+    // O DataGrid de Acurácia de Orçamento usa orçamento aprovado × realizado.
+    // O widget deve usar exatamente a mesma fonte, não o forecast simulado.
+    getBudgetAccuracy(Number(month.slice(0, 4)), Number(month.slice(4, 6)), null, "monthly")
+      .then(data => {
         if (cancelled) return;
-        const run = months.find(item => item.target_month === month);
-        if (!run) {
-          if (!cancelled) setDesviosWarning(`Nenhum simulado de acurácia para ${prettyMonth(month)} — sem Top 5 de desvios.`);
-          return;
-        }
-        setRunId(run.run_id);
-        return getForecastAccuracyDesvios(run.run_id, month, department || undefined)
-          .then(desvios => {
-            if (cancelled) return;
-            const split = splitByVariance([...desvios.positive, ...desvios.negative]);
-            setPositive(split.positive);
-            setNegative(split.negative);
-          })
-          .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
+        setRunId(1);
+        const items = data.lines.map(line => ({
+          name: line.department_levels[line.department_levels.length - 1] || "",
+          path: line.department_levels,
+          forecast_value: line.budget_value,
+          actual_value: line.actual_value,
+          variance: line.variance,
+          variance_pct: line.variance_pct,
+          accuracy: null,
+        }));
+        const split = splitByVariance(items);
+        setPositive(split.positive);
+        setNegative(split.negative);
       })
       .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
