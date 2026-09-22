@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.dimon_rule import DimonRule, DimonRuleSource, VALUE_COLUMNS
 from app.services.dimon_materialization import (
+    DIMON_NAMESPACE,
     dimon_table_name,
     load_gold_schema,
     load_gold_schema_typed,

@@ -1836,7 +1836,7 @@ async def _expected_view_period_detail_core(
     de todos os níveis (1..7), dentro do escopo selecionado."""
     await wait_until_ready(timeout_s=20)
     table = body.dimon_table.strip().replace('"', "")
-    schema = await _describe_layer_schema(table, max_retries=2, namespace="dimon")
+    schema = await _describe_layer_schema(table, max_retries=2, namespace=DIMON_NAMESPACE)
     columns = {name.lower(): name for name in schema}
     for required in ("period", "realizado", "tipo", "departamento_nivel_1"):
         if required not in columns:
@@ -1948,7 +1948,7 @@ async def _expected_view_core(
     # forecast e rateio na mesma granularidade de departamento. Uma única
     # tabela pré-agregada substitui a varredura da Gold (31M linhas) e da planning.
     actual_name = forecast_name = body.dimon_table.strip().replace('"', "")
-    dimon_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace="dimon")
+    dimon_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace=DIMON_NAMESPACE)
     actual_schema = forecast_schema = dimon_schema
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = actual_columns
