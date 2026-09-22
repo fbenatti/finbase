@@ -826,3 +826,121 @@ corrigidas em P1C.
 3. Migrar os templates SQL persistidos (`dimon_rule.sql_template` ids 11/12/15/16)
    e concluir o cutover das leituras restantes.
 
+
+---
+
+## 10. P1C — Cutover de leitura e namespaces
+
+**Commit:** `34bbda92` — `fix(p1c): point remaining reads to the correct layer and centralize namespaces`
+(push `29a56d9f..4f3d627f`).
+
+### 10.1 Bug de leitura/escrita encontrado
+
+`dimon_materialization.DIMON_NAMESPACE = "gold"` (o materializador **escreve** os
+marts na Gold) enquanto `dimon.py` **lia** de `iceberg.dimon`. Os marts iam para
+um namespace e ninguém os lia — dashboards vazios. `dimon.py` passa a resolver
+por `DIMON_NAMESPACE`, e o mesmo foi feito nas constantes de IA e nos dashboards
+de projeto (sinfonia, datamesh, wisper, copilot).
+
+### 10.2 O que foi corrigido
+
+| Grupo | Tratamento |
+|---|---|
+| Detalhe (FOCUS, órfãos, inventário, planejamento, savings, IA de origem, métricas OCI) | resolvido por `lakehouse_layers.detail_layer()` em 12 arquivos |
+| Marts Dimon (consumo/licenças IA, copilot, sinfonia, datamesh, wisper) | resolvido por `DIMON_NAMESPACE` |
+| Ilha PTU (`dest_azure_ptu_*`) | **preservada de propósito**: escreve e lê na Gold de forma consistente |
+| Templates SQL persistidos | **auditados, não reescritos** (§10.3) |
+| Asserções de teste que fixavam `iceberg.gold` | passam a usar o resolvedor |
+
+### 10.3 Templates SQL persistidos: auditoria em vez de substituição cega
+
+`scripts/migrate_persisted_sql_templates.py` verifica cada
+`iceberg.<namespace>.<tabela>` dos templates contra o catálogo Iceberg, aponta
+referências divergentes e salva o SQL atual para rollback (`--dump`).
+
+Resultado: **0 divergências**.
+
+| Template | Referências | Situação |
+|---|---|---|
+| 11 `saving_desligue_vm` | `iceberg.gold._tmp_vm_monthly` | **correto** — tabela auxiliar criada pelo materializador no namespace dele |
+| 12 `snapshot_tags_automacao` | `iceberg.silver.dest_modelo_focus` | correto |
+| 15 `custo_recursos_orfaos` | `iceberg.silver.dest_cloud_orphan_resources`, `iceberg.silver.dest_modelo_focus` | correto |
+| 16 `consumo_diario_vm` | `iceberg.silver.dest_modelo_focus` | correto |
+
+Não havia reescrita a fazer. Isto é o oposto de substituição textual: uma troca
+cega de `gold`→`silver` teria quebrado o template 11, cuja tabela realmente vive
+na Gold.
+
+### 10.4 Resultado
+
+Suíte: **8 failed, 353 passed** (antes do P1C: 10 failed, 351). As duas falhas de
+migração que existiam (`test_dimon_materialization::test_preview_source_queries_gold`
+e `test_forecast_daily_drilldown`) foram corrigidas; as 8 restantes são as
+herdadas do commit `23ceaf6b`, não desta iniciativa.
+
+---
+
+## 11. P5 (antecipado) — Fonte `monitor_vm_metrics` e carga de 15 dias
+
+**Commit:** `4f3d627f` — `feat(p5): add the Azure Monitor VM metrics source with a 15-day pilot`.
+
+O P5 é a etapa do plano que cria a carga de 15 dias. Foi antecipado a pedido do
+usuário, depois de P1A/P1B/P1C, porque é uma fonte **nova com Bronze própria** e
+não depende do cutover de leitura.
+
+### 11.1 Capacidade verificada no tenant
+
+| Verificação | Resultado |
+|---|---|
+| VMs visíveis (4P) | **61** em 2 regiões (`brazilsouth`, `eastus`) e 12 subscriptions |
+| API de métricas (batch) | `HTTP 200` |
+| Clusters AKS visíveis | **46** (tiers Standard e Free) — insumo para P4 |
+| Memória guest | indisponível: exige Azure Monitor Agent/DCR; a API batch não atende guest metrics |
+
+### 11.2 Contrato da fonte
+
+`source_key = monitor_vm_metrics`; `code = azure-4p-monitor-vm` (id 37); Bronze
+exclusiva `bronze.raw_azure_4p_monitor_vm`; sem tabela compartilhada com custo,
+inventário ou AKS. Detalhes de API, batch, limites, checkpoint e idempotência no
+docstring de `app/services/azure_monitor_vm_service.py`.
+
+### 11.3 Carga real de 15 dias
+
+| Métrica | Valor |
+|---|---|
+| VMs | 61 |
+| Métricas de plataforma | 7 (CPU, rede in/out, IOPS e bytes de disco r/w) |
+| Linhas na Bronze | **615.002** (614.880 série + 122 ausência) |
+| Cobertura | **1.440 buckets por métrica** = 15 dias × 96 intervalos de 15 min |
+| Janela observada | `2026-09-07T00:00Z` → `2026-09-21T23:45Z` |
+| Requisições | 195 (batch de até 50 recursos) |
+| Duração | 164,8 s |
+| 429 / falhas | 0 / 0 |
+| Qualidade | `SERIES/OK` 614.880 · `GAP/NOT_AVAILABLE` 122 (memória guest) |
+
+### 11.4 Idempotência (critério de aceite do P5)
+
+Reexecutar a mesma janela **não duplica**. Duas execuções após a correção da
+âncora: mesmo total (615.002), **13 fatias** (não 26), caminho estável
+`monitor/<sub>/<região>/20260922T0000/15d/metrics.csv`.
+
+### 11.5 Dois defeitos encontrados e corrigidos durante a carga
+
+1. **Deadlock em `etl_task`.** O callback de progresso chamava `session.commit()`
+   a cada fatia, disputando lock com o próprio worker. Progresso agora é
+   atualizado em memória e persistido pelo worker ao final, como Automation e ARG.
+2. **Duplicação por âncora instável.** A chave da fatia incluía `now()`, então
+   duas execuções da mesma janela geravam `_blob_path` diferente e a coleta
+   **acumulava** em vez de substituir (a primeira carga rendeu 1.230.004 linhas
+   para 615.002 reportadas). Corrigido com `anchor_until` (dia cheio por padrão,
+   hora cheia opcional para coleta incremental).
+
+### 11.6 Estado e pendências
+
+- A Bronze está coletada e idempotente; a **Silver temporal** da fonte ainda não
+  existe (transformação Bronze → Silver é o próximo passo do P5).
+- A conexão está marcada `cost_source = false`: métrica não é custo e não pode
+  alimentar o FOCUS.
+- `worker.py` ganhou branch explícito para o tipo novo. Sem ele o
+  `azure_monitor_vm_metrics` cairia no `else` do `task_runner` (extrator GCP) —
+  o risco D14 do §1.2, agora fechado para este tipo.
