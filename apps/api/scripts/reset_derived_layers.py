@@ -1,7 +1,7 @@
 """Reset only derived Iceberg layers.
 
 Bronze is deliberately excluded: it is the immutable input required to rebuild
-Silver, Gold, forecast and analytical marts after a contract migration.
+Silver, Gold, forecast and analytical gold cubes after a contract migration.
 
 Usage:
   PYTHONPATH=apps/api python apps/api/scripts/reset_derived_layers.py --dry-run
@@ -15,7 +15,7 @@ import argparse
 from app.services import iceberg_service as iceberg
 
 
-DERIVED_NAMESPACES = ("silver", "gold", "dimon", "forecast")
+DERIVED_NAMESPACES = ("silver", "gold", "gold", "forecast")
 
 
 def tables_in(namespace: str) -> list[str]:

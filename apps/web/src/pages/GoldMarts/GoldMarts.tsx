@@ -1,34 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { Add, ContentCopy, Delete, Save } from "@mui/icons-material";
-import { DimonRule, DimonRuleSource, GoldTable, DimonGoldColumn, formatApiError, getDimonRules, getDimonGoldTables, getDimonGoldSchema, saveDimonRule, reprocessDimons, getDimonHistory, DimonHistoryItem, deleteDimonRule } from "../../services/api";
+import { GoldCubeRule, GoldCubeRuleSource, GoldTable, GoldColumn, formatApiError, getGoldCubeRules, getGoldTables, getGoldSchema, saveGoldCubeRule, reprocessGoldCubes, getGoldCubeHistory, GoldCubeHistoryItem, deleteGoldCubeRule } from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import SqlEditor from "../../components/SqlEditor";
 
 type Condition = { column: string; operator: string; values: string[]; logic?: "AND" | "OR" };
 const operators = ["IN", "=", "CONTAINS", "NOT_IN", "NOT_CONTAINS", "EMPTY", "NOT_EMPTY"];
-const emptySource = (): DimonRuleSource => ({ gold_tables: [], filter_json: [], value_column: "realizado", percent: 100 });
-const emptyRule = (): Partial<DimonRule> => ({ code: "", name: "", description: "", active: true, dimensions: [], measure_columns: [], sql_template: "", snapshot_mode: false, sources: [emptySource()] });
+const emptySource = (): GoldCubeRuleSource => ({ gold_tables: [], filter_json: [], value_column: "realizado", percent: 100 });
+const emptyRule = (): Partial<GoldCubeRule> => ({ code: "", name: "", description: "", active: true, dimensions: [], measure_columns: [], sql_template: "", snapshot_mode: false, sources: [emptySource()] });
 
-function conditions(source: DimonRuleSource): Condition[] {
+function conditions(source: GoldCubeRuleSource): Condition[] {
   const raw: any = source.filter_json;
   if (Array.isArray(raw)) return raw as Condition[];
   if (raw?.conditions && Array.isArray(raw.conditions)) return raw.conditions as Condition[];
   return [];
 }
 
-/** Dimon — pivot-style editor: pick Golds, choose dimensions (GROUP BY) and measures (SUM). */
-export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
+/** Gold — pivot-style editor: pick Golds, choose dimensions (GROUP BY) and measures (SUM). */
+export default function Gold({ embedded }: { embedded?: boolean } = {}) {
   const { enqueueSnackbar } = useNotifications();
-  const [rules, setRules] = useState<DimonRule[]>([]);
+  const [rules, setRules] = useState<GoldCubeRule[]>([]);
   const [tables, setTables] = useState<GoldTable[]>([]);
-  const [selected, setSelected] = useState<Partial<DimonRule>>(emptyRule());
+  const [selected, setSelected] = useState<Partial<GoldCubeRule>>(emptyRule());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<DimonHistoryItem[]>([]);
+  const [history, setHistory] = useState<GoldCubeHistoryItem[]>([]);
   // Schema of the first selected Gold, used for the pivot autocompletes.
-  const [schemaCols, setSchemaCols] = useState<DimonGoldColumn[]>([]);
+  const [schemaCols, setSchemaCols] = useState<GoldColumn[]>([]);
   const [editorMode, setEditorMode] = useState<"pivot" | "sql">("pivot");
 
   // Schema UNIFICADO de todas as Golds das fontes selecionadas (união de
@@ -47,10 +47,10 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
   useEffect(() => {
     if (!selectedGolds.length) { setSchemaCols([]); return; }
     let cancelled = false;
-    Promise.all(selectedGolds.map(gold => getDimonGoldSchema(gold).catch(() => [] as DimonGoldColumn[])))
+    Promise.all(selectedGolds.map(gold => getGoldSchema(gold).catch(() => [] as GoldColumn[])))
       .then(results => {
         if (cancelled) return;
-        const byName = new Map<string, DimonGoldColumn>();
+        const byName = new Map<string, GoldColumn>();
         results.flat().forEach(col => { if (!byName.has(col.name)) byName.set(col.name, col); });
         setSchemaCols([...byName.values()]);
       })
@@ -61,17 +61,17 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const [ruleList, tableList] = await Promise.all([getDimonRules(), getDimonGoldTables()]);
+      const [ruleList, tableList] = await Promise.all([getGoldCubeRules(), getGoldTables()]);
       setRules(ruleList); setTables(tableList);
       setSelected(current => current.id ? current : (ruleList[0] ? { ...ruleList[0] } : emptyRule()));
-      getDimonHistory().then(setHistory).catch(() => setHistory([]));
-    } catch (e) { setError(formatApiError(e, "Não foi possível carregar as Dimons")); }
+      getGoldCubeHistory().then(setHistory).catch(() => setHistory([]));
+    } catch (e) { setError(formatApiError(e, "Não foi possível carregar as cubos Gold")); }
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
 
-  const setSource = (index: number, patch: Partial<DimonRuleSource>) => {
-    const sources = [...(selected.sources || [])] as DimonRuleSource[];
+  const setSource = (index: number, patch: Partial<GoldCubeRuleSource>) => {
+    const sources = [...(selected.sources || [])] as GoldCubeRuleSource[];
     sources[index] = { ...sources[index], ...patch };
     setSelected({ ...selected, sources });
   };
@@ -80,17 +80,17 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
   const save = async () => {
     setSaving(true); setError("");
     try {
-      const saved = await saveDimonRule({ ...selected, sources: (selected.sources || []).map(s => ({ ...s, filter_json: conditions(s) })) });
+      const saved = await saveGoldCubeRule({ ...selected, sources: (selected.sources || []).map(s => ({ ...s, filter_json: conditions(s) })) });
       setSelected({ ...saved });
       await load();
-      enqueueSnackbar('Regra Dimon "' + (saved.name || saved.code || "?") + '" salva com sucesso', "success");
-    } catch (e) { setError(formatApiError(e, "Não foi possível salvar a regra Dimon")); }
+      enqueueSnackbar('Regra Gold "' + (saved.name || saved.code || "?") + '" salva com sucesso', "success");
+    } catch (e) { setError(formatApiError(e, "Não foi possível salvar a regra Gold")); }
     finally { setSaving(false); }
   };
 
   const startReprocess = async () => {
     setError("");
-    try { await reprocessDimons(selected.id ? [selected.id] : []); await load(); enqueueSnackbar("Reprocessamento Dimon enfileirado", "info"); }
+    try { await reprocessGoldCubes(selected.id ? [selected.id] : []); await load(); enqueueSnackbar("Reprocessamento Gold enfileirado", "info"); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
   };
 
@@ -100,11 +100,11 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
     if (!window.confirm('Excluir a regra "' + label + '"? A tabela física ' + (rule?.materialization_table || 'dest_dm_cost_...') + ' também será removida do Iceberg.')) return;
     setError("");
     try {
-      await deleteDimonRule(ruleId);
+      await deleteGoldCubeRule(ruleId);
       if (selected.id === ruleId) setSelected(emptyRule());
       await load();
       enqueueSnackbar('Regra "' + label + '" e tabela excluídas', "success");
-    } catch (e) { setError(formatApiError(e, "Não foi possível excluir a regra Dimon")); }
+    } catch (e) { setError(formatApiError(e, "Não foi possível excluir a regra Gold")); }
   };
 
   const cloneRule = (ruleId: number) => {
@@ -118,7 +118,7 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
     let n = 2;
     const used = new Set(rules.map(r => r.code));
     while (used.has(suggested)) { suggested = base + "-copia-" + n; n += 1; }
-    const copy: Partial<DimonRule> = {
+    const copy: Partial<GoldCubeRule> = {
       code: suggested,
       name: (rule.name || base) + " (cópia)",
       description: rule.description ?? null,
@@ -161,7 +161,7 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
   return <Box sx={{ p: embedded ? 0 : 3 }}>
     <Typography variant="h4">Cubos de custo (Gold)</Typography>
     <Typography color="text.secondary" mb={2}>Escolha as Golds de origem, defina as dimensões de agrupamento (linhas do pivot) e as medidas a somar (valores). O reprocessamento gera uma tabela pré-agregada dest_dm_cost_&lt;code&gt; — os dashboards consultam apenas essas tabelas materializadas.</Typography>
-    <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Gold(s) + filtros → dimensões (GROUP BY) + medidas (SUM) → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a tabela Dimon.</Alert>
+    <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Gold(s) + filtros → dimensões (GROUP BY) + medidas (SUM) → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a tabela Gold.</Alert>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Grid container spacing={2}>
       <Grid item xs={12} md={4}><Paper variant="outlined" sx={{ p: 2, minHeight: 460 }}>

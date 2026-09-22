@@ -62,7 +62,7 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   if (k === "shared_cost") return "Custo compartilhado";
   if (k === "forecast") return "Forecast";
   if (String(task.task_type || task.type || "") === "dimon_reprocess") {
-    return "Dimon (custo pré-agregado) #" + task.id;
+    return "Gold (custo pré-agregado) #" + task.id;
   }
   if (String(task.task_type || task.type || "") === "ai_cost_relationship_reprocess") {
     return "Relacionamentos de custo IA #" + task.id;

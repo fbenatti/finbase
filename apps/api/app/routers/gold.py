@@ -1,4 +1,4 @@
-"""Dimon portal — CRUD for pre-aggregated cost marts, preview, and reprocess."""
+"""Gold portal — CRUD for pre-aggregated cost gold cubes, preview, and reprocess."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource, VALUE_COLUMNS
 from app.services.gold_materialization import (
-    MART_NAMESPACE,
+    GOLD,
     dimon_table_name,
     load_gold_schema,
     load_gold_schema_typed,
@@ -28,19 +28,19 @@ from app.services.trino_service import execute
 logger = logging.getLogger(__name__)
 
 
-def _raise_mart_query_error(table: str, exc: Exception) -> None:
+def _raise_gold_query_error(table: str, exc: Exception) -> None:
     """Expose stable errors instead of leaking Trino protocol wording."""
     message = str(exc)
     lowered = message.lower()
     if "metadata not found" in lowered or "metadata location" in lowered:
         raise HTTPException(status_code=503, detail={
-            "code": "MART_METADATA_MISSING", "table": table,
-            "message": "A materialização do mart está indisponível e precisa ser recuperada.",
+            "code": "GOLD_METADATA_MISSING", "table": table,
+            "message": "A materialização do cubo Gold está indisponível e precisa ser recuperada.",
         }) from exc
     if "does not exist" in lowered or "not found" in lowered:
         raise HTTPException(status_code=404, detail={
-            "code": "MART_NOT_FOUND", "table": table,
-            "message": "Mart não cadastrado na Gold.",
+            "code": "GOLD_NOT_FOUND", "table": table,
+            "message": "Gold não cadastrado na Gold.",
         }) from exc
     raise HTTPException(status_code=503, detail={
         "code": "ANALYTICS_UNAVAILABLE", "table": table,
@@ -206,7 +206,7 @@ async def create_rule(data: DimonRuleCreate, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=422, detail="name é obrigatório")
     existing = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code))).scalar_one_or_none()
     if existing:
-        raise HTTPException(status_code=409, detail=f"Já existe uma regra Dimon com o code '{code}'")
+        raise HTTPException(status_code=409, detail=f"Já existe uma regra Gold com o code '{code}'")
     rule = GoldMartRule(
         code=code,
         name=data.name.strip(),
@@ -236,7 +236,7 @@ async def get_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
         select(GoldMartRule).options(selectinload(GoldMartRule.sources)).where(GoldMartRule.id == rule_id)
     )).scalar_one_or_none()
     if not rule:
-        raise HTTPException(status_code=404, detail="Regra Dimon não encontrada")
+        raise HTTPException(status_code=404, detail="Regra Gold não encontrada")
     return _rule_out(rule)
 
 
@@ -246,7 +246,7 @@ async def update_rule(rule_id: int, data: DimonRuleUpdate, db: AsyncSession = De
         select(GoldMartRule).options(selectinload(GoldMartRule.sources)).where(GoldMartRule.id == rule_id)
     )).scalar_one_or_none()
     if not rule:
-        raise HTTPException(status_code=404, detail="Regra Dimon não encontrada")
+        raise HTTPException(status_code=404, detail="Regra Gold não encontrada")
     if data.code is not None:
         code = normalize_code(data.code)
         if not code:
@@ -255,7 +255,7 @@ async def update_rule(rule_id: int, data: DimonRuleUpdate, db: AsyncSession = De
             select(GoldMartRule).where(GoldMartRule.code == code, GoldMartRule.id != rule_id)
         )).scalar_one_or_none()
         if conflict:
-            raise HTTPException(status_code=409, detail=f"Já existe uma regra Dimon com o code '{code}'")
+            raise HTTPException(status_code=409, detail=f"Já existe uma regra Gold com o code '{code}'")
         rule.code = code
     for field in ("name", "description", "active", "valid_from", "valid_until"):
         value = getattr(data, field)
@@ -286,23 +286,23 @@ async def update_rule(rule_id: int, data: DimonRuleUpdate, db: AsyncSession = De
 async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     rule = await db.get(GoldMartRule, rule_id)
     if not rule:
-        raise HTTPException(status_code=404, detail="Regra Dimon não encontrada")
+        raise HTTPException(status_code=404, detail="Regra Gold não encontrada")
     table = dimon_table_name(rule.code)
     await db.execute(delete(GoldMartRuleSource).where(GoldMartRuleSource.rule_id == rule_id))
     await db.delete(rule)
     await db.commit()
-    # Drop the physical Dimon table owned exclusively by this rule.
+    # Drop the physical Gold table owned exclusively by this rule.
     import asyncio
     from app.services import iceberg_service as iceberg
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: iceberg._force_delete_table(iceberg._table_id(MART_NAMESPACE, table), table),
+        lambda: iceberg._force_delete_table(iceberg._table_id(GOLD, table), table),
     )
 
 
 @router.delete("/tables/{table_name}", status_code=204)
 async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
-    """Drop a physical Dimon table (and its rule when one exists for the code)."""
+    """Drop a physical Gold table (and its rule when one exists for the code)."""
     import asyncio
     from app.services import iceberg_service as iceberg
 
@@ -310,7 +310,7 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Nome de tabela inválido")
     safe = table_name.strip().replace('"', "")
     if not _DIMON_TABLE_RE.fullmatch(safe):
-        raise HTTPException(status_code=400, detail="Somente tabelas Dimon podem ser removidas")
+        raise HTTPException(status_code=400, detail="Somente tabelas Gold podem ser removidas")
 
     # Remove the rule (and its sources) that owns this table, if any.
     code_guess = safe
@@ -325,16 +325,16 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
         await db.commit()
         logger.info("delete_table: removed rule #%s for %s", rule.id, safe)
 
-    # Drop only the physical Dimon table. Gold tables are managed by ETL.
+    # Drop only the physical Gold table. Gold tables are managed by ETL.
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: iceberg._force_delete_table(iceberg._table_id(MART_NAMESPACE, safe), safe),
+        lambda: iceberg._force_delete_table(iceberg._table_id(GOLD, safe), safe),
     )
 
 
 @router.get("/gold-tables")
 async def list_gold_tables():
-    """Available Gold tables a Dimon source can point at."""
+    """Available Gold tables a Gold source can point at."""
     from app.database import SyncSession
     from app.models.destination import DestinationTable
     session = SyncSession()
@@ -375,7 +375,7 @@ async def preview(body: DimonPreviewRequest):
             value_column=body.value_column,
         )
     except Exception as exc:
-        logger.exception("Dimon preview failed")
+        logger.exception("Gold preview failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 class DimonReprocessRequest(BaseModel):
@@ -383,8 +383,8 @@ class DimonReprocessRequest(BaseModel):
 
 
 @router.post("/reprocess")
-async def reprocess_dimons(body: DimonReprocessRequest, db: AsyncSession = Depends(get_db)):
-    """Queue one independent task per selected Dimon rule."""
+async def reprocess_gold_cubes(body: DimonReprocessRequest, db: AsyncSession = Depends(get_db)):
+    """Queue one independent task per selected Gold rule."""
     from datetime import datetime, timezone
     from app.models.etl_task import EtlTask
 
@@ -392,7 +392,7 @@ async def reprocess_dimons(body: DimonReprocessRequest, db: AsyncSession = Depen
     rules = await _load_rules(db, rule_ids)
     active = [rule for rule in rules if rule.active]
     if not active:
-        raise HTTPException(status_code=422, detail="Nenhuma regra Dimon ativa para materializar.")
+        raise HTTPException(status_code=422, detail="Nenhuma regra Gold ativa para materializar.")
 
     now = datetime.now(timezone.utc)
     tasks = []
@@ -405,7 +405,7 @@ async def reprocess_dimons(body: DimonReprocessRequest, db: AsyncSession = Depen
         db.add(task)
         tasks.append(task)
     await db.commit()
-    return {"task_id": tasks[0].id, "task_ids": [task.id for task in tasks], "status": "QUEUED", "message": f"{len(tasks)} Gold mart(s) colocada(s) em fila individual", "rules": len(tasks)}
+    return {"task_id": tasks[0].id, "task_ids": [task.id for task in tasks], "status": "QUEUED", "message": f"{len(tasks)} cubo(s) Gold colocada(s) em fila individual", "rules": len(tasks)}
 
 
 @router.get("/history")
@@ -422,7 +422,7 @@ async def dimon_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Leitura da Dimon para dashboards (tabelas dest_dm_cost_*)
+#  Leitura da Gold para dashboards (tabelas dest_dm_cost_*)
 # ═══════════════════════════════════════════════════════════════════════
 import re as _re
 from typing import Literal as _Literal
@@ -430,7 +430,7 @@ from typing import Literal as _Literal
 _DIMON_TABLE_RE = _re.compile(r"^dest_dm_[a-z0-9_]+$")
 _DIMON_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
 _DIMON_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
-# Aliases lógicos → colunas físicas da Dimon (ex.: "quantity" da UI = consumedquantity).
+# Aliases lógicos → colunas físicas da Gold (ex.: "quantity" da UI = consumedquantity).
 _DIMON_COLUMN_ALIASES = {"quantity": "consumedquantity"}
 
 
@@ -456,20 +456,20 @@ class DimonQueryRequest(BaseModel):
 
 
 async def _dimon_schema(table: str) -> dict[str, str]:
-    """DESCRIBE a Dimon table, validating the name against the whitelist."""
+    """DESCRIBE a Gold cube, validating the name against the whitelist."""
     if not _DIMON_TABLE_RE.match(table):
-        raise HTTPException(status_code=422, detail=f"Nome de tabela Dimon inválido: {table}")
+        raise HTTPException(status_code=422, detail=f"Nome de tabela Gold inválido: {table}")
     try:
-        rows = await execute(f"DESCRIBE iceberg.{MART_NAMESPACE}.{table}", timeout_s=30)
+        rows = await execute(f"DESCRIBE iceberg.{GOLD}.{table}", timeout_s=30)
     except Exception as exc:  # noqa: BLE001
-        _raise_mart_query_error(table, exc)
+        _raise_gold_query_error(table, exc)
     schema: dict[str, str] = {}
     for row in rows:
         name = str(row.get("Column") or row.get("column_name") or row.get("column") or "")
         if name:
             schema[name.lower()] = name
     if not schema:
-        raise HTTPException(status_code=422, detail=f"Tabela Dimon vazia/inexistente: {table}")
+        raise HTTPException(status_code=422, detail=f"Tabela Gold vazia/inexistente: {table}")
     return schema
 
 
@@ -489,7 +489,7 @@ def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]
     for item in filters or []:
         physical = _dimon_resolve(schema, item.column)
         if not physical:
-            raise HTTPException(status_code=422, detail=f"Coluna de filtro inexistente na Dimon: {item.column}")
+            raise HTTPException(status_code=422, detail=f"Coluna de filtro inexistente na Gold: {item.column}")
         operator = str(item.operator or "IN").upper()
         if operator not in _DIMON_OPERATORS:
             raise HTTPException(status_code=422, detail=f"Operador inválido: {operator}")
@@ -508,7 +508,7 @@ def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]
             likes = " AND ".join(f"{col_sql} NOT LIKE {_quote_literal('%' + v.lower() + '%')}" for v in values)
             clauses.append(f"({likes})")
         elif operator == "IS_REALIZED":
-            # A Dimon histórica possui linhas de realizado sem ``tipo`` ou
+            # A Gold histórica possui linhas de realizado sem ``tipo`` ou
             # com a coluna vazia. Esta é a mesma semântica usada pela Visão
             # Executiva; não reduza realizado a somente tipo='realizado'.
             clauses.append(
@@ -520,11 +520,11 @@ def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]
 
 
 @router.post("/query")
-async def query_dimons(body: DimonQueryRequest):
-    """Aggregate query over one Gold mart (dest_dm_cost_*) for dashboards.
+async def query_gold_cubes(body: DimonQueryRequest):
+    """Aggregate query over one Gold cube (dest_dm_cost_*) for dashboards.
 
-    Only the whitelisted Dimon measures (quantity, realizado, billedcost) can
-    be aggregated; rows must resolve to real Dimon dimension columns.
+    Only the whitelisted Gold measures (quantity, realizado, billedcost) can
+    be aggregated; rows must resolve to real Gold dimension columns.
     """
     schema = await _dimon_schema(body.table)
 
@@ -532,7 +532,7 @@ async def query_dimons(body: DimonQueryRequest):
     for name in body.rows or []:
         physical = _dimon_resolve(schema, name)
         if not physical:
-            raise HTTPException(status_code=422, detail=f"Coluna de linha inexistente na Dimon: {name}")
+            raise HTTPException(status_code=422, detail=f"Coluna de linha inexistente na Gold: {name}")
         if physical not in rows_physical:
             rows_physical.append(physical)
 
@@ -544,7 +544,7 @@ async def query_dimons(body: DimonQueryRequest):
             continue
         physical = _dimon_resolve(schema, measure.column)
         if not physical or measure.column.lower() not in _DIMON_MEASURE_COLUMNS:
-            raise HTTPException(status_code=422, detail=f"Medida não permitida na Dimon: {measure.column}")
+            raise HTTPException(status_code=422, detail=f"Medida não permitida na Gold: {measure.column}")
         label = str(measure.column).lower()
         measures.append((f"SUM(COALESCE(TRY_CAST({_quote_ident(physical)} AS DOUBLE), 0))", label))
 
@@ -568,7 +568,7 @@ async def query_dimons(body: DimonQueryRequest):
     direction = "ASC" if str(body.sort_direction or "desc").lower() == "asc" else "DESC"
 
     sql = (
-        f"SELECT {', '.join(select_parts)} FROM iceberg.{MART_NAMESPACE}.{body.table} "
+        f"SELECT {', '.join(select_parts)} FROM iceberg.{GOLD}.{body.table} "
         f"WHERE {where}"
     )
     if group_by:
@@ -578,32 +578,32 @@ async def query_dimons(body: DimonQueryRequest):
     try:
         rows = await execute(sql, timeout_s=180)
     except Exception as exc:  # noqa: BLE001
-        _raise_mart_query_error(body.table, exc)
+        _raise_gold_query_error(body.table, exc)
     columns = [*[p.lower() for p in rows_physical], *[label for _, label in measures]]
     return {"table": body.table, "columns": columns, "rows": rows, "row_count": len(rows)}
 
 
 @router.get("/info")
 async def dimon_info(table: str = "dest_dm_cost_visao_completa"):
-    """Metadata + coverage of one Dimon table: schema, rows, periods."""
+    """Metadata + coverage of one Gold table: schema, rows, periods."""
     schema = await _dimon_schema(table)
     try:
         overview = await execute(
             f"SELECT COUNT(*) AS row_count, COUNT(DISTINCT {_quote_ident(schema['_billing_period'])}) AS period_count "
-            f"FROM iceberg.{MART_NAMESPACE}.{table}",
+            f"FROM iceberg.{GOLD}.{table}",
             timeout_s=120,
         )
     except Exception as exc:  # noqa: BLE001
-        _raise_mart_query_error(table, exc)
+        _raise_gold_query_error(table, exc)
     row = overview[0] if overview else {}
     try:
         periods_rows = await execute(
             f"SELECT DISTINCT {_quote_ident(schema['_billing_period'])} AS period "
-            f"FROM iceberg.{MART_NAMESPACE}.{table} ORDER BY period DESC LIMIT 120",
+            f"FROM iceberg.{GOLD}.{table} ORDER BY period DESC LIMIT 120",
             timeout_s=60,
         )
     except Exception as exc:  # noqa: BLE001
-        _raise_mart_query_error(table, exc)
+        _raise_gold_query_error(table, exc)
     return {
         "table": table,
         "row_count": int(row.get("row_count") or 0),

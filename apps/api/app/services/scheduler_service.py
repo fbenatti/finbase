@@ -248,16 +248,16 @@ def _azure_ptu_dimon_daily_job() -> None:
     """Compacta a Gold horária depois da coleta diária para os dashboards."""
     try:
         import asyncio
-        from app.services.azure_ptu_gold import refresh_azure_ptu_dimon
+        from app.services.azure_ptu_gold import refresh_azure_ptu_gold
 
-        result = asyncio.run(refresh_azure_ptu_dimon(days=400))
-        logger.info("Azure PTU Dimon refreshed: %s", result)
+        result = asyncio.run(refresh_azure_ptu_gold(days=400))
+        logger.info("Azure PTU Gold refreshed: %s", result)
     except Exception as exc:
-        logger.warning("Azure PTU Dimon refresh failed: %s", exc, exc_info=True)
+        logger.warning("Azure PTU Gold refresh failed: %s", exc, exc_info=True)
 
 
 def _ai_usage_dimon_daily_job() -> None:
-    """Enfileira as Dimons auxiliares; a publicação pertence ao escritor Dimon."""
+    """Enfileira as cubos Gold auxiliares; a publicação pertence ao escritor Gold."""
     session = _get_sync_session()
     try:
         from app.models.gold_mart_rule import GoldMartRule
@@ -270,9 +270,9 @@ def _ai_usage_dimon_daily_job() -> None:
         rules = session.query(GoldMartRule).filter(GoldMartRule.active == True, GoldMartRule.code.in_(codes)).all()  # noqa: E712
         task = enqueue_dimons_task(session, rule_ids=[rule.id for rule in rules], source="ai_usage_daily")
         session.commit()
-        logger.info("AI usage Dimons queued in Dimon writer: task=%s rules=%d", getattr(task, "id", None), len(rules))
+        logger.info("AI usage cubos Gold queued in Gold writer: task=%s rules=%d", getattr(task, "id", None), len(rules))
     except Exception as exc:
-        logger.warning("AI usage Dimons refresh failed: %s", exc, exc_info=True)
+        logger.warning("AI usage cubos Gold refresh failed: %s", exc, exc_info=True)
         session.rollback()
     finally:
         session.close()

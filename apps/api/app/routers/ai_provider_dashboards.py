@@ -1,6 +1,6 @@
 """
 Dashboards executivo/técnico por provedor de IA (Anthropic Claude, Google NotebookLM)
-sobre as Dimons derivadas das tabelas normalizadas de consumo e licenças.
+sobre as cubos Gold derivadas das tabelas normalizadas de consumo e licenças.
 
 Estratégia: um único endpoint parametrizado por provider ("1 dash, troca o parâmetro").
 A semântica de métrica se adapta ao provider:
@@ -22,21 +22,21 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.services.ai_usage_gold import AI_CONSUMPTION_TABLE, AI_LICENSE_TABLE, refresh_ai_usage_dimons
+from app.services.ai_usage_gold import AI_CONSUMPTION_TABLE, AI_LICENSE_TABLE, refresh_ai_usage_gold_cubes
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
-from app.services.gold_materialization import MART_NAMESPACE
+from app.services.gold_materialization import GOLD
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/visoes-consumo-ia/provider", tags=["visoes-consumo-ia"])
 
-LIC_TABLE = f"iceberg.{MART_NAMESPACE}.{AI_LICENSE_TABLE}"
-CONS_TABLE = f"iceberg.{MART_NAMESPACE}.{AI_CONSUMPTION_TABLE}"
+LIC_TABLE = f"iceberg.{GOLD}.{AI_LICENSE_TABLE}"
+CONS_TABLE = f"iceberg.{GOLD}.{AI_CONSUMPTION_TABLE}"
 
 _PROVIDERS: dict[str, dict[str, str]] = {
     "anthropic": {
         "label": "Anthropic Claude",
-        # ai_usage_dimon publishes unquoted aliases, which Iceberg exposes in
+        # ai_usage_gold publishes unquoted aliases, which Iceberg exposes in
         # lowercase.  Quoted PascalCase identifiers make Trino look for a
         # different column and caused both provider dashboards to fail.
         "provider_sql": "lower(TRIM(CAST(provider AS VARCHAR))) = 'anthropic'",
@@ -53,7 +53,7 @@ _PROVIDERS: dict[str, dict[str, str]] = {
     },
 }
 
-# Cache curto: o dashboard é read-only e as Dimons são atualizadas em lote.
+# Cache curto: o dashboard é read-only e as cubos Gold são atualizadas em lote.
 _OVERVIEW_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _OVERVIEW_CACHE_TTL_S = 30.0
 
@@ -97,15 +97,15 @@ class ProviderIaRequest(BaseModel):
 
 
 @router.post("/gold/reprocess")
-async def reprocess_provider_dimons():
-    """Reconstrói as Dimons compartilhadas por Copilot, Claude e NotebookLM."""
+async def reprocess_provider_gold_cubes():
+    """Reconstrói as cubos Gold compartilhadas por Copilot, Claude e NotebookLM."""
     try:
-        result = await refresh_ai_usage_dimons()
+        result = await refresh_ai_usage_gold_cubes()
         _OVERVIEW_CACHE.clear()
         return result
     except Exception as exc:
-        logger.exception("Falha ao materializar Dimons de consumo de IA")
-        raise HTTPException(status_code=503, detail=f"Falha ao materializar Dimons de IA: {exc}") from exc
+        logger.exception("Falha ao materializar cubos Gold de consumo de IA")
+        raise HTTPException(status_code=503, detail=f"Falha ao materializar cubos Gold de IA: {exc}") from exc
 
 
 def _quote_literal(value: str | int | float | bool) -> str:

@@ -159,7 +159,7 @@ function RolesTab() {
           <FormControl size="small" sx={{ mt: 2, minWidth: 200 }}>
             <InputLabel>Adicionar módulo</InputLabel>
             <Select label="Adicionar módulo" value="" onChange={(e) => addModule(e.target.value)}>
-              {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","dimon","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"]
+              {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","gold","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"]
                 .filter((m) => !perms[m]).map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
             </Select>
           </FormControl>
@@ -350,7 +350,7 @@ function UsersTab() {
             <FormControl size="small" sx={{ minWidth: 140 }}>
               <InputLabel>Módulo</InputLabel>
               <Select label="Módulo" value={grantModule} onChange={(e) => setGrantModule(e.target.value)}>
-                {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","dimon","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"].map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+                {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","gold","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"].map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 110 }}>

@@ -291,7 +291,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
             subscriptions = item.get("scope_subscriptions") or []
             name = f"openfinops-{kind}-{code}{test_suffix}-{index}"
             if not subscriptions:
-                lines += [f"# SKIPPED {name}: no observed Dimon subscription or explicit subscription GUID for this rule.", ""]
+                lines += [f"# SKIPPED {name}: no observed Gold subscription or explicit subscription GUID for this rule.", ""]
                 continue
             exclusions = item.get("exclusions") or []
             assignment_scope = _assignment_scope(subscriptions[0], item) if subscriptions else ""

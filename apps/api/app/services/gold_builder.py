@@ -1,4 +1,4 @@
-"""Dimon agregada gerada DENTRO do reprocess (reutiliza os DataFrames em memória).
+"""Gold agregada gerada DENTRO do reprocess (reutiliza os DataFrames em memória).
 
 Ao final do reprocessamento do destino MODELO FOCUS, além de publicar a Gold,
 este módulo acumula a agregação das mesmas linhas já processadas em memória e
@@ -12,7 +12,7 @@ A publicação é feita por fatia ``(_billing_period, source_connection_id)`` co
 semântica atômica de substituição (delete + insert na mesma transação Iceberg),
 nunca sobrescrevendo fatias de outros meses/conexões. Se a publicação
 incremental falhar, um rebuild completo a partir da Gold é tentado como
-fallback para manter a Dimon consistente.
+fallback para manter a Gold consistente.
 """
 from __future__ import annotations
 
@@ -27,15 +27,15 @@ from app.services import iceberg_service as iceberg
 
 logger = logging.getLogger(__name__)
 
-# Tabela Dimon principal gerada ao final do reprocess do MODELO FOCUS.
-MART_TABLE = os.getenv("DIMON_GOLD_TABLE", "dest_dm_cost_focus")
+# Tabela Gold principal gerada ao final do reprocess do MODELO FOCUS.
+GOLD_TABLE = os.getenv("DIMON_GOLD_TABLE", "dest_dm_cost_focus")
 DIMON_GOLD_SOURCE = os.getenv("DIMON_GOLD_SOURCE", "dest_modelo_focus")
 
 # Dimensões analíticas (colunas físicas da Gold, minúsculas). A agregação usa
 # somente as dimensões presentes no frame processado — as demais entram nulas,
-# mantendo o schema estável da tabela Dimon.
+# mantendo o schema estável da tabela Gold.
 #
-# A Dimon é propositalmente MENOS granular (uma única tabela full agrupada):
+# A Gold é propositalmente MENOS granular (uma única tabela full agrupada):
 # mantém o drilldown organizacional (níveis 1..5), cloud, serviço/categoria,
 # região e tipo de carga — e descarta colunas de alta cardinalidade que
 # explodiriam a contagem de linhas (SKU, subcategoria, subconta, centro de
@@ -56,7 +56,7 @@ DIMON_DIMENSIONS: tuple[str, ...] = (
     "chargecategory",
 )
 
-# Medidas agregadas: nome na Dimon -> coluna física de origem (Gold/frame).
+# Medidas agregadas: nome na Gold -> coluna física de origem (Gold/frame).
 DIMON_MEASURES: dict[str, str] = {
     "quantity": "ConsumedQuantity",
     "realizado": "realizado",
@@ -88,7 +88,7 @@ def _lookup(frame: pd.DataFrame) -> dict[str, str]:
 
 
 def aggregate_frame(frame: pd.DataFrame) -> pd.DataFrame | None:
-    """Agrega um frame processado (contrato Gold) na granularidade da Dimon.
+    """Agrega um frame processado (contrato Gold) na granularidade da Gold.
 
     Retorna um DataFrame pequeno com todas as dimensões + medidas (colunas
     ausentes preenchidas com None) ou ``None`` quando não há nada a agregar.
@@ -129,14 +129,14 @@ def aggregate_frame(frame: pd.DataFrame) -> pd.DataFrame | None:
     return out
 
 
-def publish_marts(chunks: list[pd.DataFrame], *, table: str | None = None) -> int:
-    """Publica (ou substitui por fatia) a Dimon a partir dos chunks acumulados.
+def publish_gold_cubes(chunks: list[pd.DataFrame], *, table: str | None = None) -> int:
+    """Publica (ou substitui por fatia) a Gold a partir dos chunks acumulados.
 
     Chunks são os resultados de ``aggregate_frame`` acumulados durante o
     reprocess — concatena, agrupa novamente (por segurança) e publica.
-    Retorna o número de linhas publicadas na tabela Dimon.
+    Retorna o número de linhas publicadas na tabela Gold.
     """
-    table = (table or MART_TABLE).replace("-", "_").replace(".", "_")
+    table = (table or GOLD_TABLE).replace("-", "_").replace(".", "_")
     frames = [c for c in (chunks or []) if c is not None and not c.empty]
     if not frames:
         return 0
@@ -157,7 +157,7 @@ def publish_marts(chunks: list[pd.DataFrame], *, table: str | None = None) -> in
 
 
 def _publish_frame(table: str, frame: pd.DataFrame) -> int:
-    """Escreve o frame agregado na Dimon com publicação atômica por fatia."""
+    """Escreve o frame agregado na Gold com publicação atômica por fatia."""
     if frame.empty:
         return 0
     namespace = "gold"
@@ -211,19 +211,19 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
         iceberg.cleanup_staged_table(temp_name, namespace=namespace)
     except Exception:  # noqa: BLE001
         pass
-    logger.info("Dimon %s publicada por fatia: %d linhas", table, total)
+    logger.info("Gold %s publicada por fatia: %d linhas", table, total)
     return total
 
 
-def rebuild_marts_from_gold(*, table: str | None = None, gold: str | None = None) -> int:
-    """Fallback: reconstrói a Dimon inteira a partir da Gold via Trino.
+def rebuild_gold_cubes(*, table: str | None = None, gold: str | None = None) -> int:
+    """Fallback: reconstrói a Gold inteira a partir da Gold via Trino.
 
     Usado quando a publicação incremental falha, garantindo consistência sem
     depender dos chunks em memória. Retorna o número de linhas escritas.
     """
     from app.services.trino_service import execute_sync
 
-    table = (table or MART_TABLE).replace("-", "_").replace(".", "_")
+    table = (table or GOLD_TABLE).replace("-", "_").replace(".", "_")
     gold = (gold or DIMON_GOLD_SOURCE).replace("-", "_").replace(".", "_")
 
     schema_rows = execute_sync(f"DESCRIBE iceberg.silver.{gold}", timeout_s=60)
@@ -231,7 +231,7 @@ def rebuild_marts_from_gold(*, table: str | None = None, gold: str | None = None
     dims = [d for d in DIMON_DIMENSIONS if d in schema]
     if not dims:
         raise RuntimeError(
-            f"Nenhuma dimensão Dimon encontrada na Gold {gold} — rebuild impossível"
+            f"Nenhuma dimensão Gold encontrada na Gold {gold} — rebuild impossível"
         )
 
     select_dims = ", ".join(dims)
@@ -242,7 +242,7 @@ def rebuild_marts_from_gold(*, table: str | None = None, gold: str | None = None
         if source.lower() in schema
     )
     if not sums:
-        raise RuntimeError(f"Nenhuma medida Dimon encontrada na Gold {gold}")
+        raise RuntimeError(f"Nenhuma medida Gold encontrada na Gold {gold}")
 
     staging = f"{table}_stg_{time.time_ns()}"
     create_sql = (
@@ -251,7 +251,7 @@ def rebuild_marts_from_gold(*, table: str | None = None, gold: str | None = None
         f"SELECT {select_dims}, {sums} FROM iceberg.silver.{gold} "
         f"GROUP BY {group_by}"
     )
-    logger.info("Rebuild Dimon %s a partir de %s", table, gold)
+    logger.info("Rebuild Gold %s a partir de %s", table, gold)
     execute_sync(create_sql, timeout_s=3600)
     try:
         result = execute_sync(f"SELECT COUNT(*) AS row_count FROM iceberg.gold.{staging}", timeout_s=180)

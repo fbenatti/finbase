@@ -69,7 +69,7 @@ export async function getAzurePtuView(
   return data;
 }
 
-/** Dashboard executivo de custo de Aura Brain ou Vivo Mais, usando a Dimon específica de cada projeto. */
+/** Dashboard executivo de custo de Aura Brain ou Vivo Mais, usando a Gold específica de cada projeto. */
 export async function getProjectCostDashboard(
   params: {
     project_key: "aura-brain" | "vivo-mais";
@@ -458,7 +458,7 @@ async function cachedAnalytics<T>(key: string, loader: () => Promise<T>): Promis
   return data;
 }
 
-/** Invalidate executive-view results after a Gold/Dimon mutation. */
+/** Invalidate executive-view results after a Gold/Gold mutation. */
 export function purgeExpectedViewCache(): void {
   expectedViewCache.clear();
   analyticsCache.clear();
@@ -1224,7 +1224,7 @@ export async function reprocessDest(body: {
   connection_ids: number[];
   billing_periods?: string[];
   replace_existing?: boolean;
-  chain_dimons?: { enabled: boolean; rule_ids: number[] };
+  chain_gold_cubes?: { enabled: boolean; rule_ids: number[] };
 }): Promise<{
   task_id: number;
   task_ids?: number[];
@@ -3462,7 +3462,6 @@ export interface TrinoTableList {
   bronze: string[];
   silver: string[];
   gold: string[];
-  dimon: string[];
 }
 
 export interface TrinoQueryResult {
@@ -4469,8 +4468,8 @@ export async function getAICopilotUserModelDetails(
   return data;
 }
 
-// ── Dimon (pre-aggregated cost mart) ──
-export interface DimonRuleSource {
+// ── Cubos Gold (pré-agregação de custo) ──
+export interface GoldCubeRuleSource {
   id?: number;
   gold_table?: string | null;
   gold_tables?: string[];
@@ -4479,7 +4478,7 @@ export interface DimonRuleSource {
   percent: number;
 }
 
-export interface DimonRule {
+export interface GoldCubeRule {
   id?: number;
   code: string;
   name: string;
@@ -4501,7 +4500,7 @@ export interface DimonRule {
   materialization_rows?: number | null;
   materialized_at?: string | null;
   materialization_error?: string | null;
-  sources?: DimonRuleSource[];
+  sources?: GoldCubeRuleSource[];
 }
 
 export interface GoldTable {
@@ -4510,7 +4509,7 @@ export interface GoldTable {
   physical_name: string;
 }
 
-export interface DimonHistoryItem {
+export interface GoldCubeHistoryItem {
   id: number;
   status: string;
   phase?: string;
@@ -4521,14 +4520,14 @@ export interface DimonHistoryItem {
   };
 }
 
-export async function getDimonRules(): Promise<DimonRule[]> {
+export async function getGoldCubeRules(): Promise<GoldCubeRule[]> {
   const { data } = await api.get("/gold/rules");
   return data;
 }
 
-export async function saveDimonRule(
-  rule: Partial<DimonRule>,
-): Promise<DimonRule> {
+export async function saveGoldCubeRule(
+  rule: Partial<GoldCubeRule>,
+): Promise<GoldCubeRule> {
   const body = {
     code: rule.code,
     name: rule.name,
@@ -4567,12 +4566,12 @@ export async function saveDimonRule(
   return data;
 }
 
-export async function getDimonGoldTables(): Promise<GoldTable[]> {
+export async function getGoldTables(): Promise<GoldTable[]> {
   const { data } = await api.get("/gold/gold-tables");
   return data.tables || [];
 }
 
-export async function deleteDimonRule(ruleId: number): Promise<void> {
+export async function deleteGoldCubeRule(ruleId: number): Promise<void> {
   await api.delete("/gold/rules/" + ruleId);
   purgeExpectedViewCache();
 }
@@ -4582,7 +4581,7 @@ export async function deleteDimonTable(tableName: string): Promise<void> {
   purgeExpectedViewCache();
 }
 
-export async function reprocessDimons(
+export async function reprocessGoldCubes(
   ruleIds: number[] = [],
 ): Promise<{
   task_id: number;
@@ -4595,12 +4594,12 @@ export async function reprocessDimons(
   return data;
 }
 
-export async function getDimonHistory(): Promise<DimonHistoryItem[]> {
+export async function getGoldCubeHistory(): Promise<GoldCubeHistoryItem[]> {
   const { data } = await api.get("/gold/history");
   return data;
 }
 
-// ── Dimon — leitura para dashboards (tabelas dest_dm_cost_*) ──
+// ── Gold — leitura para dashboards (tabelas dest_dm_cost_*) ──
 export interface DimonQueryMeasure {
   column: string;
   aggregation?: "SUM" | "COUNT";
@@ -4638,7 +4637,7 @@ export async function queryDimonTable(body: {
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
 }): Promise<DimonQueryResult> {
-  const key = `dimon-query:${JSON.stringify(body)}`;
+  const key = `gold-query:${JSON.stringify(body)}`;
   return cachedAnalytics(key, async () => {
     const { data } = await api.post("/gold/query", body, { timeout: 180000 });
     return data as DimonQueryResult;
@@ -4646,25 +4645,25 @@ export async function queryDimonTable(body: {
 }
 
 export async function getDimonInfo(table: string): Promise<DimonInfo> {
-  return cachedAnalytics(`dimon-info:${table}`, async () => {
+  return cachedAnalytics(`gold-info:${table}`, async () => {
     const { data } = await api.get("/gold/info", { params: { table } });
     return data as DimonInfo;
   });
 }
 
-export interface DimonGoldColumn {
+export interface GoldColumn {
   name: string;
   type: string;
 }
 
-export async function getDimonGoldSchema(
+export async function getGoldSchema(
   goldTable: string,
-): Promise<DimonGoldColumn[]> {
+): Promise<GoldColumn[]> {
   return cachedAnalytics(`gold-schema:${goldTable}`, async () => {
     const { data } = await api.get("/gold/gold-schema", {
       params: { gold_table: goldTable },
     });
-    return (data.columns || []) as DimonGoldColumn[];
+    return (data.columns || []) as GoldColumn[];
   });
 }
 

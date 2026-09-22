@@ -295,7 +295,7 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
       const m: Record<string, DimonQueryResult | null> = {};
       defs.forEach((d, i) => { m[d.id] = list[i]; });
       setResults(m);
-    }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a Dimon")); })
+    }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a Gold")); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -539,7 +539,7 @@ export default function GoldDashboard() {
   // ── carrega tabelas disponíveis (namespace gold) ──
   useEffect(() => {
     getAnalysisTables().then(t => {
-      const dimonTables = t.dimon || [];
+      const dimonTables = t.gold || [];
       setAvailableTables(dimonTables);
       if (dimonTables.length && !dimonTables.includes(table)) setTable(dimonTables.includes(DEFAULT_TABLE) ? DEFAULT_TABLE : dimonTables[0]);
     }).catch(() => setAvailableTables([]));
@@ -550,7 +550,7 @@ export default function GoldDashboard() {
     let alive = true;
     setInfo(null);
     getDimonInfo(table).then(i => { if (alive) { setInfo(i); setMonthsAll(i.periods || []); } })
-      .catch(e => { if (alive) setError(formatApiError(e, "Falha ao carregar info da Dimon")); });
+      .catch(e => { if (alive) setError(formatApiError(e, "Falha ao carregar info da Gold")); });
     return () => { alive = false; };
   }, [table]);
 
@@ -744,7 +744,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
       `Top cloud: ${topCloud ? esc(topCloud.cloud_origem) : "—"} · Top serviço: ${topServico ? esc(topServico.servicename) : "—"}`,
       `Health Score: ${health}/100 (${healthStatus.label}).`,
       "",
-      "Gerado automaticamente pelo Dashboard FinOps (Dimon).",
+      "Gerado automaticamente pelo Dashboard FinOps (Gold).",
     ].join("\n");
   }, [total, mensal, mom, topDir, topCloud, topServico, top5Share, health, healthStatus, filters.months, latest, dirField, dirLabel]);
 
@@ -754,14 +754,14 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado (BRL)" value={money(total.realizado)} sub="Soma da medida realizado" color={PURPLE} full={moneyFull(total.realizado)} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Billed Cost (USD)" value={money(total.billedcost, "USD")} sub="Moeda de billing" color={ORANGE} full={moneyFull(total.billedcost, "USD")} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Quantidade" value={num(total.quantity)} sub="Soma de ConsumedQuantity" color={BLUE} full={total.quantity.toLocaleString("pt-BR")} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Linhas agregadas" value={num(total.count)} sub="Registros da Dimon" color={GREEN} full={total.count.toLocaleString("pt-BR")} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Linhas agregadas" value={num(total.count)} sub="Registros da Gold" color={GREEN} full={total.count.toLocaleString("pt-BR")} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Health Score" value={`${health}/100`} sub={healthStatus.label} color={healthStatus.color} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="MoM último mês" value={mom === null ? "—" : `${mom >= 0 ? "+" : ""}${pct(mom)}`} sub={latest ? monthLabel(latest.month) : "sem histórico"} color={mom !== null && mom > 10 ? RED : GREEN} /></Grid>
       </Grid>
 
       <Grid container spacing={1.5}>
         <Grid item xs={12} md={7}>
-          <ChartCard title="Evolução mensal — Realizado vs Billed Cost" note="Valores somados da Dimon para o escopo filtrado.">
+          <ChartCard title="Evolução mensal — Realizado vs Billed Cost" note="Valores somados da Gold para o escopo filtrado.">
             <Chart
               data={[
                 { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Realizado (BRL)", marker: { color: PURPLE } },
@@ -1274,7 +1274,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // Comparator e Decomposição hierárquica encadeada.
 // ═══════════════════════════════════════════════════════════════════
 
-// Dimensões disponíveis para os widgets de decisão (colunas válidas da Dimon).
+// Dimensões disponíveis para os widgets de decisão (colunas válidas da Gold).
 const DECISAO_DIMS_BASE: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
   { field: "departamento_nivel_3", label: "Plataforma" },

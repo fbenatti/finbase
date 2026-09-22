@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inline Dimon materialization with the centro_custo dimension.
+"""Inline Gold materialization with the centro_custo dimension.
 
 Runs the same pipeline the worker executes for dimon_reprocess tasks, but in
 this process (so module reload is not required). Creates its own EtlTask row
@@ -26,11 +26,11 @@ from app.models.fact_cost import FactCost  # noqa: E402
 from app.models.period_status import PeriodStatus  # noqa: E402
 from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun  # noqa: E402
 from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource  # noqa: E402
-from app.services.gold_materialization import materialize_dimons  # noqa: E402
+from app.services.gold_materialization import materialize_gold_cubes  # noqa: E402
 
 s = SyncSession()
 task = EtlTask(task_type="dimon_reprocess", status="RUNNING", errors=[])
-task.phase = "Inline: materializando Dimons com centro_custo"
+task.phase = "Inline: materializando cubos Gold com centro_custo"
 task.started_at = datetime.now(timezone.utc)
 s.add(task)
 s.flush()
@@ -50,13 +50,13 @@ def progress(done, total, name):
 
 
 try:
-    result = asyncio.run(materialize_dimons(s, run_id=task_id, progress=progress))
+    result = asyncio.run(materialize_gold_cubes(s, run_id=task_id, progress=progress))
     failed = list(result.get("failed") or [])
     rows = int(result.get("rows") or 0)
     cur = s.get(EtlTask, task_id)
     if cur:
         cur.status = "COMPLETED" if not failed or rows else "FAILED"
-        cur.phase = f"Dimon publicada: {rows} linhas" + (f" · {len(failed)} regra(s) com erro" if failed else "")
+        cur.phase = f"Gold publicada: {rows} linhas" + (f" · {len(failed)} regra(s) com erro" if failed else "")
         cur.rows_destination = rows
         cur.processed_blobs = int(result.get("rules") or 0)
         cur.errors = [f.get("error", "") for f in failed] or None

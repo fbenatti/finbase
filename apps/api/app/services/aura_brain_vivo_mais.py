@@ -1,6 +1,6 @@
 """Dashboard executivo de custo dos projetos Aura Brain e Vivo Mais.
 
-Lê as Dimons pré-agregadas de Aura Brain e Vivo Mais e decompõe o custo de
+Lê as cubos Gold pré-agregadas de Aura Brain e Vivo Mais e decompõe o custo de
 cada projeto em
 classes executivas:
 
@@ -34,16 +34,16 @@ import time
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
-from app.services.gold_materialization import MART_NAMESPACE
+from app.services.gold_materialization import GOLD
 from app.services.azure_ptu_gold import (
-    MART_TABLE as PTU_DIMON_TABLE,
+    GOLD_TABLE as PTU_DIMON_TABLE,
     load_project_token_totals,
     load_project_tokens_last_30d,
 )
 
 logger = logging.getLogger(__name__)
 
-MART_NAMESPACE = f"iceberg.{__import__('app.services.gold_materialization', fromlist=['MART_NAMESPACE']).MART_NAMESPACE}"
+GOLD = f"iceberg.{__import__('app.services.gold_materialization', fromlist=['GOLD']).GOLD}"
 PROJECT_LABELS = {"aura-brain": "Aura Brain", "vivo-mais": "Vivo Mais"}
 PROJECTS = ("Aura Brain", "Vivo Mais")
 PROJECT_SOURCES = {
@@ -91,7 +91,7 @@ def _ia_family_sql() -> str:
     )
     return f"CASE {clauses} ELSE NULL END"
 
-# Classificação executiva por linha da Dimon. Ordem importa:
+# Classificação executiva por linha da Gold. Ordem importa:
 # 1) compra/reserva de capacidade (Purchase/Refund/Return da reserva Foundry /
 #    Microsoft.Capacity) — pode vir com meter "Provisioned Managed*";
 # 2) consumo diário/horário (Provisioned Managed*, 1/Hour) -> EXCLUÍDO;
@@ -126,7 +126,7 @@ COST_CLASS_LABELS = {
     "infra": "Infraestrutura",
 }
 
-# Cache curto: a Dimon é alimentada em lote (batch), então 60s é seguro e
+# Cache curto: a Gold é alimentada em lote (batch), então 60s é seguro e
 # evita repetir as queries Trino a cada redraw/refiltro do React.
 _COST_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _COST_CACHE_TTL_S = 60.0
@@ -171,7 +171,7 @@ def ia_family_for(row: dict[str, Any]) -> str | None:
 
 
 def classify_dimon_row(row: dict[str, Any]) -> str:
-    """Classifica uma linha da Dimon (realizada ou forecast) em classe executiva.
+    """Classifica uma linha da Gold (realizada ou forecast) em classe executiva.
 
     Retorna ``__excluded__`` para o consumo diário/horário (Provisioned
     Managed*, 1/Hour), que não deve aparecer no dashboard, e ``ia_service``
@@ -203,12 +203,12 @@ async def _query_cost_rows(
     project_key: str,
     cancel_event: asyncio.Event | None,
 ) -> list[dict[str, Any]]:
-    """Todas as linhas da Dimon agregadas por (período, projeto, tipo,
+    """Todas as linhas da Gold agregadas por (período, projeto, tipo,
     chargecategory, classe, servicesubcategory, is_ondemand_ptu). O consumo
     diário/horário sai do resultado na própria query (WHERE <> '__excluded__').
     """
     source = PROJECT_SOURCES[project_key]
-    table_sql = f"{MART_NAMESPACE}.{source['table']}"
+    table_sql = f"{GOLD}.{source['table']}"
     project = PROJECT_LABELS[project_key]
     source_project = source["source_project"].lower().replace("'", "''")
     sql = f"""
@@ -237,7 +237,7 @@ async def _query_subaccounts(
 ) -> list[dict[str, Any]]:
     """Distribuição do mês por subconta (sustenta a narrativa do rateio)."""
     source = PROJECT_SOURCES[project_key]
-    table_sql = f"{MART_NAMESPACE}.{source['table']}"
+    table_sql = f"{GOLD}.{source['table']}"
     source_project = source["source_project"].lower().replace("'", "''")
     rows = await trino_execute(
         f"""
@@ -317,7 +317,7 @@ def _monthly_series(
                 continue
             forecast_by_period[period] = forecast_by_period.get(period, 0.0) + amount
             continue
-        # A Dimon específica do Vivo Mais também publica ``tipo='rateio'``
+        # A Gold específica do Vivo Mais também publica ``tipo='rateio'``
         # para meses futuros. Rateio não é custo realizado e não pode definir
         # o mês de referência nem ser somado aos KPIs de realizado.
         if tipo != "realizado":
@@ -445,22 +445,22 @@ async def load_project_cost_dashboard(
     rows = await _query_cost_rows(project_key, cancel_event)
     periods = sorted({str(r.get("period") or "") for r in rows if r.get("period")})
     if not periods:
-        payload = {"available": False, "error": "Dimon sem períodos disponíveis.", "table": source_table}
+        payload = {"available": False, "error": "Gold sem períodos disponíveis.", "table": source_table}
         _COST_CACHE[cache_key] = (time.monotonic(), payload)
         return payload
 
     series_all = _monthly_series(rows, periods, project)
     try:
-        # A janela de tokens é independente dos períodos existentes na Dimon
+        # A janela de tokens é independente dos períodos existentes na Gold
         # financeira. Isso permite sinalizar e estimar lacunas de cobertura.
         tokens_by_period = await load_project_token_totals(project_key, None, cancel_event)
     except Exception as exc:
-        logger.warning("Tokens da Dimon PTU falharam para %s: %s", project_key, exc)
+        logger.warning("Tokens da Gold PTU falharam para %s: %s", project_key, exc)
         tokens_by_period = {}
     try:
         tokens_last_30d = await load_project_tokens_last_30d(project_key, cancel_event)
     except Exception as exc:
-        logger.warning("Tokens 30d da Dimon PTU falharam para %s: %s", project_key, exc)
+        logger.warning("Tokens 30d da Gold PTU falharam para %s: %s", project_key, exc)
         tokens_last_30d = {}
     for month in series_all:
         token_row = tokens_by_period.get(str(month.get("period") or ""), {})
@@ -490,7 +490,7 @@ async def load_project_cost_dashboard(
             "available_periods": periods,
             "monthly": [],
             "current": None,
-            "notes": ["Nenhum mês com custo realizado na Dimon."],
+            "notes": ["Nenhum mês com custo realizado na Gold."],
         }
         _COST_CACHE[cache_key] = (time.monotonic(), payload)
         return payload
@@ -527,7 +527,7 @@ async def load_project_cost_dashboard(
     subaccounts_task = _query_subaccounts(project_key, detail_period, cancel_event)
     subaccounts = await subaccounts_task
     if isinstance(subaccounts, Exception):
-        logger.warning("Subcontas Dimon falharam: %s", subaccounts)
+        logger.warning("Subcontas Gold falharam: %s", subaccounts)
         subaccounts = []
 
     # PTU do mês de referência: compra realizada se existir; senão estimada

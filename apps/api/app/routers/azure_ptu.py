@@ -52,7 +52,7 @@ from app.services.azure_ptu_ops import (
     weighted_utilization,
 )
 from app.services.azure_ptu_cost import load_dimon_ptu_costs
-from app.services.azure_ptu_gold import load_dimon_metrics, refresh_azure_ptu_dimon
+from app.services.azure_ptu_gold import load_dimon_metrics, refresh_azure_ptu_gold
 from app.services.aura_brain_vivo_mais import load_project_cost_dashboard
 from app.services.sinfonia_dashboard import load_sinfonia_dashboard
 from app.services.datamesh_dashboard import load_datamesh_dashboard
@@ -256,7 +256,7 @@ async def _load_operational_data(
     dashboard_only: bool = False,
     cancel_event: asyncio.Event | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str, list[dict[str, Any]]]:
-    """Load dashboard metrics from Dimon and the small capacity inventory from Gold."""
+    """Load dashboard metrics from Gold and the small capacity inventory from Gold."""
     conns = (await db.execute(
         select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")
     )).scalars().all()
@@ -264,9 +264,9 @@ async def _load_operational_data(
     inventory: list[dict[str, Any]] = []
     metrics: list[dict[str, Any]] = []
     heatmap: list[dict[str, Any]] = []
-    data_source = "dimon"
+    data_source = "gold"
 
-    # A Dimon é diária. A granularidade horária fica reservada ao heatmap
+    # A Gold é diária. A granularidade horária fica reservada ao heatmap
     # explícito, que é a única ação do dashboard que consulta a Gold pesada.
     effective_grain = "month" if body.grain == "month" else "day"
 
@@ -316,15 +316,15 @@ async def dashboard_ops_heatmap(body: OverviewRequest, request: Request, db: Asy
 
 
 @router.post("/azure-ptu/gold/reprocess")
-async def reprocess_azure_ptu_dimon(days: int = 400):
-    """Materializa novamente a Dimon PTU usada pelos widgets do dashboard."""
+async def reprocess_azure_ptu_gold(days: int = 400):
+    """Materializa novamente a Gold PTU usada pelos widgets do dashboard."""
     if days < 90 or days > 400:
         raise HTTPException(status_code=422, detail="days deve estar entre 90 e 400")
     try:
-        return await refresh_azure_ptu_dimon(days=days)
+        return await refresh_azure_ptu_gold(days=days)
     except Exception as exc:
-        logger.exception("Falha ao materializar Dimon Azure PTU")
-        raise HTTPException(status_code=503, detail=f"Falha ao materializar Dimon Azure PTU: {exc}") from exc
+        logger.exception("Falha ao materializar Gold Azure PTU")
+        raise HTTPException(status_code=503, detail=f"Falha ao materializar Gold Azure PTU: {exc}") from exc
 
 
 def _filtered(items: list[dict[str, Any]], f: DashboardFilter) -> list[dict[str, Any]]:
@@ -1389,7 +1389,7 @@ async def dashboard_overview(body: OverviewRequest, request: Request, db: AsyncS
 
 @router.post("/dashboard/ops-overview")
 async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    """Dashboard PTU leve — Dimon diária; Gold horária somente sob demanda."""
+    """Dashboard PTU leve — Gold diária; Gold horária somente sob demanda."""
     async with _ClientCancelScope(request) as scope:
         cancel = scope.cancel_event
         cache_key = json.dumps(body.model_dump(mode="json"), sort_keys=True, default=str)
@@ -1399,7 +1399,7 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
         date_from, date_to, _, _ = _dashboard_date_bounds(body)
         effective_grain = "month" if body.grain == "month" else "day"
 
-        # Enriquecimento financeiro via Dimon (compras mensais de PTU e custos
+        # Enriquecimento financeiro via Gold (compras mensais de PTU e custos
         # dos projetos). Roda em paralelo com a carga operacional para não
         # adicionar latência perceptível; nunca derruba o endpoint.
         cost_task = asyncio.create_task(load_dimon_ptu_costs(
@@ -1429,7 +1429,7 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
                     ).strftime("%Y-%m-%d"),
                 }
             )
-            # O comparativo também usa a Dimon; nenhuma consulta Gold ocorre
+            # O comparativo também usa a Gold; nenhuma consulta Gold ocorre
             # durante a abertura normal do dashboard.
             connections = (await db.execute(
                 select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")
@@ -1566,7 +1566,7 @@ class ProjectCostRequest(BaseModel):
 async def dashboard_project_costs(body: ProjectCostRequest, request: Request):
     """Dashboard executivo de custo de um projeto (Aura Brain | Vivo Mais).
 
-    Lê a Dimon específica do projeto (incluindo
+    Lê a Gold específica do projeto (incluindo
     ``dest_dm_cost_custo_vivo_mais`` para Vivo Mais) e decompõe o custo
     mensal em PTUs (compra mensal: realizada se existir, senão forecast),
     tokens on-demand e infra (por servicesubcategory), com a série mensal

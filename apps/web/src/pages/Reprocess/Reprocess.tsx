@@ -16,7 +16,7 @@ const TABS = [
   { id: "forecast", label: "Forecast" },
   { id: "accuracy", label: "Acurácia de Forecast" },
   { id: "shared", label: "Custo compartilhado" },
-  { id: "gold", label: "Gold (Marts analíticos)" },
+  { id: "gold", label: "Gold (cubos analíticos)" },
   { id: "extraction", label: "Extração & Monitoramento" },
   { id: "schedules", label: "Agendamentos" },
 ] as const;
@@ -25,7 +25,7 @@ export default function Reprocess() {
   const [params, setParams] = useSearchParams();
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [schedulesError, setSchedulesError] = useState("");
-  const requestedTab = params.get("tab") === "dimon" ? "gold" : params.get("tab");
+  const requestedTab = params.get("tab") === "gold" ? "gold" : params.get("tab");
   const tab = TABS.some(item => item.id === requestedTab) ? requestedTab! : "data";
 
   useEffect(() => {

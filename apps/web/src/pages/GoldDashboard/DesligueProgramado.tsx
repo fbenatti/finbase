@@ -159,7 +159,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
   const totals = useMemo(() => {
     // SAVING ESTIMADO e HORAS usam o total ACUMULADO do gráfico mensal
-    // (todos os meses da Dimon) para bater com as barras.
+    // (todos os meses da Gold) para bater com as barras.
     const monthlySaving = monthly.reduce((s, r) => s + r.saving_brl, 0);
     const monthlyHours = monthly.reduce((s, r) => s + r.saved_hours, 0);
     const totalExceptionCost = data.reduce((s, r) => s + (r.exception_cost_brl || 0), 0);
@@ -320,10 +320,10 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                 <Alert severity="info" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
                   VMs efêmeras (<strong>CICLO_CURTO</strong>, <strong>AKS gerenciado</strong>) e{" "}
                   <strong>ligadas 24×7</strong> não aparecem nesta lista. Os totais de saving consideram apenas{" "}
-                  <strong>desligue confirmado</strong> — escopo de subscriptions configurável na Origem Gold da regra Dimon.
+                  <strong>desligue confirmado</strong> — escopo de subscriptions configurável na Origem Gold da regra Gold.
                 </Alert>
                 {!padroes || padroes.rows.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">Sem padrões (materialize a Dimon em Dimon → Reprocessar).</Typography>
+                  <Typography variant="caption" color="text.secondary">Sem padrões (materialize a Gold em Gold → Reprocessar).</Typography>
                 ) : (
                   <>
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
@@ -579,7 +579,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
           <Typography variant="subtitle2" fontWeight={900} mb={1}>
-            Delta de tags shutdown=auto (Dimon snapshot)
+            Delta de tags shutdown=auto (Gold snapshot)
             {tagDelta?.latest_snapshot ? ` — ${tagDelta.latest_snapshot}${tagDelta.previous_snapshot ? ` vs ${tagDelta.previous_snapshot}` : " (estado atual — aguardando 2ª coleta)"}` : ""}
           </Typography>
           {(tagDelta?.total_resources ?? 0) > 0 && (tagDelta?.total_with_tag ?? 0) === 0 && (
@@ -618,7 +618,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             <Typography color="text.secondary" variant="body2">
               {tagDelta?.previous_snapshot
                 ? "Nenhuma mudança de tag entre os snapshots."
-                : "Ainda só existe 1 snapshot — o delta D vs D-1 aparecerá após a 2ª coleta diária (reprocess da Dimon snapshot_tags_automacao). O estado atual mostra os recursos monitorados."}
+                : "Ainda só existe 1 snapshot — o delta D vs D-1 aparecerá após a 2ª coleta diária (reprocess da Gold snapshot_tags_automacao). O estado atual mostra os recursos monitorados."}
             </Typography>
           ) : (
             <TableContainer sx={{ maxHeight: 360 }}>
@@ -710,7 +710,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}><CircularProgress size={24} /></Box>
           ) : !opp || !opp.rows.length ? (
             <Typography color="text.secondary" variant="body2">
-              Nenhum recurso encontrado com os filtros. A Dimon de saving precisa estar materializada (reprocess) para o mês corrente.
+              Nenhum recurso encontrado com os filtros. A Gold de saving precisa estar materializada (reprocess) para o mês corrente.
             </Typography>
           ) : (
             <TableContainer sx={{ maxHeight: 420 }}>

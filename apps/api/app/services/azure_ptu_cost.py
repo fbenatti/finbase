@@ -40,7 +40,7 @@ DETAIL_NAMESPACE = f"iceberg.{layers.detail_layer()}"
 PROJECTS = ("Vivo Mais", "Aura Brain")
 
 # Chaves de projeto usadas pelo dashboard (filtro de projeto) -> rótulo exibido.
-PROJECT_KEY_TO_DIMON = {
+PROJECT_KEY_TO_GOLD = {
     "vivo-mais": "Vivo Mais",
     "aura-brain": "Aura Brain",
 }
@@ -122,7 +122,7 @@ def _resolve_projects(project_keys: list[str] | None) -> list[str]:
     """Mapeia as chaves do dashboard (vivo-mais/aura-brain) para o rótulo exibido."""
     resolved: list[str] = []
     for key in (project_keys or []):
-        name = PROJECT_KEY_TO_DIMON.get(str(key or ""), str(key or ""))
+        name = PROJECT_KEY_TO_GOLD.get(str(key or ""), str(key or ""))
         if name in PROJECTS and name not in resolved:
             resolved.append(name)
     return resolved or list(PROJECTS)

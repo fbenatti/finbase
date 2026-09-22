@@ -221,7 +221,7 @@ async def lifespan(app: FastAPI):
                FROM (VALUES ('projeto', 'departamento_nivel_5'), ('diretoria', 'departamento_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
                WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
             # Nomes de tabela históricos (`dimon_rule*`): são o registro das regras de
-            # mart. Renomear exigiria migração; o conteúdo já vive na Gold.
+            # cubo Gold. Renomear exigiria migração; o conteúdo já vive na Gold.
             """CREATE TABLE IF NOT EXISTS dimon_rule (
               id SERIAL PRIMARY KEY,
               code VARCHAR(120) NOT NULL UNIQUE,
@@ -257,11 +257,11 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS snapshot_col VARCHAR(50) NOT NULL DEFAULT '_snapshot_date'",
             """INSERT INTO dimon_rule (code, name, description, active, materialization_table, materialization_status)
                VALUES
-                 ('ai_consumption_daily', 'IA — Consumo diário (Claude/NotebookLM)', 'Dimon auxiliar de consumo de IA; publicada pela fila Dimon a partir de dest_consumo_ia.', TRUE, 'dest_dm_ai_consumption_daily', 'PENDING'),
-                 ('ai_license_snapshot', 'IA — Licenças (Claude/NotebookLM)', 'Dimon auxiliar de licenças; publicada pela fila Dimon a partir de dest_licencas_ia.', TRUE, 'dest_dm_ai_license_snapshot', 'PENDING'),
-                 ('copilot_usage_daily', 'Copilot — Uso diário', 'Dimon auxiliar de uso do GitHub Copilot.', TRUE, 'dest_dm_copilot_usage_daily', 'PENDING'),
-                 ('copilot_license_snapshot', 'Copilot — Licenças', 'Dimon auxiliar de licenças do GitHub Copilot.', TRUE, 'dest_dm_copilot_license_snapshot', 'PENDING'),
-                 ('copilot_user_period', 'Copilot — Usuário/período', 'Dimon auxiliar de adoção por usuário e período.', TRUE, 'dest_dm_copilot_user_period', 'PENDING')
+                 ('ai_consumption_daily', 'IA — Consumo diário (Claude/NotebookLM)', 'Gold auxiliar de consumo de IA; publicada pela fila Gold a partir de dest_consumo_ia.', TRUE, 'dest_dm_ai_consumption_daily', 'PENDING'),
+                 ('ai_license_snapshot', 'IA — Licenças (Claude/NotebookLM)', 'Gold auxiliar de licenças; publicada pela fila Gold a partir de dest_licencas_ia.', TRUE, 'dest_dm_ai_license_snapshot', 'PENDING'),
+                 ('copilot_usage_daily', 'Copilot — Uso diário', 'Gold auxiliar de uso do GitHub Copilot.', TRUE, 'dest_dm_copilot_usage_daily', 'PENDING'),
+                 ('copilot_license_snapshot', 'Copilot — Licenças', 'Gold auxiliar de licenças do GitHub Copilot.', TRUE, 'dest_dm_copilot_license_snapshot', 'PENDING'),
+                 ('copilot_user_period', 'Copilot — Usuário/período', 'Gold auxiliar de adoção por usuário e período.', TRUE, 'dest_dm_copilot_user_period', 'PENDING')
                ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, active = TRUE, materialization_table = EXCLUDED.materialization_table""",
             """CREATE TABLE IF NOT EXISTS shutdown_exception_rule (
               id SERIAL PRIMARY KEY,

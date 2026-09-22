@@ -85,7 +85,7 @@ function App() {
         <Route path="dashboards-ia" element={<DashboardsIA />} />
         <Route path="gold-dashboard" element={<GoldDashboard />} />
         {/* Rota legada: mantém links antigos vivos sem reintroduzir o nome no código. */}
-        <Route path="dimon-dashboard" element={<Navigate to="/gold-dashboard" replace />} />
+        <Route path="gold-dashboard" element={<Navigate to="/gold-dashboard" replace />} />
         <Route path="visoes-consumo-ia" element={<AzurePtuOps />} />
         <Route path="azure-ptu-ops" element={<Navigate to="/visoes-consumo-ia" replace />} />
         <Route path="reservations" element={<Navigate to="/savings?tab=reservas" replace />} />

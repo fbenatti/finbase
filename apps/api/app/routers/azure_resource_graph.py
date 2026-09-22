@@ -27,7 +27,7 @@ from app.models.source_connection import SourceConnection
 from app.models.orphan_annotation import OrphanAnnotation
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
-from app.services.gold_materialization import MART_NAMESPACE
+from app.services.gold_materialization import GOLD
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/azure-resource-graph", tags=["azure-resource-graph"])
@@ -112,7 +112,7 @@ def _mappings_for(sources: list[str]) -> list[dict[str, Any]]:
 INVENTORY_MAPPINGS = _mappings_for(_INVENTORY_SOURCES)
 ORPHAN_MAPPINGS = _mappings_for(_ORPHAN_SOURCES)
 
-# ── Regra Dimon: custo por recurso órfão (join com FOCUS) ──────────────────
+# ── Regra Gold: custo por recurso órfão (join com FOCUS) ──────────────────
 # Agrupa os órfãos (Gold coletada via ARG) e cruza com a Gold FOCUS pelo
 # resource_id dentro do mesmo billing period. A materialização cria
 # dest_dm_cost_<code> pré-agregada — a governança lê custo sem varrer o FOCUS.
@@ -188,8 +188,8 @@ GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 """
 
 
-async def seed_orphan_cost_dimon(db: AsyncSession) -> dict[str, Any]:
-    """Cria (idempotente) a regra Dimon de custo por recurso órfão."""
+async def seed_orphan_cost_gold(db: AsyncSession) -> dict[str, Any]:
+    """Cria (idempotente) a regra Gold de custo por recurso órfão."""
     from app.models.gold_mart_rule import GoldMartRule
     from app.services.gold_materialization import normalize_code
 
@@ -293,11 +293,11 @@ async def _setup_for_connection(db: AsyncSession, conn: SourceConnection) -> dic
                     active=True,
                 ))
 
-    # Regra Dimon de custo por órfão (idempotente) — join com a Gold FOCUS.
+    # Regra Gold de custo por órfão (idempotente) — join com a Gold FOCUS.
     try:
-        await seed_orphan_cost_dimon(db)
+        await seed_orphan_cost_gold(db)
     except Exception:
-        logger.exception("Falha ao criar regra Dimon de custo de órfãos")
+        logger.exception("Falha ao criar regra Gold de custo de órfãos")
 
     await db.commit()
     return {
@@ -347,12 +347,12 @@ async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSessio
     return SetupResponse(connection_id=None, destination_tables=last["destination_tables"], message=last["message"])
 
 
-@router.post("/seed-dimon")
+@router.post("/seed-gold")
 async def seed_dimon_orphan_cost(db: AsyncSession = Depends(get_db)):
-    """Cria (idempotente) a regra Dimon de custo por recurso órfão."""
-    result = await seed_orphan_cost_dimon(db)
+    """Cria (idempotente) a regra Gold de custo por recurso órfão."""
+    result = await seed_orphan_cost_gold(db)
     if result["status"] == "EXISTS":
-        raise HTTPException(status_code=409, detail=f"Regra Dimon já existe: {result['code']} (rule {result['rule_id']})")
+        raise HTTPException(status_code=409, detail=f"Regra Gold já existe: {result['code']} (rule {result['rule_id']})")
     return result
 
 
@@ -466,7 +466,7 @@ async def orphan_summary(
             cost_where = _latest_snapshot_per_origin_where(cost_where, "", period)
         cost_total = await trino_execute(
             "SELECT COALESCE(SUM(cost_brl), 0) AS cost_brl, COUNT(*) AS n "
-            f"FROM iceberg.{MART_NAMESPACE}.{ORPHAN_COST_DIMON_TABLE}"
+            f"FROM iceberg.{GOLD}.{ORPHAN_COST_DIMON_TABLE}"
             + cost_where
         )
     except Exception as exc:  # noqa: BLE001 — Trino pode estar fora/ tabela ainda não criada
@@ -549,11 +549,11 @@ async def list_orphans(
         "COALESCE(c.focus_rows, 0) AS focus_rows, COALESCE(c.billedcost, 0) AS billedcost, "
         "COALESCE(c.effectivecost, 0) AS effectivecost, COALESCE(c.cost_brl, 0) AS cost_brl"
     )
-    # LEFT JOIN com a Dimon pré-agregada (custo via FOCUS) quando existir.
+    # LEFT JOIN com a Gold pré-agregada (custo via FOCUS) quando existir.
     # Tabela pode não existir ainda (materialização não executada) → custo 0.
     sql = (
         "SELECT " + columns + " FROM iceberg.silver.dest_cloud_orphan_resources o "
-        f"LEFT JOIN iceberg.{MART_NAMESPACE}.{ORPHAN_COST_DIMON_TABLE} c "
+        f"LEFT JOIN iceberg.{GOLD}.{ORPHAN_COST_DIMON_TABLE} c "
         "ON c.resource_id = o.resource_id AND c.orphan_rule = o.orphan_rule "
         "AND c.\"_billing_period\" = o.\"_billing_period\" "
         "AND c.snapshot_date = o.snapshot_date "
@@ -638,7 +638,7 @@ async def orphan_savings(
       ), costs AS (
         SELECT lower(resource_id) AS rid, orphan_rule, snapshot_date,
                MAX(COALESCE(cost_brl, 0)) AS cost_brl
-        FROM iceberg.{MART_NAMESPACE}.{ORPHAN_COST_DIMON_TABLE}
+        FROM iceberg.{GOLD}.{ORPHAN_COST_DIMON_TABLE}
         GROUP BY 1, 2, 3
       )
       SELECT p.resource_id, p.resource_name, p.resource_type, p.subscription_id,

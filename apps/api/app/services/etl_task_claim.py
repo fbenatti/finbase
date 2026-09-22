@@ -27,7 +27,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "reservation_collection",
 )
 
-# These task types write an Iceberg Gold, Dimon or planning table. Bronze
+# These task types write an Iceberg Gold, Silver or planning table. Bronze
 # extraction remains parallel, while the analytic warehouse has one writer.
 _ANALYTIC_WRITER_TASK_TYPES = {
     "reprocess", "reclassification", "forecast", "forecast_accuracy",

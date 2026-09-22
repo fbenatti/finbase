@@ -1193,7 +1193,7 @@ def _align_staged_batch_to_target(batch, target) -> pa.Table:
     )
 
 
-def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold",
+def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = layers.GOLD,
                       known_row_count: int | None = None) -> int:
     """Replace a final table from staging without promoting its staging path.
 
@@ -1414,7 +1414,7 @@ def publish_staged_partition(
     return int(row_count)
 
 
-def publish_staged_by_slices(physical_name: str, temp_safe_name: str, namespace: str = "gold") -> int:
+def publish_staged_by_slices(physical_name: str, temp_safe_name: str, namespace: str = layers.GOLD) -> int:
     """Publish a staged table slice-by-slice into the Gold destination table.
 
     Groups rows by (_billing_period, source_connection_id) and calls
@@ -1555,7 +1555,7 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
     """Force-delete Iceberg table: SQL metadata + local Parquet/metadata files."""
     import shutil, os
     target_locations: list[str] = []
-    ns = tid[0] if isinstance(tid, tuple) and len(tid) > 0 else "gold"
+    ns = tid[0] if isinstance(tid, tuple) and len(tid) > 0 else layers.GOLD
 
     # 1. Obter caminho físico real antes do drop no catálogo
     cat = _get_catalog()
@@ -1630,12 +1630,12 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
     if not warehouse_path.exists():
         return {"deleted_dirs": 0, "deleted_bytes": 0, "dropped_tables": 0}
 
-    known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast"]
+    known_namespaces = list(layers.ACTIVE_LAYERS) + ["financial_base"]
 
     def _has_active_writer(namespace: str, base_name: str) -> bool:
         session = SyncSession()
         try:
-            if namespace == "gold":
+            if namespace == layers.GOLD:
                 return session.execute(
                     select(EtlTask.id)
                     .join(DestinationTable, DestinationTable.id == EtlTask.destination_table_id)
@@ -2030,8 +2030,8 @@ def upsert_azure_ptu_hourly(df: pd.DataFrame) -> int:
         return 0
     from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThanOrEqual
 
-    _ensure_namespace("gold")
-    tid = _table_id("gold", "dest_azure_ptu_metrics")
+    _ensure_namespace(layers.GOLD)
+    tid = _table_id(layers.GOLD, "dest_azure_ptu_metrics")
     frame = df.copy()
     if "_billing_period" not in frame.columns:
         frame["_billing_period"] = frame["metric_hour"].astype(str).str[:7].str.replace("-", "")

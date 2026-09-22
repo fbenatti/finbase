@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Checkbox, Chip, CircularProgress, Stack, Typography } from "@mui/material";
 import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
-import { DimonHistoryItem, DimonRule, formatApiError, getDimonHistory, getDimonRules, reprocessDimons } from "../../services/api";
+import { GoldCubeHistoryItem, GoldCubeRule, formatApiError, getGoldCubeHistory, getGoldCubeRules, reprocessGoldCubes } from "../../services/api";
 
 export default function ReprocessGoldTab() {
-  const [rules, setRules] = useState<DimonRule[]>([]);
+  const [rules, setRules] = useState<GoldCubeRule[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<DimonHistoryItem[]>([]);
+  const [history, setHistory] = useState<GoldCubeHistoryItem[]>([]);
 
   const load = async () => {
     const [ruleList, hist] = await Promise.all([
-      getDimonRules().catch(() => [] as DimonRule[]),
-      getDimonHistory().catch(() => [] as DimonHistoryItem[]),
+      getGoldCubeRules().catch(() => [] as GoldCubeRule[]),
+      getGoldCubeHistory().catch(() => [] as GoldCubeHistoryItem[]),
     ]);
     setRules(ruleList);
     setHistory(hist);
@@ -38,7 +38,7 @@ export default function ReprocessGoldTab() {
 
   const startAll = async () => {
     setRunning(true); setError("");
-    try { await reprocessDimons([]); await load(); }
+    try { await reprocessGoldCubes([]); await load(); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
     finally { setRunning(false); }
   };
@@ -46,12 +46,12 @@ export default function ReprocessGoldTab() {
   const startSelected = async () => {
     if (!selectedIds.size) return;
     setRunning(true); setError("");
-    try { await reprocessDimons([...selectedIds]); await load(); }
+    try { await reprocessGoldCubes([...selectedIds]); await load(); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
     finally { setRunning(false); }
   };
 
-  const statusChip = (r: DimonRule) => {
+  const statusChip = (r: GoldCubeRule) => {
     const s = r.materialization_status || "PENDING";
     const label = s === "UPDATED" ? "Atualizada" : s === "EMPTY" ? "Sem dados" : s === "ERROR" ? "Com erro" : "Pendente";
     const color = s === "UPDATED" ? "success" : s === "ERROR" ? "error" : "warning";
@@ -60,7 +60,7 @@ export default function ReprocessGoldTab() {
 
   return <Stack spacing={2}>
     <Typography variant="h6">Materialização Gold</Typography>
-    <Typography color="text.secondary">Lê a Silver (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica marts agregados no namespace iceberg.gold. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
+    <Typography color="text.secondary">Lê a Silver (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica cubos agregados no namespace iceberg.gold. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
     {error && <Alert severity="error">{error}</Alert>}
 
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>

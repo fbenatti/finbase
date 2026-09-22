@@ -6,7 +6,7 @@ import os
 from typing import Callable
 
 # Only these task types acquire ``exclusive_write_lock``; others must not wait on
-# ``is_locked()`` (forecast/Dimon use the analytic advisory lock only).
+# ``is_locked()`` (forecast/Gold use the analytic advisory lock only).
 WAREHOUSE_FLOCK_TASK_TYPES = frozenset({"backup", "extraction", "reprocess", "reclassification"})
 
 

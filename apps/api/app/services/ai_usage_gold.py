@@ -1,7 +1,7 @@
 """Materializações leves para dashboards de consumo e licenças de IA.
 
 As tabelas Gold continuam sendo a camada normalizada e auditável. Os
-dashboards leem estas Dimons, que preservam a granularidade necessária para
+dashboards leem estas cubos Gold, que preservam a granularidade necessária para
 ranking e drilldown sem repetir scans nas tabelas normalizadas completas.
 """
 from __future__ import annotations
@@ -12,11 +12,11 @@ from typing import Any
 
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
-from app.services.gold_materialization import MART_NAMESPACE
+from app.services.gold_materialization import GOLD
 
 logger = logging.getLogger(__name__)
 
-MART_NAMESPACE = "gold"
+GOLD = layers.GOLD
 AI_CONSUMPTION_TABLE = "dest_dm_ai_consumption_daily"
 AI_LICENSE_TABLE = "dest_dm_ai_license_snapshot"
 COPILOT_USAGE_TABLE = "dest_dm_copilot_usage_daily"
@@ -29,20 +29,20 @@ def _number(name: str) -> str:
 
 
 async def _publish(table: str, select_sql: str, *, partition_column: str = "_billing_period") -> int:
-    """Publica uma CTAS validada usando o mesmo swap atômico das demais Dimons."""
+    """Publica uma CTAS validada usando o mesmo swap atômico das demais cubos Gold."""
     from app.services import iceberg_service as iceberg
 
     staging = f"{table}_stg_{time.time_ns()}"
-    iceberg.ensure_namespace(MART_NAMESPACE)
+    iceberg.ensure_namespace(GOLD)
     sql = f"""
-      CREATE TABLE iceberg.{MART_NAMESPACE}.{staging}
+      CREATE TABLE iceberg.{GOLD}.{staging}
       WITH (partitioning = ARRAY['{partition_column}']) AS
       {select_sql}
     """
     try:
         await trino_execute(sql, timeout_s=1800)
         rows = await trino_execute(
-            f"SELECT COUNT(*) AS row_count FROM iceberg.{MART_NAMESPACE}.{staging}",
+            f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}",
             timeout_s=180,
         )
         row_count = int((rows[0] if rows else {}).get("row_count") or 0)
@@ -51,13 +51,13 @@ async def _publish(table: str, select_sql: str, *, partition_column: str = "_bil
         iceberg.swap_staged_table(
             table,
             staging,
-            namespace=MART_NAMESPACE,
+            namespace=GOLD,
             known_row_count=row_count,
         )
         return row_count
     except Exception:
         try:
-            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=GOLD)
         except Exception:
             pass
         raise
@@ -224,7 +224,7 @@ def _copilot_user_period_select() -> str:
         MIN(CAST(day AS VARCHAR)) AS period_start,
         MAX(CAST(day AS VARCHAR)) AS period_end,
         COUNT(DISTINCT day) AS period_days
-      FROM iceberg.{MART_NAMESPACE}.dest_dm_copilot_usage_daily
+      FROM iceberg.{GOLD}.dest_dm_copilot_usage_daily
       WHERE assignee_login IS NOT NULL AND assignee_login <> ''
         AND source_kind IN ('ai_usage_report', 'billing_report')
         AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')
@@ -232,8 +232,8 @@ def _copilot_user_period_select() -> str:
     """
 
 
-async def refresh_ai_usage_dimons(only_tables: list[str] | None = None) -> dict[str, Any]:
-    """Reconstrói as Dimons auxiliares pela fila oficial de Dimon."""
+async def refresh_ai_usage_gold_cubes(only_tables: list[str] | None = None) -> dict[str, Any]:
+    """Reconstrói as cubos Gold auxiliares pela fila oficial de Gold."""
     definitions = [
         (AI_CONSUMPTION_TABLE, _consumption_select()),
         (AI_LICENSE_TABLE, _license_select()),
@@ -247,5 +247,5 @@ async def refresh_ai_usage_dimons(only_tables: list[str] | None = None) -> dict[
     results: dict[str, int] = {}
     for table, select_sql in definitions:
         results[table] = await _publish(table, select_sql)
-        logger.info("AI Dimon refreshed: %s (%d rows)", table, results[table])
-    return {"namespace": MART_NAMESPACE, "tables": results}
+        logger.info("AI Gold refreshed: %s (%d rows)", table, results[table])
+    return {"namespace": GOLD, "tables": results}

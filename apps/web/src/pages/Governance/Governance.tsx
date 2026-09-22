@@ -4,13 +4,13 @@ import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
 import CloneRules from "../CloneRules/CloneRules";
-import Dimon from "../GoldMarts/GoldMarts";
+import Gold from "../GoldMarts/GoldMarts";
 
 const TABS = [
   { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
   { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
-  { id: "cost-relationship", label: "Camada Dimon de Custo", perms: [{ module: "dimon", scope: null }] },
+  { id: "cost-relationship", label: "Camada Gold de Custo", perms: [{ module: "gold", scope: null }] },
   { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
 ] as const;
 
@@ -79,7 +79,7 @@ export default function Governance() {
         )}
         {tab === "cost-relationship" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Dimon embedded />
+            <Gold embedded />
           </Paper>
         )}
         {tab === "tags" && (

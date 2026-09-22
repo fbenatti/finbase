@@ -344,7 +344,7 @@ def consumer_main(worker_id: int):
                             wait_phase = (
                                 "Aguardando conexão de origem"
                                 if queued.task_type == "extraction"
-                                else "Aguardando escritor Gold/Dimon"
+                                else "Aguardando escritor Gold/Gold"
                             )
                             release_task_to_queue(retry, queued, phase=wait_phase)
                             retry.commit()
@@ -526,30 +526,30 @@ def consumer_main(worker_id: int):
                             if task_row:
                                 task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
                                 s.commit()
-                        # Sequência: forecast → rateio → Dimon (visão completa =
+                        # Sequência: forecast → rateio → Gold (visão completa =
                         # realizado + forecast + rateio). A planning mudou, então a
-                        # Dimon pré-agregada precisa ser materializada de novo; a
+                        # Gold pré-agregada precisa ser materializada de novo; a
                         # fila do worker executa em ordem de id (sequência real).
                         dimon_rule_ids = [int(x) for x in (task_json.get("dimon_rule_ids") or []) if x]
-                        run_scheduled_dimon = (not task_json.get("scheduled_pipeline")) or bool(dimon_rule_ids)
+                        run_scheduled_gold = (not task_json.get("scheduled_pipeline")) or bool(dimon_rule_ids)
                         try:
-                            if not run_scheduled_dimon:
-                                raise LookupError("Dimon desabilitada no schedule")
+                            if not run_scheduled_gold:
+                                raise LookupError("Gold desabilitada no schedule")
                             from app.services.gold_materialization import enqueue_dimons_task
-                            mart_task = enqueue_dimons_task(
+                            gold_task = enqueue_dimons_task(
                                 s, rule_ids=dimon_rule_ids, source="forecast",
                             )
-                            if mart_task and task_row:
+                            if gold_task and task_row:
                                 task_row.phase = (
                                     f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
-                                    f" · Dimon enfileirada (task #{mart_task.id})"
+                                    f" · Gold enfileirada (task #{gold_task.id})"
                                 )
                                 s.commit()
                         except LookupError:
                             pass
-                        except Exception as mart_exc:
+                        except Exception as gold_exc:
                             if task_row:
-                                task_row.phase = f"Forecast publicado · Dimon pendente: {mart_exc}"
+                                task_row.phase = f"Forecast publicado · Gold pendente: {gold_exc}"
                                 s.commit()
                         s.close()
                     except Exception as exc:
@@ -710,12 +710,12 @@ def consumer_main(worker_id: int):
 
                 elif task.task_type in ("ai_cost_relationship_reprocess", "dimon_reprocess"):
                     task.status = "RUNNING"
-                    task.phase = "Agregando Golds e publicando as tabelas Dimon"
+                    task.phase = "Agregando Golds e publicando as tabelas Gold"
                     session.commit()
                     session.close()
                     try:
                         import asyncio
-                        from app.services.gold_materialization import materialize_dimons
+                        from app.services.gold_materialization import materialize_gold_cubes
                         s = SyncSession()
                         task_row = s.get(EtlTask, task_id)
                         def progress(done, total, name):
@@ -726,7 +726,7 @@ def consumer_main(worker_id: int):
                                 current.phase = f"Materializando {done}/{total}: {name}"
                                 s.commit()
                         rule_ids = list((task_row.result_json or {}).get("rule_ids") or []) if task_row else []
-                        result = asyncio.run(materialize_dimons(s, run_id=task_id, progress=progress, rule_ids=rule_ids or None))
+                        result = asyncio.run(materialize_gold_cubes(s, run_id=task_id, progress=progress, rule_ids=rule_ids or None))
                         task_row = s.get(EtlTask, task_id)
                         if task_row:
                             failed = list(result.get("failed") or [])
@@ -968,16 +968,16 @@ def consumer_main(worker_id: int):
                                     ]
                                     terminal_task.result_json["failure_context"] = context
                                     terminal_task.result_json["failure_kind"] = "reprocess_error"
-                                # Opção "Materializar Dimon na sequência": quando o
-                                # reprocessamento pediu chain_marts, só a ÚLTIMA
-                                # tarefa do grupo enfileira a Dimon (visão completa
+                                # Opção "Materializar Gold na sequência": quando o
+                                # reprocessamento pediu chain_gold_cubes, só a ÚLTIMA
+                                # tarefa do grupo enfileira a Gold (visão completa
                                 # = realizado + forecast + rateio) na fila do worker.
                                 if succeeded:
                                     if (terminal_task.result_json or {}).get("scheduled_pipeline"):
                                         scheduled_forecasts = _queue_scheduled_forecasts(task_id, terminal_task.result_json or {}, terminal_session)
                                         if scheduled_forecasts:
                                             terminal_task.phase = ((terminal_task.phase or "") + f" · Forecast(s) na fila: {len(scheduled_forecasts)}")[:200]
-                                    chain = terminal_task.result_json.get("chain_marts")
+                                    chain = terminal_task.result_json.get("chain_gold_cubes")
                                     if chain and isinstance(chain, dict) and chain.get("enabled"):
                                         group = terminal_task.result_json.get("queue_group")
                                         position = terminal_task.result_json.get("queue_position")
@@ -1001,13 +1001,13 @@ def consumer_main(worker_id: int):
                                         if is_last_group_task:
                                             from app.services.gold_materialization import enqueue_dimons_task
                                             rule_ids = chain.get("rule_ids") or None
-                                            mart_task = enqueue_dimons_task(
+                                            gold_task = enqueue_dimons_task(
                                                 terminal_session, rule_ids=rule_ids, source="reprocess"
                                             )
-                                            if mart_task:
+                                            if gold_task:
                                                 terminal_task.phase = (
                                                     (terminal_task.phase or "")
-                                                    + f" · Dimon enfileirada (task #{mart_task.id})"
+                                                    + f" · Gold enfileirada (task #{gold_task.id})"
                                                 )
                                 terminal_task.finished_at = datetime.now(timezone.utc)
                                 terminal_session.commit()

@@ -39,7 +39,7 @@ from app.services.iceberg_service import list_tables, get_catalog, read_bronze
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
 from app.services import lakehouse_layers as layers
-from app.services.gold_materialization import MART_NAMESPACE
+from app.services.gold_materialization import GOLD
 
 logger = logging.getLogger(__name__)
 
@@ -263,9 +263,9 @@ class ExpectedViewRequest(BaseModel):
     director_view: bool = False
     year: int = 2026
     include_shared_cost: bool = False
-    # Nome físico da Dimon pré-agregada que alimenta a Visão Esperada.
+    # Nome físico da Gold pré-agregada que alimenta a Visão Esperada.
     # Default: a regra visao-completa (dest_dm_cost_visao_completa).
-    mart_table: str = "dest_dm_cost_visao_completa"
+    gold_table: str = "dest_dm_cost_visao_completa"
 
 
 class ExpectedViewPeriodDetailRequest(BaseModel):
@@ -274,7 +274,7 @@ class ExpectedViewPeriodDetailRequest(BaseModel):
     department_id: int | None = None
     period: str  # YYYYMM
     tipo: str = "realizado"  # realizado | forecast
-    mart_table: str = "dest_dm_cost_visao_completa"
+    gold_table: str = "dest_dm_cost_visao_completa"
 
 
 def _quote_ident(identifier: str) -> str:
@@ -1086,13 +1086,13 @@ async def run_pivot(req: PivotRequest, request: Request, db: AsyncSession = Depe
 async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
     """Return billing periods that already hold realized data.
 
-    Reads the pre-aggregated Gold mart (dest_dm_cost_*) instead of scanning the
-    31M-row Gold: the Dimon carries tipo='realizado' with the same period
+    Reads the pre-aggregated Gold cube (dest_dm_cost_*) instead of scanning the
+    31M-row Gold: the Gold carries tipo='realizado' with the same period
     grain, so DISTINCT on it is orders of magnitude cheaper.
     """
     try:
         rows = await trino_execute(
-            "SELECT DISTINCT _billing_period FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_visao_completa "
+            "SELECT DISTINCT _billing_period FROM iceberg.{GOLD}.dest_dm_cost_visao_completa "
             "WHERE tipo = 'realizado'",
             **trino_kwargs,
         )
@@ -1835,12 +1835,12 @@ async def _expected_view_period_detail_core(
     """Dinâmica de um mês: valor realizado ou forecast de cada departamento,
     de todos os níveis (1..7), dentro do escopo selecionado."""
     await wait_until_ready(timeout_s=20)
-    table = body.mart_table.strip().replace('"', "")
-    schema = await _describe_layer_schema(table, max_retries=2, namespace=MART_NAMESPACE)
+    table = body.gold_table.strip().replace('"', "")
+    schema = await _describe_layer_schema(table, max_retries=2, namespace=GOLD)
     columns = {name.lower(): name for name in schema}
     for required in ("period", "realizado", "tipo", "departamento_nivel_1"):
         if required not in columns:
-            raise HTTPException(status_code=422, detail=f"A tabela de mart não possui a coluna {required}")
+            raise HTTPException(status_code=422, detail=f"A tabela de cubo Gold não possui a coluna {required}")
     period_col = _quote_ident(columns.get("_billing_period") or columns["period"])
     value_col = _quote_ident(columns["realizado"])
     type_col = _quote_ident(columns["tipo"])
@@ -1886,7 +1886,7 @@ async def _expected_view_period_detail_core(
     cloud_filter = _expected_view_cloud_filter(scope_path, selected, columns)
     sql = f"""
       SELECT {', '.join(group_cols)}, SUM(COALESCE(TRY_CAST({value_col} AS DOUBLE), 0)) AS value
-      FROM iceberg.{MART_NAMESPACE}.{table}
+      FROM iceberg.{GOLD}.{table}
       WHERE {scope_filter()}{cloud_filter}
         AND {period_col} = {_quote_literal(body.period)}
         AND {tipo_sql}
@@ -1944,18 +1944,18 @@ async def _expected_view_core(
         await wait_until_ready(timeout_s=20)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Trino está reiniciando: {exc}")
-    # A Visão Esperada lê a Dimon pré-agregada (dest_dm_cost_*): realizado,
+    # A Visão Esperada lê a Gold pré-agregada (dest_dm_cost_*): realizado,
     # forecast e rateio na mesma granularidade de departamento. Uma única
     # tabela pré-agregada substitui a varredura da Gold (31M linhas) e da planning.
-    actual_name = forecast_name = body.mart_table.strip().replace('"', "")
-    mart_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace=MART_NAMESPACE)
-    actual_schema = forecast_schema = mart_schema
+    actual_name = forecast_name = body.gold_table.strip().replace('"', "")
+    gold_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace=GOLD)
+    actual_schema = forecast_schema = gold_schema
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = actual_columns
     required_actual = {"_billing_period", "realizado", "departamento_nivel_1"}
     required_forecast = {"period", "realizado", "tipo", "departamento_nivel_1", "rateio_medida"}
     if not required_actual.issubset(actual_columns) or not required_forecast.issubset(forecast_columns):
-        raise HTTPException(status_code=422, detail="A tabela de mart não possui as colunas necessárias para a Visão Esperada")
+        raise HTTPException(status_code=422, detail="A tabela de cubo Gold não possui as colunas necessárias para a Visão Esperada")
     actual_period = _quote_ident(actual_columns.get("_billing_period") or actual_columns["period"])
     # ``realizado`` is the executive financial measure.  ``EffectiveCost`` is
     # a provider net-cost field and includes credit/return adjustments, which
@@ -1987,7 +1987,7 @@ async def _expected_view_core(
         checks: list[str] = []
         # A project can be reached through Showback or Chargeback. At project
         # level the executive realized value is the consumption total, not
-        # only the small chargeback allocation. Historical Dimon snapshots
+        # only the small chargeback allocation. Historical Gold snapshots
         # also contain both orders for the Azure/Diretoria levels.
         pairs = list(zip(scope_level_order, scope_path))
         if len(scope_path) >= 5 and scope_path[1] in _CLOUD_BRANCHES:
@@ -2013,7 +2013,7 @@ async def _expected_view_core(
     actual_cloud_filter = _expected_view_cloud_filter(scope_path, selected, actual_columns)
     forecast_cloud_filter = _expected_view_cloud_filter(scope_path, selected, forecast_columns)
     # year <= 0 = "todos os períodos": sem recorte de ano — traz todo o
-    # realizado e todo o forecast disponível na Dimon, inclusive meses futuros.
+    # realizado e todo o forecast disponível na Gold, inclusive meses futuros.
     all_periods = body.year <= 0
     year_start = _quote_literal(f"{max(body.year, 1):04d}01")
     year_end = _quote_literal(f"{max(body.year, 1) + 1:04d}01")
@@ -2032,7 +2032,7 @@ async def _expected_view_core(
         cutoff_rows = await trino_execute(
             f"""
             SELECT MIN({forecast_period}) AS period
-            FROM iceberg.{MART_NAMESPACE}.{forecast_name}
+            FROM iceberg.{GOLD}.{forecast_name}
             WHERE {forecast_scope_filter}{forecast_cloud_filter}
               {forecast_year_clause}
               AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
@@ -2062,7 +2062,7 @@ async def _expected_view_core(
     driver_key = f"departamento_nivel_{driver_level}"
     actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
     forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
-    actual_from = f"iceberg.{MART_NAMESPACE}.{actual_name}"
+    actual_from = f"iceberg.{GOLD}.{actual_name}"
     actual_sql = f"""
       SELECT {actual_period} AS period,
              COALESCE(NULLIF(TRIM(CAST({actual_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
@@ -2077,7 +2077,7 @@ async def _expected_view_core(
       SELECT {forecast_period} AS period,
              COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
-      FROM iceberg.{MART_NAMESPACE}.{forecast_name}
+      FROM iceberg.{GOLD}.{forecast_name}
       WHERE {forecast_scope_filter}{forecast_cloud_filter}
         {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
@@ -2129,7 +2129,7 @@ async def _expected_view_core(
                  COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
                  {medida_sql},
                  SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
-          FROM iceberg.{MART_NAMESPACE}.{forecast_name}
+          FROM iceberg.{GOLD}.{forecast_name}
           WHERE {forecast_scope_filter}{forecast_cloud_filter}
             {forecast_year_clause}
             AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
@@ -2161,7 +2161,7 @@ async def _expected_view_core(
     fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
     # Em "todos os períodos" o orçamento/forecast manual continua ancorado no
     # ano corrente (planejamento anual), enquanto a série de realizado/forecast
-    # da Dimon cobre todos os meses disponíveis.
+    # da Gold cobre todos os meses disponíveis.
     budget_year = body.year if body.year > 0 else datetime.now().year
     budget_entries = (await db.execute(
         select(PlanningEntry).join(PlanningVersion).join(FinancialType).where(
@@ -2316,7 +2316,7 @@ async def _expected_view_core(
 
 @router.get("/tables")
 async def get_tables():
-    """List all Iceberg tables across bronze, silver, gold and dimon layers."""
+    """List all Iceberg tables across bronze, silver, gold and gold layers."""
     result: dict[str, list[str]] = {}
     for layer in ("bronze", "silver", "gold"):
         try:

@@ -66,7 +66,7 @@ async def test_preview_source_reads_the_detail_layer(monkeypatch):
     )
     assert result["row_count"] == 10
     assert result["total_value"] == 123.45
-    # A fonte do mart é o detalhe (Silver), resolvido em um único ponto.
+    # A fonte do cubo é o detalhe (Silver), resolvido em um único ponto.
     assert f"iceberg.{layers.detail_layer()}.dest_modelo_focus" in calls[-1]
 
 

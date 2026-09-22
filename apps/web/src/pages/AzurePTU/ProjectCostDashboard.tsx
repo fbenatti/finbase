@@ -57,12 +57,12 @@ const HELP: Record<string, string> = {
   "Infraestrutura": "Todo o restante: VMs, Cosmos DB, discos, rede, Service Bus, Log Analytics etc., detalhado por servicesubcategory (sem serviços de IA).",
   "Infra compartilhada (rateio)": "Custo de infraestrutura repassado ao projeto. O Vivo Mais não recebe rateio: consome a infra do Aura Brain, mas a divisão não é feita por não existir forma eficiente (a infra não é específica do Vivo Mais e uma estrutura dedicada seria inviável).",
   "Custo previsto (forecast)": "Total planejado (planning) do mês de referência, exibido como total no chip — o planejamento não tem granularidade por componente. Bruto (sem abater as devoluções do espelho, que espelham o consumo horário já excluído do realizado).",
-  "Bilhões de tokens": "Bilhões de tokens atribuídos ao projeto na Dimon diária de Azure PTU, somando input e output no mesmo mês do custo.",
+  "Bilhões de tokens": "Bilhões de tokens atribuídos ao projeto na Gold diária de Azure PTU, somando input e output no mesmo mês do custo.",
   "Custo por MM de tokens": "Custo total do projeto dividido pelos milhões de tokens atribuídos no mesmo período. Inclui toda a composição de custo do projeto, não apenas meters de tokens.",
 };
 
 function Kpi({ label, value, hint, color }: { label: string; value: React.ReactNode; hint?: string; color?: string }) {
-  const help = HELP[label] || "Indicador executivo calculado a partir da Dimon específica do projeto.";
+  const help = HELP[label] || "Indicador executivo calculado a partir da Gold específica do projeto.";
   return (
     <Tooltip title={<Typography variant="body2" sx={{ maxWidth: 340, p: 0.5 }}>{help}</Typography>} arrow placement="top" enterDelay={250}>
       <Card sx={{ height: "100%", borderTop: color ? `3px solid ${color}` : undefined, cursor: "help" }}>
@@ -168,7 +168,7 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
       {error && <Alert severity="error">{error}</Alert>}
       {!error && !data && <Box p={5} textAlign="center"><CircularProgress /></Box>}
       {!error && data?.available === false && <Alert severity="warning">{data.error || "Dados indisponíveis."}</Alert>}
-      {!error && data?.empty && <Alert severity="info">Nenhum mês com custo realizado na Dimon para este projeto.</Alert>}
+      {!error && data?.empty && <Alert severity="info">Nenhum mês com custo realizado na Gold para este projeto.</Alert>}
 
       {data?.available && !data?.empty && (
         <>

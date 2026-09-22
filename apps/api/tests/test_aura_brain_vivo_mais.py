@@ -1,4 +1,4 @@
-"""Testes da decomposição executiva de custo Aura Brain / Vivo Mais (Dimon)."""
+"""Testes da decomposição executiva de custo Aura Brain / Vivo Mais (Gold)."""
 
 from datetime import date
 
@@ -49,7 +49,7 @@ async def test_vivo_mais_queries_its_own_dimon_and_normalizes_project(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_aura_brain_keeps_combined_dimon(monkeypatch):
+async def test_aura_brain_keeps_combined_gold(monkeypatch):
     captured = []
 
     async def fake_execute(sql, **kwargs):

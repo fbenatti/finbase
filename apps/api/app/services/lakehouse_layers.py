@@ -12,13 +12,13 @@ Fonte de verdade da arquitetura Bronze → Silver → Gold:
   (`forecast.result_run_{id}`), que não são cubo de consumo.
 
 Antes deste módulo cada chamada repetia a string do namespace (``"silver"``,
-``"gold"``, ``"dimon"``). Foi exatamente assim que ``merge_planning_rateio``
+``"gold"``, ``"gold"``). Foi exatamente assim que ``merge_planning_rateio``
 passou a **ler** de ``gold`` enquanto a publicação **escrevia** em ``silver``,
 apagando realizado e forecast a cada execução de rateio. Toda resolução de
 camada passa por aqui para que uma divergência dessas seja impossível de
 reintroduzir sem alterar um único ponto.
 
-O namespace legado ``dimon`` é reconhecido apenas para **detecção e
+O namespace legado ``gold`` é reconhecido apenas para **detecção e
 migração**; nenhum caminho novo deve escrever nele.
 """
 
@@ -32,17 +32,17 @@ GOLD = "gold"
 FORECAST = "forecast"
 
 #: Namespace legado em remoção (P1D). Não usar em código novo.
-LEGACY_DIMON = "dimon"
+LEGACY_GOLD = "gold"
 
 #: Namespaces que o runtime atual pode criar/ler.
 ACTIVE_LAYERS: tuple[str, ...] = (BRONZE, SILVER, GOLD, FORECAST)
 
 #: Todos os namespaces conhecidos, incluindo o legado — usado por utilitários de
 #: auditoria, limpeza de staging e scripts de migração.
-KNOWN_LAYERS: tuple[str, ...] = ACTIVE_LAYERS + (LEGACY_DIMON,)
+KNOWN_LAYERS: tuple[str, ...] = ACTIVE_LAYERS + (LEGACY_GOLD,)
 
 #: Camadas que guardam dado derivado (podem ser reconstruídas a partir da Bronze).
-DERIVED_LAYERS: tuple[str, ...] = (SILVER, GOLD, FORECAST, LEGACY_DIMON)
+DERIVED_LAYERS: tuple[str, ...] = (SILVER, GOLD, FORECAST, LEGACY_GOLD)
 
 
 def detail_layer() -> str:
@@ -78,7 +78,7 @@ def is_known(namespace: str | None) -> bool:
 
 def is_legacy(namespace: str | None) -> bool:
     """``True`` quando o namespace pertence à arquitetura legada em remoção."""
-    return bool(namespace) and str(namespace).lower() == LEGACY_DIMON
+    return bool(namespace) and str(namespace).lower() == LEGACY_GOLD
 
 
 def normalize(namespace: str | None, *, fallback: str | None = None) -> str:
@@ -106,6 +106,6 @@ def detail_sources() -> tuple[str, ...]:
 
     Usado pela detecção de consultas divergentes: uma leitura de detalhe deve
     resolver para Silver. A Gold aparece depois apenas enquanto a migração de
-    P1C/P1D não termina, e ``dimon`` só para auditoria.
+    P1C/P1D não termina, e ``gold`` só para auditoria.
     """
-    return (SILVER, GOLD, LEGACY_DIMON)
+    return (SILVER, GOLD, LEGACY_GOLD)

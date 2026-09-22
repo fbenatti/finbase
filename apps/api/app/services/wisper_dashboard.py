@@ -21,8 +21,8 @@ from app.services import lakehouse_layers as layers
 FOCUS_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
 # Operational/inventory source
 OP_METRICS_TABLE = f"iceberg.{layers.detail_layer()}.dest_oci_operational_metrics"
-# Legacy dimon table (kept only for current-month forecast comparison)
-MART_TABLE = f"iceberg.{layers.detail_layer()}.dest_dm_cost_custo_wisper"
+# Legacy gold table (kept only for current-month forecast comparison)
+GOLD_TABLE = f"iceberg.{layers.GOLD}.dest_dm_cost_custo_wisper"
 
 WISPER_SUBACCOUNT_RE = "whisper|llm|poc-stt"
 
@@ -125,7 +125,7 @@ def _merge_forecast_monthly(
     forecast_by_period: dict[str, dict[str, Any]],
     current_period: str,
 ) -> list[dict[str, Any]]:
-    """Attach forecast totals and future months from Dimon/planning."""
+    """Attach forecast totals and future months from Gold/planning."""
     by_period = {item["period"]: dict(item) for item in monthly}
     for period, forecast in forecast_by_period.items():
         entry = by_period.setdefault(
@@ -161,7 +161,7 @@ async def _forecast_by_period(
     current_period: str,
     cancel_event: asyncio.Event | None,
 ) -> dict[str, dict[str, Any]]:
-    """Forecast monthly totals from Dimon until December of the current year."""
+    """Forecast monthly totals from Gold until December of the current year."""
     end_period = f"{current_period[:4]}12"
     try:
         rows = await trino_execute(
@@ -171,7 +171,7 @@ async def _forecast_by_period(
                    servicesubcategory,
                    skumeter,
                    SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS amount
-            FROM {MART_TABLE}
+            FROM {GOLD_TABLE}
             WHERE lower(tipo) = 'forecast'
               AND _billing_period >= '{current_period}'
               AND _billing_period <= '{end_period}'
@@ -212,7 +212,7 @@ async def _financials(
 ) -> dict[str, Any]:
     """Return monthly series, buckets, SKUs, subaccounts and daily series."""
 
-    # 1. Monthly series (realizado).  The Wisper Dimon is the canonical,
+    # 1. Monthly series (realizado).  The Wisper Gold is the canonical,
     # pre-aggregated slice and avoids rescanning the 35M-row FOCUS table for
     # the first query on every dashboard load.  FOCUS remains used below only
     # for the detailed daily/SKU drill-downs that require its finer grain.
@@ -224,7 +224,7 @@ async def _financials(
                servicesubcategory,
                skumeter,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS bucket_cost
-        FROM {MART_TABLE}
+        FROM {GOLD_TABLE}
         WHERE lower(COALESCE(tipo, '')) = 'realizado'
         GROUP BY 1, 3, 4, 5
         ORDER BY 1, 3, 4, 5
@@ -334,7 +334,7 @@ async def _financials(
             f"""
             SELECT subaccountname,
                    SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS cost
-            FROM {MART_TABLE}
+            FROM {GOLD_TABLE}
             WHERE lower(COALESCE(tipo, '')) = 'realizado'
               AND _billing_period = '{closed_period}'
             GROUP BY 1
@@ -570,8 +570,8 @@ async def _financials(
             "closed_label": _label(closed_period),
             "current_period": current_period,
             "current_label": _label(current_period),
-            "financial_source": "Dimon Wisper (FOCUS consolidada)",
-            "forecast_source": "Dimon/planning",
+            "financial_source": "Gold Wisper (FOCUS consolidada)",
+            "forecast_source": "Gold/planning",
         },
         "executive": {
             "total_closed": round(closed_total, 2),
@@ -1138,7 +1138,7 @@ async def _wisper_compartment_ids(
 ) -> list[str]:
     """Discover active Wisper compartment IDs from recent billing + inventory.
 
-    Compartment IDs are absent from the cost Dimon.  Limit the fallback FOCUS
+    Compartment IDs are absent from the cost Gold.  Limit the fallback FOCUS
     lookup to the current and immediately preceding partition; the old query
     scanned every historical FOCUS partition just to obtain stable IDs.
     """
@@ -1240,7 +1240,7 @@ async def load(cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
             "B95909 = GPU Hours; B97384 = OCPU de suporte; B97385 = GB Hours de suporte; B108085 = AI unit-hours.",
             "Hospedagem dedicada de IA = Generative AI + Hospedagem GPU (compute + suporte).",
             "O custo do mês em curso é parcial; a projeção por run-rate usa a média móvel dos últimos 7 dias com telemetria financeira.",
-            "Realizado: FOCUS · Forecast: Dimon/planning.",
+            "Realizado: FOCUS · Forecast: Gold/planning.",
         ],
     }
 

@@ -553,7 +553,7 @@ class AzureTagPolicyService:
     def _scopes_disjoint(scope_a: list[str], scope_b: list[str]) -> bool:
         """Retorna True se ambos os escopos são não-vazios e não se intersectam.
 
-        Se algum escopo estiver vazio (regra sem dados Dimon / escopo desconhecido),
+        Se algum escopo estiver vazio (regra sem dados Gold / escopo desconhecido),
         não podemos provar disjunção — retorna False (conservador).
         """
         if not scope_a or not scope_b:

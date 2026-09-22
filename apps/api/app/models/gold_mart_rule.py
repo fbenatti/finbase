@@ -1,6 +1,6 @@
-"""Dimon — pre-aggregated cost mart materialized from Gold/planning tables.
+"""Regra de cubo Gold — pré-agregação de custo materializada a partir da Silver.
 
-A Dimon rule selects one or more sources. Each source points at ONE OR MORE
+A Gold rule selects one or more sources. Each source points at ONE OR MORE
 Gold tables with the same normalized structure (e.g. dest_modelo_focus and
 dest_modelo_focus_planning). The tables of a source are unioned together
 (same filters applied on each) into a single clean dataset, then aggregated.
@@ -16,7 +16,7 @@ VALUE_COLUMNS = frozenset({"realizado", "BilledCost", "EffectiveCost"})
 
 
 class GoldMartRule(Base):
-    """One pre-aggregated cost mart: sources (Golds) + filters -> dest_dm_cost_<code>."""
+    """Uma regra de cubo Gold: fontes + filtros -> dest_dm_cost_<code>."""
     __tablename__ = "dimon_rule"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -42,7 +42,7 @@ class GoldMartRule(Base):
     materialized_at = Column(DateTime(timezone=True), nullable=True)
     materialization_error = Column(Text, nullable=True)
     # SQL custom (optional): when present, bypasses the pivot builder and uses
-    # this query to materialize the Dimon table. The query MUST produce a result
+    # this query to materialize the Gold table. The query MUST produce a result
     # named with the same dimensions + measures the UI expects.
     sql_template = Column(Text, nullable=True)
     # Snapshot mode: quando ativo, a materialização NÃO substitui a tabela;
@@ -63,7 +63,7 @@ class GoldMartRule(Base):
 
 
 class GoldMartRuleSource(Base):
-    """One source contributing rows to a Dimon mart.
+    """Uma fonte que contribui linhas para o cubo Gold.
 
     A source binds one or more Gold tables with the same normalized structure
     (e.g. dest_modelo_focus + dest_modelo_focus_planning). Filters, value

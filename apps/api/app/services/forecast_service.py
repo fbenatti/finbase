@@ -1322,7 +1322,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             results.append({**key_values, "forecast_month": anchor_month_key, "tipo": "forecast", "forecast_value": baseline * current_forecast_days, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
         # NOTE: o realizado do mês âncora NÃO é gravado na planning. A Gold
         # dest_modelo_focus já carrega o realizado; gravá-lo também na planning
-        # duplicava o valor (a Dimon soma as duas fontes e o dashboard somava
+        # duplicava o valor (a Gold soma as duas fontes e o dashboard somava
         # o realizado duas vezes). realized_value continua usado acima apenas
         # para decidir se o mês está fechado (current_forecast_days).
         for month_offset in range(1, int(config.horizon_months) + 1):

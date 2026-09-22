@@ -211,7 +211,7 @@ def test_layer_resolver_declares_silver_as_detail(monkeypatch):
     assert layers.detail_layer() == "silver"
     assert layers.cube_layer() == "gold"
     assert layers.bronze_layer() == "bronze"
-    assert layers.is_legacy("dimon") is True
+    assert layers.is_legacy("gold") is True
     assert layers.is_legacy("silver") is False
     assert layers.normalize("silver.db") == "silver"
     assert layers.normalize("GOLD") == "gold"

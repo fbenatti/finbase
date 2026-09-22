@@ -31,7 +31,7 @@ const DIRECTOR_VIEW_LABELS: Record<string, string> = {
   departamento_nivel_6: "SubProjeto",
 };
 
-/** Raiz do organograma na UI — não corresponde a departamento_nivel_1 nos dados Dimon. */
+/** Raiz do organograma na UI — não corresponde a departamento_nivel_1 nos dados Gold. */
 const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo Cloud"] as const;
 
 const DEFAULT_CHILD_LIMIT = 7;
@@ -72,7 +72,7 @@ function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, f
     const v = Number(r.realizado || 0);
     // No diálogo de consumo o filtro SQL já selecionou somente realizado.
     // Não dependa do nome retornado da coluna ``tipo`` (que pode preservar a
-    // capitalização física da Dimon), pois isso descartava todas as linhas.
+    // capitalização física da Gold), pois isso descartava todas as linhas.
     const isRealized = ["", "realizado"].includes(String(r.tipo ?? r.Tipo ?? "").trim().toLowerCase());
     if (!filterRowTypes || isRealized) {
       o.cost += v;

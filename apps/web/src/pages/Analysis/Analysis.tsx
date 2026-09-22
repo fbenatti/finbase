@@ -69,8 +69,8 @@ export default function Analysis() {
   const [loading, setLoading] = useState(false);
 
   // ─── Iceberg state ───
-  const [layer, setLayer] = useState<"bronze" | "silver" | "gold" | "dimon">("gold");
-  const [tables, setTables] = useState<TrinoTableList>({ bronze: [], silver: [], gold: [], dimon: [] });
+  const [layer, setLayer] = useState<"bronze" | "silver" | "gold">("gold");
+  const [tables, setTables] = useState<TrinoTableList>({ bronze: [], silver: [], gold: [] });
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<TrinoQueryResult | null>(null);
   const [executedSql, setExecutedSql] = useState("");
@@ -138,14 +138,14 @@ export default function Analysis() {
   };
 
   const removeDimonTable = async (t: string) => {
-    if (!window.confirm('Excluir a tabela ' + t + '? A regra Dimon associada (se houver) e a tabela física no Iceberg serão removidas.')) return;
+    if (!window.confirm('Excluir a tabela ' + t + '? A regra Gold associada (se houver) e a tabela física no Iceberg serão removidas.')) return;
     setError("");
     try {
       await deleteDimonTable(t);
       getAnalysisTables().then(setTables).catch(() => {});
       if (sql.startsWith('SELECT * FROM iceberg.gold.' + t)) setSql("");
     } catch (e: unknown) {
-      setError(formatApiError(e, 'Não foi possível excluir a tabela Dimon'));
+      setError(formatApiError(e, 'Não foi possível excluir a tabela Gold'));
     }
   };
 
@@ -289,7 +289,7 @@ export default function Analysis() {
   }, [srcData, srcPage]);
 
   const destColumns = useMemo(() => destData?.columns || [], [destData]);
-  const dimonTablesCount = useMemo(() => (tables.dimon || []).length, [tables]);
+  const dimonTablesCount = useMemo(() => (tables.gold || []).length, [tables]);
   const destPaged = useMemo(() => {
     if (!destData) return [];
     return destData.rows.slice(destPage * PAGE_SIZE, (destPage + 1) * PAGE_SIZE);
@@ -534,30 +534,30 @@ export default function Analysis() {
               ))}
             </Box>
           )}
-          {layer === "dimon" && (
+          {layer === "gold" && (
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
                 <SchemaIcon color="primary" fontSize="small" />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Dimon — tabelas pré-agregadas (dest_dm_cost_*)</Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Gold — tabelas pré-agregadas (dest_dm_cost_*)</Typography>
                 <Chip label={`${dimonTablesCount} tabela(s)`} size="small" color="primary" variant="outlined" />
               </Box>
               {dimonTablesCount === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma tabela Dimon gerada ainda. Ela é criada automaticamente ao final do reprocess do destino MODELO FOCUS.</Alert>
+                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma tabela Gold gerada ainda. Ela é criada automaticamente ao final do reprocess do destino MODELO FOCUS.</Alert>
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
-                  {(tables.dimon || []).map((t) => (
+                  {(tables.gold || []).map((t) => (
                     <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant="outlined"
-                      onClick={() => setSql(`SELECT * FROM iceberg.dimon.${t} LIMIT 10`)} sx={{ cursor: "pointer" }}
+                      onClick={() => setSql(`SELECT * FROM iceberg.gold.${t} LIMIT 10`)} sx={{ cursor: "pointer" }}
                       onDelete={() => void removeDimonTable(t)} deleteIcon={<Delete fontSize="small" />} />
                   ))}
                 </Box>
               )}
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Clique em uma tabela para montar a query e depois em <b>Run</b> — mesmo comportamento da camada Gold. As Dimons são pré-agregadas (mensal) com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
+                Clique em uma tabela para montar a query e depois em <b>Run</b> — mesmo comportamento da camada Gold. As cubos Gold são pré-agregadas (mensal) com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
               </Typography>
             </>
           )}
-          {layer !== "gold" && layer !== "dimon" && (
+          {layer !== "gold" && (
             <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
               {(tables[layer] || []).map((t) => (
                 <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant="outlined"
@@ -574,7 +574,7 @@ export default function Analysis() {
             </Box>
             <Box sx={{ display: "flex", gap: 1 }}>
               <TextField fullWidth multiline minRows={2} maxRows={6} size="small"
-                placeholder={layer === "dimon" ? "SELECT * FROM iceberg.dimon.dest_dm_cost_<code> LIMIT 10" : "SELECT * FROM iceberg." + layer + "." + ((tables[layer] || [])[0] || "...") + " LIMIT 10"}
+                placeholder={layer === "gold" ? "SELECT * FROM iceberg.gold.dest_dm_cost_<code> LIMIT 10" : "SELECT * FROM iceberg." + layer + "." + ((tables[layer] || [])[0] || "...") + " LIMIT 10"}
                 value={sql} onChange={(e) => setSql(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && e.metaKey && executeSql()}
                 sx={{ fontFamily: "monospace", "& textarea": { fontSize: "0.85rem" } }} />

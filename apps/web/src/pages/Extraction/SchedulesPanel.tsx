@@ -8,7 +8,7 @@ import { Schedule, Add, Edit, Delete, PlayArrow } from "@mui/icons-material";
 import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   ScheduledTask, SourceConnection, formatApiError, getDestinationTables, getForecastConfigs,
-  getDimonRules, DestinationTable, ForecastConfig, DimonRule,
+  getGoldCubeRules, DestinationTable, ForecastConfig, GoldCubeRule,
 } from "../../services/api";
 import SortableTable from "../../components/SortableTable";
 
@@ -60,7 +60,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const [error, setError] = useState("");
   const [destinations, setDestinations] = useState<DestinationTable[]>([]);
   const [forecastConfigs, setForecastConfigs] = useState<ForecastConfig[]>([]);
-  const [dimonRules, setDimonRules] = useState<DimonRule[]>([]);
+  const [dimonRules, setDimonRules] = useState<GoldCubeRule[]>([]);
   const [forecastConfigsError, setForecastConfigsError] = useState(false);
 
   const focusDimonIds = (goldIds: number[]): number[] => {
@@ -92,7 +92,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         setForecastConfigsError(false);
       })
       .catch(() => setForecastConfigsError(true));
-    getDimonRules().then(setDimonRules).catch(() => {});
+    getGoldCubeRules().then(setDimonRules).catch(() => {});
   }, []);
 
   const openNew = () => {
@@ -127,7 +127,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
     setDialogOpen(true);
   };
 
-  // Existing Cloud schedules historically stored an empty Dimon list to mean
+  // Existing Cloud schedules historically stored an empty Gold list to mean
   // "automatic". Surface the actual FOCUS-related rules as checked items.
   useEffect(() => {
     if (!dialogOpen || !editing || form.schedule_type === "backup" || form.dimon_rule_ids.length) return;
@@ -385,7 +385,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acurácia" />
               <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar custo compartilhado" />
               <Box>
-                <FormControl size="small" fullWidth><InputLabel>Dimons</InputLabel><Select multiple value={form.dimon_rule_ids} label="Dimons" onChange={e => setForm({ ...form, dimon_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => dimonRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{dimonRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>Dimons relacionadas à Gold selecionada já aparecem marcadas.</FormHelperText></FormControl>
+                <FormControl size="small" fullWidth><InputLabel>cubos Gold</InputLabel><Select multiple value={form.dimon_rule_ids} label="cubos Gold" onChange={e => setForm({ ...form, dimon_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => dimonRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{dimonRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>cubos Gold relacionadas à Gold selecionada já aparecem marcadas.</FormHelperText></FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
                   <Button size="small" onClick={() => setForm({ ...form, dimon_rule_ids: dimonRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Selecionar todas</Button>
                   <Button size="small" onClick={() => setForm({ ...form, dimon_rule_ids: [] })}>Limpar</Button>

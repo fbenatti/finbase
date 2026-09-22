@@ -1,4 +1,4 @@
-"""Dimon leve para os dashboards operacionais de Azure OpenAI PTU.
+"""Gold leve para os dashboards operacionais de Azure OpenAI PTU.
 
 A Gold ``dest_azure_ptu_metrics`` preserva a observação horária e continua
 sendo a fonte do heatmap. Os demais widgets leem esta materialização diária,
@@ -13,12 +13,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
-MART_NAMESPACE = "dimon"
-MART_TABLE = "dest_dm_azure_ptu_daily"
-DIMON_SQL = f"iceberg.{MART_NAMESPACE}.{MART_TABLE}"
+GOLD = layers.GOLD
+GOLD_TABLE = "dest_dm_azure_ptu_daily"
+DIMON_SQL = f"iceberg.{GOLD}.{GOLD_TABLE}"
 GOLD_SQL = "iceberg.gold.dest_azure_ptu_metrics"
 DASHBOARD_TRINO_TIMEOUT_S = 25
 
@@ -127,7 +128,7 @@ def _daily_select(columns: set[str]) -> str:
     return ",\n        ".join(measures)
 
 
-async def refresh_azure_ptu_dimon(*, days: int = 400) -> dict[str, Any]:
+async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
     """Reconstrói atomicamente o histórico operacional e financeiro recente."""
     # PyArrow/PyIceberg são dependências do worker de materialização, não da
     # API de leitura nem dos testes unitários do dashboard.
@@ -141,10 +142,10 @@ async def refresh_azure_ptu_dimon(*, days: int = 400) -> dict[str, Any]:
     start_iso = start.strftime("%Y-%m-%dT%H:00:00Z")
     end_iso = end.strftime("%Y-%m-%dT%H:00:00Z")
     where = _gold_metric_hour_filter(start_iso, end_iso)
-    staging = f"{MART_TABLE}_stg_{time.time_ns()}"
-    iceberg.ensure_namespace(MART_NAMESPACE)
+    staging = f"{GOLD_TABLE}_stg_{time.time_ns()}"
+    iceberg.ensure_namespace(GOLD)
     sql = f"""
-      CREATE TABLE iceberg.{MART_NAMESPACE}.{staging}
+      CREATE TABLE iceberg.{GOLD}.{staging}
       WITH (partitioning = ARRAY['_billing_period']) AS
       SELECT
         substr(CAST(metric_hour AS VARCHAR), 1, 10) AS metric_day,
@@ -166,19 +167,19 @@ async def refresh_azure_ptu_dimon(*, days: int = 400) -> dict[str, Any]:
     try:
         await trino_execute(sql, timeout_s=1800)
         count_rows = await trino_execute(
-            f"SELECT COUNT(*) AS row_count FROM iceberg.{MART_NAMESPACE}.{staging}", timeout_s=120,
+            f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=120,
         )
         row_count = int((count_rows[0] if count_rows else {}).get("row_count") or 0)
         if row_count:
-            iceberg.swap_staged_table(MART_TABLE, staging, namespace=MART_NAMESPACE, known_row_count=row_count)
+            iceberg.swap_staged_table(GOLD_TABLE, staging, namespace=GOLD, known_row_count=row_count)
         else:
-            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=GOLD)
         global _DIMON_COLUMNS
         _DIMON_COLUMNS = None
-        return {"table": MART_TABLE, "rows": row_count, "days": days}
+        return {"table": GOLD_TABLE, "rows": row_count, "days": days}
     except Exception:
         try:
-            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=GOLD)
         except Exception:
             pass
         raise
@@ -192,13 +193,13 @@ async def load_dimon_metrics(
     grain: str = "day",
     timeout_s: float = DASHBOARD_TRINO_TIMEOUT_S,
 ) -> list[dict[str, Any]]:
-    """Lê a Dimon diária; nunca consulta a Gold como fallback silencioso."""
+    """Lê a Gold diária; nunca consulta a Gold como fallback silencioso."""
     global _DIMON_COLUMNS
     if _DIMON_COLUMNS is None:
         try:
             _DIMON_COLUMNS = await _columns(DIMON_SQL)
         except Exception as exc:
-            logger.warning("Dimon Azure PTU indisponível: %s", exc)
+            logger.warning("Gold Azure PTU indisponível: %s", exc)
             return []
     start_iso, end_iso = _gold_metrics_window(hours)
     start_day, end_day = start_iso[:10], end_iso[:10]
@@ -253,7 +254,7 @@ async def load_dimon_metrics(
         rows = await trino_execute(sql, timeout_s=timeout_s)
         return [dict(row) for row in (rows or [])]
     except Exception as exc:
-        logger.warning("Dimon Azure PTU query failed: %s", exc, exc_info=True)
+        logger.warning("Gold Azure PTU query failed: %s", exc, exc_info=True)
         return []
 
 

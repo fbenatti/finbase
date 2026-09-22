@@ -910,11 +910,11 @@ async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession
     series_dims = [field for field in snapshot.get("dimensions", []) if field in schema]
     measure, date_col = snapshot["measure_column"], snapshot["date_column"]
     period_col = snapshot.get("period_column")
-    actual_source, mart_date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
-    # O mart já resolve date_expr/type_filter (sem chargeperiodstart); a Gold
+    actual_source, gold_date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
+    # O cubo Gold já resolve date_expr/type_filter (sem chargeperiodstart); a Gold
     # legada usa date_col original e o filtro com prefixo WHERE.
     if "dest_dm_cost_" in actual_source:
-        date_expr = mart_date_expr
+        date_expr = gold_date_expr
     else:
         date_expr = gold_date_expr(date_col, period_col)
         type_col = snapshot.get("type_column")
@@ -1004,8 +1004,8 @@ def _accuracy_metrics(forecast_value: float | None, actual_value: float | None) 
 def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, str | None, str]:
     """Resolve the 'actual' side of forecast accuracy.
 
-    Reads the pre-aggregated Gold mart (dest_dm_cost_*) instead of the 31M-row
-    Gold when the snapshot targets the FOCUS table: the mart carries the
+    Reads the pre-aggregated Gold cube (dest_dm_cost_*) instead of the 31M-row
+    Gold when the snapshot targets the FOCUS table: the Gold cube carries the
     same tipo/realizado grain at a fraction of the scan cost.
     Returns (actual_source, date_expr, measure, type_col, type_filter).
     """
@@ -1016,7 +1016,7 @@ def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, s
         date_expr = gold_date_expr(period_col, period_col)
         measure = snapshot.get("measure_column") or "realizado"
         type_col = "tipo"
-        # The mart only stores tipo='realizado' rows for realized facts.
+        # The Gold cube only stores tipo='realizado' rows for realized facts.
         type_filter = " AND lower(CAST(\"tipo\" AS VARCHAR)) = 'realizado'"
         return actual_source, date_expr, measure, type_col, type_filter
     actual_source = f"iceberg.{snapshot.get('source_namespace', 'gold')}.{dest}"
@@ -1030,7 +1030,7 @@ def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, s
 def _daily_gold_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, str | None, str]:
     """Resolve the non-aggregated Gold source used by the daily drill-down.
 
-    Accuracy totals may use the Gold mart for the FOCUS model because its monthly grain
+    Accuracy totals may use the Gold cube for the FOCUS model because its monthly grain
     makes those queries much cheaper.  A day-by-day chart cannot use that
     aggregate: its period-derived date maps every value to day 1.  Keep this
     path explicitly on the original Gold table and its configured date column.
@@ -1781,7 +1781,7 @@ async def accuracy_delta_series(
     year, month = int(target[:4]), int(target[4:6])
     days_in_month = calendar.monthrange(year, month)[1]
 
-    # Dimon is monthly and intentionally used by the summary tables.  The
+    # Gold is monthly and intentionally used by the summary tables.  The
     # expanded series must instead retain Gold's real charge date so each day
     # is displayed where the resource was actually consumed.
     actual_source, date_expr, measure, type_col, type_filter = _daily_gold_actual_context(snapshot)

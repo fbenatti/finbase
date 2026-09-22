@@ -3,7 +3,7 @@ Script de limpeza de pastas órfãs de staging no repositório Iceberg local.
 
 Identifica e remove com segurança todos os diretórios temporários (*_stg_*)
 que não correspondem a nenhuma tabela ativa no catálogo SQL do PyIceberg.
-Preserva 100% das tabelas ativas, snapshots da Gold, Bronze, Silver, Forecast e Dimon.
+Preserva 100% das tabelas ativas, snapshots da Gold, Bronze, Silver, Forecast e Gold.
 
 Uso:
     PYTHONPATH=apps/api ./.venv/bin/python apps/api/scripts/cleanup_orphan_staging.py
@@ -77,7 +77,7 @@ def run_cleanup(dry_run: bool = False) -> None:
     active_locations: set[str] = set()
     active_table_count = 0
 
-    known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast", "dimon"]
+    known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast", "gold"]
     for ns in known_namespaces:
         try:
             tables = cat.list_tables(ns)

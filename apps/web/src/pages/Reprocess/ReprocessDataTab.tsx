@@ -13,7 +13,7 @@ import {
   getAvailablePeriods, AvailablePeriod,
   reprocessDest, reclassifyDest, getReprocessStatus, cancelReprocess, ReprocessStatus,
   getRunningTasks, TaskStatus, getWorkerHealth, WorkerHealth, getReprocessHistory,
-  getDimonRules, DimonRule,
+  getGoldCubeRules, GoldCubeRule,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import ReprocessHistoryDataGrid from "./ReprocessHistoryDataGrid";
@@ -37,9 +37,9 @@ export default function ReprocessDataTab() {
   const [selPeriods, setSelPeriods] = useState<string[]>([]);
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [classificationOnly, setClassificationOnly] = useState(false);
-  const [chainDimons, setChainDimons] = useState(false);
-  const [chainDimonRuleId, setChainDimonRuleId] = useState<number | "">("");
-  const [dimonRules, setDimonRules] = useState<DimonRule[]>([]);
+  const [chainGoldCubes, setChainGoldCubes] = useState(false);
+  const [chainGoldCubeRuleId, setChainDimonRuleId] = useState<number | "">("");
+  const [dimonRules, setDimonRules] = useState<GoldCubeRule[]>([]);
   const [periods, setPeriods] = useState<AvailablePeriod[]>([]);
   const [processing, setProcessing] = useState(false);
   const [taskId, setTaskId] = useState<number | null>(null);
@@ -89,7 +89,7 @@ export default function ReprocessDataTab() {
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
-    getDimonRules().then(setDimonRules).catch(() => {});
+    getGoldCubeRules().then(setDimonRules).catch(() => {});
     historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     const refreshWorker = () => getWorkerHealth().then(setWorkerHealth).catch(() => setWorkerHealth({ status: "offline", heartbeat_age_seconds: null }));
     refreshWorker();
@@ -226,7 +226,7 @@ export default function ReprocessDataTab() {
             connection_ids: selConnIds,
             billing_periods: selPeriods,
             replace_existing: replaceExisting,
-            chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
+            chain_gold_cubes: { enabled: chainGoldCubes, rule_ids: chainGoldCubeRuleId === "" ? [] : [chainGoldCubeRuleId as number] },
           });
       await notifications.addTaskById(res.task_id, { kind: "reprocess", title: classificationOnly ? "Reclassificar projetos" : "Reprocessar dados" });
       setTaskId(res.task_id);
@@ -259,7 +259,7 @@ export default function ReprocessDataTab() {
         connection_ids: item.connection_ids,
         billing_periods: item.billing_periods,
         replace_existing: false,
-        chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
+        chain_gold_cubes: { enabled: chainGoldCubes, rule_ids: chainGoldCubeRuleId === "" ? [] : [chainGoldCubeRuleId as number] },
       });
       await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
       setTaskId(res.task_id);
@@ -290,7 +290,7 @@ export default function ReprocessDataTab() {
             connection_ids: item.connection_ids,
             billing_periods: item.billing_periods,
             replace_existing: false,
-            chain_dimons: { enabled: chainDimons, rule_ids: chainDimonRuleId === "" ? [] : [chainDimonRuleId as number] },
+            chain_gold_cubes: { enabled: chainGoldCubes, rule_ids: chainGoldCubeRuleId === "" ? [] : [chainGoldCubeRuleId as number] },
           });
           await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
           if (res.task_ids) allTaskIds.push(...res.task_ids);
@@ -439,19 +439,19 @@ export default function ReprocessDataTab() {
               label="Reconstruir tabela completa (substituir dados antigos)"
             />
             <FormControlLabel
-              control={<Switch checked={classificationOnly} onChange={(e) => { setClassificationOnly(e.target.checked); if (e.target.checked) { setReplaceExisting(false); setChainDimons(false); } }} color="primary" />}
+              control={<Switch checked={classificationOnly} onChange={(e) => { setClassificationOnly(e.target.checked); if (e.target.checked) { setReplaceExisting(false); setChainGoldCubes(false); } }} color="primary" />}
               label="Reprocessar apenas classificação dos projetos"
             />
             <FormControlLabel
-              control={<Switch checked={chainDimons} onChange={(e) => setChainDimons(e.target.checked)} color="primary" disabled={classificationOnly} />}
-              label="Materializar Dimon na sequência (visão completa)"
+              control={<Switch checked={chainGoldCubes} onChange={(e) => setChainGoldCubes(e.target.checked)} color="primary" disabled={classificationOnly} />}
+              label="Materializar Gold na sequência (visão completa)"
             />
-            {chainDimons && (
+            {chainGoldCubes && (
               <FormControl sx={{ minWidth: 280 }} size="small">
-                <InputLabel>Tabela Dimon</InputLabel>
+                <InputLabel>Tabela Gold</InputLabel>
                 <Select
-                  value={chainDimonRuleId}
-                  label="Tabela Dimon"
+                  value={chainGoldCubeRuleId}
+                  label="Tabela Gold"
                   onChange={(e) => setChainDimonRuleId(e.target.value as number | "")}
                 >
                   <MenuItem value=""><em>Todas as regras ativas</em></MenuItem>
@@ -508,11 +508,11 @@ export default function ReprocessDataTab() {
         </Alert>
       )}
       {/* ── Andamento — movido para o ícone de notificações ── */}
-      {chainDimons && !isRunning && (
+      {chainGoldCubes && !isRunning && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          A Dimon selecionada será materializada <strong>na sequência</strong>, depois que o último
+          A Gold selecionada será materializada <strong>na sequência</strong>, depois que o último
           reprocessamento do grupo concluir (visão completa = realizado + forecast + rateio). Acompanhe
-          a execução da Dimon no sino de notificações e na aba <strong>Dimon (Custo pré-agregado)</strong>.
+          a execução da Gold no sino de notificações e na aba <strong>Gold (Custo pré-agregado)</strong>.
         </Alert>
       )}
       {(isRunning || isQueued) && (

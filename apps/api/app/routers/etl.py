@@ -1451,9 +1451,9 @@ def _reprocess_destination_sync(
                     "table": status.get("table", ""),
                     "rows_written": status.get("rows_destination", 0),
                     "error": status.get("error", ""),
-                    "mart_table": status.get("mart_table"),
-                    "mart_rows": status.get("mart_rows"),
-                    "mart_error": status.get("mart_error"),
+                    "gold_table": status.get("gold_table"),
+                    "gold_rows": status.get("gold_rows"),
+                    "gold_error": status.get("gold_error"),
                 }
                 if status.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
                     row.finished_at = func.now()
@@ -1474,14 +1474,14 @@ def _reprocess_destination_sync(
             (dest_info.name or "").strip().upper() == "MODELO FOCUS"
             or (phys_name or "").strip().lower() == "dest_modelo_focus"
         )
-        # O mart agregado é gerado ao final do reprocess SOMENTE para o
+        # O cubo Gold agregado é gerado ao final do reprocess SOMENTE para o
         # destino MODELO FOCUS, reutilizando os DataFrames em memória (não
         # varre a Gold de milhões de linhas).
-        # Estrutura Dimon única = regras (dimon_rule + dimon_materialization),
+        # Estrutura Gold única = regras (dimon_rule + dimon_materialization),
         # geradas sob demanda via /gold/reprocess. A geração automática
         # paralela (gold_builder -> dest_dm_cost_focus) foi desativada.
-        enable_marts = False
-        mart_chunks: list = []
+        enable_gold_cubes = False
+        gold_chunks: list = []
 
         all_mappings = []
         for cid in connection_ids:
@@ -1864,16 +1864,16 @@ def _reprocess_destination_sync(
         def _stage_frame(frame: pd.DataFrame) -> None:
             """Append one completed blob to the temporary Iceberg table."""
             nonlocal temp_name, staged_rows
-            if enable_marts:
-                # Reaproveita o frame em memória: acumula a agregação do mart
+            if enable_gold_cubes:
+                # Reaproveita o frame em memória: acumula a agregação do cubo Gold
                 # (principais colunas, mensal, SUM quantity/realizado/billedcost)
                 # sem reler a Gold publicada.
                 try:
-                    mart_agg = gold_builder.aggregate_frame(frame)
-                    if mart_agg is not None and not mart_agg.empty:
-                        mart_chunks.append(mart_agg)
+                    gold_agg = gold_builder.aggregate_frame(frame)
+                    if gold_agg is not None and not gold_agg.empty:
+                        gold_chunks.append(gold_agg)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("Agregação do mart falhou (Gold segue normal): %s", exc)
+                    logger.warning("Agregação do cubo Gold falhou (Gold segue normal): %s", exc)
             prepared = _prepare_for_stage(frame)
             for start in range(0, len(prepared), 100_000):
                 chunk = prepared.iloc[start:start + 100_000]
@@ -2115,43 +2115,43 @@ def _reprocess_destination_sync(
                 iceberg.cleanup_staged_table(temp_name)
             raise stage_err
 
-        # ── Mart agregado (só MODELO FOCUS): publica a pré-agregação mensal
+        # ── Gold agregado (só MODELO FOCUS): publica a pré-agregação mensal
         # gerada dos frames em memória. Se falhar, reconstrói da Gold (fallback)
         # para manter consistência; a Gold já publicada permanece a fonte da
         # verdade e o erro fica auditável no resultado da tarefa.
-        mart_rows = 0
-        mart_error = None
-        if enable_marts:
+        gold_rows = 0
+        gold_error = None
+        if enable_gold_cubes:
             try:
-                mart_rows = gold_builder.publish_marts(mart_chunks)
-                status["mart_rows"] = mart_rows
-                status["mart_table"] = gold_builder.MART_TABLE
+                gold_rows = gold_builder.publish_gold_cubes(gold_chunks)
+                status["gold_rows"] = gold_rows
+                status["gold_table"] = gold_builder.GOLD_TABLE
                 status["current_blob"] = (
                     f"Concluido: {total_written} linhas na Gold, "
-                    f"{mart_rows:,} linhas no mart ({gold_builder.MART_TABLE})"
+                    f"{gold_rows:,} linhas no cubo Gold ({gold_builder.GOLD_TABLE})"
                 )
                 _append_reprocess_log(
                     task_id,
-                    f"Gold publicada: {mart_rows:,} linhas agregadas",
-                    details={"mart_table": gold_builder.MART_TABLE, "mart_rows": mart_rows},
+                    f"Gold publicada: {gold_rows:,} linhas agregadas",
+                    details={"gold_table": gold_builder.GOLD_TABLE, "gold_rows": gold_rows},
                 )
             except Exception as exc:  # noqa: BLE001
-                mart_error = str(exc)
+                gold_error = str(exc)
                 try:
-                    mart_rows = gold_builder.rebuild_marts_from_gold()
-                    mart_error = None
-                    status["mart_rows"] = mart_rows
-                    status["mart_table"] = gold_builder.MART_TABLE
+                    gold_rows = gold_builder.rebuild_gold_cubes()
+                    gold_error = None
+                    status["gold_rows"] = gold_rows
+                    status["gold_table"] = gold_builder.GOLD_TABLE
                     _append_reprocess_log(
                         task_id,
-                        f"Mart reconstruído da Gold (fallback): {mart_rows:,} linhas",
-                        details={"mart_table": gold_builder.MART_TABLE, "mart_rows": mart_rows},
+                        f"Gold reconstruído da Gold (fallback): {gold_rows:,} linhas",
+                        details={"gold_table": gold_builder.GOLD_TABLE, "gold_rows": gold_rows},
                     )
                 except Exception as exc2:  # noqa: BLE001
-                    mart_error = f"{mart_error} | rebuild: {exc2}"
-                    status["mart_error"] = mart_error
-                    status["mart_rows"] = 0
-                    _append_reprocess_log(task_id, f"Mart falhou: {mart_error}", level="ERROR")
+                    gold_error = f"{gold_error} | rebuild: {exc2}"
+                    status["gold_error"] = gold_error
+                    status["gold_rows"] = 0
+                    _append_reprocess_log(task_id, f"Gold falhou: {gold_error}", level="ERROR")
             _sync_db()
 
         status["status"] = "COMPLETED"
@@ -2161,9 +2161,9 @@ def _reprocess_destination_sync(
         _sync_db()
         _append_reprocess_log(task_id, "Reprocessamento concluído e Gold publicada", details={"rows_written": total_written, "blobs_processed": len(all_blobs), "table": dest_info.name})
         return {"success": True, "rows_written": total_written, "table": dest_info.name,
-                "mart_table": gold_builder.MART_TABLE if enable_marts else None,
-                "mart_rows": mart_rows if enable_marts else None,
-                "mart_error": mart_error}
+                "gold_table": gold_builder.GOLD_TABLE if enable_gold_cubes else None,
+                "gold_rows": gold_rows if enable_gold_cubes else None,
+                "gold_error": gold_error}
 
     except Exception as e:
         import traceback
@@ -2463,7 +2463,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                         "replace_existing": False,
                         "backfill": not periods,
                         **details,
-                        "chain_marts": body.chain_marts.model_dump() if body.chain_marts else {},
+                        "chain_gold_cubes": body.chain_gold_cubes.model_dump() if body.chain_gold_cubes else {},
                         "event_log": [{
                             "at": datetime.now(timezone.utc).isoformat(),
                             "level": "INFO",
@@ -2563,7 +2563,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                 # Each child replaces only its own source/month. ``replace_existing``
                 # must never erase the other queued months.
                 result_json={"replace_existing": False, **details,
-                             "chain_marts": body.chain_marts.model_dump() if body.chain_marts else {},
+                             "chain_gold_cubes": body.chain_gold_cubes.model_dump() if body.chain_gold_cubes else {},
                              "event_log": [{
                     "at": datetime.now(timezone.utc).isoformat(), "level": "INFO",
                     "message": f"Fila {position}/{len(ordered_pairs)}: fonte {connection_id}, mês {period}",

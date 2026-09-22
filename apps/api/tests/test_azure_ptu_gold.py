@@ -4,7 +4,7 @@ from app.services import azure_ptu_gold as gold_mart
 
 
 @pytest.mark.asyncio
-async def test_project_tokens_are_read_from_ptu_dimon(monkeypatch):
+async def test_project_tokens_are_read_from_ptu_gold(monkeypatch):
     captured = []
 
     async def fake_execute(sql, **kwargs):
@@ -15,7 +15,7 @@ async def test_project_tokens_are_read_from_ptu_dimon(monkeypatch):
     result = await gold_mart.load_project_token_totals("vivo-mais", ["202608"], None)
 
     assert result["202608"]["total_tokens"] == 1000
-    assert f"iceberg.{gold_mart.MART_NAMESPACE}.dest_dm_azure_ptu_daily" in captured[0]
+    assert f"iceberg.{gold_mart.GOLD}.dest_dm_azure_ptu_daily" in captured[0]
     assert "lower(CAST(project_hint AS VARCHAR)) = 'vivo-mais'" in captured[0]
 
 
@@ -52,7 +52,7 @@ async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
     await gold_mart.load_dimon_metrics(hours=720, project_hints=["aura-brain"], grain="day")
 
     assert len(captured) == 1
-    assert f"FROM iceberg.{gold_mart.MART_NAMESPACE}.dest_dm_azure_ptu_daily" in captured[0]
+    assert f"FROM iceberg.{gold_mart.GOLD}.dest_dm_azure_ptu_daily" in captured[0]
     assert "iceberg.gold.dest_azure_ptu_metrics" not in captured[0]
 
 
