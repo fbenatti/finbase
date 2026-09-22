@@ -106,8 +106,12 @@ export default function AcksWidget({ department }: { department?: string }) {
         return getForecastAccuracyDesvios(run.run_id, month, department || undefined)
           .then(desvios => {
             if (cancelled) return;
-            setPositive(desvios.positive.slice(0, 5));
-            setNegative(desvios.negative.slice(0, 5));
+            // No widget executivo, os grupos recebidos do endpoint chegam
+            // invertidos em relação ao rótulo exibido (subestimou = gastou
+            // mais; superestimou = gastou menos). Corrige somente a camada
+            // de apresentação, sem alterar a semântica da API nas demais telas.
+            setPositive(desvios.negative.slice(0, 5));
+            setNegative(desvios.positive.slice(0, 5));
           })
           .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
       })
