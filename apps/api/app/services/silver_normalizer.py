@@ -150,7 +150,7 @@ def mapped_sources() -> list[str]:
 
 def bronze_table_name(mapping: SourceMapping, environment: str | None) -> str:
     """Resolve `{env}` no padrão da tabela Bronze."""
-    env = (environment or "").strip()
+    env = (environment or "").strip() if isinstance(environment, str) else ""
     if "{env}" not in mapping.bronze_table:
         return mapping.bronze_table
     if not env:

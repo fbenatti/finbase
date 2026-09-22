@@ -1334,10 +1334,16 @@ def consumer_main(worker_id: int):
                                     # Normalização por modelo: a fonte declara o
                                     # mapeamento, o motor grava a Silver canônica.
                                     from app.services.silver_normalizer import materialise
+                                    from app.services.azure_source_registry import (
+                                        environment_slug as _env_of,
+                                    )
                                     _silver = materialise(
                                         _ptu_session,
                                         source_key=_task_source_key or "monitor_vm_metrics",
-                                        bronze_table=source_code.replace("-", "_"),
+                                        # O ambiente vem do resolvedor do registry
+                                        # (explícito → cloud_name → code); montar o
+                                        # nome da Bronze à mão já divergiu uma vez.
+                                        environment=_env_of(_ptu_conn) or None,
                                     )
                                     _mon_result["silver_rows"] = _silver.get("rows_silver", 0)
                                     _mon_result["silver_table"] = _silver.get("silver_table")
