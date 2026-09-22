@@ -1020,3 +1020,74 @@ reprocessar.
 | `/api/planning/budget-accuracy` | HTTP 200 |
 | `/api/analysis/expected-view` | HTTP 200 |
 | `/dimon/*` | HTTP 404 (removido) |
+
+---
+
+## 13. Investigação: forecast abaixo do realizado
+
+**Sintoma.** Na Visão Executiva os meses futuros apareciam com ~13,3–13,8 M/mês,
+enquanto o realizado recente estava em 18,67 M (ago/2026). A Acurácia de Forecast
+estava correta.
+
+### 13.1 O que foi verificado (e descartado)
+
+| Verificação | Resultado |
+|---|---|
+| Cubo × Silver no realizado | **diferença zero** em 202606–202609 |
+| Cubo × run 269 no forecast | **idêntico** (13.621.475 em 202610, etc.) |
+| Motor (baseline × dias) | consistente: usa `MEAN_30D` e projeta o mês cheio |
+
+O cubo não distorce nada: ele reproduz fielmente o que o motor gerou e o que a
+Silver contém. Não era erro de geração do cubo.
+
+### 13.2 Causa raiz: a janela do baseline engole um mês parcial
+
+O motor projeta como `baseline × dias_do_mês`, com o baseline vindo de médias
+móveis dos últimos 7/14/30 dias. Em 22/09 a janela de 30 dias contém:
+
+- agosto/2026 **completo** (18,67 M);
+- setembro/2026 **parcial**, com 22 de 30 dias (9,00 M).
+
+Isso dá ~425 k/dia, e 425 k × 30 ≈ 12,8 M — exatamente o valor projetado. O
+mês em curso entra na média com o valor parcial e **deprime o baseline**.
+
+### 13.3 O que estava baixo era o próprio setembro
+
+Comparando por conexão, agosto → setembro:
+
+| Conexão | Agosto | Setembro | Situação |
+|---|---|---|---|
+| 2 · azure-ti | 12.031.489 | 5.439.968 | carregando (parcial) |
+| 9 · oci-prod | 3.726.267 | 2.649.058 | carregando (parcial) |
+| 8 · gcp-ttech | 897.075 | 617.361 | carregando (parcial) |
+| 3 · gcp-4p | 360.011 | 159.855 | carregando (parcial) |
+| 4 · gcp-ti | 91.896 | 64.960 | carregando (parcial) |
+| 5 | 94.866 | 71.316 | carregando (parcial) |
+| **10 · azure-marketplace** | **1.473.205** | **ausente** | carga **manual CSV** não atualizada |
+| 7 · ibm-ti | ausente desde jul | ausente | carga **manual CSV** não atualizada |
+
+Todas as conexões de carga automática estão proporcionais ao mês em curso; as
+duas de carga **manual** não têm setembro.
+
+### 13.4 Conclusão
+
+O forecast está aritmeticamente correto para o baseline que recebeu. São dois
+fatores somados:
+
+1. a janela de 30 dias mistura um mês fechado com um mês em curso;
+2. setembro ainda não tem o mês completo carregado (e as fontes manuais não
+   foram atualizadas).
+
+### 13.5 Correção proposta (a confirmar)
+
+Não alterar a fórmula sem decisão: mudar o baseline muda todo o forecast.
+Opções levantadas:
+
+- (a) excluir o mês parcial da janela do baseline, projetando a partir do
+  **run-rate dos dias fechados** do mês em curso;
+- (b) manter a fórmula e tratar a atualização das cargas manuais (10 e 7) como
+  pré-requisito para o forecast fechar;
+- (c) as duas coisas.
+
+Antes de mexer, verificar se o contrato do motor (`FORECAST.md`) define o
+tratamento do mês em curso — não encontrado até o momento.
