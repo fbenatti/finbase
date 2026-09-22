@@ -1252,3 +1252,76 @@ helper, deixando `lifespan` sem decorator.
 Não reiniciar worker/API durante uma coleta: o kill no meio da escrita deixa o
 Iceberg em estado que o Trino não lê. Quando for necessário, aguardar a fila
 drenar.
+
+---
+
+## 16. Fechamento da validação das 3 conexões
+
+### 16.1 Contrato verificado ponto a ponto
+
+| Item do objetivo | Evidência |
+|---|---|
+| `PUT /{id}/sources/{source_key}/selection` grava em `azure_connection_source` | ligar/desligar `openai_ptu` na 4P e `resource_graph` na TI persistiu e **não vazou** para a outra conexão |
+| `POST /environments/{env}/collect` cria uma task por fonte | 4P → 6 tasks, TI → 3, Marketplace → 0 (carga manual, motivo explícito) |
+| Coletores escrevem na Bronze com o `source_code` derivado | conexão 1 escreveu em `raw_azure_4p`, `_resource_graph`, `_automation`, `_monitor_vm`, `_ptu`, `_vm_inventory` |
+| Painel do frontend | lista o catálogo completo (14) por conexão, com as ligadas marcadas e o resto selecionável |
+| Carga full das 3 conexões | 9 tasks, **9 COMPLETED, 0 falhas** |
+
+### 16.2 Carga full — resultado por conexão
+
+| Conexão | Fonte | Status | Linhas |
+|---|---|---|---|
+| 4P | cost_exports | COMPLETED | — |
+| 4P | openai_ptu | COMPLETED | 8.928 |
+| 4P | automation_jobs | COMPLETED | 4.219 |
+| 4P | resource_graph | COMPLETED | 8.926 |
+| 4P | monitor_vm_metrics | COMPLETED | 615.002 |
+| 4P | vm_inventory | COMPLETED | 304 |
+| TI | cost_exports | COMPLETED | — |
+| TI | automation_jobs | COMPLETED | 5.192 |
+| TI | resource_graph | COMPLETED | 10.316 |
+| Marketplace | cost_exports | — | carga manual (upload), 1.475 linhas históricas |
+
+### 16.3 Bronze → Silver no pipeline
+
+A normalização passou a rodar dentro da coleta do Monitor (task 5822):
+
+| Etapa | Resultado |
+|---|---|
+| Bronze | 615.002 linhas |
+| Silver `resource_metric_series` | 615.002 linhas, 394.834 com valor, 61 recursos |
+| Erro | nenhum |
+
+Estado atual da Silver canônica:
+
+| Modelo | Linhas | Detalhe |
+|---|---|---|
+| `resource_metric_series` | 615.002 | 61 recursos, 9 métricas |
+| `resource_inventory` | 8.926 | 130 tipos de recurso, 8.748 recursos distintos |
+
+### 16.4 Defeito operacional que custou tempo
+
+Havia **workers antigos vivos** competindo pela fila. Como eu reiniciava apenas o
+processo registrado no arquivo de pid, sobravam workers com o código anterior
+pegando as tasks — cada teste rodava em uma versão diferente do código, o que
+produziu três erros distintos em sequência (nome de Bronze errado, módulo
+removido, ambiente vazio) para o mesmo defeito de fundo.
+
+Detecção correta: `pgrep -f "\.venv/bin/python worker\.py"`. Um `pgrep -f worker.py`
+casa com o próprio shell do comando, que continha a string no heredoc.
+
+O `/etl/worker-health` também não serve para isso: ele responde pela última
+gravação de heartbeat, então reporta workers já mortos como ativos.
+
+### 16.5 Estado dos serviços
+
+| Serviço | Estado |
+|---|---|
+| API (`:8001`) | `{"status":"ok"}`, 0 falhas de startup |
+| Web (`:5173`) | HTTP 200 |
+| Worker | ativo, 2 processos |
+| Suíte backend | 8 failed / 383 passed |
+
+As 8 falhas são todas de arquitetura antiga (schema anterior, módulo
+`app.routers.ai_cost_origin` inexistente e default de auth em ambiente de dev) e
+não foram perseguidas por decisão de escopo: o foco é a estrutura nova.
