@@ -32,6 +32,12 @@ from croniter import croniter
 
 router = APIRouter(prefix="/etl", tags=["etl"])
 
+# Downloads must never materialize an unbounded Bronze snapshot in the API
+# process.  CSV is streamed in batches; XLSX has a lower cap because the
+# workbook writer necessarily buffers the document in memory.
+DOWNLOAD_CSV_MAX_ROWS = int(os.getenv("OPENFINOPS_DOWNLOAD_CSV_MAX_ROWS", "1000000"))
+DOWNLOAD_XLSX_MAX_ROWS = int(os.getenv("OPENFINOPS_DOWNLOAD_XLSX_MAX_ROWS", "200000"))
+
 
 async def _reconcile_dead_worker_tasks(db: AsyncSession, reason: str) -> int:
     """Close persisted tasks when the worker is definitely no longer alive.
@@ -404,7 +410,7 @@ async def download_ingested_blob(
 ):
     """Download raw Bronze layer data for an ingested blob as CSV or XLSX."""
     from fastapi.responses import StreamingResponse
-    from app.services.iceberg_service import read_bronze
+    from app.services.iceberg_service import read_bronze, read_bronze_batches
     import io
 
     result = await db.execute(
@@ -418,28 +424,40 @@ async def download_ingested_blob(
 
     blob, conn_code, conn_name = row
 
-    try:
-        loop = asyncio.get_running_loop()
-        df = await loop.run_in_executor(
-            None,
-            lambda: read_bronze(
-                conn_code,
-                blob_path=blob.blob_path,
-                billing_period=blob.billing_period,
-            )
+    max_rows = DOWNLOAD_XLSX_MAX_ROWS if format == "xlsx" else DOWNLOAD_CSV_MAX_ROWS
+    known_rows = int(blob.row_count or 0)
+    if known_rows > max_rows:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Arquivo possui {known_rows:,} registros; o limite para download "
+                f"{format.upper()} é {max_rows:,}. Use a consulta paginada ou reduza a fonte."
+            ),
         )
-    except Exception as e:
-        logger.exception("Failed to read bronze data for blob %d: %s", blob_id, e)
-        raise HTTPException(status_code=500, detail=f"Erro ao ler camada Bronze: {e}")
-
-    if df.empty:
-        raise HTTPException(status_code=404, detail="Nenhum dado encontrado na camada Bronze para este blob")
 
     safe_code = re.sub(r'[^a-zA-Z0-9_\-]', '_', conn_code or 'origem')
     period = blob.billing_period or 'period'
     filename = f"origem_{safe_code}_{period}.{format}"
 
     if format == "xlsx":
+        try:
+            loop = asyncio.get_running_loop()
+            df = await loop.run_in_executor(
+                None,
+                lambda: read_bronze(
+                    conn_code,
+                    blob_path=blob.blob_path,
+                    billing_period=blob.billing_period,
+                    max_rows=max_rows + 1,
+                )
+            )
+        except Exception as e:
+            logger.exception("Failed to read bronze data for blob %d: %s", blob_id, e)
+            raise HTTPException(status_code=500, detail=f"Erro ao ler camada Bronze: {e}")
+        if df.empty:
+            raise HTTPException(status_code=404, detail="Nenhum dado encontrado na camada Bronze para este blob")
+        if len(df) > max_rows:
+            raise HTTPException(status_code=413, detail=f"Arquivo excede o limite de {max_rows:,} registros para XLSX")
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Bronze_Origem")
@@ -449,13 +467,28 @@ async def download_ingested_blob(
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
-    else:
-        csv_bytes = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-        return StreamingResponse(
-            io.BytesIO(csv_bytes),
-            media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
+
+    def csv_stream():
+        header = True
+        found = False
+        for frame in read_bronze_batches(
+            conn_code,
+            blob_path=blob.blob_path,
+            billing_period=blob.billing_period,
+            max_rows=max_rows,
+            batch_size=25_000,
+        ):
+            found = True
+            yield frame.to_csv(index=False, header=header, encoding="utf-8-sig").encode("utf-8-sig")
+            header = False
+        if not found:
+            logger.info("Bronze blob %d has no rows to download", blob_id)
+
+    return StreamingResponse(
+        csv_stream(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @router.delete("/blobs/", status_code=204)
