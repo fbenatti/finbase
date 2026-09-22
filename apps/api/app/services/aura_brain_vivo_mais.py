@@ -35,6 +35,7 @@ from typing import Any
 
 from app.services.trino_service import execute as trino_execute
 from app.services.gold_materialization import GOLD
+from app.services import lakehouse_layers as layers
 from app.services.azure_ptu_gold import (
     GOLD_TABLE as PTU_DIMON_TABLE,
     load_project_token_totals,
@@ -43,7 +44,7 @@ from app.services.azure_ptu_gold import (
 
 logger = logging.getLogger(__name__)
 
-GOLD = f"iceberg.{__import__('app.services.gold_materialization', fromlist=['GOLD']).GOLD}"
+GOLD = f"iceberg.{layers.GOLD}"
 PROJECT_LABELS = {"aura-brain": "Aura Brain", "vivo-mais": "Vivo Mais"}
 PROJECTS = ("Aura Brain", "Vivo Mais")
 PROJECT_SOURCES = {

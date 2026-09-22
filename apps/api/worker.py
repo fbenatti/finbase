@@ -1331,16 +1331,17 @@ def consumer_main(worker_id: int):
                                 # `silver.resource_metric_series`, que é a mesma para
                                 # qualquer cloud com métricas equivalentes.
                                 try:
-                                    from app.services.silver_normalization import (
-                                        materialise_metric_series,
-                                    )
-                                    _silver = materialise_metric_series(
+                                    # Normalização por modelo: a fonte declara o
+                                    # mapeamento, o motor grava a Silver canônica.
+                                    from app.services.silver_normalizer import materialise
+                                    _silver = materialise(
                                         _ptu_session,
                                         source_key=_task_source_key or "monitor_vm_metrics",
                                         bronze_table=source_code.replace("-", "_"),
                                     )
                                     _mon_result["silver_rows"] = _silver.get("rows_silver", 0)
                                     _mon_result["silver_table"] = _silver.get("silver_table")
+                                    _mon_result["silver_model"] = _silver.get("model")
                                 except Exception as _sv_exc:
                                     import traceback as _tb_sv
                                     _tb_sv.print_exc()

@@ -879,8 +879,23 @@ def write_silver(
         tbl.append(arrow_table)
         logger.info("Appended %d rows to %s", rows, table_name)
         return rows
-    except Exception:
-        pass
+    except Exception as append_exc:
+        # Se a tabela existe, o problema é o append (tipos/partição), não a
+        # ausência dela. Tentar criar de novo só produziria um
+        # TableAlreadyExistsError que esconde a causa real.
+        from pyiceberg.exceptions import TableAlreadyExistsError as _Exists
+
+        try:
+            cat.load_table(table_name)
+            existe = True
+        except Exception:  # noqa: BLE001
+            existe = False
+        if existe:
+            logger.error(
+                "Falha ao anexar em %s (tabela existe): %s: %s",
+                table_name, type(append_exc).__name__, append_exc,
+            )
+            raise
 
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     iceberg_schema = pyarrow_to_schema(arrow_table.schema)
