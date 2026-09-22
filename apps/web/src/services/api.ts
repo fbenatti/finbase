@@ -5173,3 +5173,87 @@ export async function getOrphanSavings(
   });
   return data;
 }
+
+// ── Catálogo de fontes Azure (P2) ──────────────────────────────────────────
+// O operador escolhe as fontes por ambiente/credencial; cada fonte continua
+// sendo uma conexão interna, mas a UI as apresenta agrupadas.
+
+export interface AzureSourceItem {
+  connection_id: number;
+  code: string;
+  name: string;
+  source_key: string | null;
+  display_name: string;
+  description?: string | null;
+  connector_type: string;
+  environment_slug: string;
+  state: "NOT_CONFIGURED" | "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "ERROR";
+  enabled: boolean;
+  is_cost_source: boolean;
+  credential_profile?: string | null;
+  credential_configured: boolean;
+  bronze_table: string;
+  silver_target?: string | null;
+  gold_target?: string | null;
+  api_reference?: string | null;
+  required_permission?: string | null;
+  implementation_status?: string | null;
+  scope?: string | null;
+  position: number;
+  last_test_status?: string | null;
+  last_test_message?: string | null;
+  last_tested_at?: string | null;
+  last_ingested_at?: string | null;
+  last_billing_period?: string | null;
+  rows?: number | null;
+  window_days?: number | null;
+  metrics?: string[] | null;
+  subscription_count: number;
+  running_tasks: number;
+}
+
+export interface AzureEnvironmentGroup {
+  environment_slug: string;
+  credential_profiles: string[];
+  cloud_names: string[];
+  source_count: number;
+  enabled_count: number;
+  states: Record<string, number>;
+  sources: AzureSourceItem[];
+}
+
+export async function getAzureSources(environment?: string): Promise<{ environments: AzureEnvironmentGroup[]; total_environments: number }> {
+  const { data } = await api.get("/azure-sources/", { params: environment ? { environment } : {} });
+  return data;
+}
+
+export async function testAzureSource(connectionId: number): Promise<{
+  connection_id: number;
+  state: string;
+  message: string;
+  capability?: Record<string, unknown> | null;
+}> {
+  const { data } = await api.post(`/azure-sources/${connectionId}/test`, {}, { timeout: 180000 });
+  return data;
+}
+
+export async function updateAzureSourceSelection(
+  connectionId: number,
+  body: { enabled?: boolean; window_days?: number; metrics?: string[] | null; subscription_ids?: string[] | null },
+): Promise<AzureSourceItem> {
+  const { data } = await api.put(`/azure-sources/${connectionId}/selection`, body);
+  return data;
+}
+
+export async function collectAzureEnvironment(
+  environment: string,
+  body: { source_keys?: string[]; window_days?: number } = {},
+): Promise<{
+  environment_slug: string;
+  queued: { task_id: number; connection_id: number; code: string; source_key: string | null; display_name: string }[];
+  skipped: { connection_id: number; code: string; source_key: string | null; reason: string }[];
+  message: string;
+}> {
+  const { data } = await api.post(`/azure-sources/environments/${encodeURIComponent(environment)}/collect`, body, { timeout: 120000 });
+  return data;
+}

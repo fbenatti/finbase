@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Box, Typography, Button,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, Divider,
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
   FormControlLabel, Checkbox, Tab, Tabs, Paper, InputAdornment, Stack, Snackbar,
 } from "@mui/material";
@@ -14,6 +14,7 @@ import {
 import EmptyState from "../../components/EmptyState";
 import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
+import AzureSourcesPanel from "./AzureSourcesPanel";
 
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
@@ -1360,6 +1361,12 @@ export default function Connections() {
               </>
             )}
 
+            {editing && form.cloud_scope === "azure" && (
+              <>
+                <Divider sx={{ my: 1 }} />
+                <AzureSourcesPanel />
+              </>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
