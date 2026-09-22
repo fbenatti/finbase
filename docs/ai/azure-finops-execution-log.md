@@ -448,6 +448,8 @@ CPU baixa com RAM insuficiente deve vetar; preço de destino ausente deve dar
 ## 8. P1A — Conter os bugs ativos
 
 **Entrada:** decisões confirmadas do usuário; P0 fechado em `e4e78b76`.
+**Commit do P1A:** **`19a1c287`** — `fix(p1a): preserve realizado/forecast in planning rateio and read detail from Silver`
+(push `e4e78b76..19a1c287` em `novo_dev`).
 **Escopo:** corrigir a perda de dado do rateio e o caminho de leitura de pivô/análise.
 Explicitamente **fora** desta etapa: excluir tabelas, namespace legado ou Dimon.
 
@@ -586,10 +588,28 @@ O **conjunto de falhas é idêntico** ao baseline — nenhuma falha nova:
 - Código: `git revert` do commit deste checkpoint (mudanças isoladas em
   `lakehouse_layers.py`, `iceberg_service.py`, `analysis.py` e o teste novo).
 - Dados: **nenhuma escrita em dado real foi feita em P1A**. A tabela de teste da
-  prova de integração foi criada e dropada no mesmo script; a tabela órfã de
-  planejamento não foi tocada (manifesto com `sha256` em §8.2).
+  prova de integração foi criada e dropada no mesmo script (o diretório residual
+  `silver.db/p1a_selftest_planning` foi removido manualmente depois); a tabela
+  órfã de planejamento não foi tocada (manifesto com `sha256` em §8.2).
 - Configuração: `dimon_rule` e `forecast_*` não foram alterados; o `pg_dump`
   está em `backups/azure-finops-p1a/`.
+
+### 8.7 Estado operacional no fechamento do P1A
+
+- Havia um `forecast` (task 5702 / run 259, `trigger_type=MANUAL`) **RUNNING** na
+  fase "Agregando histórico no Trino" durante o P1A. Ele roda no processo do
+  worker, que mantém os módulos antigos em memória: **não foi reiniciado** para
+  não matar a tarefa. Nenhum `shared_cost` estava enfileirado.
+- Para a correção passar a valer em produção é preciso reiniciar API e worker
+  (o worker não recarrega código entre tasks). Fazer quando a fila estiver
+  vazia; o próximo agendamento é 2026-09-23 03:00.
+- Consequência a observar: como a tabela de planejamento não está registrada, se
+  um `shared_cost` rodar **antes** de reiniciar o worker, ele usará o código
+  antigo e criará a tabela apenas com `tipo='rateio'`. Depois do reinício, a
+  ordem correta é: rodar o forecast (publica planejamento com
+  realizado+forecast) e só então o `shared_cost` (adiciona rateio preservando os
+  outros dois tipos).
+
 
 
 

@@ -32,6 +32,10 @@ backups/scheduled/
 /backups/*.sql
 /FinOps_v2.5.3_FROZEN_LOCAL_CORRIGIDO/report-cloud-full-azure.csv
 
+# Artefatos de auditoria/rollback da iniciativa Azure FinOps (snapshots de
+# metadata e manifestos). Não versionar: são grandes e específicos do ambiente.
+/backups/azure-finops-*/
+
 # Files created when restoring a full backup on a host.
 /postgres/
 /BACKUP_MANIFEST.json
