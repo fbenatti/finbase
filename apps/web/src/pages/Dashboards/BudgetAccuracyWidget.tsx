@@ -49,6 +49,7 @@ const money = new Intl.NumberFormat("pt-BR", {
   currency: "BRL",
   maximumFractionDigits: 0,
 });
+const percent = (value: number | null | undefined) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 const monthNames = [
   "Jan",
   "Fev",
@@ -102,8 +103,8 @@ function BudgetRows({
   const ordered = useMemo(() => {
     const sorted = [...rows].sort((a, b) =>
       direction === "underestimated"
-        ? a.variance - b.variance
-        : b.variance - a.variance,
+        ? b.variance - a.variance
+        : a.variance - b.variance,
     );
     return expanded ? sorted : sorted.slice(0, 5);
   }, [rows, direction, expanded]);
@@ -133,7 +134,6 @@ function BudgetRows({
               <TableCell>Projeto</TableCell>
               <TableCell align="right">Orçamento aprovado</TableCell>
               <TableCell align="right">Realizado</TableCell>
-              <TableCell align="right">Forecast</TableCell>
               <TableCell align="right">Desvio</TableCell>
               <TableCell>Status</TableCell>
             </TableRow>
@@ -149,8 +149,8 @@ function BudgetRows({
               const valid = noActual
                 ? false
                 : direction === "underestimated"
-                  ? line.variance < 0
-                  : line.variance > 0;
+                  ? line.variance > 0
+                  : line.variance < 0;
               return (
                 <TableRow key={line.department_id} hover>
                   <TableCell>
@@ -181,18 +181,16 @@ function BudgetRows({
                   <TableCell align="right">
                     {money.format(line.actual_value)}
                   </TableCell>
-                  <TableCell align="right">
-                    {money.format(line.forecast_value || 0)}
-                  </TableCell>
                   <TableCell
                     align="right"
                     sx={{
                       fontWeight: 700,
-                      color: line.variance < 0 ? "#DC2626" : "#16A34A",
+                      color: line.variance > 0 ? "#DC2626" : "#16A34A",
                     }}
                   >
                     {money.format(line.variance)}
                   </TableCell>
+                  <TableCell align="right">{percent(line.variance_pct)}</TableCell>
                   <TableCell>
                     <Chip
                       size="small"
@@ -305,10 +303,10 @@ function BudgetPanel({ department }: { department?: string }) {
 
   const rows = data?.lines || [];
   const underRows = rows.filter(
-    (line) => line.status !== "sem_realizado" && line.variance < 0,
+    (line) => line.status !== "sem_realizado" && line.variance > 0,
   );
   const overRows = rows.filter(
-    (line) => line.status === "sem_realizado" || line.variance > 0,
+    (line) => line.status !== "sem_realizado" && line.variance < 0,
   );
   const totals = data?.totals;
   const openDetail = async (line: BudgetAccuracyLine) => {
