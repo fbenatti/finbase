@@ -40,6 +40,10 @@ backups/scheduled/
 /postgres/
 /BACKUP_MANIFEST.json
 
+# A main versiona este virtualenv (28k arquivos / ~700 MB). Ele não deve voltar
+# para o controle de versão em nenhum merge.
+/.venv-linux/
+
 # OS/editor files
 .DS_Store
 .idea/
