@@ -2546,7 +2546,7 @@ export interface ForecastAck {
   }>;
 }
 export async function getForecastAccuracyDesvios(
-  runId: number,
+  runId?: number | null,
   targetMonth?: string,
   department?: string,
   direction?: "positive" | "negative",
@@ -2559,7 +2559,7 @@ export async function getForecastAccuracyDesvios(
   return data;
 }
 export async function getForecastAccuracyDesviosSubcategories(
-  runId: number,
+  runId?: number | null,
   targetMonth?: string,
   department?: string,
   scope?: string,

@@ -1652,9 +1652,31 @@ async def _desvios_subcat(
     return rows
 
 
+async def _resolve_accuracy_run(db: AsyncSession, run_id: int | None) -> ForecastRun:
+    """Resolve a run de acurácia pedida ou a mais recente disponível.
+
+    O dashboard executivo não conhece o id da run simulada; sem esta resolução
+    ele enviava um placeholder (`run_id=1`) que não existe e recebia 404. Escolher
+    a run mais recente é determinístico e mantém o comportamento quando o id é
+    informado explicitamente.
+    """
+    if run_id is not None:
+        run = await db.get(ForecastRun, run_id)
+        if not run:
+            raise HTTPException(404, "Execução não encontrada")
+        return run
+    runs = (await db.execute(
+        select(ForecastRun).order_by(ForecastRun.id.desc()).limit(50)
+    )).scalars().all()
+    for candidate in runs:
+        if dict(candidate.config_snapshot or {}).get("simulated_as_of"):
+            return candidate
+    raise HTTPException(404, "Nenhuma execução de acurácia disponível")
+
+
 @router.get("/accuracy/desvios")
 async def accuracy_desvios(
-    run_id: int,
+    run_id: int | None = None,
     target_month: str | None = None,
     department: str | None = None,
     direction: Literal["positive", "negative"] | None = None,
@@ -1663,9 +1685,7 @@ async def accuracy_desvios(
 ):
     """Desvios no último nível de cada departamento (folhas) dentro do escopo:
     top 10 positivos (realizado acima do projetado) e top 10 negativos."""
-    run = await db.get(ForecastRun, run_id)
-    if not run:
-        raise HTTPException(404, "Execução não encontrada")
+    run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
         raise HTTPException(422, "Esta execução não é um simulado de acurácia")
@@ -1701,7 +1721,7 @@ async def accuracy_desvios(
 
 @router.get("/accuracy/desvios/subcategories")
 async def accuracy_desvios_subcategories(
-    run_id: int,
+    run_id: int | None = None,
     target_month: str | None = None,
     department: str | None = None,
     scope: str | None = None,
@@ -1710,9 +1730,7 @@ async def accuracy_desvios_subcategories(
     """Breakdown por ServiceSubcategory do último nível (folha) selecionado.
     ``scope`` (opcional) é o departamento atual da página — o grão é calculado
     uma vez por escopo e todas as folhas dele expandem instantaneamente."""
-    run = await db.get(ForecastRun, run_id)
-    if not run:
-        raise HTTPException(404, "Execução não encontrada")
+    run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
         raise HTTPException(422, "Esta execução não é um simulado de acurácia")
@@ -1738,7 +1756,7 @@ def _subcategory_filter(subcategory: str) -> str:
 
 @router.get("/accuracy/delta/series")
 async def accuracy_delta_series(
-    run_id: int,
+    run_id: int | None = None,
     target_month: str | None = None,
     department: str | None = None,
     subcategory: str | None = None,
@@ -1750,9 +1768,7 @@ async def accuracy_delta_series(
     o realizado vem do Gold agregado por dia.  ``deviation_day`` é o primeiro dia
     em que o realizado acumulado ultrapassa o projetado acumulado (o desvio é
     identificado a partir dali) — None quando nunca cruza (redução pura)."""
-    run = await db.get(ForecastRun, run_id)
-    if not run:
-        raise HTTPException(404, "Execução não encontrada")
+    run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
         raise HTTPException(422, "Esta execução não é um simulado de acurácia")
