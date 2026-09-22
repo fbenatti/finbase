@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,42 @@ from app.database import engine, Base, async_session
 from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
 from app.seed import seed
 from app.services import scheduler_service
+
+logger = logging.getLogger(__name__)
+
+
+async def _execute_migration(conn, statement: str, *, attempts: int = 5) -> None:
+    """Executa uma migração tolerando contenção de lock.
+
+    O `lock_timeout` evita esperar minutos por uma tabela em uso, mas transforma
+    a espera em erro. Como as migrações são idempotentes (`IF NOT EXISTS`),
+    tentar de novo com espera crescente é seguro — e impede que uma coleta em
+    andamento derrube o startup da API.
+    """
+    import asyncio as _asyncio
+
+    from sqlalchemy import text as _text
+
+    atraso = 1.0
+    for tentativa in range(1, attempts + 1):
+        try:
+            await conn.execute(_text(statement))
+            return
+        except Exception as exc:  # noqa: BLE001
+            nome = type(exc).__name__
+            transitorio = (
+                "LockNotAvailable" in nome
+                or "lock timeout" in str(exc).lower()
+                or "DeadlockDetected" in nome
+            )
+            if not transitorio or tentativa == attempts:
+                raise
+            logger.warning(
+                "Migração com lock indisponível (tentativa %d/%d, %s): %s",
+                tentativa, attempts, nome, statement[:70],
+            )
+            await _asyncio.sleep(atraso)
+            atraso = min(atraso * 2, 8.0)
 
 
 @asynccontextmanager
@@ -62,17 +99,21 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
         # Retenção de auditoria (roda depois do create_all)
-        await conn.execute(text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(days=settings.audit_retention_days))
+        await conn.execute(
+            text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(
+                days=settings.audit_retention_days
+            )
+        )
         # create_all does not evolve PostgreSQL tables.  Keep this small,
         # idempotent migration next to startup until Alembic is introduced.
-        await conn.execute(text("ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0"))
-        await conn.execute(text("ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ"))
-        await conn.execute(text("ALTER TABLE role_permission ADD COLUMN IF NOT EXISTS scope VARCHAR(60)"))
-        await conn.execute(text("ALTER TABLE user_grant ADD COLUMN IF NOT EXISTS scope VARCHAR(60)"))
-        await conn.execute(text("ALTER TABLE role_permission DROP CONSTRAINT IF EXISTS uq_role_permission"))
-        await conn.execute(text("ALTER TABLE user_grant DROP CONSTRAINT IF EXISTS uq_user_grant"))
-        await conn.execute(text("ALTER TABLE role_permission ADD CONSTRAINT uq_role_permission UNIQUE (role_id, module, action, scope)"))
-        await conn.execute(text("ALTER TABLE user_grant ADD CONSTRAINT uq_user_grant UNIQUE (user_id, module, action, scope)"))
+        await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0")
+        await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
+        await _execute_migration(conn, "ALTER TABLE role_permission ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
+        await _execute_migration(conn, "ALTER TABLE user_grant ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
+        await _execute_migration(conn, "ALTER TABLE role_permission DROP CONSTRAINT IF EXISTS uq_role_permission")
+        await _execute_migration(conn, "ALTER TABLE user_grant DROP CONSTRAINT IF EXISTS uq_user_grant")
+        await _execute_migration(conn, "ALTER TABLE role_permission ADD CONSTRAINT uq_role_permission UNIQUE (role_id, module, action, scope)")
+        await _execute_migration(conn, "ALTER TABLE user_grant ADD CONSTRAINT uq_user_grant UNIQUE (user_id, module, action, scope)")
         # asyncpg executes prepared statements and rejects multi-command SQL,
         # so each migration operation must be sent independently.
         for statement in (
@@ -317,9 +358,9 @@ async def lifespan(app: FastAPI):
               updated_at TIMESTAMPTZ DEFAULT now()
             )""",
         ):
-            await conn.execute(text(statement))
+            await _execute_migration(conn, statement)
         # Built-in schedules are idempotent and remain editable by users.
-        await conn.execute(text("""
+        await _execute_migration(conn, """
             INSERT INTO scheduled_task
               (name, connection_id, connection_ids, destination_reprocess,
                cron_expression, timezone, active, config_json, schedule_type)
@@ -327,8 +368,8 @@ async def lifespan(app: FastAPI):
                    '0 1 * * *', 'America/Sao_Paulo', TRUE,
                    json_build_object('retention_days', 30), 'backup'
             WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'backup')
-        """))
-        await conn.execute(text("""
+        """)
+        await _execute_migration(conn, """
             INSERT INTO scheduled_task
               (name, connection_id, connection_ids, destination_reprocess,
                cron_expression, timezone, active, config_json, schedule_type)
@@ -336,16 +377,16 @@ async def lifespan(app: FastAPI):
                    '0 2 * * 0', 'America/Sao_Paulo', FALSE,
                    json_build_object('period_mode', 'all', 'accuracy', TRUE, 'shared_cost', FALSE, 'forecast_config_ids', '[]'::json, 'dimon_rule_ids', '[]'::json), 'reprocess'
             WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'reprocess')
-        """))
-        await conn.execute(text("""
+        """)
+        await _execute_migration(conn, """
             DO $$ BEGIN
               IF to_regclass('fact_cost') IS NOT NULL THEN
                 ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS departamento_nivel_6 VARCHAR(200);
                 ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS departamento_nivel_7 VARCHAR(200);
               END IF;
             END $$
-        """))
-        await conn.execute(text("""
+        """)
+        await _execute_migration(conn, """
             DO $$ DECLARE fk_name text; BEGIN
               SELECT conname INTO fk_name FROM pg_constraint
               WHERE conrelid = 'forecast_run'::regclass AND contype = 'f'
@@ -358,11 +399,11 @@ async def lifespan(app: FastAPI):
                 FOREIGN KEY (forecast_config_id) REFERENCES forecast_config(id) ON DELETE SET NULL;
               END IF;
             END $$
-        """))
+        """)
         # Populate frozen execution contracts for historical runs whose
         # configurations still exist.  Their legacy result table remains
         # queryable; runs without a result are intentionally left unchanged.
-        await conn.execute(text("""
+        await _execute_migration(conn, """
             UPDATE forecast_run run
             SET destination_table_id_snapshot = cfg.destination_table_id,
                 destination_physical_name = dest.physical_name,
@@ -377,7 +418,7 @@ async def lifespan(app: FastAPI):
                   'horizon_months', cfg.horizon_months)
             FROM forecast_config cfg JOIN destination_table dest ON dest.id = cfg.destination_table_id
             WHERE run.forecast_config_id = cfg.id AND (run.config_snapshot::jsonb = '{}'::jsonb OR run.config_snapshot IS NULL);
-        """))
+        """)
         for statement in (
             "ALTER TABLE business_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
@@ -390,7 +431,7 @@ async def lifespan(app: FastAPI):
             # data-driven cutoff (MAX collected − cutoff_days); never "today".
             "ALTER TABLE forecast_run ALTER COLUMN cutoff_date DROP NOT NULL",
         ):
-            await conn.execute(text(statement))
+            await _execute_migration(conn, statement)
         # The Projects feature was removed (UI, API and metadata).  Drop the
         # legacy table and its columns.  Classification rules keep their
         # department target; the project_id column is dropped with its values.
@@ -401,12 +442,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE planning_entry DROP COLUMN IF EXISTS project_name",
             "DROP TABLE IF EXISTS project",
         ):
-            await conn.execute(text(statement))
+            await _execute_migration(conn, statement)
         # Backfill the canonical provider slug for legacy rows that only have a
         # free-text cloud_name, so rule matching keeps working without a
         # re-import. Unknown/free-text names are left NULL (match only the
         # generic unscoped rules).
-        await conn.execute(text("""
+        await _execute_migration(conn, """
             UPDATE source_connection
             SET cloud_scope = CASE
                 WHEN lower(cloud_name) LIKE 'azure%' THEN 'azure'
@@ -418,7 +459,7 @@ async def lifespan(app: FastAPI):
                 ELSE cloud_scope
             END
             WHERE cloud_scope IS NULL
-        """))
+        """)
         # PyIceberg's SQL catalog is external to our ORM metadata. Repair old
         # host-specific file:// URIs only when that native table already exists.
         from app.services.iceberg_catalog_migration import migrate_iceberg_catalog_paths
