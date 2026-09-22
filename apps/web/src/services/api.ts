@@ -542,9 +542,17 @@ async function tryRefresh(): Promise<string | null> {
         );
         setAccessToken(data.access_token);
         return data.access_token as string;
-      } catch {
-        setAccessToken(null);
-        return null;
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
+          const detail = String(error.response.data?.detail || "").toLowerCase();
+          const sessionExpired = ["ausente", "inválido", "invalido", "expirado", "usuário inválido", "usuario invalido", "inativo"]
+            .some((reason) => detail.includes(reason));
+          if (sessionExpired && !detail.includes("já rotacionado")) {
+            setAccessToken(null);
+            return null;
+          }
+        }
+        throw error;
       } finally {
         setTimeout(() => {
           refreshPromise = null;
@@ -565,13 +573,17 @@ api.interceptors.response.use(
     const neverRetry = isTokenlessPublic(url);
     if (error.response?.status === 401 && !original._retried && !neverRetry) {
       original._retried = true;
-      const token = await tryRefresh();
-      if (token) {
-        original.headers = original.headers || {};
-        original.headers.Authorization = `Bearer ${token}`;
-        return api(original);
+      try {
+        const token = await tryRefresh();
+        if (token) {
+          original.headers = original.headers || {};
+          original.headers.Authorization = `Bearer ${token}`;
+          return api(original);
+        }
+        sessionExpiredHandler?.();
+      } catch (refreshError) {
+        console.warn("[Auth] Refresh indisponível ou já rotacionado", refreshError);
       }
-      sessionExpiredHandler?.();
     }
     return Promise.reject(error);
   },
@@ -748,6 +760,19 @@ export function formatApiError(
   }
   if (error instanceof Error) return error.message;
   return fallback;
+}
+
+export interface PlanningMissingDepartment {
+  path: string[];
+  lines: number[];
+}
+
+export function getPlanningMissingDepartments(error: unknown): PlanningMissingDepartment[] {
+  if (!axios.isAxiosError(error)) return [];
+  const detail = error.response?.data?.detail;
+  if (!detail || typeof detail !== "object") return [];
+  const missing = (detail as Record<string, unknown>).departments_missing;
+  return Array.isArray(missing) ? (missing as PlanningMissingDepartment[]) : [];
 }
 
 export interface SourceConnection {
@@ -2524,9 +2549,11 @@ export async function getForecastAccuracyDesvios(
   runId: number,
   targetMonth?: string,
   department?: string,
+  direction?: "positive" | "negative",
+  limit = 5,
 ): Promise<ForecastDesvios> {
   const { data } = await api.get("/forecast/accuracy/desvios", {
-    params: { run_id: runId, target_month: targetMonth, department },
+    params: { run_id: runId, target_month: targetMonth, department, direction, limit },
     timeout: 60000,
   });
   return data;
@@ -2846,6 +2873,53 @@ export interface PlanningGrid {
   individual_lines?: BudgetDefenseRequest[];
   defense_request?: BudgetDefenseRequest | null;
 }
+export type BudgetAccuracyStatus = "sem_orcamento" | "sem_realizado" | "fora_orcamento" | "dentro_orcamento";
+export interface BudgetAccuracyLine {
+  department_id: number;
+  department_levels: string[];
+  budget_value: number;
+  actual_value: number;
+  forecast_value?: number;
+  comparison_value?: number;
+  variance: number;
+  variance_pct: number | null;
+  consumed_pct: number | null;
+  status: BudgetAccuracyStatus;
+}
+export interface BudgetAccuracyResponse {
+  year: number;
+  month: number;
+  period: "monthly" | "annual";
+  target_month: string;
+  version: PlanningVersion | null;
+  scope: { department_id: number | null; path: string[] | null };
+  totals: Omit<BudgetAccuracyLine, "department_id" | "department_levels"> & { forecast_value?: number; comparison_value?: number };
+  lines: BudgetAccuracyLine[];
+}
+export interface BudgetAccuracyAck {
+  id: number;
+  target_month: string;
+  planning_version_id: number | null;
+  department_id: number | null;
+  department_path: string[];
+  department_name: string;
+  budget_value: number;
+  actual_value: number;
+  variance: number;
+  category: string;
+  reason: string;
+  severity: string;
+  active: boolean;
+}
+export interface BudgetAccuracyDetail {
+  year: number;
+  department_id: number;
+  department_levels: string[];
+  monthly: Array<{ period: string; budget_value: number; actual_value: number; forecast_value: number }>;
+  subcategories: Array<{ name: string; value: number; monthly_values: number[] }>;
+  others_value: number;
+  others_monthly: number[];
+}
 export type BudgetDefenseStatus =
   | "RASCUNHO"
   | "SOLICITADA"
@@ -2914,6 +2988,46 @@ export async function getPlanningGrid(
     })
   ).data;
 }
+export async function getBudgetAccuracy(
+  year: number,
+  month: number | null,
+  departmentId?: number | null,
+  period: "monthly" | "annual" = "monthly",
+  scopeId?: string,
+  scopeCloud?: string,
+): Promise<BudgetAccuracyResponse> {
+  return (
+    await api.get("/planning/budget-accuracy", {
+      params: {
+        year,
+        month,
+        period,
+        department_id: departmentId || undefined,
+        scope_id_orcamento: scopeId || undefined,
+        scope_cloud: scopeCloud || undefined,
+      },
+    })
+  ).data;
+}
+export async function getBudgetAccuracyAcks(targetMonth?: string, departmentId?: number | null): Promise<{ items: BudgetAccuracyAck[] }> {
+  return (await api.get("/planning/budget-accuracy/acks", { params: { target_month: targetMonth, department_id: departmentId || undefined } })).data;
+}
+export async function getBudgetAccuracyDetail(year: number, departmentId: number): Promise<BudgetAccuracyDetail> {
+  return (await api.get("/planning/budget-accuracy/detail", { params: { year, department_id: departmentId } })).data;
+}
+export async function createBudgetAccuracyAck(body: {
+  target_month: string;
+  planning_version_id?: number | null;
+  department_id?: number | null;
+  department: string;
+  budget_value: number;
+  actual_value: number;
+  category: string;
+  reason: string;
+  severity?: string;
+}): Promise<BudgetAccuracyAck> {
+  return (await api.post("/planning/budget-accuracy/acks", body)).data;
+}
 export async function savePlanningGrid(
   type: string,
   year: number,
@@ -2959,13 +3073,15 @@ export async function importPlanningExcel(
   file: File,
   publication: PlanningPublication,
   defenseRequestId?: number,
-): Promise<{ version: PlanningVersion; rows: number }> {
+  createMissingDepartments?: string[][],
+): Promise<{ version: PlanningVersion; rows: number; warnings?: string[] }> {
   const data = new FormData();
   data.append("file", file);
   Object.entries(publication).forEach(([key, value]) => {
     if (value != null) data.append(key, String(value));
   });
   if (defenseRequestId) data.append("defense_request_id", String(defenseRequestId));
+  if (createMissingDepartments) data.append("create_missing_departments", JSON.stringify(createMissingDepartments));
   return (await api.post(`/planning/${type}/${year}/import`, data)).data;
 }
 export async function downloadPlanningTemplate(year: number): Promise<Blob> {
@@ -5023,6 +5139,7 @@ export interface OrphanSavingRow {
   orphan_rule: string;
   orphan_reason: string | null;
   tipo_recurso: string | null;
+  cloud_origem: string | null;
   last_seen_date: string;
   disappeared_on: string;
   _billing_period: string;

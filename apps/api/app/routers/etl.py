@@ -1190,6 +1190,17 @@ def _process_blob_for_reprocess(
         # The caller identifies the blob by metadata id; resolve its path once.
         from app.models.ingested_blob import IngestedBlob
         meta = session.get(IngestedBlob, blob_id)
+        _append_reprocess_log(
+            task_id,
+            f"Iniciando leitura do primeiro batch do blob {blob_id}",
+            details={
+                "blob_id": blob_id,
+                "connection_id": connection_id,
+                "billing_period": str(billing_period),
+                "row_count": getattr(meta, "row_count", None),
+                "batch_rows": int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
+            },
+        )
         if meta is not None and source_frame is not None:
             if "_blob_path" in source.columns:
                 source = source[source["_blob_path"] == meta.blob_path].copy()
@@ -1230,6 +1241,17 @@ def _process_blob_for_reprocess(
             if target.empty:
                 return
             rows_in_blob += len(target)
+            if rows_in_blob == len(target):
+                _append_reprocess_log(
+                    task_id,
+                    f"Primeiro batch transformado do blob {blob_id}",
+                    details={
+                        "blob_id": blob_id,
+                        "input_rows": input_rows,
+                        "output_rows": len(target),
+                        "clone_rows": clone_count,
+                    },
+                )
             if batch_callback is not None:
                 batch_callback(target, input_rows)
             else:
@@ -1571,7 +1593,7 @@ def _reprocess_destination_sync(
                 expected_rows=expected_rows_by_blob.get(blob_id),
                 batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
                 allow_consolidated_row_count=bool(conn and conn.connector_type == "oci"),
-                allow_legitimate_empty=bool(conn and conn.connector_type == "mongodb_atlas"),
+                allow_legitimate_empty=bool(conn and conn.connector_type in ("azure_blob", "mongodb_atlas", "claude_token")),
             )
             audit["blob_id"] = blob_id
             bronze_audit.append(audit)
@@ -1856,6 +1878,11 @@ def _reprocess_destination_sync(
             for start in range(0, len(prepared), 100_000):
                 chunk = prepared.iloc[start:start + 100_000]
                 if temp_name is None:
+                    _append_reprocess_log(
+                        task_id,
+                        "Primeira escrita no staging iniciada",
+                        details={"rows": len(chunk), "table": phys_name},
+                    )
                     temp_name = iceberg.write_destination_staged(
                         phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
                         namespace="silver",
@@ -1906,6 +1933,13 @@ def _reprocess_destination_sync(
                     f"({memory_limit // (1024 * 1024)} MB); Gold anterior preservada"
                 )
             try:
+                status["current_blob"] = f"Lendo primeiro batch: blob {blob_id} ({bperiod})"
+                _sync_db()
+                _append_reprocess_log(
+                    task_id,
+                    f"Iniciando processamento do blob {blob_id}",
+                    details={"blob_id": blob_id, "connection_id": cid, "billing_period": str(bperiod)},
+                )
                 if cid not in conn_rules:
                     processed += 1
                     status["processed_blobs"] = processed
@@ -2134,10 +2168,26 @@ def _reprocess_destination_sync(
     except Exception as e:
         import traceback
         status["status"] = "FAILED"; status["error"] = str(e); status["current_blob"] = f"Erro: {e}"
+        error_traceback = traceback.format_exc()
         traceback.print_exc()
         _sync_db()
-        _append_reprocess_log(task_id, f"Falha no reprocessamento: {e}", level="ERROR")
-        return {"success": False, "error": str(e), "rows_written": 0}
+        _append_reprocess_log(
+            task_id,
+            f"Falha no reprocessamento: {e}",
+            level="ERROR",
+            details={"exception_type": type(e).__name__},
+        )
+        return {
+            "success": False,
+            "error": str(e) or type(e).__name__,
+            "rows_written": 0,
+            "failure_context": {
+                "exception_type": type(e).__name__,
+                "traceback": error_traceback[-12000:],
+                "phase": status.get("phase"),
+                "current_blob": status.get("current_blob"),
+            },
+        }
     finally:
         # Keep the previous Gold table intact whenever staging did not reach
         # the atomic swap, and release worker-held pandas objects promptly.
@@ -2188,7 +2238,7 @@ def _audit_reprocess_group_sync(
                 expected_rows=blob.row_count,
                 batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
                 allow_consolidated_row_count=connector_type == "oci",
-                allow_legitimate_empty=connector_type == "mongodb_atlas",
+                allow_legitimate_empty=connector_type in ("azure_blob", "mongodb_atlas", "claude_token"),
             )
             audit.update({"blob_id": blob.id, "connection_id": blob.connection_id})
             audits.append(audit)

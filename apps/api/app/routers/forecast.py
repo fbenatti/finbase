@@ -395,8 +395,12 @@ async def metadata(destination_table_id: int, db: AsyncSession = Depends(get_db)
 
 @router.get("/configs")
 async def list_configs(db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(select(ForecastConfig).order_by(ForecastConfig.updated_at.desc()))).scalars().all()
-    return [_out(r) for r in rows]
+    rows = (await db.execute(
+        select(ForecastConfig, DestinationTable.name)
+        .outerjoin(DestinationTable, DestinationTable.id == ForecastConfig.destination_table_id)
+        .order_by(ForecastConfig.updated_at.desc())
+    )).all()
+    return [{**_out(row), "table_name": table_name} for row, table_name in rows]
 
 @router.get("/configs/grid")
 async def list_configs_grid(
@@ -1653,6 +1657,8 @@ async def accuracy_desvios(
     run_id: int,
     target_month: str | None = None,
     department: str | None = None,
+    direction: Literal["positive", "negative"] | None = None,
+    limit: int = Query(5, ge=0, le=10000),
     db: AsyncSession = Depends(get_db),
 ):
     """Desvios no último nível de cada departamento (folhas) dentro do escopo:
@@ -1675,8 +1681,15 @@ async def accuracy_desvios(
             continue
         metrics = _desvio_metrics(forecast, actual)
         items.append({"path": leaf, "name": leaf[-1] if leaf else "", "forecast_value": forecast, "actual_value": actual, **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy", "wape", "bias")}})
-    positive = sorted((i for i in items if i["variance"] > 0), key=lambda i: -i["variance"])[:10]
-    negative = sorted((i for i in items if i["variance"] < 0), key=lambda i: i["variance"])[:10]
+    positive = sorted((i for i in items if i["variance"] > 0), key=lambda i: -i["variance"])
+    negative = sorted((i for i in items if i["variance"] < 0), key=lambda i: i["variance"])
+    if limit:
+        positive = positive[:limit]
+        negative = negative[:limit]
+    if direction == "positive":
+        negative = []
+    elif direction == "negative":
+        positive = []
     return {
         "run_id": run.id,
         "target_month": target,

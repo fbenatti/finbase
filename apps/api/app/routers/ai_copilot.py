@@ -26,6 +26,7 @@ from app.services.ai_usage_dimon import (
 )
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
 from app.services.dimon_materialization import DIMON_NAMESPACE
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ COPILOT_USAGE_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_USAGE_TABLE}"
 COPILOT_LICENSE_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_LICENSE_TABLE}"
 COPILOT_USER_PERIOD_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_USER_PERIOD_TABLE}"
 # Custo de referência do Copilot: a Dimon pré-agregada (iceberg.dimon.dest_dm_cost_copilot_custo)
-# é gerada a partir de iceberg.gold.dest_modelo_focus (+ planning) filtrada por
+# é gerada a partir de iceberg.{layers.detail_layer()}.dest_modelo_focus (+ planning) filtrada por
 # ServiceName='GitHub'. Os dashboards consultam a Dimon em vez de varrer a Gold/raw.
 # Medidas do dashboard: realizado (BRL c/ imposto) e effectivecost (USD =
 # CostInUSD). BilledCost não é usado nos indicadores financeiros exibidos.

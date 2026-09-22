@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.database import async_session
 from app.services import trino_service
 from app.services.cloud_scope import connection_cloud_scope
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ async def _refresh_table(
 ) -> None:
     safe = physical_name.replace("-", "_").replace(".", "_")
     quoted = '"' + safe.replace('"', '""') + '"'
-    table_ref = f"iceberg.gold.{quoted}"
+    table_ref = f"iceberg.{layers.detail_layer()}.{quoted}"
 
     scan_fields = [f.strip() for f in fields if f and f.strip()] if fields else await _rule_fields(session, destination_table_id)
     if not scan_fields:

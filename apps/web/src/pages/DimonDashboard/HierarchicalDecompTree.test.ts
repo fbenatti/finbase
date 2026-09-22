@@ -67,7 +67,6 @@ describe("buildExecutiveDecompChain", () => {
     expect(chain.map(c => c.field)).toEqual([
       "departamento_nivel_6",
       "servicename",
-      "servicecategory",
       "servicesubcategory",
       "skumeter",
     ]);

@@ -212,8 +212,22 @@ def reconcile_stale_running_tasks(session: Session) -> None:
             row.phase = "Worker reiniciado durante backup; tarefa encerrada"
             row.finished_at = datetime.now(timezone.utc)
             continue
+        previous_phase = row.phase
+        previous_blob = row.current_blob
+        previous_result = dict(row.result_json or {})
         row.status = "FAILED"
-        row.phase = "Worker reiniciado; tarefa RUNNING anterior foi encerrada"
+        row.phase = (
+            f"Worker reiniciado; tarefa encerrada (ultima fase: {previous_phase or 'desconhecida'})"
+        )[:200]
+        row.current_blob = previous_blob or "Worker reiniciado durante a execução"
+        row.errors = list(row.errors or []) + ["Worker reiniciado durante a execução"]
+        row.result_json = {
+            **previous_result,
+            "failure_kind": "worker_restart",
+            "reconciled_at": datetime.now(timezone.utc).isoformat(),
+            "previous_phase": previous_phase,
+            "previous_current_blob": previous_blob,
+        }
         row.finished_at = datetime.now(timezone.utc)
         if row.task_type == "forecast":
             run_id = (row.result_json or {}).get("forecast_run_id")

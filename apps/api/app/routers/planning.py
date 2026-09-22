@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -10,7 +11,7 @@ import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require
@@ -18,6 +19,7 @@ from app.database import get_db
 from app.models.destination import DestinationTable
 from app.models.identity import User
 from app.models.planning import BudgetDefenseRequest, FinancialType, PlanningEntry, PlanningVersion
+from app.models.budget_accuracy import BudgetAccuracyAck
 from app.models.rules import Department
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
@@ -128,6 +130,20 @@ class DefensePublishIn(BaseModel):
 
 class DefenseRejectIn(BaseModel):
     decision_note: str
+
+
+class BudgetAccuracyAckIn(BaseModel):
+    target_month: str = Field(min_length=6, max_length=6)
+    planning_version_id: int | None = None
+    department_id: int | None = None
+    department: str
+    budget_value: float = 0
+    actual_value: float = 0
+    category: str
+    reason: str
+    severity: str = "Informação"
+    ordem: int = 0
+    registered_at: date | None = None
 
 
 def _out(row: Any) -> dict[str, Any]:
@@ -350,10 +366,91 @@ def _levels(department: Department, departments: dict[int, Department]) -> list[
     return list(reversed(chain))
 
 
+def _budget_accuracy_metrics(budget: float, actual: float) -> dict[str, Any]:
+    variance = actual - budget
+    return {
+        "budget_value": budget,
+        "actual_value": actual,
+        "variance": variance,
+        "variance_pct": variance / budget if budget else None,
+        "consumed_pct": actual / budget if budget else None,
+        "status": "sem_orcamento" if not budget and not actual else "sem_realizado" if not actual else "fora_orcamento" if variance > 0 else "dentro_orcamento",
+    }
+
+
+async def _budget_accuracy_actuals(
+    year: int,
+    months: list[int],
+    scope_cloud: str | None = None,
+    scope_path: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    levels = ", ".join(
+        f'CAST("departamento_nivel_{level}" AS VARCHAR) AS departamento_nivel_{level}'
+        for level in range(1, 8)
+    )
+    periods = ", ".join(f"'{year}{month:02d}'" for month in months)
+    cloud_filter = ""
+    if scope_cloud:
+        cloud = scope_cloud.strip().lower()
+        if cloud == "azure":
+            cloud_filter = " AND lower(CAST(\"cloud_origem\" AS VARCHAR)) LIKE 'azure%'"
+        elif cloud == "gcp":
+            cloud_filter = " AND lower(CAST(\"cloud_origem\" AS VARCHAR)) LIKE 'gcp%'"
+        else:
+            cloud_filter = f" AND lower(CAST(\"cloud_origem\" AS VARCHAR)) = '{cloud}'"
+    scope_filter = ""
+    if scope_path:
+        escaped = [item.strip().replace("'", "''") for item in scope_path]
+        candidates = [list(range(1, len(escaped) + 1))]
+        if len(escaped) >= 3:
+            candidates.append([1, 2, 4, 3, *range(5, len(escaped) + 2)])
+        # A project under Showback and the same project under Chargeback are
+        # one consumption entity for budget accuracy. Include both branches
+        # and support both historical Azure/Diretoria level orders.
+        if len(escaped) >= 5 and escaped[1] in {"Showback", "Chargeback"}:
+            candidates.extend([
+                [1, 3, 4, *range(5, len(escaped) + 2)],
+                [1, 4, 3, *range(5, len(escaped) + 2)],
+            ])
+        candidate_sql = []
+        for levels_order in candidates:
+            checks = [
+                f'TRIM(CAST("departamento_nivel_{physical_level}" AS VARCHAR)) = \'{escaped[index]}\''
+                for index, physical_level in enumerate(levels_order[:len(escaped)])
+            ]
+            candidate_sql.append(" AND ".join(checks))
+        scope_filter = " AND (" + " OR ".join(f"({item})" for item in candidate_sql) + ")"
+    group_levels = ", ".join(f'"departamento_nivel_{level}"' for level in range(1, 8))
+    sql = f"""
+        SELECT {levels}, period, SUM(actual_value) AS actual_value, SUM(forecast_value) AS forecast_value, MAX(has_actual) AS has_actual
+        FROM (
+          SELECT {levels}, CAST("_billing_period" AS VARCHAR) AS period,
+                 SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS actual_value,
+                 CAST(0 AS DOUBLE) AS forecast_value, 1 AS has_actual
+          FROM iceberg.dimon.dest_dm_cost_visao_completa
+          WHERE CAST("_billing_period" AS VARCHAR) IN ({periods})
+            AND ("tipo" IS NULL OR TRIM(CAST("tipo" AS VARCHAR)) IN ('', 'realizado')){cloud_filter}
+          {scope_filter}
+          GROUP BY {group_levels}, "_billing_period"
+          UNION ALL
+          SELECT {levels}, CAST("period" AS VARCHAR) AS period,
+                 CAST(0 AS DOUBLE) AS actual_value,
+                 SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS forecast_value, 0 AS has_actual
+          FROM iceberg.dimon.dest_dm_cost_visao_completa
+          WHERE CAST("period" AS VARCHAR) IN ({periods})
+            AND lower(TRIM(CAST("tipo" AS VARCHAR))) = 'forecast'{cloud_filter}
+          {scope_filter}
+          GROUP BY {group_levels}, "period"
+        ) facts
+        GROUP BY {group_levels}, period
+    """
+    return await trino_execute(sql, timeout_s=180)
+
+
 async def _validate_rows(rows: list[PlanningRowIn], db: AsyncSession) -> list[dict[str, Any]]:
     departments, _ = await _organization(db)
     prepared: list[dict[str, Any]] = []
-    seen: set[tuple[str, int]] = set()
+    by_entity: dict[tuple[str, int], dict[str, Any]] = {}
     errors: list[str] = []
     for pos, row in enumerate(rows, 1):
         entity_type = row.entity_type.lower()
@@ -365,11 +462,16 @@ async def _validate_rows(rows: list[PlanningRowIn], db: AsyncSession) -> list[di
             errors.append(f"Linha {pos}: departamento inválido ou inativo")
             continue
         key = (entity_type, department.id)
-        if key in seen:
-            errors.append(f"Linha {pos}: entidade duplicada")
+        existing = by_entity.get(key)
+        if existing:
+            existing["values"] = [
+                float(current) + float(incoming)
+                for current, incoming in zip(existing["values"], row.values)
+            ]
             continue
-        seen.add(key)
-        prepared.append({"entity_type": entity_type, "department_id": department.id, "department_levels": _levels(department, departments), "values": row.values})
+        prepared_row = {"entity_type": entity_type, "department_id": department.id, "department_levels": _levels(department, departments), "values": [float(value) for value in row.values]}
+        by_entity[key] = prepared_row
+        prepared.append(prepared_row)
     if errors:
         raise HTTPException(422, {"message": "Dados inválidos", "errors": errors})
     return prepared
@@ -530,32 +632,56 @@ def _cell_str(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
-async def _parse_excel(raw: bytes, db: AsyncSession) -> list[PlanningRowIn]:
+def _sheet_header(sheet: Any) -> list[str]:
+    header = [_cell_str(cell) for cell in next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), [])]
+    while header and not header[-1]:
+        header.pop()
+    return header
+
+
+async def _parse_excel(raw: bytes, db: AsyncSession, create_missing_departments: list[list[str]] | None = None) -> list[PlanningRowIn]:
     try:
         workbook = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
-        sheet = workbook.active
     except Exception as exc:
         raise HTTPException(422, f"Arquivo Excel inválido: {exc}")
-    header = [_cell_str(c) for c in next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), [])]
+    sheet = next((candidate for candidate in workbook.worksheets if _sheet_header(candidate) == HEADERS), workbook.active)
+    header = _sheet_header(sheet)
     if header != HEADERS:
-        raise HTTPException(422, {"message": "Modelo Excel inválido", "errors": [f"Cabeçalhos esperados: {', '.join(HEADERS)}"]})
+        received = ", ".join(header) if header else "(vazio)"
+        raise HTTPException(422, {"message": "Modelo Excel inválido", "errors": [f"Cabeçalhos esperados: {', '.join(HEADERS)}", f"Cabeçalhos recebidos: {received}"]})
     departments, children = await _organization(db)
     parsed: list[PlanningRowIn] = []
     errors: list[str] = []
+    missing: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    skipped: list[str] = []
     for line, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
         vals = list(values)
         if not any(v not in (None, "") for v in vals): continue
-        names = [_cell_str(v) for v in vals[:7]]
+        names = [name for name in (_cell_str(value) for value in vals[:7]) if name]
         if not names[0]: errors.append(f"Linha {line}: Departamento nível 1 é obrigatório"); continue
+        path = tuple(names)
         parent: int | None = None; department: Department | None = None; broken = False
         for level, name in enumerate(names, 1):
-            if not name:
-                if any(names[level:]): errors.append(f"Linha {line}: há lacuna na hierarquia de departamentos"); broken = True
-                break
             matches = [d for d in children[parent] if d.active and d.name == name]
-            if len(matches) != 1: errors.append(f"Linha {line}: Departamento nível {level} inválido: {name}"); broken = True; break
+            if len(matches) != 1:
+                selected_paths = {tuple(item) for item in (create_missing_departments or [])}
+                if create_missing_departments is not None and path not in selected_paths:
+                    broken = True
+                    break
+                if path not in selected_paths:
+                    missing[path].append(line); broken = True; break
+                created = Department(parent_id=parent, name=name, active=True)
+                db.add(created)
+                await db.flush()
+                departments[created.id] = created
+                children.setdefault(parent, []).append(created)
+                children.setdefault(created.id, [])
+                matches = [created]
             department = matches[0]; parent = department.id
-        if broken or not department: continue
+        if broken or not department:
+            if path in missing and create_missing_departments is not None:
+                skipped.append(f"Linha {line}: {' > '.join(names)}")
+            continue
         monthly: list[float] = []
         for month, value in zip(MONTHS, vals[7:19]):
             try:
@@ -564,6 +690,9 @@ async def _parse_excel(raw: bytes, db: AsyncSession) -> list[PlanningRowIn]:
             except (TypeError, ValueError): errors.append(f"Linha {line}: {month} deve ser numérico")
         if len(monthly) == 12: parsed.append(PlanningRowIn(entity_type="department", department_id=department.id, values=monthly))
     if errors: raise HTTPException(422, {"message": "Importação rejeitada", "errors": errors})
+    if missing:
+        departments_missing = [{"path": list(path), "lines": lines} for path, lines in missing.items()]
+        raise HTTPException(422, {"message": "Departamentos ausentes", "errors": [f"Linha {line}: departamento não cadastrado" for lines in missing.values() for line in lines], "departments_missing": departments_missing})
     return parsed
 
 
@@ -583,8 +712,8 @@ async def planning_scope_options(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{type_code}/{year}/import")
-async def import_excel(type_code: str, year: int, file: UploadFile = File(...), title: str = Form(...), description: str = Form(...), event_type: str = Form(...), effective_date: date = Form(...), scope_id_orcamento: str | None = Form(None), scope_cloud: str | None = Form(None), defense_request_id: int | None = Form(None), db: AsyncSession = Depends(get_db)):
-    if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(422, "Envie um arquivo .xlsx")
+async def import_excel(type_code: str, year: int, file: UploadFile = File(...), title: str = Form(...), description: str = Form(...), event_type: str = Form(...), effective_date: date = Form(...), scope_id_orcamento: str | None = Form(None), scope_cloud: str | None = Form(None), defense_request_id: int | None = Form(None), create_missing_departments: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xltm")): raise HTTPException(422, "Envie um arquivo .xlsx ou .xltm")
     fin_type = await _type_for_write(type_code, db)
     defense_request: BudgetDefenseRequest | None = None
     if defense_request_id:
@@ -595,7 +724,13 @@ async def import_excel(type_code: str, year: int, file: UploadFile = File(...), 
             raise HTTPException(422, "Esta solicitação não aceita mais alterações de valores")
         scope_id_orcamento = defense_request.requested_id_orcamento
         scope_cloud = defense_request.requested_cloud
-    rows = await _parse_excel(await file.read(), db)
+    try:
+        selected_missing = json.loads(create_missing_departments) if create_missing_departments else None
+        if selected_missing is not None and not isinstance(selected_missing, list):
+            raise ValueError()
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise HTTPException(422, "create_missing_departments deve ser uma lista JSON de caminhos")
+    rows = await _parse_excel(await file.read(), db, selected_missing)
     prepared = await _validate_rows(rows, db)
     if type_code == "defesa-orcamentaria" and not scope_id_orcamento:
         raise HTTPException(422, "ID Orçamento é obrigatório para publicar uma defesa")
@@ -618,7 +753,7 @@ async def import_excel(type_code: str, year: int, file: UploadFile = File(...), 
         if defense_request.status == "SOLICITADA":
             defense_request.status = "RASCUNHO"
         await db.commit()
-    return {"version": _out(snapshot), "rows": len(prepared)}
+    return {"version": _out(snapshot), "rows": len(prepared), "warnings": []}
 
 
 async def _timeline(fin_type: FinancialType, year: int, db: AsyncSession) -> list[dict[str, Any]]:
@@ -753,6 +888,313 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
             previous_total = event_total
     events.sort(key=lambda event: (str(event["effective_date"]), str(event["created_at"])), reverse=True)
     return {"year": year, "cards": cards, "series": series, "events": events, "scope": {"department_id": department_id, "path": scope_path, "included_departments": len(scoped_department_ids or departments)}}
+
+
+@router.get("/budget-accuracy")
+async def budget_accuracy(
+    year: int,
+    month: int | None = None,
+    period: str = "monthly",
+    department_id: int | None = None,
+    scope_id_orcamento: str | None = None,
+    scope_cloud: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    if period not in {"monthly", "annual"}:
+        raise HTTPException(422, "period deve ser monthly ou annual")
+    if period == "monthly" and (month is None or month < 1 or month > 12):
+        raise HTTPException(422, "O mês deve estar entre 1 e 12")
+    budget_type = (await db.execute(select(FinancialType).where(FinancialType.code == "orcamento"))).scalar_one_or_none()
+    if not budget_type:
+        raise HTTPException(404, "Tipificação de orçamento não encontrada")
+    departments, children = await _organization(db)
+    if department_id is not None and department_id not in departments:
+        raise HTTPException(404, "Departamento não encontrado")
+    included_ids = _subtree_ids(department_id, children) if department_id is not None else None
+    if department_id is not None:
+        inherited_id, inherited_cloud = _department_scope(departments[department_id], departments)
+        scope_id_orcamento = scope_id_orcamento or inherited_id
+        scope_cloud = scope_cloud or inherited_cloud
+
+    base_query = select(PlanningVersion).where(
+        PlanningVersion.financial_type_id == budget_type.id,
+        PlanningVersion.year == year,
+        PlanningVersion.is_current == True,
+    )
+    query = base_query
+    if scope_id_orcamento:
+        query = query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento)
+    if scope_cloud:
+        query = query.where(PlanningVersion.scope_cloud == scope_cloud)
+    versions = list((await db.execute(query.order_by(PlanningVersion.effective_date.desc(), PlanningVersion.version.desc()))).scalars().all())
+    if not versions and (scope_id_orcamento or scope_cloud):
+        fallback = base_query.where(PlanningVersion.scope_cloud.is_(None))
+        if scope_id_orcamento:
+            fallback = fallback.where(or_(
+                PlanningVersion.scope_id_orcamento == scope_id_orcamento,
+                PlanningVersion.scope_id_orcamento.is_(None),
+            ))
+        versions = list((await db.execute(fallback.order_by(PlanningVersion.effective_date.desc(), PlanningVersion.version.desc()))).scalars().all())
+
+    selected_months = list(range(1, 13)) if period == "annual" else [month]
+    budget_by_department: dict[int, float] = defaultdict(float)
+    if versions:
+        entries = (await db.execute(select(PlanningEntry).where(
+            PlanningEntry.planning_version_id.in_([version.id for version in versions]),
+            PlanningEntry.entity_type == "department",
+            PlanningEntry.month.in_(selected_months),
+        ))).scalars().all()
+        for entry in entries:
+            if entry.department_id is not None and (included_ids is None or entry.department_id in included_ids):
+                budget_by_department[entry.department_id] += float(entry.value or 0)
+
+    actual_by_department: dict[int, float] = defaultdict(float)
+    forecast_by_department: dict[int, float] = defaultdict(float)
+    actual_total = 0.0
+    forecast_total = 0.0
+    current_month_key = datetime.now().strftime("%Y%m")
+    path_to_department: dict[tuple[str, ...], int] = {}
+    for department in departments.values():
+        if not department.active:
+            continue
+        path = _levels(department, departments)
+        path_to_department[tuple(path)] = department.id
+        if len(path) >= 4:
+            director_path = [path[index] for index in (0, 1, 3, 2, *range(4, len(path)))]
+            path_to_department.setdefault(tuple(director_path), department.id)
+    inherited_cloud = _department_scope(departments[department_id], departments)[1] if department_id is not None else None
+    selected_path = _levels(departments[department_id], departments) if department_id is not None else None
+    actual_rows = await _budget_accuracy_actuals(year, selected_months, inherited_cloud, selected_path)
+    consolidate_selected_project = bool(
+        selected_path and len(selected_path) >= 5 and selected_path[1] in {"Showback", "Chargeback"}
+    )
+    for row in actual_rows:
+        period_key = str(row.get("period") or "")
+        actual_value = float(row.get("actual_value") or 0)
+        forecast_value = float(row.get("forecast_value") or 0)
+        actual_total += actual_value
+        if not row.get("has_actual") or period_key == current_month_key:
+            forecast_total += forecast_value
+        path = tuple(str(row.get(f"departamento_nivel_{level}") or "").strip() for level in range(1, 8))
+        path = tuple(item for item in path if item)
+        current_id = path_to_department.get(path)
+        if consolidate_selected_project and department_id is not None:
+            selected_tail = tuple(selected_path[2:])
+            natural_tail = tuple(path[2:]) if len(path) >= 5 else ()
+            swapped_tail = (path[3], path[2], *path[4:]) if len(path) >= 5 else ()
+            if natural_tail == selected_tail or swapped_tail == selected_tail:
+                current_id = department_id
+        if current_id is not None and (included_ids is None or current_id in included_ids):
+            actual_by_department[current_id] += actual_value
+            if not row.get("has_actual") or period_key == current_month_key:
+                forecast_by_department[current_id] += forecast_value
+
+    line_ids = set(budget_by_department) | set(actual_by_department) | set(forecast_by_department)
+    lines = []
+    for current_id in line_ids:
+        department = departments.get(current_id)
+        if not department:
+            continue
+        budget_value = budget_by_department.get(current_id, 0.0)
+        actual_value = actual_by_department.get(current_id, 0.0)
+        forecast_value = forecast_by_department.get(current_id, 0.0)
+        comparison_value = actual_value + forecast_value if period == "annual" else actual_value
+        lines.append({
+            "department_id": current_id,
+            "department_levels": _levels(department, departments),
+            **_budget_accuracy_metrics(budget_value, comparison_value),
+            "actual_value": actual_value,
+            "forecast_value": forecast_value,
+            "comparison_value": comparison_value,
+        })
+    if period == "annual":
+        for line in lines:
+            line["variance"] = -line["variance"]
+            if line["variance_pct"] is not None:
+                line["variance_pct"] = -line["variance_pct"]
+        lines.sort(key=lambda item: item["variance"])
+    else:
+        lines.sort(key=lambda item: item["variance"], reverse=True)
+    totals = _budget_accuracy_metrics(
+        sum(item["budget_value"] for item in lines),
+        actual_total + forecast_total if period == "annual" else actual_total,
+    )
+    totals["actual_value"] = actual_total
+    totals["forecast_value"] = forecast_total
+    totals["comparison_value"] = actual_total + forecast_total if period == "annual" else actual_total
+    if period == "annual":
+        totals["variance"] = -totals["variance"]
+        if totals["variance_pct"] is not None:
+            totals["variance_pct"] = -totals["variance_pct"]
+    selected_version = max(versions, key=lambda item: (item.effective_date or date.min, item.version)) if versions else None
+    return {
+        "year": year,
+        "period": period,
+        "month": month,
+        "target_month": f"{year}{month:02d}" if month else None,
+        "version": _out(selected_version) if selected_version else None,
+        "scope": {"department_id": department_id, "path": _levels(departments[department_id], departments) if department_id else None},
+        "totals": totals,
+        "lines": lines,
+    }
+
+
+@router.get("/budget-accuracy/detail")
+async def budget_accuracy_detail(
+    year: int,
+    department_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    departments, _ = await _organization(db)
+    department = departments.get(department_id)
+    if not department or not department.active:
+        raise HTTPException(404, "Departamento não encontrado")
+    path = _levels(department, departments)
+    inherited_cloud = _department_scope(department, departments)[1]
+    periods = [f"{year}{month:02d}" for month in range(1, 13)]
+    escaped_path = [item.strip().replace("'", "''") for item in path]
+    candidates = [list(range(1, len(escaped_path) + 1))]
+    if len(escaped_path) >= 3:
+        candidates.append([1, 2, 4, 3, *range(5, len(escaped_path) + 2)])
+    if len(escaped_path) >= 5 and escaped_path[1] in {"Showback", "Chargeback"}:
+        candidates.extend([
+            [1, 3, 4, *range(5, len(escaped_path) + 2)],
+            [1, 4, 3, *range(5, len(escaped_path) + 2)],
+        ])
+    scope_checks = []
+    for order in candidates:
+        scope_checks.append(" AND ".join(
+            f'TRIM(CAST("departamento_nivel_{physical}" AS VARCHAR)) = \'{escaped_path[index]}\''
+            for index, physical in enumerate(order[:len(escaped_path)])
+        ))
+    scope_sql = " AND (" + " OR ".join(f"({item})" for item in scope_checks) + ")"
+    cloud_sql = ""
+    if inherited_cloud:
+        cloud = inherited_cloud.lower()
+        cloud_sql = f" AND lower(CAST(\"cloud_origem\" AS VARCHAR)) LIKE '{cloud}%'"
+    period_sql = ", ".join(f"'{item}'" for item in periods)
+    try:
+        rows = await trino_execute(f"""
+                 SELECT CAST(period AS VARCHAR) AS period, service_subcategory,
+                     SUM(actual_value) AS actual_value, SUM(forecast_value) AS forecast_value, MAX(has_actual) AS has_actual
+            FROM (
+              SELECT CAST("_billing_period" AS VARCHAR) AS period,
+                     COALESCE(NULLIF(TRIM(CAST("servicesubcategory" AS VARCHAR)), ''), 'Outros') AS service_subcategory,
+                     SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS actual_value,
+                     CAST(0 AS DOUBLE) AS forecast_value, 1 AS has_actual
+              FROM iceberg.dimon.dest_dm_cost_visao_completa
+              WHERE CAST("_billing_period" AS VARCHAR) IN ({period_sql})
+                AND ("tipo" IS NULL OR TRIM(CAST("tipo" AS VARCHAR)) IN ('', 'realizado')){cloud_sql}{scope_sql}
+              GROUP BY 1, 2
+              UNION ALL
+              SELECT CAST("period" AS VARCHAR) AS period,
+                     COALESCE(NULLIF(TRIM(CAST("servicesubcategory" AS VARCHAR)), ''), 'Outros') AS service_subcategory,
+                     CAST(0 AS DOUBLE) AS actual_value,
+                     SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS forecast_value, 0 AS has_actual
+              FROM iceberg.dimon.dest_dm_cost_visao_completa
+              WHERE CAST("period" AS VARCHAR) IN ({period_sql})
+                AND lower(TRIM(CAST("tipo" AS VARCHAR))) = 'forecast'{cloud_sql}{scope_sql}
+              GROUP BY 1, 2
+            ) facts
+            GROUP BY period, service_subcategory
+            ORDER BY period, actual_value DESC, forecast_value DESC
+        """, timeout_s=180)
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao consultar detalhe do projeto: {exc}")
+
+    budget_rows = (await db.execute(select(PlanningEntry).where(
+        PlanningEntry.department_id == department_id,
+        PlanningEntry.entity_type == "department",
+        PlanningEntry.month.in_(range(1, 13)),
+        PlanningEntry.planning_version_id.in_(select(PlanningVersion.id).where(
+            PlanningVersion.financial_type_id == select(FinancialType.id).where(FinancialType.code == "orcamento").scalar_subquery(),
+            PlanningVersion.year == year,
+            PlanningVersion.is_current == True,
+        )),
+    ))).scalars().all()
+    budget_by_month = defaultdict(float)
+    for entry in budget_rows:
+        budget_by_month[entry.month] += float(entry.value or 0)
+    monthly = {period: {"period": period, "budget_value": budget_by_month[index + 1], "actual_value": 0.0, "forecast_value": 0.0} for index, period in enumerate(periods)}
+    subcategories: dict[str, float] = defaultdict(float)
+    subcategory_monthly: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    current_month_key = datetime.now().strftime("%Y%m")
+    for row in rows:
+        item = monthly.setdefault(str(row["period"]), {"period": str(row["period"]), "budget_value": 0.0, "actual_value": 0.0, "forecast_value": 0.0})
+        actual_value = float(row.get("actual_value") or 0)
+        forecast_value = float(row.get("forecast_value") or 0) if (not row.get("has_actual") or str(row["period"]) == current_month_key) else 0.0
+        item["actual_value"] += actual_value
+        item["forecast_value"] += forecast_value
+        subcategory = str(row.get("service_subcategory") or "Outros")
+        consumption = actual_value + forecast_value
+        subcategories[subcategory] += consumption
+        subcategory_monthly[subcategory][str(row["period"])] += consumption
+    ranked_subcategories = sorted(subcategories.items(), key=lambda item: item[1], reverse=True)[:5]
+    top_names = {name for name, _ in ranked_subcategories}
+    subcategory_series = [
+        {
+            "name": name,
+            "value": value,
+            "monthly_values": [subcategory_monthly[name].get(period, 0.0) for period in periods],
+        }
+        for name, value in ranked_subcategories
+    ]
+    others_monthly = [
+        sum(values.get(period, 0.0) for name, values in subcategory_monthly.items() if name not in top_names)
+        for period in periods
+    ]
+    return {
+        "year": year,
+        "department_id": department_id,
+        "department_levels": path,
+        "monthly": list(monthly.values()),
+        "subcategories": subcategory_series,
+        "others_value": sum(subcategories.values()) - sum(value for _, value in ranked_subcategories),
+        "others_monthly": others_monthly,
+    }
+
+
+@router.post("/budget-accuracy/acks", status_code=201)
+async def create_budget_accuracy_ack(body: BudgetAccuracyAckIn, db: AsyncSession = Depends(get_db)):
+    if not re.fullmatch(r"\d{6}", body.target_month):
+        raise HTTPException(422, "target_month deve estar no formato YYYYMM")
+    path = [part.strip() for part in body.department.split(">") if part.strip()]
+    if not path:
+        raise HTTPException(422, "Informe o departamento")
+    row = BudgetAccuracyAck(
+        target_month=body.target_month,
+        planning_version_id=body.planning_version_id,
+        department_id=body.department_id,
+        department_path=path,
+        department_name=path[-1],
+        budget_value=body.budget_value,
+        actual_value=body.actual_value,
+        variance=body.actual_value - body.budget_value,
+        category=body.category.strip() or "Outro",
+        reason=body.reason.strip(),
+        severity=body.severity.strip() or "Informação",
+        ordem=body.ordem,
+        registered_at=body.registered_at,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _out(row)
+
+
+@router.get("/budget-accuracy/acks")
+async def list_budget_accuracy_acks(
+    target_month: str | None = None,
+    department_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(BudgetAccuracyAck).where(BudgetAccuracyAck.active == True).order_by(BudgetAccuracyAck.created_at.desc())
+    if target_month:
+        query = query.where(BudgetAccuracyAck.target_month == target_month)
+    if department_id is not None:
+        query = query.where(BudgetAccuracyAck.department_id == department_id)
+    rows = (await db.execute(query.limit(500))).scalars().all()
+    return {"items": [_out(row) for row in rows]}
 
 
 def _group_entries(entries: list[PlanningEntry]) -> dict[int, dict[str, Any]]:
@@ -1139,13 +1581,16 @@ async def planning_grid(type_code: str, year: int, version_id: int | None = None
     # Snapshots anteriores ao recorte por Cloud guardam o ID Orçamento, mas
     # possuem scope_cloud nulo. Ao selecionar Azure/GCP, use esse snapshot como
     # fallback e restrinja suas linhas pela hierarquia logo abaixo.
-    if not versions and not version_id and defense_request is None and scope_cloud:
+    if not versions and not version_id and defense_request is None and (scope_id_orcamento or scope_cloud):
         fallback_query = base_query.where(
             PlanningVersion.is_current == True,
             PlanningVersion.scope_cloud.is_(None),
         )
         if scope_id_orcamento:
-            fallback_query = fallback_query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento)
+            fallback_query = fallback_query.where(or_(
+                PlanningVersion.scope_id_orcamento == scope_id_orcamento,
+                PlanningVersion.scope_id_orcamento.is_(None),
+            ))
         versions = (await db.execute(fallback_query.order_by(PlanningVersion.effective_date.desc(), PlanningVersion.version.desc()))).scalars().all()
     departments, children = await _organization(db)
     individual = await _individual_line_map(db, year, scope_id_orcamento, scope_cloud, departments) if type_code == "defesa-orcamentaria" else {}

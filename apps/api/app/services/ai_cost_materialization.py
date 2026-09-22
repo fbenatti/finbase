@@ -68,7 +68,7 @@ async def _focus_periods(schema: dict[str, str]) -> list[str]:
         raise RuntimeError("A Gold FOCUS não possui _billing_period/period")
     qperiod = _quote_ident(period)
     rows = await execute(
-        f"SELECT DISTINCT CAST({qperiod} AS VARCHAR) AS billing_period FROM iceberg.gold.{FOCUS_TABLE} "
+        f"SELECT DISTINCT CAST({qperiod} AS VARCHAR) AS billing_period FROM iceberg.{layers.detail_layer()}.{FOCUS_TABLE} "
         f"WHERE {qperiod} IS NOT NULL ORDER BY 1", timeout_s=120,
     )
     return [str(row["billing_period"]) for row in rows if row.get("billing_period")]
@@ -102,7 +102,7 @@ async def _build_routed_staging(
         )
         escaped = period.replace("'", "''")
         select_sql = (
-            f"SELECT f.*, routed._ai_cost_link_id FROM iceberg.gold.{FOCUS_TABLE} f "
+            f"SELECT f.*, routed._ai_cost_link_id FROM iceberg.{layers.detail_layer()}.{FOCUS_TABLE} f "
             f"CROSS JOIN UNNEST(filter(ARRAY[{routes}], x -> x IS NOT NULL)) AS routed (_ai_cost_link_id) "
             f"WHERE CAST({_quote_ident(period_col)} AS VARCHAR) = '{escaped}'"
         )

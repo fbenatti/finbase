@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -36,6 +37,8 @@ from pyiceberg.transforms import IdentityTransform
 from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
+_STAGING_TABLE_RE = re.compile(r"^(?P<base>[a-z0-9_]+)_stg_(?P<timestamp>\d{16,20})$")
+_STAGING_TABLE_RE = re.compile(r"^(?P<base>[a-z0-9_]+)_stg_(?P<timestamp>\d{16,20})$")
 
 # ---------------------------------------------------------------------------
 # Catalog configuration
@@ -1180,7 +1183,17 @@ def write_destination_staged(
     return temp_safe_name
 
 
-def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "silver",
+def _align_staged_batch_to_target(batch, target) -> pa.Table:
+    """Align column order and Iceberg field IDs before appending staged data."""
+    target_column_names = [field.name for field in target.schema().fields]
+    staged_table = pa.Table.from_batches([batch]).select(target_column_names)
+    return pa.Table.from_arrays(
+        [staged_table.column(name) for name in target_column_names],
+        schema=target.schema().as_arrow(),
+    )
+
+
+def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = "gold",
                       known_row_count: int | None = None) -> int:
     """Replace a final table from staging without promoting its staging path.
 
@@ -1229,7 +1242,10 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
     tx.delete(AlwaysTrue())
     for batch in staged.scan().to_arrow_batch_reader():
         if batch.num_rows:
-            tx.append(pa.Table.from_batches([batch]))
+            # Iceberg appends fields by position. A collector can produce the
+            # same columns in a different order on a later run, so always
+            # align the staged batch to the canonical Gold schema.
+            tx.append(_align_staged_batch_to_target(batch, target))
     tx.commit_transaction()
     _force_delete_table(temp_tid, temp_safe_name)
 
@@ -1389,19 +1405,7 @@ def publish_staged_partition(
             # Arrow batches preserve staging order, while the target schema
             # may have evolved by name. Reorder before the native append so
             # fields with different positions cannot be paired by position.
-            # The target can also carry a legacy optional field absent from a
-            # newly rebuilt slice.  Selecting it directly used to raise
-            # ``Field <name> does not exist in schema`` after all Bronze work
-            # had completed.  Materialize such fields as nulls so the table
-            # contract remains stable while the slice is atomically replaced.
-            arrow_table = pa.Table.from_batches([batch])
-            for column_name in target_column_names:
-                if column_name not in arrow_table.column_names:
-                    arrow_table = arrow_table.append_column(
-                        column_name,
-                        pa.nulls(arrow_table.num_rows, type=target_arrow_fields[column_name].type),
-                    )
-            tx.append(arrow_table.select(target_column_names))
+            tx.append(_align_staged_batch_to_target(batch, target))
     tx.commit_transaction()
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
@@ -1610,23 +1614,70 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
     """
     import os, shutil, time
     from pathlib import Path
+    from app.database import SyncSession
+    from app.models.destination import DestinationTable
+    from app.models.etl_task import EtlTask
+    from sqlalchemy import func, select
 
     cat = _get_catalog()
     active_locations: set[str] = set()
     catalog_errors: list[str] = []
     warehouse_path = Path(_LOCAL_WAREHOUSE).resolve()
+    now = time.time()
+    min_age_seconds = max_age_hours * 3600
+    dropped_tables = 0
 
     if not warehouse_path.exists():
-        return {"deleted_dirs": 0, "deleted_bytes": 0}
+        return {"deleted_dirs": 0, "deleted_bytes": 0, "dropped_tables": 0}
 
     known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast", "dimon"]
+
+    def _has_active_writer(namespace: str, base_name: str) -> bool:
+        session = SyncSession()
+        try:
+            if namespace == "gold":
+                return session.execute(
+                    select(EtlTask.id)
+                    .join(DestinationTable, DestinationTable.id == EtlTask.destination_table_id)
+                    .where(
+                        EtlTask.task_type.in_(["reprocess", "reclassification"]),
+                        EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                        func.replace(
+                            func.replace(DestinationTable.physical_name, "-", "_"), ".", "_"
+                        ) == base_name,
+                    )
+                    .limit(1)
+                ).scalar_one_or_none() is not None
+            return session.execute(
+                select(EtlTask.id).where(
+                    EtlTask.task_type.in_(["dimon_reprocess", "shared_cost", "forecast", "forecast_accuracy", "ai_cost_relationship_reprocess"]),
+                    EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                ).limit(1)
+            ).scalar_one_or_none() is not None
+        finally:
+            session.close()
+
     for ns in known_namespaces:
         try:
             for t in cat.list_tables(ns):
                 table_name = t[1] if isinstance(t, tuple) else t
-                tbl = cat.load_table((ns, table_name))
-                loc = _normalize_pyiceberg_location(tbl.location())
-                active_locations.add(os.path.realpath(loc))
+                match = _STAGING_TABLE_RE.fullmatch(str(table_name))
+                if match:
+                    created_at = int(match.group("timestamp")) / 1_000_000_000
+                    if now - created_at >= min_age_seconds and not _has_active_writer(ns, match.group("base")):
+                        _force_delete_table((ns, table_name), str(table_name))
+                        dropped_tables += 1
+                        continue
+                try:
+                    tbl = cat.load_table((ns, table_name))
+                    loc = _normalize_pyiceberg_location(tbl.location())
+                    active_locations.add(os.path.realpath(loc))
+                except Exception as exc:
+                    if match and now - int(match.group("timestamp")) / 1_000_000_000 >= min_age_seconds and not _has_active_writer(ns, match.group("base")):
+                        _force_delete_table((ns, table_name), str(table_name))
+                        dropped_tables += 1
+                        continue
+                    catalog_errors.append(f"{ns}.{table_name}: {exc}")
         except Exception as exc:
             # A failed catalog read is not evidence that its directory is
             # orphaned. Stop the collector rather than risking live data.
@@ -1634,12 +1685,25 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
 
     if catalog_errors:
         logger.error("Staging cleanup skipped because catalog verification failed: %s", catalog_errors)
-        return {"deleted_dirs": 0, "deleted_bytes": 0}
+        return {"deleted_dirs": 0, "deleted_bytes": 0, "dropped_tables": dropped_tables}
 
-    now = time.time()
-    min_age_seconds = max_age_hours * 3600
     deleted_dirs = 0
     deleted_bytes = 0
+
+    # A failed publication leaves a staging table registered in the SQL
+    # catalog. Such tables are not filesystem orphans, so remove their catalog
+    # entries explicitly after the safety window unless their writer is active.
+    for namespace in known_namespaces:
+        for table_ref in cat.list_tables(namespace):
+            table_name = table_ref[1] if isinstance(table_ref, tuple) else table_ref
+            match = _STAGING_TABLE_RE.fullmatch(str(table_name))
+            if not match:
+                continue
+            created_at = int(match.group("timestamp")) / 1_000_000_000
+            if now - created_at < min_age_seconds or _has_active_writer(namespace, match.group("base")):
+                continue
+            _force_delete_table((namespace, table_name), str(table_name))
+            dropped_tables += 1
 
     for db_dir in warehouse_path.glob("*"):
         if not db_dir.is_dir():
@@ -1674,7 +1738,11 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
             "Garbage Collector Iceberg finalizado: %d pastas removidas, %.2f MB liberados",
             deleted_dirs, deleted_bytes / (1024 * 1024)
         )
-    return {"deleted_dirs": deleted_dirs, "deleted_bytes": deleted_bytes}
+    return {
+        "deleted_dirs": deleted_dirs,
+        "deleted_bytes": deleted_bytes,
+        "dropped_tables": dropped_tables,
+    }
 
 
 def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days: int = 7) -> bool:

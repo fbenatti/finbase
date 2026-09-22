@@ -24,6 +24,8 @@ from app.models.destination import DestinationTable, DestinationColumn, SourceDe
 from app.models.source_connection import SourceConnection
 from app.models.shutdown_exception_rule import ShutdownExceptionRule
 from app.services.trino_service import execute
+from app.services import lakehouse_layers as layers
+from app.services.dimon_materialization import DIMON_NAMESPACE
 from app.services.dimon_materialization import (
     _baseline_hours,
     _desligue_validation_dates,
@@ -393,7 +395,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         saving_brl,
         padrao,
         is_desligue_programado
-    FROM iceberg.gold.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     ORDER BY saving_brl DESC
@@ -408,7 +410,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         COUNT(DISTINCT CASE WHEN saved_hours > 0 THEN resource_id END) AS vm_with_shutdown,
         COALESCE(SUM(saved_hours), 0) AS total_saved_hours,
         COALESCE(SUM(saving_brl), 0) AS total_saving_brl
-    FROM iceberg.gold.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     """
@@ -559,7 +561,7 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
             SUM(COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0)) AS hours_billed,
             SUM(COALESCE(TRY_CAST("EffectiveCost" AS DOUBLE), 0)) AS total_effective_cost,
             MIN(TRY(date_parse("ChargePeriodStart", '%m/%d/%Y'))) AS first_seen
-        FROM iceberg.gold.dest_modelo_focus
+        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
         WHERE LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
           AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
           AND LOWER(COALESCE(CAST("ResourceName" AS VARCHAR), '')) NOT LIKE '%savings plan%'
@@ -608,7 +610,7 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
                 WHEN COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0) > 0
                 THEN date_parse("ChargePeriodStart", '%m/%d/%Y')
             END) AS last_seen
-        FROM iceberg.gold.dest_modelo_focus
+        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
         WHERE _billing_period = '{period}'
           AND "ChargePeriodStart" IS NOT NULL
           AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
@@ -918,7 +920,7 @@ async def _cost_since_removal_by_name(vm_name: str, snapshot_date: str) -> tuple
     price_sql = f"""
     SELECT
         AVG(COALESCE(TRY_CAST("BilledCost" AS DOUBLE), 0) / NULLIF(COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0), 0)) AS avg_price_hour
-    FROM iceberg.gold.dest_modelo_focus
+    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
     WHERE LOWER(TRIM(element_at(split(CAST("ResourceId" AS VARCHAR), '/'), -1))) = LOWER(TRIM('{vm_name.replace("'", "''")}'))
       AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
       AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
@@ -957,7 +959,7 @@ async def _cost_since_removal(resource_id: str, subscription_id: str, snapshot_d
     price_sql = f"""
     SELECT
         AVG(COALESCE(TRY_CAST("ListUnitPrice" AS DOUBLE), 0)) AS avg_price_hour
-    FROM iceberg.gold.dest_modelo_focus
+    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
     WHERE LOWER(TRIM("ResourceId")) = LOWER(TRIM('{resource_id.replace("'", "''")}'))
       AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
       AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
@@ -1407,7 +1409,7 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
     # realizado; NUNCA varre a Gold por requisição (evita OOM no Trino).
     sql = f"""
     SELECT day, hours, cost_brl
-    FROM iceberg.gold.dest_dm_cost_consumo_diario_vm
+    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_consumo_diario_vm
     WHERE LOWER(TRIM(resource_name)) = LOWER(TRIM('{name.replace("'", "''")}'))
       AND _billing_period IN ({period_literals})
       AND day >= '{start}' AND day <= '{end_date.isoformat()}'
@@ -1533,7 +1535,7 @@ async def saving_departamento(period: str | None = None):
             LOWER(TRIM(g."ResourceId")) AS rid,
             MAX(g.departamento_nivel_4) AS n4,
             MAX(g.departamento_nivel_5) AS n5
-        FROM iceberg.gold.dest_modelo_focus g
+        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus g
         JOIN dimon_vms d ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(d.resource_id))
         WHERE g._billing_period = '{period}'
         GROUP BY 1
@@ -1784,7 +1786,7 @@ SELECT
     SUM(COALESCE(TRY_CAST(b."ConsumedQuantity" AS DOUBLE), 0)) AS hours_billed,
     SUM(COALESCE(TRY_CAST(b."EffectiveCost" AS DOUBLE), 0)) AS total_effective_cost,
     COUNT(DISTINCT b."ResourceId") AS vm_count
-FROM iceberg.gold.dest_modelo_focus b
+FROM iceberg.{layers.detail_layer()}.dest_modelo_focus b
 WHERE LOWER(CAST(b."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
   AND (b."ChargeCategory" = 'Usage' OR b."ChargeCategory" IS NULL)
   AND LOWER(COALESCE(CAST(b."ResourceName" AS VARCHAR), '')) NOT LIKE '%savings plan%'
@@ -1843,7 +1845,7 @@ WITH vm_tags AS (
                 ELSE FALSE
             END
         ) AS has_shutdown_auto
-    FROM iceberg.gold.dest_modelo_focus
+    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
     WHERE LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
       AND LOWER(COALESCE(CAST("ResourceName" AS VARCHAR), '')) NOT LIKE '%savings plan%'
       AND LOWER(COALESCE(CAST("ResourceName" AS VARCHAR), '')) NOT LIKE '%reserved vm instance%'

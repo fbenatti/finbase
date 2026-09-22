@@ -20,6 +20,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env-databriks
     environment:
       DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
       DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
@@ -42,6 +44,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env-databriks
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
@@ -70,6 +74,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     command: ["python", "-u", "worker.py"]
+    env_file:
+      - .env-databriks
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops

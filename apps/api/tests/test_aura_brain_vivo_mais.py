@@ -59,7 +59,7 @@ async def test_aura_brain_keeps_combined_dimon(monkeypatch):
     monkeypatch.setattr(dashboard_service, "trino_execute", fake_execute)
     await dashboard_service._query_cost_rows("aura-brain", None)
 
-    assert "iceberg.dimon.dest_dm_cost_custo_aura_brain_vivo_mais" in captured[0]
+    assert "iceberg.gold.dest_dm_cost_custo_aura_brain_vivo_mais" in captured[0]
     assert "lower(CAST(departamento_nivel_5 AS VARCHAR)) = 'aura brain'" in captured[0]
 
 

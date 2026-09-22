@@ -126,17 +126,27 @@ ORPHAN_COST_SQL_TEMPLATE = """
 -- O filtro por orphan_ids roda ANTES do window function, evitando varrer o
 -- FOCUS inteiro (~15-20M linhas) — apenas as linhas que casam com órfãos.
 WITH orphan_ids AS (
-    SELECT DISTINCT lower(resource_id) AS rid
-    FROM iceberg.silver.dest_cloud_orphan_resources
+        SELECT DISTINCT lower(resource_id) AS rid, "_billing_period",
+                     CASE cloud_origem
+                         WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
+                         WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
+                         ELSE cloud_origem
+                     END AS focus_cloud_origem
+    FROM iceberg.{layers.detail_layer()}.dest_cloud_orphan_resources
     WHERE "_billing_period" = (
         SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources
     )
 ), focus_dedup AS (
-    SELECT resourceid, "_billing_period", billedcost, effectivecost, realizado
+    SELECT resourceid, "_billing_period", cloud_origem, billedcost, effectivecost, realizado
     FROM (
-        SELECT *, MIN(resourceid) OVER (PARTITION BY lower(resourceid), "_billing_period") AS canonical
-        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
-        WHERE lower(resourceid) IN (SELECT rid FROM orphan_ids)
+        SELECT f.*, MIN(f.resourceid) OVER (
+            PARTITION BY lower(f.resourceid), f."_billing_period", f.cloud_origem
+        ) AS canonical
+        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus f
+        JOIN orphan_ids o
+          ON lower(f.resourceid) = o.rid
+         AND f."_billing_period" = o."_billing_period"
+         AND lower(f.cloud_origem) = lower(o.focus_cloud_origem)
     ) WHERE resourceid = canonical
 )
 SELECT
@@ -150,6 +160,8 @@ SELECT
     o.disk_size_gb,
     o.age_days,
     o.snapshot_date,
+    o.cloud_origem,
+    o.source_connection_id,
     COUNT(f.resourceid) AS focus_rows,
     ROUND(SUM(COALESCE(TRY_CAST(f.billedcost AS DOUBLE), 0)), 2) AS billedcost,
     ROUND(SUM(COALESCE(TRY_CAST(f.effectivecost AS DOUBLE), 0)), 2) AS effectivecost,
@@ -162,11 +174,16 @@ LEFT JOIN focus_dedup f
   -- enquanto o export de custo FOCUS normaliza para UPPER/lower.
   ON LOWER(f.resourceid) = LOWER(o.resource_id)
  AND f."_billing_period" = o."_billing_period"
+ AND lower(f.cloud_origem) = lower(CASE o.cloud_origem
+     WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
+     WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
+     ELSE o.cloud_origem
+ END)
 -- Restringe ao período mais recente dos órfãos (poda de partição no FOCUS).
 WHERE o."_billing_period" = (
     SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources
 )
-GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 """
 
 
@@ -177,8 +194,24 @@ async def seed_orphan_cost_dimon(db: AsyncSession) -> dict[str, Any]:
 
     code = normalize_code(ORPHAN_COST_DIMON_CODE)
     existing = (await db.execute(select(DimonRule).where(DimonRule.code == code))).scalar_one_or_none()
+    dimensions = ["_billing_period", "resource_id", "resource_name", "orphan_rule", "tipo_recurso",
+                  "subscription_id", "resource_group", "disk_size_gb", "age_days", "snapshot_date",
+                  "cloud_origem", "source_connection_id"]
+    measures = ["focus_rows", "billedcost", "effectivecost", "cost_brl"]
     if existing:
-        return {"status": "EXISTS", "code": code, "rule_id": existing.id, "table": existing.materialization_table}
+        changed = (
+            existing.sql_template != ORPHAN_COST_SQL_TEMPLATE
+            or existing.dimensions != dimensions
+            or existing.measure_columns != measures
+        )
+        if changed:
+            existing.dimensions = dimensions
+            existing.measure_columns = measures
+            existing.sql_template = ORPHAN_COST_SQL_TEMPLATE
+            existing.materialization_status = "PENDING"
+            existing.materialization_error = None
+            await db.commit()
+        return {"status": "UPDATED" if changed else "EXISTS", "code": code, "rule_id": existing.id, "table": existing.materialization_table}
     rule = DimonRule(
         code=code,
         name="Custo por recurso órfão (join FOCUS)",
@@ -187,9 +220,8 @@ async def seed_orphan_cost_dimon(db: AsyncSession) -> dict[str, Any]:
             "com a Gold FOCUS por resource_id no mesmo billing period (billed/effective/BRL)."
         ),
         active=True,
-        dimensions=["_billing_period", "resource_id", "resource_name", "orphan_rule", "tipo_recurso",
-                    "subscription_id", "resource_group", "disk_size_gb", "age_days", "snapshot_date"],
-        measure_columns=["focus_rows", "billedcost", "effectivecost", "cost_brl"],
+        dimensions=dimensions,
+        measure_columns=measures,
         sql_template=ORPHAN_COST_SQL_TEMPLATE,
         sources=[],
     )
@@ -362,6 +394,18 @@ def _build_orphan_where(period: str | None, orphan_rules: list[str] | None,
     return (" WHERE " + " AND ".join(clauses)) if clauses else ""
 
 
+def _latest_snapshot_per_origin_where(where: str, alias: str, period: str | None = None) -> str:
+    """Restrict a unified orphan view to each origin's newest snapshot."""
+    prefix = f"{alias}." if alias else ""
+    period_filter = f' AND i."_billing_period" = {_quote(period)}' if period else ""
+    clause = (
+        f"{prefix}snapshot_date = (SELECT MAX(i.snapshot_date) "
+        f"FROM iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL} i "
+        f"WHERE i.cloud_origem = {prefix}cloud_origem{period_filter})"
+    )
+    return where + (" AND " if where else " WHERE ") + clause
+
+
 async def _load_annotations(db: AsyncSession, orphan_rule: str | None = None,
                             snapshot_date: str | None = None) -> dict[tuple[str, str, str], OrphanAnnotation]:
     q = select(OrphanAnnotation)
@@ -397,11 +441,14 @@ async def orphan_summary(
             + snapshot_period_where + ' ORDER BY snapshot_date DESC'
         )
         snapshot_dates = [r.get("snapshot_date") for r in snapshots_rows if r.get("snapshot_date")]
-        selected_snapshot = snapshot_date or (snapshot_dates[0] if snapshot_dates else None)
+        selected_snapshot = snapshot_date
+        latest_snapshot = snapshot_dates[0] if snapshot_dates else None
         where = _build_orphan_where(
             period, rules, subscription_id, resource_group,
             tipos=tipos, snapshot_date=selected_snapshot,
         )
+        if not selected_snapshot:
+            where = _latest_snapshot_per_origin_where(where, "", period)
         by_rule = await trino_execute(
             "SELECT orphan_rule, COUNT(*) AS cnt FROM iceberg.silver.dest_cloud_orphan_resources"
             + where + " GROUP BY orphan_rule ORDER BY cnt DESC"
@@ -410,13 +457,16 @@ async def orphan_summary(
             "SELECT tipo_recurso, COUNT(*) AS cnt FROM iceberg.silver.dest_cloud_orphan_resources"
             + where + " GROUP BY tipo_recurso ORDER BY cnt DESC"
         )
+        cost_where = _build_orphan_where(
+            period, rules, subscription_id, resource_group,
+            tipos=tipos, snapshot_date=selected_snapshot,
+        )
+        if not selected_snapshot:
+            cost_where = _latest_snapshot_per_origin_where(cost_where, "", period)
         cost_total = await trino_execute(
             "SELECT COALESCE(SUM(cost_brl), 0) AS cost_brl, COUNT(*) AS n "
             f"FROM iceberg.dimon.{ORPHAN_COST_DIMON_TABLE}"
-            + _build_orphan_where(
-                period, rules, subscription_id, resource_group,
-                tipos=tipos, snapshot_date=selected_snapshot,
-            )
+            + cost_where
         )
     except Exception as exc:  # noqa: BLE001 — Trino pode estar fora/ tabela ainda não criada
         logger.warning("Trino summary indisponível: %s", exc)
@@ -443,7 +493,7 @@ async def orphan_summary(
     return {
         "periods": periods,
         "snapshot_dates": snapshot_dates,
-        "latest_snapshot": snapshot_dates[0] if snapshot_dates else None,
+        "latest_snapshot": latest_snapshot,
         "selected_snapshot": selected_snapshot,
         "by_rule": by_rule,
         "by_tipo": by_tipo,
@@ -481,13 +531,15 @@ async def list_orphans(
                 "SELECT MAX(snapshot_date) AS snapshot_date "
                 "FROM iceberg.silver.dest_cloud_orphan_resources" + snapshot_where
             )
-            snapshot_date = (latest[0] if latest else {}).get("snapshot_date")
+            snapshot_date = None
         except Exception as exc:  # noqa: BLE001
             logger.warning("Snapshot de órfãos indisponível: %s", exc)
     where = _build_orphan_where(
         period, rules, subscription_id, resource_group,
         alias="o", tipos=tipos, snapshot_date=snapshot_date,
     )
+    if not snapshot_date:
+        where = _latest_snapshot_per_origin_where(where, "o", period)
     columns = (
         "o.resource_id, o.resource_name, o.resource_type, o.subscription_id, o.resource_group, o.location, o.sku, "
         "o.disk_size_gb, o.ip_address, o.source_disk, o.tags, o.created_at, o.orphan_rule, o.orphan_reason, "
@@ -503,7 +555,9 @@ async def list_orphans(
         f"LEFT JOIN iceberg.dimon.{ORPHAN_COST_DIMON_TABLE} c "
         "ON c.resource_id = o.resource_id AND c.orphan_rule = o.orphan_rule "
         "AND c.\"_billing_period\" = o.\"_billing_period\" "
-        "AND c.snapshot_date = o.snapshot_date"
+        "AND c.snapshot_date = o.snapshot_date "
+        "AND c.cloud_origem = o.cloud_origem "
+        "AND c.source_connection_id = o.source_connection_id"
         + where
         + " ORDER BY cost_brl DESC, o.age_days DESC NULLS LAST LIMIT " + str(limit)
     )
@@ -561,16 +615,19 @@ async def orphan_savings(
     presence_filter = presence_where.replace(" WHERE ", " WHERE ", 1)
     sql = f"""
       WITH snapshots AS (
-        SELECT snapshot_date,
-               LEAD(snapshot_date) OVER (ORDER BY snapshot_date) AS next_snapshot
+                SELECT cloud_origem, snapshot_date,
+                             LEAD(snapshot_date) OVER (
+                                 PARTITION BY cloud_origem ORDER BY snapshot_date
+                             ) AS next_snapshot
         FROM (
-          SELECT DISTINCT snapshot_date
+                    SELECT DISTINCT cloud_origem, snapshot_date
           FROM iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL}
         )
       ), presence_ranked AS (
         SELECT o.*,
                ROW_NUMBER() OVER (
-                 PARTITION BY lower(o.resource_id), o.orphan_rule, o.snapshot_date
+                 PARTITION BY lower(o.resource_id), o.orphan_rule, o.snapshot_date,
+                              o.cloud_origem
                  ORDER BY o.source_connection_id
                ) AS rn
         FROM iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL} o
@@ -585,14 +642,17 @@ async def orphan_savings(
       )
       SELECT p.resource_id, p.resource_name, p.resource_type, p.subscription_id,
              p.resource_group, p.location, p.orphan_rule, p.orphan_reason,
-             p.tipo_recurso, p.snapshot_date AS last_seen_date,
+             p.tipo_recurso, p.cloud_origem, p.snapshot_date AS last_seen_date,
              s.next_snapshot AS disappeared_on, p."_billing_period",
              COALESCE(c.cost_brl, 0) AS monthly_saving_brl
       FROM presence p
-      JOIN snapshots s ON s.snapshot_date = p.snapshot_date
+            JOIN snapshots s
+                ON s.cloud_origem = p.cloud_origem
+             AND s.snapshot_date = p.snapshot_date
       LEFT JOIN presence n
         ON lower(n.resource_id) = lower(p.resource_id)
        AND n.orphan_rule = p.orphan_rule
+        AND n.cloud_origem = p.cloud_origem
        AND n.snapshot_date = s.next_snapshot
       LEFT JOIN costs c
         ON c.rid = lower(p.resource_id)
@@ -604,6 +664,7 @@ async def orphan_savings(
           SELECT 1 FROM presence later
           WHERE lower(later.resource_id) = lower(p.resource_id)
             AND later.orphan_rule = p.orphan_rule
+                        AND later.cloud_origem = p.cloud_origem
             AND later.snapshot_date >= s.next_snapshot
         )
       ORDER BY disappeared_on DESC, monthly_saving_brl DESC

@@ -226,6 +226,7 @@ export default function OrphanedResources() {
                 <TableRow>
                   <TableCell>Recurso removido</TableCell>
                   <TableCell>Tipo</TableCell>
+                  <TableCell>Origem</TableCell>
                   <TableCell>Última aparição</TableCell>
                   <TableCell>Desapareceu em</TableCell>
                   <TableCell align="right">Dias economizando</TableCell>
@@ -235,9 +236,9 @@ export default function OrphanedResources() {
               </TableHead>
               <TableBody>
                 {savingsLoading ? (
-                  <TableRow><TableCell colSpan={7} align="center"><CircularProgress size={28} sx={{ my: 2 }} /></TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} align="center"><CircularProgress size={28} sx={{ my: 2 }} /></TableCell></TableRow>
                 ) : !savings?.rows.length ? (
-                  <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4, color: "text.secondary" }}>
+                  <TableRow><TableCell colSpan={8} align="center" sx={{ py: 4, color: "text.secondary" }}>
                     Ainda não há desaparecimentos confirmados entre snapshots diários.
                   </TableCell></TableRow>
                 ) : savings.rows.map((row) => (
@@ -247,6 +248,7 @@ export default function OrphanedResources() {
                       <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>{row.resource_id}</Typography>
                     </TableCell>
                     <TableCell>{TIPO_LABELS[row.tipo_recurso || ""] || row.tipo_recurso || "—"}</TableCell>
+                    <TableCell>{row.cloud_origem || "—"}</TableCell>
                     <TableCell>{row.last_seen_date}</TableCell>
                     <TableCell>{row.disappeared_on}</TableCell>
                     <TableCell align="right">{row.days_saving}</TableCell>
@@ -366,6 +368,7 @@ export default function OrphanedResources() {
                 <TableCell sx={{ width: "26%" }}>Recurso</TableCell>
                 <TableCell sx={{ width: "11%" }}>Tipo</TableCell>
                 <TableCell sx={{ width: "11%" }}>Regra</TableCell>
+                <TableCell sx={{ width: "10%" }}>Origem</TableCell>
                 <TableCell align="right" sx={{ width: "8%" }}>Tamanho</TableCell>
                 <TableCell sx={{ width: "10%" }}>Subscription</TableCell>
                 <TableCell sx={{ width: "10%" }}>Resource Group</TableCell>
@@ -377,9 +380,9 @@ export default function OrphanedResources() {
             </TableHead>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={10} align="center"><CircularProgress size={28} sx={{ my: 2 }} /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={11} align="center"><CircularProgress size={28} sx={{ my: 2 }} /></TableCell></TableRow>
               ) : rows.length === 0 ? (
-                <TableRow><TableCell colSpan={10} align="center" sx={{ py: 4, color: "text.secondary" }}>
+                <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4, color: "text.secondary" }}>
                   Nenhum recurso órfão encontrado para os filtros atuais.
                 </TableCell></TableRow>
               ) : rows.map((row) => (
@@ -407,6 +410,7 @@ export default function OrphanedResources() {
                       {RULE_LABELS[row.orphan_rule] || row.orphan_rule}
                     </Typography>
                   </TableCell>
+                  <TableCell>{row.cloud_origem || "—"}</TableCell>
                   <TableCell align="right">
                     {row.disk_size_gb ? `${Number(row.disk_size_gb).toLocaleString("pt-BR")} GB` : "—"}
                   </TableCell>

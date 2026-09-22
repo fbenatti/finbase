@@ -11,6 +11,8 @@ import time
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
+from app.services.dimon_materialization import DIMON_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +224,7 @@ def _copilot_user_period_select() -> str:
         MIN(CAST(day AS VARCHAR)) AS period_start,
         MAX(CAST(day AS VARCHAR)) AS period_end,
         COUNT(DISTINCT day) AS period_days
-      FROM iceberg.gold.dest_dm_copilot_usage_daily
+      FROM iceberg.{DIMON_NAMESPACE}.dest_dm_copilot_usage_daily
       WHERE assignee_login IS NOT NULL AND assignee_login <> ''
         AND source_kind IN ('ai_usage_report', 'billing_report')
         AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')

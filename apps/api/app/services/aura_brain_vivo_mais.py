@@ -34,6 +34,7 @@ import time
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services.dimon_materialization import DIMON_NAMESPACE
 from app.services.azure_ptu_dimon import (
     DIMON_TABLE as PTU_DIMON_TABLE,
     load_project_token_totals,
@@ -42,7 +43,7 @@ from app.services.azure_ptu_dimon import (
 
 logger = logging.getLogger(__name__)
 
-DIMON_NAMESPACE = "iceberg.gold"
+DIMON_NAMESPACE = f"iceberg.{__import__('app.services.dimon_materialization', fromlist=['DIMON_NAMESPACE']).DIMON_NAMESPACE}"
 PROJECT_LABELS = {"aura-brain": "Aura Brain", "vivo-mais": "Vivo Mais"}
 PROJECTS = ("Aura Brain", "Vivo Mais")
 PROJECT_SOURCES = {

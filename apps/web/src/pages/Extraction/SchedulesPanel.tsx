@@ -61,6 +61,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const [destinations, setDestinations] = useState<DestinationTable[]>([]);
   const [forecastConfigs, setForecastConfigs] = useState<ForecastConfig[]>([]);
   const [dimonRules, setDimonRules] = useState<DimonRule[]>([]);
+  const [forecastConfigsError, setForecastConfigsError] = useState(false);
 
   const focusDimonIds = (goldIds: number[]): number[] => {
     const goldNames = new Set(
@@ -72,7 +73,10 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   };
 
   const forecastCandidates = forecastConfigs.filter(config =>
-    config.active && (!form.destination_table_ids.length || form.destination_table_ids.includes(config.destination_table_id)),
+    config.active !== false && (
+      !form.destination_table_ids.length
+      || form.destination_table_ids.map(Number).includes(Number(config.destination_table_id))
+    ),
   );
 
   const loadSchedules = () => {
@@ -82,7 +86,12 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   useEffect(() => {
     loadSchedules();
     getDestinationTables(true).then(setDestinations).catch(() => {});
-    getForecastConfigs().then(setForecastConfigs).catch(() => {});
+    getForecastConfigs()
+      .then(configs => {
+        setForecastConfigs(configs);
+        setForecastConfigsError(false);
+      })
+      .catch(() => setForecastConfigsError(true));
     getDimonRules().then(setDimonRules).catch(() => {});
   }, []);
 
@@ -372,7 +381,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                 <FormControl size="small"><InputLabel>Períodos</InputLabel><Select value={form.period_mode} label="Períodos" onChange={e => setForm({ ...form, period_mode: e.target.value as "selected" | "all" })}><MenuItem value="all">Todos disponíveis</MenuItem><MenuItem value="selected">Selecionados</MenuItem></Select></FormControl>
                 {form.period_mode === "selected" && <TextField label="Períodos (YYYYMM)" value={form.billing_periods} onChange={e => setForm({ ...form, billing_periods: e.target.value })} helperText="Ex.: 202601, 202602, 202603" />}
               </>}
-              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatos</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatos" onChange={e => setForm({ ...form, forecast_config_ids: e.target.value as number[], forecast_config_id: String((e.target.value as number[])[0] || "") })} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === id); return candidate ? `${candidate.name} — ${candidate.table_name || `Gold ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `Gold ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>Somente configurações ativas compatíveis com as Golds selecionadas.</FormHelperText></FormControl>}
+              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatos</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatos" onChange={e => { const ids = (e.target.value as number[]).map(Number); setForm({ ...form, forecast_config_ids: ids, forecast_config_id: String(ids[0] || "") }); }} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === Number(id)); return candidate ? `${candidate.name} — ${candidate.table_name || `Gold ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `Gold ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>{forecastConfigsError ? "Não foi possível carregar as configurações de forecast. Verifique a API." : forecastCandidates.length ? "Somente configurações ativas compatíveis com as Golds selecionadas." : "Nenhuma configuração ativa compatível com as Golds selecionadas."}</FormHelperText></FormControl>}
               <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acurácia" />
               <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar custo compartilhado" />
               <Box>

@@ -226,9 +226,22 @@ def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = Tr
         frame = pd.DataFrame(records); period = now.strftime("%Y%m")
         persisted["bronze_rows"] = iceberg.write_bronze(f"{connection.code}_operational", frame, period, blob_path=f"oci-operational://{connection.code}/{now:%Y%m%d%H}")
         bronze = iceberg.read_bronze(f"{connection.code}_operational")
+        if bronze is None or bronze.empty:
+            persisted["gold_error"] = "Bronze operacional OCI não retornou linhas; Gold anterior preservada"
+            logger.warning("OCI operational Gold publication skipped for %s: Bronze is empty", connection.code)
+            return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}
         combined = gold_frame_from_bronze(bronze, connection=connection, period=period)
         if "collected_at" not in combined.columns:
             combined["collected_at"] = collected_at
-        staged = iceberg.write_destination_staged(GOLD_TABLE, combined, column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"})
-        iceberg.swap_staged_table(GOLD_TABLE, staged); persisted["gold_rows"] = len(combined)
+        staged = None
+        try:
+            staged = iceberg.write_destination_staged(GOLD_TABLE, combined, column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"})
+            persisted["gold_rows"] = iceberg.swap_staged_table(
+                GOLD_TABLE, staged, known_row_count=len(combined),
+            )
+        except Exception as exc:
+            persisted["gold_error"] = f"{type(exc).__name__}: {exc}"
+            logger.error("OCI operational Gold publication failed for %s", connection.code, exc_info=True)
+            if staged:
+                iceberg.cleanup_staged_table(staged)
     return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}

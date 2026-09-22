@@ -144,17 +144,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         # usando o refresh novo que o navegador recebeu na primeira resposta.
         if row.replaced_by_id is not None:
             raise HTTPException(status_code=401, detail="Refresh token já rotacionado")
-        # Reutilização de refresh revogado → revogar toda a família do usuário
-        logger.warning("Refresh revogado reutilizado — revogando família do usuário %s", row.user_id)
-        result2 = await db.execute(
-            select(RefreshToken).where(
-                RefreshToken.user_id == row.user_id,
-                RefreshToken.revoked_at.is_(None),
-            )
-        )
-        for sibling in result2.scalars().all():
-            sibling.revoked_at = now
-        await db.commit()
+        logger.warning("Refresh revogado reutilizado para o usuário %s", row.user_id)
         raise HTTPException(status_code=401, detail="Refresh token revogado")
     if row.expires_at.replace(tzinfo=timezone.utc) < now:
         raise HTTPException(status_code=401, detail="Refresh token expirado")

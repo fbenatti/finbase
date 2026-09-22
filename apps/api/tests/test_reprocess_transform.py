@@ -1,6 +1,7 @@
 import pandas as pd
 
 from app.services.reprocess_transform import build_chunk_payload
+from worker import _failure_context
 
 
 def _mapping():
@@ -35,3 +36,19 @@ def test_build_chunk_payload_includes_rules_and_provenance():
     assert payload["billing_period"] == "202501"
     assert payload["records"][0]["ServiceName"] == "Compute"
     assert payload["cmapps"][0]["destination_column"] == "ServiceName"
+
+
+def test_failure_context_is_bounded_and_structured():
+    context = _failure_context({
+        "failure_context": {
+            "exception_type": "RuntimeError",
+            "traceback": "x" * 20000,
+            "phase": "Processando batches",
+            "current_blob": "Aguardando primeiro batch",
+        }
+    })
+
+    assert context["exception_type"] == "RuntimeError"
+    assert len(context["traceback"]) == 12000
+    assert context["phase"] == "Processando batches"
+    assert context["current_blob"] == "Aguardando primeiro batch"

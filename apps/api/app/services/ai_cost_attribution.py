@@ -205,7 +205,7 @@ class ApplyResult:
 
 async def load_focus_schema() -> dict[str, str]:
     from app.services.trino_service import execute as trino_execute
-    rows = await trino_execute(f"DESCRIBE iceberg.gold.{FOCUS_TABLE}", timeout_s=30)
+    rows = await trino_execute(f"DESCRIBE iceberg.{layers.detail_layer()}.{FOCUS_TABLE}", timeout_s=30)
     return _schema_map(rows)
 
 
@@ -232,7 +232,7 @@ async def preview_source(
     sql = f"""
       SELECT COUNT(*) AS row_count,
              SUM({_value_expr(schema, value_col)}) AS total_value
-      FROM iceberg.gold.{FOCUS_TABLE}
+      FROM iceberg.{layers.detail_layer()}.{FOCUS_TABLE}
       WHERE {where}
     """
     rows = await trino_execute(sql, timeout_s=120)
@@ -273,7 +273,7 @@ async def resolve_source_rows(
     sql = f"""
       SELECT {fp} AS fingerprint,
              SUM({_value_expr(schema, value_col)}) AS value
-      FROM iceberg.gold.{FOCUS_TABLE}
+      FROM iceberg.{layers.detail_layer()}.{FOCUS_TABLE}
       WHERE {where}
       GROUP BY 1
     """

@@ -1,11 +1,13 @@
 import { Box, Tab, Tabs, Typography } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import FinancialDashboard from "./FinancialDashboard";
+import BudgetAccuracy from "./BudgetAccuracy";
 import Planning from "./Planning";
 import VisaoContabil, { EMPTY_FILTERS } from "../DimonDashboard/VisaoContabil";
 
 const TABS = [
   { code: "orcamento", label: "Orçamento", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },
+  { code: "acuracia-orcamento", label: "Acurácia de Orçamento", title: "Acurácia de Orçamento", help: "Orçamento vigente contra o realizado por mês." },
   { code: "forecast-manual", label: "Forecast Manual", title: "Forecast Manual", help: "Projeções mensais inseridas manualmente." },
   { code: "base-line-contratual", label: "Base Line Contratual", title: "Base Line Contratual", help: "Referência financeira contratual por departamento." },
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
@@ -37,7 +39,9 @@ export default function FinancialPlanning() {
         </Tabs>
       </Box>
       <Box sx={{ m: 3 }}>
-        {active.code === "visao-contabil" ? (
+        {active.code === "acuracia-orcamento" ? (
+          <BudgetAccuracy />
+        ) : active.code === "visao-contabil" ? (
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
         ) : active.code === "dashboard" ? (
           <FinancialDashboard />
