@@ -1174,3 +1174,81 @@ automática. O painel não aparece para conexão `manual_csv`.
 
 **A carga inicial é só dos 15 dias da fonte 4P**, por ter menos volume. As outras
 conexões ficam prontas e validadas para quando o piloto avançar.
+
+---
+
+## 15. Incidente: sistema caiu e Bronze corrompida
+
+### 15.1 O que aconteceu
+
+Ao reiniciar a API e o worker durante as coletas, os processos foram mortos no
+meio de uma escrita. O resultado foram **arquivos de metadados truncados** no
+Iceberg — o manifesto `.avro` existia no disco mas com tamanho menor que o
+registrado (ex.: `7635` bytes lidos, arquivo maior). O Trino recusa ler
+("Incorrect file size ... end of stream not reached"), e a tabela fica
+inutilizável mesmo com os dados presentes.
+
+Tabelas afetadas: `raw_azure_ti` (70,8 M linhas, 11 GB), `raw_azure_automation_4p`,
+`raw_azure_automation_ti`, `raw_azure_ti_resource_graph`,
+`raw_azure_resource_graph_4p`, `raw_azure_ptu_metrics`.
+
+### 15.2 Diagnóstico
+
+| Verificação | Resultado |
+|---|---|
+| PyIceberg lê `raw_azure_ti` | **OK** — 70.835.991 linhas |
+| Trino lê a mesma tabela | **falha** no manifesto truncado |
+| Rollback para 45 versões de metadado | **todas quebradas** (manifesto compartilhado) |
+| Demais tabelas | legíveis |
+
+Os dados estavam íntegros; a cadeia de snapshots é que não podia ser lida pelo
+Trino. Como o PyIceberg escreve mas o Trino não lê, a tabela era inútil para o
+dashboard.
+
+### 15.3 Correção
+
+As tabelas foram **dropadas e recoletadas da origem** (decisão tomada com o
+usuário, já que a extração estava sendo refeita de qualquer forma):
+
+- `raw_azure_ti` recriada: 548.606 linhas;
+- `raw_azure_ti_automation`: 5.192 · `raw_azure_ti_resource_graph`: 10.344;
+- 4P e Marketplace preservados e legíveis.
+
+**Todas as tabelas Bronze respondem a `count(*)` no Trino.**
+
+### 15.4 Defeito de startup encontrado no caminho
+
+O `lock_timeout` que eu tinha adicionado às migrações transformava espera longa
+em **falha fatal**: com um worker escrevendo, o startup abortava com
+`LockNotAvailableError` e a API não subia.
+
+Correção: `_execute_migration` com retry e espera crescente (5 tentativas,
+1s→8s), tratando só erro transitório de lock. As migrações são idempotentes
+(`IF NOT EXISTS`), então repetir é seguro.
+
+Dois defeitos que eu introduzi ao escrever esse fix e corrigi: o regex de
+conversão reescreveu o `conn.execute` dentro do próprio helper (recursão) e
+quebrou `text(...).bindparams(...)`; e o `@asynccontextmanager` ficou colado no
+helper, deixando `lifespan` sem decorator.
+
+### 15.5 Estado final da extração (9/9 tasks)
+
+| Conexão | Fonte | Resultado |
+|---|---|---|
+| TI | cost_exports | COMPLETED |
+| TI | automation_jobs | COMPLETED · 5.005 jobs / 187 schedules |
+| TI | resource_graph | COMPLETED · 10.000 recursos / 315 órfãos |
+| 4P | cost_exports | COMPLETED |
+| 4P | openai_ptu | COMPLETED · 8.928 registros |
+| 4P | automation_jobs | COMPLETED · 4.017 jobs / 202 schedules |
+| 4P | resource_graph | COMPLETED · 8.748 recursos / 178 órfãos |
+| 4P | monitor_vm_metrics | COMPLETED · 615.002 linhas |
+| 4P | vm_inventory | COMPLETED · 304 recursos |
+
+**Zero falhas.** Marketplace é carga manual (1.475 linhas), sem coleta automática.
+
+### 15.6 Lição operacional
+
+Não reiniciar worker/API durante uma coleta: o kill no meio da escrita deixa o
+Iceberg em estado que o Trino não lê. Quando for necessário, aguardar a fila
+drenar.
