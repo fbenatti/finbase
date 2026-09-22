@@ -1103,3 +1103,74 @@ Opções levantadas:
 
 Antes de mexer, verificar se o contrato do motor (`FORECAST.md`) define o
 tratamento do mês em curso — não encontrado até o momento.
+
+---
+
+## 14. Conexões Azure reduzidas a 3 e fluxo de coleta por fonte
+
+### 14.1 Modelo
+
+A conexão passou a ser **ambiente + credencial**; a fonte é uma linha em
+`azure_connection_source`. Antes cada fonte era uma conexão própria, o que
+multiplicava cards e repetia o mesmo segredo.
+
+| Conexão | Ambiente | Fontes |
+|---|---|---|
+| `azure-4p` (id 1) | 4P | cost_exports, resource_graph, automation_jobs, monitor_vm_metrics, vm_inventory, openai_ptu |
+| `azure-ti` (id 2) | TI | cost_exports, resource_graph, automation_jobs |
+| `azure-marketplace` (id 10) | Marketplace | cost_exports (carga manual CSV) |
+
+Removidas as conexões-ferramenta 23, 27, 30, 34, 35, 37 e as criadas por engano
+(38, 39), com as 14 FKs tratadas antes do DELETE.
+
+### 14.2 Nomes de Bronze preservados
+
+`source_code(connection.code, source_key)` deriva o `code` da coleta:
+`cost_exports` tem sufixo vazio, então o `raw_azure_4p` histórico não mudou.
+Verificado: a conexão 1 escreve em 5 tabelas distintas —
+`raw_azure_4p`, `_resource_graph`, `_automation`, `_monitor_vm`, `_ptu`.
+
+### 14.3 Endpoints
+
+| Endpoint | Comportamento |
+|---|---|
+| `GET /azure-sources/?connection_id=N` | catálogo **completo** da conexão: ligadas marcadas, resto disponível |
+| `PUT /{connection}/sources/{source_key}/selection` | grava em `azure_connection_source` |
+| `POST /environments/{env}/collect` | **uma task por fonte selecionada**, com `source_key`/`source_code` |
+
+O filtro por conexão corrige um defeito real: editar a 4P listava as fontes da TI
+e do Marketplace.
+
+### 14.4 Despacho no worker
+
+Com uma conexão hospedando várias fontes, o ramo do coletor passou a ser
+escolhido pelo `connector_type` **da fonte** (com o da conexão como fallback), e
+o `source_code` da task é derivado da fonte. Os coletores de monitor, resource
+graph, automation e vm_inventory aceitam `source_code` e escrevem a Bronze sob ele.
+
+### 14.5 Validação por conexão
+
+**4P** (carga full, 6 tasks): cost_exports, openai_ptu (8.928 registros),
+automation_jobs (4.016 jobs / 202 schedules), resource_graph (8.763 recursos /
+182 órfãos), monitor_vm_metrics (615.002 linhas), vm_inventory (304 recursos:
+61 VMs + 243 VMSS) — todas COMPLETED.
+
+**TI**: 3 tasks enfileiradas (cost_exports, automation_jobs, resource_graph).
+
+**Marketplace**: 0 tasks, 1 fonte pulada com motivo — carga manual não tem coleta
+automática. O painel não aparece para conexão `manual_csv`.
+
+### 14.6 Correções de camada encontradas
+
+| Onde | Problema | Correção |
+|---|---|---|
+| Bronze de métricas | ponto sem amostra marcado `OK` com valor vazio, parecendo coleta quebrada | `GAP` com motivo; resumo separa `series_rows` de `empty_rows` |
+| `write_silver` | faz append: rematerializar duplicou a série (2×615.002) | remove a fatia do período antes de reescrever |
+| `analysis.py` | `body.mart_table` inexistente após rename | `body.gold_table` |
+| listagem | `_source_state` usava `_enabled(connection)` | passa a usar a seleção |
+| mensagem da coleta | dizia "planejada" para qualquer skip | usa o motivo real de cada skip |
+
+### 14.7 Escopo do MVP
+
+**A carga inicial é só dos 15 dias da fonte 4P**, por ter menos volume. As outras
+conexões ficam prontas e validadas para quando o piloto avançar.
