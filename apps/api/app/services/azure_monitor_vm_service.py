@@ -315,6 +315,15 @@ def _rows_from_batch_multi(
                     bucket = point.get("timeStamp")
                     if not bucket:
                         continue
+                    # Um ponto sem nenhuma agregação é **ausência**, não um
+                    # valor zero: a VM estava desligada/desalocada ou não
+                    # reportou no bucket. Marcar como OK esconderia isso de quem
+                    # consome a série e sugeriria consumo nulo.
+                    valores = [
+                        point.get("average"), point.get("minimum"),
+                        point.get("maximum"), point.get("total"), point.get("count"),
+                    ]
+                    sem_amostra = all(v is None for v in valores)
                     rows.append({
                         **base, METRIC_COLUMN: metric, "dimension": dimension,
                         BUCKET_COLUMN: bucket,
@@ -325,8 +334,11 @@ def _rows_from_batch_multi(
                         "count": point.get("count"),
                         "unit": unit,
                         "api_version": METRICS_API_VERSION,
-                        "quality_status": "OK",
-                        "gap_reason": None,
+                        "quality_status": "GAP" if sem_amostra else "OK",
+                        "gap_reason": (
+                            "sem amostra no bucket (VM desligada/desalocada ou sem reporte)"
+                            if sem_amostra else None
+                        ),
                     })
         # Métrica pedida que não veio em bloco nenhum: registra a ausência com o
         # nome correto (a API pode omitir a métrica quando não existe no SKU).
@@ -486,6 +498,10 @@ async def collect_metrics(
         "duration_seconds": round((finished - started).total_seconds(), 1),
         "rows": int(len(frame)),
         "gap_rows": int(len(gaps)),
+        # Pontos sem amostra não são série: separá-los deixa o resumo honesto e
+        # evita que a ausência seja lida como consumo.
+        "empty_rows": int((frame["quality_status"] == "GAP").sum()) if "quality_status" in frame.columns else 0,
+        "series_rows": int((frame["quality_status"] != "GAP").sum()) if "quality_status" in frame.columns else int(len(frame)),
     }
 
 
@@ -613,7 +629,7 @@ def run_monitor_vm_collection(
 
     return {
         "bronze_rows": written,
-        "series_rows": result["rows"],
+        "series_rows": result["series_rows"],
         "gap_rows": result["gap_rows"],
         "vms": result["vms"],
         "metrics": result["metrics"],
