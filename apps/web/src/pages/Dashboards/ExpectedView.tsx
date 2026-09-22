@@ -537,12 +537,12 @@ export default function ExpectedView({
     },
     yaxis: {
       title: {
-        text: cumulative ? "Valor acumulado" : "Valor mensal",
+        text: cumulative ? "Valor acumulado (R$)" : "Valor mensal (R$)",
         standoff: 12,
       },
       side: "left",
       showticklabels: true,
-      tickprefix: "$",
+      tickprefix: "R$ ",
       tickformat: ".2s",
       zeroline: true,
       rangemode: "tozero",
