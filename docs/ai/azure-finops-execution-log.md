@@ -944,3 +944,79 @@ Reexecutar a mesma janela **não duplica**. Duas execuções após a correção 
 - `worker.py` ganhou branch explícito para o tipo novo. Sem ele o
   `azure_monitor_vm_metrics` cairia no `else` do `task_runner` (extrator GCP) —
   o risco D14 do §1.2, agora fechado para este tipo.
+
+---
+
+## 12. P1D — Remoção do nome Dimon (refatoração em etapas)
+
+**Commit:** `e824c488`. A camada Dimon não existe na arquitetura alvo: os marts
+pré-agregados são cubos da Gold.
+
+### 12.1 Método (a primeira tentativa falhou e foi revertida)
+
+A primeira tentativa usou substituição de texto simples (`"dimon"` → `"gold mart"`)
+e corrompeu **198 pontos**, gerando identificadores como `Gold martRule` e
+`gold mart_rule_ids`, com sintaxe quebrada em 13 arquivos. Foi revertida por
+completo. A versão que ficou usa:
+
+1. `git mv` para os arquivos (sem tocar conteúdo);
+2. `str.replace` **apenas** em caminhos de módulo (`app.services.dimon_*`), que
+   são strings exatas e não colidem com identificadores;
+3. `re` com `\b` (fronteira de palavra) para símbolos, com marcadores para
+   proteger nomes de tabela do banco;
+4. validação de `ast.parse` e da suíte **a cada etapa**.
+
+### 12.2 Resultado
+
+| Antes | Depois |
+|---|---|
+| `routers/dimon.py` | `routers/gold.py` |
+| `services/dimon_materialization.py` | `services/gold_materialization.py` |
+| `services/dimon_builder.py` | `services/gold_builder.py` |
+| `services/ai_usage_dimon.py` | `services/ai_usage_gold.py` |
+| `services/azure_ptu_dimon.py` | `services/azure_ptu_gold.py` |
+| `models/dimon_rule.py` | `models/gold_mart_rule.py` |
+| `/dimon/*` (13 rotas) | `/gold/*` |
+| módulo RBAC `dimon` | `gold` |
+| `pages/DimonDashboard/` | `pages/GoldDashboard/` |
+| `pages/Dimon/` | `pages/GoldMarts/` |
+| `ReprocessDimonTab.tsx` | `ReprocessGoldTab.tsx` |
+
+`DIMON_NAMESPACE → MART_NAMESPACE`, `DimonRule(Source) → GoldMartRule(Source)`,
+`publish_dimons → publish_marts`, `chain_dimons → chain_marts`,
+`enable_dimon → enable_marts`, `dimon_{table,rows,error,chunks,agg} → mart_*`.
+
+### 12.3 Correções de camada encontradas na varredura
+
+| Onde | O que estava errado | Correção |
+|---|---|---|
+| `ai_cost_attribution` | `dest_licencas_ia` e `dest_consumo_ia` são **origem** de detalhe, lidas da Gold (10 refs) | resolvidas por `layers.detail_layer()` |
+| `azure_ptu`, `azure_ptu_cost` | FOCUS lido da Gold; constantes `GOLD_FOCUS_TABLE`/`GOLD_PLANNING_TABLE`/`GOLD_NAMESPACE` | renomeadas para `FOCUS_TABLE`/`PLANNING_TABLE`/`DETAIL_NAMESPACE` |
+| `iceberg_service` | manutenção de snapshots do FOCUS mirava `("gold", …)` | mira a camada de detalhe |
+| `ai_cost_materialization` | mantido na Gold | **correto**: são cubos/marts |
+
+### 12.4 Preservado de propósito
+
+- Tabelas do banco `dimon_rule` e `dimon_rule_source`: renomear exigiria migração
+  com FK; o conteúdo já vive na Gold. Documentado no `main.py`.
+- Ilha PTU (`dest_azure_ptu_*`): escreve e lê na Gold de forma consistente.
+- `iceberg.gold.dest_dm_*`: os marts **são** cubos da Gold.
+
+### 12.5 Uma armadilha operacional confirmada de novo
+
+Os 404 em `/api/gold/*` que apareceram no console do browser eram o **processo
+da API com código antigo**: o `/gold` existia no disco mas o uvicorn em execução
+ainda servia `/dimon`. Reiniciar a API resolveu — os mesmos endpoints passaram a
+HTTP 200. Vale para o frontend também: o bundle só reflete o código após o Vite
+reprocessar.
+
+### 12.6 Validação
+
+| Verificação | Resultado |
+|---|---|
+| Suíte backend | 8 failed, 383 passed (inalterado em todas as etapas) |
+| `tsc -b --noEmit` | exit 0 |
+| `/api/gold/gold-tables`, `/gold/info`, `/gold/history`, `/gold/query` | HTTP 200 via proxy |
+| `/api/planning/budget-accuracy` | HTTP 200 |
+| `/api/analysis/expected-view` | HTTP 200 |
+| `/dimon/*` | HTTP 404 (removido) |
