@@ -404,6 +404,14 @@ async def _budget_accuracy_actuals(
         candidates = [list(range(1, len(escaped) + 1))]
         if len(escaped) >= 3:
             candidates.append([1, 2, 4, 3, *range(5, len(escaped) + 2)])
+        # A project under Showback and the same project under Chargeback are
+        # one consumption entity for budget accuracy. Include both branches
+        # and support both historical Azure/Diretoria level orders.
+        if len(escaped) >= 5 and escaped[1] in {"Showback", "Chargeback"}:
+            candidates.extend([
+                [1, 3, 4, *range(5, len(escaped) + 2)],
+                [1, 4, 3, *range(5, len(escaped) + 2)],
+            ])
         candidate_sql = []
         for levels_order in candidates:
             checks = [
@@ -957,6 +965,9 @@ async def budget_accuracy(
     inherited_cloud = _department_scope(departments[department_id], departments)[1] if department_id is not None else None
     selected_path = _levels(departments[department_id], departments) if department_id is not None else None
     actual_rows = await _budget_accuracy_actuals(year, selected_months, inherited_cloud, selected_path)
+    consolidate_selected_project = bool(
+        selected_path and len(selected_path) >= 5 and selected_path[1] in {"Showback", "Chargeback"}
+    )
     for row in actual_rows:
         period_key = str(row.get("period") or "")
         actual_value = float(row.get("actual_value") or 0)
@@ -967,6 +978,12 @@ async def budget_accuracy(
         path = tuple(str(row.get(f"departamento_nivel_{level}") or "").strip() for level in range(1, 8))
         path = tuple(item for item in path if item)
         current_id = path_to_department.get(path)
+        if consolidate_selected_project and department_id is not None:
+            selected_tail = tuple(selected_path[2:])
+            natural_tail = tuple(path[2:]) if len(path) >= 5 else ()
+            swapped_tail = (path[3], path[2], *path[4:]) if len(path) >= 5 else ()
+            if natural_tail == selected_tail or swapped_tail == selected_tail:
+                current_id = department_id
         if current_id is not None and (included_ids is None or current_id in included_ids):
             actual_by_department[current_id] += actual_value
             if not row.get("has_actual") or period_key == current_month_key:
