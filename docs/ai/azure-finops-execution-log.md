@@ -644,6 +644,35 @@ O **conjunto de falhas é idêntico** ao baseline — nenhuma falha nova:
   realizado+forecast) e só então o `shared_cost` (adiciona rateio preservando os
   outros dois tipos).
 
+### 8.8 O bug se reproduziu ao vivo durante o P1A (evidência definitiva)
+
+O forecast que estava em execução terminou **com o código antigo** e o cenário
+descrito em §8.7 aconteceu de fato, documentado pela própria linha `etl_task`:
+
+| Evidência | Valor |
+|---|---|
+| `etl_task.id` | 5702 (`forecast`, COMPLETED) |
+| `rows_destination` | **129.631** (o que o forecast publicou no planejamento) |
+| `phase` final | `Forecast publicado · 3751 linhas de rateio · Dimon enfileirada (task #5703)` |
+| Conteúdo real de `silver.dest_modelo_focus_planning` | **3.751 linhas, todas `tipo='rateio'`** |
+
+O caminho é direto no worker: ao terminar o forecast ele chama o rateio **no
+mesmo processo** (`worker.py:505`, `run_shared_cost_job_sync`), sem passar por uma
+task própria. Com o código antigo, esse merge leu `gold` (vazio), não encontrou
+nada para preservar e republicou o planejamento somente com rateio — descartando
+os 129.631 registros de realizado+forecast que o próprio forecast tinha acabado
+de publicar em `silver`.
+
+Isso confirma que o defeito não era teórico: ele dispara em **toda** execução de
+forecast, e é exatamente o que a correção de P1A impede (a guarda `_type_counts`
+levanta erro antes de publicar um subconjunto).
+
+**Estado herdado por P1C:** o planejamento atual está reduzido a rateio. Precisa
+ser reconstruído rodando o forecast com o código corrigido (o merge passará a
+preservar realizado+forecast) e conferindo contra `forecast.result_run_*`, que é
+snapshot imutável e não foi afetado.
+
+
 
 
 
