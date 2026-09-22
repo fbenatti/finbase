@@ -1984,7 +1984,21 @@ async def _expected_view_core(
 
     def scope_filter(columns: dict[str, str]) -> str:
         checks: list[str] = []
-        for level, name in zip(scope_level_order, scope_path):
+        # A project can be reached through Showback or Chargeback. At project
+        # level the executive realized value is the consumption total, not
+        # only the small chargeback allocation. Historical Dimon snapshots
+        # also contain both orders for the Azure/Diretoria levels.
+        pairs = list(zip(scope_level_order, scope_path))
+        if body.director_view and len(scope_path) >= 5 and scope_path[1] in _CLOUD_BRANCHES:
+            pairs = [(level, name) for level, name in pairs if level != 2]
+            if "departamento_nivel_3" in columns and "departamento_nivel_4" in columns:
+                first = _quote_literal(scope_path[2])
+                second = _quote_literal(scope_path[3])
+                level3 = _quote_ident(columns["departamento_nivel_3"])
+                level4 = _quote_ident(columns["departamento_nivel_4"])
+                checks.append(f"(({level3} = {first} AND {level4} = {second}) OR ({level3} = {second} AND {level4} = {first}))")
+                pairs = [(level, name) for level, name in pairs if level not in (3, 4)]
+        for level, name in pairs:
             key = f"departamento_nivel_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}; reprocese os dados após ajustar o organograma")
