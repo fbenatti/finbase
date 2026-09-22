@@ -1239,6 +1239,57 @@ def consumer_main(worker_id: int):
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
                                 continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_monitor_vm_metrics":
+                                # Azure Monitor — série de métricas de plataforma
+                                # das VMs. Bronze exclusiva da fonte; janela padrão
+                                # de 15 dias (piloto), configurável até 90.
+                                from app.services.azure_monitor_vm_service import (
+                                    run_monitor_vm_collection,
+                                )
+                                _mon_cfg = dict(_ptu_conn.config_json or {})
+                                _mon_days = int(_mon_cfg.get("window_days") or 15)
+                                try:
+                                    _mon_result = run_monitor_vm_collection(
+                                        _ptu_session,
+                                        _ptu_conn.id,
+                                        window_days=_mon_days,
+                                        task_id=task_id,
+                                    )
+                                except Exception as _mon_exc:
+                                    import traceback as _tb_mon
+                                    _tb_mon.print_exc()
+                                    _t_mon_fail = _ptu_session.get(EtlTask, task_id)
+                                    if _t_mon_fail:
+                                        _t_mon_fail.status = "FAILED"
+                                        _t_mon_fail.phase = (
+                                            f"Azure Monitor VM coleta falhou: {str(_mon_exc)[:400]}"
+                                        )
+                                        _t_mon_fail.errors = [str(_mon_exc)[:1000]]
+                                        _t_mon_fail.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_mon = _ptu_session.get(EtlTask, task_id)
+                                if _t_mon:
+                                    _t_mon.status = "COMPLETED"
+                                    _t_mon.phase = (
+                                        f"Azure Monitor VM: {_mon_result.get('bronze_rows', 0)} linhas "
+                                        f"({_mon_result.get('series_rows', 0)} série / "
+                                        f"{_mon_result.get('gap_rows', 0)} ausência) em "
+                                        f"{_mon_result.get('vms', 0)} VM(s), "
+                                        f"janela {_mon_result.get('window_days', _mon_days)}d · "
+                                        f"{_mon_result.get('requests', 0)} requisição(ões) · "
+                                        f"{_mon_result.get('duration_seconds', 0)}s"
+                                    )
+                                    _t_mon.rows_raw = _mon_result.get("bronze_rows", 0)
+                                    _t_mon.billing_periods = _mon_result.get("periods") or []
+                                    _t_mon.result_json = _mon_result
+                                    _t_mon.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_resource_graph":
                                 # Azure Resource Graph é coletado via ARG (inventário
                                 # e regras de órfãos) e persistido na Bronze, seguindo

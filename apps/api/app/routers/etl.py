@@ -128,6 +128,50 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
                 "items": [],
                 "message": f"Falha ao descobrir Automation Accounts: {str(exc)[:400]}",
             }
+    if conn.connector_type == "azure_monitor_vm_metrics":
+        # Azure Monitor: o "scan" é o teste de capacidade da fonte — quantas VMs
+        # a credencial enxerga, em quais regiões/subscriptions, e se a API de
+        # métricas (batch) responde. Não executa a coleta completa.
+        try:
+            from app.services.azure_monitor_vm_service import discover_scope as discover_monitor
+            scope = await discover_monitor(dict(conn.config_json or {}))
+            return {
+                "connection_id": connection_id,
+                "total": scope["vms"],
+                "new": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "items": [
+                    {
+                        "blob_path": f"monitor/region/{region}",
+                        "billing_period": None,
+                        "last_modified": None,
+                        "etag": "",
+                        "content_length": 0,
+                        "status": "NEW",
+                        "location": region,
+                    }
+                    for region in scope["regions"]
+                ],
+                "scope": scope,
+                "message": (
+                    f"Azure Monitor VM: {scope['vms']} VM(s) em "
+                    f"{len(scope['regions'])} região(ões) e "
+                    f"{len(scope['subscriptions'])} subscription(ões). "
+                    f"API de métricas: {'OK' if scope['metrics_api_ok'] else (scope['metrics_api_error'] or 'não testada')}. "
+                    "Execute a extração para coletar a série."
+                ),
+            }
+        except Exception as exc:
+            return {
+                "connection_id": connection_id,
+                "total": 0,
+                "new": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "items": [],
+                "message": f"Falha ao testar Azure Monitor VM: {str(exc)[:400]}",
+            }
     if conn.connector_type == "azure_resource_graph":
         # Azure Resource Graph: o "scan" valida a credencial e lista as
         # subscriptions acessíveis com a contagem de recursos. A coleta de
@@ -547,7 +591,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         # PTU is an operational source, not an Azure Blob export.  It is
         # executed by the worker through the PTU collector below.
         pass
-    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph"):
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph", "azure_monitor_vm_metrics"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -578,6 +622,14 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
             days = int(request.backfill_days or cfg.get("backfill_days") or 93)
             result_json = {"backfill": True, "backfill_days": days, "user_triggered": True}
             phase = f"Na fila: importar histórico Azure PTU ({days} dias, retenção Monitor)"
+
+    elif conn.connector_type == "azure_monitor_vm_metrics":
+        # Série de métricas de plataforma das VMs. Sem blob: a janela é em dias,
+        # com padrão de 15 (piloto) e teto de 90.
+        days = int(request.backfill_days or cfg.get("window_days") or 15)
+        days = max(1, min(days, 90))
+        result_json = {"window_days": days, "metric_window": True, "user_triggered": True}
+        phase = f"Na fila: buscar métricas do Azure Monitor ({days} dias, intervalos de 15 min)"
 
     new_id = await db.execute(
         insert(EtlTask).values(
