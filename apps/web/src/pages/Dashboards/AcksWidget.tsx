@@ -291,8 +291,8 @@ export default function AcksWidget({ department }: { department?: string }) {
         return getForecastAccuracyDesvios(run.run_id, month, department || undefined)
           .then(desvios => {
             if (cancelled) return;
-            setPositive(desvios.positive);
-            setNegative(desvios.negative);
+            setPositive(desvios.negative);
+            setNegative(desvios.positive);
           })
           .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
       })
@@ -321,10 +321,10 @@ export default function AcksWidget({ department }: { department?: string }) {
     try {
       const desvios = await getForecastAccuracyDesvios(runId, month, department || undefined, direction, 0);
       if (direction === "positive") {
-        setPositive(desvios.positive);
+        setPositive(desvios.negative);
         setPositiveExpanded(true);
       } else {
-        setNegative(desvios.negative);
+        setNegative(desvios.positive);
         setNegativeExpanded(true);
       }
     } catch (e) {
@@ -336,10 +336,10 @@ export default function AcksWidget({ department }: { department?: string }) {
     try {
       const desvios = await getForecastAccuracyDesvios(runId, month, department || undefined, direction, 5);
       if (direction === "positive") {
-        setPositive(desvios.positive);
+        setPositive(desvios.negative);
         setPositiveExpanded(false);
       } else {
-        setNegative(desvios.negative);
+        setNegative(desvios.positive);
         setNegativeExpanded(false);
       }
     } catch (e) {
