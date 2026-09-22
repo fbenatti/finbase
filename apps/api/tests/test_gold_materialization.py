@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from app.services import lakehouse_layers as layers
 
-from app.services.dimon_materialization import (
+from app.services.gold_materialization import (
     _desligue_validation_dates,
     _merged_dimensions,
     dimon_table_name,
@@ -59,7 +59,7 @@ async def test_preview_source_reads_the_detail_layer(monkeypatch):
             return [{"Column": "servicename", "Type": "varchar"}, {"Column": "realizado", "Type": "double"}]
         return [{"row_count": 10, "total_value": 123.45}]
 
-    monkeypatch.setattr("app.services.dimon_materialization.execute", fake_execute)
+    monkeypatch.setattr("app.services.gold_materialization.execute", fake_execute)
     result = await preview_source(
         gold_table="dest_modelo_focus",
         filter_json={"conditions": [{"column": "servicename", "operator": "=", "values": ["GitHub"]}]},
@@ -82,14 +82,14 @@ def test_source_gold_tables_list_kept_in_order():
     )
     schema = {"servicename": "servicename", "realizado": "realizado"}
     # _source_clause validates against each table's own schema.
-    from app.services.dimon_materialization import _source_clause
+    from app.services.gold_materialization import _source_clause
     clause = _source_clause(schema, source)
     assert "servicename" in clause
 
 
 def test_alias_for_missing_departamento_on_planning():
     """A filter on 'departamento' applies to planning as departamento_nivel_1."""
-    from app.services.dimon_materialization import _normalized_conditions
+    from app.services.gold_materialization import _normalized_conditions
     planning_schema = {
         "departamento_nivel_1": "departamento_nivel_1",
         "servicename": "servicename",
@@ -136,7 +136,7 @@ def test_is_aks_managed_resource_detects_mc_aks():
 
 
 def test_desligue_list_filter_sql_excludes_ephemeral_and_24x7():
-    from app.services.dimon_materialization import desligue_list_filter_sql
+    from app.services.gold_materialization import desligue_list_filter_sql
 
     sql = desligue_list_filter_sql()
     assert "CICLO_CURTO" in sql

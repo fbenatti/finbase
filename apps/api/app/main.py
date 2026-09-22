@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, dimon, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
         from app.models.clone_rule import CloneRule, ClonePricePendencies  # noqa: F401
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
-        from app.models.dimon_rule import DimonRule, DimonRuleSource  # noqa: F401
+        from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource  # noqa: F401
         from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
@@ -220,6 +220,8 @@ async def lifespan(app: FastAPI):
                SELECT seed.tag_key, seed.focus_field, TRUE
                FROM (VALUES ('projeto', 'departamento_nivel_5'), ('diretoria', 'departamento_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
                WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
+            # Nomes de tabela históricos (`dimon_rule*`): são o registro das regras de
+            # mart. Renomear exigiria migração; o conteúdo já vive na Gold.
             """CREATE TABLE IF NOT EXISTS dimon_rule (
               id SERIAL PRIMARY KEY,
               code VARCHAR(120) NOT NULL UNIQUE,
@@ -469,7 +471,7 @@ app.include_router(clone_rules.router)
 app.include_router(planning.router)
 app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
-app.include_router(dimon.router)
+app.include_router(gold.router)
 app.include_router(azure_ptu.router)
 app.include_router(reservations.router)
 app.include_router(scheduled_shutdown.router)

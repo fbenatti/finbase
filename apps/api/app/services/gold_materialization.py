@@ -12,16 +12,16 @@ import re
 import time
 from typing import Any
 
-from app.models.dimon_rule import DimonRule, DimonRuleSource
+from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource
 from app.services import iceberg_service as iceberg
 from app.services.trino_service import execute
 
 logger = logging.getLogger(__name__)
 
-# Os marts vivem no namespace canônico DIMON_NAMESPACE (hoje `gold`), separado
+# Os marts vivem no namespace canônico MART_NAMESPACE (hoje `gold`), separado
 # das Golds (iceberg.gold.*). O materializador cria/swap aqui; os dashboards e
-# a API consultam {DIMON_NAMESPACE}.dest_dm_cost_*.
-DIMON_NAMESPACE = "gold"
+# a API consultam {MART_NAMESPACE}.dest_dm_cost_*.
+MART_NAMESPACE = "gold"
 
 _AI_AUXILIARY_DIMONS = {
     "ai_consumption_daily": "dest_dm_ai_consumption_daily",
@@ -165,7 +165,7 @@ def _filter_clause(schema: dict[str, str], conditions: list[dict[str, Any]], tab
     return " ".join(clauses) if clauses else "1=1"
 
 
-def _source_clause(schema: dict[str, str], source: DimonRuleSource, gold_table: str | None = None, table_alias: str | None = None) -> str:
+def _source_clause(schema: dict[str, str], source: GoldMartRuleSource, gold_table: str | None = None, table_alias: str | None = None) -> str:
     raw_filter = source.filter_json or {}
     raw_conditions = raw_filter if isinstance(raw_filter, list) else raw_filter.get("conditions", [])
     conditions, missing = _normalized_conditions(schema, raw_conditions)
@@ -215,7 +215,7 @@ async def load_gold_schema_typed(gold_table: str) -> dict[str, dict[str, str]]:
     """DESCRIBE a Gold and keep the REAL column type (double, varchar, ...).
 
     load_gold_schema discards types (only name resolution), which made
-    /dimon/gold-schema report type = column name and broke the
+    /gold/gold-schema report type = column name and broke the
     numeric-measure filter in the pivot editor. This variant preserves it.
     """
     rows = await execute(f"DESCRIBE iceberg.silver.{gold_table}", timeout_s=30)
@@ -370,7 +370,7 @@ def _side_select(gold: str, schema: dict[str, str], dims: list[str], measure_ali
     return ", ".join(exprs)
 
 
-async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | None = None) -> int:
+async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | None = None) -> int:
     """Build the pre-aggregated Dimon table for one rule and swap it atomically."""
     table = dimon_table_name(rule.code)
 
@@ -379,7 +379,7 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
     # Dimon rule queue/UI (never by an external script or scheduler shortcut).
     ai_code = normalize_code(rule.code)
     if ai_code in _AI_AUXILIARY_DIMONS:
-        from app.services.ai_usage_dimon import refresh_ai_usage_dimons
+        from app.services.ai_usage_gold import refresh_ai_usage_dimons
         if progress:
             progress(0, 1, f"Agregando {ai_code} a partir da Gold de IA")
         result = await refresh_ai_usage_dimons(only_tables=[table])
@@ -392,7 +392,7 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
         snapshot_mode = bool(getattr(rule, "snapshot_mode", False))
         snapshot_col = str(getattr(rule, "snapshot_col", "_snapshot_date") or "_snapshot_date")
         # A regra de saving por desligue depende da auxiliar mensal de VMs
-        # (dimon._tmp_vm_monthly). O consumo DIÁRIO tem regra própria na Camada
+        # (gold_mart._tmp_vm_monthly). O consumo DIÁRIO tem regra própria na Camada
         # Dimon de Custo (consumo_diario_vm → dest_dm_cost_consumo_diario_vm).
         if rule.code == "saving_desligue_vm":
             if progress:
@@ -403,48 +403,48 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
                 logger.exception("Falha ao preparar auxiliar para %s", rule.code)
                 raise
         staging = f"{table}_stg_{time.time_ns()}"
-        iceberg.ensure_namespace(DIMON_NAMESPACE)
+        iceberg.ensure_namespace(MART_NAMESPACE)
         # Em snapshot mode, cada execução adiciona uma cópia datada (append),
         # preservando o histórico para comparar dias (ex.: delta de tags).
         if snapshot_mode:
             create_sql = (
-                f"CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging} AS "
+                f"CREATE TABLE iceberg.{MART_NAMESPACE}.{staging} AS "
                 f"SELECT t.*, CAST(CURRENT_DATE AS VARCHAR) AS {_quote_ident(snapshot_col)} "
                 f"FROM ({rule.sql_template.strip()}) t"
             )
         else:
-            create_sql = f"CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging} AS {rule.sql_template.strip()}"
+            create_sql = f"CREATE TABLE iceberg.{MART_NAMESPACE}.{staging} AS {rule.sql_template.strip()}"
         try:
             if progress:
                 progress(0, 1, f"Materializando {rule.code} via SQL custom (snapshot={snapshot_mode})")
             await execute(create_sql, timeout_s=1800)
-            result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{DIMON_NAMESPACE}.{staging}", timeout_s=180)
+            result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{MART_NAMESPACE}.{staging}", timeout_s=180)
             rows = int((result[0] if result else {}).get("row_count") or 0)
             if snapshot_mode:
                 if rows:
                     try:
                         await execute(
-                            f"INSERT INTO iceberg.{DIMON_NAMESPACE}.{table} SELECT * FROM iceberg.{DIMON_NAMESPACE}.{staging}",
+                            f"INSERT INTO iceberg.{MART_NAMESPACE}.{table} SELECT * FROM iceberg.{MART_NAMESPACE}.{staging}",
                             timeout_s=900,
                         )
                     except Exception as insert_exc:
                         # Tabela ainda não existe → cria a partir do staging.
                         await execute(
-                            f"CREATE TABLE iceberg.{DIMON_NAMESPACE}.{table} AS SELECT * FROM iceberg.{DIMON_NAMESPACE}.{staging}",
+                            f"CREATE TABLE iceberg.{MART_NAMESPACE}.{table} AS SELECT * FROM iceberg.{MART_NAMESPACE}.{staging}",
                             timeout_s=900,
                         )
-                    iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+                    iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
                 else:
-                    iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+                    iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
                 return rows
             if rows:
-                iceberg.swap_staged_table(table, staging, namespace=DIMON_NAMESPACE, known_row_count=rows)
+                iceberg.swap_staged_table(table, staging, namespace=MART_NAMESPACE, known_row_count=rows)
             else:
-                iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+                iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
             return rows
         except Exception:
             try:
-                iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+                iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
             except Exception:
                 pass
             raise
@@ -545,24 +545,24 @@ async def _materialize_rule(rule: DimonRule, *, run_id: int, progress: Any | Non
     staging = f"{table}_stg_{time.time_ns()}"
     period = period_physical.get((rule.sources or [])[0].gold_table) if rule.sources else None
     # Garante que o namespace dos marts exista antes do CREATE.
-    iceberg.ensure_namespace(DIMON_NAMESPACE)
-    create_sql = f"CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging} AS {full_sql}"
+    iceberg.ensure_namespace(MART_NAMESPACE)
+    create_sql = f"CREATE TABLE iceberg.{MART_NAMESPACE}.{staging} AS {full_sql}"
     if period:
-        create_sql = f"CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging} WITH (partitioning = ARRAY['{period}']) AS {full_sql}"
+        create_sql = f"CREATE TABLE iceberg.{MART_NAMESPACE}.{staging} WITH (partitioning = ARRAY['{period}']) AS {full_sql}"
     try:
         if progress:
             progress(0, 1, f"Agregando {rule.code} a partir de {len(rule.sources or [])} Gold(s)")
         await execute(create_sql, timeout_s=1800)
-        result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{DIMON_NAMESPACE}.{staging}", timeout_s=180)
+        result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{MART_NAMESPACE}.{staging}", timeout_s=180)
         rows = int((result[0] if result else {}).get("row_count") or 0)
         if rows:
-            iceberg.swap_staged_table(table, staging, namespace=DIMON_NAMESPACE, known_row_count=rows)
+            iceberg.swap_staged_table(table, staging, namespace=MART_NAMESPACE, known_row_count=rows)
         else:
-            iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
         return rows
     except Exception:
         try:
-            iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
         except Exception:
             pass
         raise
@@ -572,9 +572,9 @@ async def materialize_dimons(session: Any, *, run_id: int, progress: Any | None 
     from datetime import datetime, timezone
     from sqlalchemy.orm import selectinload
 
-    query = session.query(DimonRule).options(selectinload(DimonRule.sources)).filter(DimonRule.active == True)  # noqa: E712
+    query = session.query(GoldMartRule).options(selectinload(GoldMartRule.sources)).filter(GoldMartRule.active == True)  # noqa: E712
     if rule_ids:
-        query = query.filter(DimonRule.id.in_(rule_ids))
+        query = query.filter(GoldMartRule.id.in_(rule_ids))
     rules = query.all()
 
     # ``copilot_user_period`` is derived from the already aggregated Copilot
@@ -585,11 +585,11 @@ async def materialize_dimons(session: Any, *, run_id: int, progress: Any | None 
     # keeps both tables consistent.
     if rule_ids and any(normalize_code(rule.code) == "copilot_usage_daily" for rule in rules):
         user_period = (
-            session.query(DimonRule)
-            .options(selectinload(DimonRule.sources))
+            session.query(GoldMartRule)
+            .options(selectinload(GoldMartRule.sources))
             .filter(
-                DimonRule.active == True,  # noqa: E712
-                DimonRule.code == "copilot_user_period",
+                GoldMartRule.active == True,  # noqa: E712
+                GoldMartRule.code == "copilot_user_period",
             )
             .first()
         )
@@ -633,7 +633,7 @@ def materialize_dimons_sync(session: Any, *, run_id: int, progress: Any | None =
 # Preparação da tabela auxiliar mensal de VMs (saving por desligue)
 # ---------------------------------------------------------------------------
 # A regra custom "saving_desligue_vm" depende de uma tabela auxiliar agregada
-# (dimon._tmp_vm_monthly) com o histórico mensal de horas/custo por VM real:
+# (gold_mart._tmp_vm_monthly) com o histórico mensal de horas/custo por VM real:
 # extrai o nome da VM do ResourceId (a Gold guarda o nome do PLANO em
 # ResourceName), exclui pods efêmeros (ResourceIds hex UUID de Databricks/spot)
 # e deixa só VMs clássicas de /virtualMachines/. A materialização da Dimon lê
@@ -646,9 +646,9 @@ async def prepare_vm_monthly(
     progress: Any | None = None,
     *,
     months: list[str] | None = None,
-    sources: list[DimonRuleSource] | None = None,
+    sources: list[GoldMartRuleSource] | None = None,
 ) -> int:
-    """Popula dimon._tmp_vm_monthly com histórico de VMs reais mês a mês.
+    """Popula gold_mart._tmp_vm_monthly com histórico de VMs reais mês a mês.
 
     ``months`` opcional: lista explícita de períodos YYYYMM a coletar (ex. para
     reprocessar o histórico). Default: últimos ``VM_MONTHLY_HISTORY_MONTHS``
@@ -658,9 +658,9 @@ async def prepare_vm_monthly(
     (inclusive ``subaccountname``) são aplicados à Gold antes de montar o
     histórico. Assim o SQL customizado respeita os filtros editados no portal.
     """
-    await execute(f"DROP TABLE IF EXISTS iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE}", timeout_s=120)
+    await execute(f"DROP TABLE IF EXISTS iceberg.{MART_NAMESPACE}.{VM_MONTHLY_TABLE}", timeout_s=120)
     await execute(f"""
-    CREATE TABLE iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE} (
+    CREATE TABLE iceberg.{MART_NAMESPACE}.{VM_MONTHLY_TABLE} (
         resource_id VARCHAR,
         vm_name VARCHAR,
         connection_code VARCHAR,
@@ -702,11 +702,11 @@ async def prepare_vm_monthly(
         # Remove o período antes de inserir (idempotente — evita duplicatas
         # se a preparação rodar mais de uma vez para o mesmo mês).
         await execute(
-            f"DELETE FROM iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
+            f"DELETE FROM iceberg.{MART_NAMESPACE}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
             timeout_s=300,
         )
         await execute(f"""
-        INSERT INTO iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE}
+        INSERT INTO iceberg.{MART_NAMESPACE}.{VM_MONTHLY_TABLE}
         SELECT
             CAST(b."ResourceId" AS VARCHAR) AS resource_id,
             element_at(split(CAST(b."ResourceId" AS VARCHAR), '/'), -1) AS vm_name,
@@ -725,7 +725,7 @@ async def prepare_vm_monthly(
         GROUP BY CAST(b."ResourceId" AS VARCHAR), b.cloud_origem, b._billing_period
         """, timeout_s=300)
         result = await execute(
-            f"SELECT COUNT(*) AS c FROM iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
+            f"SELECT COUNT(*) AS c FROM iceberg.{MART_NAMESPACE}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
             timeout_s=120,
         )
         rows = int((result[0] if result else {}).get("c") or 0)
@@ -745,7 +745,7 @@ VM_DAILY_TABLE = "_tmp_vm_daily"
 
 
 async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | None = None) -> int:
-    """Popula dimon._tmp_vm_daily com consumo diário (horas/custo) por VM.
+    """Popula gold_mart._tmp_vm_daily com consumo diário (horas/custo) por VM.
 
     ``periods`` opcional (YYYYMM). Default: mês realizado (anterior ao atual).
     O dialog de consumo (vm-usage-daily) lê desta tabela — rápida.
@@ -757,9 +757,9 @@ async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | 
         y = today.year if today.month > 1 else today.year - 1
         periods = [f"{y:04d}{m:02d}"]
 
-    await execute(f"DROP TABLE IF EXISTS iceberg.{DIMON_NAMESPACE}.{VM_DAILY_TABLE}", timeout_s=120)
+    await execute(f"DROP TABLE IF EXISTS iceberg.{MART_NAMESPACE}.{VM_DAILY_TABLE}", timeout_s=120)
     await execute(f"""
-    CREATE TABLE iceberg.{DIMON_NAMESPACE}.{VM_DAILY_TABLE} (
+    CREATE TABLE iceberg.{MART_NAMESPACE}.{VM_DAILY_TABLE} (
         resource_name VARCHAR,
         day VARCHAR,
         hours DOUBLE,
@@ -773,7 +773,7 @@ async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | 
         if progress:
             progress(0, 1, f"Preparando consumo diário de VMs {period}")
         await execute(f"""
-        INSERT INTO iceberg.{DIMON_NAMESPACE}.{VM_DAILY_TABLE}
+        INSERT INTO iceberg.{MART_NAMESPACE}.{VM_DAILY_TABLE}
         SELECT
             element_at(split(CAST(g."ResourceId" AS VARCHAR), '/'), -1) AS resource_name,
             date_format(date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y'), '%Y-%m-%d') AS day,
@@ -789,7 +789,7 @@ async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | 
         GROUP BY 1, 2, g._billing_period
         """, timeout_s=600)
         result = await execute(
-            f"SELECT COUNT(*) AS c FROM iceberg.{DIMON_NAMESPACE}.{VM_DAILY_TABLE} WHERE _billing_period = '{period}'",
+            f"SELECT COUNT(*) AS c FROM iceberg.{MART_NAMESPACE}.{VM_DAILY_TABLE} WHERE _billing_period = '{period}'",
             timeout_s=120,
         )
         rows = int((result[0] if result else {}).get("c") or 0)
@@ -1025,7 +1025,7 @@ SAVING_TEMPLATE_HEADER = """--
 -- ⚠ QUERY DE REPROCESSAMENTO MÊS A MÊS (NÃO RODAR PARA VÁRIOS MESES DE UMA VEZ)
 -- Esta regra classifica o PADRÃO de desligue de cada VM comparando o mês alvo
 -- (o MÊS ANTERIOR ao atual = mês fechado) com os meses anteriores da tabela
--- auxiliar dimon._tmp_vm_monthly. Cada reprocess materializa APENAS UM período.
+-- auxiliar gold_mart._tmp_vm_monthly. Cada reprocess materializa APENAS UM período.
 -- Para popular o histórico (ex.: jan/2026 → mês atual), reprocesse mês a mês
 -- via /scheduled-shutdown/reprocess-history ou reprocesse a regra a cada mês
 -- fechado. O padrão exige >= 3 meses de histórico (60+ dias) por VM.
@@ -1046,7 +1046,7 @@ async def materialize_saving_history(
     progress: Any | None = None,
     *,
     periods: list[str] | None = None,
-    sources: list[DimonRuleSource] | None = None,
+    sources: list[GoldMartRuleSource] | None = None,
 ) -> dict[str, Any]:
     """Materializa a Dimon de saving por desligue MÊS A MÊS.
 
@@ -1078,11 +1078,11 @@ async def materialize_saving_history(
 
     # Drop da Dimon final para recomeçar do zero.
     await execute(
-        f"DROP TABLE IF EXISTS iceberg.{DIMON_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE}",
+        f"DROP TABLE IF EXISTS iceberg.{MART_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE}",
         timeout_s=120,
     )
     await execute(f"""
-    CREATE TABLE iceberg.{DIMON_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} (
+    CREATE TABLE iceberg.{MART_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} (
         resource_id VARCHAR,
         resource_name VARCHAR,
         resource_type VARCHAR,
@@ -1149,7 +1149,7 @@ async def materialize_saving_history(
                 MIN(billing_period) AS first_period,
                 MAX(CASE WHEN billing_period = '{target}' THEN total_hours END) AS cur_hours,
                 MAX(CASE WHEN billing_period = '{target}' THEN total_cost END) AS cur_cost
-            FROM iceberg.{DIMON_NAMESPACE}.{VM_MONTHLY_TABLE}
+            FROM iceberg.{MART_NAMESPACE}.{VM_MONTHLY_TABLE}
             WHERE billing_period <= '{target}'
             GROUP BY resource_id, vm_name, connection_code, subscription_name
         ),
@@ -1238,11 +1238,11 @@ async def materialize_saving_history(
         WHERE {desligue_list_filter_sql()}
         """
         await execute(
-            f"INSERT INTO iceberg.{DIMON_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} {sql}",
+            f"INSERT INTO iceberg.{MART_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} {sql}",
             timeout_s=600,
         )
         result = await execute(
-            f"SELECT COUNT(*) AS c FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} WHERE _billing_period = '{target}'",
+            f"SELECT COUNT(*) AS c FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_{SAVING_DIMON_CODE} WHERE _billing_period = '{target}'",
             timeout_s=120,
         )
         rows = int((result[0] if result else {}).get("c") or 0)
@@ -1267,7 +1267,7 @@ def enqueue_dimons_task(session: Any, *, rule_ids: list[int] | None = None, sour
     Used by the worker to chain the Dimon materialization (visão completa =
     realizado + forecast + rateio) right after a forecast/reprocess completes.
     Skips silently when no active rule matches or a Dimon task is already
-    queued/running (the manual /dimon/reprocess would return 409 there).
+    queued/running (the manual /gold/reprocess would return 409 there).
 
     ``session`` must be a sync SQLAlchemy session (worker SyncSession).
     The caller owns the commit.
@@ -1275,11 +1275,11 @@ def enqueue_dimons_task(session: Any, *, rule_ids: list[int] | None = None, sour
     from datetime import datetime, timezone
     from sqlalchemy import select
     from app.models.etl_task import EtlTask
-    from app.models.dimon_rule import DimonRule
+    from app.models.gold_mart_rule import GoldMartRule
 
-    query = session.query(DimonRule).filter(DimonRule.active == True)  # noqa: E712
+    query = session.query(GoldMartRule).filter(GoldMartRule.active == True)  # noqa: E712
     if rule_ids:
-        query = query.filter(DimonRule.id.in_(rule_ids))
+        query = query.filter(GoldMartRule.id.in_(rule_ids))
     rules = query.all()
     if not rules:
         return None

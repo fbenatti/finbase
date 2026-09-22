@@ -248,7 +248,7 @@ def _azure_ptu_dimon_daily_job() -> None:
     """Compacta a Gold horária depois da coleta diária para os dashboards."""
     try:
         import asyncio
-        from app.services.azure_ptu_dimon import refresh_azure_ptu_dimon
+        from app.services.azure_ptu_gold import refresh_azure_ptu_dimon
 
         result = asyncio.run(refresh_azure_ptu_dimon(days=400))
         logger.info("Azure PTU Dimon refreshed: %s", result)
@@ -260,14 +260,14 @@ def _ai_usage_dimon_daily_job() -> None:
     """Enfileira as Dimons auxiliares; a publicação pertence ao escritor Dimon."""
     session = _get_sync_session()
     try:
-        from app.models.dimon_rule import DimonRule
-        from app.services.dimon_materialization import enqueue_dimons_task
+        from app.models.gold_mart_rule import GoldMartRule
+        from app.services.gold_materialization import enqueue_dimons_task
 
         codes = {
             "ai_consumption_daily", "ai_license_snapshot", "copilot_usage_daily",
             "copilot_license_snapshot", "copilot_user_period",
         }
-        rules = session.query(DimonRule).filter(DimonRule.active == True, DimonRule.code.in_(codes)).all()  # noqa: E712
+        rules = session.query(GoldMartRule).filter(GoldMartRule.active == True, GoldMartRule.code.in_(codes)).all()  # noqa: E712
         task = enqueue_dimons_task(session, rule_ids=[rule.id for rule in rules], source="ai_usage_daily")
         session.commit()
         logger.info("AI usage Dimons queued in Dimon writer: task=%s rules=%d", getattr(task, "id", None), len(rules))

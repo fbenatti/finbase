@@ -3,7 +3,7 @@ import { Alert, Box, Button, Checkbox, Chip, CircularProgress, Stack, Typography
 import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
 import { DimonHistoryItem, DimonRule, formatApiError, getDimonHistory, getDimonRules, reprocessDimons } from "../../services/api";
 
-export default function ReprocessDimonTab() {
+export default function ReprocessGoldTab() {
   const [rules, setRules] = useState<DimonRule[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [running, setRunning] = useState(false);

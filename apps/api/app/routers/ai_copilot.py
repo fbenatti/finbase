@@ -16,7 +16,7 @@ import httpx
 
 from app.database import get_db
 from app.routers.ai_dashboards import _ClientCancelScope, _dept_filter, _period_filter, _resolve_scope_path
-from app.services.ai_usage_dimon import (
+from app.services.ai_usage_gold import (
     AI_CONSUMPTION_TABLE,
     AI_LICENSE_TABLE,
     COPILOT_LICENSE_TABLE,
@@ -25,19 +25,19 @@ from app.services.ai_usage_dimon import (
     refresh_ai_usage_dimons,
 )
 from app.services.trino_service import TrinoCancelled, execute as trino_execute, wait_until_ready
-from app.services.dimon_materialization import DIMON_NAMESPACE
+from app.services.gold_materialization import MART_NAMESPACE
 from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai-copilot", tags=["ai-copilot"])
 
-CONS_TABLE = f"iceberg.{DIMON_NAMESPACE}.{AI_CONSUMPTION_TABLE}"
-LIC_TABLE = f"iceberg.{DIMON_NAMESPACE}.{AI_LICENSE_TABLE}"
-COPILOT_USAGE_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_USAGE_TABLE}"
-COPILOT_LICENSE_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_LICENSE_TABLE}"
-COPILOT_USER_PERIOD_DIMON = f"iceberg.{DIMON_NAMESPACE}.{COPILOT_USER_PERIOD_TABLE}"
-# Custo de referência do Copilot: a Dimon pré-agregada (iceberg.{DIMON_NAMESPACE}.dest_dm_cost_copilot_custo)
+CONS_TABLE = f"iceberg.{MART_NAMESPACE}.{AI_CONSUMPTION_TABLE}"
+LIC_TABLE = f"iceberg.{MART_NAMESPACE}.{AI_LICENSE_TABLE}"
+COPILOT_USAGE_DIMON = f"iceberg.{MART_NAMESPACE}.{COPILOT_USAGE_TABLE}"
+COPILOT_LICENSE_DIMON = f"iceberg.{MART_NAMESPACE}.{COPILOT_LICENSE_TABLE}"
+COPILOT_USER_PERIOD_DIMON = f"iceberg.{MART_NAMESPACE}.{COPILOT_USER_PERIOD_TABLE}"
+# Custo de referência do Copilot: a Dimon pré-agregada (iceberg.{MART_NAMESPACE}.dest_dm_cost_copilot_custo)
 # é gerada a partir de iceberg.{layers.detail_layer()}.dest_modelo_focus (+ planning) filtrada por
 # ServiceName='GitHub'. Os dashboards consultam a Dimon em vez de varrer a Gold/raw.
 # Medidas do dashboard: realizado (BRL c/ imposto) e effectivecost (USD =
@@ -174,7 +174,7 @@ async def _raw_token_columns(interactive: dict[str, Any]) -> set[str]:
     return {str(row.get("column_name") or "").lower() for row in rows}
 
 
-@router.post("/dimon/reprocess")
+@router.post("/gold/reprocess")
 async def reprocess_copilot_dimons():
     """Reconstrói as Dimons compartilhadas e detalhadas do Copilot."""
     try:
@@ -287,7 +287,7 @@ async def copilot_financial_insights(
             THEN SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) / SUM(COALESCE(TRY_CAST(consumedquantity AS DOUBLE), 0))
             ELSE NULL END AS unit_cost_brl,
           COUNT(*) AS rows
-        FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+        FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
         WHERE tipo = 'realizado'
           AND lower(COALESCE(servicename, '')) = 'github'
           AND {period_filter}
@@ -306,7 +306,7 @@ async def copilot_financial_insights(
         projection_sql = f"""
         SELECT
           (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
-             FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+             FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
             WHERE tipo = 'forecast'
               AND lower(COALESCE(servicename, '')) = 'github'
               AND "_billing_period" = '{body.period or "202608"}') AS forecast_brl
@@ -459,7 +459,7 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
           "_billing_period" AS period,
           SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS cloud_cost_brl,
           SUM(COALESCE(TRY_CAST(effectivecost AS DOUBLE), 0)) AS cloud_cost_usd
-        FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+        FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
         WHERE tipo = 'realizado'
           AND lower(COALESCE(servicesubcategory, '')) = 'github copilot'
           AND "_billing_period" <= '{body.period or "202608"}'
@@ -510,12 +510,12 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
         projection_sql = f"""
         SELECT
           (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
-             FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+             FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
             WHERE tipo = 'realizado'
               AND lower(COALESCE(servicename, '')) = 'github'
               AND "_billing_period" = '{body.period or "202608"}') AS realized_brl,
           (SELECT SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))
-             FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+             FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
             WHERE tipo = 'forecast'
               AND lower(COALESCE(servicename, '')) = 'github'
               AND "_billing_period" = '{body.period or "202608"}') AS forecast_brl
@@ -973,7 +973,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
           CAST("_billing_period" AS VARCHAR) AS period,
           SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS cost_brl,
           SUM(COALESCE(TRY_CAST(effectivecost AS DOUBLE), 0)) AS cost_usd
-        FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+        FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
         WHERE tipo = 'realizado'
           AND lower(COALESCE(servicesubcategory, '')) = 'github copilot'
           AND {year_filter}
@@ -989,7 +989,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
           CAST("_billing_period" AS VARCHAR) AS period,
           COALESCE(servicesubcategory, '') AS subcategory,
           SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
-        FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+        FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
         WHERE tipo = 'realizado'
           AND {year_filter}
         GROUP BY 1, 2
@@ -1002,7 +1002,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         SELECT
           CAST("_billing_period" AS VARCHAR) AS period,
           SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS forecast_value
-        FROM iceberg.{DIMON_NAMESPACE}.{COPILOT_COST_DIMON}
+        FROM iceberg.{MART_NAMESPACE}.{COPILOT_COST_DIMON}
         WHERE tipo = 'forecast'
           AND {year_filter}
         GROUP BY 1

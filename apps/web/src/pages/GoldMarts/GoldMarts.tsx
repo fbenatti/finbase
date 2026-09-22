@@ -159,7 +159,7 @@ export default function Dimon({ embedded }: { embedded?: boolean } = {}) {
   };
 
   return <Box sx={{ p: embedded ? 0 : 3 }}>
-    <Typography variant="h4">Camada Dimon de Custo</Typography>
+    <Typography variant="h4">Cubos de custo (Gold)</Typography>
     <Typography color="text.secondary" mb={2}>Escolha as Golds de origem, defina as dimensões de agrupamento (linhas do pivot) e as medidas a somar (valores). O reprocessamento gera uma tabela pré-agregada dest_dm_cost_&lt;code&gt; — os dashboards consultam apenas essas tabelas materializadas.</Typography>
     <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Gold(s) + filtros → dimensões (GROUP BY) + medidas (SUM) → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a tabela Dimon.</Alert>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

@@ -5,7 +5,7 @@ import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, Dia
 import { Add, Cancel, Refresh } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { SavingAction, SavingFilter, SavingMeasurement, createSavingAction, cancelSavingAction, getDestinationTables, getSavingActions, getSavingMeasurements, getSavingsDashboard, getSavingsMetadata, refreshSavingAction, SavingsDashboard, DestinationTable } from "../../services/api";
-import DesligueProgramado from "../DimonDashboard/DesligueProgramado";
+import DesligueProgramado from "../GoldDashboard/DesligueProgramado";
 import OrphanedResources from "../Governance/OrphanedResources";
 import Reservations from "../Reservations/Reservations";
 

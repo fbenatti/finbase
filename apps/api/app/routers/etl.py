@@ -1407,7 +1407,7 @@ def _reprocess_destination_sync(
     from app.models.etl_task import EtlTask
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
-    from app.services import dimon_builder
+    from app.services import gold_builder
     from app.services.task_runner import _inmemory_tasks, _check_cancelled
     from app.services.cloud_scope import (
         allowed_rule_cloud_scopes,
@@ -1451,9 +1451,9 @@ def _reprocess_destination_sync(
                     "table": status.get("table", ""),
                     "rows_written": status.get("rows_destination", 0),
                     "error": status.get("error", ""),
-                    "dimon_table": status.get("dimon_table"),
-                    "dimon_rows": status.get("dimon_rows"),
-                    "dimon_error": status.get("dimon_error"),
+                    "mart_table": status.get("mart_table"),
+                    "mart_rows": status.get("mart_rows"),
+                    "mart_error": status.get("mart_error"),
                 }
                 if status.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
                     row.finished_at = func.now()
@@ -1474,14 +1474,14 @@ def _reprocess_destination_sync(
             (dest_info.name or "").strip().upper() == "MODELO FOCUS"
             or (phys_name or "").strip().lower() == "dest_modelo_focus"
         )
-        # A Dimon agregada é gerada ao final do reprocess SOMENTE para o
+        # O mart agregado é gerado ao final do reprocess SOMENTE para o
         # destino MODELO FOCUS, reutilizando os DataFrames em memória (não
         # varre a Gold de milhões de linhas).
         # Estrutura Dimon única = regras (dimon_rule + dimon_materialization),
-        # geradas sob demanda via /dimon/reprocess. A geração automática
-        # paralela (dimon_builder -> dest_dm_cost_focus) foi desativada.
-        enable_dimon = False
-        dimon_chunks: list = []
+        # geradas sob demanda via /gold/reprocess. A geração automática
+        # paralela (gold_builder -> dest_dm_cost_focus) foi desativada.
+        enable_marts = False
+        mart_chunks: list = []
 
         all_mappings = []
         for cid in connection_ids:
@@ -1864,16 +1864,16 @@ def _reprocess_destination_sync(
         def _stage_frame(frame: pd.DataFrame) -> None:
             """Append one completed blob to the temporary Iceberg table."""
             nonlocal temp_name, staged_rows
-            if enable_dimon:
-                # Reaproveita o frame em memória: acumula a agregação Dimon
+            if enable_marts:
+                # Reaproveita o frame em memória: acumula a agregação do mart
                 # (principais colunas, mensal, SUM quantity/realizado/billedcost)
                 # sem reler a Gold publicada.
                 try:
-                    dimon_agg = dimon_builder.aggregate_frame(frame)
-                    if dimon_agg is not None and not dimon_agg.empty:
-                        dimon_chunks.append(dimon_agg)
+                    mart_agg = gold_builder.aggregate_frame(frame)
+                    if mart_agg is not None and not mart_agg.empty:
+                        mart_chunks.append(mart_agg)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("Agregação Dimon falhou (Gold segue normal): %s", exc)
+                    logger.warning("Agregação do mart falhou (Gold segue normal): %s", exc)
             prepared = _prepare_for_stage(frame)
             for start in range(0, len(prepared), 100_000):
                 chunk = prepared.iloc[start:start + 100_000]
@@ -2115,43 +2115,43 @@ def _reprocess_destination_sync(
                 iceberg.cleanup_staged_table(temp_name)
             raise stage_err
 
-        # ── Dimon agregada (só MODELO FOCUS): publica a pré-agregação mensal
+        # ── Mart agregado (só MODELO FOCUS): publica a pré-agregação mensal
         # gerada dos frames em memória. Se falhar, reconstrói da Gold (fallback)
         # para manter consistência; a Gold já publicada permanece a fonte da
         # verdade e o erro fica auditável no resultado da tarefa.
-        dimon_rows = 0
-        dimon_error = None
-        if enable_dimon:
+        mart_rows = 0
+        mart_error = None
+        if enable_marts:
             try:
-                dimon_rows = dimon_builder.publish_dimons(dimon_chunks)
-                status["dimon_rows"] = dimon_rows
-                status["dimon_table"] = dimon_builder.DIMON_TABLE
+                mart_rows = gold_builder.publish_marts(mart_chunks)
+                status["mart_rows"] = mart_rows
+                status["mart_table"] = gold_builder.MART_TABLE
                 status["current_blob"] = (
                     f"Concluido: {total_written} linhas na Gold, "
-                    f"{dimon_rows:,} linhas na Dimon ({dimon_builder.DIMON_TABLE})"
+                    f"{mart_rows:,} linhas no mart ({gold_builder.MART_TABLE})"
                 )
                 _append_reprocess_log(
                     task_id,
-                    f"Gold publicada: {dimon_rows:,} linhas agregadas",
-                    details={"dimon_table": dimon_builder.DIMON_TABLE, "dimon_rows": dimon_rows},
+                    f"Gold publicada: {mart_rows:,} linhas agregadas",
+                    details={"mart_table": gold_builder.MART_TABLE, "mart_rows": mart_rows},
                 )
             except Exception as exc:  # noqa: BLE001
-                dimon_error = str(exc)
+                mart_error = str(exc)
                 try:
-                    dimon_rows = dimon_builder.rebuild_dimons_from_gold()
-                    dimon_error = None
-                    status["dimon_rows"] = dimon_rows
-                    status["dimon_table"] = dimon_builder.DIMON_TABLE
+                    mart_rows = gold_builder.rebuild_marts_from_gold()
+                    mart_error = None
+                    status["mart_rows"] = mart_rows
+                    status["mart_table"] = gold_builder.MART_TABLE
                     _append_reprocess_log(
                         task_id,
-                        f"Dimon reconstruída da Gold (fallback): {dimon_rows:,} linhas",
-                        details={"dimon_table": dimon_builder.DIMON_TABLE, "dimon_rows": dimon_rows},
+                        f"Mart reconstruído da Gold (fallback): {mart_rows:,} linhas",
+                        details={"mart_table": gold_builder.MART_TABLE, "mart_rows": mart_rows},
                     )
                 except Exception as exc2:  # noqa: BLE001
-                    dimon_error = f"{dimon_error} | rebuild: {exc2}"
-                    status["dimon_error"] = dimon_error
-                    status["dimon_rows"] = 0
-                    _append_reprocess_log(task_id, f"Dimon falhou: {dimon_error}", level="ERROR")
+                    mart_error = f"{mart_error} | rebuild: {exc2}"
+                    status["mart_error"] = mart_error
+                    status["mart_rows"] = 0
+                    _append_reprocess_log(task_id, f"Mart falhou: {mart_error}", level="ERROR")
             _sync_db()
 
         status["status"] = "COMPLETED"
@@ -2161,9 +2161,9 @@ def _reprocess_destination_sync(
         _sync_db()
         _append_reprocess_log(task_id, "Reprocessamento concluído e Gold publicada", details={"rows_written": total_written, "blobs_processed": len(all_blobs), "table": dest_info.name})
         return {"success": True, "rows_written": total_written, "table": dest_info.name,
-                "dimon_table": dimon_builder.DIMON_TABLE if enable_dimon else None,
-                "dimon_rows": dimon_rows if enable_dimon else None,
-                "dimon_error": dimon_error}
+                "mart_table": gold_builder.MART_TABLE if enable_marts else None,
+                "mart_rows": mart_rows if enable_marts else None,
+                "mart_error": mart_error}
 
     except Exception as e:
         import traceback
@@ -2463,7 +2463,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                         "replace_existing": False,
                         "backfill": not periods,
                         **details,
-                        "chain_dimons": body.chain_dimons.model_dump() if body.chain_dimons else {},
+                        "chain_marts": body.chain_marts.model_dump() if body.chain_marts else {},
                         "event_log": [{
                             "at": datetime.now(timezone.utc).isoformat(),
                             "level": "INFO",
@@ -2563,7 +2563,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                 # Each child replaces only its own source/month. ``replace_existing``
                 # must never erase the other queued months.
                 result_json={"replace_existing": False, **details,
-                             "chain_dimons": body.chain_dimons.model_dump() if body.chain_dimons else {},
+                             "chain_marts": body.chain_marts.model_dump() if body.chain_marts else {},
                              "event_log": [{
                     "at": datetime.now(timezone.utc).isoformat(), "level": "INFO",
                     "message": f"Fila {position}/{len(ordered_pairs)}: fonte {connection_id}, mês {period}",

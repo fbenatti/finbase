@@ -1,6 +1,6 @@
 import pytest
 
-from app.services import azure_ptu_dimon as dimon
+from app.services import azure_ptu_gold as gold_mart
 
 
 @pytest.mark.asyncio
@@ -11,11 +11,11 @@ async def test_project_tokens_are_read_from_ptu_dimon(monkeypatch):
         captured.append(sql)
         return [{"period": "202608", "input_tokens": 800, "output_tokens": 200, "total_tokens": 1000}]
 
-    monkeypatch.setattr(dimon, "trino_execute", fake_execute)
-    result = await dimon.load_project_token_totals("vivo-mais", ["202608"], None)
+    monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
+    result = await gold_mart.load_project_token_totals("vivo-mais", ["202608"], None)
 
     assert result["202608"]["total_tokens"] == 1000
-    assert "iceberg.dimon.dest_dm_azure_ptu_daily" in captured[0]
+    assert f"iceberg.{gold_mart.MART_NAMESPACE}.dest_dm_azure_ptu_daily" in captured[0]
     assert "lower(CAST(project_hint AS VARCHAR)) = 'vivo-mais'" in captured[0]
 
 
@@ -27,8 +27,8 @@ async def test_project_tokens_can_load_all_available_periods(monkeypatch):
         captured.append(sql)
         return []
 
-    monkeypatch.setattr(dimon, "trino_execute", fake_execute)
-    await dimon.load_project_token_totals("aura-brain", None, None)
+    monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
+    await gold_mart.load_project_token_totals("aura-brain", None, None)
 
     assert "replace(_billing_period, '-', '') IN" not in captured[0]
     assert "lower(CAST(project_hint AS VARCHAR)) = 'aura-brain'" in captured[0]
@@ -37,7 +37,7 @@ async def test_project_tokens_can_load_all_available_periods(monkeypatch):
 @pytest.mark.asyncio
 async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
     captured = []
-    dimon._DIMON_COLUMNS = {
+    gold_mart._DIMON_COLUMNS = {
         "metric_day", "connection_id", "account_resource_id", "deployment_name",
         "model_name", "model_version", "region", "sku_name", "project_hint",
         "provisioned_ptus", "input_tokens_sum", "output_tokens_sum", "total_tokens_sum",
@@ -48,16 +48,16 @@ async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
         captured.append(sql)
         return []
 
-    monkeypatch.setattr(dimon, "trino_execute", fake_execute)
-    await dimon.load_dimon_metrics(hours=720, project_hints=["aura-brain"], grain="day")
+    monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
+    await gold_mart.load_dimon_metrics(hours=720, project_hints=["aura-brain"], grain="day")
 
     assert len(captured) == 1
-    assert "FROM iceberg.dimon.dest_dm_azure_ptu_daily" in captured[0]
+    assert f"FROM iceberg.{gold_mart.MART_NAMESPACE}.dest_dm_azure_ptu_daily" in captured[0]
     assert "iceberg.gold.dest_azure_ptu_metrics" not in captured[0]
 
 
 def test_daily_rollup_keeps_token_and_risk_measures():
-    sql = dimon._daily_select({
+    sql = gold_mart._daily_select({
         "input_tokens_sum", "output_tokens_sum", "total_tokens_sum", "request_count",
         "provisioned_ptus", "utilization_avg", "utilization_max",
     })
@@ -76,8 +76,8 @@ async def test_project_tokens_last_30d_uses_rolling_window(monkeypatch):
         return [{"input_tokens": 800, "output_tokens": 200, "total_tokens": 1000,
                  "date_from": "2026-08-02", "date_to": "2026-09-01"}]
 
-    monkeypatch.setattr(dimon, "trino_execute", fake_execute)
-    result = await dimon.load_project_tokens_last_30d("aura-brain")
+    monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
+    result = await gold_mart.load_project_tokens_last_30d("aura-brain")
 
     assert result["total_tokens"] == 1000
     assert "current_date - INTERVAL '30' DAY" in captured[0]

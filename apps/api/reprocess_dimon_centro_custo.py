@@ -25,8 +25,8 @@ from app.models.skipped_blob import SkippedBlob  # noqa: E402
 from app.models.fact_cost import FactCost  # noqa: E402
 from app.models.period_status import PeriodStatus  # noqa: E402
 from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun  # noqa: E402
-from app.models.dimon_rule import DimonRule, DimonRuleSource  # noqa: E402
-from app.services.dimon_materialization import materialize_dimons  # noqa: E402
+from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource  # noqa: E402
+from app.services.gold_materialization import materialize_dimons  # noqa: E402
 
 s = SyncSession()
 task = EtlTask(task_type="dimon_reprocess", status="RUNNING", errors=[])

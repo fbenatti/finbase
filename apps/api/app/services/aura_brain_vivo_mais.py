@@ -34,16 +34,16 @@ import time
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
-from app.services.dimon_materialization import DIMON_NAMESPACE
-from app.services.azure_ptu_dimon import (
-    DIMON_TABLE as PTU_DIMON_TABLE,
+from app.services.gold_materialization import MART_NAMESPACE
+from app.services.azure_ptu_gold import (
+    MART_TABLE as PTU_DIMON_TABLE,
     load_project_token_totals,
     load_project_tokens_last_30d,
 )
 
 logger = logging.getLogger(__name__)
 
-DIMON_NAMESPACE = f"iceberg.{__import__('app.services.dimon_materialization', fromlist=['DIMON_NAMESPACE']).DIMON_NAMESPACE}"
+MART_NAMESPACE = f"iceberg.{__import__('app.services.gold_materialization', fromlist=['MART_NAMESPACE']).MART_NAMESPACE}"
 PROJECT_LABELS = {"aura-brain": "Aura Brain", "vivo-mais": "Vivo Mais"}
 PROJECTS = ("Aura Brain", "Vivo Mais")
 PROJECT_SOURCES = {
@@ -208,7 +208,7 @@ async def _query_cost_rows(
     diário/horário sai do resultado na própria query (WHERE <> '__excluded__').
     """
     source = PROJECT_SOURCES[project_key]
-    table_sql = f"{DIMON_NAMESPACE}.{source['table']}"
+    table_sql = f"{MART_NAMESPACE}.{source['table']}"
     project = PROJECT_LABELS[project_key]
     source_project = source["source_project"].lower().replace("'", "''")
     sql = f"""
@@ -237,7 +237,7 @@ async def _query_subaccounts(
 ) -> list[dict[str, Any]]:
     """Distribuição do mês por subconta (sustenta a narrativa do rateio)."""
     source = PROJECT_SOURCES[project_key]
-    table_sql = f"{DIMON_NAMESPACE}.{source['table']}"
+    table_sql = f"{MART_NAMESPACE}.{source['table']}"
     source_project = source["source_project"].lower().replace("'", "''")
     rows = await trino_execute(
         f"""

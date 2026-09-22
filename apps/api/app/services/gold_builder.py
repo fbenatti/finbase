@@ -28,7 +28,7 @@ from app.services import iceberg_service as iceberg
 logger = logging.getLogger(__name__)
 
 # Tabela Dimon principal gerada ao final do reprocess do MODELO FOCUS.
-DIMON_TABLE = os.getenv("DIMON_GOLD_TABLE", "dest_dm_cost_focus")
+MART_TABLE = os.getenv("DIMON_GOLD_TABLE", "dest_dm_cost_focus")
 DIMON_GOLD_SOURCE = os.getenv("DIMON_GOLD_SOURCE", "dest_modelo_focus")
 
 # Dimensões analíticas (colunas físicas da Gold, minúsculas). A agregação usa
@@ -129,14 +129,14 @@ def aggregate_frame(frame: pd.DataFrame) -> pd.DataFrame | None:
     return out
 
 
-def publish_dimons(chunks: list[pd.DataFrame], *, table: str | None = None) -> int:
+def publish_marts(chunks: list[pd.DataFrame], *, table: str | None = None) -> int:
     """Publica (ou substitui por fatia) a Dimon a partir dos chunks acumulados.
 
     Chunks são os resultados de ``aggregate_frame`` acumulados durante o
     reprocess — concatena, agrupa novamente (por segurança) e publica.
     Retorna o número de linhas publicadas na tabela Dimon.
     """
-    table = (table or DIMON_TABLE).replace("-", "_").replace(".", "_")
+    table = (table or MART_TABLE).replace("-", "_").replace(".", "_")
     frames = [c for c in (chunks or []) if c is not None and not c.empty]
     if not frames:
         return 0
@@ -215,7 +215,7 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
     return total
 
 
-def rebuild_dimons_from_gold(*, table: str | None = None, gold: str | None = None) -> int:
+def rebuild_marts_from_gold(*, table: str | None = None, gold: str | None = None) -> int:
     """Fallback: reconstrói a Dimon inteira a partir da Gold via Trino.
 
     Usado quando a publicação incremental falha, garantindo consistência sem
@@ -223,7 +223,7 @@ def rebuild_dimons_from_gold(*, table: str | None = None, gold: str | None = Non
     """
     from app.services.trino_service import execute_sync
 
-    table = (table or DIMON_TABLE).replace("-", "_").replace(".", "_")
+    table = (table or MART_TABLE).replace("-", "_").replace(".", "_")
     gold = (gold or DIMON_GOLD_SOURCE).replace("-", "_").replace(".", "_")
 
     schema_rows = execute_sync(f"DESCRIBE iceberg.silver.{gold}", timeout_s=60)

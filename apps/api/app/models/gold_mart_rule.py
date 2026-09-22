@@ -15,7 +15,7 @@ from app.database import Base
 VALUE_COLUMNS = frozenset({"realizado", "BilledCost", "EffectiveCost"})
 
 
-class DimonRule(Base):
+class GoldMartRule(Base):
     """One pre-aggregated cost mart: sources (Golds) + filters -> dest_dm_cost_<code>."""
     __tablename__ = "dimon_rule"
 
@@ -54,15 +54,15 @@ class DimonRule(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     sources = relationship(
-        "DimonRuleSource",
+        "GoldMartRuleSource",
         cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="selectin",
-        order_by="DimonRuleSource.id",
+        order_by="GoldMartRuleSource.id",
     )
 
 
-class DimonRuleSource(Base):
+class GoldMartRuleSource(Base):
     """One source contributing rows to a Dimon mart.
 
     A source binds one or more Gold tables with the same normalized structure

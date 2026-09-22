@@ -43,7 +43,7 @@ async def test_vivo_mais_queries_its_own_dimon_and_normalizes_project(monkeypatc
 
     assert len(captured) == 2
     for sql in captured:
-        assert "iceberg.dimon.dest_dm_cost_custo_vivo_mais" in sql
+        assert "iceberg.gold_mart.dest_dm_cost_custo_vivo_mais" in sql
         assert "lower(CAST(departamento_nivel_5 AS VARCHAR)) = 'vivo+'" in sql
     assert "'Vivo Mais' AS project" in captured[0]
 

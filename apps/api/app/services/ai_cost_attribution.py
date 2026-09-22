@@ -328,7 +328,7 @@ async def count_active_licenses(
         sku_clause = f" AND lower(CAST(\"LicenseSkuName\" AS VARCHAR)) = {_quote_literal(license_sku.lower())}"
     sql = f"""
       SELECT COUNT(DISTINCT "UserEmail") AS active_count
-      FROM iceberg.gold.{LICENSES_TABLE}
+      FROM iceberg.{layers.detail_layer()}.{LICENSES_TABLE}
       WHERE CAST("_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
         AND lower(CAST("Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
         AND lower(CAST("ProductName" AS VARCHAR)) = {_quote_literal(product_name.lower())}
@@ -365,7 +365,7 @@ async def _distribution_weights(
     if basis == "equal":
         sql = f"""
           SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email, 1.0 AS weight
-          FROM iceberg.gold.{LICENSES_TABLE} l
+          FROM iceberg.{layers.detail_layer()}.{LICENSES_TABLE} l
           WHERE CAST(l."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
             AND lower(CAST(l."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
             AND lower(CAST(l."ProductName" AS VARCHAR)) = {_quote_literal(product_name.lower())}
@@ -376,8 +376,8 @@ async def _distribution_weights(
         sql = f"""
           SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email,
                  COALESCE(SUM(COALESCE(TRY_CAST(c."RequestCount" AS DOUBLE), 0)), 0) AS weight
-          FROM iceberg.gold.{LICENSES_TABLE} l
-          LEFT JOIN iceberg.gold.{CONSUMPTION_TABLE} c
+          FROM iceberg.{layers.detail_layer()}.{LICENSES_TABLE} l
+          LEFT JOIN iceberg.{layers.detail_layer()}.{CONSUMPTION_TABLE} c
             ON lower(CAST(c.{con_user_col} AS VARCHAR)) = lower(CAST(l.{lic_user_col} AS VARCHAR))
            AND CAST(c."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
            AND lower(CAST(c."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
@@ -394,7 +394,7 @@ async def _distribution_weights(
             SELECT lower(CAST({con_user_col} AS VARCHAR)) AS user_email,
                    COALESCE(SUM(COALESCE(TRY_CAST("TotalTokens" AS DOUBLE), 0)), 0)
                    + COALESCE(SUM(COALESCE(TRY_CAST("SuggestionsCount" AS DOUBLE), 0)), 0) AS metric
-            FROM iceberg.gold.{CONSUMPTION_TABLE}
+            FROM iceberg.{layers.detail_layer()}.{CONSUMPTION_TABLE}
             WHERE CAST("_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
               AND lower(CAST("Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
             GROUP BY 1
@@ -407,7 +407,7 @@ async def _distribution_weights(
           )
           SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email,
                  COALESCE(r.weight, 0) AS weight
-          FROM iceberg.gold.{LICENSES_TABLE} l
+          FROM iceberg.{layers.detail_layer()}.{LICENSES_TABLE} l
           LEFT JOIN ranked r ON r.user_email = lower(CAST(l.{lic_user_col} AS VARCHAR))
           WHERE CAST(l."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
             AND lower(CAST(l."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
@@ -419,8 +419,8 @@ async def _distribution_weights(
         sql = f"""
           SELECT lower(CAST(l.{lic_user_col} AS VARCHAR)) AS user_email,
                  COALESCE(SUM(COALESCE(TRY_CAST(c."TotalTokens" AS DOUBLE), 0)), 0) AS weight
-          FROM iceberg.gold.{LICENSES_TABLE} l
-          LEFT JOIN iceberg.gold.{CONSUMPTION_TABLE} c
+          FROM iceberg.{layers.detail_layer()}.{LICENSES_TABLE} l
+          LEFT JOIN iceberg.{layers.detail_layer()}.{CONSUMPTION_TABLE} c
             ON lower(CAST(c.{con_user_col} AS VARCHAR)) = lower(CAST(l.{lic_user_col} AS VARCHAR))
            AND CAST(c."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
            AND lower(CAST(c."Provider" AS VARCHAR)) = {_quote_literal(provider.lower())}
@@ -490,7 +490,7 @@ async def propagate_allocated_costs(
         val_str = ", ".join(batch)
         
         license_sql = f"""
-          MERGE INTO iceberg.gold.{LICENSES_TABLE} t
+          MERGE INTO iceberg.{layers.detail_layer()}.{LICENSES_TABLE} t
           USING (VALUES {val_str}) AS s(email, amount)
           ON lower(COALESCE(CAST(t."UserEmail" AS VARCHAR), CAST(t."UserLogin" AS VARCHAR))) = lower(s.email)
              AND CAST(t."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}
@@ -505,7 +505,7 @@ async def propagate_allocated_costs(
         """
         
         consumption_sql = f"""
-          MERGE INTO iceberg.gold.{CONSUMPTION_TABLE} t
+          MERGE INTO iceberg.{layers.detail_layer()}.{CONSUMPTION_TABLE} t
           USING (VALUES {val_str}) AS s(email, amount)
           ON lower(COALESCE(CAST(t."UserEmail" AS VARCHAR), CAST(t."UserLogin" AS VARCHAR))) = lower(s.email)
              AND CAST(t."_billing_period" AS VARCHAR) = {_quote_literal(billing_period)}

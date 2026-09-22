@@ -81,7 +81,7 @@ const menuGroups = [
     background: "#f0fdfa",
     items: [
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
-      { path: "/dimon-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
+      { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
     ],
   },

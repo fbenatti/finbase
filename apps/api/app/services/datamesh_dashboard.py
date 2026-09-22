@@ -8,9 +8,9 @@ from datetime import datetime
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
-from app.services.dimon_materialization import DIMON_NAMESPACE
+from app.services.gold_materialization import MART_NAMESPACE
 
-DIMON_TABLE = f"iceberg.{DIMON_NAMESPACE}.dest_dm_cost_projeto_datamesh"
+MART_TABLE = f"iceberg.{MART_NAMESPACE}.dest_dm_cost_projeto_datamesh"
 BUCKETS = ("Databricks", "Dados associados", "Infraestrutura")
 _DATA_TERMS = (
     "storage", "database", "sql", "synapse", "data factory", "datafactory",
@@ -52,7 +52,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
         values[period][row["bucket"]][tipo] += row["amount"]
         scoped[period].append(row)
     if not values:
-        return {"available": True, "empty": True, "table": DIMON_TABLE, "monthly": []}
+        return {"available": True, "empty": True, "table": MART_TABLE, "monthly": []}
 
     monthly = []
     for period in sorted(values):
@@ -102,7 +102,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
         dominant = max(BUCKETS, key=lambda bucket: composition.get(bucket, 0)) if total else "—"
         projects.append({"project": name, "cost": total, "dominant_bucket": dominant, "buckets": {bucket: composition.get(bucket, 0) for bucket in BUCKETS}})
     return {
-        "available": True, "table": DIMON_TABLE,
+        "available": True, "table": MART_TABLE,
         "reference": {"period": period, "label": current["label"], "source": current["source"]},
         "kpis": {"total": current["total"], "databricks": current["buckets"]["Databricks"], "data": current["buckets"]["Dados associados"], "infra": current["buckets"]["Infraestrutura"], "forecast": current["forecast_total"]},
         "monthly": monthly, "projects": projects,
@@ -119,7 +119,7 @@ async def load_datamesh_dashboard(*, cancel_event: asyncio.Event | None = None) 
                departamento AS organograma_nivel_6,
                centro_custo, subaccountname, regionname, servicename, servicesubcategory, skumeter,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
-        FROM {DIMON_TABLE}
+        FROM {MART_TABLE}
         GROUP BY 1,2,3,4,5,6,7,8,9,10
     """, timeout_s=120, cancel_event=cancel_event)
     return build_dashboard(rows or [])

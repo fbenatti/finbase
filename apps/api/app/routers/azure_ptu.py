@@ -52,7 +52,7 @@ from app.services.azure_ptu_ops import (
     weighted_utilization,
 )
 from app.services.azure_ptu_cost import load_dimon_ptu_costs
-from app.services.azure_ptu_dimon import load_dimon_metrics, refresh_azure_ptu_dimon
+from app.services.azure_ptu_gold import load_dimon_metrics, refresh_azure_ptu_dimon
 from app.services.aura_brain_vivo_mais import load_project_cost_dashboard
 from app.services.sinfonia_dashboard import load_sinfonia_dashboard
 from app.services.datamesh_dashboard import load_datamesh_dashboard
@@ -194,7 +194,7 @@ async def _query_focus_dashboard_costs(
         {category} AS cost_class,
         CAST("servicename" AS VARCHAR) AS service_name,
         COALESCE(SUM(TRY_CAST("realizado" AS DOUBLE)), 0) AS realized
-      FROM iceberg.gold.dest_modelo_focus
+      FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
       WHERE lower(CAST("cloud_origem" AS VARCHAR)) LIKE 'azure%'
         AND {_focus_date_predicate(date_from, date_to)}
         AND ({dept} LIKE '%aura brain%' OR {dept} LIKE '%vivo mais%')
@@ -315,7 +315,7 @@ async def dashboard_ops_heatmap(body: OverviewRequest, request: Request, db: Asy
         return {"heatmap": rows, "source": "gold", "loaded_on_demand": True}
 
 
-@router.post("/azure-ptu/dimon/reprocess")
+@router.post("/azure-ptu/gold/reprocess")
 async def reprocess_azure_ptu_dimon(days: int = 400):
     """Materializa novamente a Dimon PTU usada pelos widgets do dashboard."""
     if days < 90 or days > 400:
@@ -571,7 +571,7 @@ async def _build_cost_series(
           SELECT {period_expr} AS period,
                  COALESCE(SUM(CASE WHEN {ptu_expr} = 1 THEN TRY_CAST("realizado" AS DOUBLE) ELSE 0 END), 0) AS realized_cost,
                  COALESCE(SUM(CASE WHEN {ptu_expr} = 1 THEN TRY_CAST("billedcost" AS DOUBLE) ELSE 0 END), 0) AS billed_cost
-          FROM iceberg.gold.dest_modelo_focus
+          FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
           WHERE lower(CAST("cloud_origem" AS VARCHAR)) LIKE 'azure%'
             AND {ptu_expr} = 1{date_filter}
           GROUP BY 1

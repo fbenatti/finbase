@@ -39,7 +39,7 @@ import {
   ExpectedViewRow,
 } from "../../services/api";
 import AccuracyWidget from "./BudgetAccuracyWidget";
-import ConsumptionDrillDialog from "../DimonDashboard/ConsumptionDrillDialog";
+import ConsumptionDrillDialog from "../GoldDashboard/ConsumptionDrillDialog";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative";

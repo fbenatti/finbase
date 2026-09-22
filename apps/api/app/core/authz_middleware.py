@@ -42,7 +42,7 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/planning", "planning"),
     ("/savings", "savings"),
     ("/azure-tag-policy", "azure_tag_policy"),
-    ("/dimon", "dimon"),
+    ("/gold", "gold"),
     ("/azure-resource-graph", "azure_resource_graph"),
     ("/reservations", "reservations"),
     ("/scheduled-shutdown", "scheduled_shutdown"),
@@ -75,8 +75,8 @@ READ_POST_PREFIXES: list[tuple[str, str]] = [
     ("/visoes-consumo-ia/provider/", "ai_provider_dashboards"),
     ("/ai-copilot/", "ai_copilot"),
     ("/ai-dashboards/", "ai_dashboards"),
-    ("/dimon/query", "dimon"),
-    ("/dimon/info", "dimon"),
+    ("/gold/query", "gold"),
+    ("/gold/info", "gold"),
     ("/analysis/query", "analysis"),
     ("/analysis/pivot", "analysis"),
     ("/analysis/expected-view", "analysis"),
@@ -98,8 +98,8 @@ SCOPED_PATH_RULES: list[tuple[str, str, str, str, bool, bool]] = [
     # (kind, needle, module, scope, post_é_leitura, escopo_vale_para_leitura)
     ("prefix", "/forecast/accuracy/months", "forecast", "visao-contabil", True, True),
     ("contains", "/history/", "forecast", "visao-contabil", True, True),
-    ("prefix", "/dimon/query", "dimon", "visao-contabil", True, True),
-    ("prefix", "/dimon/info", "dimon", "visao-contabil", True, True),
+    ("prefix", "/gold/query", "gold", "visao-contabil", True, True),
+    ("prefix", "/gold/info", "gold", "visao-contabil", True, True),
     # Publicar a defesa no orçamento é a permissão de merge/aprovação.
     ("contains", "/publish-budget", "planning", "defesa-publicar", False, False),
     # Salvar/solicitar a defesa exige a permissão de solicitação.

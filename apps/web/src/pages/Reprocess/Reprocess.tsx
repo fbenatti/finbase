@@ -6,7 +6,7 @@ import ReprocessDataTab from "./ReprocessDataTab";
 import ReprocessForecastTab from "./ReprocessForecastTab";
 import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
-import ReprocessDimonTab from "./ReprocessDimonTab";
+import ReprocessGoldTab from "./ReprocessGoldTab";
 import { useEffect, useState } from "react";
 import { getConnections, SourceConnection, formatApiError } from "../../services/api";
 import { Alert } from "@mui/material";
@@ -60,7 +60,7 @@ export default function Reprocess() {
           {tab === "forecast" && <ReprocessForecastTab />}
           {tab === "accuracy" && <ReprocessAccuracyTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}
-          {tab === "gold" && <ReprocessDimonTab />}
+          {tab === "gold" && <ReprocessGoldTab />}
           {tab === "extraction" && <Extraction embedded />}
           {tab === "schedules" && (
             <>

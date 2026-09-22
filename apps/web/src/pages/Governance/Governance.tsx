@@ -4,7 +4,7 @@ import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
 import CloneRules from "../CloneRules/CloneRules";
-import Dimon from "../Dimon/Dimon";
+import Dimon from "../GoldMarts/GoldMarts";
 
 const TABS = [
   { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },

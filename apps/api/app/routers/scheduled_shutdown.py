@@ -25,8 +25,8 @@ from app.models.source_connection import SourceConnection
 from app.models.shutdown_exception_rule import ShutdownExceptionRule
 from app.services.trino_service import execute
 from app.services import lakehouse_layers as layers
-from app.services.dimon_materialization import DIMON_NAMESPACE
-from app.services.dimon_materialization import (
+from app.services.gold_materialization import MART_NAMESPACE
+from app.services.gold_materialization import (
     _baseline_hours,
     _desligue_validation_dates,
     _desligue_window_dates,
@@ -235,12 +235,12 @@ async def _setup_for_connection(db: AsyncSession, conn: SourceConnection) -> Set
 
     # Cria a regra Dimon padrão de saving por desligue (se ainda não existir).
     try:
-        from app.models.dimon_rule import DimonRule
-        from app.services.dimon_materialization import normalize_code
+        from app.models.gold_mart_rule import GoldMartRule
+        from app.services.gold_materialization import normalize_code
         code = normalize_code("saving_desligue_vm")
-        exists = (await db.execute(select(DimonRule).where(DimonRule.code == code))).scalar_one_or_none()
+        exists = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code))).scalar_one_or_none()
         if not exists:
-            rule = DimonRule(
+            rule = GoldMartRule(
                 code=code,
                 name="Saving por desligue de VMs",
                 description="Saving por VM/mês baseado em horas de consumo vs baseline 24x7 (query custom).",
@@ -252,9 +252,9 @@ async def _setup_for_connection(db: AsyncSession, conn: SourceConnection) -> Set
             )
             db.add(rule)
         code_tags = normalize_code("snapshot_tags_automacao")
-        exists_tags = (await db.execute(select(DimonRule).where(DimonRule.code == code_tags))).scalar_one_or_none()
+        exists_tags = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code_tags))).scalar_one_or_none()
         if not exists_tags:
-            db.add(DimonRule(
+            db.add(GoldMartRule(
                 code=code_tags,
                 name="Snapshot tags shutdown=auto",
                 description="Snapshot diário da tag shutdown=auto por recurso (modo snapshot: append datado sem replace).",
@@ -395,7 +395,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         saving_brl,
         padrao,
         is_desligue_programado
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     ORDER BY saving_brl DESC
@@ -410,7 +410,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
         COUNT(DISTINCT CASE WHEN saved_hours > 0 THEN resource_id END) AS vm_with_shutdown,
         COALESCE(SUM(saved_hours), 0) AS total_saved_hours,
         COALESCE(SUM(saving_brl), 0) AS total_saving_brl
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     """
@@ -1119,7 +1119,7 @@ async def savings_monthly():
     # Todos os períodos disponíveis na Dimon, a partir de 202601.
     periods_sql = """
     SELECT DISTINCT _billing_period AS p
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period >= '202601'
     ORDER BY 1
     """
@@ -1135,7 +1135,7 @@ async def savings_monthly():
         COUNT(DISTINCT resource_id) AS resources,
         COALESCE(SUM(saved_hours), 0) AS saved_hours,
         COALESCE(SUM(saving_brl), 0) AS saving_brl
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE saved_hours > 0
       AND is_desligue_programado = TRUE
     GROUP BY 1
@@ -1178,7 +1178,7 @@ async def padroes_periodos():
     sql = f"""
     SELECT _billing_period AS period,
            COUNT(*) AS resources
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE {list_filter}
     GROUP BY 1
     ORDER BY 1
@@ -1207,7 +1207,7 @@ async def padroes_distribuicao(period: str | None = None):
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
+                "SELECT MAX(_billing_period) AS p FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1224,7 +1224,7 @@ async def padroes_distribuicao(period: str | None = None):
         COALESCE(SUM(saved_hours), 0) AS saved_hours,
         COALESCE(SUM(saving_brl), 0) AS saving_brl,
         MAX(is_desligue_programado) AS dp
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND {list_filter}
     GROUP BY 1
@@ -1275,7 +1275,7 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
+                "SELECT MAX(_billing_period) AS p FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1293,7 +1293,7 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
         saved_hours,
         saving_brl,
         is_desligue_programado
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND padrao = '{padrao.replace("'", "''")}'
       AND {list_filter}
@@ -1409,7 +1409,7 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
     # realizado; NUNCA varre a Gold por requisição (evita OOM no Trino).
     sql = f"""
     SELECT day, hours, cost_brl
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_consumo_diario_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_consumo_diario_vm
     WHERE LOWER(TRIM(resource_name)) = LOWER(TRIM('{name.replace("'", "''")}'))
       AND _billing_period IN ({period_literals})
       AND day >= '{start}' AND day <= '{end_date.isoformat()}'
@@ -1435,29 +1435,29 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
     padrao = None
     is_desligue = False
     try:
-        dimon_rows = await execute(
+        mart_rows = await execute(
             f"""
             SELECT padrao, is_desligue_programado, active_days, window_hours,
                    window_uptime_pct, monthly_uptime_pct
-            FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+            FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
             WHERE _billing_period = '{done_period}'
               AND LOWER(TRIM(resource_name)) = LOWER(TRIM('{name.replace("'", "''")}'))
             LIMIT 1
             """,
             timeout_s=60,
         )
-        if dimon_rows:
-            dimon = dimon_rows[0]
-            padrao = str(dimon.get("padrao") or "") or None
-            is_desligue = bool(dimon.get("is_desligue_programado"))
-            if dimon.get("active_days") is not None:
-                quality["active_days"] = int(dimon.get("active_days") or 0)
-            if dimon.get("window_hours") is not None:
-                quality["window_hours"] = round(float(dimon.get("window_hours") or 0), 2)
-            if dimon.get("window_uptime_pct") is not None:
-                quality["window_uptime_pct"] = round(float(dimon.get("window_uptime_pct") or 0), 4)
-            if dimon.get("monthly_uptime_pct") is not None:
-                quality["monthly_uptime_pct"] = round(float(dimon.get("monthly_uptime_pct") or 0), 4)
+        if mart_rows:
+            dimon = mart_rows[0]
+            padrao = str(gold_mart.get("padrao") or "") or None
+            is_desligue = bool(gold_mart.get("is_desligue_programado"))
+            if gold_mart.get("active_days") is not None:
+                quality["active_days"] = int(gold_mart.get("active_days") or 0)
+            if gold_mart.get("window_hours") is not None:
+                quality["window_hours"] = round(float(gold_mart.get("window_hours") or 0), 2)
+            if gold_mart.get("window_uptime_pct") is not None:
+                quality["window_uptime_pct"] = round(float(gold_mart.get("window_uptime_pct") or 0), 4)
+            if gold_mart.get("monthly_uptime_pct") is not None:
+                quality["monthly_uptime_pct"] = round(float(gold_mart.get("monthly_uptime_pct") or 0), 4)
     except Exception:
         pass
     total_h = sum(float(r["hours"] or 0) for r in rows)
@@ -1512,7 +1512,7 @@ async def saving_departamento(period: str | None = None):
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
+                "SELECT MAX(_billing_period) AS p FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1526,7 +1526,7 @@ async def saving_departamento(period: str | None = None):
     sql = f"""
     WITH dimon_vms AS (
         SELECT d.resource_id, d.saved_hours, d.saving_brl
-        FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm d
+        FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm d
         WHERE d._billing_period = '{period}'
           AND d.is_desligue_programado = TRUE
     ),
@@ -1579,8 +1579,8 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
     Este endpoint roda a materialização histórica completa (janeiro até o mês
     anterior ao atual) e pode demorar vários minutos.
     """
-    from app.services.dimon_materialization import SAVING_DIMON_CODE, materialize_saving_history
-    from app.models.dimon_rule import DimonRule
+    from app.services.gold_materialization import SAVING_DIMON_CODE, materialize_saving_history
+    from app.models.gold_mart_rule import GoldMartRule
     from app.models.etl_task import EtlTask
 
     task = EtlTask(
@@ -1595,9 +1595,9 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
 
     try:
         saving_rule = (await db.execute(
-            select(DimonRule)
-            .options(selectinload(DimonRule.sources))
-            .where(DimonRule.code == SAVING_DIMON_CODE)
+            select(GoldMartRule)
+            .options(selectinload(GoldMartRule.sources))
+            .where(GoldMartRule.code == SAVING_DIMON_CODE)
         )).scalar_one_or_none()
         summary = await materialize_saving_history(
             sources=list(saving_rule.sources) if saving_rule else None
@@ -1655,7 +1655,7 @@ async def opportunity_subscriptions():
         subscription_name,
         COUNT(*) AS resources,
         COALESCE(SUM(CASE WHEN resource_type = 'VMSS' THEN 1 ELSE 0 END), 0) AS vmss
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND LOWER(COALESCE(CAST(resource_name AS VARCHAR), '')) NOT LIKE 'azure plan%'
     GROUP BY subscription_name
@@ -1703,7 +1703,7 @@ async def opportunity_savings(body: SavingsFilter, db: AsyncSession = Depends(ge
         saved_hours,
         saving_brl,
         is_new_vm
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_saving_desligue_vm
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period = '{period}'
       AND LOWER(COALESCE(CAST(resource_name AS VARCHAR), '')) NOT LIKE 'azure plan%'
     """
@@ -1804,15 +1804,15 @@ GROUP BY
 @router.post("/seed-dimon")
 async def seed_saving_dimon(db: AsyncSession = Depends(get_db)):
     """Cria (se não existir) a regra Dimon de saving por desligue de VM."""
-    from app.models.dimon_rule import DimonRule
-    from app.services.dimon_materialization import normalize_code
+    from app.models.gold_mart_rule import GoldMartRule
+    from app.services.gold_materialization import normalize_code
 
     code = normalize_code("saving_desligue_vm")
-    existing = (await db.execute(select(DimonRule).where(DimonRule.code == code))).scalar_one_or_none()
+    existing = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code))).scalar_one_or_none()
     if existing:
         return {"status": "EXISTS", "code": code, "rule_id": existing.id, "message": "Regra Dimon já existe."}
 
-    rule = DimonRule(
+    rule = GoldMartRule(
         code=code,
         name="Saving por desligue de VMs",
         description="Saving por VM/mês baseado em horas de consumo vs baseline 24x7 (query custom).",
@@ -1865,15 +1865,15 @@ FROM vm_tags
 @router.post("/seed-tag-dimon")
 async def seed_tag_snapshot_dimon(db: AsyncSession = Depends(get_db)):
     """Cria a Dimon de snapshot de tags shutdown=auto por recurso (modo snapshot)."""
-    from app.models.dimon_rule import DimonRule
-    from app.services.dimon_materialization import normalize_code
+    from app.models.gold_mart_rule import GoldMartRule
+    from app.services.gold_materialization import normalize_code
 
     code = normalize_code("snapshot_tags_automacao")
-    existing = (await db.execute(select(DimonRule).where(DimonRule.code == code))).scalar_one_or_none()
+    existing = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code))).scalar_one_or_none()
     if existing:
         return {"status": "EXISTS", "code": code, "rule_id": existing.id, "message": "Regra Dimon de tags já existe."}
 
-    rule = DimonRule(
+    rule = GoldMartRule(
         code=code,
         name="Snapshot tags shutdown=auto",
         description="Snapshot diário da tag shutdown=auto por recurso (modo snapshot: append datado sem replace).",
@@ -1923,7 +1923,7 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
     """
     dates_sql = """
     SELECT DISTINCT CAST(_snapshot_date AS VARCHAR) AS d
-    FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
+    FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
     ORDER BY d DESC
     """
     try:
@@ -1942,7 +1942,7 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
                 st_rows = await execute(f"""
                 SELECT COUNT(*) AS total,
                        COUNT(CASE WHEN has_shutdown_auto THEN 1 END) AS with_tag
-                FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
+                FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
                 WHERE CAST(_snapshot_date AS VARCHAR) LIKE '{latest}%'
                 """, timeout_s=60)
                 if st_rows:
@@ -1965,12 +1965,12 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
     delta_sql = f"""
     WITH hoje AS (
         SELECT resource_id, resource_name, connection_code, has_shutdown_auto
-        FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
+        FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
         WHERE CAST(_snapshot_date AS VARCHAR) LIKE '{latest}%'
     ),
     ontem AS (
         SELECT resource_id, resource_name, connection_code, has_shutdown_auto
-        FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
+        FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_snapshot_tags_automacao
         WHERE CAST(_snapshot_date AS VARCHAR) LIKE '{previous}%'
     )
     SELECT

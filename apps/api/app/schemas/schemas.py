@@ -519,7 +519,7 @@ class ReprocessRequest(BaseModel):
     connection_ids: list[int]
     billing_periods: list[str] = []
     replace_existing: bool = False
-    chain_dimons: DimonChainOption = Field(default_factory=DimonChainOption)
+    chain_marts: DimonChainOption = Field(default_factory=DimonChainOption)
 
 
 class ScheduledTaskCreate(BaseModel):

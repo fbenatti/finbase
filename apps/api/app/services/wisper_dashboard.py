@@ -22,7 +22,7 @@ FOCUS_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
 # Operational/inventory source
 OP_METRICS_TABLE = f"iceberg.{layers.detail_layer()}.dest_oci_operational_metrics"
 # Legacy dimon table (kept only for current-month forecast comparison)
-DIMON_TABLE = f"iceberg.{layers.detail_layer()}.dest_dm_cost_custo_wisper"
+MART_TABLE = f"iceberg.{layers.detail_layer()}.dest_dm_cost_custo_wisper"
 
 WISPER_SUBACCOUNT_RE = "whisper|llm|poc-stt"
 
@@ -171,7 +171,7 @@ async def _forecast_by_period(
                    servicesubcategory,
                    skumeter,
                    SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS amount
-            FROM {DIMON_TABLE}
+            FROM {MART_TABLE}
             WHERE lower(tipo) = 'forecast'
               AND _billing_period >= '{current_period}'
               AND _billing_period <= '{end_period}'
@@ -224,7 +224,7 @@ async def _financials(
                servicesubcategory,
                skumeter,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS bucket_cost
-        FROM {DIMON_TABLE}
+        FROM {MART_TABLE}
         WHERE lower(COALESCE(tipo, '')) = 'realizado'
         GROUP BY 1, 3, 4, 5
         ORDER BY 1, 3, 4, 5
@@ -334,7 +334,7 @@ async def _financials(
             f"""
             SELECT subaccountname,
                    SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS cost
-            FROM {DIMON_TABLE}
+            FROM {MART_TABLE}
             WHERE lower(COALESCE(tipo, '')) = 'realizado'
               AND _billing_period = '{closed_period}'
             GROUP BY 1

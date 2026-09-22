@@ -12,9 +12,9 @@ from datetime import datetime
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
-from app.services.dimon_materialization import DIMON_NAMESPACE
+from app.services.gold_materialization import MART_NAMESPACE
 
-DIMON_TABLE = f"iceberg.{DIMON_NAMESPACE}.dest_dm_cost_projeto_sinfonia"
+MART_TABLE = f"iceberg.{MART_NAMESPACE}.dest_dm_cost_projeto_sinfonia"
 
 _PROJECTS = {
     "sinfonia - watson": ("IBM", "Sinfonia IBM", "Watson"),
@@ -118,7 +118,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
 
     current = next((item for item in reversed(monthly) if item["period"] <= open_period), monthly[-1] if monthly else None)
     if not current:
-        return {"available": True, "empty": True, "table": DIMON_TABLE, "monthly": []}
+        return {"available": True, "empty": True, "table": MART_TABLE, "monthly": []}
     current_period = current["period"]
     current_values = {name: buckets[current_period][name]["forecast"] if current_period >= open_period and buckets[current_period][name]["forecast"] else buckets[current_period][name]["realizado"] + buckets[current_period][name]["rateio"] for name in buckets[current_period]}
     cloud_costs = [{"cloud": "IBM", "cost": current["ibm"]}, {"cloud": "Azure", "cost": current["factory"]}]
@@ -138,7 +138,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
         service = _text(row.get("servicename")) or "Não informado"
         services[(row["cloud"], service)] += row["amount"]
     return {
-        "available": True, "table": DIMON_TABLE, "reference": {"period": current_period, "label": current["label"], "source": current["source"]},
+        "available": True, "table": MART_TABLE, "reference": {"period": current_period, "label": current["label"], "source": current["source"]},
         "kpis": {"total": current["total"], "ibm": current["ibm"], "factory": current["factory"], "forecast": current["forecast_total"]},
         "monthly": monthly, "projects": projects, "clouds": cloud_costs,
         "ai_families": [{"family": name, "cost": value} for name, value in sorted(families.items(), key=lambda x: x[1], reverse=True)],
@@ -152,7 +152,7 @@ async def load_sinfonia_dashboard(*, cancel_event: asyncio.Event | None = None) 
         SELECT _billing_period AS period, tipo, cloud_origem,
                departamento AS organograma_nivel_5, CAST(NULL AS VARCHAR) AS organograma_nivel_6,
                servicename, servicesubcategory, skumeter, SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
-        FROM {DIMON_TABLE}
+        FROM {MART_TABLE}
         GROUP BY 1,2,3,4,5,6,7,8
     """, timeout_s=120, cancel_event=cancel_event)
     return build_dashboard(rows or [])

@@ -12,11 +12,11 @@ from typing import Any
 
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
-from app.services.dimon_materialization import DIMON_NAMESPACE
+from app.services.gold_materialization import MART_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
-DIMON_NAMESPACE = "gold"
+MART_NAMESPACE = "gold"
 AI_CONSUMPTION_TABLE = "dest_dm_ai_consumption_daily"
 AI_LICENSE_TABLE = "dest_dm_ai_license_snapshot"
 COPILOT_USAGE_TABLE = "dest_dm_copilot_usage_daily"
@@ -33,16 +33,16 @@ async def _publish(table: str, select_sql: str, *, partition_column: str = "_bil
     from app.services import iceberg_service as iceberg
 
     staging = f"{table}_stg_{time.time_ns()}"
-    iceberg.ensure_namespace(DIMON_NAMESPACE)
+    iceberg.ensure_namespace(MART_NAMESPACE)
     sql = f"""
-      CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging}
+      CREATE TABLE iceberg.{MART_NAMESPACE}.{staging}
       WITH (partitioning = ARRAY['{partition_column}']) AS
       {select_sql}
     """
     try:
         await trino_execute(sql, timeout_s=1800)
         rows = await trino_execute(
-            f"SELECT COUNT(*) AS row_count FROM iceberg.{DIMON_NAMESPACE}.{staging}",
+            f"SELECT COUNT(*) AS row_count FROM iceberg.{MART_NAMESPACE}.{staging}",
             timeout_s=180,
         )
         row_count = int((rows[0] if rows else {}).get("row_count") or 0)
@@ -51,13 +51,13 @@ async def _publish(table: str, select_sql: str, *, partition_column: str = "_bil
         iceberg.swap_staged_table(
             table,
             staging,
-            namespace=DIMON_NAMESPACE,
+            namespace=MART_NAMESPACE,
             known_row_count=row_count,
         )
         return row_count
     except Exception:
         try:
-            iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
         except Exception:
             pass
         raise
@@ -224,7 +224,7 @@ def _copilot_user_period_select() -> str:
         MIN(CAST(day AS VARCHAR)) AS period_start,
         MAX(CAST(day AS VARCHAR)) AS period_end,
         COUNT(DISTINCT day) AS period_days
-      FROM iceberg.{DIMON_NAMESPACE}.dest_dm_copilot_usage_daily
+      FROM iceberg.{MART_NAMESPACE}.dest_dm_copilot_usage_daily
       WHERE assignee_login IS NOT NULL AND assignee_login <> ''
         AND source_kind IN ('ai_usage_report', 'billing_report')
         AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')
@@ -248,4 +248,4 @@ async def refresh_ai_usage_dimons(only_tables: list[str] | None = None) -> dict[
     for table, select_sql in definitions:
         results[table] = await _publish(table, select_sql)
         logger.info("AI Dimon refreshed: %s (%d rows)", table, results[table])
-    return {"namespace": DIMON_NAMESPACE, "tables": results}
+    return {"namespace": MART_NAMESPACE, "tables": results}

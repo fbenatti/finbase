@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import FinancialDashboard from "./FinancialDashboard";
 import BudgetAccuracy from "./BudgetAccuracy";
 import Planning from "./Planning";
-import VisaoContabil, { EMPTY_FILTERS } from "../DimonDashboard/VisaoContabil";
+import VisaoContabil, { EMPTY_FILTERS } from "../GoldDashboard/VisaoContabil";
 
 const TABS = [
   { code: "orcamento", label: "Orçamento", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },

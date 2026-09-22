@@ -15,7 +15,7 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   { prefix: "/pipeline", targets: [{ module: "etl" }] },
   { prefix: "/extraction", targets: [{ module: "etl" }] },
   { prefix: "/analysis", targets: [{ module: "analysis" }] },
-  { prefix: "/dimon-dashboard", targets: [{ module: "dimon" }] },
+  { prefix: "/gold-dashboard", targets: [{ module: "gold" }] },
   { prefix: "/expected-view", targets: [{ module: "analysis" }] },
   { prefix: "/dashboards-ia", targets: [{ module: "ai_dashboards" }] },
   { prefix: "/github-copilot", targets: [{ module: "ai_dashboards" }] },

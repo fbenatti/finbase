@@ -1630,7 +1630,7 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
     if not warehouse_path.exists():
         return {"deleted_dirs": 0, "deleted_bytes": 0, "dropped_tables": 0}
 
-    known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast", "dimon"]
+    known_namespaces = ["gold", "silver", "bronze", "financial_base", "forecast"]
 
     def _has_active_writer(namespace: str, base_name: str) -> bool:
         session = SyncSession()
@@ -1754,7 +1754,7 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
     # Never run maintenance against a broken/staging-backed table. Snapshot
     # age is not data age: the active snapshot remains authoritative forever.
     try:
-        table = _get_catalog().load_table(("gold", table_name))
+        table = _get_catalog().load_table((layers.detail_layer(), table_name))
         if table.current_snapshot() is None or "_stg_" in str(table.location()):
             logger.error("Snapshot maintenance skipped for unsafe table gold.%s", table_name)
             return False
@@ -1781,12 +1781,12 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
     headers = {
         "X-Trino-User": TRINO_USER,
         "X-Trino-Catalog": "iceberg",
-        "X-Trino-Schema": "gold",
+        "X-Trino-Schema": layers.detail_layer(),
         "X-Trino-Session": session_prop,
     }
     submit_url = urljoin(TRINO_URL, "/v1/statement")
     statements = [
-        f"ALTER TABLE iceberg.gold.{table_name} EXECUTE expire_snapshots(retention_threshold => '{retention_str}')",
+        f"ALTER TABLE iceberg.{layers.detail_layer()}.{table_name} EXECUTE expire_snapshots(retention_threshold => '{retention_str}')",
         f"ALTER TABLE iceberg.gold.{table_name} EXECUTE remove_orphan_files(retention_threshold => '{retention_str}')",
     ]
 

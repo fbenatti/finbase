@@ -23,7 +23,7 @@ from app.models.budget_accuracy import BudgetAccuracyAck
 from app.models.rules import Department
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
-from app.services.dimon_materialization import DIMON_NAMESPACE
+from app.services.gold_materialization import MART_NAMESPACE
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 
@@ -428,7 +428,7 @@ async def _budget_accuracy_actuals(
           SELECT {levels}, CAST("_billing_period" AS VARCHAR) AS period,
                  SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS actual_value,
                  CAST(0 AS DOUBLE) AS forecast_value, 1 AS has_actual
-          FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_visao_completa
+          FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_visao_completa
           WHERE CAST("_billing_period" AS VARCHAR) IN ({periods})
             AND ("tipo" IS NULL OR TRIM(CAST("tipo" AS VARCHAR)) IN ('', 'realizado')){cloud_filter}
           {scope_filter}
@@ -437,7 +437,7 @@ async def _budget_accuracy_actuals(
           SELECT {levels}, CAST("period" AS VARCHAR) AS period,
                  CAST(0 AS DOUBLE) AS actual_value,
                  SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS forecast_value, 0 AS has_actual
-          FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_visao_completa
+          FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_visao_completa
           WHERE CAST("period" AS VARCHAR) IN ({periods})
             AND lower(TRIM(CAST("tipo" AS VARCHAR))) = 'forecast'{cloud_filter}
           {scope_filter}
@@ -1083,7 +1083,7 @@ async def budget_accuracy_detail(
                      COALESCE(NULLIF(TRIM(CAST("servicesubcategory" AS VARCHAR)), ''), 'Outros') AS service_subcategory,
                      SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS actual_value,
                      CAST(0 AS DOUBLE) AS forecast_value, 1 AS has_actual
-              FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_visao_completa
+              FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_visao_completa
               WHERE CAST("_billing_period" AS VARCHAR) IN ({period_sql})
                 AND ("tipo" IS NULL OR TRIM(CAST("tipo" AS VARCHAR)) IN ('', 'realizado')){cloud_sql}{scope_sql}
               GROUP BY 1, 2
@@ -1092,7 +1092,7 @@ async def budget_accuracy_detail(
                      COALESCE(NULLIF(TRIM(CAST("servicesubcategory" AS VARCHAR)), ''), 'Outros') AS service_subcategory,
                      CAST(0 AS DOUBLE) AS actual_value,
                      SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS forecast_value, 0 AS has_actual
-              FROM iceberg.{DIMON_NAMESPACE}.dest_dm_cost_visao_completa
+              FROM iceberg.{MART_NAMESPACE}.dest_dm_cost_visao_completa
               WHERE CAST("period" AS VARCHAR) IN ({period_sql})
                 AND lower(TRIM(CAST("tipo" AS VARCHAR))) = 'forecast'{cloud_sql}{scope_sql}
               GROUP BY 1, 2

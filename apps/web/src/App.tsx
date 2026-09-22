@@ -28,7 +28,7 @@ import GitHubCopilotDashboard from "./pages/GitHubCopilotDashboard/GitHubCopilot
 import FinancialPlanning from "./pages/Planning/FinancialPlanning";
 import Savings from "./pages/Savings/Savings";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
-import DimonDashboard from "./pages/DimonDashboard/DimonDashboard";
+import GoldDashboard from "./pages/GoldDashboard/GoldDashboard";
 import Admin from "./pages/Admin/Admin";
 import SsoProviders from "./pages/Admin/SsoProviders";
 import Audit from "./pages/Admin/Audit";
@@ -81,9 +81,11 @@ function App() {
         <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />
         <Route path="schedules" element={<Navigate to="/reprocess?tab=schedules" replace />} />
         <Route path="analysis" element={<Analysis />} />
-        <Route path="expected-view" element={<Navigate to="/dimon-dashboard?tab=visao-executiva" replace />} />
+        <Route path="expected-view" element={<Navigate to="/gold-dashboard?tab=visao-executiva" replace />} />
         <Route path="dashboards-ia" element={<DashboardsIA />} />
-        <Route path="dimon-dashboard" element={<DimonDashboard />} />
+        <Route path="gold-dashboard" element={<GoldDashboard />} />
+        {/* Rota legada: mantém links antigos vivos sem reintroduzir o nome no código. */}
+        <Route path="dimon-dashboard" element={<Navigate to="/gold-dashboard" replace />} />
         <Route path="visoes-consumo-ia" element={<AzurePtuOps />} />
         <Route path="azure-ptu-ops" element={<Navigate to="/visoes-consumo-ia" replace />} />
         <Route path="reservations" element={<Navigate to="/savings?tab=reservas" replace />} />

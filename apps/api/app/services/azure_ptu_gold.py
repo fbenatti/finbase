@@ -16,9 +16,9 @@ from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
-DIMON_NAMESPACE = "dimon"
-DIMON_TABLE = "dest_dm_azure_ptu_daily"
-DIMON_SQL = f"iceberg.{DIMON_NAMESPACE}.{DIMON_TABLE}"
+MART_NAMESPACE = "dimon"
+MART_TABLE = "dest_dm_azure_ptu_daily"
+DIMON_SQL = f"iceberg.{MART_NAMESPACE}.{MART_TABLE}"
 GOLD_SQL = "iceberg.gold.dest_azure_ptu_metrics"
 DASHBOARD_TRINO_TIMEOUT_S = 25
 
@@ -141,10 +141,10 @@ async def refresh_azure_ptu_dimon(*, days: int = 400) -> dict[str, Any]:
     start_iso = start.strftime("%Y-%m-%dT%H:00:00Z")
     end_iso = end.strftime("%Y-%m-%dT%H:00:00Z")
     where = _gold_metric_hour_filter(start_iso, end_iso)
-    staging = f"{DIMON_TABLE}_stg_{time.time_ns()}"
-    iceberg.ensure_namespace(DIMON_NAMESPACE)
+    staging = f"{MART_TABLE}_stg_{time.time_ns()}"
+    iceberg.ensure_namespace(MART_NAMESPACE)
     sql = f"""
-      CREATE TABLE iceberg.{DIMON_NAMESPACE}.{staging}
+      CREATE TABLE iceberg.{MART_NAMESPACE}.{staging}
       WITH (partitioning = ARRAY['_billing_period']) AS
       SELECT
         substr(CAST(metric_hour AS VARCHAR), 1, 10) AS metric_day,
@@ -166,19 +166,19 @@ async def refresh_azure_ptu_dimon(*, days: int = 400) -> dict[str, Any]:
     try:
         await trino_execute(sql, timeout_s=1800)
         count_rows = await trino_execute(
-            f"SELECT COUNT(*) AS row_count FROM iceberg.{DIMON_NAMESPACE}.{staging}", timeout_s=120,
+            f"SELECT COUNT(*) AS row_count FROM iceberg.{MART_NAMESPACE}.{staging}", timeout_s=120,
         )
         row_count = int((count_rows[0] if count_rows else {}).get("row_count") or 0)
         if row_count:
-            iceberg.swap_staged_table(DIMON_TABLE, staging, namespace=DIMON_NAMESPACE, known_row_count=row_count)
+            iceberg.swap_staged_table(MART_TABLE, staging, namespace=MART_NAMESPACE, known_row_count=row_count)
         else:
-            iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
         global _DIMON_COLUMNS
         _DIMON_COLUMNS = None
-        return {"table": DIMON_TABLE, "rows": row_count, "days": days}
+        return {"table": MART_TABLE, "rows": row_count, "days": days}
     except Exception:
         try:
-            iceberg.cleanup_staged_table(staging, namespace=DIMON_NAMESPACE)
+            iceberg.cleanup_staged_table(staging, namespace=MART_NAMESPACE)
         except Exception:
             pass
         raise

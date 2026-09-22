@@ -433,7 +433,7 @@ function monthlySeries(r: DimonQueryResult | null | undefined, measure: string) 
 // ─────────────────────────────────────────────────────────────────────
 type TabId = "visao-executiva" | "geral" | "evolucao" | "organizacao" | "servicos" | "investigacao" | "decisao" | "drilldown" | "data-quality";
 
-export default function DimonDashboard() {
+export default function GoldDashboard() {
   const [params] = useSearchParams();
   const [table, setTable] = useState(DEFAULT_TABLE);
   const [availableTables, setAvailableTables] = useState<string[]>([]);
@@ -536,7 +536,7 @@ export default function DimonDashboard() {
   };
   const globalDirector = filters.path.length ? filters.path.join(" > ") : undefined;
 
-  // ── carrega tabelas disponíveis (namespace dimon) ──
+  // ── carrega tabelas disponíveis (namespace gold) ──
   useEffect(() => {
     getAnalysisTables().then(t => {
       const dimonTables = t.dimon || [];

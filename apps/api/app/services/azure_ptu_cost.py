@@ -1,7 +1,7 @@
 """Enriquecimento financeiro do Azure PTU Ops a partir da Gold (FOCUS).
 
-Lê ``iceberg.gold.dest_modelo_focus`` (realizado) e
-``iceberg.gold.dest_modelo_focus_planning`` (forecast) e devolve o bloco
+Lê ``iceberg.{layers.detail_layer()}.dest_modelo_focus`` (realizado) e
+``iceberg.{layers.detail_layer()}.dest_modelo_focus_planning`` (forecast) e devolve o bloco
 financeiro do dashboard com a separação correta de capacidade PTU:
 
 * **Reserva** — ``Microsoft.Capacity`` (chargecategory Purchase/Refund/Return),
@@ -30,12 +30,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
+from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
-GOLD_FOCUS_TABLE = "dest_modelo_focus"
-GOLD_PLANNING_TABLE = "dest_modelo_focus_planning"
-GOLD_NAMESPACE = "iceberg.gold"
+FOCUS_TABLE = "dest_modelo_focus"
+PLANNING_TABLE = "dest_modelo_focus_planning"
+DETAIL_NAMESPACE = f"iceberg.{layers.detail_layer()}"
 PROJECTS = ("Vivo Mais", "Aura Brain")
 
 # Chaves de projeto usadas pelo dashboard (filtro de projeto) -> rótulo exibido.
@@ -174,7 +175,7 @@ async def _load_realized_rows(
                COUNT(*) FILTER (WHERE skumeter = '{ONDEMAND_METER}'
                                  AND consumedunit = '{ONDEMAND_UNIT}'
                                  AND commitmentdiscounttype = 'OnDemand') AS ondemand_rows
-        FROM {GOLD_NAMESPACE}.{GOLD_FOCUS_TABLE}
+        FROM {DETAIL_NAMESPACE}.{FOCUS_TABLE}
         WHERE _billing_period IN ({period_list})
           AND COALESCE(NULLIF(departamento_nivel_5, ''), departamento) IN ({project_list})
         GROUP BY 1, 2
@@ -204,7 +205,7 @@ async def _load_forecast_rows(
                {_PLANNING_PROJECT_SQL} AS projeto,
                MAX(departamento_nivel_4) AS departamento_nivel_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realizado
-        FROM {GOLD_NAMESPACE}.{GOLD_PLANNING_TABLE}
+        FROM {DETAIL_NAMESPACE}.{PLANNING_TABLE}
         WHERE period IN ({period_list})
           AND COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) IN ({project_list})
         GROUP BY 1, 2
@@ -331,7 +332,7 @@ async def load_dimon_ptu_costs(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Azure PTU cost enrichment failed: %s", exc, exc_info=exc)
-        return {"available": False, "error": str(exc)[:400], "table": GOLD_FOCUS_TABLE}
+        return {"available": False, "error": str(exc)[:400], "table": FOCUS_TABLE}
 
 
 async def _load_dimon_ptu_costs(
@@ -367,7 +368,7 @@ async def _load_dimon_ptu_costs(
         return {
             "available": True,
             "empty": True,
-            "table": GOLD_FOCUS_TABLE,
+            "table": FOCUS_TABLE,
             "current_period": current_period,
             "window_label": _window_label(window_periods),
             "monthly": [],
@@ -456,7 +457,7 @@ async def _load_dimon_ptu_costs(
     return {
         "available": True,
         "empty": False,
-        "table": GOLD_FOCUS_TABLE,
+        "table": FOCUS_TABLE,
         "current_period": current,
         "current_label": _period_label(current),
         "window_label": _window_label(window_periods),

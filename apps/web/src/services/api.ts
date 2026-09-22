@@ -4522,7 +4522,7 @@ export interface DimonHistoryItem {
 }
 
 export async function getDimonRules(): Promise<DimonRule[]> {
-  const { data } = await api.get("/dimon/rules");
+  const { data } = await api.get("/gold/rules");
   return data;
 }
 
@@ -4558,27 +4558,27 @@ export async function saveDimonRule(
     }),
   };
   if (rule.id) {
-    const { data } = await api.put(`/dimon/rules/${rule.id}`, body);
+    const { data } = await api.put(`/gold/rules/${rule.id}`, body);
     purgeExpectedViewCache();
     return data;
   }
-  const { data } = await api.post("/dimon/rules", body);
+  const { data } = await api.post("/gold/rules", body);
   purgeExpectedViewCache();
   return data;
 }
 
 export async function getDimonGoldTables(): Promise<GoldTable[]> {
-  const { data } = await api.get("/dimon/gold-tables");
+  const { data } = await api.get("/gold/gold-tables");
   return data.tables || [];
 }
 
 export async function deleteDimonRule(ruleId: number): Promise<void> {
-  await api.delete("/dimon/rules/" + ruleId);
+  await api.delete("/gold/rules/" + ruleId);
   purgeExpectedViewCache();
 }
 
 export async function deleteDimonTable(tableName: string): Promise<void> {
-  await api.delete("/dimon/tables/" + encodeURIComponent(tableName));
+  await api.delete("/gold/tables/" + encodeURIComponent(tableName));
   purgeExpectedViewCache();
 }
 
@@ -4590,13 +4590,13 @@ export async function reprocessDimons(
   message: string;
   rules: number;
 }> {
-  const { data } = await api.post("/dimon/reprocess", { rule_ids: ruleIds });
+  const { data } = await api.post("/gold/reprocess", { rule_ids: ruleIds });
   purgeExpectedViewCache();
   return data;
 }
 
 export async function getDimonHistory(): Promise<DimonHistoryItem[]> {
-  const { data } = await api.get("/dimon/history");
+  const { data } = await api.get("/gold/history");
   return data;
 }
 
@@ -4640,14 +4640,14 @@ export async function queryDimonTable(body: {
 }): Promise<DimonQueryResult> {
   const key = `dimon-query:${JSON.stringify(body)}`;
   return cachedAnalytics(key, async () => {
-    const { data } = await api.post("/dimon/query", body, { timeout: 180000 });
+    const { data } = await api.post("/gold/query", body, { timeout: 180000 });
     return data as DimonQueryResult;
   });
 }
 
 export async function getDimonInfo(table: string): Promise<DimonInfo> {
   return cachedAnalytics(`dimon-info:${table}`, async () => {
-    const { data } = await api.get("/dimon/info", { params: { table } });
+    const { data } = await api.get("/gold/info", { params: { table } });
     return data as DimonInfo;
   });
 }
@@ -4661,7 +4661,7 @@ export async function getDimonGoldSchema(
   goldTable: string,
 ): Promise<DimonGoldColumn[]> {
   return cachedAnalytics(`gold-schema:${goldTable}`, async () => {
-    const { data } = await api.get("/dimon/gold-schema", {
+    const { data } = await api.get("/gold/gold-schema", {
       params: { gold_table: goldTable },
     });
     return (data.columns || []) as DimonGoldColumn[];
