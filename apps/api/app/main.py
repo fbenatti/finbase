@@ -54,6 +54,13 @@ async def lifespan(app: FastAPI):
         from app.models.audit_log import AuditLog  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
+        # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
+        # de qualquer worker que esteja no meio de uma transação. Sem limite, o
+        # startup esperava minutos — e, com a API já servindo, travava as coletas
+        # que tocavam as mesmas tabelas. O limite transforma a espera longa em
+        # erro rápido; o retry abaixo tenta de novo.
+        await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+        await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
         # Retenção de auditoria (roda depois do create_all)
         await conn.execute(text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(days=settings.audit_retention_days))
         # create_all does not evolve PostgreSQL tables.  Keep this small,

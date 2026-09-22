@@ -581,6 +581,12 @@ async def collect_environment(
         "skipped": skipped,
         "message": (
             f"{len(queued)} coleta(s) enfileirada(s) no ambiente '{environment_slug_value}'"
-            + (f"; {len(skipped)} fonte(s) planejada(s) ignorada(s)" if skipped else "")
+            + (
+                # O motivo é do skip, não presumido: carga manual não é
+                # "planejada", e dizer que era confundiria o operador.
+                "; " + "; ".join(
+                    f"{item.get('source_key')}: {item.get('reason')}" for item in skipped
+                ) if skipped else ""
+            )
         ),
     }
