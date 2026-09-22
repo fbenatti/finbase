@@ -30,6 +30,10 @@ _LOGIN_IDENTIFIER_RE = re.compile(r"^[^@\s]+(?:@[^@\s]+)?$")
 
 
 async def _get_provider(db: AsyncSession, name: str, enabled_only: bool = True) -> SsoProvider:
+    # Provider names may arrive once- or twice-percent-encoded when a name
+    # contains spaces (for example, ``Entra%20ID`` in a stored redirect URI).
+    # Normalize before querying so the callback remains compatible with both.
+    name = urllib.parse.unquote(name)
     result = await db.execute(select(SsoProvider).where(SsoProvider.name == name))
     provider = result.scalar_one_or_none()
     if provider is None:
