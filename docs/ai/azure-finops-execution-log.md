@@ -3073,3 +3073,51 @@ Ambos leem dos cubos Gold materializados pela governança pelo endpoint
 `/rightsizing/dashboard`; a reconciliação resumo × detalhe compara a **mesma fonte**.
 
 `tsc` exit 0 · suíte 9 failed / 401 passed · ambas as rotas respondem 200.
+
+---
+
+## 42. Dashboard completo: custo e antes/depois (fim da sequência ruim)
+
+### 42.1 O erro que o usuário apontou
+
+Os dashboards mostravam **mecânica** (veredito, peso de alocação, nível de AKS) em
+vez de responder a pergunta de negócio: *quanto gasto, onde, e quanto economiza*.
+
+A raiz era dupla:
+
+1. **Cobertura minúscula** — só 67 VMs tinham métrica; os 1.154 VMSS e os 968 mil
+   recursos com custo ficavam invisíveis;
+2. **Visão errada** — eu exibia o encanamento do motor, não o valor.
+
+### 42.2 A correção de dado decuplicou o resultado
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| Série | 844 mil (67 VMs) | **3,08 M (VM + 183 VMSS)** |
+| Perfil | 441 | **1.746** |
+| Candidatos | 49 | **193** |
+| VALID / saving | 10 / R$ 589 | **23 / R$ 6.050/mês** |
+
+### 42.3 Dashboard completo
+
+`/saving-actions` agora é uma visão única de custo e oportunidade:
+
+1. **Resumo** — custo total (R$ 37,3M), oportunidade (R$ 6.050/mês), maior caso;
+2. **Custo por mês** e **por serviço** — barras;
+3. **Antes/depois** — peça central: barra DE (azul) × PARA (verde) por recurso,
+   ordenada pelo saving;
+4. **Detalhe** — DE/PARA, vCPU, memória, CPU p95, custos e saving.
+
+Endpoint `GET /rightsizing/overview` com fonte única (`resource_cost` +
+`rightsizing_candidate` × perfil para o tipo).
+
+Exemplo concreto que a tela mostra: `aks-aksflowpool-…-vmss`, Standard_E8s_v5 →
+Standard_E4-2ads_v5, custo cai de R$ 4.055,88 para R$ 1.679,29 — **R$ 2.376,59/mês**.
+
+### 42.4 Pendência honesta
+
+`resource_type` no `rightsizing_candidate` ainda vem do perfil por JOIN (a coluna
+não está materializada no candidato). Funciona, mas o ideal é o candidato já
+nascer com o tipo — evita um JOIN a cada leitura do dashboard.
+
+Suíte: 9 failed / 401 passed.
