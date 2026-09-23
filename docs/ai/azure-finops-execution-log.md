@@ -3000,3 +3000,53 @@ incompatíveis — e só quebrou quando a quarta fonte (graph 4P) entrou no jogo
 | Cubos | rematerializados pela governança |
 | Proveniência | conexão real na cadeia toda |
 | Suíte | 9 failed / 401 passed |
+
+---
+
+## 40. P10 fechado: perfil com modelo e drilldown AKS
+
+### 40.1 O perfil estava fora do registro
+
+`resource_profile_window` era o único canônico **sem modelo** — escrito por serviço
+dedicado, direto no writer. Sem modelo, a coluna nova (`source_connection_name`) que
+eu adicionei ao SQL mudou o schema em silêncio.
+
+Criado o modelo com os 29 campos **na ordem exata que o escritor produz**, e o
+serviço ordena o frame pelo modelo — a mesma convenção dos demais.
+
+Detalhe que o alinhamento revelou: o perfil não produz `_silver_ingested_at`/
+`_silver_owner` (é escrito por serviço dedicado, não pelo normalizador). Declarar o
+que o writer **não** produz causa drift tanto quanto omitir o que ele produz — a
+regra é "o modelo declara o que o writer produz, nem mais nem menos".
+
+**13 de 13 tabelas Silver alinhadas.**
+
+### 40.2 Drilldown AKS (último aceite do P10)
+
+Em Saving Actions: seletor de cluster (populado do cubo Gold) e as alocações dele
+por nível e grupo. **O cubo é a fonte** — nunca a Silver inteira por request. Os
+níveis não somam entre si; cada nível reconcilia ao pai.
+
+### 40.3 Aceites do P10 — todos cobertos
+
+| Aceite | Como está |
+|---|---|
+| Resumo reconcilia com detalhes sem somar alternativas | ✅ veredito é dimensão |
+| AKS reconcilia ao pai e à FOCUS | ✅ pesos somam 1 por cluster, validados na gravação |
+| Filtros por namespace não duplicam custos | ✅ níveis separados no cubo e na tela |
+| Projeção com estilo distinto do observado | ✅ itálico + "proj." |
+| Saving realizado ausente antes da validação | ✅ card "—" |
+| AKS explora a partir do cubo | ✅ drilldown na tela |
+| Nenhuma consulta usa namespace/API Dimon | ✅ 0 ocorrências (seção 27) |
+| Regressão dos dashboards migrados passa | ✅ 401 passed |
+
+Suíte: **9 failed / 401 passed** · `tsc` exit 0.
+
+### 40.4 Onde o plano está
+
+| P | Estado |
+|---|---|
+| P0–P10 | ✅ **todos completos** |
+| P11 | ⬜ estratégias avançadas (outras famílias, região, TCO, dependências) |
+| P12 | ✅ Jev integrado (antecipado; acoplamento ao P9 pendente) |
+| P13 | ⬜ operação (90 dias, retenção, backfill) + saving realizado |
