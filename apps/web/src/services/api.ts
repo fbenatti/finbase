@@ -5319,3 +5319,48 @@ export async function testIntegration(
   const { data } = await api.post(`/integrations/${encodeURIComponent(code)}/test`);
   return data;
 }
+
+
+// ── P10: direitosizing (candidatos, decisões e revisão) ───────────────────────
+export interface RightsizingDecisionRow {
+  evidence_hash: string;
+  run_id: string;
+  resource_id: string;
+  resource_name: string | null;
+  region_id: string | null;
+  deterministic_verdict: string;
+  veto_reason: string | null;
+  review_status: string;
+  sku_from: string | null;
+  sku_to: string | null;
+  cost_from_monthly: number | null;
+  cost_to_monthly: number | null;
+  saving_monthly: number | null;
+  cpu_p95: number | null;
+  observed_days: number | null;
+  _source_connection_name: string | null;
+  [key: string]: unknown;
+}
+
+export interface RightsizingDecisionsResponse {
+  items: RightsizingDecisionRow[];
+  total: number;
+  review_summary: Record<string, number>;
+  saving_approved: number;
+  saving_pending: number;
+}
+
+export async function getRightsizingDecisions(limit = 200): Promise<RightsizingDecisionsResponse> {
+  const { data } = await api.get("/rightsizing/decisions", { params: { limit } });
+  return data;
+}
+
+export async function ReviewDecision(
+  evidenceHash: string,
+  body: { status: string; reviewer?: string; note?: string },
+): Promise<{ review_status: string; message: string }> {
+  const { data } = await api.put(
+    `/rightsizing/decisions/${encodeURIComponent(evidenceHash)}/review`, body,
+  );
+  return data;
+}

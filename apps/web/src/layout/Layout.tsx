@@ -42,6 +42,7 @@ import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForPath } from "../auth/moduleMap";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
+import TrendingDownIcon from "@mui/icons-material/TrendingDown";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
@@ -69,6 +70,7 @@ const menuGroups = [
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
+      { path: "/rightsizing", label: "Rightsizing", icon: <TrendingDownIcon /> },
       { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
       { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },

@@ -12,6 +12,8 @@ import re
 import time
 from typing import Any
 
+from app.models.destination import DestinationTable
+from app.models.source_connection import SourceConnection
 from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource
 from app.services import iceberg_service as iceberg
 from app.services.trino_service import execute
