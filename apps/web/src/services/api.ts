@@ -783,7 +783,9 @@ export interface SourceConnection {
   cloud_name: string | null;
   cloud_scope: string | null;
   config_json: Record<string, unknown>;
-  blob_prefixes: string[];
+  // Lista de caminhos (formato antigo) ou mapa `{tipo de relatório: caminho}`
+  // (novo). O tipo decide qual coletor usa o caminho.
+  blob_prefixes: string[] | Record<string, string>;
   last_test_status: string | null;
   last_test_message: string | null;
   last_tested_at: string | null;

@@ -163,6 +163,43 @@ const emptyForm = {
   arg_orphan_rules: "",
 };
 
+
+/**
+ * `blob_prefixes` aceita duas formas na API: lista de caminhos (antiga) e mapa
+ * `{tipo de relatório: caminho}` (nova). A tela edita no formato do mapa, uma
+ * linha por tipo, porque o tipo é o que decide qual coletor usa o caminho.
+ */
+function prefixesToText(prefixes: unknown): string {
+  if (!prefixes) return "";
+  if (Array.isArray(prefixes)) return prefixes.filter(Boolean).join("\n");
+  if (typeof prefixes === "object") {
+    return Object.entries(prefixes as Record<string, string>)
+      .map(([tipo, caminho]) => `${tipo}: ${caminho}`)
+      .join("\n");
+  }
+  return String(prefixes);
+}
+
+/** Converte as linhas da tela no mapa que a API espera. */
+function textToPrefixes(texto: string): Record<string, string> {
+  const saida: Record<string, string> = {};
+  for (const linha of (texto || "").split("\n")) {
+    const limpa = linha.trim();
+    if (!limpa) continue;
+    const separador = limpa.indexOf(":");
+    if (separador > 0) {
+      const tipo = limpa.slice(0, separador).trim();
+      const caminho = limpa.slice(separador + 1).trim();
+      if (tipo && caminho) saida[tipo] = caminho;
+    } else {
+      // Linha sem tipo é o caminho do custo realizado — mantém compatibilidade
+      // com quem já digitava só o caminho.
+      saida.actual_cost = limpa;
+    }
+  }
+  return saida;
+}
+
 export default function Connections() {
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connectionCatalog, setConnectionCatalog] = useState<SourceConnection[]>([]);
@@ -335,7 +372,7 @@ export default function Connections() {
         client_secret: cfg.client_secret || "",
         storage_account: cfg.storage_account || "",
         container_name: cfg.container_name || "",
-        blob_prefixes: (conn.blob_prefixes || []).join("\n"),
+        blob_prefixes: prefixesToText(conn.blob_prefixes),
       });
     } else if (conn.connector_type === "azure_openai_ptu") {
       // The API deliberately omits secrets. Never repopulate the write-only field.
@@ -377,7 +414,7 @@ export default function Connections() {
         oci_region: cfg.region || "sa-saopaulo-1",
         oci_private_key: cfg.private_key || cfg.key_content || "",
         oci_genai_compartments: (Array.isArray(cfg.generative_ai_compartment_ids) ? cfg.generative_ai_compartment_ids : []).join("\n"),
-        blob_prefixes: (conn.blob_prefixes || []).join("\n"),
+        blob_prefixes: prefixesToText(conn.blob_prefixes),
       });
     } else if (conn.connector_type === "mongodb_atlas") {
       setForm({
@@ -656,7 +693,7 @@ export default function Connections() {
       cloud_name: form.cloud_name || null,
       cloud_scope: form.cloud_scope === "other" ? null : (form.cloud_scope || null),
       config_json: configJson,
-      blob_prefixes: form.blob_prefixes.split("\n").map((value) => value.trim()).filter(Boolean),
+      blob_prefixes: textToPrefixes(form.blob_prefixes),
     };
   };
 
@@ -1120,10 +1157,15 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, storage_account: e.target.value })} />
                 <TextField label="Container Name" value={form.container_name}
                   onChange={(e) => setForm({ ...form, container_name: e.target.value })} />
-                <TextField label="Blob Prefixes (um por linha)" multiline rows={3}
+                <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={4}
                   value={form.blob_prefixes}
                   onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
-                  helperText="Ex: reports/Report4P-actual-cost/" />
+                  helperText={
+                    "O tipo decide qual coletor usa o caminho — não é chumbado no código.\n"
+                    + "Ex.:\nactual_cost: reports/Report4P-actual-cost/\n"
+                    + "amortized_cost: reports/Report4P-amortized-cost/\n"
+                    + "price_sheet: reports/report_-pricesheet/"
+                  } />
               </>
             )}
 
@@ -1165,7 +1207,7 @@ export default function Connections() {
                   value={form.oci_private_key}
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
                   helperText="Cole o conteudo completo da chave privada (.pem)" />
-                <TextField label="Blob Prefixes (um por linha)" multiline rows={2}
+                <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={2}
                   value={form.blob_prefixes}
                   onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
                   helperText="Padrão: reports/cost-csv (relatórios de custo financeiro)" />
