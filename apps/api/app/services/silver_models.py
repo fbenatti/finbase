@@ -218,6 +218,12 @@ PRICE_CATALOG = SilverModel(
         _f("unit_of_measure", "varchar", ROLE_DIMENSION),
         _f("price_type", "varchar", ROLE_IDENTITY,
            notes="Consumption (uso) | Reservation (compromisso) | DevTest."),
+        _f("price_source", "varchar", ROLE_IDENTITY, required=True,
+           notes="PUBLIC_RETAIL | CONTRACTED | OBSERVED_EFFECTIVE. Preço contratual "
+                 "e retail não se misturam: quem consome escolhe a fonte."),
+        _f("price_confidence", "varchar", ROLE_QUALITY,
+           notes="HIGH (contratual) | MEDIUM (observado comparável) | "
+                 "LOW (retail indicativo)."),
         _f("reservation_term", "varchar", ROLE_DIMENSION, notes="1 Year | 3 Years | 5 Years."),
         _f("currency", "varchar", ROLE_IDENTITY, notes="FOCUS PricingCurrency."),
         _f("unit_price", "decimal", ROLE_MEASURE, notes="Preço da unidade de medida."),
@@ -233,11 +239,49 @@ PRICE_CATALOG = SilverModel(
 )
 
 
+# ── Modelo: catálogo de SKU de compute ────────────────────────────────────────
+# O que dá elegibilidade: quais tamanhos existem, em que regiões e com que
+# restrição. Sem isto um candidato pode ser sugerido num SKU que a assinatura
+# não pode criar — o próprio aceite do P7 proíbe.
+
+COMPUTE_SKU = SilverModel(
+    name="compute_sku_catalog",
+    table="compute_sku_catalog",
+    description="SKUs de compute disponíveis por região, com restrições e capacidades.",
+    grain=("cloud_provider", "sub_account_id", "region_id", "sku_name", "valid_from"),
+    time_field="valid_from",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("sub_account_id", "varchar", ROLE_IDENTITY, notes="Assinatura do escopo."),
+        _f("region_id", "varchar", ROLE_IDENTITY, required=True, notes="FOCUS RegionId."),
+        _f("sku_name", "varchar", ROLE_IDENTITY, required=True),
+        _f("sku_tier", "varchar", ROLE_DIMENSION),
+        _f("sku_family", "varchar", ROLE_DIMENSION),
+        _f("vcpus", "bigint", ROLE_DIMENSION),
+        _f("memory_gb", "decimal", ROLE_DIMENSION),
+        _f("max_data_disks", "bigint", ROLE_DIMENSION),
+        _f("premium_io", "varchar", ROLE_DIMENSION),
+        _f("accelerated_networking", "varchar", ROLE_DIMENSION),
+        # Elegibilidade: restrição declarada pelo provedor veta o candidato.
+        _f("is_available", "varchar", ROLE_QUALITY, required=True,
+           notes="SIM | NAO. Derivado das restrições da API."),
+        _f("restrictions_json", "varchar", ROLE_QUALITY),
+        _f("restriction_reason", "varchar", ROLE_QUALITY),
+        _f("zones", "varchar", ROLE_DIMENSION),
+        _f("valid_from", "timestamp", ROLE_TIME, required=True),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
     RESOURCE_COST.name: RESOURCE_COST,
     PRICE_CATALOG.name: PRICE_CATALOG,
+    COMPUTE_SKU.name: COMPUTE_SKU,
 }
 
 

@@ -1415,6 +1415,45 @@ def consumer_main(worker_id: int):
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
                                 continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_compute_skus":
+                                # Catálogo de SKUs: elegibilidade por região.
+                                from app.services.azure_compute_sku_service import (
+                                    run_compute_sku_collection,
+                                )
+                                try:
+                                    _sku = run_compute_sku_collection(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _sku_exc:
+                                    import traceback as _tb_sku
+                                    _tb_sku.print_exc()
+                                    _t_sku = _ptu_session.get(EtlTask, task_id)
+                                    if _t_sku:
+                                        _t_sku.status = "FAILED"
+                                        _t_sku.phase = f"Catálogo de SKUs falhou: {str(_sku_exc)[:400]}"
+                                        _t_sku.errors = [str(_sku_exc)[:1000]]
+                                        _t_sku.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_sku_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_sku_ok:
+                                    _t_sku_ok.status = "COMPLETED"
+                                    _t_sku_ok.phase = (
+                                        f"SKUs de compute: {_sku.get('rows_bronze', 0)} linha(s) · "
+                                        f"{_sku.get('subscriptions', 0)} assinatura(s) · "
+                                        f"{_sku.get('available_rows', 0)} disponíveis"
+                                    )
+                                    _t_sku_ok.rows_raw = _sku.get("rows_bronze", 0)
+                                    _t_sku_ok.billing_periods = [_sku.get("period")] if _sku.get("period") else []
+                                    _t_sku_ok.result_json = _sku
+                                    _t_sku_ok.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_retail_price":
                                 # Catálogo de preço público (API sem autenticação).
                                 from app.services.azure_retail_price_service import (
