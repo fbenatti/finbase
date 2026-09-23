@@ -766,6 +766,57 @@ RIGHTSIZING_DECISION = SilverModel(
 )
 
 
+# ── Modelo: Perfil da janela (P6) ─────────────────────────────────────────────
+# Era escrito fora do registro — e, sem modelo, qualquer coluna nova no SQL do
+# serviço mudava o schema em silêncio. Declarado na ordem exata que o serviço
+# produz, para a tabela física e o modelo nunca divergirem.
+RESOURCE_PROFILE_WINDOW = SilverModel(
+    name="resource_profile_window",
+    table="resource_profile_window",
+    description="Perfil de uso por recurso e métrica, com cobertura e confiança.",
+    grain=("resource_id", "metric", "billing_period"),
+    primary_measure="effective_cost",
+    time_field=None,
+    fields=(
+        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("resource_name", "varchar", ROLE_DIMENSION),
+        _f("resource_sku", "varchar", ROLE_DIMENSION),
+        _f("resource_state", "varchar", ROLE_DIMENSION),
+        _f("region_id", "varchar", ROLE_DIMENSION),
+        _f("sub_account_id", "varchar", ROLE_IDENTITY),
+        _f("resource_type", "varchar", ROLE_DIMENSION),
+        _f("metric", "varchar", ROLE_IDENTITY, required=True),
+        _f("billing_period", "varchar", ROLE_IDENTITY),
+        _f("requested_days", "bigint", ROLE_QUALITY,
+           notes="Janela pedida; o aceite do P6 compara com a observada."),
+        _f("observed_days", "bigint", ROLE_QUALITY),
+        _f("samples", "bigint", ROLE_QUALITY),
+        _f("value_min", "double", ROLE_MEASURE),
+        _f("p50", "double", ROLE_MEASURE),
+        _f("p95", "double", ROLE_MEASURE, notes="Pico que o P8 usa para dimensionar."),
+        _f("p99", "double", ROLE_MEASURE),
+        _f("value_max", "double", ROLE_MEASURE),
+        _f("value_avg", "double", ROLE_MEASURE),
+        _f("coverage", "double", ROLE_QUALITY, notes="Amostras sobre as esperadas."),
+        _f("confidence", "varchar", ROLE_QUALITY, notes="ALTA | MEDIA | BAIXA."),
+        _f("effective_cost", "double", ROLE_MEASURE),
+        _f("billed_cost", "varchar", ROLE_QUALITY),
+        _f("consumed_quantity", "varchar", ROLE_QUALITY),
+        _f("pricing_currency", "varchar", ROLE_QUALITY),
+        _f("source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; a proveniência da decisão vem daqui."),
+        _f("profile_hash", "varchar", ROLE_QUALITY,
+           notes="Mesma entrada, mesmo hash: perfil reproduzível."),
+        _f("profile_built_at", "varchar", ROLE_QUALITY),
+        # O perfil e gravado por servico dedicado, nao pelo normalizador: ele nao
+        # produz _silver_ingested_at/_silver_owner, e declarar o que o writer nao
+        # produz causa drift. O que o writer produz: _billing_period e _processed_at.
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_processed_at", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
@@ -780,6 +831,7 @@ MODELS: dict[str, SilverModel] = {
     PTU.name: PTU,
     RIGHTSIZING_CANDIDATE.name: RIGHTSIZING_CANDIDATE,
     RIGHTSIZING_DECISION.name: RIGHTSIZING_DECISION,
+    RESOURCE_PROFILE_WINDOW.name: RESOURCE_PROFILE_WINDOW,
 }
 
 

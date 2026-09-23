@@ -187,6 +187,13 @@ async def build_profile_window(*, requested_days: int = 15) -> dict[str, Any]:
     import pandas as pd
 
     frame = pd.DataFrame(linhas)
+    # Ordem = ordem declarada no modelo: o writer anexa _billing_period/_processed_at,
+    # entao a ordem do frame determina o schema fisico.
+    from app.services.silver_models import model as _modelo
+
+    declaradas = [c for c in _modelo("resource_profile_window").column_names() if c in frame.columns]
+    extras = [c for c in frame.columns if c not in declaradas]
+    frame = frame[declaradas + extras]
     frame["requested_days"] = dias
     frame["profile_hash"] = perfil_hash
     frame["profile_built_at"] = carimbo

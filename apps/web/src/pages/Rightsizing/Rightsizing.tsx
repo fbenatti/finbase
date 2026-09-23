@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog,
-  DialogActions, DialogContent, DialogTitle, Stack, Table, TableBody,
+  DialogActions, DialogContent, DialogTitle, MenuItem, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import {
@@ -37,6 +37,7 @@ export default function Rightsizing() {
   const [items, setItems] = useState<Record<string, unknown>[]>([]);
   const [resumo, setResumo] = useState<Record<string, unknown> | null>(null);
   const [dash, setDash] = useState<SavingDashboard | null>(null);
+  const [clusterSel, setClusterSel] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [revisando, setRevisando] = useState<Record<string, unknown> | null>(null);
@@ -79,6 +80,16 @@ export default function Rightsizing() {
       setSalvando(false);
     }
   };
+
+  // Drilldown: clusters do cubo e as alocações do selecionado. Os níveis
+  // (node_pool × namespace) NÃO somam entre si — cada nível reconcilia ao pai.
+  const clustersDisponiveis = Array.from(
+    new Set((dash?.aks || []).map((a) => String(a.parent_resource_id))),
+  ).filter(Boolean).sort();
+  const aksn = (dash?.aks || []).filter((a) => String(a.parent_resource_id) === clusterSel);
+  useEffect(() => {
+    if (!clusterSel && clustersDisponiveis.length) setClusterSel(clustersDisponiveis[0]);
+  }, [clusterSel, clustersDisponiveis.join("|")]);
 
   if (loading) return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
 
@@ -181,6 +192,55 @@ export default function Rightsizing() {
             </CardContent>
           </Card>
         </Stack>
+      )}
+
+      {dash && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="caption" color="text.secondary">
+              Exploração AKS (cubo Gold · pesos validados somam 1 por cluster)
+            </Typography>
+            <Stack direction="row" spacing={2} sx={{ mt: 1, mb: 1.5 }} alignItems="center">
+              <TextField
+                select size="small" sx={{ minWidth: 320 }}
+                label="Cluster"
+                value={clusterSel}
+                onChange={(e) => setClusterSel(e.target.value)}
+              >
+                {clustersDisponiveis.map((c) => (
+                  <MenuItem key={c} value={c}>{c}</MenuItem>
+                ))}
+              </TextField>
+              <Typography variant="caption" color="text.secondary">
+                {aksn.length} alocação(ões) no cluster selecionado
+              </Typography>
+            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Nível</TableCell>
+                  <TableCell>Grupo</TableCell>
+                  <TableCell>Namespace</TableCell>
+                  <TableCell align="right">Peso</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {aksn.slice(0, 12).map((a, i) => (
+                  <TableRow key={i}>
+                    <TableCell>{String(a.allocation_level)}</TableCell>
+                    <TableCell>
+                      <Typography variant="caption">{String(a.allocation_key || "—")}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption">{String(a.namespace || "—")}</Typography>
+                    </TableCell>
+                    <TableCell align="right">{Number(a.allocation_weight).toFixed(4)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
       <Table size="small">
         <TableHead>
