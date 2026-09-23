@@ -1,9 +1,15 @@
 """Regra de cubo Gold — pré-agregação de custo materializada a partir da Silver.
 
-A Gold rule selects one or more sources. Each source points at ONE OR MORE
-Gold tables with the same normalized structure (e.g. dest_modelo_focus and
-dest_modelo_focus_planning). The tables of a source are unioned together
-(same filters applied on each) into a single clean dataset, then aggregated.
+Uma regra Gold seleciona uma ou mais **fontes Silver**. Cada fonte aponta para
+uma ou mais tabelas Silver com a mesma estrutura normalizada — por exemplo
+`resource_cost` para os cubos financeiros, ou `dest_modelo_focus` e o espelho
+`dest_modelo_focus_planning` para os cubos organizacionais legados. As tabelas de
+uma fonte são unidas (mesmos filtros em cada uma) num único conjunto e só então
+agregadas.
+
+O texto anterior descrevia as fontes como "Gold tables". A camada errada no
+docstring sugeria um cruzamento que não existia: `dest_modelo_focus` é Silver
+detalhada, e o cruzamento é justamente o que o materializador produz.
 """
 
 from sqlalchemy import (
@@ -65,10 +71,10 @@ class GoldMartRule(Base):
 class GoldMartRuleSource(Base):
     """Uma fonte que contribui linhas para o cubo Gold.
 
-    A source binds one or more Gold tables with the same normalized structure
-    (e.g. dest_modelo_focus + dest_modelo_focus_planning). Filters, value
-    column and percent apply to every table in the source; the tables are
-    unioned into a single clean dataset before aggregation.
+    Liga uma ou mais tabelas **Silver** de mesma estrutura normalizada (por
+    exemplo `dest_modelo_focus` + `dest_modelo_focus_planning`). Filtros, coluna
+    de valor e percentual aplicam-se a toda tabela da fonte; as tabelas são
+    unidas num único conjunto antes da agregação.
     """
     __tablename__ = "gold_rule_source"
     __table_args__ = (Index("ix_gold_rule_source_rule", "rule_id"),)

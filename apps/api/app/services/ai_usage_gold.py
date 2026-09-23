@@ -13,6 +13,7 @@ from typing import Any
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
+from app.services.gold_governance import publish_gold_cube
 
 logger = logging.getLogger(__name__)
 
@@ -24,43 +25,54 @@ COPILOT_LICENSE_TABLE = "dest_dm_copilot_license_snapshot"
 COPILOT_USER_PERIOD_TABLE = "dest_dm_copilot_user_period"
 
 
+#: Código da `gold_rule` de cada tabela auxiliar. O manifesto usa o código da
+#: regra, para que a linha do manifesto e a linha da governança falem do mesmo
+#: objeto.
+_CUBE_CODES: dict[str, str] = {
+    AI_CONSUMPTION_TABLE: "ai_consumption_daily",
+    AI_LICENSE_TABLE: "ai_license_snapshot",
+    COPILOT_USAGE_TABLE: "copilot_usage_daily",
+    COPILOT_LICENSE_TABLE: "copilot_license_snapshot",
+    COPILOT_USER_PERIOD_TABLE: "copilot_user_period",
+}
+
+
+def _cube_code_for(table: str) -> str:
+    """Código da regra para uma tabela auxiliar; a própria tabela como fallback."""
+    return _CUBE_CODES.get(table, table)
+
+
 def _number(name: str) -> str:
     return f"COALESCE(TRY_CAST({name} AS DOUBLE), 0)"
 
 
-async def _publish(table: str, select_sql: str, *, partition_column: str = "_billing_period") -> int:
-    """Publica uma CTAS validada usando o mesmo swap atômico das demais cubos Gold."""
-    from app.services import iceberg_service as iceberg
+async def _publish(
+    table: str,
+    select_sql: str,
+    *,
+    partition_column: str = "_billing_period",
+    cube_code: str | None = None,
+) -> int:
+    """Publica a Gold de IA pelo caminho governado.
 
-    staging = f"{table}_stg_{time.time_ns()}"
-    iceberg.ensure_namespace(GOLD)
-    sql = f"""
-      CREATE TABLE iceberg.{GOLD}.{staging}
-      WITH (partitioning = ARRAY['{partition_column}']) AS
-      {select_sql}
+    Antes chamava staging + swap direto, criando um quarto caminho de publicação
+    sem manifesto: as tabelas existiam, mas não havia registro de fontes, hash,
+    linhas nem rollback. Agora delega a `gold_governance.publish_gold_cube`, que é
+    o único ponto de publicação da Gold.
+
+    Mantém a semântica anterior de recusar materialização vazia
+    (`empty_is_error=True`): para estas tabelas, zero linha já foi tratado como
+    falha pelo dashboard.
     """
-    try:
-        await trino_execute(sql, timeout_s=1800)
-        rows = await trino_execute(
-            f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}",
-            timeout_s=180,
-        )
-        row_count = int((rows[0] if rows else {}).get("row_count") or 0)
-        if row_count <= 0:
-            raise RuntimeError(f"Materialização {table} não produziu linhas")
-        iceberg.swap_staged_table(
-            table,
-            staging,
-            namespace=GOLD,
-            known_row_count=row_count,
-        )
-        return row_count
-    except Exception:
-        try:
-            iceberg.cleanup_staged_table(staging, namespace=GOLD)
-        except Exception:
-            pass
-        raise
+    resultado = await publish_gold_cube(
+        cube_code=cube_code or table.removeprefix("dest_dm_"),
+        table=table,
+        select_sql=select_sql,
+        namespace=GOLD,
+        partition_column=partition_column,
+        empty_is_error=True,
+    )
+    return resultado.rows
 
 
 def _consumption_select() -> str:
@@ -246,6 +258,6 @@ async def refresh_ai_usage_gold_cubes(only_tables: list[str] | None = None) -> d
         definitions = [(table, sql) for table, sql in definitions if table in wanted]
     results: dict[str, int] = {}
     for table, select_sql in definitions:
-        results[table] = await _publish(table, select_sql)
+        results[table] = await _publish(table, select_sql, cube_code=_cube_code_for(table))
         logger.info("AI Gold refreshed: %s (%d rows)", table, results[table])
     return {"namespace": GOLD, "tables": results}

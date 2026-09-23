@@ -116,33 +116,32 @@ async def _build_routed_staging(
 
 
 async def _publish_link(link: AiCostLink, schema: dict[str, str], routed: str) -> int:
-    """Publish a final clone from its small routed partition, never from full FOCUS."""
-    from app.services import iceberg_service as iceberg
-    from app.services.trino_service import execute
+    """Publica o clone final a partir da partição roteada, nunca da FOCUS inteira.
+
+    A publicação passa por `gold_governance.publish_gold_cube`: antes fazia
+    staging + swap direto, o que criava um caminho de publicação de cubo sem
+    manifesto. O vínculo (`ai_cost_link`) mantém o próprio controle de
+    materialização, e o manifesto registra fontes, hash e rollback.
+    """
+    from app.services.gold_governance import publish_gold_cube
+
     table = link_gold_table_name(link.id)
-    staging = f"{table}_stg_{time.time_ns()}"
     columns = ", ".join(_quote_ident(name) for name in schema.values())
     period = schema.get("_billing_period") or schema.get("period")
-    sql = (
-        f"CREATE TABLE iceberg.gold.{staging} WITH (partitioning = ARRAY['{period}']) AS "
-        f"SELECT {columns} FROM iceberg.gold.{routed} WHERE _ai_cost_link_id = {int(link.id)}"
+    select_sql = (
+        f"SELECT {columns} FROM iceberg.gold.{routed} "
+        f"WHERE _ai_cost_link_id = {int(link.id)}"
     )
-    try:
-        await execute(sql, timeout_s=1800)
-        result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.gold.{staging}", timeout_s=180)
-        rows = int((result[0] if result else {}).get("row_count") or 0)
-        link.materialization_table = table
-        link.materialization_rows = rows
-        if rows:
-            iceberg.swap_staged_table(table, staging, known_row_count=rows)
-            link.materialization_status = "UPDATED"
-        else:
-            iceberg.cleanup_staged_table(staging)
-            link.materialization_status = "EMPTY"
-        return rows
-    except Exception:
-        iceberg.cleanup_staged_table(staging)
-        raise
+    resultado = await publish_gold_cube(
+        cube_code=f"ai_cost_link_{int(link.id)}",
+        table=table,
+        select_sql=select_sql,
+        partition_column=period,
+    )
+    link.materialization_table = table
+    link.materialization_rows = resultado.rows
+    link.materialization_status = "UPDATED" if resultado.rows else "EMPTY"
+    return resultado.rows
 
 
 async def materialize_ai_cost_relationships(session: Any, *, run_id: int, progress: Any | None = None) -> dict[str, Any]:

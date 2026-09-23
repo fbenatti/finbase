@@ -108,6 +108,7 @@ async def lifespan(app: FastAPI):
         from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant, SsoProvider  # noqa: F401
         from app.models.audit_log import AuditLog  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
+        from app.models.gold_manifest import GoldManifest  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
@@ -397,6 +398,40 @@ async def lifespan(app: FastAPI):
               created_at TIMESTAMPTZ DEFAULT now()
             )""",
             "CREATE INDEX IF NOT EXISTS ix_gold_rule_source_rule ON gold_rule_source (rule_id)",
+            # Manifesto de cada materialização Gold (G2). PostgreSQL guarda
+            # metadata de execução; o dado financeiro continua no lakehouse.
+            # Existe porque a coluna materialization_rows de gold_rule não é
+            # confiável: cinco regras ficaram com status ERROR e contagem
+            # preenchida, e a tabela publicada estava em outro namespace.
+            """CREATE TABLE IF NOT EXISTS gold_manifest (
+              id BIGSERIAL PRIMARY KEY,
+              cube_code VARCHAR(120) NOT NULL,
+              physical_table VARCHAR(140) NOT NULL,
+              namespace VARCHAR(40) NOT NULL DEFAULT 'gold',
+              contract_version VARCHAR(20) NOT NULL,
+              run_id INTEGER,
+              rule_id INTEGER,
+              status VARCHAR(20) NOT NULL,
+              reason VARCHAR(400),
+              sql_hash VARCHAR(64),
+              source_tables JSONB NOT NULL DEFAULT '[]'::jsonb,
+              source_freshness_at TIMESTAMPTZ,
+              rows_read BIGINT,
+              rows_written BIGINT,
+              financial_total_in DOUBLE PRECISION,
+              financial_total_out DOUBLE PRECISION,
+              financial_delta DOUBLE PRECISION,
+              tolerance DOUBLE PRECISION NOT NULL DEFAULT 0.01,
+              reconciliation_status VARCHAR(20),
+              currency VARCHAR(8),
+              previous_snapshot_id VARCHAR(64),
+              rollback_table VARCHAR(140),
+              error TEXT,
+              started_at TIMESTAMPTZ,
+              finished_at TIMESTAMPTZ DEFAULT now()
+            )""",
+            "CREATE INDEX IF NOT EXISTS ix_gold_manifest_cube ON gold_manifest (cube_code, started_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_gold_manifest_status ON gold_manifest (status, started_at DESC)",
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE gold_rule_source ADD COLUMN IF NOT EXISTS gold_tables JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS measure_columns JSONB NOT NULL DEFAULT '[]'::jsonb",

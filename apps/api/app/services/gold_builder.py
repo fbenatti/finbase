@@ -179,9 +179,19 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
     if not target_exists:
         # Primeira publicação: renomear o staging inteiro é a troca atômica
         # mais barata e preserva a partition spec.
-        return iceberg.swap_staged_table(
+        linhas = iceberg.swap_staged_table(
             table, temp_name, namespace=namespace, known_row_count=len(frame)
         )
+        from app.services.gold_governance import record_frame_publication_blocking
+
+        record_frame_publication_blocking(
+            cube_code=table,
+            physical_table=table,
+            rows_written=int(linhas),
+            namespace=namespace,
+            source_tables=[f"{layers.detail_layer()}.{GOLD_GOLD_SOURCE}"],
+        )
+        return linhas
 
     total = 0
     grouped = frame.groupby(["_billing_period", "source_connection_id"], dropna=False)
@@ -211,6 +221,18 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
         iceberg.cleanup_staged_table(temp_name, namespace=namespace)
     except Exception:  # noqa: BLE001
         pass
+    # Publicação por fatia a partir de frame em memória: não há SQL para o
+    # manifesto, mas o fato da publicação precisa ser registrado — antes este
+    # caminho publicava sem deixar rastro.
+    from app.services.gold_governance import record_frame_publication_blocking
+
+    record_frame_publication_blocking(
+        cube_code=table,
+        physical_table=table,
+        rows_written=total,
+        namespace=namespace,
+        source_tables=[f"{layers.detail_layer()}.{GOLD_GOLD_SOURCE}"],
+    )
     logger.info("Gold %s publicada por fatia: %d linhas", table, total)
     return total
 

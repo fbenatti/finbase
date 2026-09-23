@@ -239,6 +239,16 @@ def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = Tr
             persisted["gold_rows"] = iceberg.swap_staged_table(
                 GOLD_TABLE, staged, known_row_count=len(combined),
             )
+            # Publicação por fatia a partir de frame em memória: registra no
+            # mesmo manifesto da Gold para que a tabela não fique sem rastro.
+            from app.services.gold_governance import record_frame_publication_blocking
+
+            record_frame_publication_blocking(
+                cube_code=GOLD_TABLE,
+                physical_table=GOLD_TABLE,
+                rows_written=int(persisted["gold_rows"] or 0),
+                source_tables=[f"bronze.raw_{connection.code}_operational"],
+            )
         except Exception as exc:
             persisted["gold_error"] = f"{type(exc).__name__}: {exc}"
             logger.error("OCI operational Gold publication failed for %s", connection.code, exc_info=True)

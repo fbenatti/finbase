@@ -881,7 +881,17 @@ test_sinfonia_dashboard.py (2)
 | `_tmp_vm_monthly` | renomear | existe em `gold` e `dimon`; não pode permanecer como contrato público |
 | `compatibility.py` (novo) | criar | medida de divergência `dest_modelo_focus` × `resource_cost` para C11 |
 
-## G1.8 Próximo passo
+## G1.8 Registro de publicação
+
+```text
+branch : novo_dev
+commit : 9a141969  feat(G1): fundacao semantica, cobertura de competencia e remocao de focus_enriched
+push   : origin/novo_dev  7f42db17..9a141969
+testes : pytest tests/ -q  ->  517 passed, 9 failed (9 pre-existentes no HEAD limpo)
+recon. : verify_reconciliation -> OK em 17/17 competencias, delta R$ 0,00 e 0 linhas
+```
+
+## G1.9 Próximo passo
 
 **G2 não foi iniciado nesta execução.** Ordem proposta, sustentada por G0.2.4 e
 G1.7:
@@ -892,3 +902,234 @@ G1.7:
 3. remover `gold_cubes_service.py`; corrigir docstrings de `GoldMartRule`;
 4. tratar `_tmp_vm_monthly` (dois namespaces) e a compatibilidade entre
    `dest_modelo_focus` e `resource_cost`.
+
+---
+
+# G2 — Governança Gold unificada e compatibilidade entre os dois livros
+
+**Status:** concluído.
+
+## G2.0 Regra de execução do pacote
+
+```text
+entrada     : G1 (normalizadores + cobertura) e G0.2.4 (sete caminhos de CTAS)
+premissas   : resource_cost e o canonico; dest_modelo_focus atende consumidores
+              legados ate o cutover; um unico ponto de publicacao governado
+arquivos    : +app/services/gold_governance.py
+              +app/services/cost_book_compatibility.py
+              +app/models/gold_manifest.py
+              -app/services/gold_cubes_service.py (removido: zero consumidores)
+              ~app/services/gold_materialization.py (manifesto; auxiliar de VM fora da Gold)
+              ~app/services/ai_usage_gold.py (publica pelo caminho governado)
+              ~app/services/ai_cost_materialization.py (idem)
+              ~app/services/azure_ptu_gold.py (idem)
+              ~app/services/gold_builder.py (registra publicacao em memoria)
+              ~app/services/oci_operational_monitoring.py (idem)
+              ~app/models/gold_mart_rule.py (docstrings corrigidos)
+              ~app/main.py (tabela gold_manifest + registro do modelo)
+              +tests/test_gold_governance.py
+              +tests/test_cost_book_compatibility.py
+testes      : 49 novos; suite completa 569 passam, 9 falhas pre-existentes
+rollback    : git revert do commit de G2. A tabela gold_manifest e aditiva e pode
+              permanecer vazia; nenhum dado financeiro foi tocado.
+```
+
+## G2.1 Um único ponto de publicação
+
+`apps/api/app/services/gold_governance.py` passa a ser o único lugar que faz
+staging + swap de cubo Gold a partir de SQL. Os sete caminhos de G0.2.4 foram
+tratados assim:
+
+| Caminho | Antes | Depois |
+|---|---|---|
+| `gold_materialization` (governado) | swap direto em 2 pontos | swap direto + registro de manifesto nos 3 caminhos da regra |
+| `ai_usage_gold` | staging + swap próprio | `publish_gold_cube` |
+| `ai_cost_materialization` | staging + swap próprio | `publish_gold_cube` |
+| `azure_ptu_gold` | staging + swap próprio | `publish_gold_cube` |
+| `gold_cubes_service` | código morto | **removido** |
+| `focus_enrichment` | código morto | **removido em G1** |
+| `gold_builder` | swap por fatia, sem rastro | swap por fatia + registro no manifesto |
+| `oci_operational_monitoring` | swap por fatia, sem rastro | swap por fatia + registro no manifesto |
+
+`gold_builder` e `oci_operational_monitoring` publicam a partir de frame **já em
+memória**, por fatia, e existem exatamente para evitar reler o lakehouse.
+Reescrevê-los para `publish_gold_cube` custaria o scan que eles evitam, então eles
+registram a publicação em vez de passar pelo publicador de SQL. A distinção é
+explícita (`PUBLICATION_IN_MEMORY`).
+
+Um teste de arquitetura impede a regressão: qualquer módulo que chame
+`swap_staged_table` sem chamar `publish_gold_cube` ou `record_frame_publication`
+reprova a suíte.
+
+## G2.2 Manifesto de execução
+
+Tabela `gold_manifest` (PostgreSQL, porque é metadata de execução — linhas
+financeiras continuam no lakehouse). Cada materialização registra:
+
+`cube_code`, `physical_table`, **`namespace`**, `contract_version`, `run_id`,
+`rule_id`, `status`, `reason`, `sql_hash`, `source_tables`,
+`rows_read`/`rows_written`, `financial_total_in`/`financial_total_out`,
+`financial_delta`, `tolerance`, `reconciliation_status`, `currency`,
+**`previous_snapshot_id`** (ponteiro de rollback), `rollback_table`, `error`
+sanitizado, `started_at`/`finished_at`.
+
+Por que a coluna `namespace` importa: em 23/09/2026 cinco regras estavam com
+`materialization_status = ERROR` e `materialization_rows` preenchido, e as
+tabelas existiam em **`iceberg.dimon`**, não em `iceberg.gold` — o registro de
+governança apontava para uma tabela que não existia no namespace declarado.
+`materialization_rows` não é evidência de publicação; o manifesto é.
+
+### G2.2.1 Erro sanitizado
+
+`error` passa por `sanitize_error`, que redige URL de conexão com senha,
+`password=`, `account_key=`, `Bearer` e tokens de provedor. Achado da
+implementação: o padrão inicial exigia `-` como separador e **não pegava
+`ghp_…`**, que é justamente o tipo de token presente no `.env` deste repositório.
+Corrigido para aceitar `-` ou `_`.
+
+### G2.2.2 Reconciliação financeira no manifesto
+
+`compute_financial_delta` distingue três estados: `OK` (delta dentro de R$ 0,01),
+`MISMATCH` (acima) e `NOT_MEASURED` (um dos lados ausente). Cubo de dimensão, que
+não soma dinheiro, cai em `NOT_MEASURED` — e não é reprovado por isso. Total
+medido que vale zero (`delta = 0,0`) é diferente de total não medido (`None`).
+
+## G2.3 Publicação atômica e dependência fresca
+
+- o swap continua sendo uma transação Iceberg (`iceberg.swap_staged_table`), então
+  falha preserva a versão publicada anterior. O que faltava era o registro do
+  **snapshot anterior** para tornar o rollback um procedimento, não uma intenção;
+- `assert_dependencies_fresh` bloqueia um dependente quando um cubo-fonte tem
+  manifesto mais velho que `DEFAULT_SOURCE_MAX_AGE_HOURS` (48 h). Cubo sem
+  manifesto não bloqueia: os cubos anteriores ao manifesto existem e são usados, e
+  bloquear seria pior que publicar;
+- só cubo Gold entra no gate. Ler `silver.resource_cost` não tem limite de idade
+  declarado;
+- `publish_gold_cube` verifica **moeda única no staging, antes do swap**. Somar
+  BRL com USD falha e a tabela publicada nunca fica inválida.
+
+## G2.4 Auxiliar de VM fora do namespace público
+
+`_tmp_vm_monthly` existia em `iceberg.gold` (66.570 linhas) e `iceberg.dimon`
+(0 linhas). Uma tabela chamada `_tmp_` no namespace Gold é contrato público por
+posição: qualquer consumidor podia passar a lê-la e o cubo publicado dependia de
+uma "temporária".
+
+Agora é `silver.vm_monthly_history`, auxiliar de detalhe com nome que diz o que é.
+As cópias legadas em `gold`, `gold` (legado) e `dimon` são removidas de forma
+defensiva na mesma execução. `prepare_vm_daily` (que criava `_tmp_vm_daily`, com
+**zero consumidores**) foi removido.
+
+## G2.5 Namespace legado `dimon`
+
+`retire_legacy_namespace_copy` só remove a cópia legada **depois** de confirmar
+que a versão canônica existe: não se troca "duas cópias" por "nenhuma".
+
+Verificação real (dry run) em 23/09/2026:
+
+| tabela | canônica em `gold` | cópia em `dimon` | decisão |
+|---|---|---|---|
+| `_tmp_vm_monthly` | sim | sim | removível |
+| `dest_dm_ai_consumption_daily` | **não** | sim | **preservada** |
+| `dest_dm_ai_license_snapshot` | **não** | sim | **preservada** |
+| `dest_dm_copilot_usage_daily` | **não** | sim | **preservada** |
+| `dest_dm_copilot_license_snapshot` | **não** | sim | **preservada** |
+| `dest_dm_copilot_user_period` | **não** | sim | **preservada** |
+
+**Achado material (D15):** os cinco cubos auxiliares de IA/Dashboards não existem
+em `iceberg.gold`. Os endpoints que os leem apontam para
+`iceberg.{GOLD}.dest_dm_ai_*` (por exemplo
+`routers/ai_provider_dashboards.py:33-34` e `routers/ai_copilot.py:35-36`), e as
+tabelas vivem **apenas** em `iceberg.dimon`. O status `ERROR` das regras 17–21
+não era falso positivo: a publicação desses cubos está falhando desde antes do
+baseline. Não corrigido em G2 porque republicar move 1,7 M linhas — é um item
+próprio, com janela e verificação.
+
+## G2.6 Compatibilidade entre os dois livros
+
+`cost_book_compatibility.py` mede a divergência por competência entre
+`resource_cost` (canônico) e `dest_modelo_focus` (legado). Ele **não decide** qual
+está certo: a ordem das fontes de verdade decide, e o canônico é `resource_cost`.
+
+Medição real em 23/09/2026 (`FULL OUTER JOIN`, para competência presente em só um
+livro não desaparecer):
+
+| competência | canônico (linhas) | legado (linhas) | razão de linhas | delta de custo | material |
+|---|---:|---:|---:|---:|---|
+| 202504–202511 | 434.954 a 3.763.016 | **ausente** | — | — | não |
+| 202512 | 823.720 | 3.577.709 | 4,34× | +R$ 3.977.624,00 | sim |
+| 202601 | 790.406 | 3.611.104 | 4,57× | +R$ 3.970.502,66 | sim |
+| 202602 | 693.389 | 3.291.347 | 4,75× | +R$ 5.535.291,23 | sim |
+| 202603 | 683.474 | 3.709.750 | 5,43× | +R$ 6.607.321,43 | sim |
+| 202604–202607 | 51 / 1 / 1 / 3 | ~3,5–4,0 M | 70.000× a 1.341.181× | +R$ 10,2 M a 18,8 M | sim |
+| 202608 | **ausente** | 4.711.931 | — | — | não |
+| 202609 | 548.606 | 2.338.021 | 4,26× | +R$ 5.153.320,26 | sim |
+
+Duas conclusões que mudam o cutover:
+
+1. **os livros não são comparáveis linha a linha.** O legado tem 4,3× a 5,4× mais
+   linhas no mesmo mês. `dest_modelo_focus` é o FOCUS do provedor; `resource_cost`
+   é o modelo canônico com o grão declarado. Um total diferente entre as telas não
+   é erro de um dos lados — é diferença de modelagem que precisa ser explicada
+   antes do cutover;
+2. **`dest_modelo_focus` é o único livro com 202608** (4.711.931 linhas) e o único
+   ativo em 202604–202607. `resource_cost` para em 202607 com 3 linhas. Trocar a
+   tela antes de `resource_cost` receber 202608 mostraria um mês faltando.
+
+Por isso o cutover não é só apontar a tela nova: exige popular `resource_cost`
+para as competências que só o legado tem, e explicar a diferença de grão em C11.
+
+## G2.7 Docstrings e código morto
+
+- `GoldMartRule` e `GoldMartRuleSource`: os docstrings chamavam as fontes de "Gold
+  tables". As fontes são **Silver** detalhada (`resource_cost`,
+  `dest_modelo_focus` e o espelho `_planning`), e o cruzamento é o que o
+  materializador produz. O texto na camada errada sustentava a suposição de um
+  cruzamento que nunca existiu;
+- `gold_materialization` (docstring do módulo): mesma correção, mais a explicação
+  do caminho único de publicação;
+- `gold_cubes_service.py` removido (173 linhas, zero consumidores);
+- `prepare_vm_daily` removido (criava `_tmp_vm_daily`, zero consumidores).
+
+## G2.8 Testes
+
+| Arquivo | Testes | Cobre |
+|---|---:|---|
+| `tests/test_gold_governance.py` | 38 | hash, dependências, sanitização de erro (incluindo `ghp_`), delta financeiro, manifesto, freshness, falha preserva o anterior, moeda mista, guarda de arquitetura, namespace legado |
+| `tests/test_cost_book_compatibility.py` | 11 | delta assinado, tolerância, base zero, ausência de lado, conversão de tipo do Trino, forma da linha |
+| **total novo** | **49** | |
+
+Suíte completa: **569 passam, 9 falham**. As mesmas 9 falhas pré-existentes de G1
+(confirmadas em `git stash` no HEAD limpo). Nenhuma regressão.
+
+## G2.9 Aceite de G2
+
+| Critério | Situação | Evidência |
+|---|---|---|
+| Falha conserva cubo anterior | **Atendido** | `test_publish_failure_preserves_previous_table` prova swap ausente + staging removido + manifesto `FAILED` |
+| Manifesto prova fontes e totais | **Atendido** | `gold_manifest` criada e escrita de ponta a ponta; `sql_hash`, `source_tables`, totais, delta e `previous_snapshot_id` |
+| Busca no código não encontra consumidor do caminho desativado | **Atendido** | `gold_cubes_service` e `focus_enrichment` removidos; zero referências |
+| Testes de materialização e rollback passam | **Atendido** | 49 testes novos; guarda de arquitetura impede novo publicador sem manifesto |
+| Um único executor governado e observável | **Atendido com exceção justificada** | `gold_builder` e `oci_operational_monitoring` publicam frame em memória por fatia e registram manifesto |
+
+**Aceite de G2 cumprido.**
+
+## G2.10 Próximo passo
+
+**C1–C3 não foram iniciados nesta execução.**
+
+Antes de materializar C1–C3, dois itens que G2 revelou:
+
+1. **D15 — republicar os cinco cubos de IA em `iceberg.gold`.** É pré-requisito de
+   qualquer cutover da aba `dashboards-ia`; hoje os endpoints leem tabela ausente;
+2. **Cobertura temporal do canônico.** `resource_cost` precisa receber 202608 (e as
+   competências operacionais de 202604–202607) antes de a tela nova substituir a
+   antiga, sob pena de mostrar um mês faltando.
+
+Ordem proposta:
+
+1. `finops_period_coverage` materializada a partir de `period_coverage.collect_coverage`;
+2. C1 `finops_cost_monthly` com as dimensões de `semantic_normalization`;
+3. C2 a partir de C1, com join 1:1 provado contra `resource_inventory`;
+4. C3 por `driver_type`, reconciliando com o delta de C1;
+5. só então o cutover, com a divergência de grão publicada em C11.

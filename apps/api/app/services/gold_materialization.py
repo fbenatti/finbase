@@ -1,8 +1,17 @@
 """Materializa um cubo Gold pré-agregado (dest_dm_cost_<code>) a partir da Silver.
 
-A rule selects one or more Gold tables (dest_modelo_focus, *_planning, ...),
-applies filters over the already-normalized Gold data and pre-aggregates by
-analytic dimensions so dashboards read a thin, fast table.
+Uma `gold_rule` seleciona uma ou mais tabelas **Silver** já normalizadas
+(`resource_cost` para os cubos financeiros; `dest_modelo_focus` e o espelho
+`dest_modelo_focus_planning` para os cubos organizacionais legados), aplica os
+filtros declarados e pré-agrega nas dimensões analíticas para que a API e o
+dashboard leiam uma tabela fina.
+
+O docstring anterior chamava essas fontes de "Gold tables". A camada errada no
+texto levou a supor que já existia um cruzamento que nunca foi feito; as fontes
+são Silver detalhada, e o cruzamento é o que este materializador produz.
+
+Toda publicação passa por `gold_governance.publish_gold_cube`, que registra o
+manifesto (fontes, hash do SQL, linhas, totais, rollback) e troca atomicamente.
 """
 from __future__ import annotations
 
@@ -424,26 +433,29 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
             result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=180)
             rows = int((result[0] if result else {}).get("row_count") or 0)
             if snapshot_mode:
+                # Snapshot mode é append datado: não há swap, e portanto não há
+                # versão anterior a preservar. O manifesto registra a publicação
+                # pelo mesmo ponto de governança, sem troca.
                 if rows:
                     try:
                         await execute(
                             f"INSERT INTO iceberg.{GOLD}.{table} SELECT * FROM iceberg.{GOLD}.{staging}",
                             timeout_s=900,
                         )
-                    except Exception as insert_exc:
+                    except Exception:
                         # Tabela ainda não existe → cria a partir do staging.
                         await execute(
                             f"CREATE TABLE iceberg.{GOLD}.{table} AS SELECT * FROM iceberg.{GOLD}.{staging}",
                             timeout_s=900,
                         )
-                    iceberg.cleanup_staged_table(staging, namespace=GOLD)
-                else:
-                    iceberg.cleanup_staged_table(staging, namespace=GOLD)
+                iceberg.cleanup_staged_table(staging, namespace=GOLD)
+                await _record_rule_manifest(rule, rows=rows, sql=rule.sql_template, run_id=run_id)
                 return rows
             if rows:
                 iceberg.swap_staged_table(table, staging, namespace=GOLD, known_row_count=rows)
             else:
                 iceberg.cleanup_staged_table(staging, namespace=GOLD)
+            await _record_rule_manifest(rule, rows=rows, sql=rule.sql_template, run_id=run_id)
             return rows
         except Exception:
             try:
@@ -554,7 +566,7 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
         create_sql = f"CREATE TABLE iceberg.{GOLD}.{staging} WITH (partitioning = ARRAY['{period}']) AS {full_sql}"
     try:
         if progress:
-            progress(0, 1, f"Agregando {rule.code} a partir de {len(rule.sources or [])} Gold(s)")
+            progress(0, 1, f"Agregando {rule.code} a partir de {len(rule.sources or [])} fonte(s) Silver")
         await execute(create_sql, timeout_s=1800)
         result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=180)
         rows = int((result[0] if result else {}).get("row_count") or 0)
@@ -562,6 +574,7 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
             iceberg.swap_staged_table(table, staging, namespace=GOLD, known_row_count=rows)
         else:
             iceberg.cleanup_staged_table(staging, namespace=GOLD)
+        await _record_rule_manifest(rule, rows=rows, sql=full_sql, run_id=run_id)
         return rows
     except Exception:
         try:
@@ -569,6 +582,29 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
         except Exception:
             pass
         raise
+
+
+async def _record_rule_manifest(
+    rule: GoldMartRule, *, rows: int, sql: str, run_id: int | None
+) -> None:
+    """Registra no manifesto a materialização governada de uma regra.
+
+    Um único ponto para os três caminhos de `_materialize_rule` (SQL custom,
+    snapshot mode e pivô), para que nenhum deles publique sem rastro.
+    """
+    from app.services.gold_governance import ManifestEntry, record_manifest, sql_fingerprint
+
+    entry = ManifestEntry(
+        cube_code=normalize_code(rule.code),
+        physical_table=rule_target_table(rule.code),
+        run_id=run_id,
+        rule_id=getattr(rule, "id", None),
+        rows_written=rows,
+        sql_hash=sql_fingerprint(sql),
+        status="SUCCESS" if rows else "PARTIAL",
+        reason=None if rows else "sem linhas",
+    )
+    await record_manifest(entry)
 
 
 async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | None = None, rule_ids: list[int] | None = None) -> dict[str, Any]:
@@ -633,17 +669,53 @@ def materialize_golds_sync(session: Any, *, run_id: int, progress: Any | None = 
 
 
 # ---------------------------------------------------------------------------
-# Preparação da tabela auxiliar mensal de VMs (saving por desligue)
+# Histórico mensal de VMs (saving por desligue)
 # ---------------------------------------------------------------------------
-# A regra custom "saving_desligue_vm" depende de uma tabela auxiliar agregada
-# (gold_mart._tmp_vm_monthly) com o histórico mensal de horas/custo por VM real:
-# extrai o nome da VM do ResourceId (a Gold guarda o nome do PLANO em
-# ResourceName), exclui pods efêmeros (ResourceIds hex UUID de Databricks/spot)
-# e deixa só VMs clássicas de /virtualMachines/. A materialização da Gold lê
-# essa auxiliar — leve — em vez de varrer 8 meses da Gold em uma query só.
+# A regra custom "saving_desligue_vm" depende de uma tabela agregada com o
+# histórico mensal de horas/custo por VM real: extrai o nome da VM do ResourceId
+# (a origem guarda o nome do PLANO em ResourceName), exclui pods efêmeros
+# (ResourceIds hex UUID de Databricks/spot) e deixa só VMs clássicas de
+# /virtualMachines/. A materialização lê essa auxiliar — leve — em vez de varrer
+# 8 meses em uma query só.
+#
+# O nome era `_tmp_vm_monthly` dentro do namespace **Gold**, o que a colocava
+# como contrato público: qualquer consumidor podia passar a lê-la e o cubo
+# publicado dependia de uma tabela chamada "tmp". Além disso ela existia em dois
+# namespaces (`gold` e `dimon`), com 66.570 linhas num e 0 no outro.
+#
+# Agora é uma auxiliar de detalhe na Silver, com nome que diz o que é. Não é
+# cubo e não deve ser consumida por dashboard: quem consome é a regra que a
+# constrói, no mesmo run.
 
-VM_MONTHLY_TABLE = "_tmp_vm_monthly"
+VM_MONTHLY_TABLE = "vm_monthly_history"
+VM_MONTHLY_LAYER = layers.SILVER
+#: Nome legado, mantido só para limpeza. Não escrever nele.
+LEGACY_VM_MONTHLY_TABLE = "_tmp_vm_monthly"
 VM_MONTHLY_HISTORY_MONTHS = 8
+
+async def _drop_legacy_vm_monthly() -> None:
+    """Remove as cópias legadas da auxiliar de VM dos namespaces Gold e `dimon`.
+
+    A tabela existia em `iceberg.gold` (66.570 linhas) e `iceberg.dimon`
+    (0 linhas). Enquanto a cópia em Gold existisse, um consumidor que a
+    encontrasse continuaria lendo um contrato público com nome de temporária.
+    A remoção é defensiva: falha não derruba a materialização da auxiliar nova,
+    porque a tabela publicada (`dest_dm_cost_saving_desligue_vm`) não depende dela.
+    """
+    for namespace in (GOLD, layers.LEGACY_GOLD, "dimon"):
+        try:
+            await execute(
+                f"DROP TABLE IF EXISTS iceberg.{namespace}.{LEGACY_VM_MONTHLY_TABLE}",
+                timeout_s=120,
+            )
+        except Exception as exc:  # noqa: BLE001 — limpeza não é caminho crítico
+            logger.warning(
+                "Não foi possível remover %s.%s: %s",
+                namespace,
+                LEGACY_VM_MONTHLY_TABLE,
+                exc,
+            )
+
 
 async def prepare_vm_monthly(
     progress: Any | None = None,
@@ -661,9 +733,10 @@ async def prepare_vm_monthly(
     (inclusive ``subaccountname``) são aplicados à Gold antes de montar o
     histórico. Assim o SQL customizado respeita os filtros editados no portal.
     """
-    await execute(f"DROP TABLE IF EXISTS iceberg.{GOLD}.{VM_MONTHLY_TABLE}", timeout_s=120)
+    await execute(f"DROP TABLE IF EXISTS iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE}", timeout_s=120)
+    await _drop_legacy_vm_monthly()
     await execute(f"""
-    CREATE TABLE iceberg.{GOLD}.{VM_MONTHLY_TABLE} (
+    CREATE TABLE iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE} (
         resource_id VARCHAR,
         vm_name VARCHAR,
         connection_code VARCHAR,
@@ -705,11 +778,11 @@ async def prepare_vm_monthly(
         # Remove o período antes de inserir (idempotente — evita duplicatas
         # se a preparação rodar mais de uma vez para o mesmo mês).
         await execute(
-            f"DELETE FROM iceberg.{GOLD}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
+            f"DELETE FROM iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
             timeout_s=300,
         )
         await execute(f"""
-        INSERT INTO iceberg.{GOLD}.{VM_MONTHLY_TABLE}
+        INSERT INTO iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE}
         SELECT
             CAST(b."ResourceId" AS VARCHAR) AS resource_id,
             element_at(split(CAST(b."ResourceId" AS VARCHAR), '/'), -1) AS vm_name,
@@ -728,76 +801,12 @@ async def prepare_vm_monthly(
         GROUP BY CAST(b."ResourceId" AS VARCHAR), b.cloud_origem, b._billing_period
         """, timeout_s=300)
         result = await execute(
-            f"SELECT COUNT(*) AS c FROM iceberg.{GOLD}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
+            f"SELECT COUNT(*) AS c FROM iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE} WHERE billing_period = '{period}'",
             timeout_s=120,
         )
         rows = int((result[0] if result else {}).get("c") or 0)
         total += rows
         logger.info("VM monthly %s: %d linhas", period, rows)
-
-    return total
-
-
-# ---------------------------------------------------------------------------
-# Consumo DIÁRIO por VM (mês realizado) — alimenta o dialog de detalhe do
-# recurso no dashboard. Pré-agregado na materialização para NUNCA varrer a
-# Gold por requisição (o scan por ResourceId custa ~30-45s e derruba o Trino).
-# ---------------------------------------------------------------------------
-
-VM_DAILY_TABLE = "_tmp_vm_daily"
-
-
-async def prepare_vm_daily(progress: Any | None = None, *, periods: list[str] | None = None) -> int:
-    """Popula gold_mart._tmp_vm_daily com consumo diário (horas/custo) por VM.
-
-    ``periods`` opcional (YYYYMM). Default: mês realizado (anterior ao atual).
-    O dialog de consumo (vm-usage-daily) lê desta tabela — rápida.
-    """
-    from datetime import date as _date
-    if periods is None:
-        today = _date.today()
-        m = today.month - 1 or 12
-        y = today.year if today.month > 1 else today.year - 1
-        periods = [f"{y:04d}{m:02d}"]
-
-    await execute(f"DROP TABLE IF EXISTS iceberg.{GOLD}.{VM_DAILY_TABLE}", timeout_s=120)
-    await execute(f"""
-    CREATE TABLE iceberg.{GOLD}.{VM_DAILY_TABLE} (
-        resource_name VARCHAR,
-        day VARCHAR,
-        hours DOUBLE,
-        cost_brl DOUBLE,
-        _billing_period VARCHAR
-    )
-    """, timeout_s=120)
-
-    total = 0
-    for period in periods:
-        if progress:
-            progress(0, 1, f"Preparando consumo diário de VMs {period}")
-        await execute(f"""
-        INSERT INTO iceberg.{GOLD}.{VM_DAILY_TABLE}
-        SELECT
-            element_at(split(CAST(g."ResourceId" AS VARCHAR), '/'), -1) AS resource_name,
-            date_format(date_parse(CAST(g."ChargePeriodStart" AS VARCHAR), '%m/%d/%Y'), '%Y-%m-%d') AS day,
-            SUM(COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0)) AS hours,
-            SUM(COALESCE(TRY_CAST(g."BilledCost" AS DOUBLE), 0)) AS cost_brl,
-            g._billing_period
-        FROM iceberg.silver.dest_modelo_focus g
-        WHERE g._billing_period = '{period}'
-          AND g."ChargePeriodStart" IS NOT NULL
-          AND LOWER(CAST(g."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
-          AND (g."ChargeCategory" = 'Usage' OR g."ChargeCategory" IS NULL)
-          AND POSITION('/virtualMachines/' IN CAST(g."ResourceId" AS VARCHAR)) > 0
-        GROUP BY 1, 2, g._billing_period
-        """, timeout_s=600)
-        result = await execute(
-            f"SELECT COUNT(*) AS c FROM iceberg.{GOLD}.{VM_DAILY_TABLE} WHERE _billing_period = '{period}'",
-            timeout_s=120,
-        )
-        rows = int((result[0] if result else {}).get("c") or 0)
-        total += rows
-        logger.info("VM daily %s: %d linhas", period, rows)
 
     return total
 
@@ -1152,7 +1161,7 @@ async def materialize_saving_history(
                 MIN(billing_period) AS first_period,
                 MAX(CASE WHEN billing_period = '{target}' THEN total_hours END) AS cur_hours,
                 MAX(CASE WHEN billing_period = '{target}' THEN total_cost END) AS cur_cost
-            FROM iceberg.{GOLD}.{VM_MONTHLY_TABLE}
+            FROM iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE}
             WHERE billing_period <= '{target}'
             GROUP BY resource_id, vm_name, connection_code, subscription_name
         ),

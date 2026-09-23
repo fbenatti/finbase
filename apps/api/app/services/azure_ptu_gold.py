@@ -14,6 +14,7 @@ from typing import Any
 
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
+from app.services.gold_governance import publish_gold_cube
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +144,7 @@ async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
     start_iso = start.strftime("%Y-%m-%dT%H:00:00Z")
     end_iso = end.strftime("%Y-%m-%dT%H:00:00Z")
     where = _gold_metric_hour_filter(start_iso, end_iso)
-    staging = f"{GOLD_TABLE}_stg_{time.time_ns()}"
-    iceberg.ensure_namespace(GOLD)
-    sql = f"""
-      CREATE TABLE iceberg.{GOLD}.{staging}
-      WITH (partitioning = ARRAY['_billing_period']) AS
+    select_sql = f"""
       SELECT
         substr(CAST(metric_hour AS VARCHAR), 1, 10) AS metric_day,
         substr(CAST(metric_hour AS VARCHAR), 1, 7) AS _billing_period,
@@ -165,25 +162,19 @@ async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
       WHERE {where}
       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
     """
-    try:
-        await trino_execute(sql, timeout_s=1800)
-        count_rows = await trino_execute(
-            f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=120,
-        )
-        row_count = int((count_rows[0] if count_rows else {}).get("row_count") or 0)
-        if row_count:
-            iceberg.swap_staged_table(GOLD_TABLE, staging, namespace=GOLD, known_row_count=row_count)
-        else:
-            iceberg.cleanup_staged_table(staging, namespace=GOLD)
-        global _GOLD_COLUMNS
-        _GOLD_COLUMNS = None
-        return {"table": GOLD_TABLE, "rows": row_count, "days": days}
-    except Exception:
-        try:
-            iceberg.cleanup_staged_table(staging, namespace=GOLD)
-        except Exception:
-            pass
-        raise
+    # Publicação pelo caminho governado: antes esta função fazia staging + swap
+    # direto, e a Gold de PTU ficava fora do manifesto (o materializador lê as
+    # tabelas de PTU e não tinha como saber quando foram publicadas).
+    resultado = await publish_gold_cube(
+        cube_code=GOLD_TABLE,
+        table=GOLD_TABLE,
+        select_sql=select_sql,
+        namespace=GOLD,
+        partition_column="_billing_period",
+    )
+    global _GOLD_COLUMNS
+    _GOLD_COLUMNS = None
+    return {"table": GOLD_TABLE, "rows": resultado.rows, "days": days}
 
 
 async def load_gold_metrics(
