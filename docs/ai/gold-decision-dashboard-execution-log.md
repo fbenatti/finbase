@@ -1331,3 +1331,113 @@ Cada fatia registra manifesto.
 - **`resource_inventory` só tem 202609**: os atributos de recurso vêm do snapshot
   atual mesmo para competências antigas. `inventory_snapshot_period` e
   `inventory_snapshots` publicam essa defasagem em vez de escondê-la.
+
+## G3.9 C3 `finops_cost_change_driver`
+
+**Status:** materializado, fechando no delta (9 pares × 4 drivers).
+
+Grão: `period_current + period_previous + connection_code + driver_type +
+driver_key`.
+
+```text
+C3: 1.319 linhas | 9 pares comparáveis x 4 drivers | 36 fatias | 38 s
+pares pulados (não comparáveis): 6
+```
+
+### G3.9.1 Fechamento do delta por par
+
+Comparação independente entre `SUM(delta)` de C3 e a diferença real de C1 entre as
+competências, por par (driver = `service`):
+
+| par | drivers | soma C3 | delta C1 | dif | tolerância |
+|---|---:|---:|---:|---:|---:|
+| 202506→202507 | 44 | 104.821,92 | 104.821,94 | −0,02 | 0,44 |
+| 202507→202508 | 43 | −73.984,26 | −73.984,26 | 0,00 | 0,43 |
+| 202508→202509 | 43 | −856.901,96 | −856.901,96 | 0,00 | 0,43 |
+| 202509→202510 | 43 | 826.739,14 | 826.739,12 | +0,02 | 0,43 |
+| 202510→202511 | 43 | 625.643,21 | 625.643,21 | 0,00 | 0,43 |
+| 202511→202512 | 43 | 210.899,75 | 210.899,75 | 0,00 | 0,43 |
+| 202512→202601 | 43 | 108.118,77 | 108.118,78 | −0,01 | 0,43 |
+| 202601→202602 | 44 | −371.918,24 | −371.918,26 | +0,02 | 0,44 |
+| 202602→202603 | 43 | −189.847,44 | −189.847,40 | −0,04 | 0,43 |
+
+**Todos os pares fecham.** As quatro leituras (serviço, conta, região,
+organização) fecham cada uma o delta do par — somar leituras diferentes contaria a
+mesma variação várias vezes, e por isso `driver_type` faz parte do grão.
+
+### G3.9.2 Tolerância proporcional ao número de drivers
+
+Cada driver carrega até R$ 0,005 de erro de arredondamento (o delta é publicado com
+duas casas). Com 44 drivers o desvio acumulado medido foi R$ 0,02. Uma tolerância
+fixa de R$ 0,01 reprovaria um cubo correto, então o limite é R$ 0,01 **por driver**,
+com piso de R$ 0,05.
+
+### G3.9.3 Períodos parciais não entram
+
+Os status reais medidos por G1 alimentam a lista de pares:
+
+| conexão | competência | status |
+|---|---|---|
+| azure-4p | 202504, 202505 | `PARTIAL` |
+| azure-4p | 202506 … 202603 | `COMPLETE` |
+| azure-4p | 202604 … 202607 | `PARTIAL` |
+| azure-ti | 202609 | `CURRENT_OPEN` |
+
+Resultado: **9 pares materializados** (202506→…→202603) e **6 pulados**, cada um com
+o motivo (`previous_status`/`current_status`). `202504→202505` e `202603→202604` não
+viram tendência.
+
+### G3.9.4 Dois defeitos encontrados e corrigidos durante a construção
+
+1. **fatia órfã virava número.** A primeira execução somou −R$ 209.564,67, que é o
+   custo de **202504** — competência que não é comparável e não deveria estar no
+   cubo. As fatias na Silver não eram versionadas, então uma fatia de um par
+   recusado sobreviveu e entrou na montagem seguinte. Agora o nome da fatia carrega
+   o `build` da execução;
+2. **comparabilidade fabricada.** `comparable_period_pairs` montava
+   `PeriodCoverage(status="COMPLETE")` para toda competência, então o filtro nunca
+   reprovava nada. O status passou a vir de `period_statuses`, que executa o
+   classificador de G1; sem status medido, o default é **não comparável**.
+
+Os dois são a mesma classe de defeito que G1 existe para eliminar: dar a um valor um
+atributo de qualidade que ninguém mediu.
+
+### G3.9.5 Montagem lê fatias, não repete CTEs
+
+40 partes (10 pares × 4 drivers) numa consulta só estourou o limite de estágios do
+Trino: `Number of stages in the query (363) exceeds the allowed maximum (150)`. Cada
+par × driver é materializado como fatia própria e a montagem faz `UNION ALL` sobre
+tabelas — um scan por fatia.
+
+## G3.10 Testes
+
+| Arquivo | Testes | Cobre |
+|---|---:|---|
+| `tests/test_finops_cost_cubes.py` | 41 | C1, C2 e C3: grão, chaves seguras, não-aditividade, moeda, deduplicação, comparabilidade, versionamento de fatia, tolerância |
+
+Suíte completa: **610 passam, 9 falham** (as mesmas 9 pré-existentes). 183 testes
+novos acumulados em G1+G2+G3.
+
+## G3.11 Aceite de G3 (C1–C3)
+
+| Critério | Situação | Evidência |
+|---|---|---|
+| Totais C1/C2 batem com `resource_cost` | **Atendido** | R$ 37.356.361,47 nas três pontas, delta R$ 0,00 |
+| Driver fecha no delta total | **Atendido** | 9/9 pares fecham, dentro da tolerância por driver |
+| Não há soma entre moedas | **Atendido** | 1 moeda no cubo; `publish_gold_cube` verifica moeda única no staging antes do swap |
+| Query p95 atende a meta | **Parcial** | C1 tem 13.184 linhas e C2 1.023.977; as APIs `/finops/*` (G8) ainda não existem para medir p95 |
+| Períodos parciais aparecem sinalizados | **Atendido** | C1 publica o que a origem tem; C3 recusa 6 pares com motivo; a materialização de `finops_period_coverage` como tabela ainda é pendente |
+| Nenhum join multiplica custo | **Atendido** | as 13.519.512 linhas de origem estão preservadas em C1 e C2 |
+
+## G3.12 Pendente para fechar G8
+
+- **APIs `/finops/*`** (`summary`, `cost/trend`, `cost/drivers`, `cost/resources`);
+- **`finops_period_coverage`** materializada — o classificador existe e é usado por
+  C3, mas ainda não é tabela consultável pela API;
+- **registro em `gold_rule`**: os cubos `finops_*` são materializados por serviços
+  versionados no código, que usam o caminho governado (`materialize_gold_sql`) e
+  registram manifesto, mas não têm linha declarativa em `gold_rule`. A seção 6.1
+  pede um único caminho de governança; expor esses cubos como regras na fila
+  existente é a próxima decisão a registrar;
+- **D15**: republicar os cinco cubos de IA em `iceberg.gold`;
+- **C4–C12**.
