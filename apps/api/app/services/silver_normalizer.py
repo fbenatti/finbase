@@ -230,6 +230,30 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         measure_priority=("effective_cost", "list_cost"),
         notes="FOCUS do Cost Management: custo e uso por recurso.",
     ),
+    "aks_inventory": SourceMapping(
+        source_key="aks_inventory",
+        model_name="resource_inventory",
+        bronze_table="raw_azure_{env}_aks_inventory",
+        columns={
+            "resource_id": "resource_id",
+            "resource_name": "resource_name",
+            "resource_type": "resource_type",
+            "subscription_id": "sub_account_id",
+            "resource_group": "resource_group_id",
+            "location": "region_id",
+            "power_state": "resource_state",
+            "provisioning_state": "provisioning_state",
+            "zones": "availability_zones",
+            "tags_json": "tags_json",
+            "snapshot_date": "valid_from",
+            "_billing_period": "_billing_period",
+        },
+        constants={"cloud_provider": "azure"},
+        # O SKU do cluster é o tamanho do node pool — é o que permite estimar o
+        # custo dos nós antes de ter o custo por pool.
+        derived={"resource_sku": "coalesce:pool_vm_size+sku"},
+        notes="Clusters AKS × node pools via Resource Graph.",
+    ),
     "resource_graph": SourceMapping(
         source_key="resource_graph",
         model_name="resource_inventory",

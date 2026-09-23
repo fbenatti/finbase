@@ -26,18 +26,36 @@ async def _execute_migration(conn, statement: str, *, attempts: int = 5) -> None
 
     atraso = 1.0
     for tentativa in range(1, attempts + 1):
+        # SAVEPOINT por statement: sem ele, **um** erro de lock aborta a
+        # transação e todas as migrações seguintes falham em cascata com
+        # "current transaction is aborted", escondendo a causa original.
+        ponto = f"migracao_{tentativa}"
+        await conn.execute(_text(f"SAVEPOINT {ponto}"))
         try:
             await conn.execute(_text(statement))
+            await conn.execute(_text(f"RELEASE SAVEPOINT {ponto}"))
             return
         except Exception as exc:  # noqa: BLE001
+            await conn.execute(_text(f"ROLLBACK TO SAVEPOINT {ponto}"))
             nome = type(exc).__name__
+            mensagem = str(exc).lower()
             transitorio = (
                 "LockNotAvailable" in nome
-                or "lock timeout" in str(exc).lower()
+                or "lock timeout" in mensagem
                 or "DeadlockDetected" in nome
             )
-            if not transitorio or tentativa == attempts:
+            if not transitorio:
                 raise
+            if tentativa == attempts:
+                # Migração idempotente que não conseguiu o lock depois de todas
+                # as tentativas: registra e segue. Derrubar o startup por causa
+                # dela deixava a API fora do ar enquanto uma coleta rodava — o
+                # oposto do que se quer. A próxima subida tenta de novo.
+                logger.error(
+                    "Migração não aplicada por contenção de lock (seguindo): %s",
+                    statement[:90],
+                )
+                return
             logger.warning(
                 "Migração com lock indisponível (tentativa %d/%d, %s): %s",
                 tentativa, attempts, nome, statement[:70],

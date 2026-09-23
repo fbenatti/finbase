@@ -202,7 +202,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "api_reference": "Kubernetes API / Container Insights (spike em P4)",
         "required_permission": "a validar no spike",
         "azure_scope": "resource",
-        "implementation_status": "planned",
+        "implementation_status": "implemented",
     },
     {
         "source_key": "aks_cost_allocation",
@@ -261,6 +261,7 @@ CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
     "azure_automation_jobs": "automation_jobs",
     "azure_monitor_vm_metrics": "monitor_vm_metrics",
     "azure_vm_inventory": "vm_inventory",
+    "azure_aks_inventory": "aks_inventory",
     "azure_openai_ptu": "openai_ptu",
     "azure_compute_skus": "compute_skus",
     "azure_compute_quota": "compute_quota",

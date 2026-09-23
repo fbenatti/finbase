@@ -1415,6 +1415,45 @@ def consumer_main(worker_id: int):
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
                                 continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_aks_inventory":
+                                # AKS: clusters e node pools via Resource Graph.
+                                from app.services.azure_aks_service import (
+                                    run_aks_inventory_collection,
+                                )
+                                try:
+                                    _aks = run_aks_inventory_collection(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _aks_exc:
+                                    import traceback as _tb_aks
+                                    _tb_aks.print_exc()
+                                    _t_aks = _ptu_session.get(EtlTask, task_id)
+                                    if _t_aks:
+                                        _t_aks.status = "FAILED"
+                                        _t_aks.phase = f"Inventário AKS falhou: {str(_aks_exc)[:400]}"
+                                        _t_aks.errors = [str(_aks_exc)[:1000]]
+                                        _t_aks.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_aks_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_aks_ok:
+                                    _t_aks_ok.status = "COMPLETED"
+                                    _t_aks_ok.phase = (
+                                        f"Inventário AKS: {_aks.get('clusters', 0)} cluster(s) / "
+                                        f"{_aks.get('pools', 0)} node pool(s), "
+                                        f"{_aks.get('rows_bronze', 0)} linha(s) na Bronze"
+                                    )
+                                    _t_aks_ok.rows_raw = _aks.get("rows_bronze", 0)
+                                    _t_aks_ok.billing_periods = [_aks.get("period")] if _aks.get("period") else []
+                                    _t_aks_ok.result_json = _aks
+                                    _t_aks_ok.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_resource_graph":
                                 # Azure Resource Graph é coletado via ARG (inventário
                                 # e regras de órfãos) e persistido na Bronze, seguindo
