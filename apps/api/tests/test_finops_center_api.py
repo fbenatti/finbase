@@ -71,12 +71,18 @@ def test_non_additive_measures_absent_from_additive_set():
 
 
 def test_unavailable_measures_are_declared_with_reason():
-    """`billed_cost` e `contracted_cost` são NULL na origem e não viram zero."""
+    """Indisponível é declarado com motivo, e não vira zero.
+
+    Duas naturezas diferentes convivem aqui: `billed_cost`/`contracted_cost` são
+    nulos **na origem**; os níveis organizacionais são indisponíveis por **falta de
+    chave reconciliável**. A UI precisa distinguir as duas.
+    """
     from app.services.finops_cost_monthly import unavailable_measures
 
-    for campo, motivo in unavailable_measures().items():
-        assert campo in {"billed_cost", "contracted_cost"}
-        assert "13.519.512" in motivo
+    motivos = unavailable_measures()
+    for campo in ("billed_cost", "contracted_cost"):
+        assert "13.519.512" in motivos[campo]
+    assert "UNMAPPED" in motivos["departamento_nivel_1..7"]
 
 
 # --- ordenação e paginação ----------------------------------------------------

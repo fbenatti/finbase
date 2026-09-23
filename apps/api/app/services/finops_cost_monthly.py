@@ -72,44 +72,136 @@ _MEASURABLE_COSTS = ("effective_cost", "list_cost")
 _UNAVAILABLE_COSTS = ("billed_cost", "contracted_cost")
 
 
-def org_mapping_sql(
+#: Status de classificação organizacional publicado no C1.
+#:
+#: `UNMAPPED` é o único valor possível hoje. O custo canônico não carrega
+#: organização, e **não existe chave reconciliável** entre `resource_cost` e a
+#: classificação organizacional: a única ponte disponível seria
+#: `sub_account_id → subaccountid` do livro FOCUS legado, e ela é **1:N**. Medido
+#: em 23/09/2026, contas do canônico aparecem no legado com dezenas de hierarquias
+#: distintas — uma delas com 52 valores diferentes em `departamento_nivel_5`.
+#:
+#: A versão anterior desta materialização escolhia a hierarquia de maior custo por
+#: conta (`ROW_NUMBER` sobre `SUM(effectivecost)`) e atribuía essa hierarquia a
+#: todo o custo da assinatura. Isso preservava o total, mas produzia **classificação
+#: organizacional incorreta**: a assinatura inteira era carimbada com a área que
+#: gastou mais, e as demais áreas desapareciam. Custo certo, decisão errada.
+#:
+#: Enquanto não existir ponte que preserve as divisões reais **e** reconcilie o
+#: total, os níveis organizacionais são publicados como `NULL`. O custo
+#: organizacional continua sendo servido pelo dashboard legado
+#: (`dest_dm_cost_visao_completa`) até o cutover.
+ORG_MAPPED = "MAPPED"
+ORG_UNMAPPED = "UNMAPPED"
+
+#: Sentinela usada quando a competência não tem classificação organizacional
+#: disponível por nenhum caminho. É o mesmo `UNKNOWN` do vocabulário de dimensões.
+_ORG_NO_VALUE = "NULL"
+
+
+def org_hierarchy_audit_sql(
     *,
     layer: str = layers.SILVER,
     legacy_table: str = "dest_modelo_focus",
+    cost_table: str = "resource_cost",
 ) -> str:
-    """Mapeamento `conta → hierarquia organizacional`, estritamente 1:1.
+    """Mede quantas contas têm múltiplas hierarquias e o custo afetado.
 
-    Uma conta pode aparecer com mais de uma organização no livro legado (74
-    contas ambíguas em 23/09/2026). Sem deduplicar, o `LEFT JOIN` multiplicaria
-    linhas de custo — exatamente o fan-out que a regra 4.1 proíbe. A linha
-    escolhida por conta é a de **maior custo agregado**, que é também a forma
-    determinística de escolher (empate cai na hierarquia lexicalmente menor).
+    A auditoria exige o número, não a impressão: sem ele a decisão de não mapear
+    pareceria conservadorismo. O resultado alimenta a regra de qualidade de C11.
+
+    Devolve, por conta do **livro canônico**:
+
+    - quantas hierarquias distintas o legado associa a ela;
+    - quanto custa essa conta no canônico;
+    - se ela é ambígua (`hierarquias > 1`), que é o caso que impede o mapeamento.
     """
-    niveis = ", ".join(f"MAX({n} ) AS {n}" for n in ORG_LEVELS)
     return f"""
-WITH por_org AS (
+WITH legado AS (
     SELECT
         LOWER(TRIM(CAST(subaccountid AS VARCHAR))) AS account_key,
-        {niveis},
-        ROUND(SUM(TRY_CAST(effectivecost AS DOUBLE)), 2) AS org_cost
+        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_1 AS VARCHAR), '')) AS n1,
+        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_2 AS VARCHAR), '')) AS n2,
+        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_5 AS VARCHAR), '')) AS n5,
+        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_6 AS VARCHAR), '')) AS n6,
+        COUNT(DISTINCT CONCAT_WS('|',
+            COALESCE(CAST(departamento_nivel_1 AS VARCHAR), ''),
+            COALESCE(CAST(departamento_nivel_2 AS VARCHAR), ''),
+            COALESCE(CAST(departamento_nivel_3 AS VARCHAR), ''),
+            COALESCE(CAST(departamento_nivel_4 AS VARCHAR), ''),
+            COALESCE(CAST(departamento_nivel_5 AS VARCHAR), ''),
+            COALESCE(CAST(departamento_nivel_6 AS VARCHAR), ''),
+            COALESCE(CAST(departamento_nivel_7 AS VARCHAR), '')
+        )) AS hierarquias
     FROM iceberg.{layer}.{legacy_table}
     WHERE NULLIF(TRIM(CAST(subaccountid AS VARCHAR)), '') IS NOT NULL
-    GROUP BY 1, {", ".join(ORG_LEVELS)}
+    GROUP BY 1
 ),
-ranqueado AS (
-    SELECT *,
-        ROW_NUMBER() OVER (
-            PARTITION BY account_key
-            ORDER BY org_cost DESC NULLS LAST,
-                     COALESCE({ORG_LEVELS[0]}, '') ASC,
-                     COALESCE({ORG_LEVELS[-1]}, '') ASC
-        ) AS rn
-    FROM por_org
+canonico AS (
+    SELECT
+        LOWER(TRIM(CAST(sub_account_id AS VARCHAR))) AS account_key,
+        COUNT(*) AS rows,
+        ROUND(SUM(TRY_CAST(effective_cost AS DOUBLE)), 2) AS cost
+    FROM iceberg.{layer}.{cost_table}
+    WHERE NULLIF(TRIM(CAST(sub_account_id AS VARCHAR)), '') IS NOT NULL
+    GROUP BY 1
 )
-SELECT account_key, {", ".join(ORG_LEVELS)}, org_cost
-FROM ranqueado
-WHERE rn = 1
+SELECT
+    c.account_key,
+    COALESCE(l.hierarquias, 0) AS hierarquias,
+    COALESCE(l.n1, 0) AS niveis_1,
+    COALESCE(l.n5, 0) AS niveis_5,
+    c.rows,
+    c.cost,
+    CASE WHEN COALESCE(l.hierarquias, 0) > 1 THEN 1 ELSE 0 END AS ambigua,
+    CASE
+        WHEN l.account_key IS NULL THEN 'SEM_CLASSIFICACAO_LEGADA'
+        WHEN l.hierarquias > 1 THEN 'MULTIPLAS_HIERARQUIAS'
+        ELSE 'HIERARQUIA_UNICA'
+    END AS diagnostico
+FROM canonico c
+LEFT JOIN legado l ON l.account_key = c.account_key
 """.strip()
+
+
+async def measure_org_hierarchies(
+    *, layer: str = layers.SILVER, timeout_s: float = 1200.0
+) -> dict[str, Any]:
+    """Executa a auditoria de hierarquias e resume o custo afetado.
+
+    É a medida que sustenta a correção B: quantas contas do canônico têm mais de
+    uma hierarquia e quanto custa esse conjunto.
+    """
+    from app.services.trino_service import execute as trino_execute
+
+    linhas = await trino_execute(
+        org_hierarchy_audit_sql(layer=layer), timeout_s=timeout_s
+    )
+    linhas = list(linhas or [])
+    total_contas = len(linhas)
+    total_custo = sum(float(r.get("cost") or 0) for r in linhas)
+    ambiguas = [r for r in linhas if int(r.get("ambigua") or 0) == 1]
+    sem_classificacao = [r for r in linhas if r.get("diagnostico") == "SEM_CLASSIFICACAO_LEGADA"]
+    custo_ambiguo = sum(float(r.get("cost") or 0) for r in ambiguas)
+    custo_sem = sum(float(r.get("cost") or 0) for r in sem_classificacao)
+    return {
+        "accounts": total_contas,
+        "accounts_multiple_hierarchies": len(ambiguas),
+        "accounts_without_legacy_classification": len(sem_classificacao),
+        "cost_total": round(total_custo, 2),
+        "cost_multiple_hierarchies": round(custo_ambiguo, 2),
+        "cost_without_legacy_classification": round(custo_sem, 2),
+        "max_hierarchies": max((int(r.get("hierarquias") or 0) for r in linhas), default=0),
+        "accounts": [
+            {
+                "account_key": r.get("account_key"),
+                "hierarchies": int(r.get("hierarquias") or 0),
+                "cost": float(r.get("cost") or 0),
+                "diagnostico": r.get("diagnostico"),
+            }
+            for r in sorted(linhas, key=lambda x: -int(x.get("hierarquias") or 0))[:50]
+        ],
+    }
 
 
 def c1_grain_sql(
@@ -204,18 +296,19 @@ def c1_stage2_sql(
     grain_table: str,
     resource_table: str,
 ) -> str:
-    """Estágio 2b: enriquece o grão com organização e recursos, sem multiplicar.
+    """Estágio 2 do C1: enriquece com recursos e declara a organização indisponível.
 
-    Os dois joins são sobre chaves **deduplicadas**:
+    Não há join organizacional. A organização é publicada como `NULL` com
+    `org_classification_status = 'UNMAPPED'`, porque **não existe chave
+    reconciliável** entre `resource_cost` e a classificação organizacional (ver
+    :data:`ORG_UNMAPPED`). Escolher a hierarquia dominante por conta preservava o
+    total e corrompia a leitura por área.
 
-    - hierarquia organizacional: uma linha por conta (`ROW_NUMBER` resolve as 74
-      contas ambíguas do livro legado);
-    - recursos: uma linha por competência + conexão + conta.
-
-    Por isso o `SUM(effective_cost)` daqui é idêntico ao do estágio 1 — o join não
-    multiplica. Cubos de custo não podem dobrar por causa de atributo.
+    O único join que sobra é sobre chave **deduplicada** (recursos por competência
+    + conexão + conta), e a prova de que não multiplica é o total publicado ser
+    idêntico ao do estágio 1.
     """
-    org_select = ", ".join(f"org.{n}" for n in ORG_LEVELS)
+    niveis = ", ".join(f"CAST(NULL AS VARCHAR) AS {n}" for n in ORG_LEVELS)
     return f"""
 SELECT
     g.billing_period,
@@ -227,9 +320,8 @@ SELECT
     g.region_key,
     g.charge_category,
     g.currency,
-    {org_select},
-    CASE WHEN org.account_key IS NULL THEN 'UNMAPPED' ELSE 'MAPPED' END
-        AS org_classification_status,
+    {niveis},
+    '{ORG_UNMAPPED}' AS org_classification_status,
     g.effective_cost,
     g.list_cost,
     CAST(NULL AS DOUBLE) AS billed_cost,
@@ -242,10 +334,6 @@ SELECT
     g.rows_without_tag,
     g.purchase_rows
 FROM iceberg.{layer}.{grain_table} g
-LEFT JOIN (
-{org_mapping_sql(layer=layer, legacy_table=legacy_table)}
-) org
-  ON org.account_key = g.sub_account_id
 LEFT JOIN iceberg.{layer}.{resource_table} rc
   ON rc.billing_period = g.billing_period
  AND rc.connection_code = g.connection_code
@@ -309,6 +397,16 @@ def unavailable_measures() -> dict[str, str]:
         "contracted_cost": (
             "contracted_cost é NULL em 13.519.512/13.519.512 linhas; "
             "list_cost é igual a effective_cost, então não há desconto a medir"
+        ),
+        "departamento_nivel_1..7": (
+            "sem chave reconciliável entre resource_cost e a classificação "
+            "organizacional: a ponte conta→hierarquia do livro legado é 1:N. "
+            "Publicado como NULL com org_classification_status='UNMAPPED'; a "
+            "classificação organizacional continua no dashboard legado"
+        ),
+        "org_classification_status": (
+            "sempre 'UNMAPPED' enquanto não existir ponte que preserve as divisões "
+            "reais e reconcilie o total"
         ),
     }
 

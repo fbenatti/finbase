@@ -638,6 +638,73 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
     details: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     written = 0
+
+    # Regras com `materializer_key` têm construção multi-estágio e são resolvidas
+    # pela allowlist `gold_materializers`. Elas saem do laço de pivô abaixo: passar
+    # um cubo `finops_*` pelo caminho genérico publicaria uma tabela diferente da
+    # que o nome promete.
+    keyed = [r for r in rules if getattr(r, "materializer_key", None)]
+    rules = [r for r in rules if not getattr(r, "materializer_key", None)]
+
+    if keyed:
+        from app.services.gold_materializers import (
+            execution_order,
+            is_registered,
+            materialize_by_keys,
+        )
+
+        chaves = [str(r.materializer_key) for r in keyed]
+        invalidas = [c for c in chaves if not is_registered(c)]
+        if invalidas:
+            raise KeyError(
+                "materializer_key fora da allowlist: " + ", ".join(sorted(set(invalidas)))
+            )
+        try:
+            if progress:
+                progress(0, len(chaves), "Materializando cubos multi-estágio")
+            resultados = await materialize_by_keys(
+                execution_order(chaves),
+                run_id=run_id,
+                progress=progress,
+            )
+            for regra in keyed:
+                resultado = resultados.get(str(regra.materializer_key)) or {}
+                linhas = int(
+                    resultado.get("rows")
+                    or resultado.get("grain_rows")
+                    or 0
+                )
+                regra.materialization_table = rule_target_table(regra.code)
+                regra.materialization_rows = linhas
+                regra.materialization_status = "UPDATED" if linhas else "EMPTY"
+                regra.materialization_error = None
+                regra.materialization_run_id = run_id
+                regra.materialized_at = datetime.now(timezone.utc)
+                details.append(
+                    {
+                        "rule_id": regra.id,
+                        "code": regra.code,
+                        "table": regra.materialization_table,
+                        "rows": linhas,
+                        "materializer_key": regra.materializer_key,
+                    }
+                )
+                written += linhas
+        except Exception as exc:
+            # Falha em cubo multi-estágio marca **todas** as regras do lote: a ordem
+            # é por dependência, então um cubo que falha invalida os seguintes, e
+            # dizer que os seguintes publicaram seria falso.
+            for regra in keyed:
+                regra.materialization_status = "ERROR"
+                regra.materialization_error = str(exc)[:2000]
+                regra.materialization_run_id = run_id
+                regra.materialized_at = datetime.now(timezone.utc)
+                failed.append(
+                    {"rule_id": regra.id, "code": regra.code, "error": str(exc)[:500]}
+                )
+            session.commit()
+            raise
+
     for index, rule in enumerate(rules, start=1):
         if progress:
             progress(index - 1, len(rules), f"Materializando {rule.code}")
@@ -661,7 +728,13 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
         if progress:
             progress(index, len(rules), f"{rule.code} - {'publicada' if rule.materialization_status != 'ERROR' else 'com erro'}")
     session.commit()
-    return {"rules": len(rules), "rows": written, "details": details, "failed": failed}
+    return {
+        "rules": len(rules) + len(keyed),
+        "rows": written,
+        "details": details,
+        "failed": failed,
+        "materializer_keys": [str(r.materializer_key) for r in keyed],
+    }
 
 
 def materialize_golds_sync(session: Any, *, run_id: int, progress: Any | None = None, rule_ids: list[int] | None = None) -> dict[str, Any]:

@@ -56,6 +56,15 @@ class GoldMartRule(Base):
     # permitindo comparar snapshots (ex.: delta de tags shutdown=auto entre dias).
     snapshot_mode = Column(Boolean, nullable=False, default=False)
     snapshot_col = Column(String(50), nullable=False, default="_snapshot_date")
+    #: Chave do materializador do cubo, quando a construção **não** é um único
+    #: `SELECT` sobre as fontes (caso dos cubos `finops_*`, que têm estágios,
+    #: buckets e dependência entre cubos). A coluna guarda uma **chave**, e o
+    #: código resolve a chave por allowlist em `gold_materializers`.
+    #:
+    #: Guardar o nome de uma função ou um trecho de Python aqui seria execução de
+    #: código vindo de um registro de banco — por isso a coluna é um vocabulário
+    #: fechado, e uma chave desconhecida é erro, não fallback silencioso.
+    materializer_key = Column(String(60), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

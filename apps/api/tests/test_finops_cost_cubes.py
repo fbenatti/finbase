@@ -31,7 +31,7 @@ from app.services.finops_cost_monthly import (
     c1_grain_sql,
     c1_select_sql,
     c1_stage2_sql,
-    org_mapping_sql,
+    org_hierarchy_audit_sql,
     resource_count_sql,
     unavailable_measures,
 )
@@ -40,7 +40,7 @@ from app.services.finops_cost_resource import (
     c2_cost_sql,
     c2_enrich_sql,
     c2_projection_sql,
-    inventory_dedup_sql,
+    inventory_temporal_sql,
     non_additive_measures,
     quality_columns,
 )
@@ -72,6 +72,13 @@ def test_resource_count_sql_requires_provider_path():
     assert "COUNT(DISTINCT" in sql
 
 
+def test_c1_has_no_dominant_org_mapping():
+    """Não pode existir função que escolha uma organização entre várias reais."""
+    import app.services.finops_cost_monthly as m
+
+    assert not hasattr(m, "org_mapping_sql")
+
+
 def test_c1_publishes_unavailable_costs_as_null():
     """`billed_cost` e `contracted_cost` são NULL na origem: publicar zero mentiria."""
     sql = c1_grain_sql()
@@ -84,11 +91,16 @@ def test_c1_publishes_unavailable_costs_as_null():
 
 
 def test_unavailable_measures_explain_the_reason():
-    """A UI precisa saber por que o campo é nulo, não só que é nulo."""
+    """A UI precisa saber por que o campo é nulo, não só que é nulo.
+
+    Inclui a organização: ela é indisponível de forma **estrutural** (não há chave
+    reconciliável), diferente de `billed_cost`, que é nulo na origem.
+    """
     motivos = unavailable_measures()
-    assert set(motivos) == {"billed_cost", "contracted_cost"}
-    for texto in motivos.values():
-        assert "13.519.512" in texto
+    assert {"billed_cost", "contracted_cost"} <= set(motivos)
+    assert "13.519.512" in motivos["billed_cost"]
+    assert "departamento_nivel_1..7" in motivos
+    assert "UNMAPPED" in motivos["departamento_nivel_1..7"]
 
 
 def test_org_levels_are_seven():
@@ -97,17 +109,17 @@ def test_org_levels_are_seven():
     assert ORG_LEVELS[-1] == "departamento_nivel_7"
 
 
-def test_org_mapping_is_deduplicated_per_account():
-    """74 contas do legado têm mais de uma organização; sem deduplicar, multiplica."""
-    sql = org_mapping_sql()
-    assert "ROW_NUMBER() OVER" in sql
-    assert "PARTITION BY account_key" in sql
-    assert "rn = 1" in sql
+def test_org_hierarchy_audit_measures_ambiguity():
+    """91 de 103 contas do canônico têm múltiplas hierarquias no legado.
 
-
-def test_org_mapping_tie_break_is_deterministic():
-    sql = org_mapping_sql()
-    assert "org_cost DESC" in sql
+    A auditoria substituiu o mapeamento dominante: em vez de escolher uma
+    hierarquia por conta (`ROW_NUMBER` sobre o maior custo), o C1 publica `NULL` e
+    `UNMAPPED`, e a ambiguidade vira medida para C11.
+    """
+    sql = org_hierarchy_audit_sql()
+    assert "MULTIPLAS_HIERARQUIAS" in sql
+    assert "ambigua" in sql
+    assert "hierarquias" in sql
 
 
 def test_non_additive_and_additive_measures_do_not_overlap():
@@ -135,43 +147,49 @@ def test_c1_select_sql_is_a_single_query_for_inspection():
 # --- C2 ------------------------------------------------------------------------
 
 
-def test_c2_projection_does_not_group():
-    """O `GROUP BY` no grão de recurso estoura o worker; quem agrega é o pandas."""
-    sql = c2_projection_sql(billing_period="202512")
-    assert "GROUP BY" not in sql
+def test_c2_bucket_sql_aggregates_in_trino():
+    """A agregação por bucket roda no Trino, não no processo da API."""
+    from app.services.finops_cost_resource import c2_bucket_select_sql
+
+    sql = c2_bucket_select_sql(
+        billing_period="202512", bucket=1, connection_code="azure-4p"
+    )
+    assert "CRC32" in sql
+    assert "GROUP BY" in sql
     assert "iceberg.silver.resource_cost" in sql
 
 
-def test_c2_projection_filters_one_period():
-    sql = c2_projection_sql(billing_period="202512")
-    assert "= '202512'" in sql
+def test_c2_bucket_sql_escapes_injected_period():
+    """A competência vem da Silver, mas ainda assim vira literal escapado."""
+    from app.services.finops_cost_resource import c2_bucket_select_sql
+
+    sql = c2_bucket_select_sql(
+        billing_period="202512'; DROP TABLE x --", bucket=0
+    )
+    assert "202512''; DROP TABLE x --" in sql
 
 
-def test_c2_projection_rejects_non_period_literal():
-    """Um valor inesperado não pode virar SQL."""
-    sql = c2_projection_sql(billing_period="2025-12; DROP TABLE x")
-    assert "DROP" not in sql
-    assert "WHERE" not in sql
+def test_c2_projection_is_over_bucket_tables():
+    """`c2_projection_sql` projeta a união dos buckets, não a Silver."""
+    sql = c2_projection_sql("SELECT 1 AS billing_period")
+    assert "FROM (SELECT 1 AS billing_period) c2_raw" in sql
+    assert "resource_cost" not in sql
 
 
-def test_c2_cost_sql_groups_when_used_in_sql():
-    sql = c2_cost_sql(billing_period="202512")
-    assert "GROUP BY" in sql
-
-
-def test_inventory_is_deduplicated_by_safe_key():
-    """26 snapshots por recurso: sem deduplicar, o custo multiplica por 26."""
-    sql = inventory_dedup_sql()
+def test_inventory_is_deduplicated_by_safe_key_per_period():
+    """26 snapshots por recurso: sem deduplicar por competência, o custo multiplica."""
+    sql = inventory_temporal_sql()
     assert "ROW_NUMBER() OVER" in sql
     assert "PARTITION BY" in sql
     assert "inventory_snapshots" in sql
     assert "rn = 1" in sql
 
 
-def test_inventory_dedup_orders_by_valid_from_then_processed():
-    sql = inventory_dedup_sql()
-    assert "ORDER BY valid_from DESC NULLS LAST" in sql
-    assert "_processed_at DESC NULLS LAST" in sql
+def test_inventory_dedup_orders_by_closest_valid_snapshot():
+    """Entre os válidos, o mais próximo da competência — não o mais recente."""
+    sql = inventory_temporal_sql()
+    assert "ORDER BY b.snapshot_valid_from DESC" in sql
+    assert "b.snapshot_processed_at DESC" in sql
 
 
 def test_c2_enrich_joins_on_the_safe_key_not_resource_id_alone():

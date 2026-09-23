@@ -438,6 +438,11 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS sql_template TEXT",
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS snapshot_mode BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS snapshot_col VARCHAR(50) NOT NULL DEFAULT '_snapshot_date'",
+            # Chave de materializador para cubos cuja construção é multi-estágio (não
+            # é um único SELECT sobre uma fonte). Resolvida por allowlist no código:
+            # **nunca** armazena nome de função ou Python vindo do usuário.
+            "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS materializer_key VARCHAR(60)",
+            "CREATE INDEX IF NOT EXISTS ix_gold_rule_materializer ON gold_rule (materializer_key)",
             """INSERT INTO gold_rule (code, name, description, active, materialization_table, materialization_status)
                VALUES
                  ('ai_consumption_daily', 'IA — Consumo diário (Claude/NotebookLM)', 'Gold auxiliar de consumo de IA; publicada pela fila Gold a partir de dest_consumo_ia.', TRUE, 'dest_dm_ai_consumption_daily', 'PENDING'),
@@ -537,6 +542,30 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE forecast_run ALTER COLUMN cutoff_date DROP NOT NULL",
         ):
             await _execute_migration(conn, statement)
+
+        # Registro dos cubos `finops_*` na governança declarativa. Idempotente: cria
+        # o que falta e atualiza descrição/tabela/materializador do que existe, sem
+        # mexer em `active`, que é decisão do operador. Sem isto, os cubos C1-C3 e a
+        # cobertura existem e publicam manifesto, mas ficam fora da fila `gold_rule`.
+        try:
+            from app.services.finops_gold_rules import seed_finops_gold_rules
+
+            def _seed_finops(sync_conn) -> dict:
+                from sqlalchemy.orm import Session
+
+                with Session(bind=sync_conn) as sync_session:
+                    resultado = seed_finops_gold_rules(sync_session)
+                    sync_session.commit()
+                    return resultado
+
+            resultado = await conn.run_sync(_seed_finops)
+            logger.info(
+                "Gold rules finops_*: %d criadas, %d atualizadas",
+                len(resultado.get("created") or []),
+                len(resultado.get("updated") or []),
+            )
+        except Exception as exc:  # noqa: BLE001 — não pode impedir o start da API
+            logger.warning("Falha ao registrar gold_rule dos cubos finops_*: %s", exc)
         # The Projects feature was removed (UI, API and metadata).  Drop the
         # legacy table and its columns.  Classification rules keep their
         # department target; the project_id column is dropped with its values.

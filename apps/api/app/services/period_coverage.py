@@ -29,10 +29,12 @@ Duas distinções que a implementação precisou fazer e que não estavam no pla
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
+from app.services import lakehouse_layers as layers
 from app.services.semantic_normalization import connection_key
 
 # --- Estados de cobertura ---------------------------------------------------
@@ -897,3 +899,228 @@ async def verify_reconciliation(
         "dimensions": sorted(dimensions) if dimensions else [],
         "rows": linhas or [],
     }
+
+
+# ── Materialização de `finops_period_coverage` ───────────────────────────────
+#
+# A classificação existia só em memória: cada request de API e cada execução de C3
+# reexecutava o classificador sobre a Silver inteira. Isso custa segundos por
+# request, não tem uma definição publicada e permite que o default de um período
+# sem classificação seja escolhido por quem lê. Aqui ela vira tabela Gold, com o
+# default explícito `NOT_COMPARABLE`.
+
+#: Nome físico do cubo de cobertura.
+COVERAGE_TABLE = "finops_period_coverage"
+COVERAGE_CUBE_CODE = "finops_period_coverage"
+
+#: Default de comparabilidade quando não existe classificação publicada para o
+#: par conexão + competência. **Nunca** `COMPLETE`: sem cobertura medida, o período
+#: não é comparável (aceite de A da auditoria).
+DEFAULT_UNKNOWN_STATUS = "NOT_COMPARABLE"
+
+
+def _coverage_row(cobertura: PeriodCoverage, *, dataset: str) -> dict[str, Any]:
+    """Uma linha publicável de cobertura."""
+    return {
+        "connection_code": cobertura.connection_code,
+        "billing_period": cobertura.billing_period,
+        "dataset": dataset,
+        "status": cobertura.status,
+        "reason": cobertura.reason,
+        "comparable": bool(cobertura.comparable),
+        "displayable": bool(cobertura.displayable),
+        "day_coverage": round(float(cobertura.day_coverage), 6),
+        "missing_dimension_ratio": round(float(cobertura.missing_dimension_ratio), 6),
+        "tag_missing_ratio": round(float(cobertura.tag_missing_ratio), 6),
+        "row_count": int(cobertura.row_count),
+        "cost": cobertura.cost,
+        "rule_version": cobertura.rule_version,
+        "warnings": list(cobertura.warnings),
+    }
+
+
+async def build_coverage_rows(
+    *, dataset: str = "resource_cost", layer: str = "silver", today: Any = None
+) -> list[dict[str, Any]]:
+    """Executa o classificador e devolve as linhas prontas para publicar."""
+    coberturas = await collect_coverage(dataset=dataset, layer=layer, today=today)
+    return [_coverage_row(c, dataset=dataset) for c in coberturas]
+
+
+#: Schema físico do cubo de cobertura, na ordem de publicação. Declarado aqui para
+#: que a materialização por frame e a leitura pela API não divirjam.
+COVERAGE_COLUMNS: tuple[str, ...] = (
+    "connection_code",
+    "billing_period",
+    "dataset",
+    "status",
+    "reason",
+    "comparable",
+    "displayable",
+    "day_coverage",
+    "missing_dimension_ratio",
+    "tag_missing_ratio",
+    "row_count",
+    "cost",
+    "rule_version",
+    "warnings",
+    "freshness_at",
+)
+
+#: Tipos para o escritor de frame do iceberg.
+COVERAGE_COLUMN_TYPES: dict[str, str] = {
+    "day_coverage": "DOUBLE",
+    "missing_dimension_ratio": "DOUBLE",
+    "tag_missing_ratio": "DOUBLE",
+    "row_count": "BIGINT",
+    "cost": "DOUBLE",
+    "comparable": "BOOLEAN",
+    "displayable": "BOOLEAN",
+    "freshness_at": "TIMESTAMP",
+}
+
+
+async def materialize_coverage(
+    *,
+    run_id: int | None = None,
+    layer: str = "silver",
+    dataset: str = "resource_cost",
+    today: Any = None,
+) -> dict[str, Any]:
+    """Publica `gold.finops_period_coverage` pelo caminho governado.
+
+    Usa o publicador por frame porque a classificação é produzida em Python: as
+    linhas vêm do classificador, não de um `SELECT`. O volume é de dezenas de
+    linhas, e a publicação é um swap de tabela inteira — coerente com o grão.
+    """
+    import pandas as pd
+
+    from app.services import iceberg_service as iceberg
+    from app.services.gold_governance import (
+        record_frame_publication,
+        sanitize_error,
+    )
+
+    linhas = await build_coverage_rows(dataset=dataset, layer=layer, today=today)
+    if not linhas:
+        return {"table": COVERAGE_TABLE, "rows": 0, "coverage": []}
+
+    agora = datetime.now(timezone.utc).replace(tzinfo=None)
+    for linha in linhas:
+        # A freshness é o instante em que a classificação foi medida — não "agora"
+        # por omissão quando o dado é antigo.
+        linha["freshness_at"] = agora
+
+    frame = pd.DataFrame(linhas)
+    for coluna in COVERAGE_COLUMNS:
+        if coluna not in frame.columns:
+            frame[coluna] = None
+    frame = frame[list(COVERAGE_COLUMNS)]
+    frame["warnings"] = frame["warnings"].apply(
+        lambda v: " | ".join(str(x) for x in (v or [])) if not isinstance(v, str) else v
+    )
+
+    staged = iceberg.write_destination_staged(
+        COVERAGE_TABLE,
+        frame,
+        partition_col="dataset",
+        column_types=dict(COVERAGE_COLUMN_TYPES),
+        namespace=layers.GOLD,
+    )
+    try:
+        publicados = iceberg.swap_staged_table(
+            COVERAGE_TABLE,
+            staged,
+            namespace=layers.GOLD,
+            known_row_count=int(len(frame)),
+        )
+    except Exception as exc:  # noqa: BLE001
+        try:
+            iceberg.cleanup_staged_table(staged, namespace=layers.GOLD)
+        except Exception:  # noqa: BLE001
+            pass
+        raise RuntimeError(f"falha ao publicar {COVERAGE_TABLE}: {sanitize_error(exc)}") from exc
+
+    # `record_frame_publication` (assíncrona): esta função já é assíncrona, e a
+    # versão `_blocking` recusa registrar quando há loop ativo — em modo
+    # obrigatório ela levanta. Usar a errada deixava o cubo publicado sem
+    # manifesto, que é exatamente o defeito que a auditoria apontou.
+    await record_frame_publication(
+        cube_code=COVERAGE_CUBE_CODE,
+        physical_table=COVERAGE_TABLE,
+        rows_written=int(len(frame)),
+        namespace=layers.GOLD,
+        source_tables=[f"{layer}.{dataset}"],
+    )
+    # O cache em processo guarda a cobertura anterior: sem invalidar, C3 e a API
+    # continuariam lendo a classificação antiga depois de uma publicação nova.
+    invalidate_coverage_cache()
+    return {
+        "table": COVERAGE_TABLE,
+        "rows": publicados,
+        "coverage": linhas,
+    }
+
+
+# ── Leitura da cobertura publicada ───────────────────────────────────────────
+
+#: Sentinela para distinguir "cache ainda não carregado" de "cache vazio".
+_COVERAGE_CACHE: dict[str, Any] = {"loaded_at": None, "map": None, "source": None}
+
+
+async def load_coverage_map(
+    *, force: bool = False, ttl_seconds: float = 300.0
+) -> dict[tuple[str, str], str]:
+    """Lê `status` de `(connection_code, billing_period)` da tabela publicada.
+
+    É a **única** fonte de comparabilidade do projeto: C3 e as APIs chamam isto em
+    vez de reexecutar o classificador. Um período ausente da tabela não recebe
+    status — quem pergunta decide o default, e o default documentado é
+    :data:`DEFAULT_UNKNOWN_STATUS`.
+
+    O cache é em processo e curto: a tabela muda quando uma publicação acontece, e
+    `invalidate_coverage_cache` é chamado no fim de cada materialização.
+    """
+    from app.services.trino_service import execute as trino_execute
+
+    agora = time.monotonic()
+    carregado = _COVERAGE_CACHE.get("loaded_at")
+    if (
+        not force
+        and _COVERAGE_CACHE.get("map") is not None
+        and carregado is not None
+        and (agora - carregado) < ttl_seconds
+    ):
+        return dict(_COVERAGE_CACHE["map"])
+
+    linhas = await trino_execute(
+        f"SELECT connection_code, billing_period, status "
+        f"FROM iceberg.{layers.GOLD}.{COVERAGE_TABLE}",
+        timeout_s=300,
+    )
+    mapa = {
+        (str(r.get("connection_code")), str(r.get("billing_period"))): str(r.get("status"))
+        for r in linhas or []
+        if r.get("connection_code") and r.get("billing_period")
+    }
+    _COVERAGE_CACHE.update({"loaded_at": agora, "map": mapa, "source": COVERAGE_TABLE})
+    return dict(mapa)
+
+
+def invalidate_coverage_cache() -> None:
+    """Descarta o cache em processo. Chamado após publicar a cobertura."""
+    _COVERAGE_CACHE.update({"loaded_at": None, "map": None, "source": None})
+
+
+def coverage_status(
+    coverage: dict[tuple[str, str], str], connection_code: str, billing_period: str
+) -> str:
+    """Status de um par, com o default **não comparável** quando ausente."""
+    return coverage.get((str(connection_code), str(billing_period)), DEFAULT_UNKNOWN_STATUS)
+
+
+def is_comparable(
+    coverage: dict[tuple[str, str], str], connection_code: str, billing_period: str
+) -> bool:
+    """Comparabilidade de um par, a partir da cobertura publicada."""
+    return coverage_status(coverage, connection_code, billing_period) in COMPARABLE_STATUSES

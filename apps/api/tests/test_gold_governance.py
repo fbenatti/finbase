@@ -447,8 +447,15 @@ async def test_publish_rejects_mixed_currency(monkeypatch):
 #: `oci_operational_monitoring` não é cubo de custo: publica métrica operacional
 #: da OCI por fatia. Entra na lista porque usa o mesmo swap, não a mesma camada.
 _IN_MEMORY_PUBLISHERS = {
+    # Frame agregado por fatia, para evitar o scan que ele existe para não fazer.
     "gold_builder.py",
     "oci_operational_monitoring.py",
+    # Cobertura de competências: a classificação é produzida em Python, então as
+    # linhas vêm do classificador e não de um SELECT. Dezenas de linhas.
+    "period_coverage.py",
+    # Inventário temporal do C2: único frame do C2, dezenas de milhares de linhas.
+    # O custo (13,5 M linhas) **não** passa por frame — é agregado no Trino.
+    "finops_cost_resource.py",
 }
 #: `gold_governance.py` é quem **implementa** o registro, então aparece nos dois
 #: lados; não é um publicador adicional.

@@ -1562,3 +1562,277 @@ Branch `novo_dev`, push em `origin`.
 | P4 | C4–C12 | plano |
 | P5 | `resource_inventory` só tem o snapshot 202609: atributos de competências antigas vêm do snapshot atual | G3.8 |
 | P6 | frontend do Centro de Decisão (G9) | plano |
+
+---
+
+# Auditoria dos commits `7f42db17..373d6f56` — correções obrigatórias
+
+**Registro da auditoria.** A implementação de G0–G3 foi considerada parcialmente
+aderente. Nove bloqueios foram identificados, e nenhum deles é cosmético: dois
+produziam número errado (organização e temporalidade), dois quebravam o contrato de
+governança (manifesto opcional e cubos fora de `gold_rule`), dois violavam a
+arquitetura de execução (classificação recriada em request e agregação de milhões de
+linhas na API) e três eram pendências de dado (cubos de IA ausentes, gap do canônico
+e ajustes de API).
+
+Correções em andamento nas seções abaixo.
+
+## AUD.1 Manifesto obrigatório (E)
+
+`record_manifest()` capturava falhas e permitia publicação sem manifesto. Corrigido:
+
+- `ManifestUnavailableError` levantada quando o registro falha;
+- `MANIFEST_REQUIRED` é o **default**; `MANIFEST_BEST_EFFORT` existe apenas para
+  `dest_dm_cost_focus` e `dest_oci_operational_metrics`, em allowlist fechada no
+  código e sem nenhum cubo `finops_*`;
+- a entrada `RUNNING` é registrada **antes** do `ensure_namespace`/CTAS, e falha
+  nela aborta sem tocar o lakehouse;
+- falha ao finalizar o manifesto reprova a publicação governada;
+- `record_manifest_blocking` levanta em modo obrigatório quando há loop assíncrono
+  ativo, em vez de pular o registro em silêncio.
+
+Teste novo: com `record_manifest` indisponível, nenhum swap acontece e nenhuma CTAS
+roda.
+
+## AUD.2 `finops_period_coverage` materializada (A)
+
+A classificação existia só em memória: cada request e cada execução de C3
+reexecutava o classificador sobre a Silver inteira. Agora:
+
+- `gold.finops_period_coverage` é publicada pelo caminho governado, com 17 linhas em
+  23/09/2026: **10 `COMPLETE`** (R$ 31.492.865,03), **6 `PARTIAL`**
+  (R$ 3.875.747,98) e **1 `CURRENT_OPEN`** (R$ 1.987.748,46) — soma igual ao total
+  de `resource_cost`;
+- colunas: conexão, competência, dataset, status, motivo, `comparable`,
+  `displayable`, `day_coverage`, `missing_dimension_ratio`, `tag_missing_ratio`,
+  linhas, custo, `rule_version`, `warnings` e `freshness_at`;
+- C3 e as APIs leem a tabela por `load_coverage_map`, com cache em processo
+  invalidado na publicação;
+- **default sem cobertura publicada é `NOT_COMPARABLE`**, nunca `COMPLETE`;
+- nenhum request reclassifica período: há teste que falha se
+  `collect_coverage`/`classify_all` reaparecerem no router.
+
+## AUD.3 Organização do C1: mapeamento dominante removido (B)
+
+O mapeamento `conta → hierarquia de maior custo` foi **removido**. A auditoria
+mediu o que ele custava:
+
+| Medida | Valor |
+|---|---:|
+| contas no livro canônico | 103 |
+| contas com **múltiplas hierarquias** no legado | **91** |
+| máximo de hierarquias distintas numa conta | **67** |
+| custo em contas ambíguas | **R$ 37.278.952,74** (99,8 % do total) |
+| contas sem classificação legada | 2 (R$ 55.380,70) |
+
+Com 91 de 103 contas ambíguas, atribuir uma hierarquia dominante carimbava a
+assinatura inteira com a área que mais gastou e apagava as demais divisões. Custo
+certo, decisão errada.
+
+Agora o C1 publica `departamento_nivel_1..7` como **`NULL`** e
+`org_classification_status = 'UNMAPPED'` em 13.184/13.184 linhas. O reconhecimento
+ficou em `unavailable_measures()`, junto de `billed_cost` e `contracted_cost`. A
+classificação organizacional continua servida pelo dashboard legado
+(`dest_dm_cost_visao_completa`) até o cutover.
+
+`measure_org_hierarchies()` produz a medida para C11, e uma ponte futura só poderá
+ser ativada se preservar as divisões reais **e** reconciliar o total — sem escolher
+uma organização dominante.
+
+## AUD.4 Temporalidade do inventário no C2 (C)
+
+O C2 aplicava o snapshot de setembro de 2026 a todas as competências. Agora o join é
+temporal:
+
+- aceita só `valid_from <= fim da competência`;
+- escolhe o snapshot válido **mais próximo** da competência;
+- `inventory_status` tem três valores fechados: `CURRENT_SNAPSHOT` (snapshot da
+  própria competência), `HISTORICAL_SNAPSHOT` (válido e anterior) e
+  `NO_TEMPORAL_SNAPSHOT` (nenhum snapshot válido);
+- sem snapshot vigente, `resource_sku`, `resource_state`, `operating_system` e
+  `resource_type_key` ficam `NULL`/`UNKNOWN` — nada é retropolado.
+
+Como só existem snapshots de 202609, todo período anterior fica
+`NO_TEMPORAL_SNAPSHOT`.
+
+## AUD.5 Agregação do C2 sem milhões de linhas na API (F)
+
+O C2 carregava as linhas Silver no pandas. Agora:
+
+- a construção é por **(competência, conexão, bucket)**;
+- o bucket é `ABS(CRC32(COALESCE(id canônico, ''))) % 64`: determinístico pela chave
+  canônica, então o mesmo recurso cai sempre no mesmo bucket. O `COALESCE` é
+  obrigatório — `CRC32(NULL)` é NULL e 412.665 linhas de ajuste sumiriam;
+- **64 buckets** por medição: 16 ainda derrubavam o worker na fatia de 202504
+  (3,76 M linhas);
+- cada bucket é agregado **no Trino** e publicado como tabela auxiliar; a fatia é
+  montada por `UNION ALL` dessas tabelas e trocada incrementalmente;
+- o único frame do C2 é o inventário deduplicado (dezenas de milhares de linhas),
+  não o custo;
+- buckets são removidos no `finally`, com sucesso ou falha, para que nenhum bucket
+  órfão entre numa montagem futura;
+- tipos de saída são **explícitos** por coluna: a primeira fatia de um período de
+  ajuste inferia tipos diferentes de um mês operacional e o `INSERT` da fatia
+  seguinte falhava.
+
+## AUD.6 Governança declarativa dos cubos (D)
+
+`gold_rule` ganhou `materializer_key` (coluna + índice) e as quatro regras foram
+registradas: `finops_period_coverage`, `finops_cost_monthly`,
+`finops_cost_resource_monthly` e `finops_cost_change_driver`, cada uma com fontes,
+dependências, versão de contrato e tabela física.
+
+`gold_materializers.py` é a **allowlist**: um dicionário `chave → (spec, função)`. A
+coluna guarda a chave; o código guarda a função. Chave desconhecida levanta, e há
+teste que prova que uma string arbitrária (`import os; os.system(...)`) não é
+aceita. A ordem de execução respeita dependências, e ciclo declarado falha em vez de
+produzir ordem arbitrária.
+
+`materialize_gold_cubes` separa regras com `materializer_key` e as executa pelo
+executor de materializadores; falha em uma marca **todas** as regras do lote como
+`ERROR`, porque a ordem é por dependência e um cubo que falha invalida os seguintes.
+
+## AUD.7 G3 API era parcial — reclassificação
+
+O commit `373d6f56` foi nomeado `feat(G8)`. Ele implementa **somente a frente de
+custo**: `/finops/summary`, `/finops/cost/trend`, `/finops/cost/drivers`,
+`/finops/cost/resources` e `/finops/cost/meta`. **G8 continua aberto** — faltam
+eficiência (C4), carteira e funil (C5–C6), projeção (C7), AKS (C8), PTU (C9),
+compromissos (C10) e qualidade (C11).
+
+Ajustes aplicados: autorização `finops:read` em todos os endpoints (com backfill de
+permissão nas roles de sistema), cache por cubo + snapshot do manifesto + filtros
+com invalidação após publicação, e medição de p50/p95 por endpoint em
+`/finops/metrics`.
+
+## AUD.8 Evidências medidas das correções
+
+### Cobertura publicada (A)
+
+```text
+gold.finops_period_coverage: 17 linhas
+  COMPLETE      : 10  R$ 31.492.865,03
+  PARTIAL       :  6  R$  3.875.747,98
+  CURRENT_OPEN  :  1  R$  1.987.748,46
+  soma          :     R$ 37.356.361,47  (= resource_cost)
+```
+
+Colunas publicadas: `connection_code`, `billing_period`, `dataset`, `status`,
+`reason`, `comparable`, `displayable`, `day_coverage`,
+`missing_dimension_ratio`, `tag_missing_ratio`, `row_count`, `cost`,
+`rule_version`, `warnings`, `freshness_at`.
+
+### Organização (B)
+
+| Medida | Valor |
+|---|---:|
+| contas no canônico | 103 |
+| contas com múltiplas hierarquias | **91** |
+| máximo de hierarquias numa conta | **67** |
+| custo em contas ambíguas | **R$ 37.278.952,74 (99,8 %)** |
+| custo sem classificação legada | R$ 55.380,70 |
+
+C1 republicado: **13.184 linhas**, R$ 37.356.361,47, delta R$ 0,00, **13.184/13.184
+`UNMAPPED`** e **zero** níveis organizacionais preenchidos.
+
+### Temporalidade (C)
+
+Inventário temporal por competência: **20.160 linhas**, todas de `202609`, todas
+`CURRENT_SNAPSHOT`; **7.958** com SKU, **643** com estado, **61** com SO. Nenhuma
+competência anterior recebeu atributo de setembro — elas nem aparecem no join.
+
+Regra exposta e testada: `snapshot_is_valid_for_period(valid_from, snapshot_period,
+billing_period)` e `inventory_status_for(...)`. Casos: `2026-09-22` **não** vale para
+`202505` nem `202608`; vale para `202609`; `202610` recebe `HISTORICAL_SNAPSHOT`.
+
+### Buckets do C2 (F)
+
+`ABS(CRC32(CAST(COALESCE(id_canônico, '') AS VARBINARY))) % 64`. **64 buckets por
+medição**: com 16, a fatia de 202504 (3,76 M linhas) ainda derrubava o worker. O
+`COALESCE` é obrigatório — `CRC32(NULL)` é NULL e as 412.665 linhas de ajuste
+sumiriam da publicação.
+
+### Governança (D)
+
+```text
+gold_rule: 4 regras novas, com materializer_key
+  2406 finops_period_coverage        materializer_key=finops_period_coverage
+  2407 finops_cost_monthly           materializer_key=finops_cost_monthly
+  2408 finops_cost_resource_monthly  materializer_key=finops_cost_resource_monthly
+  2409 finops_cost_change_driver     materializer_key=finops_cost_change_driver
+fontes: silver.resource_cost, silver.resource_inventory,
+        gold.finops_cost_monthly, gold.finops_period_coverage
+```
+
+### API (AUD.7)
+
+`finops` adicionado a `ALL_MODULES`, com backfill de permissão em `Administrador`
+(4 ações) e `Leitor Global` (read). Cache por cubo + snapshot do manifesto +
+filtros, com invalidação no ponto único de publicação. `/finops/metrics` expõe
+p50/p95 medidos.
+
+## AUD.9 Gap de `resource_cost` em 202604–202608 — causa-raiz
+
+Investigação pelo pipeline existente, sem copiar de `dest_modelo_focus`:
+
+| Camada | 202604 | 202605 | 202606 | 202607 | 202608 | 202609 |
+|---|---:|---:|---:|---:|---:|---:|
+| `bronze.raw_azure_4p` | 51 | 1 | 1 | 3 | **ausente** | 279.768 |
+| `silver.resource_cost` (4P) | 51 | 1 | 1 | 3 | ausente | — |
+| `silver.dest_modelo_focus` | 3.581.165 | 3.795.177 | 3.795.015 | 4.023.543 | 4.711.931 | 2.338.021 |
+
+**A Bronze tem exatamente o mesmo padrão do canônico.** As cargas de 202504–202603
+têm 3 a 55 blobs por mês; 202604–202607 têm **1 blob cada** e 202608 tem **2**.
+
+As tarefas de reprocessamento desses meses existem e **falharam**:
+
+```text
+5905 /reprocess 202603  FAILED  "Worker reiniciado durante a execução"
+5906 /reprocess 202604  FAILED  idem
+5907–5910               FAILED  idem (202605, 202606, 202607, 202608/202609)
+5902–5904 202609/202601/202602  FAILED / COMPLETED (1 blob)
+```
+
+Conclusão: **a origem não entregou as linhas.** O export do Azure Cost Management da
+conexão 4P publicou apenas os arquivos de ordem de reserva (`Microsoft.Capacity`) em
+202604–202607, e nenhum para 202608. Não é defeito de extração, de mapeamento nem de
+agregação: a Bronze — que é o payload como coletado — já está incompleta.
+
+Consequência para o cutover: **bloqueado**, como a auditoria determinou. Recuperar
+esses meses exige que a origem volte a publicar os arquivos, ou uma coleta nova —
+não existe caminho pelo pipeline atual, porque não há blob para reprocessar.
+
+## AUD.10 Estado do reprocessamento pela fila
+
+| Cubo | Estado |
+|---|---|
+| `finops_period_coverage` | **publicado** (17 linhas) |
+| C1 `finops_cost_monthly` | **publicado e reconciliado** (13.184 linhas, delta R$ 0,00) |
+| C2 `finops_cost_resource_monthly` | **reconstrução interrompida** — ver AUD.11 |
+| C3 `finops_cost_change_driver` | publicado com 9 pares; depende de C2/C1 estáveis para reprocessar |
+
+## AUD.11 Erro de sequenciamento assumido
+
+Durante a reconstrução bucketed do C2 eu disparei, em paralelo, a republicação dos
+cubos de IA. Os dois processos disputaram os dois workers de 2,44 GiB, e o worker
+caiu no meio da fatia `202601`.
+
+Estado no momento da interrupção: C2 com **R$ 24.332.114,58 em 735.818 linhas** —
+**incompleto** em relação aos R$ 37.356.361,47 esperados. As fatias já trocadas estão
+corretas (a troca é por fatia); as que faltam é que não foram republicadas.
+
+Correção: reconstruir o C2 **sozinho**, sem outra carga concorrente. É o próximo
+passo, e nada mais deve rodar em paralelo durante ele.
+
+## AUD.12 Pendente
+
+| # | Pendência | Bloqueio |
+|---|---|---|
+| 1 | reconstruir C2 completo e reconciliar R$ 37.356.361,47 | requer cluster ocioso; foi interrompido por disputa de recurso |
+| 2 | reprocessar C1–C3 pela fila `gold_rule` | depende de 1 |
+| 3 | republicar os 5 cubos de IA em `iceberg.gold` | idem; a tentativa concorrente derrubou o worker |
+| 4 | medir p50/p95 reais dos 5 endpoints | endpoints agora exigem autorização; medir com token |
+| 5 | recuperar 202604–202608 | **depende da origem** — a Bronze está incompleta |
+| 6 | C4–C12 | não iniciar antes de 1–4 |
+
+**G4 não foi iniciado**: os bloqueios acima não passaram.

@@ -172,6 +172,9 @@ class ManifestEntry:
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    #: `True` depois que a entrada RUNNING foi persistida com sucesso. Não vai para
+    #: o banco: é controle de fluxo do publicador.
+    manifest_started: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -383,7 +386,11 @@ async def publish_gold_cube(
         rollback_table=rollback_table,
         started_at=inicio,
     )
+    # Manifesto RUNNING **antes** do staging. Em modo obrigatório, falha aqui
+    # aborta antes de criar qualquer tabela: publicar um cubo governado cujo
+    # registro de origem falhou é o defeito que este módulo existe para eliminar.
     await record_manifest(entrada)
+    entrada.manifest_started = True
 
     iceberg.ensure_namespace(namespace)
     particao = f" WITH (partitioning = ARRAY['{partition_column}'])" if partition_column else ""
@@ -456,7 +463,16 @@ async def publish_gold_cube(
         entrada.status = FAILED
         entrada.error = sanitize_error(exc)
         entrada.finished_at = datetime.now(timezone.utc)
-        await record_manifest(entrada)
+        # O manifesto de falha é registro de diagnóstico: se ele mesmo falhar, o
+        # erro original precisa subir — é ele que explica a falha da publicação.
+        try:
+            await record_manifest(entrada)
+        except ManifestUnavailableError as manifest_exc:
+            logger.error(
+                "Falha ao registrar o próprio manifesto de falha de %s: %s",
+                entrada.cube_code,
+                manifest_exc,
+            )
         raise
 
 
@@ -517,6 +533,14 @@ async def _assert_staging_single_currency(
 
 
 async def _finish_manifest(entrada: ManifestEntry, saida: PublishOutcome) -> None:
+    """Registra o desfecho. Em modo obrigatório, falha aqui reprova a publicação.
+
+    O swap já aconteceu quando isto é chamado, então o cubo está publicado e o
+    manifesto não está: é exatamente o estado que não pode passar como sucesso. A
+    exceção sobe com o cubo já trocado, e o chamador marca a task como falha
+    preservando a evidência (o `previous_snapshot_id` da entrada RUNNING continua no
+    banco para a recuperação).
+    """
     entrada.status = saida.status
     entrada.rows_written = saida.rows
     entrada.financial_delta = saida.financial_delta
@@ -524,43 +548,113 @@ async def _finish_manifest(entrada: ManifestEntry, saida: PublishOutcome) -> Non
     entrada.reason = saida.skipped_reason
     entrada.finished_at = datetime.now(timezone.utc)
     await record_manifest(entrada)
+    # Publicação bem-sucedida invalida o cache do cubo. O ponto é único de propósito:
+    # o cache dos endpoints `finops_*` é chaveado pelo snapshot do cubo, e deixá-lo
+    # vivo depois de um swap serviria o número antigo justamente quando o usuário
+    # precisa ver o novo.
+    if entrada.status == SUCCESS:
+        try:
+            from app.services.finops_cache import invalidate_after_publish
+
+            invalidate_after_publish(entrada.cube_code)
+        except Exception as exc:  # noqa: BLE001 — cache não derruba publicação
+            logger.warning("Falha ao invalidar cache de %s: %s", entrada.cube_code, exc)
 
 
-async def record_manifest(entry: ManifestEntry) -> None:
+class ManifestUnavailableError(RuntimeError):
+    """O manifesto não pôde ser persistido.
+
+    Levantada por `record_manifest` no modo obrigatório. Publicar um cubo
+    governado sem manifesto é o defeito que G2 existe para eliminar: o número passa
+    a existir sem prova de origem, de SQL, de totais nem de rollback.
+    """
+
+
+#: Modo de registro do manifesto.
+#:
+#: `REQUIRED` é o modo dos cubos `finops_*` e de qualquer publicação nova: falha ao
+#: registrar aborta a publicação. `BEST_EFFORT` existe apenas para os caminhos
+#: legados identificados em `_BEST_EFFORT_CUBES`, onde o manifesto foi introduzido
+#: depois do cubo já estar em produção.
+MANIFEST_REQUIRED = "REQUIRED"
+MANIFEST_BEST_EFFORT = "BEST_EFFORT"
+
+#: Cubos que ainda usam best effort. Lista **fechada** e explícita: enquanto o
+#: manifesto era opcional em todo lugar, um caminho novo podia nascer sem rastro
+#: sem ninguém notar. Nenhum cubo `finops_*` pertence a esta lista.
+_BEST_EFFORT_CUBES: frozenset[str] = frozenset(
+    {
+        # Publicados por caminho legado (frame em memória por fatia) antes do
+        # manifesto existir. Migrar para REQUIRED é item de G4.
+        "dest_dm_cost_focus",
+        "dest_oci_operational_metrics",
+    }
+)
+
+
+def manifest_mode_for(cube_code: str) -> str:
+    """Modo de registro do manifesto para um cubo.
+
+    O default é **obrigatório**. Best effort só para o que está na allowlist
+    fechada, e a allowlist não é configurável por usuário.
+    """
+    base = str(cube_code or "").split(":", 1)[0]
+    return (
+        MANIFEST_BEST_EFFORT
+        if base in _BEST_EFFORT_CUBES
+        else MANIFEST_REQUIRED
+    )
+
+
+def _manifest_insert_sql() -> str:
+    return """
+INSERT INTO gold_manifest (
+    cube_code, physical_table, namespace, contract_version,
+    run_id, rule_id, status, reason, sql_hash, source_tables,
+    rows_read, rows_written, financial_total_in, financial_total_out,
+    financial_delta, tolerance, reconciliation_status, currency,
+    previous_snapshot_id, rollback_table, error, started_at, finished_at
+) VALUES (
+    :cube_code, :physical_table, :namespace, :contract_version,
+    :run_id, :rule_id, :status, :reason, :sql_hash,
+    CAST(:source_tables AS JSONB),
+    :rows_read, :rows_written, :financial_total_in, :financial_total_out,
+    :financial_delta, :tolerance, :reconciliation_status, :currency,
+    :previous_snapshot_id, :rollback_table, :error, :started_at, :finished_at
+)
+"""
+
+
+async def record_manifest(entry: ManifestEntry, *, mode: str | None = None) -> None:
     """Persiste o manifesto no PostgreSQL.
 
-    Nunca levanta: o manifesto é observabilidade. Se o registro falhar, a
-    materialização já aconteceu de fato e derrubar o pipeline por causa do
-    registro seria pior que perder a linha de log — mas a falha é registrada.
+    `mode` decide o comportamento em falha:
+
+    - `REQUIRED` (default): levanta `ManifestUnavailableError`. Quem chama precisa
+      abortar **antes** do staging quando a entrada é `RUNNING`, e marcar a task
+      como falha quando a entrada é final;
+    - `BEST_EFFORT`: registra o aviso e segue, para os cubos legados da allowlist.
+
+    O default obrigatório é deliberado: enquanto a falha era silenciosa, uma
+    publicação podia terminar com sucesso sem prova nenhuma. O manifesto é parte do
+    contrato de publicação, não observabilidade opcional.
     """
+    modo = mode or manifest_mode_for(entry.cube_code)
     try:
         from app.database import async_session
         from sqlalchemy import text
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Manifesto Gold indisponível (%s)", sanitize_error(exc))
+        mensagem = f"Manifesto Gold indisponível ({sanitize_error(exc)})"
+        if modo == MANIFEST_REQUIRED:
+            raise ManifestUnavailableError(mensagem) from exc
+        logger.warning("%s", mensagem)
         return
+
     dados = entry.as_dict()
     try:
         async with async_session() as session:
             await session.execute(
-                text(
-                    """
-                    INSERT INTO gold_manifest (
-                        cube_code, physical_table, namespace, contract_version,
-                        run_id, rule_id, status, reason, sql_hash, source_tables,
-                        rows_read, rows_written, financial_total_in, financial_total_out,
-                        financial_delta, tolerance, reconciliation_status, currency,
-                        previous_snapshot_id, rollback_table, error, started_at, finished_at
-                    ) VALUES (
-                        :cube_code, :physical_table, :namespace, :contract_version,
-                        :run_id, :rule_id, :status, :reason, :sql_hash,
-                        CAST(:source_tables AS JSONB),
-                        :rows_read, :rows_written, :financial_total_in, :financial_total_out,
-                        :financial_delta, :tolerance, :reconciliation_status, :currency,
-                        :previous_snapshot_id, :rollback_table, :error, :started_at, :finished_at
-                    )
-                    """
-                ),
+                text(_manifest_insert_sql()),
                 {
                     **dados,
                     "source_tables": _json_list(dados["source_tables"]),
@@ -568,7 +662,10 @@ async def record_manifest(entry: ManifestEntry) -> None:
             )
             await session.commit()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Falha ao registrar manifesto de %s: %s", entry.cube_code, sanitize_error(exc))
+        mensagem = f"Falha ao registrar manifesto de {entry.cube_code}: {sanitize_error(exc)}"
+        if modo == MANIFEST_REQUIRED:
+            raise ManifestUnavailableError(mensagem) from exc
+        logger.warning("%s", mensagem)
 
 
 def _json_list(valores: list[str]) -> str:
@@ -628,6 +725,9 @@ async def record_frame_publication(
         finished_at=datetime.now(timezone.utc),
     )
     await record_manifest(entrada)
+    from app.services.finops_cache import invalidate_after_publish
+
+    invalidate_after_publish(entrada.cube_code)
     return entrada
 
 
@@ -635,24 +735,37 @@ def record_manifest_blocking(entry: ManifestEntry) -> None:
     """Versão síncrona de :func:`record_manifest`, para caminhos que já são sync.
 
     O agregador do reprocess roda dentro de função síncrona (pandas + Iceberg
-    local). Criar um loop novo quando não há loop rodando é seguro; quando há, o
-    registro é ignorado em vez de derrubar a publicação — o dado já foi
-    publicado, e perder a linha de manifesto é menos grave que falhar o pipeline.
+    local). Criar um loop novo quando não há loop rodando é seguro.
+
+    Quando **há** loop assíncrono ativo, registrar de forma síncrona é impossível
+    sem bloquear o loop. O comportamento depende do modo:
+
+    - `REQUIRED`: levanta. Um cubo governado não pode terminar sem manifesto, e um
+      caminho síncrono dentro de loop é um defeito de arquitetura que precisa
+      aparecer, não ser absorvido;
+    - `BEST_EFFORT` (legado): registra o aviso e segue.
     """
     import asyncio
 
+    modo = manifest_mode_for(entry.cube_code)
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         try:
             asyncio.run(record_manifest(entry))
         except Exception as exc:  # noqa: BLE001
+            if modo == MANIFEST_REQUIRED:
+                raise ManifestUnavailableError(sanitize_error(exc)) from exc
             logger.warning("Manifesto não registrado: %s", sanitize_error(exc))
         return
-    logger.warning(
-        "Manifesto de %s não registrado: há loop assíncrono ativo no caminho síncrono",
-        entry.cube_code,
+
+    mensagem = (
+        f"Manifesto de {entry.cube_code} não registrado: há loop assíncrono ativo "
+        "no caminho síncrono"
     )
+    if modo == MANIFEST_REQUIRED:
+        raise ManifestUnavailableError(mensagem)
+    logger.warning("%s", mensagem)
 
 
 def record_frame_publication_blocking(

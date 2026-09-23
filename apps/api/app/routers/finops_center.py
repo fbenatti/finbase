@@ -25,9 +25,19 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import require
+from app.database import get_db
+from app.models.identity import User
 from app.services import lakehouse_layers as layers
+from app.services.finops_cache import (
+    cache_key,
+    get_cached,
+    record_request_metric,
+    set_cached,
+)
 from app.services.finops_cost_driver import C3_TABLE, DRIVER_TYPES, driver_key_column
 from app.services.finops_cost_monthly import (
     C1_TABLE,
@@ -39,6 +49,11 @@ from app.services.semantic_normalization import CurrencyMixedError, assert_singl
 from app.services.trino_service import execute as trino_execute
 
 router = APIRouter(prefix="/finops", tags=["finops"])
+
+#: Dependência de autorização. Todos os endpoints do Centro de Decisão leem custo
+#: agregado, então exigem `finops:read` no mesmo padrão dos demais routers
+#: protegidos (`require(module, action)`).
+_READ = Depends(require("finops", "read"))
 
 #: Dimensões filtráveis do C1. A allowlist é o contrato: o cliente manda o nome
 #: lógico, nunca a coluna.
@@ -160,6 +175,7 @@ def _envelope(
     quality: dict[str, Any] | None = None,
     page: dict[str, Any] | None = None,
     elapsed_ms: float | None = None,
+    cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Contrato comum de resposta (seção 8)."""
     return {
@@ -171,6 +187,7 @@ def _envelope(
         "data": data,
         "page": page,
         "elapsed_ms": round(elapsed_ms, 1) if elapsed_ms is not None else None,
+        "cache": cache,
     }
 
 
@@ -185,6 +202,56 @@ async def _run(sql: str, *, timeout_s: float) -> tuple[list[dict[str, Any]], flo
     inicio = time.monotonic()
     linhas = await trino_execute(sql, timeout_s=timeout_s)
     return list(linhas or []), (time.monotonic() - inicio) * 1000.0
+
+
+async def _run_cached(
+    *,
+    endpoint: str,
+    cube: str,
+    filters: dict[str, Any],
+    sql: str,
+    timeout_s: float,
+) -> tuple[list[dict[str, Any]], float, bool]:
+    """Executa com cache por cubo + snapshot publicado + filtros.
+
+    Devolve as linhas, o tempo decorrido e se veio do cache. A versão que entra na
+    chave é o snapshot atual do cubo, obtido do manifesto: uma publicação nova muda
+    a versão e a entrada antiga deixa de ser encontrada, mesmo antes da invalidação
+    explícita.
+
+    Toda chamada registra amostra de latência — inclusive a que veio do cache, que é
+    a latência que o usuário sente.
+    """
+    inicio = time.monotonic()
+    versao = await _cubo_version(cube)
+    chave = cache_key(cube, filters, version=versao)
+    em_cache = get_cached(chave)
+    if em_cache is not None:
+        record_cache_hit(endpoint, True)
+        decorrido = (time.monotonic() - inicio) * 1000.0
+        record_request_metric(endpoint, decorrido)
+        return list(em_cache), decorrido, True
+
+    record_cache_hit(endpoint, False)
+    try:
+        linhas, _ = await _run(sql, timeout_s=timeout_s)
+    except Exception:
+        record_request_metric(endpoint, (time.monotonic() - inicio) * 1000.0, error=True)
+        raise
+    set_cached(chave, linhas, version=versao)
+    decorrido = (time.monotonic() - inicio) * 1000.0
+    record_request_metric(endpoint, decorrido)
+    return linhas, decorrido, False
+
+
+async def _cubo_version(cube: str) -> str:
+    """Versão publicada do cubo, pelo manifesto. ``unversioned`` quando ausente."""
+    from app.services.gold_governance import current_snapshot_id
+
+    try:
+        return current_snapshot_id(layers.GOLD, cube) or "unversioned"
+    except Exception:  # noqa: BLE001 — versão ausente não impede responder
+        return "unversioned"
 
 
 # ── Resumo ───────────────────────────────────────────────────────────────────
@@ -218,6 +285,7 @@ async def summary(
     service: str | None = None,
     region: str | None = None,
     currency: str | None = None,
+    user: User = _READ,
 ) -> dict[str, Any]:
     """Custo do escopo, com escopo, qualidade e indisponibilidades declaradas.
 
@@ -239,7 +307,15 @@ async def summary(
             "currency": currency,
         },
     )
-    linhas, ms = await _run(summary_sql(where), timeout_s=_SUMMARY_TIMEOUT)
+    linhas, ms, do_cache = await _run_cached(
+        endpoint="summary",
+        cube=C1_TABLE,
+        filters={"period": period, "provider": provider, "connection": connection,
+                 "account": account, "service": service, "region": region,
+                 "currency": currency},
+        sql=summary_sql(where),
+        timeout_s=_SUMMARY_TIMEOUT,
+    )
     moeda = _separate_currency(linhas)
 
     custo_mensal = sum(float(r.get("effective_cost") or 0) for r in linhas)
@@ -274,6 +350,7 @@ async def summary(
             else str(comparacao.get("current_status") or "COMPLETE")
         ),
         quality=qualidade,
+        cache={"hit": do_cache, "version_source": "gold_manifest"},
         data={
             "cube": C1_TABLE,
             "latest_period": periodo_atual,
@@ -301,19 +378,20 @@ async def _mom_and_run_rate(
 ) -> dict[str, Any]:
     """MoM e run rate usando **apenas** competências comparáveis.
 
-    O status vem de `period_coverage.collect_coverage`, a mesma função que C3 usa.
-    Não existe segunda definição de "período comparável" no projeto.
+    O status vem de `gold.finops_period_coverage`, a tabela publicada que C3 também
+    lê. Não existe segunda definição de "período comparável" no projeto, e nenhum
+    request reclassifica período.
     """
-    from app.services.finops_cost_driver import period_statuses
     from app.services.period_coverage import (
         COMPARABLE_STATUSES,
-        classify_all,
+        PeriodCoverage,
+        load_coverage_map,
         month_over_month,
         run_rate_annualized,
     )
-    from app.services.period_coverage import PeriodFacts
 
-    statuses = await period_statuses()
+    # Comparabilidade vem da tabela publicada, não de reclassificação no request.
+    statuses = await load_coverage_map()
     conexoes = await _connections_in_scope(where)
     fatos: list[PeriodFacts] = []
     for conexao in conexoes:
@@ -440,6 +518,7 @@ async def cost_trend(
     currency: str | None = None,
     group_by: str = Query("period", description="period | service | region | sub_account"),
     limit: int = Query(25, ge=1, le=200),
+    user: User = _READ,
 ) -> dict[str, Any]:
     """Série mensal e decomposição, com o status de cada competência.
 
@@ -489,13 +568,22 @@ FROM iceberg.{layers.GOLD}.{C1_TABLE}
 WHERE {where} AND billing_period IS NOT NULL
 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT {int(_resolved(limit) or 25)}
 """
-    linhas, ms = await _run(sql, timeout_s=_SUMMARY_TIMEOUT)
+    linhas, ms, do_cache = await _run_cached(
+        endpoint="cost/trend",
+        cube=C1_TABLE,
+        filters={"period": period, "provider": provider, "connection": connection,
+                 "account": account, "service": service, "region": region,
+                 "currency": currency, "group_by": group_by, "limit": limit},
+        sql=sql,
+        timeout_s=_SUMMARY_TIMEOUT,
+    )
     moeda = _separate_currency(linhas)
     statuses = await _statuses_for(linhas if group_by == "period" else [])
     return _envelope(
         scope={"group_by": group_by, "filters": _scope_filters(locals())},
         currency=moeda,
         quality={"coverage_pct": None, "warnings": []},
+        cache={"hit": do_cache, "version_source": "gold_manifest"},
         data={
             "cube": C1_TABLE,
             "group_by": group_by,
@@ -523,12 +611,20 @@ def _scope_filters(valores: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _statuses_for(linhas: list[dict[str, Any]]) -> dict[str, str]:
-    """Status de cobertura por competência, para rotular a série."""
-    from app.services.finops_cost_driver import period_statuses
+    """Status de cobertura por competência, lido da tabela publicada.
+
+    A API **não** reclassifica em memória: isso custaria segundos por request e
+    criaria uma segunda definição de comparabilidade. Período ausente da tabela
+    publicada é rotulado `NOT_COMPARABLE`.
+    """
+    from app.services.period_coverage import (
+        DEFAULT_UNKNOWN_STATUS,
+        load_coverage_map,
+    )
 
     if not linhas:
         return {}
-    statuses = await period_statuses()
+    statuses = await load_coverage_map()
     saida: dict[str, str] = {}
     for linha in linhas:
         periodo = str(linha.get("grp"))
@@ -536,7 +632,7 @@ async def _statuses_for(linhas: list[dict[str, Any]]) -> dict[str, str]:
         # Uma competência é comparável só se **todas** as conexões que a produzem
         # forem comparáveis.
         if not estados:
-            saida[periodo] = "NAO_MEDIDO"
+            saida[periodo] = DEFAULT_UNKNOWN_STATUS
         elif estados == {"COMPLETE"}:
             saida[periodo] = "COMPLETE"
         else:
@@ -553,6 +649,7 @@ async def cost_drivers(
     period_previous: str = Query(..., description="Competência anterior YYYYMM"),
     driver_type: str = Query("service", description=" | ".join(DRIVER_TYPES)),
     limit: int = Query(25, ge=1, le=200),
+    user: User = _READ,
 ) -> dict[str, Any]:
     """O que explica a mudança entre duas competências comparáveis.
 
@@ -573,7 +670,14 @@ WHERE period_current = {_quote_literal(period_current)}
 ORDER BY ABS(delta) DESC
 LIMIT {int(_resolved(limit) or 25)}
 """
-    linhas, ms = await _run(sql, timeout_s=_SUMMARY_TIMEOUT)
+    linhas, ms, do_cache = await _run_cached(
+        endpoint="cost/drivers",
+        cube=C3_TABLE,
+        filters={"period_current": period_current, "period_previous": period_previous,
+                 "driver_type": driver_type, "limit": limit},
+        sql=sql,
+        timeout_s=_SUMMARY_TIMEOUT,
+    )
     if not linhas:
         return _envelope(
             scope={
@@ -588,6 +692,7 @@ LIMIT {int(_resolved(limit) or 25)}
                     "par sem driver materializado: um dos períodos pode não ser comparável"
                 ],
             },
+            cache={"hit": do_cache, "version_source": "gold_manifest"},
             data={"cube": C3_TABLE, "drivers": [], "reason": "sem_par_comparavel"},
             elapsed_ms=ms,
         )
@@ -599,6 +704,7 @@ LIMIT {int(_resolved(limit) or 25)}
             "driver_type": driver_type,
         },
         quality={"coverage_pct": None, "warnings": []},
+        cache={"hit": do_cache, "version_source": "gold_manifest"},
         data={
             "cube": C3_TABLE,
             "driver_type": driver_type,
@@ -643,6 +749,7 @@ async def cost_resources(
     order: str = Query("desc", description="asc | desc"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    user: User = _READ,
 ) -> dict[str, Any]:
     """Detalhe por recurso, **paginado**, a partir de C2.
 
@@ -687,7 +794,17 @@ ORDER BY {_resolved(order_by) or "effective_cost"} {direcao} NULLS LAST
 OFFSET {int(_resolved(offset) or 0)} ROWS
 FETCH NEXT {int(_resolved(limit) or 50)} ROWS ONLY
 """
-    linhas, ms = await _run(sql, timeout_s=_DETAIL_TIMEOUT)
+    linhas, ms, do_cache = await _run_cached(
+        endpoint="cost/resources",
+        cube=C2_TABLE,
+        filters={"period": period, "provider": provider, "connection": connection,
+                 "account": account, "service": service, "region": region,
+                 "resource_type": resource_type, "currency": currency,
+                 "order_by": order_by, "order": direcao,
+                 "limit": limit, "offset": offset},
+        sql=sql,
+        timeout_s=_DETAIL_TIMEOUT,
+    )
     moeda = _separate_currency(linhas)
     return _envelope(
         scope=_scope_filters(locals()),
@@ -698,6 +815,7 @@ FETCH NEXT {int(_resolved(limit) or 50)} ROWS ONLY
                 "resources e rows_without_tag não são aditivos entre linhas",
             ],
         },
+        cache={"hit": do_cache, "version_source": "gold_manifest"},
         data={
             "cube": C2_TABLE,
             "resources": [
@@ -723,7 +841,7 @@ FETCH NEXT {int(_resolved(limit) or 50)} ROWS ONLY
 
 
 @router.get("/cost/meta")
-async def cost_meta() -> dict[str, Any]:
+async def cost_meta(user: User = _READ) -> dict[str, Any]:
     """Contrato do cubo para a UI: filtros aceitos, medidas e indisponibilidades.
 
     Existe para que a tela não precise conhecer nomes de coluna nem inventar
@@ -746,4 +864,26 @@ async def cost_meta() -> dict[str, Any]:
             "non_additive_measures": sorted(NON_ADDITIVE_MEASURES),
             "unavailable_measures": unavailable_measures(),
         },
+    )
+
+
+@router.get("/metrics")
+async def finops_metrics(
+    user: User = Depends(require("finops", "read")),
+) -> dict[str, Any]:
+    """Latência medida e estatística de cache dos endpoints do Centro.
+
+    A auditoria pediu p50 e p95 **medidos**, não declarados. Este endpoint devolve o
+    que foi observado no processo: amostras, p50, p95, erros, acertos e invalidações
+    de cache por endpoint.
+
+    As amostras são de janela curta e por processo — não substituem observabilidade
+    histórica; servem para sustentar o aceite de performance no ambiente de
+    referência.
+    """
+    from app.services.finops_cache import metrics_report
+
+    return _envelope(
+        scope={"scope": "processo"},
+        data={"metrics": metrics_report()},
     )

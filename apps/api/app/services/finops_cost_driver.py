@@ -297,20 +297,20 @@ async def materialize_c3_slice(
     return publicacao.rows
 
 
-async def period_statuses(
-    *, layer: str = layers.SILVER, today: Any | None = None
-) -> dict[tuple[str, str], str]:
-    """Status de cobertura real de cada `(conexão, competência)` de `resource_cost`.
+async def period_statuses() -> dict[tuple[str, str], str]:
+    """Status de cobertura de `(conexão, competência)` **lido da tabela publicada**.
 
-    Executa o classificador de G1 sobre a Silver. É a fonte de verdade da
-    comparabilidade: C3 não decide quais períodos comparar, ele pergunta.
+    Antes esta função reexecutava o classificador sobre a Silver inteira a cada
+    chamada — segundos por execução e uma segunda definição de comparabilidade
+    dentro do request. Agora lê `gold.finops_period_coverage`, que é a fonte de
+    verdade publicada.
+
+    Par ausente da tabela **não** recebe status: C3 aplica
+    `DEFAULT_UNKNOWN_STATUS` (`NOT_COMPARABLE`), nunca `COMPLETE`.
     """
-    from app.services.period_coverage import collect_coverage
+    from app.services.period_coverage import load_coverage_map
 
-    coberturas = await collect_coverage(dataset="resource_cost", layer=layer, today=today)
-    return {
-        (c.connection_code, c.billing_period): c.status for c in coberturas
-    }
+    return await load_coverage_map()
 
 
 async def materialize_c3(
@@ -350,7 +350,7 @@ async def materialize_c3(
     # O status de cada competência vem da classificação de cobertura — a fonte de
     # verdade de comparabilidade —, nunca de uma suposição local. Sem isso, C3
     # compararia um mês de ajuste com um mês operacional.
-    statuses = await period_statuses(layer=layer)
+    statuses = await period_statuses()
     pares = comparable_period_pairs(periods_by_connection, statuses=statuses)
     todos = [
         (conexao, sorted(periodos)[i], sorted(periodos)[i + 1])
