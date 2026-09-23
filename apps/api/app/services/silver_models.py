@@ -105,6 +105,8 @@ METRIC_SERIES = SilverModel(
         _f("_bronze_blob_path", "varchar", ROLE_QUALITY),
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY,
+           notes="Fonte que escreveu a linha; a tabela recebe várias."),
     ),
 )
 
@@ -138,6 +140,8 @@ RESOURCE_INVENTORY = SilverModel(
            notes="Data da fotografia: o inventário vale a partir dela."),
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY,
+           notes="Fonte que escreveu a linha; a tabela recebe várias."),
     ),
 )
 
@@ -153,7 +157,10 @@ RESOURCE_COST = SilverModel(
     description="Custo e uso por recurso e período, no grão do FOCUS.",
     grain=("cloud_provider", "sub_account_id", "resource_id", "billing_period", "charge_category"),
     primary_measure="effective_cost",
-    time_field="billing_period",
+    # `billing_period` é varchar `YYYYMM` (chave de partição lógica do FOCUS),
+    # não um instante. O campo temporal do modelo é o início do período de
+    # cobrança; converter `YYYYMM` para timestamp produziria NaT.
+    time_field="charge_period_start",
     fields=(
         _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
         _f("sub_account_id", "varchar", ROLE_IDENTITY, required=True, notes="FOCUS SubAccountId."),
