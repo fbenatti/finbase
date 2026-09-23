@@ -2942,3 +2942,61 @@ Página `/rightsizing` (menu "Rightsizing"), ligada à API do P9:
 | Regressão dos dashboards migrados passa | ✅ suíte 401 passed, dashboards intocados |
 
 Suíte: **9 failed / 401 passed** · `tsc` exit 0.
+
+---
+
+## 39. Menu Saving Actions e a proveniência da cadeia P6→P8→P9
+
+### 39.1 O pedido
+
+O usuário pediu um **menu novo** — "Saving Actions" — com os dashboards que
+faltavam, em vez de acoplá-los ao FinOps Intelligence existente.
+
+O `/rightsizing` passa a ser **Saving Actions**: resumo executivo, dashboards do
+cubo Gold (oportunidade por veredito e alocação AKS) e a tabela de decisões com o
+fluxo de revisão. Endpoint dedicado `GET /rightsizing/dashboard` lê os cubos MVP —
+o whitelist do `/gold/query` cobre measures legadas e o contrato compartilhado não
+foi estendido.
+
+### 39.2 O dashboard expôs um defeito de proveniência
+
+Tudo aparecia como `rightsizing_engine`. Corrigido em três pontos:
+
+| Ponto | Defeito | Correção |
+|---|---|---|
+| Perfil (P6) | não trazia a conexão do recurso | `MAX(_source_connection_name)` do resource_cost |
+| Candidato (P8) | gravava o nome do motor literal | conexão do recurso; motor só como fallback declarado |
+| Consulta do P8 | o perfil tinha a coluna, mas a query não a lia | `MAX(source_connection_name)` na agregação |
+
+O terceiro é o mais instrutivo: **o dado estava certo e o leitor que não o pedia**.
+Gravar certo não basta; o consumidor precisa ler o que foi gravado.
+
+Verificado: candidatos/decisões com a conexão real (`raw_azure_ti` 48/32, motor
+apenas 1). Cubos rematerializados pela **governança** (task 5953) e o dashboard
+mostra `('VALID', 'raw_azure_ti', 6, 589.30)`.
+
+### 39.3 Sentinela em atributo envenenou o perfil
+
+Ao restaurar o `resource_inventory` do 4P, o perfil passou a casar com o Resource
+Graph — que grava SKU sintético (`sem-recurso:...`) para recursos sem SKU (NICs,
+discos). O `MAX()` do perfil escolhia o sentinela em vez do SKU real da
+vm_inventory, e **o P8 perdeu todos os candidatos** ("Nenhum candidato gerado").
+
+A derivada `coalesce:` é legítima para **identidade** (rastreabilidade de custo sem
+recurso), mas para **atributo** o plano é explícito: desconhecido fica NULL,
+"jamais vira zero ou valor fake". Criada `coalesce-null` e aplicada ao SKU do
+inventário. Perfil com **zero sentinelas**; P8 de volta aos 49 candidatos com os
+mesmos 10 VALID.
+
+A lição: o mesmo helper servindo identidade e atributo tinha dois contratos
+incompatíveis — e só quebrou quando a quarta fonte (graph 4P) entrou no jogo.
+
+### 39.4 Estado
+
+| Item | Valor |
+|---|---|
+| Menu | **Saving Actions** (`/rightsizing`) |
+| Dashboards | oportunidade por veredito · alocação AKS · custo por período (17) |
+| Cubos | rematerializados pela governança |
+| Proveniência | conexão real na cadeia toda |
+| Suíte | 9 failed / 401 passed |
