@@ -2074,3 +2074,91 @@ Staging restante na Silver: **0**.
 
 `openai_ptu` (Bronze `raw_azure_4p_ptu`, 6.660 linhas) ainda não tem modelo
 canônico nem mapeamento. É o único que falta para o passo 4 ter dado completo.
+
+---
+
+## 27. Dimon removido por completo e PTU no canônico
+
+### 27.1 Dimon: nomenclatura removida, negócio preservado
+
+O nome "Dimon" sobrevivia em 52 identificadores de código, 2 tabelas, 1 string de
+dados e 9 arquivos do frontend.
+
+| Onde | Antes | Depois |
+|---|---|---|
+| tabela | `dimon_rule` / `dimon_rule_source` | `gold_rule` / `gold_rule_source` |
+| índice | `ix_dimon_rule_source_rule` | `ix_gold_rule_source_rule` |
+| dado | `task_type='dimon_reprocess'` (444 linhas) | `'gold_reprocess'` |
+| código | 52 identificadores | renomeados |
+| frontend | 9 arquivos | renomeados |
+
+**192 substituições** com regex ancorado, preservando a caixa. Sintaxe validada nos
+18 arquivos — a lição da vez anterior, em que um rename por texto simples corrompeu
+198 identificadores.
+
+As regras **são conteúdo de negócio vivo** (Copilot por depto, Aura Brain,
+Sinfonia), não lixo: a nomenclatura saiu, o conteúdo ficou.
+
+Nomes gerados que não descreviam nada foram corrigidos:
+`enqueue_golds_task` → `enqueue_rule_materialization`, `gold_table_name` →
+`rule_target_table`, `Golds` → `cubos Gold` nos comentários.
+
+Verificado: **0 ocorrências** no Python, no frontend, no banco e nas três camadas
+Iceberg. `tsc` exit 0.
+
+### 27.2 PTU no modelo canônico
+
+`ptu_capacity_series` na Silver:
+
+| Verificação | Resultado |
+|---|---|
+| Linhas | 6.660 |
+| Deployments / modelos | 4 / 3 |
+| Períodos | 202605–202608 |
+| `resource_id` | **normalizado em minúsculas** |
+| `completeness_pct` | 99,9% |
+
+O `resource_id` normalizado é o que permite cruzar a PTU com o custo do FOCUS e com
+o inventário. A proveniência é **medida** (`source_points`/`expected_points`), não
+estimada.
+
+`utilization_p95` distingue capacidade sobrando de capacidade no limite;
+`rate_limited_count` sinaliza PTU insuficiente.
+
+Registrado como destino Silver com 28 mapeamentos em `etl_mapping`.
+
+### 27.3 Dois defeitos encontrados
+
+1. **`_register` órfão** — a chamada ao registro paralelo sobreviveu quando removi
+   a tabela `bronze_silver_mapping`, e quebrava todo `materialise` com
+   `NameError`. Só apareceu porque carreguei o PTU logo depois.
+
+2. **`GOLD_SQL` definido duas vezes** em `azure_ptu_gold.py`: a segunda linha
+   sobrescrevia a primeira, e as consultas liam uma tabela não canônica. A leitura
+   de tokens por projeto passou a usar `ptu_capacity_series`.
+
+### 27.4 Estado dos testes
+
+**9 failed / 382 passed.** As 9 são preexistentes ou testes obsoletos que afirmam
+predicados que a produção substituiu — por exemplo
+`test_aura_brain_vivo_mais` espera `departamento_nivel_5 = 'vivo+'`, mas a produção
+classifica por `classify_gold_row`/`__excluded__`. **Nenhuma é regressão do
+rename**: as duas que eu causei foram corrigidas e o número caiu de 10 para 9.
+
+### 27.5 Silver: 11 modelos canônicos
+
+| Modelo | Linhas |
+|---|---|
+| `resource_cost` | 8.224.606 |
+| `price_catalog` | 3.946.787 |
+| `resource_metric_series` | 612.722 |
+| `resource_inventory` | 10.862 |
+| `resource_quota` | 9.744 |
+| `container_metric_series` | 9.177 |
+| `ptu_capacity_series` | 6.660 |
+| `region_policy` | 2.254 |
+| `compute_sku_catalog` | coletando |
+| `resource_allocation` | 242 |
+| `focus_enriched` (Gold) | pendente |
+
+**13 fontes mapeadas · 17 destinos · 228 mapeamentos.**
