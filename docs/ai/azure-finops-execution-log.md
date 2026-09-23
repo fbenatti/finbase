@@ -2674,3 +2674,61 @@ cobertura insuficiente, e — o mais importante — que **o nome da métrica que
 lê é o mesmo que o coletor pede**. Esse último teria pegado o defeito 34.4 sozinho.
 
 Suíte: **9 failed / 391 passed** (era 382 antes destes testes).
+
+---
+
+## 35. P2 fechado: serviços auxiliares pela tela
+
+### 35.1 O que faltava
+
+O backend das integrações estava pronto (seção 31), mas **sem UI**: não havia como
+editar, testar ou cadastrar um serviço pela plataforma. O P2 pede a aba
+**Integrações** explicitamente.
+
+### 35.2 Onde ficou
+
+Na própria tela de **Credenciais**, como alternador de nível superior entre
+"Conexões" e "Serviços auxiliares".
+
+**Por que ali e não numa tela separada:** um serviço que ninguém acha não é
+configurável. **Por que não misturado na lista de conexões:** serviço auxiliar não é
+fonte de dado de nuvem, e misturar confundiria a contagem e os filtros por provedor.
+
+### 35.3 O que a tela faz
+
+| Ação | Como |
+|---|---|
+| Ver | Jev e ServiceNow, com tipo, estado, token e último teste |
+| Habilitar/desabilitar | chave na linha, grava na hora |
+| Configurar | diálogo com os campos de `config` |
+| Testar | chama o **primitivo real** e mostra a resposta, registrando |
+| Cadastrar token | campo **write-only** |
+
+### 35.4 Cinco decisões que evitam defeito
+
+1. **O token nunca volta para a tela.** A API devolve `secret_fields` (nomes), nunca
+   valores. Verificado: **0 ocorrências do token** na resposta do painel. Se o valor
+   viesse, um print de suporte o vazaria.
+
+2. **Campo de segredo vazio significa "manter"**, não "apagar" — sem isso, salvar a
+   configuração apagaria o token sem o operador perceber.
+
+3. **Campos sugeridos por serviço.** Ao abrir o Jev, `base_url`, `path_systemone`,
+   `model` e `timeout_s` já vêm nomeados; o operador não adivinha.
+
+4. **`timeout_s` vai como número** — string quebraria a validação do backend.
+
+5. **Estado honesto.** `NOT_CONFIGURED`, `UNAUTHORIZED`, `UNREACHABLE` e `OK` com
+   cor e mensagem próprias, em vez de um "erro" genérico.
+
+### 35.5 Verificado ponta a ponta
+
+Pelo proxy do web:
+
+```
+Jev         habilitado=True  token=sim   ultimo teste=OK
+ServiceNow  habilitado=False token=nao   nunca testado
+```
+
+Assim o P2 fica completo: catálogo de fontes, seleção por conexão, validador de
+código **e** a aba de serviços auxiliares.
