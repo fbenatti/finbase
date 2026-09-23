@@ -1686,3 +1686,70 @@ customer_price.
 
 **4 planejadas**: compute_quota, aks_cost_allocation, container_insights,
 region_policy.
+
+---
+
+## 22. Correção de sequência, fontes que faltam e a integração adiada
+
+### 22.1 Correção de sequência (apontada pelo usuário)
+
+Eu havia começado a **integrar a FOCUS** com os modelos canônicos antes de
+terminar de baixar as fontes. A ordem correta é:
+
+```
+baixar todas as fontes → depois integrar/enriquecer a FOCUS
+```
+
+O serviço de enriquecimento (`focus_enrichment.py`) fica **pronto mas parado** até
+as fontes terminarem.
+
+### 22.2 O que eu havia deixado de fazer — resposta ao questionamento
+
+**Sim, eu estava criando estruturas Silver paralelas sem integrá-las à FOCUS.**
+
+Medição que provou o gap:
+
+| Métrica | Valor |
+|---|---|
+| Recursos distintos na FOCUS | 33.700 |
+| Que casavam com o inventário canônico | **0** |
+| Com `lower()` nos dois lados | **5.004 de 5.004 (100%)** |
+
+A causa é só a caixa do texto: a FOCUS grafa
+`/subscriptions/.../resourceGroups/...` e o inventário
+`/subscriptions/.../resourcegroups/...`. Mesma entidade, texto diferente — e por
+isso a ligação dava zero.
+
+### 22.3 Coletores de quota e policy
+
+| Fonte | Verificação (chamada direta) |
+|---|---|
+| `compute_quota` | **232 linhas** em brazilsouth (cores, virtualMachines, lowPriorityCores com limite e consumo) |
+| `region_policy` | **102 assignments** com enforcement e valores permitidos |
+
+Ambas são **restrição de elegibilidade** no P8: candidato que caiba no SKU mas não
+caiba na quota não é elegível; policy é veto, não sugestão.
+
+**Pendência:** o despacho no worker não alcança esses coletores — a task é tratada
+pelo caminho de blob antes. O trace instrumentado nunca apareceu, o que confirma
+que o ramo não é atingido. Os coletores funcionam quando chamados direto, então é
+defeito de roteamento.
+
+### 22.4 Estado das fontes
+
+| Estado | Fontes |
+|---|---|
+| Implementadas e ligadas | cost_exports, resource_graph, automation_jobs, monitor_vm_metrics, vm_inventory, aks_inventory, retail_price, openai_ptu, compute_skus, customer_price |
+| Coletor pronto, despacho pendente | compute_quota, region_policy |
+| Sem coletor | aks_cost_allocation, container_insights |
+
+### 22.5 Modelos canônicos na Silver
+
+| Modelo | Linhas |
+|---|---|
+| `resource_cost` | 8.224.606 |
+| `price_catalog` | 3.946.787 (contratual 3.667.019 + retail 279.768) |
+| `resource_metric_series` | 612.722 |
+| `resource_inventory` | 10.862 |
+| `compute_sku_catalog` | coletando |
+| `focus_enriched` | **parado por decisão de sequência** |
