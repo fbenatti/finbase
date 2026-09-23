@@ -170,7 +170,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "api_reference": "Microsoft.CostManagement Price Sheet (download by billing account)",
         "required_permission": "Billing Reader no billing scope",
         "azure_scope": "catalog",
-        "implementation_status": "planned",
+        "implementation_status": "implemented",
     },
     {
         "source_key": "openai_ptu",

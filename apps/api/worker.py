@@ -1,3 +1,20 @@
+# Fontes com coletor dedicado: quando a task é de uma delas, o coletor vence o
+# transporte da conexão. O price sheet, por exemplo, chega pelo mesmo
+# `azure_blob` do custo, mas tem Blob, tabela e parser próprios.
+#
+# A lista vem do catálogo em vez de ser escrita à mão: manter as duas em sincronia
+# é justamente o tipo de divergência que já causou erro silencioso.
+_DEDICATED_COLLECTORS: frozenset[str] = frozenset({
+    "azure_customer_price",
+    "azure_retail_price",
+    "azure_compute_skus",
+    "azure_aks_inventory",
+    "azure_vm_inventory",
+    "azure_monitor_vm_metrics",
+    "azure_resource_graph",
+    "azure_automation_jobs",
+})
+
 #!/usr/bin/env python3
 """FinOps Worker — polls etl_task queue and executes reprocess/extraction jobs.
 
@@ -1411,6 +1428,44 @@ def consumer_main(worker_id: int):
                                     _t_vm.billing_periods = [_vm_result.get("period")] if _vm_result.get("period") else []
                                     _t_vm.result_json = _vm_result
                                     _t_vm.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
+                            if _source_connector in _DEDICATED_COLLECTORS:
+                                # Price Sheet contratual (MCA) do Blob de export.
+                                from app.services.azure_customer_price_service import (
+                                    run_customer_price_collection,
+                                )
+                                try:
+                                    _ps = run_customer_price_collection(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _ps_exc:
+                                    import traceback as _tb_ps
+                                    _tb_ps.print_exc()
+                                    _t_ps = _ptu_session.get(EtlTask, task_id)
+                                    if _t_ps:
+                                        _t_ps.status = "FAILED"
+                                        _t_ps.phase = f"Price Sheet falhou: {str(_ps_exc)[:400]}"
+                                        _t_ps.errors = [str(_ps_exc)[:1000]]
+                                        _t_ps.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_ps_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_ps_ok:
+                                    _t_ps_ok.status = "COMPLETED"
+                                    _t_ps_ok.phase = (
+                                        f"Price Sheet contratual: {_ps.get('rows_bronze', 0)} linha(s) · "
+                                        f"{_ps.get('period')} · {_ps.get('files', 0)} arquivo(s)"
+                                    )
+                                    _t_ps_ok.rows_raw = _ps.get("rows_bronze", 0)
+                                    _t_ps_ok.billing_periods = [_ps.get("period")] if _ps.get("period") else []
+                                    _t_ps_ok.result_json = _ps
+                                    _t_ps_ok.finished_at = datetime.now(timezone.utc)
                                     _ptu_session.commit()
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
