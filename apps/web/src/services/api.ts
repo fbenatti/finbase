@@ -5270,3 +5270,52 @@ export async function collectAzureEnvironment(
   const { data } = await api.post(`/azure-sources/environments/${encodeURIComponent(environment)}/collect`, body, { timeout: 120000 });
   return data;
 }
+
+
+// ── Serviços auxiliares (Jev, ServiceNow) ─────────────────────────────────────
+// Seguem o princípio das conexões: o segredo é **write-only**. A API devolve
+// quais campos existem (`secret_fields`), nunca o valor — então o formulário
+// mostra "configurado" e permite substituir, sem exibir o token.
+
+export interface IntegrationItem {
+  id: number | null;
+  code: string;
+  name: string;
+  integration_type: string;
+  description: string | null;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  /** Nomes dos campos de segredo já gravados; nunca os valores. */
+  secret_fields: string[];
+  has_secret: boolean;
+  last_test_at: string | null;
+  last_test_status: string | null;
+  last_test_message: string | null;
+  catalog: Record<string, unknown> | null;
+}
+
+export async function getIntegrations(): Promise<{ items: IntegrationItem[] }> {
+  const { data } = await api.get("/integrations/");
+  return data;
+}
+
+export async function saveIntegration(
+  code: string,
+  body: {
+    name?: string;
+    description?: string;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+    secret?: Record<string, unknown>;
+  },
+): Promise<IntegrationItem> {
+  const { data } = await api.put(`/integrations/${encodeURIComponent(code)}`, body);
+  return data;
+}
+
+export async function testIntegration(
+  code: string,
+): Promise<{ code: string; status: string; message: string }> {
+  const { data } = await api.post(`/integrations/${encodeURIComponent(code)}/test`);
+  return data;
+}

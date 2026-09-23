@@ -15,6 +15,7 @@ import EmptyState from "../../components/EmptyState";
 import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
 import AzureSourcesPanel from "./AzureSourcesPanel";
+import IntegrationsPanel from "./IntegrationsPanel";
 
 const CONNECTOR_TYPES = [
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
@@ -213,6 +214,10 @@ export default function Connections() {
   const [activeProvider, setActiveProvider] = useState("all");
   const [search, setSearch] = useState("");
   const [tabsReady, setTabsReady] = useState(false);
+  // Serviços auxiliares (Jev, ServiceNow) não são fontes de dado de nuvem, mas
+  // seguem o mesmo princípio de configuração — por isso vivem aqui, e não numa
+  // tela separada que ninguém encontra.
+  const [activeView, setActiveView] = useState<"connections" | "integrations">("connections");
   const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
   const gridRequestId = useRef(0);
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
@@ -823,6 +828,22 @@ export default function Connections() {
         </Box>
 
         <Tabs
+          value={activeView}
+          onChange={(_, value: "connections" | "integrations") => setActiveView(value)}
+          aria-label="Conexões ou serviços auxiliares"
+          sx={{ mb: 1.5, minHeight: 44 }}
+        >
+          <Tab value="connections" label="Conexões" />
+          <Tab value="integrations" label="Serviços auxiliares" />
+        </Tabs>
+
+        {activeView === "integrations" ? (
+          <Box sx={{ py: 3 }}>
+            <IntegrationsPanel />
+          </Box>
+        ) : (
+          <>
+        <Tabs
           value={activeCategory}
           onChange={(_, value: string) => selectCategory(value as "all" | ConnectionCategory)}
           aria-label="Filtrar conexões por categoria"
@@ -871,6 +892,8 @@ export default function Connections() {
               <Tab value="all" label="Todos os provedores" sx={{ minHeight: 42, py: 0.5 }} />
             </Tabs>
           </Box>
+        )}
+          </>
         )}
       </Box>
 
