@@ -192,6 +192,66 @@ async def review_decision(
     }
 
 
+@router.get("/dashboard")
+async def dashboard() -> dict[str, Any]:
+    """Agregações dos cubos Gold do MVP, no grão que a tela navega.
+
+    Lê os cubos **materializados pela governança** (dest_dm_cost_mvp_*), não a
+    Silver: é o papel da Gold, e o aceite de reconciliação compara resumo com
+    detalhe sobre a MESMA fonte.
+    """
+    async def _agregado(sql: str, timeout: int = 120) -> list[dict[str, Any]]:
+        try:
+            return await trino_execute(sql, timeout_s=timeout)
+        except Exception:  # noqa: BLE001 - cubo sem dado é estado, não erro
+            return []
+
+    oportunidade = await _agregado(
+        """
+        SELECT deterministic_verdict AS verdict,
+               _source_connection_name AS source_connection,
+               COUNT(*) AS decisions,
+               ROUND(SUM(COALESCE(saving_monthly, 0)), 2) AS saving
+        FROM iceberg.gold.dest_dm_cost_mvp_oportunidade
+        GROUP BY 1, 2 ORDER BY 4 DESC
+        """,
+    )
+    revisao = await _agregado(
+        """
+        SELECT review_status,
+               COUNT(*) AS decisions,
+               ROUND(SUM(COALESCE(saving_monthly, 0)), 2) AS saving
+        FROM iceberg.gold.dest_dm_cost_mvp_decisao
+        GROUP BY 1
+        """,
+    )
+    aks = await _agregado(
+        """
+        SELECT allocation_level, parent_resource_id, allocation_key,
+               allocation_weight, _source_connection_name
+        FROM iceberg.gold.dest_dm_cost_mvp_aks_consumo
+        ORDER BY allocation_weight DESC LIMIT 100
+        """,
+        timeout=60,
+    )
+    custo = await _agregado(
+        """
+        SELECT _billing_period AS period,
+               _source_connection_name AS source_connection,
+               ROUND(SUM(effective_cost), 2) AS cost
+        FROM iceberg.gold.dest_dm_cost_mvp_custo_recurso
+        GROUP BY 1, 2 ORDER BY 1
+        """,
+        timeout=300,
+    )
+    return {
+        "opportunity": oportunidade or [],
+        "review": revisao or [],
+        "aks": aks or [],
+        "cost_by_period": custo or [],
+    }
+
+
 @router.get("/history")
 async def decisions_history(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
     """Histórico por execução — quantas decisões e quanto saving cada uma gerou."""

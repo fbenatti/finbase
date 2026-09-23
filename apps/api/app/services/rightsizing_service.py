@@ -123,6 +123,7 @@ async def build_candidates(*, run_id: str | None = None) -> dict[str, Any]:
                MAX(requested_days) AS requested_days,
                MAX(coverage) AS coverage,
                MAX(confidence) AS confidence,
+               MAX(source_connection_name) AS source_connection_name,
                MAX(CASE WHEN metric = 'Percentage CPU' THEN p95 END) AS cpu_p95,
                MAX(CASE WHEN metric LIKE '%Available Memory%' THEN p95 END) AS mem_avail_p95
         FROM iceberg.silver.resource_profile_window
@@ -253,7 +254,9 @@ async def build_candidates(*, run_id: str | None = None) -> dict[str, Any]:
     frame["_silver_ingested_at"] = datetime.now(timezone.utc).isoformat()
     frame["_source_connection_id"] = None
     frame["_source_connection_code"] = None
-    frame["_source_connection_name"] = "rightsizing_engine"
+    # A conexao vem do candidato (recurso). Onde o perfil nao trouxe, mantem a
+    # identidade do motor para nao ficar NULL sem explicacao.
+    frame["_source_connection_name"] = frame["_source_connection_name"].fillna("rightsizing_engine")
     frame["_processed_at"] = datetime.now(timezone.utc).isoformat()
     frame["_billing_period"] = datetime.now(timezone.utc).strftime("%Y%m")
 
@@ -315,6 +318,8 @@ def _avaliar(
         "requested_days": int(_num(item.get("requested_days")) or 0),
         "cost_from_current": _num(item.get("effective_cost")),
         "confidence": str(item.get("confidence") or "BAIXA"),
+        # Proveniencia DO RECURSO (da FOCUS de origem), nao do motor.
+        "_source_connection_name": item.get("source_connection_name"),
         "sku_to": "",
         "vcpus_to": None,
         "memory_gb_to": None,

@@ -29,6 +29,20 @@ _NUMERIC = {"decimal", "bigint", "double", "integer"}
 
 
 
+def _derivada_coalesce_null(frame: pd.DataFrame, nomes: list[str], resolver) -> pd.Series:
+    """Primeira coluna com valor; senão NULL — sem identidade sintética."""
+    reais = [c for c in (resolver(n) for n in nomes) if c is not None]
+    if not reais:
+        return pd.Series([None] * len(frame), index=frame.index, dtype="string")
+    combinado = frame[reais[0]].astype("string")
+    for extra in reais[1:]:
+        combinado = combinado.where(
+            combinado.notna() & (combinado != ""), frame[extra].astype("string")
+        )
+    # Vazio vira NULL: nada de sentinela em atributo.
+    return combinado.where(combinado.notna() & (combinado != ""))
+
+
 def _derivada_menos(frame: pd.DataFrame, nomes: list[str], coluna) -> pd.Series:
     """Diferença entre duas colunas numéricas: `esquerda - direita`.
 
@@ -193,7 +207,7 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         # `sku` (Resource Graph) e `vm_size` (coletor de VM) são o mesmo dado
         # com nomes diferentes; a derivada evita que o nulo de um bloqueie o
         # outro, o que aconteceria com duas entradas no mapa de colunas.
-        derived={"resource_sku": "coalesce:sku+vm_size"},
+        derived={"resource_sku": "coalesce-null:sku+vm_size"},
         notes="VMs e VMSS via Resource Graph.",
     ),
     # Custo (FOCUS/export do Cost Management). As medidas foram confirmadas
@@ -525,7 +539,7 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         # `sku` (Resource Graph) e `vm_size` (coletor de VM) são o mesmo dado
         # com nomes diferentes; a derivada evita que o nulo de um bloqueie o
         # outro, o que aconteceria com duas entradas no mapa de colunas.
-        derived={"resource_sku": "coalesce:sku+vm_size"},
+        derived={"resource_sku": "coalesce-null:sku+vm_size"},
         notes="Inventário geral e órfãos via Resource Graph.",
     ),
 }
@@ -664,6 +678,12 @@ def normalise(frame: pd.DataFrame, mapping: SourceMapping, silver_model: SilverM
         if funcao == "coalesce":
             # A coluna de referência é uma lista separada por `+`.
             out[destino] = _derivada_coalesce(frame, partes[1].split("+"), coluna)
+            continue
+        if funcao == "coalesce-null":
+            # Igual ao coalesce, mas SEM identidade sintética: atributo
+            # desconhecido permanece NULL, como o plano exige ("jamais vira zero
+            # ou valor fake").
+            out[destino] = _derivada_coalesce_null(frame, partes[1].split("+"), coluna)
             continue
         if funcao == "menos":
             # Duas colunas separadas por `+`; a segunda é subtraída da primeira.

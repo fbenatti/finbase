@@ -5364,3 +5364,16 @@ export async function ReviewDecision(
   );
   return data;
 }
+
+
+export interface SavingDashboard {
+  opportunity: Record<string, unknown>[];
+  review: Record<string, unknown>[];
+  aks: Record<string, unknown>[];
+  cost_by_period: Record<string, unknown>[];
+}
+
+export async function getSavingDashboard(): Promise<SavingDashboard> {
+  const { data } = await api.get("/rightsizing/dashboard");
+  return data;
+}

@@ -13,7 +13,7 @@ import {
   TableCell, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import {
-  ReviewDecision, getRightsizingDecisions,
+  ReviewDecision, getRightsizingDecisions, getSavingDashboard, SavingDashboard,
 } from "../../services/api";
 
 /** Cadência de cor por veredito: VALID é oportunidade, INVALID é veto. */
@@ -36,6 +36,7 @@ const brl = (v: unknown) =>
 export default function Rightsizing() {
   const [items, setItems] = useState<Record<string, unknown>[]>([]);
   const [resumo, setResumo] = useState<Record<string, unknown> | null>(null);
+  const [dash, setDash] = useState<SavingDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [revisando, setRevisando] = useState<Record<string, unknown> | null>(null);
@@ -48,6 +49,7 @@ export default function Rightsizing() {
       const d = await getRightsizingDecisions(500);
       setItems(d.items || []);
       setResumo(d as unknown as Record<string, unknown>);
+      getSavingDashboard().then(setDash).catch(() => setDash(null));
       setErro(null);
     } catch {
       setErro("Não foi possível carregar as decisões.");
@@ -88,7 +90,7 @@ export default function Rightsizing() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" sx={{ mb: 0.5 }}>Rightsizing</Typography>
+      <Typography variant="h4" sx={{ mb: 0.5 }}>Saving Actions</Typography>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
         Candidatos do motor determinístico (P8), com revisão humana (P9). O saving
         realizado só aparece após a validação — antes disso fica ausente.
@@ -120,6 +122,66 @@ export default function Rightsizing() {
         </Card>
       </Stack>
 
+
+      {dash && (
+        <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 3 }}>
+          <Card sx={{ minWidth: 320, flex: 1 }}>
+            <CardContent>
+              <Typography variant="caption" color="text.secondary">Oportunidade por veredito (cubo Gold)</Typography>
+              {dash.opportunity.length === 0
+                ? <Typography variant="body2" color="text.secondary">Sem candidatos no cubo.</Typography>
+                : (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Veredito</TableCell>
+                      <TableCell align="right">Decisões</TableCell>
+                      <TableCell align="right">Saving</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(dash.opportunity as Record<string, unknown>[]).map((o, i) => (
+                      <TableRow key={i}>
+                        <TableCell>
+                          <Chip size="small" color={VERDICT_CHIP[String(o.verdict)]?.color || "default"}
+                            label={VERDICT_CHIP[String(o.verdict)]?.label || String(o.verdict)} />
+                        </TableCell>
+                        <TableCell align="right">{String(o.decisions)}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>{brl(o.saving)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                )}
+            </CardContent>
+          </Card>
+          <Card sx={{ minWidth: 320, flex: 1 }}>
+            <CardContent>
+              <Typography variant="caption" color="text.secondary">Alocação AKS — maior peso por cluster (cubo Gold)</Typography>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Nível</TableCell>
+                    <TableCell>Grupo</TableCell>
+                    <TableCell align="right">Peso</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(dash.aks as Record<string, unknown>[]).slice(0, 5).map((a, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{String(a.allocation_level)}</TableCell>
+                      <TableCell>
+                        <Typography variant="caption">{String(a.allocation_key || "—")}</Typography>
+                      </TableCell>
+                      <TableCell align="right">{Number(a.allocation_weight).toFixed(3)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </Stack>
+      )}
       <Table size="small">
         <TableHead>
           <TableRow>

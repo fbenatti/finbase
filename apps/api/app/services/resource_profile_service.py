@@ -89,7 +89,8 @@ custo AS (
         SUM(effective_cost) AS effective_cost,
         SUM(billed_cost)    AS billed_cost,
         SUM(consumed_quantity) AS consumed_quantity,
-        MAX(pricing_currency)  AS pricing_currency
+        MAX(pricing_currency)  AS pricing_currency,
+        MAX(_source_connection_name) AS source_connection_name
     FROM iceberg.silver.resource_cost
     GROUP BY resource_id, _billing_period
 ),
@@ -129,7 +130,8 @@ SELECT
         THEN 'MEDIA'
       ELSE 'BAIXA'
     END                                                     AS confidence,
-    c.effective_cost, c.billed_cost, c.consumed_quantity, c.pricing_currency
+    c.effective_cost, c.billed_cost, c.consumed_quantity, c.pricing_currency,
+    c.source_connection_name
 FROM por_metrica m
 LEFT JOIN esperado e   ON e.resource_id = m.resource_id
 LEFT JOIN custo c      ON c.resource_id = m.resource_id
