@@ -24,7 +24,8 @@ class SourceConnectionCreate(BaseModel):
     cloud_name: str | None = None
     cloud_scope: str | None = None
     config_json: dict[str, Any] = {}
-    blob_prefixes: list[str] = []
+    # Lista (formato antigo) ou mapa `{tipo de relatório: caminho}` (novo).
+    blob_prefixes: list[str] | dict[str, str] | dict[str, str] = []
 
     model_config = {"extra": "allow"}
 
@@ -34,7 +35,7 @@ class SourceConnectionUpdate(BaseModel):
     cloud_name: str | None = None
     cloud_scope: str | None = None
     config_json: dict[str, Any] | None = None
-    blob_prefixes: list[str] | None = None
+    blob_prefixes: list[str] | dict[str, str] | dict[str, str] | None = None
 
 
 class SourceConnectionOut(BaseModel):
@@ -45,7 +46,7 @@ class SourceConnectionOut(BaseModel):
     cloud_name: str | None
     cloud_scope: str | None
     config_json: dict[str, Any]
-    blob_prefixes: list[str]
+    blob_prefixes: list[str] | dict[str, str]
     last_test_status: str | None = None
     last_test_message: str | None = None
     last_tested_at: datetime | None = None

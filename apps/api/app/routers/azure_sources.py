@@ -88,6 +88,43 @@ def _enabled(connection: SourceConnection) -> bool:
     return True
 
 
+async def _bronze_row_counts(pares: list[tuple[str, str]]) -> dict[str, int]:
+    """Linhas de cada tabela Bronze, por `(conexão, fonte)`.
+
+    O registro de blob é por conexão e vários coletores não o alimentam (gravam
+    direto na Bronze), então contar a tabela é a única forma de cada fonte
+    mostrar o **seu** número. Sem isso todas exibiam o mesmo `row_count` — o da
+    última fonte processada.
+    """
+    from app.services.trino_service import execute as trino_execute
+
+    contagens: dict[str, int] = {}
+    for connection_code, source_key in pares:
+        tabela = bronze_table_for(connection_code, source_key)
+        try:
+            linhas = await trino_execute(
+                f"SELECT COUNT(*) AS n FROM iceberg.bronze.{tabela}", timeout_s=45
+            )
+            contagens[f"{connection_code}:{source_key}"] = int(
+                (linhas[0] if linhas else {}).get("n") or 0
+            )
+        except Exception:  # noqa: BLE001 - tabela ausente é estado, não erro
+            contagens[f"{connection_code}:{source_key}"] = 0
+    return contagens
+
+
+def _blob_da_fonte(last_blobs: dict, connection, source_key: str):
+    """Blob mais recente **daquela fonte**, não da conexão.
+
+    O prefixo do blob é o nome da tabela Bronze sem o `raw_`: `monitor_vm_metrics`
+    escreve em `monitor/...`, `customer_price` em `azure_customer_price/...`.
+    """
+    if not source_key:
+        return last_blobs.get(connection.id)
+    prefixo = bronze_table_for(connection.code, source_key).removeprefix("raw_")
+    return last_blobs.get(f"{connection.id}:{prefixo}") or last_blobs.get(connection.id)
+
+
 def _source_state(connection: SourceConnection, *, enabled: bool, last_blob, running: int) -> str:
     """Estado da fonte a partir de dados que já existem.
 
@@ -116,6 +153,7 @@ def _source_payload(
     *,
     last_blob,
     running: int,
+    bronze_rows: int | None = None,
 ) -> dict:
     """Uma **fonte selecionada** de uma conexão.
 
@@ -160,7 +198,9 @@ def _source_payload(
         "last_tested_at": connection.last_tested_at.isoformat() if connection.last_tested_at else None,
         "last_ingested_at": last_blob.ingested_at.isoformat() if last_blob and last_blob.ingested_at else None,
         "last_billing_period": last_blob.billing_period if last_blob else None,
-        "rows": last_blob.row_count if last_blob else None,
+        # A contagem da Bronze manda; o registro de blob é fallback (fontes de
+        # blob antigas que ainda não têm a contagem materializada).
+        "rows": bronze_rows if bronze_rows is not None else (last_blob.row_count if last_blob else None),
         "window_days": selection.window_days if selection.window_days is not None else entry.get("default_window_days") if entry else None,
         "metrics": [m for m in (selection.metrics or "").split(",") if m] or (entry or {}).get("default_metrics"),
         "subscription_count": len([s for s in (selection.subscription_ids or "").split(",") if s.strip()]) or len(config.get("subscription_ids") or []),
@@ -239,8 +279,13 @@ async def list_azure_sources(
             .where(IngestedBlob.connection_id.in_(connection_ids))
             .order_by(IngestedBlob.connection_id, IngestedBlob.ingested_at.desc())
         )).scalars().all()
+        # Uma conexão hospeda várias fontes, e cada uma grava o seu próprio
+        # prefixo na Bronze. Indexar só por `connection_id` fazia todas as fontes
+        # exibirem o mesmo `row_count` — o da última fonte processada.
         for blob in blobs:
             last_blobs.setdefault(blob.connection_id, blob)
+            chave = f"{blob.connection_id}:{blob.blob_path.split('/')[0]}"
+            last_blobs.setdefault(chave, blob)
 
         tasks = (await db.execute(
             select(EtlTask.connection_id)
@@ -252,6 +297,13 @@ async def list_azure_sources(
         for (connection_id,) in tasks:
             if connection_id is not None:
                 running[connection_id] = running.get(connection_id, 0) + 1
+
+    pares_bronze = [
+        (c.code, sel.source_key)
+        for c in connections
+        for sel in (by_connection.get(c.id) or [])
+    ]
+    contagens_bronze = await _bronze_row_counts(pares_bronze) if pares_bronze else {}
 
     groups: dict[str, dict] = {}
     for connection in connections:
@@ -286,7 +338,12 @@ async def list_azure_sources(
             )
             payload = _source_payload(
                 connection, selection, entry,
-                last_blob=last_blobs.get(connection.id) if selection.enabled else None,
+                last_blob=_blob_da_fonte(
+                    last_blobs, connection, selection.source_key or ""
+                ) if selection.enabled else None,
+                bronze_rows=contagens_bronze.get(
+                    f"{connection.code}:{selection.source_key}"
+                ),
                 running=running.get(connection.id, 0),
             )
             group = groups.setdefault(slug, {

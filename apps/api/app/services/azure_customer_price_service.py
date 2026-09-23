@@ -25,7 +25,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 BRONZE_TABLE = "azure_customer_price"
-PRICE_SHEET_PREFIX = "reports/report_-pricesheet"
 CSV_ENCODING = "utf-8-sig"          # o export vem com BOM
 CHUNK_ROWS = 200_000
 
@@ -63,9 +62,33 @@ def resolve_period(connection, config: dict[str, Any]) -> str:
     return datetime.now(timezone.utc).strftime("%Y%m")
 
 
-def _listar_partes(container, periodo: str) -> tuple[str, list[str]]:
-    """Devolve a pasta do export e os CSVs dela."""
-    prefixo = f"{PRICE_SHEET_PREFIX}/{_periodo_para_pasta(periodo)}/"
+def resolve_price_sheet_prefix(connection, config: dict[str, Any] | None = None) -> str:
+    """Pasta raiz do price sheet, vinda da conexão.
+
+    O caminho não é chumbado: o mesmo export muda de nome entre ambientes
+    (`report_-pricesheet`, `ReportTI-pricesheet`). A conexão declara em
+    `blob_prefixes["price_sheet"]`; o config aceita `price_sheet_path` como
+    alternativa explícita.
+    """
+    from app.services.azure_report_types import REPORT_TYPE_PRICE_SHEET, report_path
+
+    config = config or {}
+    do_config = str(config.get("price_sheet_path") or "").strip()
+    if do_config:
+        return do_config.strip("/")
+    caminho = report_path(connection, REPORT_TYPE_PRICE_SHEET)
+    if not caminho:
+        raise ValueError(
+            "A conexão não configura o caminho do price sheet. Declare em "
+            '`blob_prefixes`: {"price_sheet": "<caminho>/"}.'
+        )
+    return caminho.strip("/")
+
+
+def _listar_partes(container, connection, config: dict[str, Any], periodo: str) -> tuple[str, list[str]]:
+    """Devolve a pasta do export do período e os CSVs dela."""
+    raiz = resolve_price_sheet_prefix(connection, config)
+    prefixo = f"{raiz}/{_periodo_para_pasta(periodo)}/"
     partes: list[str] = []
     for blob in container.list_blobs(name_starts_with=prefixo):
         if blob.name.endswith(".csv"):
@@ -125,7 +148,7 @@ def discover_price_sheet(config: dict[str, Any], connection) -> dict[str, Any]:
     ex = AzureExtractor(connection)
     svc = ex._get_blob_service_client()
     container = svc.get_container_client(config["container_name"])
-    prefixo, partes = _listar_partes(container, periodo)
+    prefixo, partes = _listar_partes(container, connection, config, periodo)
     return {
         "period": periodo,
         "prefix": prefixo,
@@ -157,7 +180,7 @@ def run_customer_price_collection(
     svc = ex._get_blob_service_client()
     container = svc.get_container_client(config["container_name"])
 
-    prefixo, partes = _listar_partes(container, periodo)
+    prefixo, partes = _listar_partes(container, conn, config, periodo)
     if not partes:
         raise ValueError(
             f"Price sheet não encontrado para {periodo} em {prefixo} — "

@@ -77,7 +77,14 @@ class AzureExtractor:
     def __init__(self, connection: SourceConnection):
         self.connection = connection
         config = connection.config_json
-        self.blob_prefixes = connection.blob_prefixes or config.get("blob_prefixes", [])
+        # `blob_prefixes` aceita as duas formas: o mapa `{tipo: caminho}` (novo) e
+        # a lista de strings (antiga). O extrator só precisa dos caminhos.
+        from app.services.azure_report_types import normalize_prefixes
+
+        self.blob_prefixes = list(
+            normalize_prefixes(connection.blob_prefixes or config.get("blob_prefixes"))
+            .values()
+        )
 
     def _get_blob_service_client(self):
         config = self.connection.config_json

@@ -303,6 +303,22 @@ async def lifespan(app: FastAPI):
               CONSTRAINT uq_bronze_silver_field UNIQUE (source_key, bronze_field)
             )""",
             "CREATE INDEX IF NOT EXISTS ix_bronze_silver_source ON bronze_silver_mapping (source_key)",
+            # `blob_prefixes` passa de lista de caminhos para mapa
+            # `{tipo de relatório: caminho}`: o tipo é variável, não código.
+            # Idempotente e restrito ao formato antigo.
+            """UPDATE source_connection
+               SET blob_prefixes = json_build_object(
+                     CASE
+                       WHEN blob_prefixes::text ILIKE '%pricesheet%' THEN 'price_sheet'
+                       WHEN blob_prefixes::text ILIKE '%amortized%' THEN 'amortized_cost'
+                       WHEN blob_prefixes::text ILIKE '%focus%' THEN 'focus'
+                       ELSE 'actual_cost'
+                     END,
+                     blob_prefixes->>0
+                   )::json
+               WHERE blob_prefixes IS NOT NULL
+                 AND json_typeof(blob_prefixes) = 'array'
+                 AND blob_prefixes::text <> '[]'""",
             """CREATE TABLE IF NOT EXISTS azure_connection_source (
               id SERIAL PRIMARY KEY,
               connection_id INTEGER NOT NULL REFERENCES source_connection(id) ON DELETE CASCADE,
