@@ -192,6 +192,79 @@ async def review_decision(
     }
 
 
+@router.get("/overview")
+async def overview() -> dict[str, Any]:
+    """Dashboard completo: custo + oportunidade com antes/depois.
+
+    Uma única fonte de verdade: custo do `resource_cost` (Silver canônica) e
+    oportunidade do `rightsizing_candidate` cruzado com o perfil (que traz o
+    `resource_type` — VM vs VMSS) e com o inventário (nome do recurso).
+    """
+    async def _ag(sql: str, timeout: int = 300) -> list[dict[str, Any]]:
+        try:
+            return await trino_execute(sql, timeout_s=timeout)
+        except Exception:  # noqa: BLE001
+            return []
+
+    # Custo: total, por período, serviço, conta, região e top recursos.
+    total = await _ag("SELECT ROUND(SUM(effective_cost),2) AS cost, count(DISTINCT _billing_period) AS periods, count(DISTINCT resource_id) AS resources FROM iceberg.silver.resource_cost")
+    por_periodo = await _ag("""SELECT _billing_period AS period, ROUND(SUM(effective_cost),2) AS cost
+        FROM iceberg.silver.resource_cost GROUP BY 1 ORDER BY 1""")
+    por_servico = await _ag("""SELECT COALESCE(service_name, service_category, '(sem serviço)') AS name, ROUND(SUM(effective_cost),2) AS cost
+        FROM iceberg.silver.resource_cost GROUP BY 1 ORDER BY 2 DESC LIMIT 12""")
+    por_conta = await _ag("""SELECT sub_account_id AS name, ROUND(SUM(effective_cost),2) AS cost
+        FROM iceberg.silver.resource_cost GROUP BY 1 ORDER BY 2 DESC LIMIT 12""")
+    por_regiao = await _ag("""SELECT region_id AS name, ROUND(SUM(effective_cost),2) AS cost
+        FROM iceberg.silver.resource_cost GROUP BY 1 ORDER BY 2 DESC LIMIT 12""")
+    top_recursos = await _ag("""SELECT resource_id, ROUND(SUM(effective_cost),2) AS cost
+        FROM iceberg.silver.resource_cost GROUP BY 1 ORDER BY 2 DESC LIMIT 20""")
+
+    # Oportunidade: antes/depois por recurso, com tipo do perfil.
+    oportunidade = await _ag("""
+        SELECT c.resource_name, p.resource_type, c.sku_from, c.sku_to,
+               c.vcpus_from, c.vcpus_to, c.memory_gb_from, c.memory_gb_to,
+               ROUND(c.cost_from_current,2) AS cost_de,
+               ROUND(c.cost_to_estimated,2) AS cost_para,
+               ROUND(c.saving_monthly,2) AS saving_monthly,
+               c.saving_pct, c.cpu_p95, c.observed_days, c.verdict,
+               c.veto_reason, c.price_source_from, c.price_source_to
+        FROM iceberg.silver.rightsizing_candidate c
+        LEFT JOIN (SELECT resource_id, MAX(resource_type) AS resource_type
+                   FROM iceberg.silver.resource_profile_window GROUP BY 1) p
+          ON p.resource_id = c.resource_id
+        WHERE c.verdict IN ('VALID', 'REQUIRES_VALIDATION')
+        ORDER BY c.saving_monthly DESC NULLS LAST
+    """)
+    por_tipo = await _ag("""
+        SELECT p.resource_type, count(*) AS candidatos,
+               ROUND(SUM(COALESCE(c.saving_monthly,0)),2) AS saving
+        FROM iceberg.silver.rightsizing_candidate c
+        LEFT JOIN (SELECT resource_id, MAX(resource_type) AS resource_type
+                   FROM iceberg.silver.resource_profile_window GROUP BY 1) p
+          ON p.resource_id = c.resource_id
+        WHERE c.verdict = 'VALID' GROUP BY 1 ORDER BY 3 DESC
+    """)
+
+    return {
+        "cost": {
+            "total": total[0] if total else {},
+            "by_period": por_periodo or [],
+            "by_service": por_servico or [],
+            "by_account": por_conta or [],
+            "by_region": por_regiao or [],
+            "top_resources": top_recursos or [],
+        },
+        "opportunity": {
+            "by_type": por_tipo or [],
+            "before_after": oportunidade or [],
+            "saving_valid_total": round(sum(
+                (o.get("saving_monthly") or 0) for o in oportunidade
+                if o.get("verdict") == "VALID"
+            ), 2),
+        },
+    }
+
+
 @router.get("/dashboard")
 async def dashboard() -> dict[str, Any]:
     """Agregações dos cubos Gold do MVP, no grão que a tela navega.

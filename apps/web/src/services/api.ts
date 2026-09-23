@@ -5377,3 +5377,28 @@ export async function getSavingDashboard(): Promise<SavingDashboard> {
   const { data } = await api.get("/rightsizing/dashboard");
   return data;
 }
+
+
+export interface CostOverview {
+  total: Record<string, unknown>;
+  by_period: { period: string; cost: number }[];
+  by_service: { name: string; cost: number }[];
+  by_account: { name: string; cost: number }[];
+  by_region: { name: string; cost: number }[];
+  top_resources: { resource_id: string; cost: number }[];
+}
+export interface BeforeAfterRow {
+  resource_name: string; resource_type: string; sku_from: string; sku_to: string;
+  vcpus_from: number; vcpus_to: number; memory_gb_from: number; memory_gb_to: number;
+  cost_de: number; cost_para: number; saving_monthly: number; saving_pct: number;
+  cpu_p95: number; observed_days: number; verdict: string; veto_reason: string;
+  price_source_from: string; price_source_to: string;
+}
+export interface RightsizingOverview {
+  cost: CostOverview;
+  opportunity: { by_type: Record<string, unknown>[]; before_after: BeforeAfterRow[]; saving_valid_total: number };
+}
+export async function getRightsizingOverview(): Promise<RightsizingOverview> {
+  const { data } = await api.get("/rightsizing/overview");
+  return data;
+}
