@@ -343,6 +343,137 @@ FOCUS_ENRICHED = SilverModel(
 )
 
 
+# ── Modelo: Quota de compute ──────────────────────────────────────────────────
+# Restrição de elegibilidade: um candidato que caiba no SKU mas não caiba na quota
+# não pode ser sugerido. Todas as nuvens têm quota, então o modelo é canônico.
+QUOTA = SilverModel(
+    name="resource_quota",
+    table="resource_quota",
+    description="Quota de compute por assinatura e região, com consumo e limite.",
+    grain=("cloud_provider", "sub_account_id", "region_id", "quota_name", "snapshot_date"),
+    primary_measure="limit_value",
+    time_field="snapshot_date",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("sub_account_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("region_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("quota_name", "varchar", ROLE_IDENTITY, required=True,
+           notes="Nome da família: cores, virtualMachines, lowPriorityCores."),
+        _f("quota_display_name", "varchar", ROLE_DIMENSION),
+        _f("current_value", "double", ROLE_MEASURE, notes="Consumo atual."),
+        _f("limit_value", "double", ROLE_MEASURE, notes="Limite contratado."),
+        _f("available_value", "double", ROLE_MEASURE,
+           notes="Limite menos consumo; é o que decide elegibilidade."),
+        _f("unit", "varchar", ROLE_DIMENSION),
+        _f("snapshot_date", "varchar", ROLE_TIME),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+# ── Modelo: Política de região/SKU ────────────────────────────────────────────
+# Veto, não sugestão: o que o contrato proíbe não entra como candidato.
+REGION_POLICY = SilverModel(
+    name="region_policy",
+    table="region_policy",
+    description="Atribuições de política que restringem SKU e região.",
+    grain=("cloud_provider", "sub_account_id", "assignment_id"),
+    primary_measure="allowed_values",
+    time_field="snapshot_date",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("sub_account_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("assignment_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("assignment_name", "varchar", ROLE_DIMENSION),
+        _f("display_name", "varchar", ROLE_DIMENSION),
+        _f("policy_definition_id", "varchar", ROLE_DIMENSION),
+        _f("scope", "varchar", ROLE_DIMENSION),
+        _f("enforcement_mode", "varchar", ROLE_QUALITY,
+           notes="Default | DoNotEnforce. Só Default veta."),
+        _f("parameters_json", "varchar", ROLE_DIMENSION),
+        _f("allowed_values", "varchar", ROLE_MEASURE,
+           notes="SKUs ou regiões permitidas, quando a política declara."),
+        _f("snapshot_date", "varchar", ROLE_TIME),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+# ── Modelo: Alocação de custo ─────────────────────────────────────────────────
+# Ponte com pesos: uma linha de custo pode virar várias alocações **desde que os
+# pesos somem 1**. O aceite do P4 depende disso.
+ALLOCATION = SilverModel(
+    name="resource_allocation",
+    table="resource_allocation",
+    description="Pesos de alocação de custo por cluster e grupo consumidor.",
+    grain=("cloud_provider", "parent_resource_id", "allocation_level", "allocation_key", "snapshot_date"),
+    primary_measure="allocation_weight",
+    time_field="snapshot_date",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("parent_resource_id", "varchar", ROLE_IDENTITY, required=True,
+           notes="Recurso cujo custo é dividido (o cluster)."),
+        _f("allocation_level", "varchar", ROLE_IDENTITY,
+           notes="node_pool | namespace | workload."),
+        _f("allocation_key", "varchar", ROLE_IDENTITY, notes="Grupo consumidor."),
+        _f("allocation_weight", "double", ROLE_MEASURE, required=True,
+           notes="Peso do grupo; soma 1 por recurso pai."),
+        _f("weight_basis", "varchar", ROLE_QUALITY,
+           notes="Como o peso foi calculado: node_capacity, consumo, custo."),
+        _f("node_count", "bigint", ROLE_MEASURE),
+        _f("node_sku", "varchar", ROLE_DIMENSION),
+        _f("pool_mode", "varchar", ROLE_DIMENSION),
+        _f("namespace", "varchar", ROLE_DIMENSION,
+           notes="NULL quando a origem não fornece namespace — nunca inferido."),
+        _f("allocation_status", "varchar", ROLE_QUALITY, notes="PARTIAL | AVAILABLE."),
+        _f("status_reason", "varchar", ROLE_QUALITY),
+        _f("weight_validated", "varchar", ROLE_QUALITY, notes="SIM quando soma 1."),
+        _f("snapshot_date", "varchar", ROLE_TIME),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+# ── Modelo: Métricas de container ─────────────────────────────────────────────
+# Inventário e desempenho por container/nó, com cobertura explícita: só os
+# clusters com Container Insights têm dado, e os outros ficam registrados.
+CONTAINER_METRIC = SilverModel(
+    name="container_metric_series",
+    table="container_metric_series",
+    description="Inventário e desempenho de containers por cluster e namespace.",
+    grain=("cloud_provider", "cluster_resource_id", "record_kind", "namespace", "computer", "metric_name", "snapshot_date"),
+    primary_measure="metric_average",
+    time_field="snapshot_date",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("cluster_resource_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("cluster_name", "varchar", ROLE_DIMENSION),
+        _f("record_kind", "varchar", ROLE_IDENTITY,
+           notes="pod_inventory | node_inventory | performance | coverage."),
+        _f("computer", "varchar", ROLE_DIMENSION, notes="Nó."),
+        _f("namespace", "varchar", ROLE_DIMENSION),
+        _f("pod_status", "varchar", ROLE_DIMENSION),
+        _f("pods", "bigint", ROLE_MEASURE),
+        _f("containers", "bigint", ROLE_MEASURE),
+        _f("nodes", "bigint", ROLE_MEASURE),
+        _f("kubernetes_version", "varchar", ROLE_DIMENSION),
+        _f("metric_name", "varchar", ROLE_DIMENSION),
+        _f("metric_average", "double", ROLE_MEASURE),
+        _f("samples", "bigint", ROLE_MEASURE),
+        _f("coverage_status", "varchar", ROLE_QUALITY, notes="AVAILABLE | UNAVAILABLE."),
+        _f("coverage_reason", "varchar", ROLE_QUALITY),
+        _f("workspace_id", "varchar", ROLE_DIMENSION),
+        _f("snapshot_date", "varchar", ROLE_TIME),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
@@ -350,6 +481,10 @@ MODELS: dict[str, SilverModel] = {
     PRICE_CATALOG.name: PRICE_CATALOG,
     COMPUTE_SKU.name: COMPUTE_SKU,
     FOCUS_ENRICHED.name: FOCUS_ENRICHED,
+    QUOTA.name: QUOTA,
+    REGION_POLICY.name: REGION_POLICY,
+    ALLOCATION.name: ALLOCATION,
+    CONTAINER_METRIC.name: CONTAINER_METRIC,
 }
 
 

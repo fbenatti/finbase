@@ -29,6 +29,24 @@ _NUMERIC = {"decimal", "bigint", "double", "integer"}
 
 
 
+def _derivada_menos(frame: pd.DataFrame, nomes: list[str], coluna) -> pd.Series:
+    """Diferença entre duas colunas numéricas: `esquerda - direita`.
+
+    Usada no disponível da quota (limite menos consumo). Coluna ausente vira
+    `None` — nunca zero, porque zero significaria "sem quota" e vetaria um
+    candidato legítimo.
+    """
+    if len(nomes) < 2:
+        return pd.Series([None] * len(frame), index=frame.index, dtype="object")
+    esquerda = coluna(nomes[0])
+    direita = coluna(nomes[1])
+    if esquerda is None or direita is None:
+        return pd.Series([None] * len(frame), index=frame.index, dtype="object")
+    a = pd.to_numeric(frame[esquerda], errors="coerce")
+    b = pd.to_numeric(frame[direita], errors="coerce")
+    return a - b
+
+
 def _derivada_mes(valores: pd.Series) -> pd.Series:
     """Período mensal `YYYYMM` a partir de data ISO (`2026-09-22`) ou
     americana (`09/22/2026`). O formato varia por export, então os dois são
@@ -322,6 +340,95 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         derived={"valid_from": "mes:EffectiveStartDate"},
         notes="Price Sheet contratual (MCA) do export do Cost Management.",
     ),
+    "compute_quota": SourceMapping(
+        source_key="compute_quota",
+        model_name="resource_quota",
+        bronze_table="raw_azure_{env}_compute_quota",
+        columns={
+            "subscription_id": "sub_account_id",
+            "region_id": "region_id",
+            "quota_name": "quota_name",
+            "localized_name": "quota_display_name",
+            "current_value": "current_value",
+            "limit": "limit_value",
+            "unit": "unit",
+            "snapshot_date": "snapshot_date",
+            "_billing_period": "_billing_period",
+        },
+        constants={"cloud_provider": "azure"},
+        # O que decide elegibilidade é o que sobra, não o limite.
+        derived={"available_value": "menos:limit+current_value"},
+        notes="Quota de compute por assinatura e região.",
+    ),
+    "region_policy": SourceMapping(
+        source_key="region_policy",
+        model_name="region_policy",
+        bronze_table="raw_azure_{env}_region_policy",
+        columns={
+            "subscription_id": "sub_account_id",
+            "assignment_id": "assignment_id",
+            "assignment_name": "assignment_name",
+            "display_name": "display_name",
+            "policy_definition_id": "policy_definition_id",
+            "scope": "scope",
+            "enforcement_mode": "enforcement_mode",
+            "parameters_json": "parameters_json",
+            "allowed_values": "allowed_values",
+            "snapshot_date": "snapshot_date",
+            "_billing_period": "_billing_period",
+        },
+        constants={"cloud_provider": "azure"},
+        notes="Política que veta SKU e região.",
+    ),
+    "aks_cost_allocation": SourceMapping(
+        source_key="aks_cost_allocation",
+        model_name="resource_allocation",
+        bronze_table="raw_azure_{env}_aks_cost_allocation",
+        columns={
+            "cluster_resource_id": "parent_resource_id",
+            "allocation_level": "allocation_level",
+            "allocation_key": "allocation_key",
+            "allocation_weight": "allocation_weight",
+            "weight_basis": "weight_basis",
+            "node_count": "node_count",
+            "node_sku": "node_sku",
+            "pool_mode": "pool_mode",
+            "namespace": "namespace",
+            "allocation_status": "allocation_status",
+            "status_reason": "status_reason",
+            "weight_validated": "weight_validated",
+            "snapshot_date": "snapshot_date",
+            "_billing_period": "_billing_period",
+        },
+        constants={"cloud_provider": "azure"},
+        notes="Ponte de alocação com pesos que somam 1.",
+    ),
+    "container_insights": SourceMapping(
+        source_key="container_insights",
+        model_name="container_metric_series",
+        bronze_table="raw_azure_{env}_container_insights",
+        columns={
+            "cluster_id": "cluster_resource_id",
+            "cluster_name": "cluster_name",
+            "record_kind": "record_kind",
+            "computer": "computer",
+            "namespace": "namespace",
+            "pod_status": "pod_status",
+            "pods": "pods",
+            "containers": "containers",
+            "nodes": "nodes",
+            "metric_name": "metric_name",
+            "metric_average": "metric_average",
+            "samples": "samples",
+            "coverage_status": "coverage_status",
+            "coverage_reason": "coverage_reason",
+            "workspace_id": "workspace_id",
+            "snapshot_date": "snapshot_date",
+            "_billing_period": "_billing_period",
+        },
+        constants={"cloud_provider": "azure"},
+        notes="Inventário e desempenho de containers, com cobertura explícita.",
+    ),
     "compute_skus": SourceMapping(
         source_key="compute_skus",
         model_name="compute_sku_catalog",
@@ -499,6 +606,10 @@ def normalise(frame: pd.DataFrame, mapping: SourceMapping, silver_model: SilverM
         if funcao == "coalesce":
             # A coluna de referência é uma lista separada por `+`.
             out[destino] = _derivada_coalesce(frame, partes[1].split("+"), coluna)
+            continue
+        if funcao == "menos":
+            # Duas colunas separadas por `+`; a segunda é subtraída da primeira.
+            out[destino] = _derivada_menos(frame, partes[1].split("+"), coluna)
             continue
         real_origem = coluna(partes[1])
         if real_origem is None:
@@ -702,28 +813,3 @@ def _delete_period(table: str, period: str, *, owner: str | None = None) -> None
         logger.debug("Silver %s: nada a remover em %s/%s (%s)", table, period, owner, type(exc).__name__)
 
 
-def _register(session, mapping: SourceMapping, silver_model: SilverModel) -> None:
-    """Grava/atualiza o correlacionamento da fonte."""
-    from sqlalchemy import text
-
-    for linha in mapping_rows(mapping, silver_model):
-        session.execute(
-            text("""
-                INSERT INTO bronze_silver_mapping
-                    (source_key, bronze_table, silver_table, bronze_field, silver_field,
-                     silver_type, unit, role, required, notes)
-                VALUES
-                    (:source_key, :bronze_table, :silver_table, :bronze_field, :silver_field,
-                     :silver_type, :unit, :role, :required, :notes)
-                ON CONFLICT (source_key, bronze_field) DO UPDATE SET
-                    bronze_table = EXCLUDED.bronze_table,
-                    silver_table = EXCLUDED.silver_table,
-                    silver_field = EXCLUDED.silver_field,
-                    silver_type = EXCLUDED.silver_type,
-                    unit = EXCLUDED.unit, role = EXCLUDED.role,
-                    required = EXCLUDED.required, notes = EXCLUDED.notes,
-                    updated_at = now()
-            """),
-            linha,
-        )
-    session.commit()

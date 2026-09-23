@@ -286,23 +286,6 @@ async def lifespan(app: FastAPI):
                SELECT seed.tag_key, seed.focus_field, TRUE
                FROM (VALUES ('projeto', 'departamento_nivel_5'), ('diretoria', 'departamento_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
                WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
-            """CREATE TABLE IF NOT EXISTS bronze_silver_mapping (
-              id SERIAL PRIMARY KEY,
-              source_key VARCHAR(60) NOT NULL,
-              bronze_table VARCHAR(200) NOT NULL,
-              silver_table VARCHAR(200) NOT NULL,
-              bronze_field VARCHAR(200) NOT NULL,
-              silver_field VARCHAR(200) NOT NULL,
-              silver_type VARCHAR(40) NOT NULL DEFAULT 'varchar',
-              unit VARCHAR(40),
-              role VARCHAR(20) NOT NULL DEFAULT 'dimension',
-              required BOOLEAN NOT NULL DEFAULT FALSE,
-              notes TEXT,
-              created_at TIMESTAMPTZ DEFAULT now(),
-              updated_at TIMESTAMPTZ DEFAULT now(),
-              CONSTRAINT uq_bronze_silver_field UNIQUE (source_key, bronze_field)
-            )""",
-            "CREATE INDEX IF NOT EXISTS ix_bronze_silver_source ON bronze_silver_mapping (source_key)",
             # `blob_prefixes` passa de lista de caminhos para mapa
             # `{tipo de relatório: caminho}`: o tipo é variável, não código.
             # Idempotente e restrito ao formato antigo.

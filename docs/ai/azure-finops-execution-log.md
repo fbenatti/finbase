@@ -1998,3 +1998,79 @@ na aba de relacionamento muda o resultado, sem deploy.
   Bronze analítico. Precisam de modelo canônico antes do passo 4.
 - `openai_ptu` também não tem mapeamento.
 - O banco ainda não representa **derivadas** (`derived`); elas vêm da declaração.
+
+---
+
+## 26. Canônicos completos e limpeza do resíduo
+
+### 26.1 Quatro modelos canônicos novos
+
+As fontes que faltavam foram construídas como Bronze analítico, sem modelo. Agora
+têm canônico e passam pelo mesmo processo (destino + `etl_mapping`).
+
+| Modelo | Campos | Papel |
+|---|---|---|
+| `resource_quota` | 13 | restrição: o que ainda cabe na assinatura/região |
+| `region_policy` | 14 | veto: o que o contrato proíbe |
+| `resource_allocation` | 17 | ponte com pesos que somam 1 |
+| `container_metric_series` | 21 | inventário e desempenho por namespace/nó |
+
+**12 fontes mapeadas** (era 8). As 4 novas materializadas:
+
+| Fonte | Linhas na Silver |
+|---|---|
+| `compute_quota` | 9.744 |
+| `container_insights` | 9.177 |
+| `region_policy` | 2.254 |
+| `aks_cost_allocation` | 242 |
+
+### 26.2 Regras de negócio verificadas
+
+**Quota** — `available_value = limite − consumo`, via derivada nova `menos`:
+
+| Verificação | Resultado |
+|---|---|
+| Linhas com disponível nulo | **0** |
+| Linhas com disponível negativo | **0** |
+
+Coluna ausente vira `NULL`, nunca zero: zero significaria "sem quota" e vetaria um
+candidato legítimo.
+
+**Policy** — `Default` 2.232 · `DoNotEnforce` 22. A separação importa: só `Default`
+veta.
+
+**Alocação** — 46 clusters, soma dos pesos **exatamente 1,0** em todos (máx = mín =
+1,0).
+
+### 26.3 Limpeza
+
+| Resíduo | Origem | Ação |
+|---|---|---|
+| `bronze_silver_mapping` (tabela + modelo + migração + escrita) | registro paralelo meu, substituído por `etl_mapping` | **removido** |
+| 14 tabelas `dest_oci_operational_metrics_stg_*` | staging acumulado de experimento OCI (~1,6 MB cada) | **removidas** |
+
+Staging restante na Silver: **0**.
+
+### 26.4 Estado das camadas
+
+**Silver — 9 modelos canônicos:**
+
+| Modelo | Linhas |
+|---|---|
+| `resource_cost` | 8.224.606 |
+| `price_catalog` | 3.946.787 |
+| `resource_metric_series` | 612.722 |
+| `resource_quota` | 9.744 |
+| `container_metric_series` | 9.177 |
+| `resource_inventory` | 10.862 |
+| `compute_sku_catalog` | coletando |
+| `region_policy` | 2.254 |
+| `resource_allocation` | 242 |
+
+**Destinos registrados:** 16 (FOCUS + canônicos + legados).
+**Mapeamentos:** 200 no `etl_mapping`.
+
+### 26.5 Pendência
+
+`openai_ptu` (Bronze `raw_azure_4p_ptu`, 6.660 linhas) ainda não tem modelo
+canônico nem mapeamento. É o único que falta para o passo 4 ter dado completo.
