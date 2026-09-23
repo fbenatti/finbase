@@ -2443,3 +2443,77 @@ medidor sem preço no contrato.
 O aceite do P7 "preço contratual e retail não se misturam" continua atendido por
 `price_source`, e o "sem preço comparável não mostra saving exato" passa a ter dado
 real dos dois lados. O plano foi atualizado em P7 com esta evidência.
+
+---
+
+## 32. Jev integrado e respondendo
+
+### 32.1 O que é, e por que a forma importa
+
+O Jev (TypeSafe System One) **não é um chat**: é um serviço de **decisão tipada**.
+Recebe um `state` (a situação) e `questions` com critérios nomeados, e devolve
+posição tipada com probabilidades — não texto para interpretar.
+
+Isso encaixa no P12 melhor que um LLM: o plano exige que a decisão assistida seja
+**reproduzível e auditável**, e uma resposta tipada é consumível sem parsing frágil.
+
+| Primitivo | Para quê | Distinção que importa |
+|---|---|---|
+| `choice` | escolher uma entre até 255 opções | distribuição compara alternativas |
+| `score` | posição ponderada num espectro | níveis precisam ser comparáveis |
+| `noul` | probabilidade de "sim" | **não tem confiança separada** — o valor é a probabilidade |
+
+**`confidence` de choice/score mede concentração da distribuição, não correção da
+decisão.** Um `noul` perto de 0,5 é probabilidade parecida para sim e não, **não**
+intensidade média. Registro isso porque é o tipo de leitura errada que levaria a
+tratar incerteza como aprovação.
+
+### 32.2 Descoberta do contrato real
+
+O endpoint não estava em nenhum arquivo do repositório; veio do usuário. No caminho:
+
+| Tentativa | Resultado |
+|---|---|
+| `GET /models` | 404 |
+| `GET /v1/models` | **200** — `jev-latest`, `jev-preview` |
+| `POST /v1/systemone` sem `model` | 422 — `Field required` |
+| `POST` com modelo inventado | 400 — `Unknown model` |
+
+O `model` é **exigido** e vem da configuração (`config.model`), nunca chumbado.
+Configurado `jev-latest`, que o serviço resolve para **`jev-1.13.0`**.
+
+### 32.3 Verificado com chamada real
+
+```
+status: OK
+{'model': 'jev-1.13.0',
+ 'answers': {'category': {'type': 'choice', 'choice': 'technical',
+                          'confidence': 0.72,
+                          'probabilities': {'technical': 0.82, 'other': 0.18, 'billing': 0.0}}}}
+```
+
+Token de `.jev-finops` (107 caracteres) **não aparece em resposta de API** — ela
+devolve `secret_fields: ["api_key"]`.
+
+### 32.4 O que foi construído
+
+| Item | Papel |
+|---|---|
+| `system_integration` | `config_json` (variável) + `secret_json` (segredo) |
+| `GET/PUT /integrations/` | cadastro; segredo write-only |
+| `POST /integrations/{code}/test` | usa o **primitivo real**, não um `/health` |
+| `assisted_decision_audit` | modelo, versão, respostas, motivo e veredito determinístico |
+| Cache por hash | a mesma pergunta não é paga duas vezes; `cached: true` |
+
+O cache segue a orientação da skill: *"changing a weight or display filter need not
+rerun inference when evidence and question meanings are unchanged"*.
+
+### 32.5 As três regras do P12, já no código
+
+1. **Não promove.** `assisted_decision_audit` guarda `deterministic_verdict` e
+   `applied` — o Jev opina, o determinístico decide.
+2. **Falha não apaga.** `ask()` devolve `UNAVAILABLE` com motivo em vez de levantar:
+   candidato não some por indisponibilidade do serviço.
+3. **Auditado.** modelo, versão e `input_hash` ficam registrados.
+
+`servicenow` nasce desabilitado, como o plano pede.

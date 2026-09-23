@@ -185,20 +185,36 @@ async def test_integration(code: str, db: AsyncSession = Depends(get_db)) -> dic
 
     status, mensagem = "NOT_CONFIGURED", "Informe `base_url` e o token."
     if base_url and token:
-        try:
-            async with httpx.AsyncClient(timeout=float(config.get("timeout_s") or 60)) as cliente:
-                resposta = await cliente.get(
-                    base_url.rstrip("/") + "/models",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            if resposta.status_code < 400:
-                status, mensagem = "OK", f"HTTP {resposta.status_code}"
-            else:
-                # 401/403 dizem que a credencial não vale; o resto é o serviço.
-                status = "UNAUTHORIZED" if resposta.status_code in (401, 403) else "ERROR"
-                mensagem = f"HTTP {resposta.status_code}: {resposta.text[:200]}"
-        except Exception as exc:  # noqa: BLE001
-            status, mensagem = "UNREACHABLE", f"{type(exc).__name__}: {str(exc)[:200]}"
+        if str(linha.integration_type) == "ai_provider" and code == "jev":
+            # O Jev é serviço de decisão tipada: o teste é uma pergunta trivial,
+            # que prova endpoint, token e contrato de uma vez.
+            from app.services.jev_service import smoke_test
+
+            try:
+                resultado = await smoke_test(linha)
+                if resultado.get("status") == "OK":
+                    status = "OK"
+                    respostas = resultado.get("answers") or {}
+                    mensagem = f"Decisão tipada recebida: {str(respostas)[:200]}"
+                else:
+                    status = "ERROR"
+                    mensagem = str(resultado.get("reason"))[:250]
+            except Exception as exc:  # noqa: BLE001
+                status, mensagem = "ERROR", f"{type(exc).__name__}: {str(exc)[:200]}"
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=float(config.get("timeout_s") or 60)) as cliente:
+                    resposta = await cliente.get(
+                        base_url.rstrip("/") + "/v1/models",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                if resposta.status_code < 400:
+                    status, mensagem = "OK", f"HTTP {resposta.status_code}"
+                else:
+                    status = "UNAUTHORIZED" if resposta.status_code in (401, 403) else "ERROR"
+                    mensagem = f"HTTP {resposta.status_code}: {resposta.text[:200]}"
+            except Exception as exc:  # noqa: BLE001
+                status, mensagem = "UNREACHABLE", f"{type(exc).__name__}: {str(exc)[:200]}"
 
     linha.last_test_at = datetime.now(timezone.utc)
     linha.last_test_status = status

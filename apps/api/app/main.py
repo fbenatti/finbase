@@ -306,6 +306,24 @@ async def lifespan(app: FastAPI):
             # compartilham a conexão e várias miram a mesma coluna canônica.
             "ALTER TABLE etl_mapping ADD COLUMN IF NOT EXISTS source_key VARCHAR(60)",
             "CREATE INDEX IF NOT EXISTS ix_etl_mapping_source_key ON etl_mapping (source_key)",
+            # Decisão assistida pelo Jev: o plano exige modelo, versão e motivo
+            # auditados, e que o assistido nunca altere o fato.
+            """CREATE TABLE IF NOT EXISTS assisted_decision_audit (
+                 id SERIAL PRIMARY KEY,
+                 integration_code VARCHAR(60) NOT NULL,
+                 input_hash VARCHAR(64) NOT NULL,
+                 status VARCHAR(30) NOT NULL,
+                 model VARCHAR(80),
+                 model_version VARCHAR(80),
+                 answers JSON,
+                 reason TEXT,
+                 -- O que o determinístico decidiu antes do Jev opinar.
+                 deterministic_verdict VARCHAR(30),
+                 -- O Jev nunca rebaixa INVALID nem promove a VALID.
+                 applied BOOLEAN NOT NULL DEFAULT false,
+                 created_at TIMESTAMPTZ DEFAULT now()
+               )""",
+            "CREATE INDEX IF NOT EXISTS ix_assisted_decision_hash ON assisted_decision_audit (input_hash)",
             # Serviços auxiliares (Jev, ServiceNow): o segredo fica em
             # `secret_json` e nunca é devolvido pela API.
             """CREATE TABLE IF NOT EXISTS system_integration (
