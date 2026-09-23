@@ -1441,3 +1441,124 @@ novos acumulados em G1+G2+G3.
   existente é a próxima decisão a registrar;
 - **D15**: republicar os cinco cubos de IA em `iceberg.gold`;
 - **C4–C12**.
+
+## G3.13 APIs `/finops/*` (frente de custo do G8)
+
+**Status:** implementadas e exercitadas contra os cubos publicados.
+
+| Endpoint | Cubo | O que devolve |
+|---|---|---|
+| `GET /finops/summary` | C1 | custo por competência, MoM, run rate, qualidade, indisponibilidades |
+| `GET /finops/cost/trend` | C1 | série mensal rotulada por status, ou decomposição por serviço/região/conta |
+| `GET /finops/cost/drivers` | C3 | drivers do par, com contribuição e fechamento |
+| `GET /finops/cost/resources` | C2 | detalhe paginado por recurso |
+| `GET /finops/cost/meta` | — | contrato: filtros aceitos, medidas aditivas e não aditivas, indisponíveis |
+
+Contrato comum: `scope`, `as_of`, `currency`, `data_status`, `quality`, `data`,
+`page`.
+
+### G3.13.1 Resposta real de `/finops/summary`
+
+```text
+currency        : BRL
+data_status     : CURRENT_OPEN
+latest_period   : 202609  (R$ 1.987.748,46)
+total           : R$ 37.356.361,47
+meses usados    : 10
+comparáveis     : 202506 … 202603
+MoM             : 202602 → 202603, delta −R$ 189.847,40
+run rate        : R$ 3.149.286,50/mês sobre 10 meses → R$ 37.791.438,04
+unavailable     : billed_cost, contracted_cost
+coverage_pct    : 99,8275
+warnings        : 313 linhas do cubo sem classificação organizacional
+```
+
+### G3.13.2 Status por competência na série
+
+`/finops/cost/trend?group_by=period` devolve 17 pontos, cada um rotulado:
+`202504`/`202505` `PARTIAL`, `202506`…`202603` `COMPLETE`, `202604`…`202607`
+`PARTIAL`, `202609` `CURRENT_OPEN`. O frontend não precisa inferir nada.
+
+### G3.13.3 Par não comparável não devolve número
+
+`/finops/cost/drivers?period_current=202505&period_previous=202504` devolve
+`data_status = EMPTY`, `reason = sem_par_comparavel` e o aviso "par sem driver
+materializado: um dos períodos pode não ser comparável". Não existe caminho em que
+o usuário receba um percentual calculado sobre um mês de ajuste.
+
+### G3.13.4 Top recursos por custo
+
+`/finops/cost/resources` pagina 1.023.977 linhas e devolve, no topo,
+`microsoft.storage/storageaccounts` e `microsoft.compute/virtualmachinescalesets` —
+tipos que **não existiam** antes de C2, porque `resource_type` é NULL em 100 % de
+`resource_cost`.
+
+### G3.13.5 Regras aplicadas
+
+- **allowlist de filtros.** `_where` recusa filtro fora da lista com HTTP 400; o
+  nome de coluna nunca vem do cliente;
+- **`order_by` fechado** em `_SORTABLE`; valor fora da lista é 400;
+- **`group_by` fechado** em `period | service | region | sub_account`;
+- **medidas não aditivas** publicadas em `non_additive` no envelope, para que o
+  cliente não as some;
+- **moeda verificada** antes de qualquer agregação: mistura devolve HTTP 409, não
+  conversão;
+- **paginação obrigatória** no detalhe, com `page.total`.
+
+### G3.13.6 Defeitos encontrados ao exercitar os endpoints
+
+1. **default de `Query` não resolvido fora do ciclo de requisição.** Ao chamar o
+   handler direto (teste, uso interno), `param: str = Query(None)` ainda é o objeto
+   `Query`, então `valor in (None, "")` é falso e o filtro virava
+   `coluna = Query(...)`. Resolvido com `_resolved`;
+2. **`OFFSET` não existe sozinho no Trino.** `LIMIT n OFFSET m` é rejeitado
+   ("mismatched input 'OFFSET'"). A forma aceita é
+   `OFFSET m ROWS FETCH NEXT n ROWS ONLY`.
+
+## G3.14 Testes
+
+| Arquivo | Testes | Cobre |
+|---|---:|---|
+| `tests/test_finops_cost_cubes.py` | 41 | C1, C2, C3 |
+| `tests/test_finops_center_api.py` | 14 | allowlist de filtros, escape de literal, medidas não aditivas, envelope, ordenação |
+| **total de G3** | **55** | |
+
+Suíte completa: **624 passam, 9 falham** (as mesmas 9 pré-existentes). **197 testes
+novos** acumulados em G1+G2+G3.
+
+## G3.15 Estado consolidado após G0–G3
+
+### Publicado e reconciliado
+
+| Cubo | Linhas | Reconciliação |
+|---|---:|---|
+| `gold.finops_cost_monthly` (C1) | 13.184 | R$ 37.356.361,47 = `resource_cost`, delta R$ 0,00 |
+| `gold.finops_cost_resource_monthly` (C2) | 1.023.977 | R$ 37.356.361,47 = `resource_cost`, delta R$ 0,00 |
+| `gold.finops_cost_change_driver` (C3) | 1.319 | 9/9 pares fecham o delta de C1 |
+| `silver.finops_cost_monthly_grain` / `_resources` | auxiliares | — |
+| `silver.finops_cost_driver_slice_*` | auxiliares | — |
+
+### Commits
+
+```text
+7f42db17  docs(G0): plano Gold orientado a decisao e log de auditoria
+9a141969  feat(G1): fundacao semantica, cobertura de competencia e remocao de focus_enriched
+eefb3f51  feat(G2): governanca Gold unificada, manifesto e compatibilidade entre livros
+e95dcfeb  feat(G3): C1 finops_cost_monthly materializado e reconciliado
+6d9d2297  feat(G3): C2 finops_cost_resource_monthly materializado e reconciliado
+f0dd8d9d  feat(G3): C3 finops_cost_change_driver e testes de C1-C3
+```
+
+Branch `novo_dev`, push em `origin`.
+
+### Pendências registradas
+
+| # | Pendência | Origem |
+|---|---|---|
+| D15 | republicar os 5 cubos de IA em `iceberg.gold` (endpoints leem tabela ausente) | G2.5 |
+| P1 | `finops_period_coverage` materializada (classificador existe, tabela não) | G1/G3 |
+| P2 | expor os cubos `finops_*` como regras na fila `gold_rule` | G2.6/G3.12 |
+| P3 | `resource_cost` precisa de 202608 e das competências operacionais de 202604–202607 para o cutover | G2.6 |
+| P4 | C4–C12 | plano |
+| P5 | `resource_inventory` só tem o snapshot 202609: atributos de competências antigas vêm do snapshot atual | G3.8 |
+| P6 | frontend do Centro de Decisão (G9) | plano |

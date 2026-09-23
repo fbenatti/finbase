@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, rightsizing
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, rightsizing, finops_center
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -664,6 +664,7 @@ app.include_router(integrations.router)
 app.include_router(rightsizing.router)
 app.include_router(oci_operational.router)
 app.include_router(ideas.router)
+app.include_router(finops_center.router)
 
 
 @app.get("/health")
