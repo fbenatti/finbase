@@ -111,7 +111,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
     const rule = rules.find(r => r.id === ruleId);
     if (!rule) return;
     // Copia tudo, exceto o id (para o save criar uma nova regra via POST) e o
-    // dimon_code: um novo valor único é SUGERIDO agora (base-copia, -2, ...)
+    // gold_code: um novo valor único é SUGERIDO agora (base-copia, -2, ...)
     // e confirmado no save — o backend rejeita code duplicado (409).
     const base = rule.code || "regra";
     let suggested = base + "-copia";
@@ -135,7 +135,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
     };
     setSelected(copy);
     setError("");
-    enqueueSnackbar('Regra "' + (rule.name || base) + '" clonada — dimon_code sugerido: ' + suggested + ' (edite se quiser e salve)', "info");
+    enqueueSnackbar('Regra "' + (rule.name || base) + '" clonada — gold_code sugerido: ' + suggested + ' (edite se quiser e salve)', "info");
   };
 
   const toggleDimension = (col: string) => {
@@ -174,7 +174,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
             <ListItemText primary={rule.name} secondary={`${rule.code} · ${rule.materialization_table || "Pendente"} · ${rule.materialization_rows ?? 0} linhas`} />
             <Chip size="small" label={rule.materialization_status === "UPDATED" ? "Atualizada" : rule.materialization_status === "EMPTY" ? "Sem dados" : rule.materialization_status === "ERROR" ? "Com erro" : "Pendente"}
               color={rule.materialization_status === "UPDATED" ? "success" : rule.materialization_status === "ERROR" ? "error" : "warning"} />
-            <IconButton size="small" title="Clonar regra (novo dimon_code)" disabled={!rule.id} onClick={(e) => { e.stopPropagation(); if (rule.id) cloneRule(rule.id); }}>
+            <IconButton size="small" title="Clonar regra (novo gold_code)" disabled={!rule.id} onClick={(e) => { e.stopPropagation(); if (rule.id) cloneRule(rule.id); }}>
               <ContentCopy fontSize="small" />
             </IconButton>
             <IconButton size="small" color="error" title="Excluir regra e tabela" disabled={!rule.id} onClick={(e) => { e.stopPropagation(); if (rule.id) void removeRule(rule.id); }}>
@@ -192,7 +192,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
         </Tabs>
         {selected.materialization_error && <Alert severity="error" sx={{ mb: 2 }}>Falha na última materialização: {selected.materialization_error}</Alert>}
         <Stack spacing={2}>
-          <TextField label="dimon_code (nome da tabela)" value={selected.code || ""} onChange={e => setSelected({ ...selected, code: e.target.value })}
+          <TextField label="gold_code (nome da tabela)" value={selected.code || ""} onChange={e => setSelected({ ...selected, code: e.target.value })}
             helperText={`Tabela gerada: dest_dm_cost_${(selected.code || "code").toLowerCase().replace(/[^a-z0-9_\-]+/g, "_")}`} />
           <TextField label="Nome da regra" value={selected.name || ""} onChange={e => setSelected({ ...selected, name: e.target.value })} />
           <TextField label="Descrição" value={selected.description || ""} onChange={e => setSelected({ ...selected, description: e.target.value })} multiline minRows={2} />

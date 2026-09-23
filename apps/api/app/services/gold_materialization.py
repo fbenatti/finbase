@@ -20,7 +20,7 @@ from app.services import lakehouse_layers as layers
 logger = logging.getLogger(__name__)
 
 # Os gold cubes vivem no namespace canônico GOLD (hoje `gold`), separado
-# das Golds (iceberg.gold.*). O materializador cria/swap aqui; os dashboards e
+# das cubos Gold (iceberg.gold.*). O materializador cria/swap aqui; os dashboards e
 # a API consultam {GOLD}.dest_dm_cost_*.
 GOLD = layers.GOLD
 
@@ -61,8 +61,8 @@ def _alias_for_missing(schema: dict[str, str], requested: str) -> str | None:
     return None
 
 
-def dimon_table_name(code: str) -> str:
-    """dest_dm_cost_<dimon_code> - the original code is preserved in the rule;
+def rule_target_table(code: str) -> str:
+    """dest_dm_cost_<gold_code> - the original code is preserved in the rule;
     the physical table name uses an underscore-safe variant (hyphens would
     break unquoted Iceberg identifiers in Trino SQL)."""
     normalized = normalize_code(code)
@@ -188,7 +188,7 @@ def _source_clause(schema: dict[str, str], source: GoldMartRuleSource, gold_tabl
         raise RuntimeError(
             f"Filtro da regra não aplicável à Gold '{gold}' (fonte #{source.id}): "
             f"campo(s) {', '.join(missing)} não existe(m) nessa tabela. "
-            f"O filtro vale para TODAS as Golds unidas na fonte — se a coluna só existe na "
+            f"O filtro vale para TODAS as cubos Gold unidas na fonte — se a coluna só existe na "
             f"FOCUS (ex.: subaccountid), a planning/espelho precisa dela ou o filtro deve "
             f"usar uma coluna comum (ex.: subaccountname). Detalhe: {detail}."
         )
@@ -264,7 +264,7 @@ async def preview_source(*, gold_table: str, filter_json: dict[str, Any] | None,
 # Analytic dimensions used by default when a rule does not declare its own.
 # Grouping by high-cardinality columns (ResourceId, tags, custom_fields...)
 # neither shrinks the table nor helps dashboards and explodes Trino memory on
-# multi-million-row Golds, so the default keeps the drill-down dimensions that
+# multi-million-row cubos Gold, so the default keeps the drill-down dimensions that
 # dashboards actually use.
 _ANALYTIC_DIMENSIONS = (
     "_billing_period",
@@ -373,7 +373,7 @@ def _side_select(gold: str, schema: dict[str, str], dims: list[str], measure_ali
 
 async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | None = None) -> int:
     """Build the pre-aggregated Gold table for one rule and swap it atomically."""
-    table = dimon_table_name(rule.code)
+    table = rule_target_table(rule.code)
 
     # These five auxiliary gold cubes have provider-specific schemas and are
     # materialized by the same atomic publisher, but are still owned by the
@@ -514,7 +514,7 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
                 uses_centro_map = True
                 sa = schema["subaccountname"]
                 join = (
-                    f"LEFT JOIN _dimon_centro_map cm ON "
+                    f"LEFT JOIN _gold_centro_map cm ON "
                     f"TRIM(lower(CAST(src.{_quote_ident(sa)} AS VARCHAR))) = "
                     f"TRIM(lower(CAST(cm.cc_subaccount AS VARCHAR)))"
                 )
@@ -537,11 +537,11 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
             f"GROUP BY {_quote_ident(centro_map['sa'])}"
         )
         full_sql = (
-            f"WITH _dimon_centro_map AS ({map_sql}) "
-            f"SELECT {group_by}, {measure_sums} FROM ({union_sql}) AS dimon_src GROUP BY {group_by}"
+            f"WITH _gold_centro_map AS ({map_sql}) "
+            f"SELECT {group_by}, {measure_sums} FROM ({union_sql}) AS gold_src GROUP BY {group_by}"
         )
     else:
-        full_sql = f"SELECT {group_by}, {measure_sums} FROM ({union_sql}) AS dimon_src GROUP BY {group_by}"
+        full_sql = f"SELECT {group_by}, {measure_sums} FROM ({union_sql}) AS gold_src GROUP BY {group_by}"
 
     staging = f"{table}_stg_{time.time_ns()}"
     period = period_physical.get((rule.sources or [])[0].gold_table) if rule.sources else None
@@ -605,13 +605,13 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
             progress(index - 1, len(rules), f"Materializando {rule.code}")
         try:
             rows = await _materialize_rule(rule, run_id=run_id, progress=progress)
-            rule.materialization_table = dimon_table_name(rule.code)
+            rule.materialization_table = rule_target_table(rule.code)
             rule.materialization_rows = rows
             rule.materialization_status = "UPDATED" if rows else "EMPTY"
             rule.materialization_error = None
             rule.materialization_run_id = run_id
             rule.materialized_at = datetime.now(timezone.utc)
-            details.append({"rule_id": rule.id, "code": rule.code, "table": dimon_table_name(rule.code), "rows": rows})
+            details.append({"rule_id": rule.id, "code": rule.code, "table": rule_target_table(rule.code), "rows": rows})
             written += rows
         except Exception as exc:
             failed.append({"rule_id": rule.id, "code": rule.code, "error": str(exc)})
@@ -626,7 +626,7 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
     return {"rules": len(rules), "rows": written, "details": details, "failed": failed}
 
 
-def materialize_dimons_sync(session: Any, *, run_id: int, progress: Any | None = None, rule_ids: list[int] | None = None) -> dict[str, Any]:
+def materialize_golds_sync(session: Any, *, run_id: int, progress: Any | None = None, rule_ids: list[int] | None = None) -> dict[str, Any]:
     return asyncio.run(materialize_gold_cubes(session, run_id=run_id, progress=progress, rule_ids=rule_ids))
 
 
@@ -1262,8 +1262,8 @@ def _baseline_hours(period: str) -> int:
     return _cal.monthrange(y, m)[1] * 24
 
 
-def enqueue_dimons_task(session: Any, *, rule_ids: list[int] | None = None, source: str = "worker") -> Any | None:
-    """Create a QUEUED ``dimon_reprocess`` EtlTask for active rules (all or a subset).
+def enqueue_rule_materialization(session: Any, *, rule_ids: list[int] | None = None, source: str = "worker") -> Any | None:
+    """Create a QUEUED ``gold_reprocess`` EtlTask for active rules (all or a subset).
 
     Used by the worker to chain the Gold materialization (visão completa =
     realizado + forecast + rateio) right after a forecast/reprocess completes.
@@ -1286,14 +1286,14 @@ def enqueue_dimons_task(session: Any, *, rule_ids: list[int] | None = None, sour
         return None
     running = session.execute(
         select(EtlTask.id).where(
-            EtlTask.task_type == "dimon_reprocess",
+            EtlTask.task_type == "gold_reprocess",
             EtlTask.status.in_(["QUEUED", "RUNNING"]),
         )
     ).scalars().first()
     if running:
         return None
     now = datetime.now(timezone.utc)
-    task = EtlTask(task_type="dimon_reprocess", status="QUEUED", errors=[])
+    task = EtlTask(task_type="gold_reprocess", status="QUEUED", errors=[])
     task.phase = f"Na fila: materializar {len(rules)} cubo(s) Gold (após {source})"
     task.started_at = now
     task.total_blobs = len(rules)

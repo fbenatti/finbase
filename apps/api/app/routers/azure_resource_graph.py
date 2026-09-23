@@ -116,8 +116,8 @@ ORPHAN_MAPPINGS = _mappings_for(_ORPHAN_SOURCES)
 # Agrupa os órfãos (Gold coletada via ARG) e cruza com a Gold FOCUS pelo
 # resource_id dentro do mesmo billing period. A materialização cria
 # dest_dm_cost_<code> pré-agregada — a governança lê custo sem varrer o FOCUS.
-ORPHAN_COST_DIMON_CODE = "custo_recursos_orfaos"
-ORPHAN_COST_DIMON_TABLE = f"dest_dm_cost_{ORPHAN_COST_DIMON_CODE}"
+ORPHAN_COST_GOLD_CODE = "custo_recursos_orfaos"
+ORPHAN_COST_GOLD_TABLE = f"dest_dm_cost_{ORPHAN_COST_GOLD_CODE}"
 
 ORPHAN_COST_SQL_TEMPLATE = """
 -- O export FOCUS pode conter o mesmo recurso em duas variantes de case
@@ -193,7 +193,7 @@ async def seed_orphan_cost_gold(db: AsyncSession) -> dict[str, Any]:
     from app.models.gold_mart_rule import GoldMartRule
     from app.services.gold_materialization import normalize_code
 
-    code = normalize_code(ORPHAN_COST_DIMON_CODE)
+    code = normalize_code(ORPHAN_COST_GOLD_CODE)
     existing = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code))).scalar_one_or_none()
     dimensions = ["_billing_period", "resource_id", "resource_name", "orphan_rule", "tipo_recurso",
                   "subscription_id", "resource_group", "disk_size_gb", "age_days", "snapshot_date",
@@ -303,7 +303,7 @@ async def _setup_for_connection(db: AsyncSession, conn: SourceConnection) -> dic
     return {
         "connection_id": conn.id,
         "destination_tables": [INVENTORY_DEST_PHYSICAL, ORPHAN_DEST_PHYSICAL],
-        "dimon_rule": ORPHAN_COST_DIMON_CODE,
+        "gold_rule": ORPHAN_COST_GOLD_CODE,
         "message": "Setup concluído: tabelas destino e mappings criados.",
     }
 
@@ -348,7 +348,7 @@ async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSessio
 
 
 @router.post("/seed-gold")
-async def seed_dimon_orphan_cost(db: AsyncSession = Depends(get_db)):
+async def seed_gold_orphan_cost(db: AsyncSession = Depends(get_db)):
     """Cria (idempotente) a regra Gold de custo por recurso órfão."""
     result = await seed_orphan_cost_gold(db)
     if result["status"] == "EXISTS":
@@ -466,14 +466,14 @@ async def orphan_summary(
             cost_where = _latest_snapshot_per_origin_where(cost_where, "", period)
         cost_total = await trino_execute(
             "SELECT COALESCE(SUM(cost_brl), 0) AS cost_brl, COUNT(*) AS n "
-            f"FROM iceberg.{GOLD}.{ORPHAN_COST_DIMON_TABLE}"
+            f"FROM iceberg.{GOLD}.{ORPHAN_COST_GOLD_TABLE}"
             + cost_where
         )
     except Exception as exc:  # noqa: BLE001 — Trino pode estar fora/ tabela ainda não criada
         logger.warning("Trino summary indisponível: %s", exc)
         return {
             "periods": [], "snapshot_dates": [], "by_rule": [], "by_tipo": [], "by_status": [],
-            "total": 0, "annotated": 0, "cost_brl": 0, "dimon_ready": False,
+            "total": 0, "annotated": 0, "cost_brl": 0, "gold_ready": False,
             "error": str(exc)[:300],
         }
 
@@ -489,7 +489,7 @@ async def orphan_summary(
         status_counter[ann.status] = status_counter.get(ann.status, 0) + 1
 
     by_status = [{"status": s, "count": status_counter[s]} for s in ORPHAN_STATUSES if status_counter.get(s, 0) > 0]
-    dimon_cost = float((cost_total[0] if cost_total else {}).get("cost_brl") or 0)
+    gold_cost = float((cost_total[0] if cost_total else {}).get("cost_brl") or 0)
 
     return {
         "periods": periods,
@@ -501,8 +501,8 @@ async def orphan_summary(
         "by_status": by_status,
         "total": total,
         "annotated": annotated,
-        "cost_brl": dimon_cost,
-        "dimon_ready": bool(cost_total),
+        "cost_brl": gold_cost,
+        "gold_ready": bool(cost_total),
     }
 
 
@@ -553,7 +553,7 @@ async def list_orphans(
     # Tabela pode não existir ainda (materialização não executada) → custo 0.
     sql = (
         "SELECT " + columns + " FROM iceberg.silver.dest_cloud_orphan_resources o "
-        f"LEFT JOIN iceberg.{GOLD}.{ORPHAN_COST_DIMON_TABLE} c "
+        f"LEFT JOIN iceberg.{GOLD}.{ORPHAN_COST_GOLD_TABLE} c "
         "ON c.resource_id = o.resource_id AND c.orphan_rule = o.orphan_rule "
         "AND c.\"_billing_period\" = o.\"_billing_period\" "
         "AND c.snapshot_date = o.snapshot_date "
@@ -638,7 +638,7 @@ async def orphan_savings(
       ), costs AS (
         SELECT lower(resource_id) AS rid, orphan_rule, snapshot_date,
                MAX(COALESCE(cost_brl, 0)) AS cost_brl
-        FROM iceberg.{GOLD}.{ORPHAN_COST_DIMON_TABLE}
+        FROM iceberg.{GOLD}.{ORPHAN_COST_GOLD_TABLE}
         GROUP BY 1, 2, 3
       )
       SELECT p.resource_id, p.resource_name, p.resource_type, p.subscription_id,

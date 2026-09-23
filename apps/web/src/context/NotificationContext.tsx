@@ -52,7 +52,7 @@ function kindOf(task: TaskStatus): NotificationKind {
   const type = String(task.task_type || task.type || "");
   if (type === "forecast") return "forecast";
   if (type === "shared_cost") return "shared_cost";
-  if (type === "dimon_reprocess" || type === "ai_cost_relationship_reprocess") return "reprocess";
+  if (type === "gold_reprocess" || type === "ai_cost_relationship_reprocess") return "reprocess";
   if (type === "reprocess" || (!task.connection_id && task.destination_table_id && type !== "extraction")) return "reprocess";
   return "extraction";
 }
@@ -61,7 +61,7 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   const k = kindOf(task);
   if (k === "shared_cost") return "Custo compartilhado";
   if (k === "forecast") return "Forecast";
-  if (String(task.task_type || task.type || "") === "dimon_reprocess") {
+  if (String(task.task_type || task.type || "") === "gold_reprocess") {
     return "Gold (custo pré-agregado) #" + task.id;
   }
   if (String(task.task_type || task.type || "") === "ai_cost_relationship_reprocess") {

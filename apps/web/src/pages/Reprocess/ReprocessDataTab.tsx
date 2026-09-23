@@ -38,8 +38,8 @@ export default function ReprocessDataTab() {
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [classificationOnly, setClassificationOnly] = useState(false);
   const [chainGoldCubes, setChainGoldCubes] = useState(false);
-  const [chainGoldCubeRuleId, setChainDimonRuleId] = useState<number | "">("");
-  const [dimonRules, setDimonRules] = useState<GoldCubeRule[]>([]);
+  const [chainGoldCubeRuleId, setChainRuleId] = useState<number | "">("");
+  const [goldRules, setGoldRules] = useState<GoldCubeRule[]>([]);
   const [periods, setPeriods] = useState<AvailablePeriod[]>([]);
   const [processing, setProcessing] = useState(false);
   const [taskId, setTaskId] = useState<number | null>(null);
@@ -89,7 +89,7 @@ export default function ReprocessDataTab() {
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
-    getGoldCubeRules().then(setDimonRules).catch(() => {});
+    getGoldCubeRules().then(setGoldRules).catch(() => {});
     historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     const refreshWorker = () => getWorkerHealth().then(setWorkerHealth).catch(() => setWorkerHealth({ status: "offline", heartbeat_age_seconds: null }));
     refreshWorker();
@@ -452,10 +452,10 @@ export default function ReprocessDataTab() {
                 <Select
                   value={chainGoldCubeRuleId}
                   label="Tabela Gold"
-                  onChange={(e) => setChainDimonRuleId(e.target.value as number | "")}
+                  onChange={(e) => setChainRuleId(e.target.value as number | "")}
                 >
                   <MenuItem value=""><em>Todas as regras ativas</em></MenuItem>
-                  {dimonRules.filter(r => r.active).map(r => (
+                  {goldRules.filter(r => r.active).map(r => (
                     <MenuItem key={r.id} value={r.id!}>{r.name} ({r.materialization_table || r.code})</MenuItem>
                   ))}
                 </Select>

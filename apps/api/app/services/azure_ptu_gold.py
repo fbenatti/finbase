@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 
 GOLD = layers.GOLD
 GOLD_TABLE = "dest_dm_azure_ptu_daily"
-DIMON_SQL = f"iceberg.{GOLD}.{GOLD_TABLE}"
-GOLD_SQL = "iceberg.gold.dest_azure_ptu_metrics"
+# Uma definição só. A PTU canônica vive na Silver; leituras de cubo usam a Gold.
+GOLD_SQL = f"iceberg.{GOLD}.{GOLD_TABLE}"
+PTU_SILVER_TABLE = "iceberg.silver.ptu_capacity_series"
 DASHBOARD_TRINO_TIMEOUT_S = 25
 
-_DIMON_COLUMNS: set[str] | None = None
+_GOLD_COLUMNS: set[str] | None = None
 
 
 def _gold_metrics_window(hours: int) -> tuple[str, str]:
@@ -174,8 +175,8 @@ async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
             iceberg.swap_staged_table(GOLD_TABLE, staging, namespace=GOLD, known_row_count=row_count)
         else:
             iceberg.cleanup_staged_table(staging, namespace=GOLD)
-        global _DIMON_COLUMNS
-        _DIMON_COLUMNS = None
+        global _GOLD_COLUMNS
+        _GOLD_COLUMNS = None
         return {"table": GOLD_TABLE, "rows": row_count, "days": days}
     except Exception:
         try:
@@ -185,7 +186,7 @@ async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
         raise
 
 
-async def load_dimon_metrics(
+async def load_gold_metrics(
     *,
     hours: int,
     connection_ids: list[int] | None = None,
@@ -194,10 +195,10 @@ async def load_dimon_metrics(
     timeout_s: float = DASHBOARD_TRINO_TIMEOUT_S,
 ) -> list[dict[str, Any]]:
     """Lê a Gold diária; nunca consulta a Gold como fallback silencioso."""
-    global _DIMON_COLUMNS
-    if _DIMON_COLUMNS is None:
+    global _GOLD_COLUMNS
+    if _GOLD_COLUMNS is None:
         try:
-            _DIMON_COLUMNS = await _columns(DIMON_SQL)
+            _GOLD_COLUMNS = await _columns(GOLD_SQL)
         except Exception as exc:
             logger.warning("Gold Azure PTU indisponível: %s", exc)
             return []
@@ -209,7 +210,7 @@ async def load_dimon_metrics(
         "concat(substr(metric_day, 1, 7), '-01T00:00:00Z')"
         if grain == "month" else "concat(metric_day, 'T00:00:00Z')"
     )
-    columns = _DIMON_COLUMNS
+    columns = _GOLD_COLUMNS
     sums = [
         "input_tokens_sum", "output_tokens_sum", "total_tokens_sum", "request_count",
         "success_count", "client_error_count", "server_error_count", "rate_limited_count",
@@ -245,7 +246,7 @@ async def load_dimon_metrics(
              MAX(CAST(project_hint AS VARCHAR)) AS project_hint,
              MAX(CAST(project_hint AS VARCHAR)) AS project_key,
              {', '.join(measures)}
-      FROM {DIMON_SQL}
+      FROM {GOLD_SQL}
       WHERE metric_day >= '{start_day}' AND metric_day <= '{end_day}'{conn_filter}{project_filter}
       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
       ORDER BY metric_hour DESC
@@ -275,7 +276,7 @@ async def load_project_token_totals(
                COALESCE(SUM(TRY_CAST(input_tokens_sum AS DOUBLE)), 0) AS input_tokens,
                COALESCE(SUM(TRY_CAST(output_tokens_sum AS DOUBLE)), 0) AS output_tokens,
                COALESCE(SUM(TRY_CAST(total_tokens_sum AS DOUBLE)), 0) AS total_tokens
-        FROM {DIMON_SQL}
+        FROM {PTU_SILVER_TABLE}
         WHERE lower(CAST(project_hint AS VARCHAR)) = '{project}'{period_filter}
         GROUP BY 1
         """,
@@ -305,7 +306,7 @@ async def load_project_tokens_last_30d(
                COALESCE(SUM(TRY_CAST(total_tokens_sum AS DOUBLE)), 0) AS total_tokens,
                MIN(metric_day) AS date_from,
                MAX(metric_day) AS date_to
-        FROM {DIMON_SQL}
+        FROM {GOLD_SQL}
         WHERE lower(CAST(project_hint AS VARCHAR)) = '{project}'
           AND CAST(metric_day AS DATE) >= current_date - INTERVAL '30' DAY
           AND CAST(metric_day AS DATE) <= current_date

@@ -171,7 +171,7 @@ def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: in
                     result_json={"schedule_id": schedule.id, "scheduled_pipeline": True,
                                  "forecast_config_ids": cfg.get("forecast_config_ids", []),
                                  "accuracy": cfg.get("accuracy", False), "shared_cost": cfg.get("shared_cost", False),
-                                 "dimon_rule_ids": cfg.get("dimon_rule_ids", [])},
+                                 "gold_rule_ids": cfg.get("gold_rule_ids", [])},
                 )
                 session.add(child)
                 session.flush()
@@ -209,14 +209,14 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
         session.flush()
         source_reprocess = session.get(EtlTask, source_task_id)
         pipeline_periods = list(source_reprocess.billing_periods or []) if source_reprocess else []
-        dimon_rule_ids = [int(x) for x in (task_json.get("dimon_rule_ids") or []) if x]
+        gold_rule_ids = [int(x) for x in (task_json.get("gold_rule_ids") or []) if x]
         forecast_task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id,
                                 errors=[], result_json={"forecast_run_id": run.id,
                                 "forecast_config_id": config_id, "scheduled_reprocess_task_id": source_task_id,
                                 "scheduled_pipeline": True, "shared_cost": task_json.get("shared_cost", False),
                                 "accuracy": task_json.get("accuracy", False),
                                 "accuracy_months": pipeline_periods,
-                                "dimon_rule_ids": dimon_rule_ids})
+                                "gold_rule_ids": gold_rule_ids})
         session.add(forecast_task)
         session.flush()
         queued.append(forecast_task.id)
@@ -551,14 +551,14 @@ def consumer_main(worker_id: int):
                         # realizado + forecast + rateio). A planning mudou, então a
                         # Gold pré-agregada precisa ser materializada de novo; a
                         # fila do worker executa em ordem de id (sequência real).
-                        dimon_rule_ids = [int(x) for x in (task_json.get("dimon_rule_ids") or []) if x]
-                        run_scheduled_gold = (not task_json.get("scheduled_pipeline")) or bool(dimon_rule_ids)
+                        gold_rule_ids = [int(x) for x in (task_json.get("gold_rule_ids") or []) if x]
+                        run_scheduled_gold = (not task_json.get("scheduled_pipeline")) or bool(gold_rule_ids)
                         try:
                             if not run_scheduled_gold:
                                 raise LookupError("Gold desabilitada no schedule")
-                            from app.services.gold_materialization import enqueue_dimons_task
-                            gold_task = enqueue_dimons_task(
-                                s, rule_ids=dimon_rule_ids, source="forecast",
+                            from app.services.gold_materialization import enqueue_rule_materialization
+                            gold_task = enqueue_rule_materialization(
+                                s, rule_ids=gold_rule_ids, source="forecast",
                             )
                             if gold_task and task_row:
                                 task_row.phase = (
@@ -729,9 +729,9 @@ def consumer_main(worker_id: int):
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
-                elif task.task_type in ("ai_cost_relationship_reprocess", "dimon_reprocess"):
+                elif task.task_type in ("ai_cost_relationship_reprocess", "gold_reprocess"):
                     task.status = "RUNNING"
-                    task.phase = "Agregando Golds e publicando as tabelas Gold"
+                    task.phase = "Agregando cubos Gold e publicando as tabelas Gold"
                     session.commit()
                     session.close()
                     try:
@@ -1020,9 +1020,9 @@ def consumer_main(worker_id: int):
                                             ]
                                             is_last_group_task = not remaining
                                         if is_last_group_task:
-                                            from app.services.gold_materialization import enqueue_dimons_task
+                                            from app.services.gold_materialization import enqueue_rule_materialization
                                             rule_ids = chain.get("rule_ids") or None
-                                            gold_task = enqueue_dimons_task(
+                                            gold_task = enqueue_rule_materialization(
                                                 terminal_session, rule_ids=rule_ids, source="reprocess"
                                             )
                                             if gold_task:

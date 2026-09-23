@@ -51,8 +51,8 @@ from app.services.azure_ptu_ops import (
     peak_utilization_label,
     weighted_utilization,
 )
-from app.services.azure_ptu_cost import load_dimon_ptu_costs
-from app.services.azure_ptu_gold import load_dimon_metrics, refresh_azure_ptu_gold
+from app.services.azure_ptu_cost import load_gold_ptu_costs
+from app.services.azure_ptu_gold import load_gold_metrics, refresh_azure_ptu_gold
 from app.services.aura_brain_vivo_mais import load_project_cost_dashboard
 from app.services.sinfonia_dashboard import load_sinfonia_dashboard
 from app.services.datamesh_dashboard import load_datamesh_dashboard
@@ -270,7 +270,7 @@ async def _load_operational_data(
     # explícito, que é a única ação do dashboard que consulta a Gold pesada.
     effective_grain = "month" if body.grain == "month" else "day"
 
-    metrics_task = load_dimon_metrics(
+    metrics_task = load_gold_metrics(
         hours=body.hours,
         connection_ids=conn_ids,
         project_hints=body.project_keys or None,
@@ -278,10 +278,10 @@ async def _load_operational_data(
         timeout_s=DASHBOARD_TRINO_TIMEOUT_S,
     )
     inventory_task = load_gold_inventory(connection_ids=conn_ids)
-    dimon_metrics, inventory = await asyncio.gather(metrics_task, inventory_task)
+    gold_metrics, inventory = await asyncio.gather(metrics_task, inventory_task)
 
-    if dimon_metrics:
-        metrics = dimon_metrics
+    if gold_metrics:
+        metrics = gold_metrics
     elif dashboard_only:
         data_source = "stale"
     else:
@@ -1402,7 +1402,7 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
         # Enriquecimento financeiro via Gold (compras mensais de PTU e custos
         # dos projetos). Roda em paralelo com a carga operacional para não
         # adicionar latência perceptível; nunca derruba o endpoint.
-        cost_task = asyncio.create_task(load_dimon_ptu_costs(
+        cost_task = asyncio.create_task(load_gold_ptu_costs(
             date_from=date_from,
             date_to=date_to,
             project_keys=body.project_keys or None,
@@ -1434,7 +1434,7 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
             connections = (await db.execute(
                 select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")
             )).scalars().all()
-            previous_metrics = await load_dimon_metrics(
+            previous_metrics = await load_gold_metrics(
                 hours=prev_body.hours,
                 connection_ids=[c.id for c in connections],
                 project_hints=prev_body.project_keys or None,
@@ -1482,7 +1482,7 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
                 conns_30d = (await db.execute(
                     select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")
                 )).scalars().all()
-                metrics_30d = await load_dimon_metrics(
+                metrics_30d = await load_gold_metrics(
                     hours=720,
                     connection_ids=[c.id for c in conns_30d],
                     project_hints=body.project_keys or None,

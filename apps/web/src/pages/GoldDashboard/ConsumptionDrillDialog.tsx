@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from "@mui/material";
-import { DimonQueryFilter } from "../../services/api";
+import { GoldQueryFilter } from "../../services/api";
 import HierarchicalDecompTree, {
   buildExecutiveDecompChain,
   executiveChainStartIndex,
@@ -45,8 +45,8 @@ export default function ConsumptionDrillDialog({
     () => buildExecutiveDecompChain(directorView, executiveChainStartIndex(path, directorView)),
     [directorView, path],
   );
-  const baseFilters = useMemo<DimonQueryFilter[]>(() => {
-    const filters: DimonQueryFilter[] = [
+  const baseFilters = useMemo<GoldQueryFilter[]>(() => {
+    const filters: GoldQueryFilter[] = [
       // Realizado é tudo o que não é projeção/rateio; forecast precisa usar
       // sua fatia própria. Antes o diálogo sempre fixava realizado, mesmo ao
       // clicar na série de forecast, o que produzia uma árvore zerada.

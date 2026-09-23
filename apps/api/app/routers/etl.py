@@ -1478,7 +1478,7 @@ def _reprocess_destination_sync(
         # O cubo Gold agregado é gerado ao final do reprocess SOMENTE para o
         # destino MODELO FOCUS, reutilizando os DataFrames em memória (não
         # varre a Gold de milhões de linhas).
-        # Estrutura Gold única = regras (dimon_rule + dimon_materialization),
+        # Estrutura Gold única = regras (gold_rule + gold_materialization),
         # geradas sob demanda via /gold/reprocess. A geração automática
         # paralela (gold_builder -> dest_dm_cost_focus) foi desativada.
         enable_gold_cubes = False

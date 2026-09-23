@@ -7,7 +7,7 @@ import pytest
 from app.services import aura_brain_vivo_mais as dashboard_service
 
 from app.services.aura_brain_vivo_mais import (
-    classify_dimon_row,
+    classify_gold_row,
     ia_family_for,
     _empty_classes,
     _infra_by_subcategory,
@@ -29,7 +29,7 @@ def _row(**kw):
 
 
 @pytest.mark.asyncio
-async def test_vivo_mais_queries_its_own_dimon_and_normalizes_project(monkeypatch):
+async def test_vivo_mais_queries_its_own_gold_and_normalizes_project(monkeypatch):
     captured = []
 
     async def fake_execute(sql, **kwargs):
@@ -68,34 +68,34 @@ async def test_aura_brain_keeps_combined_gold(monkeypatch):
 def test_classify_on_demand_monthly_purchase_is_ptu():
     row = {"skumeter": "Provisioned Throughput Units", "chargecategory": "Usage",
            "servicesubcategory": "Azure OpenAI", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "ptu"
+    assert classify_gold_row(row) == "ptu"
 
 
 def test_classify_reservation_purchase_is_ptu():
     row = {"skumeter": "Provisioned Managed Global Unit", "chargecategory": "Purchase",
            "servicesubcategory": "Azure AI Foundry Provisioned Throughput Reservation",
            "servicename": "Microsoft.Capacity"}
-    assert classify_dimon_row(row) == "ptu"
+    assert classify_gold_row(row) == "ptu"
 
 
 def test_classify_reservation_refund_is_ptu():
     row = {"skumeter": None, "chargecategory": "Refund",
            "servicesubcategory": "Azure AI Foundry Provisioned Throughput Reservation",
            "servicename": "Microsoft.Capacity"}
-    assert classify_dimon_row(row) == "ptu"
+    assert classify_gold_row(row) == "ptu"
 
 
 def test_classify_daily_consumption_is_excluded():
     # Consumo diário/horário (1/Hour) — já está na compra mensal; não retorna.
     row = {"skumeter": "Provisioned Managed Global Unit", "chargecategory": "Usage",
            "servicesubcategory": "Azure OpenAI", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "__excluded__"
+    assert classify_gold_row(row) == "__excluded__"
 
 
 def test_classify_daily_consumption_return_is_excluded():
     row = {"skumeter": "Provisioned Managed Global Unit", "chargecategory": "Return",
            "servicesubcategory": "Azure OpenAI", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "__excluded__"
+    assert classify_gold_row(row) == "__excluded__"
 
 
 def test_classify_payg_token_meters_are_ondemand():
@@ -103,22 +103,22 @@ def test_classify_payg_token_meters_are_ondemand():
                   "Claude in Microsoft Foundry (Anthropic hosted) - claude-consumption-units"):
         row = {"skumeter": meter, "chargecategory": "Usage",
                "servicesubcategory": "Azure OpenAI", "servicename": "Microsoft.CognitiveServices"}
-        assert classify_dimon_row(row) == "tokens_ondemand", meter
+        assert classify_gold_row(row) == "tokens_ondemand", meter
 
 
 def test_classify_vm_and_storage_are_infra():
     row = {"skumeter": "F16s v2", "chargecategory": "Usage",
            "servicesubcategory": "Virtual Machines FSv2 Series", "servicename": "Microsoft.Compute"}
-    assert classify_dimon_row(row) == "infra"
+    assert classify_gold_row(row) == "infra"
     row2 = {"skumeter": "P10 LRS Disk", "chargecategory": "Usage",
             "servicesubcategory": "Premium SSD Managed Disks", "servicename": "Microsoft.Compute"}
-    assert classify_dimon_row(row2) == "infra"
+    assert classify_gold_row(row2) == "infra"
 
 
 def test_classify_vm_return_is_infra():
     row = {"skumeter": None, "chargecategory": "Return",
            "servicesubcategory": "Virtual Machines Dsv5 Series", "servicename": "Microsoft.Compute"}
-    assert classify_dimon_row(row) == "infra"
+    assert classify_gold_row(row) == "infra"
 
 
 # ── serviços de IA (card próprio, fora de infra/tokens) ────────────────────
@@ -126,42 +126,42 @@ def test_classify_vm_return_is_infra():
 def test_classify_document_intelligence_is_ia_service():
     row = {"skumeter": "S0 Pre-built Pages", "chargecategory": "Usage",
            "servicesubcategory": "Azure Document Intelligence", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "ia_service"
+    assert classify_gold_row(row) == "ia_service"
     assert ia_family_for(row) == "Azure Document Intelligence"
 
 
 def test_classify_claude_saas_is_ia_service():
     row = {"skumeter": "claude sonnet 4.6 - anthropic-claude-sonnet-4-6-plan-new - paygo",
            "chargecategory": "Usage", "servicesubcategory": "Claude Sonnet 4.6", "servicename": "Microsoft.SaaS"}
-    assert classify_dimon_row(row) == "ia_service"
+    assert classify_gold_row(row) == "ia_service"
     assert ia_family_for(row) == "Claude (Anthropic)"
 
 
 def test_classify_claude_foundry_ccu_is_ia_service_not_tokens():
     row = {"skumeter": "Claude in Microsoft Foundry (Anthropic hosted) - claude-ccu-anthropic-hosted-plan - claude-consumption-units",
            "chargecategory": "Usage", "servicesubcategory": "Claude in Microsoft Foundry (Anthropic hosted)", "servicename": "Microsoft.SaaS"}
-    assert classify_dimon_row(row) == "ia_service"
+    assert classify_gold_row(row) == "ia_service"
     assert ia_family_for(row) == "Claude (Anthropic)"
 
 
 def test_classify_gpt5_tokens_are_ia_service_not_ondemand():
     row = {"skumeter": "5.4 opt gl 1m tokens", "chargecategory": "Usage",
            "servicesubcategory": "Azure OpenAI GPT5", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "ia_service"
+    assert classify_gold_row(row) == "ia_service"
     assert ia_family_for(row) == "Azure OpenAI GPT-5"
 
 
 def test_classify_speech_is_ia_service():
     row = {"skumeter": "S1 Neural Text to Speech Characters", "chargecategory": "Usage",
            "servicesubcategory": "Azure Speech", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "ia_service"
+    assert classify_gold_row(row) == "ia_service"
     assert ia_family_for(row) == "Azure Speech"
 
 
 def test_classify_azure_openai_generic_tokens_still_ondemand():
     row = {"skumeter": "gpt 4o 0513 Input global Tokens", "chargecategory": "Usage",
            "servicesubcategory": "Azure OpenAI", "servicename": "Microsoft.CognitiveServices"}
-    assert classify_dimon_row(row) == "tokens_ondemand"
+    assert classify_gold_row(row) == "tokens_ondemand"
     assert ia_family_for(row) is None
 
 

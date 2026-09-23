@@ -37,7 +37,7 @@ from app.services.trino_service import execute as trino_execute
 from app.services.gold_materialization import GOLD
 from app.services import lakehouse_layers as layers
 from app.services.azure_ptu_gold import (
-    GOLD_TABLE as PTU_DIMON_TABLE,
+    GOLD_TABLE as PTU_GOLD_TABLE,
     load_project_token_totals,
     load_project_tokens_last_30d,
 )
@@ -171,7 +171,7 @@ def ia_family_for(row: dict[str, Any]) -> str | None:
     return None
 
 
-def classify_dimon_row(row: dict[str, Any]) -> str:
+def classify_gold_row(row: dict[str, Any]) -> str:
     """Classifica uma linha da Gold (realizada ou forecast) em classe executiva.
 
     Retorna ``__excluded__`` para o consumo diário/horário (Provisioned
@@ -628,7 +628,7 @@ async def load_project_cost_dashboard(
         "note": (
             f"Custo mensal de {_period_label(current_period)} dividido pelo consumo móvel dos últimos 30 dias."
         ),
-        "source_table": PTU_DIMON_TABLE,
+        "source_table": PTU_GOLD_TABLE,
     }
 
     payload = {

@@ -15,7 +15,7 @@ async def test_project_tokens_are_read_from_ptu_gold(monkeypatch):
     result = await gold_mart.load_project_token_totals("vivo-mais", ["202608"], None)
 
     assert result["202608"]["total_tokens"] == 1000
-    assert f"iceberg.{gold_mart.GOLD}.dest_dm_azure_ptu_daily" in captured[0]
+    assert gold_mart.PTU_SILVER_TABLE in captured[0]
     assert "lower(CAST(project_hint AS VARCHAR)) = 'vivo-mais'" in captured[0]
 
 
@@ -37,7 +37,7 @@ async def test_project_tokens_can_load_all_available_periods(monkeypatch):
 @pytest.mark.asyncio
 async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
     captured = []
-    gold_mart._DIMON_COLUMNS = {
+    gold_mart._Gold_COLUMNS = {
         "metric_day", "connection_id", "account_resource_id", "deployment_name",
         "model_name", "model_version", "region", "sku_name", "project_hint",
         "provisioned_ptus", "input_tokens_sum", "output_tokens_sum", "total_tokens_sum",
@@ -49,7 +49,7 @@ async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
         return []
 
     monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
-    await gold_mart.load_dimon_metrics(hours=720, project_hints=["aura-brain"], grain="day")
+    await gold_mart.load_gold_metrics(hours=720, project_hints=["aura-brain"], grain="day")
 
     assert len(captured) == 1
     assert f"FROM iceberg.{gold_mart.GOLD}.dest_dm_azure_ptu_daily" in captured[0]

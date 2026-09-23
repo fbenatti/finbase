@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@mui/material";
 import {
-  DimonQueryFilter, DimonQueryResult, formatApiError, queryDimonTable,
+  GoldQueryFilter, GoldQueryResult, formatApiError, queryDimonTable,
 } from "../../services/api";
 import { ORG } from "../../constants/orgLabels";
 
@@ -114,12 +114,12 @@ function pct(v: unknown, digits = 1): string {
 function compact(v: unknown): string {
   return COMPACT_BRL.format(Number(v ?? 0));
 }
-function rowsOf(r: DimonQueryResult | null | undefined): Record<string, unknown>[] {
+function rowsOf(r: GoldQueryResult | null | undefined): Record<string, unknown>[] {
   return (r?.rows ?? []) as Record<string, unknown>[];
 }
 
-export function pathSegmentFilters(path: string[], visaoDiretoria: boolean): DimonQueryFilter[] {
-  const out: DimonQueryFilter[] = [];
+export function pathSegmentFilters(path: string[], visaoDiretoria: boolean): GoldQueryFilter[] {
+  const out: GoldQueryFilter[] = [];
   const scoped = normalizeDirectorPath(path, visaoDiretoria);
   scoped.forEach((segment, depth) => {
     if (!segment?.trim()) return;
@@ -183,7 +183,7 @@ export default function HierarchicalDecompTree({
   filterRowTypes = true,
 }: {
   table: string;
-  baseFilters: DimonQueryFilter[];
+  baseFilters: GoldQueryFilter[];
   chain: DecompChainItem[];
   queryKey: string;
   onApplyContext?: (path: DecompPathStep[]) => void;
@@ -194,7 +194,7 @@ export default function HierarchicalDecompTree({
   const svgId = useId().replace(/:/g, "");
   const [treePath, setTreePath] = useState<DecompPathStep[]>([]);
   const [treeMetric, setTreeMetric] = useState<"cost" | "share" | "mom">("cost");
-  const [results, setResults] = useState<Record<string, DimonQueryResult | null>>({});
+  const [results, setResults] = useState<Record<string, GoldQueryResult | null>>({});
   const [emptyLevelSkip, setEmptyLevelSkip] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -229,7 +229,7 @@ export default function HierarchicalDecompTree({
     const defs: Array<{
       id: string;
       rows?: string[];
-      filters: DimonQueryFilter[];
+      filters: GoldQueryFilter[];
       row_limit: number;
     }> = [];
     for (let i = 0; i <= treeStart; i++) {
@@ -246,7 +246,7 @@ export default function HierarchicalDecompTree({
         })),
       );
       if (!alive) return;
-      const m: Record<string, DimonQueryResult | null> = {};
+      const m: Record<string, GoldQueryResult | null> = {};
       defs.forEach((d, i) => { m[d.id] = spineList[i]; });
 
       let skip = 0;

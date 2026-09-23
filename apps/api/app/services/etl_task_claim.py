@@ -23,7 +23,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "forecast_accuracy",
     "shared_cost",
     "ai_cost_relationship_reprocess",
-    "dimon_reprocess",
+    "gold_reprocess",
     "reservation_collection",
 )
 
@@ -31,7 +31,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
 # extraction remains parallel, while the analytic warehouse has one writer.
 _ANALYTIC_WRITER_TASK_TYPES = {
     "reprocess", "reclassification", "forecast", "forecast_accuracy",
-    "shared_cost", "ai_cost_relationship_reprocess", "dimon_reprocess",
+    "shared_cost", "ai_cost_relationship_reprocess", "gold_reprocess",
 }
 
 
@@ -66,7 +66,7 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
     if task.task_type == "extraction" and task.connection_id:
         keys.append(_stable_lock_key("extraction", task.connection_id))
 
-    if task.task_type in {"dimon_reprocess", "shared_cost"}:
+    if task.task_type in {"gold_reprocess", "shared_cost"}:
         keys.append(_stable_lock_key("singleton", task.task_type))
 
     return list(dict.fromkeys(keys))
@@ -202,7 +202,7 @@ def reconcile_stale_running_tasks(session: Session) -> None:
             row.phase = "Reenfileirado após reinício do worker"
             row.finished_at = None
             continue
-        if row.task_type in ("ai_cost_relationship_reprocess", "dimon_reprocess"):
+        if row.task_type in ("ai_cost_relationship_reprocess", "gold_reprocess"):
             row.status = "QUEUED"
             row.phase = "Reenfileirado após reinício do worker"
             row.finished_at = None

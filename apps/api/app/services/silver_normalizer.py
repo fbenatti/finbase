@@ -340,6 +340,46 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         derived={"valid_from": "mes:EffectiveStartDate"},
         notes="Price Sheet contratual (MCA) do export do Cost Management.",
     ),
+    "openai_ptu": SourceMapping(
+        source_key="openai_ptu",
+        model_name="ptu_capacity_series",
+        bronze_table="raw_azure_{env}_ptu",
+        columns={
+            "account_resource_id": "resource_id",
+            "deployment_name": "deployment_name",
+            "model_name": "model_name",
+            "model_version": "model_version",
+            "region": "region_id",
+            "sku_name": "sku_name",
+            "metric_hour": "metric_hour",
+            "provisioned_ptus": "provisioned_ptus",
+            "active_tokens_p95": "active_tokens_p95",
+            "utilization_avg": "utilization_avg",
+            "utilization_p95": "utilization_p95",
+            "utilization_max": "utilization_max",
+            "input_tokens_sum": "input_tokens_sum",
+            "output_tokens_sum": "output_tokens_sum",
+            "total_tokens_sum": "total_tokens_sum",
+            "request_count": "request_count",
+            "success_count": "success_count",
+            "client_error_count": "client_error_count",
+            "server_error_count": "server_error_count",
+            "rate_limited_count": "rate_limited_count",
+            "spillover_request_count": "spillover_request_count",
+            "time_to_response_p95_ms": "time_to_response_p95_ms",
+            "tokens_per_second_avg": "tokens_per_second_avg",
+            "source_points": "source_points",
+            "expected_points": "expected_points",
+            "completeness_pct": "completeness_pct",
+            "project_hint": "project_hint",
+            "_billing_period": "_billing_period",
+        },
+        constants={"cloud_provider": "azure"},
+        # A conta de recurso é normalizada como qualquer outro Resource ID: é o
+        # que permite cruzar a PTU com o custo do FOCUS e com o inventário.
+        derived={"resource_id": "minusculo:account_resource_id"},
+        notes="Capacidade PTU provisionada e utilização, por hora.",
+    ),
     "compute_quota": SourceMapping(
         source_key="compute_quota",
         model_name="resource_quota",
@@ -774,7 +814,8 @@ def materialise(
         ) or 0)
         periods.append(chave)
 
-    _register(session, mapping, silver_model)
+    # O de-para vive em `etl_mapping`, editável na aba de relacionamento —
+    # não há mais registro paralelo a fazer aqui.
 
     resultado = {
         "source_key": source_key,

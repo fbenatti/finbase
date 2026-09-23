@@ -319,9 +319,9 @@ async def lifespan(app: FastAPI):
               CONSTRAINT uq_azure_conn_source UNIQUE (connection_id, source_key)
             )""",
             "CREATE INDEX IF NOT EXISTS ix_azure_connection_source_conn ON azure_connection_source (connection_id)",
-            # Nomes de tabela históricos (`dimon_rule*`): são o registro das regras de
+            # Nomes de tabela históricos (`gold_rule*`): são o registro das regras de
             # cubo Gold. Renomear exigiria migração; o conteúdo já vive na Gold.
-            """CREATE TABLE IF NOT EXISTS dimon_rule (
+            """CREATE TABLE IF NOT EXISTS gold_rule (
               id SERIAL PRIMARY KEY,
               code VARCHAR(120) NOT NULL UNIQUE,
               name VARCHAR(200) NOT NULL,
@@ -338,23 +338,23 @@ async def lifespan(app: FastAPI):
               created_at TIMESTAMPTZ DEFAULT now(),
               updated_at TIMESTAMPTZ DEFAULT now()
             )""",
-            """CREATE TABLE IF NOT EXISTS dimon_rule_source (
+            """CREATE TABLE IF NOT EXISTS gold_rule_source (
               id SERIAL PRIMARY KEY,
-              rule_id INTEGER NOT NULL REFERENCES dimon_rule(id) ON DELETE CASCADE,
+              rule_id INTEGER NOT NULL REFERENCES gold_rule(id) ON DELETE CASCADE,
               gold_table VARCHAR(140) NOT NULL,
               filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
               value_column VARCHAR(50) NOT NULL DEFAULT 'realizado',
               percent DOUBLE PRECISION NOT NULL DEFAULT 100.0,
               created_at TIMESTAMPTZ DEFAULT now()
             )""",
-            "CREATE INDEX IF NOT EXISTS ix_dimon_rule_source_rule ON dimon_rule_source (rule_id)",
-            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '[]'::jsonb",
-            "ALTER TABLE dimon_rule_source ADD COLUMN IF NOT EXISTS gold_tables JSONB NOT NULL DEFAULT '[]'::jsonb",
-            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS measure_columns JSONB NOT NULL DEFAULT '[]'::jsonb",
-            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS sql_template TEXT",
-            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS snapshot_mode BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE dimon_rule ADD COLUMN IF NOT EXISTS snapshot_col VARCHAR(50) NOT NULL DEFAULT '_snapshot_date'",
-            """INSERT INTO dimon_rule (code, name, description, active, materialization_table, materialization_status)
+            "CREATE INDEX IF NOT EXISTS ix_gold_rule_source_rule ON gold_rule_source (rule_id)",
+            "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE gold_rule_source ADD COLUMN IF NOT EXISTS gold_tables JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS measure_columns JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS sql_template TEXT",
+            "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS snapshot_mode BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS snapshot_col VARCHAR(50) NOT NULL DEFAULT '_snapshot_date'",
+            """INSERT INTO gold_rule (code, name, description, active, materialization_table, materialization_status)
                VALUES
                  ('ai_consumption_daily', 'IA — Consumo diário (Claude/NotebookLM)', 'Gold auxiliar de consumo de IA; publicada pela fila Gold a partir de dest_consumo_ia.', TRUE, 'dest_dm_ai_consumption_daily', 'PENDING'),
                  ('ai_license_snapshot', 'IA — Licenças (Claude/NotebookLM)', 'Gold auxiliar de licenças; publicada pela fila Gold a partir de dest_licencas_ia.', TRUE, 'dest_dm_ai_license_snapshot', 'PENDING'),
@@ -396,7 +396,7 @@ async def lifespan(app: FastAPI):
                cron_expression, timezone, active, config_json, schedule_type)
             SELECT 'Reprocessamento', NULL, '[]'::jsonb, FALSE,
                    '0 2 * * 0', 'America/Sao_Paulo', FALSE,
-                   json_build_object('period_mode', 'all', 'accuracy', TRUE, 'shared_cost', FALSE, 'forecast_config_ids', '[]'::json, 'dimon_rule_ids', '[]'::json), 'reprocess'
+                   json_build_object('period_mode', 'all', 'accuracy', TRUE, 'shared_cost', FALSE, 'forecast_config_ids', '[]'::json, 'gold_rule_ids', '[]'::json), 'reprocess'
             WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'reprocess')
         """)
         await _execute_migration(conn, """

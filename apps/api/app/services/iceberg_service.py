@@ -1665,7 +1665,7 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
                 ).scalar_one_or_none() is not None
             return session.execute(
                 select(EtlTask.id).where(
-                    EtlTask.task_type.in_(["dimon_reprocess", "shared_cost", "forecast", "forecast_accuracy", "ai_cost_relationship_reprocess"]),
+                    EtlTask.task_type.in_(["gold_reprocess", "shared_cost", "forecast", "forecast_accuracy", "ai_cost_relationship_reprocess"]),
                     EtlTask.status.in_(["QUEUED", "RUNNING"]),
                 ).limit(1)
             ).scalar_one_or_none() is not None
@@ -1782,7 +1782,7 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
         session = SyncSession()
         active_writer = session.execute(text(
             "SELECT EXISTS (SELECT 1 FROM etl_task WHERE status = 'RUNNING' "
-            "AND task_type IN ('reprocess','reclassification','dimon_reprocess','shared_cost','forecast','forecast_accuracy','ai_cost_relationship_reprocess'))"
+            "AND task_type IN ('reprocess','reclassification','gold_reprocess','shared_cost','forecast','forecast_accuracy','ai_cost_relationship_reprocess'))"
         )).scalar()
         session.close()
         if active_writer:

@@ -509,7 +509,7 @@ class DestinationTableDetailOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class DimonChainOption(BaseModel):
+class GoldChainOption(BaseModel):
     """Optional Gold materialization enqueued after the reprocess completes."""
     enabled: bool = False
     rule_ids: list[int] = Field(default_factory=list)
@@ -520,7 +520,7 @@ class ReprocessRequest(BaseModel):
     connection_ids: list[int]
     billing_periods: list[str] = []
     replace_existing: bool = False
-    chain_gold_cubes: DimonChainOption = Field(default_factory=DimonChainOption)
+    chain_gold_cubes: GoldChainOption = Field(default_factory=GoldChainOption)
 
 
 class ScheduledTaskCreate(BaseModel):

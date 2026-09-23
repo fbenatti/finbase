@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource, VALUE_COLUMNS
 from app.services.gold_materialization import (
     GOLD,
-    dimon_table_name,
+    rule_target_table,
     load_gold_schema,
     load_gold_schema_typed,
     normalize_code,
@@ -56,7 +56,7 @@ class FilterCondition(BaseModel):
     values: list[str] = []
 
 
-class DimonSourceIn(BaseModel):
+class GoldSourceIn(BaseModel):
     # One or more Gold tables with the same structure, unioned into one dataset.
     gold_table: str | None = None  # legacy single-table form
     gold_tables: list[str] = Field(default_factory=list)
@@ -65,7 +65,7 @@ class DimonSourceIn(BaseModel):
     percent: float = 100.0
 
 
-class DimonSourceOut(BaseModel):
+class GoldSourceOut(BaseModel):
     id: int
     gold_table: str
     gold_tables: list[str] = Field(default_factory=list)
@@ -76,7 +76,7 @@ class DimonSourceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class DimonRuleCreate(BaseModel):
+class GoldRuleCreate(BaseModel):
     code: str
     name: str
     description: str | None = None
@@ -89,10 +89,10 @@ class DimonRuleCreate(BaseModel):
     sql_template: str | None = None
     snapshot_mode: bool = False
     snapshot_col: str = "_snapshot_date"
-    sources: list[DimonSourceIn] = Field(default_factory=list)
+    sources: list[GoldSourceIn] = Field(default_factory=list)
 
 
-class DimonRuleUpdate(BaseModel):
+class GoldRuleUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
     description: str | None = None
@@ -104,10 +104,10 @@ class DimonRuleUpdate(BaseModel):
     sql_template: str | None = None
     snapshot_mode: bool | None = None
     snapshot_col: str | None = None
-    sources: list[DimonSourceIn] | None = None
+    sources: list[GoldSourceIn] | None = None
 
 
-class DimonRuleOut(BaseModel):
+class GoldRuleOut(BaseModel):
     id: int
     code: str
     name: str
@@ -126,13 +126,13 @@ class DimonRuleOut(BaseModel):
     materialization_run_id: int | None = None
     materialized_at: str | None = None
     materialization_error: str | None = None
-    sources: list[DimonSourceOut] = Field(default_factory=list)
+    sources: list[GoldSourceOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
 
-def _rule_out(rule: GoldMartRule) -> DimonRuleOut:
-    return DimonRuleOut(
+def _rule_out(rule: GoldMartRule) -> GoldRuleOut:
+    return GoldRuleOut(
         id=rule.id,
         code=rule.code,
         name=rule.name,
@@ -151,7 +151,7 @@ def _rule_out(rule: GoldMartRule) -> DimonRuleOut:
         materialization_run_id=rule.materialization_run_id,
         materialized_at=rule.materialized_at.isoformat() if getattr(rule, "materialized_at", None) else None,
         materialization_error=rule.materialization_error,
-        sources=[DimonSourceOut.model_validate(source) for source in (rule.sources or [])],
+        sources=[GoldSourceOut.model_validate(source) for source in (rule.sources or [])],
     )
 
 
@@ -162,7 +162,7 @@ async def _load_rules(db: AsyncSession, rule_ids: list[int] | None = None) -> li
     return list((await db.execute(stmt)).scalars().all())
 
 
-def _replace_sources(rule: GoldMartRule, sources: list[DimonSourceIn]) -> None:
+def _replace_sources(rule: GoldMartRule, sources: list[GoldSourceIn]) -> None:
     rule.sources.clear()
     for item in sources:
         raw = item.filter_json or {}
@@ -182,7 +182,7 @@ def _replace_sources(rule: GoldMartRule, sources: list[DimonSourceIn]) -> None:
         ))
 
 
-def _validate_sources(sources: list[DimonSourceIn]) -> list[str]:
+def _validate_sources(sources: list[GoldSourceIn]) -> list[str]:
     """Return human-readable warnings for sources with invalid config."""
     warnings: list[str] = []
     for item in sources:
@@ -192,13 +192,13 @@ def _validate_sources(sources: list[DimonSourceIn]) -> list[str]:
     return warnings
 
 
-@router.get("/rules", response_model=list[DimonRuleOut])
+@router.get("/rules", response_model=list[GoldRuleOut])
 async def list_rules(db: AsyncSession = Depends(get_db)):
     return [_rule_out(rule) for rule in await _load_rules(db)]
 
 
-@router.post("/rules", response_model=DimonRuleOut, status_code=201)
-async def create_rule(data: DimonRuleCreate, db: AsyncSession = Depends(get_db)):
+@router.post("/rules", response_model=GoldRuleOut, status_code=201)
+async def create_rule(data: GoldRuleCreate, db: AsyncSession = Depends(get_db)):
     code = normalize_code(data.code)
     if not code:
         raise HTTPException(status_code=422, detail="code inválido")
@@ -230,7 +230,7 @@ async def create_rule(data: DimonRuleCreate, db: AsyncSession = Depends(get_db))
     return _rule_out(rule)
 
 
-@router.get("/rules/{rule_id}", response_model=DimonRuleOut)
+@router.get("/rules/{rule_id}", response_model=GoldRuleOut)
 async def get_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     rule = (await db.execute(
         select(GoldMartRule).options(selectinload(GoldMartRule.sources)).where(GoldMartRule.id == rule_id)
@@ -240,8 +240,8 @@ async def get_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     return _rule_out(rule)
 
 
-@router.put("/rules/{rule_id}", response_model=DimonRuleOut)
-async def update_rule(rule_id: int, data: DimonRuleUpdate, db: AsyncSession = Depends(get_db)):
+@router.put("/rules/{rule_id}", response_model=GoldRuleOut)
+async def update_rule(rule_id: int, data: GoldRuleUpdate, db: AsyncSession = Depends(get_db)):
     rule = (await db.execute(
         select(GoldMartRule).options(selectinload(GoldMartRule.sources)).where(GoldMartRule.id == rule_id)
     )).scalar_one_or_none()
@@ -287,7 +287,7 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     rule = await db.get(GoldMartRule, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Regra Gold não encontrada")
-    table = dimon_table_name(rule.code)
+    table = rule_target_table(rule.code)
     await db.execute(delete(GoldMartRuleSource).where(GoldMartRuleSource.rule_id == rule_id))
     await db.delete(rule)
     await db.commit()
@@ -309,7 +309,7 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
     if not table_name or "/" in table_name or "\\" in table_name:
         raise HTTPException(status_code=400, detail="Nome de tabela inválido")
     safe = table_name.strip().replace('"', "")
-    if not _DIMON_TABLE_RE.fullmatch(safe):
+    if not _GOLD_TABLE_RE.fullmatch(safe):
         raise HTTPException(status_code=400, detail="Somente tabelas Gold podem ser removidas")
 
     # Remove the rule (and its sources) that owns this table, if any.
@@ -360,14 +360,14 @@ async def gold_schema(gold_table: str = Query(...)):
         raise HTTPException(status_code=422, detail=f"Tabela Gold não encontrada: {exc}") from exc
 
 
-class DimonPreviewRequest(BaseModel):
+class GoldPreviewRequest(BaseModel):
     gold_table: str
     filter_json: dict[str, Any] = Field(default_factory=dict)
     value_column: str = "realizado"
 
 
 @router.post("/preview")
-async def preview(body: DimonPreviewRequest):
+async def preview(body: GoldPreviewRequest):
     try:
         return await preview_source(
             gold_table=body.gold_table,
@@ -378,12 +378,12 @@ async def preview(body: DimonPreviewRequest):
         logger.exception("Gold preview failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-class DimonReprocessRequest(BaseModel):
+class GoldReprocessRequest(BaseModel):
     rule_ids: list[int] = Field(default_factory=list)
 
 
 @router.post("/reprocess")
-async def reprocess_gold_cubes(body: DimonReprocessRequest, db: AsyncSession = Depends(get_db)):
+async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = Depends(get_db)):
     """Queue one independent task per selected Gold rule."""
     from datetime import datetime, timezone
     from app.models.etl_task import EtlTask
@@ -397,7 +397,7 @@ async def reprocess_gold_cubes(body: DimonReprocessRequest, db: AsyncSession = D
     now = datetime.now(timezone.utc)
     tasks = []
     for rule in active:
-        task = EtlTask(task_type="dimon_reprocess", status="QUEUED", errors=[])
+        task = EtlTask(task_type="gold_reprocess", status="QUEUED", errors=[])
         task.phase = f"Na fila: materializar {rule.code}"
         task.started_at = now
         task.total_blobs = 1
@@ -409,10 +409,10 @@ async def reprocess_gold_cubes(body: DimonReprocessRequest, db: AsyncSession = D
 
 
 @router.get("/history")
-async def dimon_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
+async def gold_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
     from app.models.etl_task import EtlTask
     rows = list((await db.execute(select(EtlTask).where(
-        EtlTask.task_type == "dimon_reprocess"
+        EtlTask.task_type == "gold_reprocess"
     ).order_by(EtlTask.id.desc()).limit(min(max(limit, 1), 100)))).scalars().all())
     return [{
         "id": row.id, "status": row.status, "phase": row.phase, "started_at": row.started_at,
@@ -427,37 +427,37 @@ async def dimon_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
 import re as _re
 from typing import Literal as _Literal
 
-_DIMON_TABLE_RE = _re.compile(r"^dest_dm_[a-z0-9_]+$")
-_DIMON_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
-_DIMON_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
+_GOLD_TABLE_RE = _re.compile(r"^dest_dm_[a-z0-9_]+$")
+_GOLD_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
+_GOLD_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
 # Aliases lógicos → colunas físicas da Gold (ex.: "quantity" da UI = consumedquantity).
-_DIMON_COLUMN_ALIASES = {"quantity": "consumedquantity"}
+_GOLD_COLUMN_ALIASES = {"quantity": "consumedquantity"}
 
 
-class DimonQueryMeasure(BaseModel):
+class GoldQueryMeasure(BaseModel):
     column: str = "realizado"
     aggregation: _Literal["SUM", "COUNT"] = "SUM"
 
 
-class DimonQueryFilter(BaseModel):
+class GoldQueryFilter(BaseModel):
     column: str
     operator: str = "IN"
     values: list[str | int | float] = []
 
 
-class DimonQueryRequest(BaseModel):
+class GoldQueryRequest(BaseModel):
     table: str = "dest_dm_cost_visao_completa"
     rows: list[str] = Field(default_factory=list)
-    measures: list[DimonQueryMeasure] = Field(default_factory=lambda: [DimonQueryMeasure()])
-    filters: list[DimonQueryFilter] = Field(default_factory=list)
+    measures: list[GoldQueryMeasure] = Field(default_factory=lambda: [GoldQueryMeasure()])
+    filters: list[GoldQueryFilter] = Field(default_factory=list)
     row_limit: int = Field(default=2000, ge=1, le=10000)
     sort_column: str | None = None
     sort_direction: _Literal["asc", "desc"] = "desc"
 
 
-async def _dimon_schema(table: str) -> dict[str, str]:
+async def _gold_schema(table: str) -> dict[str, str]:
     """DESCRIBE a Gold cube, validating the name against the whitelist."""
-    if not _DIMON_TABLE_RE.match(table):
+    if not _GOLD_TABLE_RE.match(table):
         raise HTTPException(status_code=422, detail=f"Nome de tabela Gold inválido: {table}")
     try:
         rows = await execute(f"DESCRIBE iceberg.{GOLD}.{table}", timeout_s=30)
@@ -473,25 +473,25 @@ async def _dimon_schema(table: str) -> dict[str, str]:
     return schema
 
 
-def _dimon_resolve(schema: dict[str, str], name: str) -> str | None:
+def _gold_resolve(schema: dict[str, str], name: str) -> str | None:
     key = str(name or "").lower()
     if key in schema:
         return schema[key]
     # Aliases lógicos → colunas físicas (ex.: quantity → consumedquantity).
-    alias = _DIMON_COLUMN_ALIASES.get(key)
+    alias = _GOLD_COLUMN_ALIASES.get(key)
     if alias and alias in schema:
         return schema[alias]
     return None
 
 
-def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]) -> str:
+def _gold_filter_clause(schema: dict[str, str], filters: list[GoldQueryFilter]) -> str:
     clauses: list[str] = []
     for item in filters or []:
-        physical = _dimon_resolve(schema, item.column)
+        physical = _gold_resolve(schema, item.column)
         if not physical:
             raise HTTPException(status_code=422, detail=f"Coluna de filtro inexistente na Gold: {item.column}")
         operator = str(item.operator or "IN").upper()
-        if operator not in _DIMON_OPERATORS:
+        if operator not in _GOLD_OPERATORS:
             raise HTTPException(status_code=422, detail=f"Operador inválido: {operator}")
         values = [str(v) for v in (item.values or []) if v is not None and str(v).strip() != ""]
         col_sql = f"lower(CAST({_quote_ident(physical)} AS VARCHAR))"
@@ -520,17 +520,17 @@ def _dimon_filter_clause(schema: dict[str, str], filters: list[DimonQueryFilter]
 
 
 @router.post("/query")
-async def query_gold_cubes(body: DimonQueryRequest):
+async def query_gold_cubes(body: GoldQueryRequest):
     """Aggregate query over one Gold cube (dest_dm_cost_*) for dashboards.
 
     Only the whitelisted Gold measures (quantity, realizado, billedcost) can
     be aggregated; rows must resolve to real Gold dimension columns.
     """
-    schema = await _dimon_schema(body.table)
+    schema = await _gold_schema(body.table)
 
     rows_physical: list[str] = []
     for name in body.rows or []:
-        physical = _dimon_resolve(schema, name)
+        physical = _gold_resolve(schema, name)
         if not physical:
             raise HTTPException(status_code=422, detail=f"Coluna de linha inexistente na Gold: {name}")
         if physical not in rows_physical:
@@ -542,8 +542,8 @@ async def query_gold_cubes(body: DimonQueryRequest):
         if aggregation == "COUNT":
             measures.append(("COUNT(*)", "count"))
             continue
-        physical = _dimon_resolve(schema, measure.column)
-        if not physical or measure.column.lower() not in _DIMON_MEASURE_COLUMNS:
+        physical = _gold_resolve(schema, measure.column)
+        if not physical or measure.column.lower() not in _GOLD_MEASURE_COLUMNS:
             raise HTTPException(status_code=422, detail=f"Medida não permitida na Gold: {measure.column}")
         label = str(measure.column).lower()
         measures.append((f"SUM(COALESCE(TRY_CAST({_quote_ident(physical)} AS DOUBLE), 0))", label))
@@ -554,11 +554,11 @@ async def query_gold_cubes(body: DimonQueryRequest):
     select_parts = [f"{_quote_ident(p)}" for p in rows_physical]
     select_parts.extend(f"{expr} AS {_quote_ident(label)}" for expr, label in measures)
     group_by = ", ".join(_quote_ident(p) for p in rows_physical)
-    where = _dimon_filter_clause(schema, body.filters)
+    where = _gold_filter_clause(schema, body.filters)
 
     sort_col = None
     if body.sort_column:
-        sort_col = _dimon_resolve(schema, body.sort_column)
+        sort_col = _gold_resolve(schema, body.sort_column)
         if not sort_col:
             sort_col = body.sort_column.lower()
     else:
@@ -584,9 +584,9 @@ async def query_gold_cubes(body: DimonQueryRequest):
 
 
 @router.get("/info")
-async def dimon_info(table: str = "dest_dm_cost_visao_completa"):
+async def gold_info(table: str = "dest_dm_cost_visao_completa"):
     """Metadata + coverage of one Gold table: schema, rows, periods."""
-    schema = await _dimon_schema(table)
+    schema = await _gold_schema(table)
     try:
         overview = await execute(
             f"SELECT COUNT(*) AS row_count, COUNT(DISTINCT {_quote_ident(schema['_billing_period'])}) AS period_count "
@@ -609,7 +609,7 @@ async def dimon_info(table: str = "dest_dm_cost_visao_completa"):
         "row_count": int(row.get("row_count") or 0),
         "period_count": int(row.get("period_count") or 0),
         "periods": [str(r.get("period")) for r in periods_rows if r.get("period") is not None],
-        "columns": [{"name": physical, "type": "dimension" if physical.lower() not in _DIMON_MEASURE_COLUMNS else "measure"} for physical in schema.values()],
-        "dimensions": [physical for physical in schema.values() if physical.lower() not in _DIMON_MEASURE_COLUMNS],
-        "measures": [physical for physical in schema.values() if physical.lower() in _DIMON_MEASURE_COLUMNS],
+        "columns": [{"name": physical, "type": "dimension" if physical.lower() not in _GOLD_MEASURE_COLUMNS else "measure"} for physical in schema.values()],
+        "dimensions": [physical for physical in schema.values() if physical.lower() not in _GOLD_MEASURE_COLUMNS],
+        "measures": [physical for physical in schema.values() if physical.lower() in _GOLD_MEASURE_COLUMNS],
     }

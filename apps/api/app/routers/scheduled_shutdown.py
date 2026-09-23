@@ -1584,7 +1584,7 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
     from app.models.etl_task import EtlTask
 
     task = EtlTask(
-        task_type="dimon_reprocess",
+        task_type="gold_reprocess",
         status="RUNNING",
         phase="Reprocessando saving por desligue mês a mês (histórico)",
         started_at=datetime.now(timezone.utc),

@@ -131,11 +131,11 @@ def _license_select() -> str:
                          lower(provider), lower(productname), _billing_period
             ORDER BY snapshotdate DESC NULLS LAST, licenseupdatedat DESC NULLS LAST,
                      lastactivityat DESC NULLS LAST
-          ) AS dimon_rn
+          ) AS gold_rn
         FROM iceberg.silver.dest_licencas_ia source
         WHERE _billing_period IS NOT NULL
       ) ranked
-      WHERE dimon_rn = 1
+      WHERE gold_rn = 1
     """
 
 
@@ -173,11 +173,11 @@ def _copilot_usage_select() -> str:
           ROW_NUMBER() OVER (
             PARTITION BY day, lower(assignee_login), model, language, editor, source_kind, _billing_period
             ORDER BY _ingested_at DESC NULLS LAST
-          ) AS dimon_rn
+          ) AS gold_rn
         FROM iceberg.bronze.raw_github_token source
         WHERE _billing_period IS NOT NULL
       ) ranked
-      WHERE dimon_rn = 1
+      WHERE gold_rn = 1
     """
 
 
@@ -202,11 +202,11 @@ def _copilot_license_select() -> str:
           ROW_NUMBER() OVER (
             PARTITION BY lower(assignee_login), snapshot_date, _billing_period
             ORDER BY _ingested_at DESC NULLS LAST
-          ) AS dimon_rn
+          ) AS gold_rn
         FROM iceberg.bronze.raw_github_license source
         WHERE _billing_period IS NOT NULL
       ) ranked
-      WHERE dimon_rn = 1
+      WHERE gold_rn = 1
     """
 
 

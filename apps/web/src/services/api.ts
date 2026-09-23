@@ -4578,7 +4578,7 @@ export async function deleteGoldCubeRule(ruleId: number): Promise<void> {
   purgeExpectedViewCache();
 }
 
-export async function deleteDimonTable(tableName: string): Promise<void> {
+export async function deleteGoldTable(tableName: string): Promise<void> {
   await api.delete("/gold/tables/" + encodeURIComponent(tableName));
   purgeExpectedViewCache();
 }
@@ -4602,25 +4602,25 @@ export async function getGoldCubeHistory(): Promise<GoldCubeHistoryItem[]> {
 }
 
 // ── Gold — leitura para dashboards (tabelas dest_dm_cost_*) ──
-export interface DimonQueryMeasure {
+export interface GoldQueryMeasure {
   column: string;
   aggregation?: "SUM" | "COUNT";
 }
 
-export interface DimonQueryFilter {
+export interface GoldQueryFilter {
   column: string;
   operator?: "IN" | "NOT_IN" | "CONTAINS" | "NOT_CONTAINS" | "IS_REALIZED";
   values: (string | number)[];
 }
 
-export interface DimonQueryResult {
+export interface GoldQueryResult {
   table: string;
   columns: string[];
   rows: Record<string, unknown>[];
   row_count: number;
 }
 
-export interface DimonInfo {
+export interface GoldInfo {
   table: string;
   row_count: number;
   period_count: number;
@@ -4633,23 +4633,23 @@ export interface DimonInfo {
 export async function queryDimonTable(body: {
   table: string;
   rows?: string[];
-  measures?: DimonQueryMeasure[];
-  filters?: DimonQueryFilter[];
+  measures?: GoldQueryMeasure[];
+  filters?: GoldQueryFilter[];
   row_limit?: number;
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
-}): Promise<DimonQueryResult> {
+}): Promise<GoldQueryResult> {
   const key = `gold-query:${JSON.stringify(body)}`;
   return cachedAnalytics(key, async () => {
     const { data } = await api.post("/gold/query", body, { timeout: 180000 });
-    return data as DimonQueryResult;
+    return data as GoldQueryResult;
   });
 }
 
-export async function getDimonInfo(table: string): Promise<DimonInfo> {
+export async function getDimonInfo(table: string): Promise<GoldInfo> {
   return cachedAnalytics(`gold-info:${table}`, async () => {
     const { data } = await api.get("/gold/info", { params: { table } });
-    return data as DimonInfo;
+    return data as GoldInfo;
   });
 }
 
@@ -5046,7 +5046,7 @@ export interface OrphanSummary {
   total: number;
   annotated: number;
   cost_brl: number;
-  dimon_ready: boolean;
+  gold_ready: boolean;
   error?: string;
 }
 

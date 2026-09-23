@@ -156,7 +156,7 @@ async def materialize_ai_cost_relationships(session: Any, *, run_id: int, progre
 
     # Per-rule fault isolation: a relationship whose FOCUS filters reference
     # fields absent from the current Gold is marked ERROR and skipped, while
-    # the remaining relationships still publish their individual Golds.
+    # the remaining relationships still publish their individual cubos Gold.
     valid_links: list[AiCostLink] = []
     failed: list[dict[str, Any]] = []
     for link in links:

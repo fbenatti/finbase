@@ -28,8 +28,8 @@ from app.services import iceberg_service as iceberg
 logger = logging.getLogger(__name__)
 
 # Tabela Gold principal gerada ao final do reprocess do MODELO FOCUS.
-GOLD_TABLE = os.getenv("DIMON_GOLD_TABLE", "dest_dm_cost_focus")
-DIMON_GOLD_SOURCE = os.getenv("DIMON_GOLD_SOURCE", "dest_modelo_focus")
+GOLD_TABLE = os.getenv("GOLD_GOLD_TABLE", "dest_dm_cost_focus")
+GOLD_GOLD_SOURCE = os.getenv("GOLD_GOLD_SOURCE", "dest_modelo_focus")
 
 # Dimensões analíticas (colunas físicas da Gold, minúsculas). A agregação usa
 # somente as dimensões presentes no frame processado — as demais entram nulas,
@@ -41,7 +41,7 @@ DIMON_GOLD_SOURCE = os.getenv("DIMON_GOLD_SOURCE", "dest_modelo_focus")
 # explodiriam a contagem de linhas (SKU, subcategoria, subconta, centro de
 # custo, ambiente, níveis 6/7). ``source_connection_id`` permanece como chave
 # de fatia para a publicação atômica mês × conexão.
-DIMON_DIMENSIONS: tuple[str, ...] = (
+GOLD_DIMENSIONS: tuple[str, ...] = (
     "_billing_period",
     "source_connection_id",
     "cloud_origem",
@@ -57,13 +57,13 @@ DIMON_DIMENSIONS: tuple[str, ...] = (
 )
 
 # Medidas agregadas: nome na Gold -> coluna física de origem (Gold/frame).
-DIMON_MEASURES: dict[str, str] = {
+GOLD_MEASURES: dict[str, str] = {
     "quantity": "ConsumedQuantity",
     "realizado": "realizado",
     "billedcost": "BilledCost",
 }
 
-DIMON_COLUMN_TYPES: dict[str, str] = {
+GOLD_COLUMN_TYPES: dict[str, str] = {
     "_billing_period": "TEXT",
     "source_connection_id": "BIGINT",
     "cloud_origem": "TEXT",
@@ -96,13 +96,13 @@ def aggregate_frame(frame: pd.DataFrame) -> pd.DataFrame | None:
     if frame is None or frame.empty:
         return None
     lookup = _lookup(frame)
-    present_dims = [d for d in DIMON_DIMENSIONS if d in lookup]
+    present_dims = [d for d in GOLD_DIMENSIONS if d in lookup]
     if not present_dims:
         return None
     dim_cols = [lookup[d] for d in present_dims]
 
     measures: dict[str, pd.Series] = {}
-    for name, source_col in DIMON_MEASURES.items():
+    for name, source_col in GOLD_MEASURES.items():
         physical = lookup.get(source_col.lower())
         if physical and physical in frame.columns:
             measures[name] = pd.to_numeric(frame[physical], errors="coerce").fillna(0.0)
@@ -116,7 +116,7 @@ def aggregate_frame(frame: pd.DataFrame) -> pd.DataFrame | None:
     grouped = group.groupby(dim_cols, dropna=False)[["__q", "__r", "__b"]].sum(min_count=1)
     grouped = grouped.reset_index()
 
-    out = pd.DataFrame({d: None for d in DIMON_DIMENSIONS}, index=range(len(grouped)))
+    out = pd.DataFrame({d: None for d in GOLD_DIMENSIONS}, index=range(len(grouped)))
     for d in present_dims:
         out[d] = grouped[lookup[d]].values
     out["quantity"] = grouped["__q"].fillna(0.0).values
@@ -141,8 +141,8 @@ def publish_gold_cubes(chunks: list[pd.DataFrame], *, table: str | None = None) 
     if not frames:
         return 0
     merged = pd.concat(frames, ignore_index=True)
-    dims = [d for d in DIMON_DIMENSIONS if d in merged.columns]
-    measures = [m for m in DIMON_MEASURES if m in merged.columns]
+    dims = [d for d in GOLD_DIMENSIONS if d in merged.columns]
+    measures = [m for m in GOLD_MEASURES if m in merged.columns]
     if not dims or not measures:
         return 0
     agg = merged.groupby(dims, dropna=False)[measures].sum(min_count=1).reset_index()
@@ -173,7 +173,7 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
         table,
         frame,
         partition_col="_billing_period",
-        column_types=dict(DIMON_COLUMN_TYPES),
+        column_types=dict(GOLD_COLUMN_TYPES),
         namespace=namespace,
     )
     if not target_exists:
@@ -190,7 +190,7 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
             table,
             group,
             partition_col="_billing_period",
-            column_types=dict(DIMON_COLUMN_TYPES),
+            column_types=dict(GOLD_COLUMN_TYPES),
             namespace=namespace,
         )
         try:
@@ -224,11 +224,11 @@ def rebuild_gold_cubes(*, table: str | None = None, gold: str | None = None) -> 
     from app.services.trino_service import execute_sync
 
     table = (table or GOLD_TABLE).replace("-", "_").replace(".", "_")
-    gold = (gold or DIMON_GOLD_SOURCE).replace("-", "_").replace(".", "_")
+    gold = (gold or GOLD_GOLD_SOURCE).replace("-", "_").replace(".", "_")
 
     schema_rows = execute_sync(f"DESCRIBE iceberg.silver.{gold}", timeout_s=60)
     schema = {str(r.get("Column") or "").lower() for r in schema_rows}
-    dims = [d for d in DIMON_DIMENSIONS if d in schema]
+    dims = [d for d in GOLD_DIMENSIONS if d in schema]
     if not dims:
         raise RuntimeError(
             f"Nenhuma dimensão Gold encontrada na Gold {gold} — rebuild impossível"
@@ -238,7 +238,7 @@ def rebuild_gold_cubes(*, table: str | None = None, gold: str | None = None) -> 
     group_by = ", ".join(dims)
     sums = ", ".join(
         f"SUM(COALESCE(TRY_CAST({source} AS DOUBLE), 0)) AS {name}"
-        for name, source in DIMON_MEASURES.items()
+        for name, source in GOLD_MEASURES.items()
         if source.lower() in schema
     )
     if not sums:

@@ -7,7 +7,7 @@ import { FileDownload } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   queryDimonTable, runForecastHistoryPivot, getForecastAccuracyMonths,
-  ForecastAccuracyMonth, HistoryFilter, DimonQueryFilter,
+  ForecastAccuracyMonth, HistoryFilter, GoldQueryFilter,
 } from "../../services/api";
 
 // ── Helpers (autocontidos) ──
@@ -40,8 +40,8 @@ export type Filters = {
 
 export const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, extra: {} };
 
-function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter[] {
-  const out: DimonQueryFilter[] = [...extra];
+function filtersOf(f: Filters, extra: GoldQueryFilter[] = []): GoldQueryFilter[] {
+  const out: GoldQueryFilter[] = [...extra];
   if (f.months.length) out.push({ column: "_billing_period", operator: "IN", values: f.months });
   if (f.clouds.length) out.push({ column: "cloud_origem", operator: "IN", values: f.clouds });
   if (f.dirs.length) out.push({ column: "departamento_nivel_4", operator: "IN", values: f.dirs });
@@ -140,7 +140,7 @@ export default function VisaoContabil({ table, filters, filterKey }: { table: st
         filters: [...filtersOf(filters), { column: "_billing_period", operator: "IN", values: [mesReal] }, { column: "tipo", operator: "IN", values: ["realizado"] }],
         row_limit: 10000,
       }).catch(() => null),
-    ]).then(([pivotRes, dimonRes]) => {
+    ]).then(([pivotRes, goldRes]) => {
       if (!alive) return;
       const map = new Map<string, Map<string, { real: number; prov: number }>>();
       const bump = (cloud: string, cc: string, real: number, prov: number) => {
@@ -153,7 +153,7 @@ export default function VisaoContabil({ table, filters, filterKey }: { table: st
       for (const rec of pivotRes?.records ?? []) {
         bump(String(rec.d0 ?? "Não informado"), String(rec.d1 ?? "Não informado"), 0, Number(rec.value || 0));
       }
-      for (const r of dimonRes?.rows ?? []) {
+      for (const r of goldRes?.rows ?? []) {
         bump(String(r.cloud_origem ?? "Não informado"), String(r.centro_custo ?? "Não informado"), Number(r.realizado || 0), 0);
       }
       const clouds = [...map.entries()].map(([cloud, ccMap]) => ({

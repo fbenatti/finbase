@@ -16,7 +16,7 @@ function Chart(props: any) {
 }
 import {
   queryDimonTable, getDimonInfo, getAnalysisTables, getDepartments,
-  DimonQueryFilter, DimonQueryMeasure, DimonQueryResult, DimonInfo,
+  GoldQueryFilter, GoldQueryMeasure, GoldQueryResult, GoldInfo,
   formatApiError, Department,
   getForecastAccuracyMonths, runForecastHistoryPivot,
   ForecastAccuracyMonth, HistoryFilter,
@@ -49,8 +49,8 @@ const VISAO_DIRETORIA_PATH_ORDER = [1, 2, 4, 3, 5, 6] as const;
 /** Profundidade na árvore → coluna departamento_nivel_N (Visão Diretoria: 1,2,4,3,5,6). */
 const VISAO_DIRETORIA_DEPTH_TO_NIVEL = [1, 2, 4, 3, 5, 6] as const;
 
-function pathSegmentFilters(path: string[], visaoDiretoria: boolean): DimonQueryFilter[] {
-  const out: DimonQueryFilter[] = [];
+function pathSegmentFilters(path: string[], visaoDiretoria: boolean): GoldQueryFilter[] {
+  const out: GoldQueryFilter[] = [];
   path.forEach((segment, depth) => {
     if (!segment?.trim()) return;
     const nivel = visaoDiretoria
@@ -227,8 +227,8 @@ function monthLong(m: string): string {
 type QueryDef = {
   id: string;
   rows?: string[];
-  measures?: DimonQueryMeasure[];
-  filters?: DimonQueryFilter[];
+  measures?: GoldQueryMeasure[];
+  filters?: GoldQueryFilter[];
   row_limit?: number;
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
@@ -254,8 +254,8 @@ type Filters = {
 
 const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, visaoDiretoria: false, extra: {} };
 
-function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter[] {
-  const out: DimonQueryFilter[] = [...extra];
+function filtersOf(f: Filters, extra: GoldQueryFilter[] = []): GoldQueryFilter[] {
+  const out: GoldQueryFilter[] = [...extra];
   if (f.months.length) out.push({ column: "_billing_period", operator: "IN", values: f.months });
   if (f.clouds.length) out.push({ column: "cloud_origem", operator: "IN", values: f.clouds });
   if (f.dirs.length) out.push({ column: "departamento_nivel_4", operator: "IN", values: f.dirs });
@@ -273,7 +273,7 @@ function filtersOf(f: Filters, extra: DimonQueryFilter[] = []): DimonQueryFilter
 }
 
 function useTabQueries(table: string, defs: QueryDef[], key: string) {
-  const [results, setResults] = useState<Record<string, DimonQueryResult | null>>({});
+  const [results, setResults] = useState<Record<string, GoldQueryResult | null>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -292,7 +292,7 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
       })),
     ).then(list => {
       if (!alive) return;
-      const m: Record<string, DimonQueryResult | null> = {};
+      const m: Record<string, GoldQueryResult | null> = {};
       defs.forEach((d, i) => { m[d.id] = list[i]; });
       setResults(m);
     }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a Gold")); })
@@ -303,10 +303,10 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
   return { results, loading, error };
 }
 
-function rowsOf(r: DimonQueryResult | null | undefined): Record<string, any>[] {
+function rowsOf(r: GoldQueryResult | null | undefined): Record<string, any>[] {
   return r?.rows ?? [];
 }
-function sumOf(r: DimonQueryResult | null | undefined, col: string): number {
+function sumOf(r: GoldQueryResult | null | undefined, col: string): number {
   return (r?.rows ?? []).reduce((s, row) => s + Number(row[col] ?? 0), 0);
 }
 
@@ -422,7 +422,7 @@ function DataQuality({ table, filters, filterKey }: { table: string; filters: Fi
   return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Data Quality</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Selecione um serviço para identificar todos os projetos e diretorias consumidores, com o valor realizado no escopo filtrado.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Realizado", "% do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.departamento_nivel_4)}</TableCell><TableCell>{esc(r.departamento_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Sem consumidores no escopo selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
 }
 
-function monthlySeries(r: DimonQueryResult | null | undefined, measure: string) {
+function monthlySeries(r: GoldQueryResult | null | undefined, measure: string) {
   return rowsOf(r)
     .map(row => ({ month: String(row._billing_period || row.period || ""), value: Number(row[measure] ?? 0) }))
     .sort((a, b) => a.month.localeCompare(b.month));
@@ -437,7 +437,7 @@ export default function GoldDashboard() {
   const [params] = useSearchParams();
   const [table, setTable] = useState(DEFAULT_TABLE);
   const [availableTables, setAvailableTables] = useState<string[]>([]);
-  const [info, setInfo] = useState<DimonInfo | null>(null);
+  const [info, setInfo] = useState<GoldInfo | null>(null);
   // A aba pode vir da URL (?tab=...) — padrão: Visão Executiva.
   const urlTab = params.get("tab");
   const initialTab: TabId = urlTab && (["visao-executiva", "geral", "evolucao", "organizacao", "servicos", "investigacao", "decisao", "drilldown", "data-quality"] as TabId[]).includes(urlTab as TabId)
@@ -539,9 +539,9 @@ export default function GoldDashboard() {
   // ── carrega tabelas disponíveis (namespace gold) ──
   useEffect(() => {
     getAnalysisTables().then(t => {
-      const dimonTables = t.gold || [];
-      setAvailableTables(dimonTables);
-      if (dimonTables.length && !dimonTables.includes(table)) setTable(dimonTables.includes(DEFAULT_TABLE) ? DEFAULT_TABLE : dimonTables[0]);
+      const goldTables = t.gold || [];
+      setAvailableTables(goldTables);
+      if (goldTables.length && !goldTables.includes(table)) setTable(goldTables.includes(DEFAULT_TABLE) ? DEFAULT_TABLE : goldTables[0]);
     }).catch(() => setAvailableTables([]));
   }, []);
 
@@ -1446,7 +1446,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   ], [govDeptLevels]);
   const gov = useMemo(() => {
     const rowsPer = govDims.map(g => {
-      const rows = rowsOf(base[g.id as keyof typeof base] as DimonQueryResult | null | undefined);
+      const rows = rowsOf(base[g.id as keyof typeof base] as GoldQueryResult | null | undefined);
       let spend = 0, missingSpend = 0, missingRows = 0, cnt = 0;
       for (const r of rows) {
         const v = Math.abs(Number(r.realizado || 0));
@@ -2134,7 +2134,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
   const level = path.length;
   const next = drillChain[level];
 
-  const pathFilters = useMemo<DimonQueryFilter[]>(() => path.map(p => ({ column: p.field, operator: "IN", values: [p.value] })), [path]);
+  const pathFilters = useMemo<GoldQueryFilter[]>(() => path.map(p => ({ column: p.field, operator: "IN", values: [p.value] })), [path]);
 
   const defs = useMemo<QueryDef[]>(() => {
     if (!next) return [];

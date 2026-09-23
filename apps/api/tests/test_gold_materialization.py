@@ -6,7 +6,7 @@ from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import (
     _desligue_validation_dates,
     _merged_dimensions,
-    dimon_table_name,
+    rule_target_table,
     evaluate_daily_quality,
     evaluate_vm_lifecycle,
     is_aks_managed_resource,
@@ -15,10 +15,10 @@ from app.services.gold_materialization import (
 )
 
 
-def test_dimon_table_name_sanitizes_hyphens():
+def test_gold_table_name_sanitizes_hyphens():
     # Original code is preserved; the physical table swaps hyphens for underscores.
-    assert dimon_table_name("copilot-custo") == "dest_dm_cost_copilot_custo"
-    assert dimon_table_name("PTU 4P") == "dest_dm_cost_ptu_4p"
+    assert rule_target_table("copilot-custo") == "dest_dm_cost_copilot_custo"
+    assert rule_target_table("PTU 4P") == "dest_dm_cost_ptu_4p"
     assert normalize_code("Visão Completa!") == "vis_o_completa"
 
 

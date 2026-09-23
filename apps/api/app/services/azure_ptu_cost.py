@@ -317,7 +317,7 @@ def _carry_forward_reservation_purchase(monthly: list[dict[str, Any]]) -> None:
         row["reservation_reference_note"] = f"última compra {previous.get('label')}"
 
 
-async def load_dimon_ptu_costs(
+async def load_gold_ptu_costs(
     *,
     date_from: str,
     date_to: str,
@@ -326,7 +326,7 @@ async def load_dimon_ptu_costs(
 ) -> dict[str, Any]:
     """Bloco financeiro do Azure PTU Ops. Nunca levanta exceção para o caller."""
     try:
-        return await _load_dimon_ptu_costs(
+        return await _load_gold_ptu_costs(
             date_from=date_from, date_to=date_to,
             project_keys=project_keys, cancel_event=cancel_event,
         )
@@ -335,7 +335,7 @@ async def load_dimon_ptu_costs(
         return {"available": False, "error": str(exc)[:400], "table": FOCUS_TABLE}
 
 
-async def _load_dimon_ptu_costs(
+async def _load_gold_ptu_costs(
     *,
     date_from: str,
     date_to: str,

@@ -19,7 +19,7 @@ import {
   getAnalysisDestinations, queryAnalysisDestination,
   SourceAnalysis, SourceDataResult,
   DestinationAnalysis, DestinationDataResult,
-  formatApiError, PivotFilter, deleteDimonTable,
+  formatApiError, PivotFilter, deleteGoldTable,
   AnalysisStagingTable, getAnalysisStagingTables, deleteAnalysisStagingTable,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
@@ -137,11 +137,11 @@ export default function Analysis() {
     }
   };
 
-  const removeDimonTable = async (t: string) => {
+  const removeGoldTable = async (t: string) => {
     if (!window.confirm('Excluir a tabela ' + t + '? A regra Gold associada (se houver) e a tabela física no Iceberg serão removidas.')) return;
     setError("");
     try {
-      await deleteDimonTable(t);
+      await deleteGoldTable(t);
       getAnalysisTables().then(setTables).catch(() => {});
       if (sql.startsWith('SELECT * FROM iceberg.gold.' + t)) setSql("");
     } catch (e: unknown) {
@@ -289,7 +289,7 @@ export default function Analysis() {
   }, [srcData, srcPage]);
 
   const destColumns = useMemo(() => destData?.columns || [], [destData]);
-  const dimonTablesCount = useMemo(() => (tables.gold || []).length, [tables]);
+  const goldTablesCount = useMemo(() => (tables.gold || []).length, [tables]);
   const destPaged = useMemo(() => {
     if (!destData) return [];
     return destData.rows.slice(destPage * PAGE_SIZE, (destPage + 1) * PAGE_SIZE);
@@ -539,16 +539,16 @@ export default function Analysis() {
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
                 <SchemaIcon color="primary" fontSize="small" />
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Gold — tabelas pré-agregadas (dest_dm_cost_*)</Typography>
-                <Chip label={`${dimonTablesCount} tabela(s)`} size="small" color="primary" variant="outlined" />
+                <Chip label={`${goldTablesCount} tabela(s)`} size="small" color="primary" variant="outlined" />
               </Box>
-              {dimonTablesCount === 0 ? (
+              {goldTablesCount === 0 ? (
                 <Alert severity="info" sx={{ mb: 2 }}>Nenhuma tabela Gold gerada ainda. Ela é criada automaticamente ao final do reprocess do destino MODELO FOCUS.</Alert>
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
                   {(tables.gold || []).map((t) => (
                     <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant="outlined"
                       onClick={() => setSql(`SELECT * FROM iceberg.gold.${t} LIMIT 10`)} sx={{ cursor: "pointer" }}
-                      onDelete={() => void removeDimonTable(t)} deleteIcon={<Delete fontSize="small" />} />
+                      onDelete={() => void removeGoldTable(t)} deleteIcon={<Delete fontSize="small" />} />
                   ))}
                 </Box>
               )}

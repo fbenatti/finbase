@@ -36,7 +36,7 @@ interface SchedForm {
   period_mode: "selected" | "all";
   billing_periods: string;
   forecast_config_ids: number[];
-  dimon_rule_ids: number[];
+  gold_rule_ids: number[];
   accuracy: boolean;
   shared_cost: boolean;
 }
@@ -48,7 +48,7 @@ const EMPTY_FORM: SchedForm = {
   destination_reprocess: true, active: true,
   forecast_after_ingestion: false, forecast_config_id: "",
   destination_table_ids: [], period_mode: "all", billing_periods: "",
-  forecast_config_ids: [], dimon_rule_ids: [], accuracy: true, shared_cost: false,
+  forecast_config_ids: [], gold_rule_ids: [], accuracy: true, shared_cost: false,
 };
 
 export default function SchedulesPanel({ connections }: { connections: SourceConnection[] }) {
@@ -60,14 +60,14 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const [error, setError] = useState("");
   const [destinations, setDestinations] = useState<DestinationTable[]>([]);
   const [forecastConfigs, setForecastConfigs] = useState<ForecastConfig[]>([]);
-  const [dimonRules, setDimonRules] = useState<GoldCubeRule[]>([]);
+  const [goldRules, setGoldRules] = useState<GoldCubeRule[]>([]);
   const [forecastConfigsError, setForecastConfigsError] = useState(false);
 
   const focusDimonIds = (goldIds: number[]): number[] => {
     const goldNames = new Set(
       destinations.filter(d => goldIds.includes(d.id)).map(d => d.physical_name.toLowerCase()),
     );
-    return dimonRules.filter(rule => rule.active !== false && (rule.sources || []).some(source =>
+    return goldRules.filter(rule => rule.active !== false && (rule.sources || []).some(source =>
       (source.gold_tables || [source.gold_table || ""]).some(table => goldNames.has(String(table).toLowerCase())),
     )).map(rule => rule.id).filter((id): id is number => id != null);
   };
@@ -92,7 +92,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         setForecastConfigsError(false);
       })
       .catch(() => setForecastConfigsError(true));
-    getGoldCubeRules().then(setDimonRules).catch(() => {});
+    getGoldCubeRules().then(setGoldRules).catch(() => {});
   }, []);
 
   const openNew = () => {
@@ -119,8 +119,8 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
       forecast_config_ids: Array.isArray(cfg.forecast_config_ids) && cfg.forecast_config_ids.length
         ? cfg.forecast_config_ids.map(Number)
         : (cfg.forecast_config_id ? [Number(cfg.forecast_config_id)] : []),
-      dimon_rule_ids: Array.isArray(cfg.dimon_rule_ids) && cfg.dimon_rule_ids.length
-        ? cfg.dimon_rule_ids.map(Number)
+      gold_rule_ids: Array.isArray(cfg.gold_rule_ids) && cfg.gold_rule_ids.length
+        ? cfg.gold_rule_ids.map(Number)
         : focusDimonIds(Array.isArray(cfg.destination_table_ids) ? cfg.destination_table_ids.map(Number) : []),
       accuracy: cfg.accuracy !== false, shared_cost: cfg.shared_cost === true,
     });
@@ -130,10 +130,10 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   // Existing Cloud schedules historically stored an empty Gold list to mean
   // "automatic". Surface the actual FOCUS-related rules as checked items.
   useEffect(() => {
-    if (!dialogOpen || !editing || form.schedule_type === "backup" || form.dimon_rule_ids.length) return;
+    if (!dialogOpen || !editing || form.schedule_type === "backup" || form.gold_rule_ids.length) return;
     const inferred = focusDimonIds(form.destination_table_ids);
-    if (inferred.length) setForm(current => ({ ...current, dimon_rule_ids: inferred }));
-  }, [dialogOpen, editing, destinations, dimonRules]);
+    if (inferred.length) setForm(current => ({ ...current, gold_rule_ids: inferred }));
+  }, [dialogOpen, editing, destinations, goldRules]);
 
   const save = async () => {
     try {
@@ -151,7 +151,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
           period_mode: form.period_mode,
           billing_periods: form.billing_periods.split(",").map(v => v.trim()).filter(Boolean),
           forecast_config_ids: form.forecast_after_ingestion || form.schedule_type === "reprocess" ? form.forecast_config_ids : [],
-          dimon_rule_ids: form.dimon_rule_ids,
+          gold_rule_ids: form.gold_rule_ids,
           accuracy: form.accuracy,
           shared_cost: form.shared_cost,
         },
@@ -385,10 +385,10 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acurácia" />
               <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar custo compartilhado" />
               <Box>
-                <FormControl size="small" fullWidth><InputLabel>cubos Gold</InputLabel><Select multiple value={form.dimon_rule_ids} label="cubos Gold" onChange={e => setForm({ ...form, dimon_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => dimonRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{dimonRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>cubos Gold relacionadas à Gold selecionada já aparecem marcadas.</FormHelperText></FormControl>
+                <FormControl size="small" fullWidth><InputLabel>cubos Gold</InputLabel><Select multiple value={form.gold_rule_ids} label="cubos Gold" onChange={e => setForm({ ...form, gold_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => goldRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{goldRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>cubos Gold relacionadas à Gold selecionada já aparecem marcadas.</FormHelperText></FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
-                  <Button size="small" onClick={() => setForm({ ...form, dimon_rule_ids: dimonRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Selecionar todas</Button>
-                  <Button size="small" onClick={() => setForm({ ...form, dimon_rule_ids: [] })}>Limpar</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: goldRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Selecionar todas</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: [] })}>Limpar</Button>
                 </Box>
               </Box>
             </>}

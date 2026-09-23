@@ -474,6 +474,64 @@ CONTAINER_METRIC = SilverModel(
 )
 
 
+# ── Modelo: PTU (Provisioned Throughput Units) ────────────────────────────────
+# Capacidade provisionada de Azure OpenAI: o que se paga é a PTU reservada, e a
+# utilização diz se ela está sobrando ou faltando. A proveniência (`source_points`
+# contra `expected_points`) é medida, não estimada — lacuna não vira zero.
+PTU = SilverModel(
+    name="ptu_capacity_series",
+    table="ptu_capacity_series",
+    description="Capacidade PTU provisionada e sua utilização, por hora.",
+    grain=("cloud_provider", "sub_account_id", "resource_id", "deployment_name",
+           "model_name", "region_id", "metric_hour"),
+    primary_measure="provisioned_ptus",
+    time_field="metric_hour",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("resource_id", "varchar", ROLE_IDENTITY, required=True,
+           notes="Conta de recurso do Azure OpenAI, normalizada."),
+        _f("deployment_name", "varchar", ROLE_IDENTITY, required=True),
+        _f("model_name", "varchar", ROLE_DIMENSION),
+        _f("model_version", "varchar", ROLE_DIMENSION),
+        _f("region_id", "varchar", ROLE_DIMENSION),
+        _f("sku_name", "varchar", ROLE_DIMENSION,
+           notes="GlobalProvisionedManaged e correlatos."),
+        _f("metric_hour", "timestamp", ROLE_TIME, required=True),
+        # Capacidade: o que se paga.
+        _f("provisioned_ptus", "double", ROLE_MEASURE,
+           notes="PTUs reservadas na hora."),
+        _f("active_tokens_p95", "double", ROLE_MEASURE),
+        _f("utilization_avg", "double", ROLE_MEASURE),
+        _f("utilization_p95", "double", ROLE_MEASURE,
+           notes="É o que diz se a capacidade está no limite."),
+        _f("utilization_max", "double", ROLE_MEASURE),
+        # Consumo.
+        _f("input_tokens_sum", "double", ROLE_MEASURE),
+        _f("output_tokens_sum", "double", ROLE_MEASURE),
+        _f("total_tokens_sum", "double", ROLE_MEASURE),
+        _f("request_count", "double", ROLE_MEASURE),
+        _f("success_count", "double", ROLE_MEASURE),
+        _f("client_error_count", "double", ROLE_MEASURE),
+        _f("server_error_count", "double", ROLE_MEASURE),
+        _f("rate_limited_count", "double", ROLE_MEASURE,
+           notes="Requisições recusadas por limite: sinal de PTU insuficiente."),
+        _f("spillover_request_count", "double", ROLE_MEASURE),
+        _f("time_to_response_p95_ms", "double", ROLE_MEASURE),
+        _f("tokens_per_second_avg", "double", ROLE_MEASURE),
+        # Proveniência: medida, não estimada.
+        _f("source_points", "bigint", ROLE_QUALITY),
+        _f("expected_points", "bigint", ROLE_QUALITY),
+        _f("completeness_pct", "double", ROLE_QUALITY,
+           notes="Pontos coletados sobre esperados; abaixo de 100 há lacuna."),
+        _f("project_hint", "varchar", ROLE_DIMENSION,
+           notes="Projeto declarado na origem."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
@@ -485,6 +543,7 @@ MODELS: dict[str, SilverModel] = {
     REGION_POLICY.name: REGION_POLICY,
     ALLOCATION.name: ALLOCATION,
     CONTAINER_METRIC.name: CONTAINER_METRIC,
+    PTU.name: PTU,
 }
 
 

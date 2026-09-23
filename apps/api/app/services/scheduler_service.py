@@ -181,7 +181,7 @@ def _queue_reclassification_schedule(schedule_row, session) -> list[int]:
                                  "forecast_config_ids": cfg.get("forecast_config_ids", []),
                                  "accuracy": cfg.get("accuracy", True),
                                  "shared_cost": cfg.get("shared_cost", False),
-                                 "dimon_rule_ids": cfg.get("dimon_rule_ids", [])},
+                                 "gold_rule_ids": cfg.get("gold_rule_ids", [])},
                 )
                 session.add(task)
                 session.flush()
@@ -244,7 +244,7 @@ def _azure_ptu_daily_job() -> None:
     _queue_ptu_collections(hours=168, lookback_note="Azure PTU daily re-read 7d")
 
 
-def _azure_ptu_dimon_daily_job() -> None:
+def _azure_ptu_gold_daily_job() -> None:
     """Compacta a Gold horária depois da coleta diária para os dashboards."""
     try:
         import asyncio
@@ -256,19 +256,19 @@ def _azure_ptu_dimon_daily_job() -> None:
         logger.warning("Azure PTU Gold refresh failed: %s", exc, exc_info=True)
 
 
-def _ai_usage_dimon_daily_job() -> None:
+def _ai_usage_gold_daily_job() -> None:
     """Enfileira as cubos Gold auxiliares; a publicação pertence ao escritor Gold."""
     session = _get_sync_session()
     try:
         from app.models.gold_mart_rule import GoldMartRule
-        from app.services.gold_materialization import enqueue_dimons_task
+        from app.services.gold_materialization import enqueue_rule_materialization
 
         codes = {
             "ai_consumption_daily", "ai_license_snapshot", "copilot_usage_daily",
             "copilot_license_snapshot", "copilot_user_period",
         }
         rules = session.query(GoldMartRule).filter(GoldMartRule.active == True, GoldMartRule.code.in_(codes)).all()  # noqa: E712
-        task = enqueue_dimons_task(session, rule_ids=[rule.id for rule in rules], source="ai_usage_daily")
+        task = enqueue_rule_materialization(session, rule_ids=[rule.id for rule in rules], source="ai_usage_daily")
         session.commit()
         logger.info("AI usage cubos Gold queued in Gold writer: task=%s rules=%d", getattr(task, "id", None), len(rules))
     except Exception as exc:
@@ -547,8 +547,8 @@ async def start_scheduler():
         # Disabled: Azure PTU hourly lookback 3h (every hour at :10).
         # _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
         _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_dimon_daily_job, "cron", hour=4, minute=30, id="azure_ptu_dimon_daily", replace_existing=True)
-        _scheduler.add_job(_ai_usage_dimon_daily_job, "cron", hour=5, minute=10, id="ai_usage_dimon_daily", replace_existing=True)
+        _scheduler.add_job(_azure_ptu_gold_daily_job, "cron", hour=4, minute=30, id="azure_ptu_gold_daily", replace_existing=True)
+        _scheduler.add_job(_ai_usage_gold_daily_job, "cron", hour=5, minute=10, id="ai_usage_gold_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
         _scheduler.add_job(_oci_operational_hourly_job, "cron", minute=18, id="oci_operational_hourly", replace_existing=True)
         _scheduler.add_job(_azure_reservations_daily_job, "cron", hour=3, minute=45, id="azure_reservations_daily", replace_existing=True)

@@ -17,7 +17,7 @@ VALUE_COLUMNS = frozenset({"realizado", "BilledCost", "EffectiveCost"})
 
 class GoldMartRule(Base):
     """Uma regra de cubo Gold: fontes + filtros -> dest_dm_cost_<code>."""
-    __tablename__ = "dimon_rule"
+    __tablename__ = "gold_rule"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     # Human-friendly unique slug that names the materialized table:
@@ -70,11 +70,11 @@ class GoldMartRuleSource(Base):
     column and percent apply to every table in the source; the tables are
     unioned into a single clean dataset before aggregation.
     """
-    __tablename__ = "dimon_rule_source"
-    __table_args__ = (Index("ix_dimon_rule_source_rule", "rule_id"),)
+    __tablename__ = "gold_rule_source"
+    __table_args__ = (Index("ix_gold_rule_source_rule", "rule_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    rule_id = Column(Integer, ForeignKey("dimon_rule.id", ondelete="CASCADE"), nullable=False)
+    rule_id = Column(Integer, ForeignKey("gold_rule.id", ondelete="CASCADE"), nullable=False)
     # Legacy single-table column kept for compatibility; gold_tables is the
     # source of truth and always contains at least one physical name.
     gold_table = Column(String(140), nullable=False)

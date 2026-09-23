@@ -180,7 +180,7 @@ export default function OrphanedResources() {
       analise: byStatus.get("EM_ANALISE") ?? 0,
       excecao: byStatus.get("EXCECAO") ?? 0,
       custo: summary?.cost_brl ?? 0,
-      gold: summary?.dimon_ready ?? false,
+      gold: summary?.gold_ready ?? false,
     };
   }, [summary, rows]);
 
