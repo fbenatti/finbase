@@ -107,6 +107,8 @@ METRIC_SERIES = SilverModel(
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY,
            notes="Fonte que escreveu a linha; a tabela recebe várias."),
+        _f("_processed_at", "varchar", ROLE_QUALITY,
+           notes="Gravado pelo writer; declarado para o schema não divergir."),
     ),
 )
 
@@ -142,6 +144,8 @@ RESOURCE_INVENTORY = SilverModel(
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY,
            notes="Fonte que escreveu a linha; a tabela recebe várias."),
+        _f("_processed_at", "varchar", ROLE_QUALITY,
+           notes="Gravado pelo writer; declarado para o schema não divergir."),
     ),
 )
 
@@ -188,6 +192,9 @@ RESOURCE_COST = SilverModel(
         _f("tags_json", "varchar", ROLE_DIMENSION),
         _f("_bronze_blob_path", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY,
+           notes="Fonte que escreveu a linha."),
+        _f("_processed_at", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -242,6 +249,9 @@ PRICE_CATALOG = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -285,6 +295,9 @@ COMPUTE_SKU = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -351,6 +364,9 @@ FOCUS_ENRICHED = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -387,6 +403,9 @@ QUOTA = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -422,6 +441,9 @@ REGION_POLICY = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -464,6 +486,9 @@ ALLOCATION = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -506,6 +531,9 @@ CONTAINER_METRIC = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -570,6 +598,9 @@ PTU = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY,
            notes="Conexão que originou a linha."),
         _f("_source_connection_code", "varchar", ROLE_QUALITY,
@@ -635,6 +666,9 @@ RIGHTSIZING_CANDIDATE = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY),
         _f("_source_connection_name", "varchar", ROLE_QUALITY),
     ),
@@ -700,6 +734,9 @@ RIGHTSIZING_DECISION = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
+        # schema físico que diverge do modelo falha só na gravação seguinte.
+        _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY),
         _f("_source_connection_name", "varchar", ROLE_QUALITY),
     ),
