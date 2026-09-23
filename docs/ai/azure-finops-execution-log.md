@@ -2162,3 +2162,74 @@ rename**: as duas que eu causei foram corrigidas e o número caiu de 10 para 9.
 | `focus_enriched` (Gold) | pendente |
 
 **13 fontes mapeadas · 17 destinos · 228 mapeamentos.**
+
+---
+
+## 28. Proveniência de conexão na Silver
+
+### 28.1 O que faltava
+
+A Silver registrava só `_silver_owner` (o `source_key`). **Não havia a conexão** — e
+sem ela não há como agrupar o cubo por origem, nem excluir uma conexão sem tocar
+nas outras.
+
+### 28.2 O que foi feito
+
+Três colunas canônicas nos **11 modelos**, resolvidas do próprio nome da tabela
+Bronze (que carrega o código da conexão), sem parâmetro novo em cada chamada:
+
+| Coluna | Conteúdo |
+|---|---|
+| `_source_connection_id` | id da conexão |
+| `_source_connection_code` | `azure-4p`, `azure-ti` |
+| `_source_connection_name` | **nome da tabela Bronze de origem** |
+
+O nome registrado é o da tabela Bronze — `raw_azure_4p`, `raw_azure_ti` — porque é
+a identidade estável da origem e sobrevive a uma conexão ser renomeada.
+
+Verificado:
+
+| Tabela | Linhas | Conexão |
+|---|---|---|
+| `resource_cost` | 7.676.000 | `raw_azure_4p` / `azure-4p` |
+| `resource_cost` | 548.606 | `raw_azure_ti` / `azure-ti` |
+| `resource_inventory` | 20.643 | `raw_azure_ti_resource_graph` / `azure-ti` |
+| `resource_inventory` | 608 | `raw_azure_4p_vm_inventory` / `azure-4p` |
+| `resource_quota` | 9.744 | `raw_azure_4p_compute_quota` |
+| `ptu_capacity_series` | 6.660 | `raw_azure_4p_ptu` |
+| `price_catalog` | 3.667.019 | `raw_azure_4p_customer_price` |
+| `price_catalog` | 279.768 | `raw_azure_4p_retail_price` |
+
+**0 linhas sem proveniência.**
+
+### 28.3 Três defeitos encontrados no caminho
+
+1. **Ordem de coluna.** O Iceberg adiciona coluna **no fim** da tabela; eu declarei
+   as novas no meio do modelo. A ordem divergia e o `write_silver` recusava com
+   "Mismatch in fields". Corrigido declarando-as no fim.
+
+2. **Tipo `long` não era forçado.** O bloco de tipos tratava `bigint`, `decimal` e
+   `boolean`, mas não `long`. As colunas de quota vinham como texto e a gravação
+   falhava por tipo. Agora todo inteiro declarado é forçado a `Int64`.
+
+3. **`_processed_at` residual.** As tabelas tinham sido criadas com colunas que o
+   modelo atual não declara. Recriadas a partir da Bronze — o dado é derivado, então
+   reconstruir é a ação correta.
+
+### 28.4 Lição
+
+Os três defeitos têm a mesma raiz: **o schema da tabela e o schema do modelo
+divergiram** e o sistema só reclamou na gravação seguinte. Dois tinham passado
+despercebidos porque as gravações anteriores aconteceram antes da mudança. Vale
+validar schema do modelo contra o da tabela antes de escrever, em vez de descobrir
+pelo erro do Iceberg.
+
+### 28.5 Estado
+
+| Item | Valor |
+|---|---|
+| Modelos canônicos | 11 |
+| Fontes mapeadas | 13 |
+| Destinos | 18 |
+| Mapeamentos | 228 |
+| Testes | 9 failed / 382 passed (baseline, nenhuma regressão) |

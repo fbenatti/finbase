@@ -721,7 +721,7 @@ def normalise(frame: pd.DataFrame, mapping: SourceMapping, silver_model: SilverM
     for campo in silver_model.fields:
         if campo.name not in out.columns:
             continue
-        if campo.type == "bigint":
+        if campo.type in ("bigint", "long"):
             out[campo.name] = pd.to_numeric(out[campo.name], errors="coerce").astype("Int64")
         elif campo.type == "decimal":
             out[campo.name] = pd.to_numeric(out[campo.name], errors="coerce").astype("float64")
@@ -752,6 +752,33 @@ def mapping_rows(mapping: SourceMapping, silver_model: SilverModel) -> list[dict
             ),
         })
     return linhas
+
+
+def _resolver_conexao(session, tabela_bronze: str):
+    """Conexão que originou a Bronze.
+
+    O nome da tabela carrega o código da conexão (`raw_azure_4p`), então a
+    origem é resolvida a partir dele — sem parâmetro novo em cada chamada.
+    """
+    from sqlalchemy import select
+
+    from app.models.source_connection import SourceConnection
+
+    if not tabela_bronze.startswith("raw_"):
+        return None
+    corpo = tabela_bronze[len("raw_"):]
+    try:
+        conexoes = session.execute(select(SourceConnection)).scalars().all()
+    except Exception:  # noqa: BLE001
+        return None
+    # O código mais longo que casa vence: `azure-4p` antes de `azure`.
+    candidatas = [
+        c for c in conexoes
+        if corpo == c.code.replace("-", "_") or corpo.startswith(c.code.replace("-", "_") + "_")
+    ]
+    if not candidatas:
+        return None
+    return max(candidatas, key=lambda c: len(c.code))
 
 
 def materialise(
@@ -795,6 +822,18 @@ def materialise(
     # Marca o dono da linha: a tabela canônica recebe várias fontes e a
     # religação de uma não pode apagar as linhas da outra.
     frame["_silver_owner"] = source_key
+    # Proveniência de conexão: é o que permite agrupar o cubo por origem e
+    # excluir uma conexão sem tocar nas outras.
+    _conexao = _resolver_conexao(session, tabela_bronze)
+    # Int64 explícito: Iceberg usa `long` e o pandas promoveria a `int32`,
+    # causando "Mismatch in fields" na gravação.
+    frame["_source_connection_id"] = (
+        pd.array([_conexao.id if _conexao else None] * len(frame), dtype="Int64")
+    )
+    frame["_source_connection_code"] = _conexao.code if _conexao else None
+    # O nome registrado é o da tabela Bronze que originou a linha: é a
+    # identidade estável da origem, e sobrevive à conexão ser renomeada.
+    frame["_source_connection_name"] = tabela_bronze
     periodo_col = mapping.period_field
     if periodo_col not in frame.columns:
         raise ValueError(f"Período '{periodo_col}' ausente no modelo {silver_model.name}")

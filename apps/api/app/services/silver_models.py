@@ -242,6 +242,12 @@ PRICE_CATALOG = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -279,6 +285,12 @@ COMPUTE_SKU = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -339,6 +351,12 @@ FOCUS_ENRICHED = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -360,15 +378,21 @@ QUOTA = SilverModel(
         _f("quota_name", "varchar", ROLE_IDENTITY, required=True,
            notes="Nome da família: cores, virtualMachines, lowPriorityCores."),
         _f("quota_display_name", "varchar", ROLE_DIMENSION),
-        _f("current_value", "double", ROLE_MEASURE, notes="Consumo atual."),
-        _f("limit_value", "double", ROLE_MEASURE, notes="Limite contratado."),
-        _f("available_value", "double", ROLE_MEASURE,
+        _f("current_value", "long", ROLE_MEASURE, notes="Consumo atual, em unidades."),
+        _f("limit_value", "long", ROLE_MEASURE, notes="Limite contratado, em unidades."),
+        _f("available_value", "long", ROLE_MEASURE,
            notes="Limite menos consumo; é o que decide elegibilidade."),
         _f("unit", "varchar", ROLE_DIMENSION),
         _f("snapshot_date", "varchar", ROLE_TIME),
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -398,6 +422,12 @@ REGION_POLICY = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -434,6 +464,12 @@ ALLOCATION = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -470,6 +506,12 @@ CONTAINER_METRIC = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
@@ -528,6 +570,12 @@ PTU = SilverModel(
         _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexão que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Código da conexão (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estável da conexão."),
     ),
 )
 
