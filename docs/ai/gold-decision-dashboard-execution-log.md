@@ -574,8 +574,8 @@ usa se for construída antes de G8.
 | `apps/api/app/services/period_coverage.py` | **criar** | coleta dos 8 sinais e a regra de decisão de G0.5; escreve `finops_period_coverage` |
 | `apps/api/app/services/gold_materialization.py` | alterar | registrar `finops_period_coverage` como dependência de C1; corrigir docstring de `GoldMartRule` que descreve fontes como tabelas Gold |
 | `apps/api/app/models/gold_mart_rule.py` | alterar | docstrings (`GoldMartRule` linha 1-7 e `GoldMartRuleSource`); nenhuma mudança de coluna |
-| `apps/api/app/services/silver_models.py` | alterar | **remover** o bloco `FOCUS_ENRICHED` (linhas 340-401) — sem consumidor |
-| `apps/api/app/services/focus_enrichment.py` | **remover ou marcar** | código morto; confirmar zero consumidores antes de remover |
+| `apps/api/app/services/silver_models.py` | alterar — **feito em G1** | bloco `FOCUS_ENRICHED` removido (linhas 329-396) — sem consumidor |
+| `apps/api/app/services/focus_enrichment.py` | **remover ou marcar** — **feito em G1** | código morto; zero consumidores confirmado |
 | `apps/api/tests/test_semantic_normalization.py` | criar | casos negativos: caixa de serviço, nulo vs global, ID canônico |
 | `apps/api/tests/test_period_coverage.py` | criar | 202504, 202505, 202604 e azure-ti/202609 produzem o status esperado |
 | `scripts/` (novo utilitário) | criar | consulta de conferência do baseline para regressão |
@@ -663,3 +663,232 @@ Ordem proposta de abertura de G1, já sustentada por este log:
    deixarem de ser base silenciosa de MoM);
 3. remoção da declaração `FOCUS_ENRICHED` e do módulo `focus_enrichment.py`;
 4. testes negativos da seção 10.2 que já são reproduzíveis hoje.
+
+---
+
+# G1 — Fundação semântica e qualidade de período
+
+**Status:** concluído. Commit e push registrados em G1.9.
+
+## G1.0 Regra de execução do pacote
+
+```text
+entrada     : G0 (baseline e divergencias D1-D14) + decisoes de direcao do usuario
+premissas   : resource_cost e a fonte canonica de C1-C3; dest_modelo_focus atende
+              consumidores legados ate o cutover; billed_cost/contracted_cost
+              publicados como indisponiveis; workflow vem de rightsizing_review;
+              AKS limitado a node_pool; PTU nao usa utilization_max
+arquivos    : +app/services/semantic_normalization.py
+              +app/services/period_coverage.py
+              -app/services/focus_enrichment.py (removido)
+              ~app/services/silver_models.py (declaracao FOCUS_ENRICHED removida)
+              +tests/test_semantic_normalization.py
+              +tests/test_period_coverage.py
+saida       : normalizadores + classificacao de competencia + guarda de reconciliacao
+testes      : 116 testes novos; suite completa sem regressao nova
+risco       : ver G0.7. Nenhum risco materializado.
+rollback    : git revert do commit de G1. Os dois arquivos novos sao aditivos; a
+              remocao de focus_enriched nao tem consumidor.
+```
+
+## G1.1 Normalizadores semânticos
+
+Arquivo novo: `apps/api/app/services/semantic_normalization.py`.
+
+Cada normalizador tem **duas formas equivalentes**: uma em Python (`*_key`) usada
+por API, serviço e teste; outra como expressão Trino (`sql_*`) usada pelo
+materializador. Não existem duas definições de "serviço normalizado".
+
+| Normalizador | Regra | Efeito medido em 23/09/2026 |
+|---|---|---|
+| `service_key` | lowercase, remove espaços | 83 serviços → **62** chaves; 21 colisões de caixa |
+| `service_display_name` | marca capitalizada, mais frequente, empate lexical | determinístico, independe da ordem de leitura |
+| `region_key` | lowercase; `GLOBAL` ≠ `UNKNOWN` | 18 chaves (era 19 com `BRAZILSOUTH` duplicado) |
+| `resource_type_key` | lowercase | `UNKNOWN` em 100 % (coluna nula no custo) |
+| `canonical_resource_id` | `trim(lower())`, preserva `NULL` | 968.339 ids distintos, sem colisão |
+| `billing_period_key` | exatamente `YYYYMM` | aceita `2025-04`, descarta `202513` |
+| `currency_code` | ISO maiúsculo, ausente = `None` | nunca assume `BRL` |
+| `provider_key` | vocabulário controlado | `azure` |
+| `cost_join_key` | `(provider, conta, id canônico)` | `resource_id` sozinho não liga |
+| `assert_single_currency` | falha se houver 2 moedas | impede somar BRL + USD |
+
+### G1.1.1 Custo sem dimensão: presença não é validade
+
+Achado novo durante a implementação, não previsto no plano: as 5.294.906 linhas
+de ajuste do `azure-4p` (202504/202505) têm `resource_id` **preenchido** com
+valores como `'320core'`, `'100core'` e `'96core'`. Não são nulos — são
+identificadores sintéticos de carga.
+
+Consequência: um teste de "`resource_id` é nulo?" devolve zero linhas
+problemáticas e o dado sujo passa. A primeira versão da classificação de
+cobertura fez exatamente isso e reprovou 202505 como `COMPLETE`.
+
+`is_valid_resource_id` resolve: um ID de nuvem é caminho de provedor (começa com
+`/` e contém `/providers/`). `is_valid_sub_account_id` faz o mesmo para a conta.
+Esses valores **não** podem virar dimensão de C2.
+
+### G1.1.2 Custo sem tag é medida própria, não defeito de competência
+
+`tags_json` está ausente ou vazio em 5.677.656 de 13.519.512 linhas. A maioria é
+recurso de plataforma (storage, rede, licença) que legitimamente não tem tag de
+alocação. Tratar isso como dimensão crítica reprovava 12 dos 16 meses do 4P e
+escondia o defeito real.
+
+Decisão: `rows_without_tag` e `cost_without_tag` são medidas próprias de **custo
+não alocado** (seção 4.3) e geram aviso acima de 20 % — nunca parcialidade de
+competência.
+
+## G1.2 Classificação de competência
+
+Arquivo novo: `apps/api/app/services/period_coverage.py`.
+
+Estados: `COMPLETE`, `PARTIAL`, `EMPTY`, `MISSING`, `CURRENT_OPEN`,
+`NOT_APPLICABLE`. `comparable` é a única propriedade que o consumidor deve
+consultar para MoM, run rate, anomalia e forecast.
+
+Regra determinística, na ordem: sem carga esperada → `NOT_APPLICABLE`; sem
+execução e sem linhas → `MISSING`; execução ok com zero linhas → `EMPTY`; execução
+falhou → `PARTIAL`; mês corrente → `CURRENT_OPEN`; janela < 80 % → `PARTIAL`;
+dimensão crítica > 5 % → `PARTIAL`; reconciliação > 0,5 % → `PARTIAL`; só
+compra/ajuste → `PARTIAL`; caso contrário `COMPLETE`.
+
+**Anomalia não é parcialidade.** Um valor atípico contra o histórico vira
+`warnings` e o período continua comparável. Excluir um pico real do MoM esconderia
+exatamente a variação que o usuário precisa investigar.
+
+### G1.2.1 Janela medida pelo intervalo, não por dias distintos
+
+Medido: `charge_period_start` tem apenas 10 a 15 valores distintos por mês — é o
+dia da fatura, não o dia de consumo. Contar dias distintos reprovava **todos** os
+16 meses do 4P. A janela passou a ser `último dia − primeiro dia + 1`:
+202505 cobre 01/05 a 28/05 = 28 dias (90 %), 202504 cobre 1 dia (3 %).
+
+### G1.2.2 Outlier por resíduo contra a mediana da conexão
+
+A referência é a mediana das competências operacionais da conexão e a escala é a
+MAD dos resíduos — não a MAD do custo absoluto. O 4P varia de R$ 2,06 M (202509) a
+R$ 3,83 M (202601); com MAD do custo absoluto, 202509 era reprovado sendo mês
+operacional completo. Meses de ajuste e mês de compra ficam fora da referência.
+
+### G1.2.3 Resultado real no baseline
+
+Executado contra `iceberg.silver.resource_cost` em 23/09/2026:
+
+| competência | conexão | status | motivo | janela | dim. ausente | custo |
+|---|---|---|---|---:|---:|---:|
+| 202504 | azure-4p | `PARTIAL` | `SHORT_WINDOW` | 0,03 | 98,83 % | 209.564,67 |
+| 202505 | azure-4p | `PARTIAL` | `MISSING_DIMENSIONS` | 0,90 | 69,69 % | 3.177.030,65 |
+| 202506 | azure-4p | `COMPLETE` | `OK` | 0,93 | 0 % | 2.881.673,31 |
+| 202507 | azure-4p | `COMPLETE` | `OK` | 0,90 | 0 % | 2.986.495,25 |
+| 202508 | azure-4p | `COMPLETE` | `OK` | 0,90 | 0 % | 2.912.511,00 |
+| 202509 | azure-4p | `COMPLETE` | `OK` | 0,93 | 0 % | 2.055.609,04 |
+| 202510 | azure-4p | `COMPLETE` | `OK` | 0,90 | 0 % | 2.882.348,17 |
+| 202511 | azure-4p | `COMPLETE` | `OK` | 0,93 | 0 % | 3.507.991,37 |
+| 202512 | azure-4p | `COMPLETE` | `OK` | 1,00 | 0 % | 3.718.891,12 |
+| 202601 | azure-4p | `COMPLETE` | `OK` | 0,97 | 0 % | 3.827.009,90 |
+| 202602 | azure-4p | `COMPLETE` | `OK` | 1,00 | 0 % | 3.455.091,64 |
+| 202603 | azure-4p | `COMPLETE` | `OK` | 0,97 | 0 % | 3.265.244,23 |
+| 202604 | azure-4p | `PARTIAL` | `PURCHASE_ONLY` | 1,00 | 0 % | 194.941,66 |
+| 202605 | azure-4p | `PARTIAL` | `SHORT_WINDOW` | 0,03 | 0 % | 146.346,00 |
+| 202606 | azure-4p | `PARTIAL` | `SHORT_WINDOW` | 0,03 | 0 % | 147.865,00 |
+| 202607 | azure-4p | `PARTIAL` | `SHORT_WINDOW` | 1,00 | 0 % | 0,00 |
+| 202609 | azure-ti | `CURRENT_OPEN` | `CURRENT_PERIOD` | 0,03 | 0 % | 1.987.748,46 |
+
+Consequências para os KPIs:
+
+- **10 competências comparáveis** do `azure-4p`: 202506–202603 (exclui 202504,
+  202505 e 202604–202607);
+- **9 pares MoM permitidos**, todos consecutivos, todos do `azure-4p`;
+- `azure-ti` tem **zero** competências comparáveis: run rate e MoM indisponíveis,
+  com motivo explícito;
+- run rate do `azure-4p`: R$ 3.149.286,50/mês sobre **10 meses** → R$ 37.791.438,04
+  anualizado. O número de meses é parte do resultado.
+
+Nenhuma comparação atravessa conexões nem usa período parcial em silêncio.
+
+## G1.3 `focus_enriched` removido
+
+- `apps/api/app/services/silver_models.py`: bloco `FOCUS_ENRICHED` (declaração de
+  62 linhas) removido, incluindo a entrada em `MODELS`. O registro passou de 14
+  para 13 modelos e **nenhuma tabela `gold.*` resta no registry**.
+- `apps/api/app/services/focus_enrichment.py`: removido (195 linhas, zero
+  consumidores).
+- Prova de que não quebrou nada:
+  - `python -c "import app.main"` → importa;
+  - `model('resource_cost')` resolve; `'focus_enriched' not in MODELS`;
+  - busca por `focus_enriched`/`FOCUS_ENRICHED` no código: zero ocorrências;
+  - suíte completa sem regressão nova (G1.5).
+
+## G1.4 Guarda de reconciliação
+
+`reconciliation_sql` + `verify_reconciliation` provam, por competência, que
+agrupar pelas chaves normalizadas **não altera** o total nem a contagem de linhas.
+Tolerância: R$ 0,01 (seção 5, C1). Delta de linhas diferente de zero é sempre
+falha, mesmo com total igual — fecharia por coincidência.
+
+Executado no baseline:
+
+```text
+reconciliacao global por competencia      : OK (17 competencias, nenhum problema)
+reconciliacao por service_key + region_key: OK (17 competencias, nenhum problema)
+```
+
+Exemplo medido: 202505 tinha e continua com R$ 3.177.030,65 em 2.261.106 linhas.
+
+## G1.5 Testes
+
+| Arquivo | Testes | Cobre |
+|---|---:|---|
+| `tests/test_semantic_normalization.py` | 55 | caixa, ausência, `GLOBAL`/`UNKNOWN`, chave de ligação, moeda, competência, equivalência das expressões SQL |
+| `tests/test_period_coverage.py` | 61 | os 17 períodos reais, ordem de precedência, limiares, outlier, run rate, MoM, guarda de reconciliação |
+| **total novo** | **116** | |
+
+Suíte completa: **510 passam, 9 falham**. As 9 falhas são **pré-existentes**:
+rodadas em `git stash` no HEAD limpo (`7f42db17`) produzem exatamente as mesmas 9
+falhas. Nenhuma regressão introduzida por G1.
+
+```text
+test_aura_brain_vivo_mais.py (2)      test_auth_unit.py::test_dev_defaults_safe
+test_azure_ptu_finops.py (1)          test_azure_ptu_gold.py (1)
+test_datamesh_dashboard.py (1)        test_gold_materialization.py (1)
+test_sinfonia_dashboard.py (2)
+```
+
+## G1.6 Aceite de G1
+
+| Critério | Situação | Evidência |
+|---|---|---|
+| Períodos incompletos não alimentam comparações silenciosas | **Atendido** | 202504/202505/202604–202607 `PARTIAL`; `azure-ti/202609` `CURRENT_OPEN`; `comparable_pairs` gera 9 pares, todos consecutivos e da mesma conexão |
+| Serviços com diferença de caixa são agrupados | **Atendido** | 83 → 62 chaves; `Microsoft.Compute` agora é uma linha de R$ 11.614.067,28 (era 10.543.453,38 + 1.070.613,90) |
+| Cobranças globais usam `GLOBAL`; ausências desconhecidas usam `UNKNOWN` | **Atendido** | `GLOBAL` = 559.225 linhas / R$ 6.766.578,53 (todas `Microsoft.Capacity`); `UNKNOWN` = 5.294.906 linhas / **R$ 0,00** (só linhas de ajuste) |
+| Nenhum total financeiro muda por normalização | **Atendido** | `verify_reconciliation` OK nas duas dimensões; delta de custo R$ 0,00 e delta de linhas 0 em 17/17 competências |
+| `focus_enriched` removido sem quebrar imports ou testes | **Atendido** | `app.main` importa; registry com 13 modelos; zero referências; suíte sem regressão |
+
+**Aceite de G1 cumprido.**
+
+## G1.7 Arquivos para G2
+
+| Arquivo | Ação | Conteúdo |
+|---|---|---|
+| `app/services/gold_materialization.py` | alterar | registrar `finops_period_coverage` como dependência de C1; usar `semantic_normalization` para as dimensões; manifesto com namespace físico |
+| `app/models/gold_mart_rule.py` | alterar | corrigir docstrings que descrevem fontes como tabelas Gold |
+| `app/services/gold_cubes_service.py` | remover | código morto (zero consumidores) |
+| `app/services/azure_ptu_gold.py` | migrar | CTAS paralelo → caminho governado (namespace `gold`, hoje fora do manifesto) |
+| `app/services/ai_usage_gold.py` | migrar | CTAS paralelo chamado de dentro do materializador governado |
+| `app/services/ai_cost_materialization.py` | migrar | idem |
+| `app/services/gold_builder.py` | avaliar | CTAS dentro do reprocess (`routers/etl.py:1412`) |
+| namespace `dimon` | reconciliar | 5 tabelas `dest_dm_ai_*` referenciadas pela governança mas materializadas em `dimon` |
+| `_tmp_vm_monthly` | renomear | existe em `gold` e `dimon`; não pode permanecer como contrato público |
+| `compatibility.py` (novo) | criar | medida de divergência `dest_modelo_focus` × `resource_cost` para C11 |
+
+## G1.8 Próximo passo
+
+**G2 não foi iniciado nesta execução.** Ordem proposta, sustentada por G0.2.4 e
+G1.7:
+
+1. manifesto de materialização com namespace físico, fontes, hash e rollback;
+2. migrar os CTAS paralelos (`ai_usage_gold`, `ai_cost_materialization`,
+   `azure_ptu_gold`) para o caminho governado;
+3. remover `gold_cubes_service.py`; corrigir docstrings de `GoldMartRule`;
+4. tratar `_tmp_vm_monthly` (dois namespaces) e a compatibilidade entre
+   `dest_modelo_focus` e `resource_cost`.

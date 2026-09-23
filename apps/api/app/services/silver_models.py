@@ -327,75 +327,6 @@ COMPUTE_SKU = SilverModel(
 )
 
 
-# ── Modelo: FOCUS enriquecido (CUBO DA GOLD) ──────────────────────────────────
-# A FOCUS é a espinha do custo. Este modelo **não a substitui nem a duplica**:
-# ele a enriquece com o que as outras fontes sabem do recurso, no mesmo grão de
-# linha, para que uma pergunta de custo possa ser respondida por SKU, estado,
-# tipo de recurso ou métrica sem varrer a FOCUS inteira a cada consulta.
-#
-# Regra do plano (P3): "associar custo FOCUS a VM/ambiente/período **sem
-# multiplicar linhas**". Por isso o grão inclui a chave da linha de custo, e o
-# join com inventário e métrica é feito por agregação, nunca por fan-out.
-
-FOCUS_ENRICHED = SilverModel(
-    name="focus_enriched",
-    # Vive na Gold: é o cruzamento do FOCUS com os canônicos, não um padrão.
-    table="gold.focus_enriched",
-    description="Cubo Gold: custo FOCUS cruzado com recurso, métrica e preço.",
-    grain=("cloud_provider", "sub_account_id", "canonical_resource_id", "billing_period", "charge_category", "service_name", "region_id"),
-    primary_measure="effective_cost",
-    time_field="charge_period_start",
-    fields=(
-        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
-        _f("source_record_id", "varchar", ROLE_IDENTITY,
-           notes="Chave da linha na FOCUS; preserva o grão original."),
-        # Identidade normalizada: é o que liga a FOCUS ao inventário.
-        _f("canonical_resource_id", "varchar", ROLE_IDENTITY, required=True,
-           notes="Chave de ligação: `resource_id` canônico que a Silver produz, "
-                 "aplicado ao `resourceid` do FOCUS (minúsculas)."),
-        _f("resource_name", "varchar", ROLE_DIMENSION),
-        _f("resource_type", "varchar", ROLE_DIMENSION),
-        _f("sub_account_id", "varchar", ROLE_IDENTITY),
-        _f("resource_group_id", "varchar", ROLE_DIMENSION),
-        _f("region_id", "varchar", ROLE_DIMENSION),
-        _f("service_name", "varchar", ROLE_DIMENSION),
-        _f("service_category", "varchar", ROLE_DIMENSION),
-        _f("charge_category", "varchar", ROLE_IDENTITY),
-        _f("billing_period", "varchar", ROLE_IDENTITY),
-        _f("charge_period_start", "timestamp", ROLE_TIME),
-        # Atributos vindos do inventário: é o enriquecimento propriamente dito.
-        _f("resource_sku", "varchar", ROLE_DIMENSION, notes="Do inventário/VM."),
-        _f("resource_state", "varchar", ROLE_DIMENSION, notes="Do inventário/VM."),
-        _f("operating_system", "varchar", ROLE_DIMENSION, notes="Do inventário/VM."),
-        _f("has_inventory", "varchar", ROLE_QUALITY, required=True,
-           notes="SIM | NAO. NAO = custo sem recurso no inventário (não atribuível)."),
-        # Medidas de custo, preservadas da FOCUS sem reinterpretação.
-        _f("effective_cost", "decimal", ROLE_MEASURE),
-        _f("billed_cost", "decimal", ROLE_MEASURE),
-        _f("list_cost", "decimal", ROLE_MEASURE),
-        _f("consumed_quantity", "decimal", ROLE_MEASURE),
-        _f("pricing_currency", "varchar", ROLE_QUALITY),
-        # Agregados de métrica na janela: contagem, não fan-out.
-        _f("metric_samples", "bigint", ROLE_MEASURE,
-           notes="Amostras de métrica do recurso no período; 0 se não houver."),
-        _f("metric_avg_cpu", "decimal", ROLE_MEASURE,
-           notes="CPU média do recurso no período, quando houver série."),
-        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
-        _f("_silver_owner", "varchar", ROLE_QUALITY),
-        # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
-        # schema físico que diverge do modelo falha só na gravação seguinte.
-        _f("_processed_at", "varchar", ROLE_QUALITY),
-        _f("_source_connection_id", "bigint", ROLE_QUALITY,
-           notes="Conexão que originou a linha."),
-        _f("_source_connection_code", "varchar", ROLE_QUALITY,
-           notes="Código da conexão (azure-4p, azure-ti)."),
-        _f("_source_connection_name", "varchar", ROLE_QUALITY,
-           notes="Tabela Bronze de origem; identidade estável da conexão."),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
-    ),
-)
-
-
 # ── Modelo: Quota de compute ──────────────────────────────────────────────────
 # Restrição de elegibilidade: um candidato que caiba no SKU mas não caiba na quota
 # não pode ser sugerido. Todas as nuvens têm quota, então o modelo é canônico.
@@ -823,7 +754,6 @@ MODELS: dict[str, SilverModel] = {
     RESOURCE_COST.name: RESOURCE_COST,
     PRICE_CATALOG.name: PRICE_CATALOG,
     COMPUTE_SKU.name: COMPUTE_SKU,
-    FOCUS_ENRICHED.name: FOCUS_ENRICHED,
     QUOTA.name: QUOTA,
     REGION_POLICY.name: REGION_POLICY,
     ALLOCATION.name: ALLOCATION,
