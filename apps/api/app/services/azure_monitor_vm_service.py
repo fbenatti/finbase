@@ -76,6 +76,12 @@ MAX_WINDOW_PER_REQUEST = timedelta(days=1)
 #: instrumentação — nunca é estimada.
 DEFAULT_METRICS: tuple[str, ...] = (
     "Percentage CPU",
+    # Memória: o P8 **veta** redução que não caiba na RAM observada. Sem esta
+    # métrica o veto fica inerte e o motor sugeriria redução olhando só CPU.
+    # São métricas guest: sem o agente instalado a API não devolve série, e a
+    # ausência aparece como GAP em vez de virar zero.
+    "Available Memory Bytes",
+    "Available Memory Percentage",
     "Network In Total",
     "Network Out Total",
     "Disk Read Operations/Sec",
@@ -87,6 +93,9 @@ DEFAULT_METRICS: tuple[str, ...] = (
 #: Métricas guest que o plano prevê mas a API batch não atende. Mantidas
 #: explícitas para que a ausência seja registrada com motivo, não confundida
 #: com "SKU não expõe".
+#: Métricas guest efetivamente solicitadas. Sem o agente do Azure Monitor a API
+#: responde ponto sem agregação, e o coletor marca `GAP` — a ausência é
+#: declarada, nunca confundida com consumo zero.
 GUEST_METRICS: tuple[str, ...] = (
     "Available Memory Bytes",
     "Available Memory Percentage",

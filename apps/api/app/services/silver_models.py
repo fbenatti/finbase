@@ -580,6 +580,67 @@ PTU = SilverModel(
 )
 
 
+# ── Modelo: Candidato de rightsizing (P8) ─────────────────────────────────────
+# O aceite do P8 é explícito: "candidato SKU proibido/indisponível não é elegível;
+# preço contratual e retail não se misturam; ausência de Price Sheet vira status
+# explícito". Este modelo carrega esses três estados no próprio dado, mais o
+# `decision_hash` que faz duas execuções iguais produzirem a mesma decisão.
+RIGHTSIZING_CANDIDATE = SilverModel(
+    name="rightsizing_candidate",
+    table="rightsizing_candidate",
+    description="Candidato de rightsizing com veredito, vetos, DE/PARA e saving.",
+    grain=("run_id", "resource_id", "sku_from", "sku_to"),
+    primary_measure="saving_monthly",
+    time_field="created_at",
+    fields=(
+        _f("run_id", "varchar", ROLE_IDENTITY, required=True,
+           notes="Execução; duas execuções iguais compartilham o decision_hash."),
+        _f("decision_hash", "varchar", ROLE_IDENTITY,
+           notes="Hash das entradas materiais: mesma entrada, mesma decisão."),
+        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("resource_name", "varchar", ROLE_DIMENSION),
+        _f("region_id", "varchar", ROLE_DIMENSION),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY),
+        # Verdicto. REQUIRES_VALIDATION existe para o caso em que o dado não
+        # permite afirmar — não é indecisão, é honestidade.
+        _f("verdict", "varchar", ROLE_QUALITY, required=True,
+           notes="VALID | INVALID | REQUIRES_VALIDATION."),
+        _f("veto_reason", "varchar", ROLE_QUALITY,
+           notes="Por que foi vetado; vazio quando VALID."),
+        _f("confidence", "varchar", ROLE_QUALITY, notes="ALTA | MEDIA | BAIXA."),
+        # DE / PARA
+        _f("sku_from", "varchar", ROLE_IDENTITY, required=True),
+        _f("vcpus_from", "bigint", ROLE_DIMENSION),
+        _f("memory_gb_from", "double", ROLE_DIMENSION),
+        _f("sku_to", "varchar", ROLE_IDENTITY, required=True),
+        _f("vcpus_to", "bigint", ROLE_DIMENSION),
+        _f("memory_gb_to", "double", ROLE_DIMENSION),
+        # Pressão observada (pior caso da janela, não a média).
+        _f("cpu_p95", "double", ROLE_MEASURE),
+        _f("mem_p95", "double", ROLE_MEASURE),
+        _f("observed_days", "bigint", ROLE_QUALITY),
+        _f("requested_days", "bigint", ROLE_QUALITY),
+        # Finanças por componente: sem preço comparável, o saving fica ausente.
+        _f("cost_from_current", "double", ROLE_MEASURE, notes="Custo do recurso na janela."),
+        _f("cost_to_estimated", "double", ROLE_MEASURE, notes="Custo projetado do SKU destino."),
+        _f("saving_monthly", "double", ROLE_MEASURE,
+           notes="NULL quando não há preço comparável — nunca zero fingindo ausência."),
+        _f("saving_pct", "double", ROLE_MEASURE),
+        _f("price_source_from", "varchar", ROLE_QUALITY,
+           notes="CONTRACTED | PUBLIC_RETAIL | NONE."),
+        _f("price_source_to", "varchar", ROLE_QUALITY),
+        _f("price_comparable", "varchar", ROLE_QUALITY,
+           notes="SIM | NAO. NAO => saving não é exibido."),
+        _f("created_at", "varchar", ROLE_TIME),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
@@ -592,6 +653,7 @@ MODELS: dict[str, SilverModel] = {
     ALLOCATION.name: ALLOCATION,
     CONTAINER_METRIC.name: CONTAINER_METRIC,
     PTU.name: PTU,
+    RIGHTSIZING_CANDIDATE.name: RIGHTSIZING_CANDIDATE,
 }
 
 

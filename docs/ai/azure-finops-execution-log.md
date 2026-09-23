@@ -2598,3 +2598,79 @@ Tentei `az aks get-credentials`, mas o CLI falha com
 `PermissionError: ~/.azure/az.sess` — **restrição do meu ambiente de sandbox**, não
 do Azure. Não é caminho viável aqui; o Prometheus é melhor de qualquer forma, porque
 não depende de credencial de cluster.
+
+---
+
+## 34. P8 — Rightsizing determinístico
+
+### 34.1 Os três aceites, verificados
+
+| Aceite do plano | Como está provado |
+|---|---|
+| CPU baixa mas RAM/IOPS insuficiente **veta** | teste `test_cpu_baixa_com_memoria_insuficiente_veta` |
+| Sem preço comparável **não mostra saving exato** | `saving_monthly` fica **ausente**, nunca zero |
+| Duas execuções iguais → **mesma decisão** | hash idêntico em duas execuções |
+
+O aceite do determinismo foi verificado no motor real: duas execuções produziram
+`decision_hash = e76374830ef6d08a31a877561986c071` e os mesmos veredictos.
+
+### 34.2 Resultado
+
+**10 VALID · 16 INVALID · 23 REQUIRES_VALIDATION** · saving dos válidos
+**R$ 589,30**.
+
+Melhores candidatos:
+
+| Recurso | DE | PARA | Saving |
+|---|---|---|---|
+| core-local-4p-pro-gis | `Standard_E8s_v3` | `Standard_E4-2ads_v5` | R$ 389,34 |
+| nessus-01-brazilsouth | `Standard_B2ms` | `Standard_B1ls` | R$ 109,34 |
+| SIG-PRE-WEB1 | `Standard_B2s` | `Standard_B1ls` | R$ 27,01 |
+
+### 34.3 Cinco defeitos encontrados
+
+Todos do mesmo tipo: **um contrato entre duas partes que ninguém validava**.
+
+1. **Preço não ligava com SKU.** O catálogo de preço identifica o SKU de VM por
+   `meter_name` (`D4as v6`), não por `sku_id`. Sem normalizar os nomes, **nenhum**
+   candidato tinha preço — 49 de 49 sem saving.
+
+2. **Região em dois vocabulários.** O preço usa o nome de exibição (`BR South`) e o
+   catálogo de SKU usa a forma ARM (`brazilsouth`). Normalizar caixa/espaço não
+   resolve: `brsouth != brazilsouth`. O de-para é **explícito** porque adivinhar por
+   prefixo faria `southcentralus` casar com `South Central US` errado.
+
+3. **`is_available` é `SIM`/`NAO`.** Meu filtro comparava com `true`, rejeitava
+   **todos** os SKUs, e o sintoma era a mensagem "já está no menor tamanho" — que
+   era falsa. Diagnóstico enganoso é pior que erro visível.
+
+4. **`MeterRegion` duplicado no mapeamento.** Duas chaves iguais no mesmo dict
+   Python: a segunda apagou a primeira, e a região do preço nunca chegou ao modelo.
+
+5. **`_familia` comparava `F` com `FX`.** Famílias distintas tratadas como iguais
+   faziam o motor sugerir `Standard_F16s_v2` → `Standard_FX12-6mds`, uma troca que
+   **encarecia R$ 3.048**. Corrigido nos dois lados: família lê duas letras quando a
+   segunda é maiúscula (FX, HB, HC), e **troca que encarece é vetada**.
+
+### 34.4 Defeito material: o veto de memória estava inerte
+
+O perfil tinha **7 métricas e nenhuma de memória**. O veto por RAM — que é um dos
+três aceites do plano — existia no código e **nunca dispararia**.
+
+Correção: `Available Memory Bytes` e `Available Memory Percentage` entraram na
+coleta (são métricas *guest*). A série passou de **612.722 para 844.514 linhas**, e
+os 49 candidatos agora têm memória. Sem o agente do Azure Monitor a API responde
+ponto sem agregação e o coletor marca **`GAP`** — ausência declarada, não zero.
+
+### 34.5 Testes de aceite
+
+Novo `tests/test_rightsizing_p8.py` com **9 testes**, porque o caso do veto por
+memória **não ocorre no dado real** (CPU folgada com RAM apertada é raro): deixá-lo
+depender de dado de produção significaria código não exercitado.
+
+Cobrem: o veto por memória e seu contraponto, saving ausente sem preço, SKU
+indisponível, troca que encarece, mistura contratado/público, determinismo do hash,
+cobertura insuficiente, e — o mais importante — que **o nome da métrica que o motor
+lê é o mesmo que o coletor pede**. Esse último teria pegado o defeito 34.4 sozinho.
+
+Suíte: **9 failed / 391 passed** (era 382 antes destes testes).

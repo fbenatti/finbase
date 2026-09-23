@@ -317,7 +317,6 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
             "ServiceFamily": "service_family",
             "MeterName": "meter_name",
             "MeterCategory": "service_name",
-            "MeterRegion": "arm_region",
             "MeterRegion": "region_id",
             "UnitOfMeasure": "unit_of_measure",
             "PriceType": "price_type",
