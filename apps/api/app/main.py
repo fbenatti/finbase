@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -306,6 +306,24 @@ async def lifespan(app: FastAPI):
             # compartilham a conexão e várias miram a mesma coluna canônica.
             "ALTER TABLE etl_mapping ADD COLUMN IF NOT EXISTS source_key VARCHAR(60)",
             "CREATE INDEX IF NOT EXISTS ix_etl_mapping_source_key ON etl_mapping (source_key)",
+            # Serviços auxiliares (Jev, ServiceNow): o segredo fica em
+            # `secret_json` e nunca é devolvido pela API.
+            """CREATE TABLE IF NOT EXISTS system_integration (
+                 id SERIAL PRIMARY KEY,
+                 code VARCHAR(60) NOT NULL UNIQUE,
+                 name VARCHAR(200) NOT NULL,
+                 integration_type VARCHAR(60) NOT NULL,
+                 description TEXT,
+                 enabled BOOLEAN NOT NULL DEFAULT false,
+                 config_json JSON NOT NULL DEFAULT '{}',
+                 secret_json JSON NOT NULL DEFAULT '{}',
+                 last_test_at TIMESTAMPTZ,
+                 last_test_status VARCHAR(30),
+                 last_test_message TEXT,
+                 created_at TIMESTAMPTZ DEFAULT now(),
+                 updated_at TIMESTAMPTZ
+               )""",
+            "CREATE INDEX IF NOT EXISTS ix_system_integration_code ON system_integration (code)",
             """CREATE TABLE IF NOT EXISTS azure_connection_source (
               id SERIAL PRIMARY KEY,
               connection_id INTEGER NOT NULL REFERENCES source_connection(id) ON DELETE CASCADE,
@@ -576,6 +594,7 @@ app.include_router(reservations.router)
 app.include_router(scheduled_shutdown.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(azure_sources.router)
+app.include_router(integrations.router)
 app.include_router(oci_operational.router)
 app.include_router(ideas.router)
 

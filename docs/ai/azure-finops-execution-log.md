@@ -2363,3 +2363,83 @@ schema da tabela contra o modelo, e agora o nome da conexão (escritor e leitor)
 
 Em todos, o sintoma foi **dado errado sem erro**. A regra que fica: identidade
 derivada uma vez, em um lugar só, e consumida por referência.
+
+---
+
+## 31. Integração Jev, acesso ao AKS e o preço já presente no Price Sheet
+
+### 31.1 Jev cadastrado
+
+A integração não existia no código. Criados:
+
+| Item | O que é |
+|---|---|
+| Tabela `system_integration` | serviço auxiliar: `config_json` (variável) + `secret_json` (segredo) |
+| Catálogo de serviços | `jev` (ai_provider) e `servicenow` (itsm, futuro/desabilitado) |
+| `GET /integrations/` | mostra o que existe, o que está cadastrado e o que falta |
+| `PUT /integrations/{code}` | cria/atualiza; o segredo é **write-only** |
+| `POST /integrations/{code}/test` | testa conectividade e **registra** o resultado |
+
+O token do Jev foi gravado a partir de `.jev-finops` (107 caracteres, habilitado).
+**Verificado que o token não aparece na resposta da API** — ela devolve apenas
+`secret_fields: ["api_key"]`.
+
+**Pendência:** o `base_url` está vazio porque o endpoint não consta em nenhum
+arquivo de configuração do repositório. O teste responde, corretamente,
+`NOT_CONFIGURED`. Falta o endpoint para concluir.
+
+`servicenow` nasce desabilitado, como o plano pede — aparece sem enviar dado.
+
+### 31.2 AKS: o que falta é permissão, não código
+
+Testei `listClusterUserCredential` em três clusters do 4P: **403 nos três**.
+
+| Caminho | O que exige | Resultado |
+|---|---|---|
+| API do Kubernetes (namespace/pod) | ação `listClusterUserCredential` no cluster | **403 — ausente** |
+| Add-on Cost Analysis | `Contributor` no cluster para habilitar | **não ativo** |
+| Container Insights | workspace vinculado | 5 de 46 clusters |
+
+**Para liberar, uma das duas:**
+
+1. **Conceder a ação de credencial** ao service principal (papel *Azure Kubernetes
+   Service Cluster User* no escopo da subscription ou dos resource groups dos
+   clusters). Com isso o coletor obtém o kubeconfig e lê namespaces, pods,
+   *requests* e *limits* pela API do Kubernetes — é o que permite alocar por
+   namespace/workload, com UID de pod, como o plano exige.
+2. **Habilitar o add-on Cost Analysis** nos clusters (requer `Contributor`). O
+   add-on publica custo por namespace direto no Cost Management, sem precisar da
+   API do Kubernetes.
+
+O caminho 1 é preferível: dá a topologia completa, e a alocação fica sob nosso
+controle com pesos validados.
+
+### 31.3 O Price Sheet já tem contratado e on-demand
+
+**O usuário estava certo e eu estava errado.** O export do MCA traz as duas
+informações:
+
+| Campo | Preenchido em | Significado |
+|---|---|---|
+| `UnitPrice` | 3.101.279 | preço **contratado** |
+| `MarketPrice` | 3.101.279 | preço **on-demand** |
+
+Verificação do desconto real:
+
+| Situação | Medidores |
+|---|---|
+| Com desconto sobre o on-demand | **1.606.553** |
+| Preços iguais | 1.871.812 |
+| Contratado acima do mercado | 6 |
+
+Maiores descontos observados: Network Watcher **77,6%**, Foundry Tools **73,8%**,
+Notification Hubs **70,2%**, Azure Front Door **67,9%**.
+
+**Consequência:** a fonte de preço público deixa de ser necessária para comparar
+contratado × on-demand — o próprio price sheet responde, com o preço **do
+contrato** em vez de uma aproximação pública. Ela permanece como fallback para
+medidor sem preço no contrato.
+
+O aceite do P7 "preço contratual e retail não se misturam" continua atendido por
+`price_source`, e o "sem preço comparável não mostra saving exato" passa a ter dado
+real dos dois lados. O plano foi atualizado em P7 com esta evidência.

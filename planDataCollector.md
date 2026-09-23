@@ -429,6 +429,19 @@ Ao concluir **cada pacote**, é obrigatório versionar e subir o resultado no Gi
 - Saída: `resource_profile_window` com janela e hipóteses explícitas.
 - Aceite: percentis batem com amostra de buckets; lacunas reduzem confiança; perfil não muda sem mudança material de entradas.
 
+> **Atualização de implementação (evidência no log, seção 31).** O Price Sheet do
+> MCA **já traz contratado e on-demand no mesmo arquivo**: `UnitPrice` é o preço
+> contratado e `MarketPrice` é o preço de mercado, ambos preenchidos nos 3.101.279
+> medidores de consumo. Verificado: **1.606.553 medidores com desconto real** sobre
+> o on-demand (até 77,6%) e 1.871.812 com preços iguais.
+>
+> Consequência para este pacote: a fonte de preço público (`prices.azure.com`)
+> deixa de ser necessária para comparar contratado × on-demand — o próprio price
+> sheet responde. Ela permanece apenas como **fallback** para medidor sem preço no
+> contrato. O aceite "preço contratual e retail não se misturam" é atendido por
+> `price_source`, e o "sem preço comparável não mostra saving exato" passa a ter
+> dado real dos dois lados.
+
 **P7 — Catálogos, preço e elegibilidade local**
 
 - Entrada: P2/P6.
