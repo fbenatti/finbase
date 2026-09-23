@@ -192,10 +192,52 @@ RESOURCE_COST = SilverModel(
 )
 
 
+# ── Modelo: catálogo de preço ─────────────────────────────────────────────────
+# Preço por medidor e região. Azure Retail Prices, AWS Price List, GCP Cloud
+# Billing Catalog normalizam para cá: a pergunta "quanto custa esta unidade
+# nesta região" não depende do provedor.
+
+PRICE_CATALOG = SilverModel(
+    name="price_catalog",
+    table="price_catalog",
+    description="Preço unitário por medidor, região e tipo de compromisso.",
+    grain=("cloud_provider", "meter_id", "region_id", "price_type", "currency", "valid_from"),
+    primary_measure="unit_price",
+    time_field="valid_from",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("meter_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("sku_id", "varchar", ROLE_DIMENSION),
+        _f("service_name", "varchar", ROLE_DIMENSION, notes="FOCUS ServiceName."),
+        _f("service_family", "varchar", ROLE_DIMENSION),
+        _f("product_name", "varchar", ROLE_DIMENSION),
+        _f("meter_name", "varchar", ROLE_DIMENSION),
+        _f("arm_region", "varchar", ROLE_DIMENSION, notes="Região como o provedor a nomeia."),
+        _f("region_id", "varchar", ROLE_IDENTITY, notes="FOCUS RegionId."),
+        _f("arm_sku_name", "varchar", ROLE_DIMENSION),
+        _f("unit_of_measure", "varchar", ROLE_DIMENSION),
+        _f("price_type", "varchar", ROLE_IDENTITY,
+           notes="Consumption (uso) | Reservation (compromisso) | DevTest."),
+        _f("reservation_term", "varchar", ROLE_DIMENSION, notes="1 Year | 3 Years | 5 Years."),
+        _f("currency", "varchar", ROLE_IDENTITY, notes="FOCUS PricingCurrency."),
+        _f("unit_price", "decimal", ROLE_MEASURE, notes="Preço da unidade de medida."),
+        _f("tier_minimum_units", "decimal", ROLE_DIMENSION),
+        _f("effective_start_date", "timestamp", ROLE_TIME),
+        _f("valid_from", "timestamp", ROLE_TIME, required=True,
+           notes="Data da coleta: o preço vale a partir dela."),
+        _f("is_primary_meter", "varchar", ROLE_QUALITY),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
     RESOURCE_COST.name: RESOURCE_COST,
+    PRICE_CATALOG.name: PRICE_CATALOG,
 }
 
 

@@ -1415,6 +1415,45 @@ def consumer_main(worker_id: int):
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
                                 continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_retail_price":
+                                # Catálogo de preço público (API sem autenticação).
+                                from app.services.azure_retail_price_service import (
+                                    run_retail_price_collection,
+                                )
+                                try:
+                                    _preco = run_retail_price_collection(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _pr_exc:
+                                    import traceback as _tb_pr
+                                    _tb_pr.print_exc()
+                                    _t_pr = _ptu_session.get(EtlTask, task_id)
+                                    if _t_pr:
+                                        _t_pr.status = "FAILED"
+                                        _t_pr.phase = f"Preço público falhou: {str(_pr_exc)[:400]}"
+                                        _t_pr.errors = [str(_pr_exc)[:1000]]
+                                        _t_pr.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_pr_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_pr_ok:
+                                    _t_pr_ok.status = "COMPLETED"
+                                    _t_pr_ok.phase = (
+                                        f"Preço público: {_preco.get('rows_bronze', 0)} item(ns) · "
+                                        f"{_preco.get('meters', 0)} medidor(es) · "
+                                        f"{_preco.get('services', 0)} serviço(s)"
+                                    )
+                                    _t_pr_ok.rows_raw = _preco.get("rows_bronze", 0)
+                                    _t_pr_ok.billing_periods = [_preco.get("period")] if _preco.get("period") else []
+                                    _t_pr_ok.result_json = _preco
+                                    _t_pr_ok.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_aks_inventory":
                                 # AKS: clusters e node pools via Resource Graph.
                                 from app.services.azure_aks_service import (
