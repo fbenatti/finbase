@@ -70,7 +70,7 @@ const menuGroups = [
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
-      { path: "/rightsizing", label: "Saving Actions", icon: <TrendingDownIcon /> },
+      { path: "/rightsizing", label: "Rightsizing", icon: <TrendingDownIcon /> },
       { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
       { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
@@ -84,6 +84,7 @@ const menuGroups = [
     items: [
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
       { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
+      { path: "/saving-actions", label: "Saving Actions", icon: <TrendingDownIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
     ],
   },
