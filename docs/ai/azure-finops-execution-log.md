@@ -1398,3 +1398,73 @@ produzia um sintoma diferente sem causa visível.
 | `resource_cost` | 7.676.000 | cost_exports |
 | `resource_inventory` | 9.230 | vm_inventory, resource_graph |
 | `resource_metric_series` | 615.002 | monitor_vm_metrics |
+
+---
+
+## 18. Fontes do 4P marcadas e coletor de AKS
+
+### 18.1 Estado das fontes (4P)
+
+O catálogo tem **6 fontes implementadas e 7 planejadas**. Ligar uma fonte sem
+coletor produziria uma task que não baixa nada, então:
+
+- as **6 implementadas** ficaram ligadas: cost_exports, resource_graph,
+  automation_jobs, monitor_vm_metrics, vm_inventory, openai_ptu;
+- a carga full do 4P enfileirou **6 tasks** (as planejadas não entram);
+- as **7 planejadas** aparecem no painel, desligadas, com o aviso de "planejada".
+
+**Ponto de atenção:** a coleta valida `implementation_status` em
+`AZURE_SOURCE_CATALOG`, no **código**, não na tabela `azure_source_catalog`.
+Atualizar só o banco não muda o comportamento — foi o que aconteceu com o AKS.
+
+### 18.2 Coletor de AKS
+
+Novo `azure_aks_service`, via Resource Graph. A consulta achata
+`agentPoolProfiles` em uma linha por pool, que é o grão que permite custo por
+pool e por nó.
+
+| Verificação | Resultado |
+|---|---|
+| Bronze `raw_azure_4p_aks_inventory` | **242 linhas** |
+| Clusters distintos | **46** |
+| Node pools | 242 (49 System, 193 User) |
+| Task | 5919 COMPLETED |
+
+O acesso ao pool usa índice de string (`pool["count"]`): o parser do Resource
+Graph rejeita `pool.count`, que colide com a função de agregação.
+
+### 18.3 AKS no modelo canônico
+
+Terceira fonte no `resource_inventory`:
+
+| Dono | Linhas |
+|---|---|
+| resource_graph | 8.926 |
+| vm_inventory | 304 |
+| aks_inventory | 242 |
+| **Total** | **9.472** |
+
+SKU preenchido em todos os 288 registros AKS. Este era exatamente o cenário que
+o escopo de dono (`_silver_owner`) precisava suportar.
+
+### 18.4 Incidente de infraestrutura
+
+O ambiente acumulou **49 processos Python** e esgotou os slots de conexão do
+Postgres (`remaining connection slots are reserved for roles with the SUPERUSER
+attribute`). As quatro correções:
+
+| Problema | Correção |
+|---|---|
+| Erro de lock abortava a transação e as migrações seguintes falhavam em cascata com "current transaction is aborted" | `SAVEPOINT` por statement |
+| `ALTER TABLE etl_task` não obtinha lock (o worker consulta a tabela a cada 2s) e derrubava o startup | migração idempotente best-effort: registra e segue |
+| Worker e subprocessos vazando entre reinícios, competindo pelas tasks | detecção por `pgrep -f "projetos/OpenFinops"`, não pelo arquivo de pid |
+| Catálogo lido do código, não do banco | `aks_inventory` passou a `implemented` no registry |
+
+**Detalhe que custou tempo:** o arquivo de pid gravava o PID do **shell**, porque
+o comando de inicialização continha a string `worker.py` no corpo — o `$!`
+capturava o processo errado e o worker real nunca morria.
+
+### 18.5 Próximos coletores
+
+Restam 6 planejados: `compute_skus`, `compute_quota`, `retail_price`,
+`customer_price`, `aks_cost_allocation`, `container_insights`, `region_policy`.
