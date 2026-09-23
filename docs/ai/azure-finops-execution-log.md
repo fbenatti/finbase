@@ -1623,3 +1623,66 @@ aks_cost_allocation, container_insights, region_policy.
 O aceite pede "ausência de Price Sheet vira status explícito". O coletor de
 `customer_price` não existe, então hoje o status é apenas implícito (a fonte
 aparece como planejada). Falta o status explícito `UNAVAILABLE` com motivo.
+
+---
+
+## 21. Price Sheet contratual (MCA) do Blob
+
+### 21.1 O que foi feito
+
+O preço contratado era o que faltava no contrato de preço: retail é fallback
+indicativo, e os dois não podem se misturar.
+
+Novo `azure_customer_price_service`, lendo o export do Cost Management direto do
+Blob:
+
+    reports/report_-pricesheet/{YYYYMMDD}-{YYYYMMDD}/<export_id>/part_N_0001.csv
+
+**O mês é parâmetro de configuração** (`price_sheet_period` na conexão). Para
+Setembro do 4P: `price_sheet_period=202609`. Carregar outro mês não exige código
+novo — que era o pedido.
+
+### 21.2 Resultado
+
+Verificado pelo pipeline (task 5937): **3.667.019 linhas · 5 arquivos ·
+período 202609**, em 285s — exatamente o `dataRowCount` do manifest do export.
+
+| Tipo de preço | Linhas |
+|---|---|
+| Consumption | 3.101.279 |
+| SavingsPlan | 393.250 |
+| ReservedInstance | 172.490 |
+
+### 21.3 Preço contratual e retail separados
+
+O aceite do P7 exige que não se misturem. `price_catalog` agora:
+
+| `price_source` | `price_confidence` | Linhas | Medidores | Origem |
+|---|---|---|---|---|
+| `CONTRACTED` | `HIGH` | 3.667.019 | 598.793 | Price Sheet MCA |
+| `PUBLIC_RETAIL` | `LOW` | 279.768 | 80.743 | prices.azure.com |
+
+Campos que o price sheet exigiu no modelo: `term` (P1M/P1Y/P3Y),
+`billing_account_id` (contrato), `base_price` e `market_price` (para medir
+desconto sobre o contratado).
+
+### 21.4 Três defeitos encontrados
+
+| Defeito | Sintoma | Causa | Correção |
+|---|---|---|---|
+| Perda de ~80% das linhas **em silêncio** | 667.019 de 3.667.019 | gravava **por bloco** de 200 mil com o mesmo `blob_path`; o delete de cada bloco apagava o anterior | acumular a parte inteira antes de gravar |
+| Roteamento por transporte, não por fonte | price sheet cairia no ETL de blob do FOCUS | mesmo `connector_type` (`azure_blob`) do custo | despacho por fonte dedicada, que vence o transporte |
+| Vista da fonte montada no lugar errado | pipeline voltava 0 linhas | o `_SourceConn` só era criado dentro do ramo de Automation — as outras fontes nunca chegavam ao seu coletor | montar a vista logo após resolver o connector da fonte |
+
+O terceiro é o mais relevante: **o despacho por fonte funcionava para Automation e
+Resource Graph por coincidência de ordem dos `if`, não por desenho.** Só apareceu
+quando uma fonte passou a compartilhar o transporte com outra.
+
+### 21.5 Fontes do 4P
+
+**10 ligadas**: cost_exports, resource_graph, automation_jobs, monitor_vm_metrics,
+vm_inventory, aks_inventory, retail_price, openai_ptu, compute_skus,
+customer_price.
+
+**4 planejadas**: compute_quota, aks_cost_allocation, container_insights,
+region_policy.
