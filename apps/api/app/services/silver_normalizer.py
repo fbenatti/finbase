@@ -383,7 +383,7 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
     "compute_quota": SourceMapping(
         source_key="compute_quota",
         model_name="resource_quota",
-        bronze_table="raw_azure_{env}_compute_quota",
+        bronze_table="raw_azure_{env}_quota",
         columns={
             "subscription_id": "sub_account_id",
             "region_id": "region_id",
@@ -403,7 +403,7 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
     "region_policy": SourceMapping(
         source_key="region_policy",
         model_name="region_policy",
-        bronze_table="raw_azure_{env}_region_policy",
+        bronze_table="raw_azure_{env}_policy",
         columns={
             "subscription_id": "sub_account_id",
             "assignment_id": "assignment_id",

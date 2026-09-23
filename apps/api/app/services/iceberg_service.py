@@ -2120,14 +2120,21 @@ def upsert_azure_ptu_hourly(df: pd.DataFrame) -> int:
     return len(frame)
 
 
-def write_azure_ptu_bronze_metrics(df: pd.DataFrame) -> int:
+def write_azure_ptu_bronze_metrics(df: pd.DataFrame, connection_code: str | None = None) -> int:
     """Append audit rows; evolve schema and map field IDs when the table already exists."""
     if df is None or df.empty:
         return 0
     from pyiceberg.io.pyarrow import pyarrow_to_schema
 
     _ensure_namespace("bronze")
-    tid = _table_id("bronze", "raw_azure_ptu_metrics")
+    # Nome padrão do Bronze: a fonte carrega a conexão, senão uma conexão nova
+    # sobrescreveria o dado da anterior na mesma tabela.
+    nome_tabela = (
+        f"raw_{connection_code.replace('-', '_')}_ptu_metrics"
+        if connection_code
+        else "raw_azure_ptu_metrics"
+    )
+    tid = _table_id("bronze", nome_tabela)
     frame = df.copy()
     if "_billing_period" not in frame.columns:
         frame["_billing_period"] = frame["metric_hour"].astype(str).str[:7].str.replace("-", "")
@@ -2161,7 +2168,7 @@ def write_azure_ptu_bronze_metrics(df: pd.DataFrame) -> int:
     try:
         tbl = cat.load_table(tid)
     except Exception:
-        return _append_or_create_table("bronze", "raw_azure_ptu_metrics", frame, "_billing_period")
+        return _append_or_create_table("bronze", nome_tabela, frame, "_billing_period")
     incoming = _df_to_arrow(frame, column_types=numeric_types)
     incoming_schema = pyarrow_to_schema(incoming.schema)
     existing_names = {field.name for field in tbl.schema().fields}

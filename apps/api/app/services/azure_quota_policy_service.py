@@ -26,8 +26,8 @@ ARM = "https://management.azure.com"
 USAGES_API_VERSION = "2024-07-01"
 POLICY_API_VERSION = "2023-04-01"
 
-QUOTA_BRONZE = "azure_compute_quota"
-POLICY_BRONZE = "azure_region_policy"
+QUOTA_BRONZE = "raw_azure_{env}_quota"
+POLICY_BRONZE = "raw_azure_{env}_policy"
 MAX_PAGES = 40
 
 
@@ -179,6 +179,10 @@ def _coleta(session, connection_id: int, tabela: str, coletor, *, source_code, t
     if not conn:
         raise ValueError(f"Conexão {connection_id} não encontrada")
     config = dict(conn.config_json or {})
+    # O nome da Bronze carrega a conexão: sem isso uma conexão nova sobrescreve a
+    # anterior na mesma tabela, que é o defeito relatado.
+    if "{env}" in tabela:
+        tabela = tabela.replace("{env}", conn.code.replace("-", "_").replace("azure_", ""))
     assinaturas = _subscriptions(config)
     if not assinaturas:
         raise ValueError(

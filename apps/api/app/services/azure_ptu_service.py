@@ -1445,7 +1445,7 @@ def persist_hourly(
     inventory: dict[str, Any],
     metrics: list[dict[str, Any]],
     *,
-    connection_code: str = "azure_ptu_metrics",
+    connection_code: str | None = None,
     write_capacity: bool = True,
     strict_gold: bool = False,
 ) -> dict[str, int]:
