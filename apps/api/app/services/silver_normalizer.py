@@ -745,7 +745,14 @@ def normalise(frame: pd.DataFrame, mapping: SourceMapping, silver_model: SilverM
             out[campo.name] = pd.to_numeric(out[campo.name], errors="coerce").astype("float64")
         elif campo.type == "boolean":
             out[campo.name] = out[campo.name].astype("boolean")
-    return out
+
+    # Ordem final = ordem declarada no modelo. O writer apenas **anexa**
+    # `_billing_period` e `_processed_at`, entao a ordem do frame determina o
+    # schema fisico: divergir aqui faz a proxima gravacao falhar com
+    # "Mismatch in fields". Uma convencao, aplicada num lugar so.
+    declaradas = [c for c in silver_model.column_names() if c in out.columns]
+    extras = [c for c in out.columns if c not in declaradas]
+    return out[declaradas + extras]
 
 
 def mapping_rows(mapping: SourceMapping, silver_model: SilverModel) -> list[dict[str, Any]]:
@@ -862,7 +869,11 @@ def materialise(
         chave = str(periodo or "")
         if not chave:
             continue
-        _delete_period(silver_model.table, chave, owner=source_key)
+        # O escopo do delete inclui a CONEXÃO: 4P e TI compartilham o mesmo
+        # `_silver_owner` (a fonte), e sem isto um ambiente apagava o dado do
+        # outro no mesmo período.
+        _delete_period(silver_model.table, chave, owner=source_key,
+                       connection=tabela_bronze)
         written += int(iceberg.write_silver(
             connection_code=source_key,
             df=chunk.drop(columns=[periodo_col]),
@@ -888,7 +899,9 @@ def materialise(
     return resultado
 
 
-def _delete_period(table: str, period: str, *, owner: str | None = None) -> None:
+def _delete_period(
+    table: str, period: str, *, owner: str | None = None, connection: str | None = None
+) -> None:
     """Remove a fatia **daquela fonte** antes de reescrever.
 
     `write_silver` faz append. Como a tabela canônica recebe várias fontes (o
@@ -906,6 +919,10 @@ def _delete_period(table: str, period: str, *, owner: str | None = None) -> None
         filtro = EqualTo("_billing_period", period)
         if owner:
             filtro = And(filtro, EqualTo("_silver_owner", owner))
+        if connection:
+            # A conexão faz parte do escopo: a mesma fonte coletada de duas
+            # conexões não pode se apagar mutuamente.
+            filtro = And(filtro, EqualTo("_source_connection_name", connection))
         tabela.delete(filtro)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Silver %s: nada a remover em %s/%s (%s)", table, period, owner, type(exc).__name__)

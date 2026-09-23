@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.cloud_scope import allowed_rule_cloud_scopes
-from app.services.etl_task_claim import task_resource_lock_keys
+from app.services.etl_task_claim import task_resource_lock_keys, terminate_stale_advisory_lock_holders
 from app.models.etl_task import EtlTask
 
 
@@ -46,3 +46,15 @@ def test_task_resource_lock_keys_reprocess_slice():
     keys = task_resource_lock_keys(task)
     # global analytic writer + exact destination slice
     assert len(keys) == 2
+
+
+def test_stale_advisory_lock_recovery_is_noop_for_non_postgres():
+    class Bind:
+        class dialect:
+            name = "sqlite"
+
+    class Session:
+        def get_bind(self):
+            return Bind()
+
+    assert terminate_stale_advisory_lock_holders(Session()) == 0

@@ -103,12 +103,18 @@ METRIC_SERIES = SilverModel(
         _f("quality_reason", "varchar", ROLE_QUALITY),
         _f("source_api_version", "varchar", ROLE_QUALITY),
         _f("_bronze_blob_path", "varchar", ROLE_QUALITY),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY,
            notes="Fonte que escreveu a linha; a tabela recebe várias."),
         _f("_processed_at", "varchar", ROLE_QUALITY,
            notes="Gravado pelo writer; declarado para o schema não divergir."),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexao que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Codigo da conexao (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estavel."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -140,12 +146,18 @@ RESOURCE_INVENTORY = SilverModel(
         _f("tags_json", "varchar", ROLE_DIMENSION),
         _f("valid_from", "timestamp", ROLE_TIME, required=True,
            notes="Data da fotografia: o inventário vale a partir dela."),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY,
            notes="Fonte que escreveu a linha; a tabela recebe várias."),
         _f("_processed_at", "varchar", ROLE_QUALITY,
            notes="Gravado pelo writer; declarado para o schema não divergir."),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexao que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Codigo da conexao (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estavel."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -195,6 +207,13 @@ RESOURCE_COST = SilverModel(
         _f("_silver_owner", "varchar", ROLE_QUALITY,
            notes="Fonte que escreveu a linha."),
         _f("_processed_at", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY,
+           notes="Conexao que originou a linha."),
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+           notes="Codigo da conexao (azure-4p, azure-ti)."),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY,
+           notes="Tabela Bronze de origem; identidade estavel."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -246,7 +265,6 @@ PRICE_CATALOG = SilverModel(
         _f("valid_from", "timestamp", ROLE_TIME, required=True,
            notes="Data da coleta: o preço vale a partir dela."),
         _f("is_primary_meter", "varchar", ROLE_QUALITY),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -258,6 +276,7 @@ PRICE_CATALOG = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -292,7 +311,6 @@ COMPUTE_SKU = SilverModel(
         _f("restriction_reason", "varchar", ROLE_QUALITY),
         _f("zones", "varchar", ROLE_DIMENSION),
         _f("valid_from", "timestamp", ROLE_TIME, required=True),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -304,6 +322,7 @@ COMPUTE_SKU = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -361,7 +380,6 @@ FOCUS_ENRICHED = SilverModel(
            notes="Amostras de métrica do recurso no período; 0 se não houver."),
         _f("metric_avg_cpu", "decimal", ROLE_MEASURE,
            notes="CPU média do recurso no período, quando houver série."),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -373,6 +391,7 @@ FOCUS_ENRICHED = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -400,7 +419,6 @@ QUOTA = SilverModel(
            notes="Limite menos consumo; é o que decide elegibilidade."),
         _f("unit", "varchar", ROLE_DIMENSION),
         _f("snapshot_date", "varchar", ROLE_TIME),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -412,6 +430,7 @@ QUOTA = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -438,7 +457,6 @@ REGION_POLICY = SilverModel(
         _f("allowed_values", "varchar", ROLE_MEASURE,
            notes="SKUs ou regiões permitidas, quando a política declara."),
         _f("snapshot_date", "varchar", ROLE_TIME),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -450,6 +468,7 @@ REGION_POLICY = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -483,7 +502,6 @@ ALLOCATION = SilverModel(
         _f("status_reason", "varchar", ROLE_QUALITY),
         _f("weight_validated", "varchar", ROLE_QUALITY, notes="SIM quando soma 1."),
         _f("snapshot_date", "varchar", ROLE_TIME),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -495,6 +513,7 @@ ALLOCATION = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -528,7 +547,6 @@ CONTAINER_METRIC = SilverModel(
         _f("coverage_reason", "varchar", ROLE_QUALITY),
         _f("workspace_id", "varchar", ROLE_DIMENSION),
         _f("snapshot_date", "varchar", ROLE_TIME),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -540,6 +558,7 @@ CONTAINER_METRIC = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -595,7 +614,6 @@ PTU = SilverModel(
            notes="Pontos coletados sobre esperados; abaixo de 100 há lacuna."),
         _f("project_hint", "varchar", ROLE_DIMENSION,
            notes="Projeto declarado na origem."),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -607,6 +625,7 @@ PTU = SilverModel(
            notes="Código da conexão (azure-4p, azure-ti)."),
         _f("_source_connection_name", "varchar", ROLE_QUALITY,
            notes="Tabela Bronze de origem; identidade estável da conexão."),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -663,7 +682,6 @@ RIGHTSIZING_CANDIDATE = SilverModel(
         _f("price_comparable", "varchar", ROLE_QUALITY,
            notes="SIM | NAO. NAO => saving não é exibido."),
         _f("created_at", "varchar", ROLE_TIME),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
@@ -671,6 +689,7 @@ RIGHTSIZING_CANDIDATE = SilverModel(
         _f("_processed_at", "varchar", ROLE_QUALITY),
         _f("_source_connection_id", "bigint", ROLE_QUALITY),
         _f("_source_connection_name", "varchar", ROLE_QUALITY),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 
@@ -731,14 +750,18 @@ RIGHTSIZING_DECISION = SilverModel(
         _f("assisted_model", "varchar", ROLE_DIMENSION),
         _f("assisted_reason", "varchar", ROLE_QUALITY),
         _f("created_at", "varchar", ROLE_TIME, required=True),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
         _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
         _f("_silver_owner", "varchar", ROLE_QUALITY),
         # Gravado pelo próprio `write_silver` em toda tabela. Declarado porque
         # schema físico que diverge do modelo falha só na gravação seguinte.
         _f("_processed_at", "varchar", ROLE_QUALITY),
+
+        _f("_source_connection_code", "varchar", ROLE_QUALITY,
+
+           notes="Codigo da conexao."),
         _f("_source_connection_id", "bigint", ROLE_QUALITY),
         _f("_source_connection_name", "varchar", ROLE_QUALITY),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
     ),
 )
 

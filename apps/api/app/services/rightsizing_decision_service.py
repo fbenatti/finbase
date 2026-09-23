@@ -45,6 +45,20 @@ CAMPOS_EVIDENCIA = (
 )
 
 
+
+def _ordenar_pelo_modelo(frame, modelo):
+    """Ordena as colunas do frame pela ordem declarada no modelo.
+
+    O writer apenas **anexa** `_billing_period` e `_processed_at` ao frame. Se o
+    frame chegar com as colunas em outra ordem, o schema fisico nasce diferente do
+    modelo e a proxima gravacao falha com "Mismatch in fields". Ordenar aqui faz a
+    convencao valer para os dois servicos.
+    """
+    declaradas = [c for c in modelo.column_names() if c in frame.columns]
+    extras = [c for c in frame.columns if c not in declaradas]
+    return frame[declaradas + extras]
+
+
 def evidence_hash(item: dict[str, Any]) -> str:
     """Hash das evidências materiais da decisão.
 
@@ -146,8 +160,11 @@ async def build_decisions(*, run_id: str | None = None) -> dict[str, Any]:
             "assisted_reason": None,
             "created_at": carimbo,
             "_silver_owner": "rightsizing_decision",
+            "_silver_ingested_at": carimbo,
             "_source_connection_id": None,
+            "_source_connection_code": None,
             "_source_connection_name": c.get("_source_connection_name"),
+            "_processed_at": carimbo,
         })
 
     frame = pd.DataFrame(linhas)
@@ -169,6 +186,9 @@ async def build_decisions(*, run_id: str | None = None) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - primeira execução
         pass
 
+    from app.services.silver_models import model as _modelo
+
+    frame = _ordenar_pelo_modelo(frame, _modelo("rightsizing_decision"))
     escrito = iceberg.write_silver(
         connection_code="rightsizing_decision",
         df=frame,

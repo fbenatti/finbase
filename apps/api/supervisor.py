@@ -6,7 +6,10 @@ import time
 import logging
 
 from app.database import SyncSession
-from app.services.etl_task_claim import reconcile_stale_running_tasks
+from app.services.etl_task_claim import (
+    reconcile_stale_running_tasks,
+    terminate_stale_advisory_lock_holders,
+)
 from app.services.worker_runtime import any_worker_healthy
 
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +23,12 @@ def main() -> None:
             if not any_worker_healthy():
                 session = SyncSession()
                 try:
+                    terminated = terminate_stale_advisory_lock_holders(
+                        session,
+                        max_age_seconds=int(os.getenv("OPENFINOPS_STALE_ADVISORY_LOCK_SECONDS", "60")),
+                    )
+                    if terminated:
+                        logger.warning("Terminated %d stale advisory-lock holder(s)", terminated)
                     reconcile_stale_running_tasks(session)
                 finally:
                     session.close()

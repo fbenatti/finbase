@@ -62,6 +62,7 @@ from app.services.etl_task_claim import (
     reconcile_stale_running_tasks,
     release_task_resource_locks,
     release_task_to_queue,
+    terminate_stale_advisory_lock_holders,
     try_acquire_task_resource_locks,
 )
 from app.services.worker_runtime import (
@@ -170,6 +171,12 @@ def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: in
                     rows_normalized=0, rows_destination=0, errors=[],
                     phase=f"Agendado: reprocessar Gold {period} após coleta (task {extraction_task_id})",
                     result_json={"schedule_id": schedule.id, "scheduled_pipeline": True,
+                                 # This task is deliberately one source + one
+                                 # month.  Publish only that Iceberg partition;
+                                 # preserving the rest by staging a complete
+                                 # Gold rewrite makes a tiny scheduled import
+                                 # grow with the whole destination table.
+                                 "publish_by_partition": True,
                                  "forecast_config_ids": cfg.get("forecast_config_ids", []),
                                  "accuracy": cfg.get("accuracy", False), "shared_cost": cfg.get("shared_cost", False),
                                  "gold_rule_ids": cfg.get("gold_rule_ids", [])},
@@ -1916,6 +1923,12 @@ def supervisor_main() -> None:
 
     startup = SyncSession()
     try:
+        recovered_locks = terminate_stale_advisory_lock_holders(
+            startup,
+            max_age_seconds=int(os.getenv("OPENFINOPS_STALE_ADVISORY_LOCK_SECONDS", "60")),
+        )
+        if recovered_locks:
+            print(f"Released {recovered_locks} stale PostgreSQL advisory lock holder(s)", flush=True)
         reconcile_stale_running_tasks(startup)
     finally:
         startup.close()

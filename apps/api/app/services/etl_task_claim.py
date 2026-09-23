@@ -167,6 +167,46 @@ def release_task_resource_locks(session: Session, task: EtlTask) -> None:
             pass
 
 
+def terminate_stale_advisory_lock_holders(session: Session, *, max_age_seconds: int = 60) -> int:
+    """Terminate abandoned PostgreSQL sessions holding our queue locks.
+
+    Advisory locks live for the lifetime of the database session, rather than
+    the task row.  Usually a dead worker's TCP connection is closed promptly,
+    but an interrupted deployment can leave a pooled backend ``idle in
+    transaction`` long enough to block the next worker.  Limit this recovery
+    to the current database user/database and only sessions that both hold a
+    granted advisory lock and have been idle in a transaction past the grace
+    period.
+
+    SQLite is used by some local/test installations and has no pg catalogues,
+    so it is deliberately a no-op outside PostgreSQL.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return 0
+
+    max_age_seconds = max(1, int(max_age_seconds))
+    rows = session.execute(text("""
+        WITH stale_lock_holders AS (
+            SELECT DISTINCT activity.pid
+              FROM pg_locks AS locks
+              JOIN pg_stat_activity AS activity ON activity.pid = locks.pid
+             WHERE locks.locktype = 'advisory'
+               AND locks.granted
+               AND activity.state = 'idle in transaction'
+               AND activity.xact_start < now() - make_interval(secs => :max_age_seconds)
+               AND activity.usename = current_user
+               AND activity.datname = current_database()
+               AND activity.pid <> pg_backend_pid()
+        )
+        SELECT pg_terminate_backend(pid)
+          FROM stale_lock_holders
+    """), {"max_age_seconds": max_age_seconds}).scalars().all()
+    terminated = sum(bool(row) for row in rows)
+    if terminated:
+        session.commit()
+    return terminated
+
+
 def release_task_to_queue(
     session: Session,
     task: EtlTask,

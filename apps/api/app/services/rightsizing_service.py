@@ -43,6 +43,20 @@ MIN_COVERAGE = 0.60
 MIN_OBSERVED_DAYS = 7
 
 
+
+def _ordenar_pelo_modelo(frame, modelo):
+    """Ordena as colunas do frame pela ordem declarada no modelo.
+
+    O writer apenas **anexa** `_billing_period` e `_processed_at` ao frame. Se o
+    frame chegar com as colunas em outra ordem, o schema fisico nasce diferente do
+    modelo e a proxima gravacao falha com "Mismatch in fields". Ordenar aqui faz a
+    convencao valer para os dois servicos.
+    """
+    declaradas = [c for c in modelo.column_names() if c in frame.columns]
+    extras = [c for c in frame.columns if c not in declaradas]
+    return frame[declaradas + extras]
+
+
 def _hash_decisao(linhas: list[dict[str, Any]]) -> str:
     """Hash das entradas materiais, ordenado.
 
@@ -233,12 +247,20 @@ async def build_candidates(*, run_id: str | None = None) -> dict[str, Any]:
     frame["run_id"] = corrida
     frame["decision_hash"] = _hash_decisao(candidatos)
     frame["created_at"] = datetime.now(timezone.utc).isoformat()
+    # Colunas de sistema completas: o modelo as declara e o Iceberg compara o
+    # schema inteiro — faltar uma faz a gravação falhar na próxima vez.
     frame["_silver_owner"] = "rightsizing"
+    frame["_silver_ingested_at"] = datetime.now(timezone.utc).isoformat()
     frame["_source_connection_id"] = None
+    frame["_source_connection_code"] = None
     frame["_source_connection_name"] = "rightsizing_engine"
+    frame["_processed_at"] = datetime.now(timezone.utc).isoformat()
+    frame["_billing_period"] = datetime.now(timezone.utc).strftime("%Y%m")
 
     from app.services import iceberg_service as iceberg
+    from app.services.silver_models import model as _modelo
 
+    frame = _ordenar_pelo_modelo(frame, _modelo("rightsizing_candidate"))
     written = iceberg.write_silver(
         connection_code="rightsizing",
         df=frame,
