@@ -3050,3 +3050,26 @@ Suíte: **9 failed / 401 passed** · `tsc` exit 0.
 | P11 | ⬜ estratégias avançadas (outras famílias, região, TCO, dependências) |
 | P12 | ✅ Jev integrado (antecipado; acoplamento ao P9 pendente) |
 | P13 | ⬜ operação (90 dias, retenção, backfill) + saving realizado |
+
+---
+
+## 41. Menu novo "Saving Actions"
+
+### 41.1 O pedido e a correção
+
+O usuário pediu um **menu novo**; eu havia apenas renomeado o existente. Corrigido
+com a separação correta entre visualização e operação:
+
+| Menu | Grupo | Papel |
+|---|---|---|
+| **Saving Actions** (novo) | Visualizações, ao lado de FinOps Intelligence | **dashboard**: resumo, oportunidade por veredito, estado das revisões, consumo AKS com drilldown, custo por período |
+| Rightsizing | Regras de negócios | **operacional**: decisões com o fluxo de revisão |
+
+Rotas `/saving-actions` e `/rightsizing`, com atalho entre elas. Os widgets que
+ficaram duplicados na página operacional foram removidos — dashboard mora no
+dashboard.
+
+Ambos leem dos cubos Gold materializados pela governança pelo endpoint
+`/rightsizing/dashboard`; a reconciliação resumo × detalhe compara a **mesma fonte**.
+
+`tsc` exit 0 · suíte 9 failed / 401 passed · ambas as rotas respondem 200.
