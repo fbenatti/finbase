@@ -54,6 +54,10 @@ MANIFEST_CONTRACT_VERSION = "1.0.0"
 #: que isto — senão o dependente publica "novo" em cima de "velho".
 DEFAULT_SOURCE_MAX_AGE_HOURS = 48.0
 
+#: Tolerância de reconciliação financeira, em reais (seção 5, C1). Um delta
+#: acima disso reprova a publicação do cubo de custo.
+RECONCILIATION_TOLERANCE_BRL = 0.01
+
 #: Status possíveis de uma materialização no manifesto.
 RUNNING = "RUNNING"
 SUCCESS = "SUCCESS"
@@ -160,7 +164,7 @@ class ManifestEntry:
     financial_total_in: float | None = None
     financial_total_out: float | None = None
     financial_delta: float | None = None
-    tolerance: float = 0.01
+    tolerance: float = RECONCILIATION_TOLERANCE_BRL
     reconciliation_status: str | None = None
     currency: str | None = None
     previous_snapshot_id: str | None = None
@@ -324,6 +328,7 @@ async def publish_gold_cube(
     run_id: int | None = None,
     rule_id: int | None = None,
     partition_column: str | None = None,
+    create_sql: str | None = None,
     financial_total_in: float | None = None,
     currency: str | None = None,
     empty_is_error: bool = False,
@@ -347,6 +352,10 @@ async def publish_gold_cube(
     Falha em qualquer passo remove o staging e **preserva a versão publicada
     anterior**. O manifesto registra o motivo — falha silenciosa é o que o
     plano proíbe.
+
+    `create_sql` permite ao chamador montar a CTAS completa (por exemplo com
+    `WITH (partitioning = ...)` declarado por coluna). O hash, as fontes e a
+    pós-medição continuam derivados do SQL, então o manifesto não muda.
     """
     from app.services.trino_service import execute as trino_execute
 
@@ -378,9 +387,10 @@ async def publish_gold_cube(
 
     iceberg.ensure_namespace(namespace)
     particao = f" WITH (partitioning = ARRAY['{partition_column}'])" if partition_column else ""
-    create_sql = (
-        f"CREATE TABLE iceberg.{namespace}.{staging}{particao} AS {select_sql}"
-    )
+    if create_sql is None:
+        create_sql = f"CREATE TABLE iceberg.{namespace}.{staging}{particao} AS {select_sql}"
+    else:
+        create_sql = create_sql.replace("{staging}", staging).replace("{namespace}", namespace)
 
     try:
         if progress:
@@ -746,3 +756,46 @@ async def retire_legacy_namespace(*, dry_run: bool = False) -> list[dict[str, An
         await retire_legacy_namespace_copy(tabela, dry_run=dry_run)
         for tabela in LEGACY_DIMON_TABLES
     ]
+
+
+async def materialize_gold_sql(
+    *,
+    cube_code: str,
+    table: str,
+    select_sql: str,
+    namespace: str = layers.GOLD,
+    partition_columns: tuple[str, ...] = (),
+    run_id: int | None = None,
+    rule_id: int | None = None,
+    currency: str | None = None,
+    financial_total_in: float | None = None,
+    empty_is_error: bool = False,
+    progress: Any | None = None,
+    timeout_s: float = 3600.0,
+) -> PublishOutcome:
+    """Materializa um cubo a partir do SQL de select, com partição declarada.
+
+    Açúcar sobre :func:`publish_gold_cube` para o caso comum dos cubos
+    financeiros: o chamador escreve apenas o `SELECT` e declara as colunas de
+    partição, e o manifesto é preenchido com hash, fontes e totais.
+    """
+    particao = ""
+    if partition_columns:
+        colunas = ", ".join(f"'{c}'" for c in partition_columns)
+        particao = f" WITH (partitioning = ARRAY[{colunas}])"
+    return await publish_gold_cube(
+        cube_code=cube_code,
+        table=table,
+        select_sql=select_sql,
+        namespace=namespace,
+        run_id=run_id,
+        rule_id=rule_id,
+        create_sql=(
+            f"CREATE TABLE iceberg.{{namespace}}.{{staging}}{particao} AS {select_sql}"
+        ),
+        currency=currency,
+        financial_total_in=financial_total_in,
+        empty_is_error=empty_is_error,
+        progress=progress,
+        timeout_s=timeout_s,
+    )

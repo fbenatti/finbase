@@ -1133,3 +1133,126 @@ Ordem proposta:
 3. C2 a partir de C1, com join 1:1 provado contra `resource_inventory`;
 4. C3 por `driver_type`, reconciliando com o delta de C1;
 5. só então o cutover, com a divergência de grão publicada em C11.
+
+---
+
+# G3 (parcial) — C1 `finops_cost_monthly`
+
+**Status:** materializado, reconciliado e publicado. C2 e C3 pendentes.
+
+## G3.1 Contrato construído
+
+Grão: `billing_period + provider + connection_code + sub_account_id + service_key
++ service_category + region_key + charge_category + currency +
+departamento_nivel_1..7`.
+
+| Dimensão / medida | Origem | Observação |
+|---|---|---|
+| `billing_period` | `billing_period_key` | `YYYYMM` validado; formato inválido vira NULL |
+| `provider` | `provider_key` | vocabulário controlado |
+| `connection_code` | `_source_connection_code` | identidade durável |
+| `sub_account_id` | `lower(trim())` | GUID de assinatura |
+| `service_key` | `service_key` | **83 → 62 chaves**: `Microsoft.Compute` unificado |
+| `region_key` | `region_key` | `GLOBAL` (reserva) ≠ `UNKNOWN` (ausência) |
+| `currency` | `currency_code` | obrigatória para somar |
+| `departamento_nivel_1..7` | livro FOCUS legado, por conta | **1:1 com deduplicação**; `org_classification_status` diz se mapeou |
+| `effective_cost`, `list_cost` | soma | aditivas |
+| `billed_cost`, `contracted_cost` | **NULL declarado** | indisponíveis na origem (D1); nunca zero |
+| `resources` | `COUNT(DISTINCT id válido)` | **não aditiva** |
+| `cost_missing_dimension`, `cost_without_tag` | soma condicional | **não aditivas** |
+| `rows`, `purchase_rows` | contagem | aditivas |
+
+`NON_ADDITIVE_MEASURES` e `ADDITIVE_MEASURES` são declaradas no módulo: somar
+`resources` pelas dimensões conta o mesmo recurso em cada serviço, região e
+categoria, e produziu 21.229.892 contra 968.339 recursos distintos reais.
+
+## G3.2 Construção em duas etapas — restrição medida, não preferência
+
+Uma única CTAS agregando 13,5 M linhas com `COUNT(DISTINCT resource_id)` **e** o
+join da hierarquia organizacional derrubava o cluster:
+
+```text
+openfinops-trino-worker-1  límite 2,44 GiB  →  90,41 % de uso
+TrinoError: Trino indisponível após 12 tentativas ... 503 Trino server is still initializing
+```
+
+Por isso C1 é materializado em estágios governados:
+
+1. `silver.finops_cost_monthly_grain` — agrega `resource_cost` no grão do cubo,
+   sem join e sem `COUNT(DISTINCT)`;
+2. `silver.finops_cost_monthly_resources` — conta recursos distintos válidos por
+   competência + conexão + conta (scan estreito);
+3. `gold.finops_cost_monthly` — estágio 2, com os dois `LEFT JOIN` sobre chaves
+   **deduplicadas** (organização por conta; recursos por competência+conexão+conta);
+4. reconciliação na tabela publicada.
+
+Os estágios 1 e 2 são auxiliares de detalhe (Silver, reconstruíveis); só o cubo é
+contrato público.
+
+## G3.3 Hierarquia organizacional sem multiplicar custo
+
+O custo canônico não tem organização. A ponte é
+`sub_account_id → subaccountid` do livro FOCUS legado.
+
+Medido: **74 contas do legado aparecem com mais de uma organização** (uma delas com
+52 valores distintos em `departamento_nivel_5`). Um `LEFT JOIN` cru multiplicaria
+linhas de custo — o fan-out que a regra 4.1 proíbe. O mapeamento usa
+`ROW_NUMBER()` por conta, ordenando por custo agregado decrescente (empate
+resolvido lexicalmente), garantindo **1:1**. Resultado: o total do cubo é idêntico
+ao do estágio 1, provando que o join não multiplicou.
+
+Cobertura: **12.871 de 13.184 linhas do cubo com organização mapeada** (97,6 %).
+As demais ficam com `org_classification_status = 'UNMAPPED'` — nulo explícito,
+nunca uma área inventada.
+
+## G3.4 Reconciliação
+
+```text
+resource_cost      : R$ 37.356.361,47 em 13.519.512 linhas
+finops_cost_monthly: R$ 37.356.361,47 em     13.184 linhas de cubo
+RECONCILIACAO: delta R$ 0,00 -> OK
+linhas de origem preservadas: True (13.519.512)
+```
+
+Outras verificações no cubo publicado:
+
+| Verificação | Resultado |
+|---|---|
+| períodos | 17 |
+| providers / conexões / moedas | 1 / 2 / 1 |
+| serviços distintos | 63 (62 + `UNKNOWN`) |
+| regiões distintas | 18 (inclui `GLOBAL` e `UNKNOWN`) |
+| `billed_cost` / `contracted_cost` | **NULL** (indisponíveis, não zero) |
+| custo sem dimensão crítica | R$ 64.429,09 |
+| custo sem tag de alocação | R$ 6.718.210,04 |
+
+`custo sem dimensão crítica` caiu de R$ 557.990,51 (202505, medido em G0) para
+R$ 64.429,09 no cubo: a definição passou a distinguir **ausência em consumo** de
+**reserva global**, então R$ 6,7 M de compra de reserva deixaram de ser contados
+como dado faltante — corretamente, porque não são.
+
+## G3.5 Manifesto
+
+Cada estágio registra manifesto próprio em `gold_manifest`, com `namespace`
+correto (`silver` para auxiliares, `gold` para o cubo), `source_tables`, hash do
+SQL e `previous_snapshot_id`. O cubo recebe uma segunda linha com o veredito da
+reconciliação (`financial_total_in`, `financial_total_out`, `financial_delta`,
+`reconciliation_status`), e divergência acima de R$ 0,01 **reprova** a
+materialização com erro explícito.
+
+## G3.6 Pendente nesta frente
+
+- **C2** `finops_cost_resource_monthly`: falta provar o join 1:1 com
+  `resource_inventory` (8.731 dos 968.339 recursos de custo têm inventário; 8.476
+  deles com mais de um snapshot, até 26). `resource_type` só existe no inventário;
+  no custo é NULL em 100 %.
+- **C3** `finops_cost_change_driver`: depende de C1 com `data_status`, que vem de
+  `finops_period_coverage` (G1 tem o classificador; falta materializar o dataset).
+- **APIs `/finops/*`** (G8): os endpoints de custo ainda não existem.
+- **Registro em `gold_rule`**: C1 é materializado por
+  `finops_cost_monthly.materialize_c1`, que usa o caminho governado
+  (`materialize_gold_sql`), mas ainda não tem linha em `gold_rule`. Isso é
+  diferente dos cubos legados, cujo SQL vive no banco. Decidir em G8 se o cubo
+  ganha regra declarativa ou continua como serviço versionado no código — a
+  decisão precisa ser registrada, porque a seção 6.1 pede um único caminho de
+  governança.

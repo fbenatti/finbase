@@ -841,8 +841,12 @@ ORDER BY b.bp
 """.strip()
 
 
-#: Tolerância de reconciliação por competência, em reais (seção 5, C1).
-RECONCILIATION_TOLERANCE_BRL = 0.01
+#: Tolerância de reconciliação por competência, em reais (seção 5, C1). Definida
+#: na governança, onde o delta é calculado, e reexportada aqui para os testes de
+#: cobertura não precisarem de segundo valor.
+from app.services.gold_governance import (  # noqa: E402  (import tardio: evita ciclo)
+    RECONCILIATION_TOLERANCE_BRL,
+)
 
 
 def reconciliation_ok(rows: list[dict[str, Any]]) -> tuple[bool, list[str]]:
