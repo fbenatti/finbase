@@ -2233,3 +2233,75 @@ pelo erro do Iceberg.
 | Destinos | 18 |
 | Mapeamentos | 228 |
 | Testes | 9 failed / 382 passed (baseline, nenhuma regressão) |
+
+---
+
+## 29. Bronze: o nome da tabela carrega a conexão
+
+### 29.1 O defeito de raiz
+
+O nome da tabela Bronze tinha **três fontes que não concordavam**:
+
+| Onde | Dizia |
+|---|---|
+| coletor de quota | `azure_compute_quota` |
+| registro de fontes | `raw_azure_{env}_compute_quota` |
+| tabela realmente gravada | `raw_azure_4p_quota` |
+
+Consequência: existiam **duas tabelas para a mesma coisa**, cada escritor
+alimentando uma, e a Silver lia a **menos completa** — 21 assinaturas contra 50. O
+`blob_path` da Bronze ainda carregava um quarto nome (`azure_compute_quota`).
+
+Agora as três concordam em `raw_azure_{env}_quota` / `raw_azure_{env}_policy`, com o
+`{env}` resolvido do código da conexão.
+
+### 29.2 Padronizações
+
+| Antes | Depois | Motivo |
+|---|---|---|
+| `raw_azure_ptu_metrics` | `raw_azure_4p_ptu_metrics` | sem conexão no nome; recebia dado de qualquer uma |
+| `raw_azure_resource_graph_ti` | **removida** | 655 linhas, sem leitor e sem criador |
+| `raw_azure_4p_compute_quota` | **removida** | duplicata com 21 assinaturas |
+| `raw_azure_4p_region_policy` | **removida** | duplicata com 22 fatias |
+
+O default `connection_code="azure_ptu_metrics"` em `persist_hourly` era gambiarra: o
+nome da tabela saía do valor do parâmetro. Agora é `None` e a conexão real manda.
+
+### 29.3 A duplicata escondia dado
+
+| Modelo | Antes | Depois |
+|---|---|---|
+| `resource_quota` | 9.744 | **23.200** |
+| `region_policy` | 2.254 | **5.527** |
+
+Mais que o dobro em quota. O sistema estava respondendo elegibilidade com **42% do
+dado** — e nada indicava isso, porque a tabela tinha o nome que o mapeamento
+esperava.
+
+### 29.4 Lição
+
+O nome da tabela era derivado em **três lugares independentes**: o coletor escolhia
+um, o registro declarava outro, e o mapeamento apontava para um terceiro. Enquanto
+os três concordarem, ninguém percebe; quando divergem, o sintoma é **dado faltando
+sem erro**.
+
+O nome da Bronze passa a ter uma origem única: `bronze_pattern` no registro de
+fontes, resolvido pelo código da conexão.
+
+### 29.5 O que ficou fora do padrão, de propósito
+
+As 14 tabelas de outras nuvens (`raw_gcp_*`, `raw_oci_*`, `raw_claude_*`,
+`raw_notebooklm_*`, `raw_github_*`, `raw_ibm_*`, `raw_mongodb_*`) usam o padrão do
+próprio provedor e **não foram tocadas** — mudá-las alteraria contrato de fontes que
+não são Azure e não têm conexão no mesmo sentido.
+
+As três tabelas `azure_advisor_recommendations`, `azure_benefit_recommendations` e
+`azure_reservations_catalog` **guardam múltiplas conexões na mesma tabela**,
+distinguidas pela coluna `connection_code`. Não são um risco de sobrescrita: a
+coluna é o discriminador, e é uma escolha de desenho diferente — não inconsistência.
+Ficaram como estão.
+
+### 29.6 Estado
+
+Bronze Azure: **21 tabelas, todas no padrão** `raw_azure_<conexão>_<fonte>`.
+Testes: 9 failed / 382 passed (baseline).
