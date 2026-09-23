@@ -117,11 +117,30 @@ async def collect_policies(config: dict[str, Any], subscription_id: str) -> pd.D
     return pd.DataFrame(linhas)
 
 
+def _limitar_textos(frame: pd.DataFrame, limite: int = 3800) -> pd.DataFrame:
+    """Trunca campos de texto longos antes da Bronze.
+
+    A coluna física da Bronze é dimensionada pela primeira escrita, e uma
+    assinatura pode devolver um parâmetro de policy bem maior que a amostra —
+    o `StringDataRightTruncation` derrubava a coleta inteira por causa de um
+    campo acessório. O limite fica abaixo do teto típico de `varchar`.
+    """
+    if frame.empty:
+        return frame
+    for coluna in frame.columns:
+        if frame[coluna].dtype == object:
+            frame[coluna] = frame[coluna].apply(
+                lambda v: v[:limite] if isinstance(v, str) and len(v) > limite else v
+            )
+    return frame
+
+
 def _write_bronze(
     session, connection, frame: pd.DataFrame, period: str, blob_path: str, *, source_code: str | None = None
 ) -> int:
     if frame.empty:
         return 0
+    frame = _limitar_textos(frame)
     from app.models.ingested_blob import IngestedBlob
     from app.services import iceberg_service as iceberg
 
@@ -169,35 +188,50 @@ def _coleta(session, connection_id: int, tabela: str, coletor, *, source_code, t
     dia = datetime.now(timezone.utc).date().isoformat()
     periodo = dia.replace("-", "")[:6]
     total = 0
-    regioes = _regions(config)
+    regioes = _regions(config) or ["brazilsouth", "eastus"]
+    # Uma assinatura fora do alcance da credencial (401) é estado do ambiente,
+    # não defeito: registra e segue, em vez de perder a coleta inteira.
+    sem_acesso: list[dict[str, Any]] = []
+    coletadas = 0
     for assinatura in assinaturas:
-        if coletor is collect_quota and not regioes:
-            # Sem região declarada, usa as que têm recurso conhecido.
-            regioes = ["brazilsouth", "eastus"]
-        if coletor is collect_quota:
-            for regiao in regioes:
-                frame = asyncio_run(coletor(config, assinatura, regiao))
+        try:
+            if coletor is collect_quota:
+                for regiao in regioes:
+                    frame = asyncio_run(coletor(config, assinatura, regiao))
+                    if frame.empty:
+                        continue
+                    frame["snapshot_date"] = dia
+                    total += _write_bronze(
+                        s, conn, frame, periodo,
+                        f"{tabela}/{dia}/{assinatura}/{regiao}", source_code=source_code,
+                    )
+                    coletadas += 1
+            else:
+                frame = asyncio_run(coletor(config, assinatura))
                 if frame.empty:
                     continue
                 frame["snapshot_date"] = dia
                 total += _write_bronze(
-                    s, conn, frame, periodo,
-                    f"{tabela}/{dia}/{assinatura}/{regiao}", source_code=source_code,
+                    s, conn, frame, periodo, f"{tabela}/{dia}/{assinatura}", source_code=source_code,
                 )
-        else:
-            frame = asyncio_run(coletor(config, assinatura))
-            if frame.empty:
-                continue
-            frame["snapshot_date"] = dia
-            total += _write_bronze(
-                s, conn, frame, periodo, f"{tabela}/{dia}/{assinatura}", source_code=source_code,
-            )
+                coletadas += 1
+        except Exception as exc:  # noqa: BLE001
+            sem_acesso.append({"subscription_id": assinatura, "reason": str(exc)[:200]})
+            logger.info("%s: assinatura %s sem acesso (%s)", tabela, assinatura[:8], type(exc).__name__)
     s.commit()
     return {
         "connection_id": connection_id,
         "rows_bronze": total,
         "period": periodo,
         "subscriptions": len(assinaturas),
+        "subscriptions_collected": coletadas,
+        "subscriptions_without_access": len(sem_acesso),
+        # Estado honesto sobre a cobertura, como o plano exige.
+        "status": "PARTIAL" if sem_acesso else "AVAILABLE",
+        "status_reason": (
+            f"{len(sem_acesso)} assinatura(s) fora do alcance da credencial."
+            if sem_acesso else None
+        ),
         "bronze_table": f"raw_{(source_code or conn.code).replace('-', '_')}",
     }
 

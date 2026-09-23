@@ -15,6 +15,8 @@ _DEDICATED_COLLECTORS: frozenset[str] = frozenset({
     "azure_automation_jobs",
     "azure_compute_quota",
     "azure_region_policy",
+    "azure_aks_cost_allocation",
+    "azure_container_insights",
 })
 
 #!/usr/bin/env python3
@@ -1435,6 +1437,53 @@ def consumer_main(worker_id: int):
                                     _t_vm.billing_periods = [_vm_result.get("period")] if _vm_result.get("period") else []
                                     _t_vm.result_json = _vm_result
                                     _t_vm.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
+                            if _ptu_conn and _ptu_conn.connector_type in (
+                                "azure_aks_cost_allocation", "azure_container_insights"
+                            ):
+                                _eh_alocacao = _ptu_conn.connector_type == "azure_aks_cost_allocation"
+                                if _eh_alocacao:
+                                    from app.services.azure_aks_cost_service import (
+                                        run_aks_cost_allocation_collection as _coletor_akc,
+                                    )
+                                    _rot = "Alocação de custo AKS"
+                                else:
+                                    from app.services.azure_container_insights_service import (
+                                        run_container_insights_collection as _coletor_akc,
+                                    )
+                                    _rot = "Container Insights"
+                                try:
+                                    _akc = _coletor_akc(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _akc_exc:
+                                    import traceback as _tb_akc
+                                    _tb_akc.print_exc()
+                                    _t_akc = _ptu_session.get(EtlTask, task_id)
+                                    if _t_akc:
+                                        _t_akc.status = "FAILED"
+                                        _t_akc.phase = f"{_rot} falhou: {str(_akc_exc)[:380]}"
+                                        _t_akc.errors = [str(_akc_exc)[:1000]]
+                                        _t_akc.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_akc_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_akc_ok:
+                                    _t_akc_ok.status = "COMPLETED"
+                                    _t_akc_ok.phase = (
+                                        f"{_rot}: {_akc.get('rows_bronze', 0)} linha(s) · "
+                                        f"estado {_akc.get('status')}"
+                                    )
+                                    _t_akc_ok.rows_raw = _akc.get("rows_bronze", 0)
+                                    _t_akc_ok.billing_periods = [_akc.get("period")] if _akc.get("period") else []
+                                    _t_akc_ok.result_json = _akc
+                                    _t_akc_ok.finished_at = datetime.now(timezone.utc)
                                     _ptu_session.commit()
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)

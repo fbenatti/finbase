@@ -218,7 +218,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "api_reference": "AKS Cost Analysis / OpenCost (condicionado ao add-on)",
         "required_permission": "a validar no spike",
         "azure_scope": "subscription",
-        "implementation_status": "planned",
+        "implementation_status": "implemented",
     },
     {
         "source_key": "container_insights",
@@ -234,7 +234,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "api_reference": "Log Analytics / Container Insights",
         "required_permission": "Log Analytics Reader no workspace",
         "azure_scope": "resource",
-        "implementation_status": "planned",
+        "implementation_status": "implemented",
     },
     {
         "source_key": "region_policy",
@@ -272,12 +272,16 @@ CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
     "azure_customer_price": "customer_price",
     "azure_compute_quota": "compute_quota",
     "azure_region_policy": "region_policy",
+    "azure_aks_cost_allocation": "aks_cost_allocation",
+    "azure_container_insights": "container_insights",
     "azure_aks_inventory": "aks_inventory",
     "azure_retail_price": "retail_price",
     "azure_compute_skus": "compute_skus",
     "azure_aks_cost_allocation": "aks_cost_allocation",
     "azure_container_insights": "container_insights",
     "azure_region_policy": "region_policy",
+    "azure_aks_cost_allocation": "aks_cost_allocation",
+    "azure_container_insights": "container_insights",
 }
 
 #: Sufixos conhecidos nos codes legados que indicam a fonte (não o ambiente).
