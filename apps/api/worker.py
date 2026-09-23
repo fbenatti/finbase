@@ -17,6 +17,7 @@ _DEDICATED_COLLECTORS: frozenset[str] = frozenset({
     "azure_region_policy",
     "azure_aks_cost_allocation",
     "azure_container_insights",
+    "azure_aks_namespace_allocation",
 })
 
 #!/usr/bin/env python3
@@ -1437,6 +1438,44 @@ def consumer_main(worker_id: int):
                                     _t_vm.billing_periods = [_vm_result.get("period")] if _vm_result.get("period") else []
                                     _t_vm.result_json = _vm_result
                                     _t_vm.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
+                            if _ptu_conn and _ptu_conn.connector_type == "azure_aks_namespace_allocation":
+                                # P4: topologia por namespace via Managed Prometheus.
+                                from app.services.azure_aks_namespace_service import (
+                                    run_aks_namespace_collection,
+                                )
+                                try:
+                                    _ans = run_aks_namespace_collection(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _ans_exc:
+                                    import traceback as _tb_ans
+                                    _tb_ans.print_exc()
+                                    _t_ans = _ptu_session.get(EtlTask, task_id)
+                                    if _t_ans:
+                                        _t_ans.status = "FAILED"
+                                        _t_ans.phase = f"AKS namespace falhou: {str(_ans_exc)[:380]}"
+                                        _t_ans.errors = [str(_ans_exc)[:1000]]
+                                        _t_ans.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_ans_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_ans_ok:
+                                    _t_ans_ok.status = "COMPLETED"
+                                    _t_ans_ok.phase = (
+                                        f"AKS namespace: {_ans.get('namespaces', 0)} namespace(s) em "
+                                        f"{_ans.get('clusters', 0)} cluster(s) · {_ans.get('status')}"
+                                    )
+                                    _t_ans_ok.rows_raw = _ans.get("rows_bronze", 0)
+                                    _t_ans_ok.billing_periods = [_ans.get("period")] if _ans.get("period") else []
+                                    _t_ans_ok.result_json = _ans
+                                    _t_ans_ok.finished_at = datetime.now(timezone.utc)
                                     _ptu_session.commit()
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)

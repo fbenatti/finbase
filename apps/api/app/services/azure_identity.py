@@ -58,3 +58,15 @@ async def get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str],
         values.extend(data.get("value") or [])
         next_url = data.get("nextLink")
     return values
+
+
+# Escopo do Azure Monitor Managed Prometheus. É diferente do ARM: pedir token com
+# o escopo do ARM devolve 401, que parece falta de permissão mas é escopo errado.
+PROMETHEUS_SCOPE = "https://prometheus.monitor.azure.com/.default"
+
+
+async def prometheus_headers(config: dict[str, Any]) -> dict[str, str]:
+    """Cabeçalhos para o endpoint de consulta do Managed Prometheus."""
+    cred = credential(config)
+    token = cred.get_token(PROMETHEUS_SCOPE).token
+    return {"Authorization": f"Bearer {token}"}
