@@ -2804,3 +2804,84 @@ forma não óbvia:
   afirmar algo falso.
 
 Suíte: **9 failed / 400 passed** (era 391).
+
+---
+
+## 37. Correções aplicadas e reler o plano
+
+### 37.1 O que estava pendente e foi corrigido
+
+Quatro correções de raiz, todas da mesma família (contrato entre partes que
+ninguém validava):
+
+| Correção | O que causava |
+|---|---|
+| Bloco de sistema completo nos 13 modelos | "Mismatch in fields" na gravação seguinte |
+| `_billing_period` como último campo | ordem física divergia mesmo com colunas certas |
+| `normalise` ordena pelo modelo | a ordem do frame determinava o schema por acaso |
+| **Delete escopado por conexão** | TI apagava o dado do 4P (mesmo dono, outra conexão) |
+
+A quarta é a mais grave: `resource_inventory` tinha **21.493 linhas** porque a
+rematerialização do TI apagou as 17.850 do 4P. O dono (`_silver_owner`) distingue a
+**fonte**, não a **conexão** — e 4P/TI compartilham a fonte. Corrigido incluindo
+`_source_connection_name` no escopo do delete. Verificado: **39.343 linhas**, as
+quatro contribuições coexistindo.
+
+### 37.2 Estado verificado
+
+**12 de 12 tabelas Silver alinhadas ao modelo** (ordem e conteúdo).
+P6 = 441 · P8 = 49 candidatos · P9 = 33 decisões.
+
+| Modelo | Linhas |
+|---|---|
+| `resource_cost` | 13.519.512 |
+| `price_catalog` | 3.946.787 |
+| `resource_metric_series` | 844.514 |
+| `resource_inventory` | 39.343 |
+| `compute_sku_catalog` | 1.523.324 |
+| `resource_quota` | 23.200 |
+| `region_policy` | 5.527 |
+| `container_metric_series` | 9.177 |
+| `ptu_capacity_series` | 6.660 |
+| `resource_allocation` | 242+ |
+| perfil/candidatos/decisões | 441 / 49 / 33 |
+
+Suíte: **9 failed / 401 passed**.
+
+### 37.3 Onde paramos no plano
+
+| P | Estado |
+|---|---|
+| P0–P1 | ✅ completo |
+| P2 | ✅ completo (catálogo + seleção + aba de serviços auxiliares) |
+| P3 | ✅ completo (identidade, custo, trilha) |
+| P4 | ✅ funcional (node pool 46 clusters + namespace 2 clusters); grafo completo com UID de pod pendente |
+| P5 | ✅ completo (idempotente, memória coletada) |
+| P6 | ✅ completo (441 perfis, 49 recursos) |
+| P7 | ✅ completo (SKU/quota/policy/preço contratado+on-demand) |
+| P8 | ✅ completo (10 VALID · 16 INVALID · 23 REQUIRES_VALIDATION, R$ 589,30, determinismo provado) |
+| P9 | ✅ completo (33 decisões, revisão terminal, sem duplicação) |
+| P12 | ✅ Jev integrado (antecipado) |
+| **P10** | **▶ próximo** |
+| P11, P13 | ⬜ pendentes |
+
+### 37.4 Próximo passo: P10 — Cubos Gold e UI do MVP
+
+O plano pede:
+
+1. **Cubos Gold** de custo, oportunidade, decisão e consumo — incluindo o
+   `focus_enriched` (o cruzamento FOCUS × canônicas), que está escrito mas nunca
+   construído por causa da instabilidade do Trino nas primeiras tentativas.
+2. **UI React do MVP**: resumo executivo, detalhe DE/PARA clicável, série observada
+   **e projeção na mesma escala** (estilo distinto), dias observados, saving, risco,
+   origem do preço, cobertura e vetos.
+3. **Exploração AKS** a partir do cubo Gold, sem ler a Silver inteira por request.
+
+Aceites do P10:
+- total do resumo reconcilia com detalhes **sem somar alternativas**;
+- cada nível AKS reconcilia ao pai e à FOCUS Silver;
+- filtros por namespace **não duplicam custos**;
+- projeção tem **estilo distinto** de dado observado;
+- saving realizado continua **ausente** antes da validação;
+- nenhuma consulta usa namespace/API Dimon;
+- regressão dos dashboards migrados passa.
