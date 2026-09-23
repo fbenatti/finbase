@@ -2732,3 +2732,75 @@ ServiceNow  habilitado=False token=nao   nunca testado
 
 Assim o P2 fica completo: catálogo de fontes, seleção por conexão, validador de
 código **e** a aba de serviços auxiliares.
+
+---
+
+## 36. P9 — Histórico, versão e revisão humana
+
+### 36.1 Explicação do que o pacote pede
+
+O P9 transforma os candidatos do P8 em **decisões versionadas e revisáveis**. Três
+aceites guiaram a implementação:
+
+| Aceite | O que significa na prática |
+|---|---|
+| Veto determinístico sobrevive a qualquer provider | o veredito do motor é gravado; **a revisão não o reescreve** |
+| Revisão não muda premissas históricas | o snapshot DE/PARA é congelado no momento da decisão |
+| Reexecução cria versão adequada, sem duplicação | rodar de novo ≠ decidir de novo |
+
+### 36.2 O `evidence_hash` é o coração
+
+Cobre **as entradas que sustentam a decisão** — e deliberadamente **não** cobre
+`run_id` nem `created_at`. Isso separa duas coisas que parecem iguais:
+
+- **"rodei de novo"** → mesma evidência → mesmo hash → **0 versões novas**
+- **"o mundo mudou"** → custo ou veredito diferente → hash diferente → **versão nova**
+
+Verificado com duas execuções reais: a primeira gerou 33 decisões; a segunda gerou
+**0 novas e preservou as 33** — inclusive a revisão já feita.
+
+### 36.3 Fluxo de revisão
+
+`PENDING → APPROVED | REJECTED | DEFERRED`, com `APPROVED` e `REJECTED` **terminais**.
+
+| Ação | Resultado |
+|---|---|
+| Aprovar | HTTP 200, `deterministic_verdict` **inalterado** |
+| Reverter aprovada | **HTTP 409** — "Reabra com evidência nova, que gera outra versão" |
+
+Estado após os testes: **31 PENDING · 1 APPROVED (R$ 109,34) · 1 REJECTED**.
+
+**Nenhum endpoint altera VM.** O sistema recomenda, registra e mede; a execução é
+humana. Um endpoint que "aplicasse" a mudança seria a automação que o plano proíbe
+nesta fase.
+
+### 36.4 Dois defeitos encontrados
+
+1. **Duplicação por reexecução.** O `write_silver` **acrescenta**. Eu reaproveitava a
+   linha antiga **e** gravava de novo: **66 linhas para 33 hashes**. O sintoma
+   apareceu na API, não no log — o serviço reportava "0 novas, 33 preservadas"
+   enquanto a tabela dobrava. Corrigido com deduplicação por `evidence_hash` e
+   substituição do período.
+
+2. **A revisão não voltava na leitura.** A decisão vive no Iceberg, que é
+   *append-only* e cujo snapshot precisa permanecer imutável — então a revisão foi
+   para uma tabela própria, em PostgreSQL. Mas a leitura **não a sobrepunha**: o
+   resumo mostrava tudo `PENDING` e a validação de transição lia o estado errado, de
+   modo que **uma decisão já aprovada aceitava nova revisão**. Corrigido sobrepondo
+   a revisão mais recente na leitura.
+
+O segundo é o mais relevante: o fluxo *parecia* funcionar (a gravação respondia
+200), mas o estado não voltava. **Gravar sem ler de volta é meio caminho** — e o
+teste de aceite do P9 é justamente sobre o estado.
+
+### 36.5 Testes
+
+`tests/test_rightsizing_decision_p9.py` com **9 testes**. Dois protegem o aceite de
+forma não óbvia:
+
+- campos **não materiais** (`resource_name`, `run_id`) **não** entram no hash;
+- `saving_monthly = None` e `saving_monthly = 0.0` produzem **hashes diferentes** —
+  ausência de preço é evidência diferente de "saving zero", e tratá-las igual seria
+  afirmar algo falso.
+
+Suíte: **9 failed / 400 passed** (era 391).
