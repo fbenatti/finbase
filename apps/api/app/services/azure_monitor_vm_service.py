@@ -373,13 +373,20 @@ def _guest_gap_rows(vms: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def anchor_until(now: datetime | None = None, *, granularity_minutes: int = 0) -> datetime:
-    """Trunca o fim da janela para uma âncora estável.
+    """Fim da janela, ancorado no **último dia completo** — não no dia da execução.
 
-    A chave da fatia Bronze inclui o instante final. Se ele for `now()`, duas
+    A chave da fatia Bronze inclui o instante final. Com `now()` cru, duas
     execuções da mesma janela geram caminhos diferentes e a coleta **duplica**
-    em vez de substituir — foi o que aconteceu na primeira carga (1.230.004
-    linhas para 615.002 reportadas). A âncora usa o dia por padrão; com
-    `granularity_minutes` pode ser uma hora cheia, para coleta incremental.
+    em vez de substituir — foi o que produziu 1.230.004 linhas para 615.002
+    reais, com as fatias `20260922T0000` e `20260923T0000`.
+
+    A âncora é o **dia da execução** (00:00Z): assim, repetir a coleta no mesmo
+    dia reescreve a mesma fatia, que é o aceite do P5 ("reexecutar os 15 dias
+    não duplica"). Coletar em outro dia produz janela nova — correto, porque a
+    janela de 15 dias de fato mudou.
+
+    Para reprocessar uma janela histórica exata, o chamador passa `until`
+    explícito: a âncora só normaliza o instante, não decide a janela.
     """
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if granularity_minutes and granularity_minutes > 0:
