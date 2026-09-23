@@ -2517,3 +2517,84 @@ rerun inference when evidence and question meanings are unchanged"*.
 3. **Auditado.** modelo, versão e `input_hash` ficam registrados.
 
 `servicenow` nasce desabilitado, como o plano pede.
+
+---
+
+## 33. P4 destravado: alocação por namespace via Managed Prometheus
+
+### 33.1 O caminho que eu não tinha testado
+
+O P4 estava classificado como bloqueado por capacidade: add-on Cost Analysis
+inativo e `listClusterUserCredential` com **403**. Faltava o terceiro caminho — o
+**Azure Monitor Managed Prometheus**.
+
+| Caminho | Estado |
+|---|---|
+| API do Kubernetes | 403 |
+| Add-on Cost Analysis | não ativo |
+| **Managed Prometheus** | **disponível em 4 clusters** |
+
+As métricas do add-on de AKS já estão publicadas:
+
+```
+kube_pod_container_resource_requests / _limits
+labels: cluster, node, namespace, pod, container, uid
+```
+
+É dado do provedor, **não inferência** — e o label `uid` é exatamente o que o plano
+exige para pod efêmero.
+
+### 33.2 Duas descobertas de implementação
+
+**Endpoint descoberto, não configurado.** A conta `microsoft.monitor/accounts`
+declara `prometheusQueryEndpoint` no Resource Graph. Descobrir é melhor que exigir:
+o workspace muda por ambiente e o operador não deveria caçar a URL.
+`prometheus_endpoints` na conexão tem precedência quando declarado.
+
+**O escopo do token é diferente.** O Managed Prometheus exige
+`https://prometheus.monitor.azure.com/.default`. Com o escopo do ARM a resposta é
+**401** — que parece falta de permissão mas é escopo errado. Vale registrar: eu
+quase concluí "sem permissão" por causa disso.
+
+### 33.3 Decisões do plano respeitadas
+
+| Regra do plano | Como está |
+|---|---|
+| Peso soma 1 por grupo | validado **antes** de gravar; não fecha, não grava |
+| Recurso requisitado como peso | `cpu_requests` — é o que se paga pela capacidade reservada |
+| Sem inferir namespace por nome | classificação por lista **explícita** de namespaces de sistema |
+| Custo sem vínculo visível | namespace sem requisição fica com peso **0**, não redistribuído |
+
+### 33.4 Verificado pelo pipeline (task 5950)
+
+**19 namespaces em 2 clusters · `PARTIAL`.** Os demais clusters não têm o add-on de
+métricas, e isso fica registrado como ausência em vez de silêncio.
+
+`resource_allocation` com **dois níveis**:
+
+| Nível | Base do peso | Registros | Clusters |
+|---|---|---|---|
+| `node_pool` | `node_capacity` | 242 | 46 |
+| `namespace` | `cpu_requests` | 19 | 2 |
+
+**Todos os 48 grupos somam exatamente 1,0.**
+
+O nível `node_pool` permanece porque cobre os 46 clusters, inclusive os que não têm
+o add-on de métricas — os dois níveis se complementam.
+
+### 33.5 O que ainda falta do P4
+
+- **O grafo completo** `cluster → node → namespace → workload → pod/container` como
+  arestas persistidas. Hoje a alocação está no grão namespace; o passo de nós e
+  pods por namespace é o próximo.
+- **UID de pod** nos dados persistidos: o label existe no Prometheus e ainda não é
+  gravado na Bronze.
+- **Reconciliação com o FOCUS**: o aceite pede "soma alocada fecha com custo FOCUS
+  elegível dentro da tolerância". Depende do cubo `focus_enriched`.
+
+### 33.6 Tentativa de usar o `az` CLI
+
+Tentei `az aks get-credentials`, mas o CLI falha com
+`PermissionError: ~/.azure/az.sess` — **restrição do meu ambiente de sandbox**, não
+do Azure. Não é caminho viável aqui; o Prometheus é melhor de qualquer forma, porque
+não depende de credencial de cluster.
