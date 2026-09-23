@@ -37,10 +37,12 @@ from app.services import lakehouse_layers as layers
 router = APIRouter(prefix="/reservations", tags=["reservations"])
 logger = logging.getLogger(__name__)
 
-CATALOG_TABLE = "azure_reservations_catalog"
-UTILIZATION_TABLE = "azure_benefit_utilization"
-ADVISOR_TABLE = "azure_advisor_recommendations"
-BENEFIT_REC_TABLE = "azure_benefit_recommendations"
+# Base do nome: a conexão entra como sufixo (`raw_azure_4p_...`), como em todas
+# as outras fontes. Guardar várias conexões na mesma tabela foi desenho legado.
+CATALOG_BASE = "reservations_catalog"
+UTILIZATION_BASE = "benefit_utilization"
+ADVISOR_BASE = "advisor_recommendations"
+BENEFIT_REC_BASE = "benefit_recommendations"
 FOCUS_DETAIL_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
 TRINO_TIMEOUT_S = 60.0
 
@@ -57,17 +59,41 @@ def _ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _table(name: str) -> str:
-    safe = name.replace("-", "_").replace(".", "_")
-    return f"iceberg.bronze.{safe}"
+async def _tabelas_da_base(base: str) -> list[str]:
+    """Tabelas Bronze das conexões para uma base de nome.
 
-
-async def _table_exists(name: str) -> bool:
+    Cada conexão tem a sua (`raw_azure_4p_advisor_recommendations`,
+    `raw_azure_ti_advisor_recommendations`). A leitura une todas — quem consome
+    não precisa saber em quantas conexões o dado está.
+    """
     try:
-        rows = await trino_execute(f"SHOW TABLES FROM iceberg.bronze LIKE '{name}'", timeout_s=TRINO_TIMEOUT_S)
-        return bool(rows)
+        linhas = await trino_execute(
+            "SELECT table_name FROM iceberg.information_schema.tables "
+            f"WHERE table_schema='bronze' AND table_name LIKE 'raw_azure\_%\_{base}' "
+            "ESCAPE '\\' ORDER BY table_name",
+            timeout_s=TRINO_TIMEOUT_S,
+        )
     except Exception:
-        return False
+        return []
+    return [str(r.get("table_name")) for r in (linhas or []) if r.get("table_name")]
+
+
+async def _table(base: str) -> str:
+    """Fonte de leitura da base: a tabela da conexão, ou a união de todas.
+
+    A união preserva o comportamento anterior (uma tabela com todas as conexões)
+    já no formato novo, sem exigir que o consumidor mude.
+    """
+    tabelas = await _tabelas_da_base(base)
+    if not tabelas:
+        return f"iceberg.bronze.raw_azure_4p_{base}"
+    if len(tabelas) == 1:
+        return f"iceberg.bronze.{tabelas[0]}"
+    return "(" + " UNION ALL ".join(f"SELECT * FROM iceberg.bronze.{t}" for t in tabelas) + ")"
+
+
+async def _table_exists(base: str) -> bool:
+    return bool(await _tabelas_da_base(base))
 
 
 def _parse_azure_date(raw: Any) -> date | None:
@@ -235,7 +261,7 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """KPIs executivos consolidados (catálogo + utilização + custo no bronze)."""
-    if not await _table_exists(CATALOG_TABLE):
+    if not await _table_exists(CATALOG_BASE):
         return {
             "available": False,
             "message": "Nenhum dado de reservas coletado ainda. Use POST /reservations/collect.",
@@ -251,17 +277,17 @@ async def dashboard(
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
     catalog = await trino_execute(
-        f"SELECT * FROM {_table(CATALOG_TABLE)}{where_sql}",
+        f"SELECT * FROM {await _table(CATALOG_BASE)}{where_sql}",
         timeout_s=TRINO_TIMEOUT_S,
     )
     utilization = []
-    if await _table_exists(UTILIZATION_TABLE):
+    if await _table_exists(UTILIZATION_BASE):
         util_where = []
         if connection_id:
             util_where.append(f"{_ident('connection_id')} = {int(connection_id)}")
         util_sql = (" WHERE " + " AND ".join(util_where)) if util_where else ""
         utilization = await trino_execute(
-            f"SELECT * FROM {_table(UTILIZATION_TABLE)}{util_sql}",
+            f"SELECT * FROM {await _table(UTILIZATION_BASE)}{util_sql}",
             timeout_s=TRINO_TIMEOUT_S,
         )
 
@@ -351,7 +377,7 @@ async def catalog(
     db: AsyncSession = Depends(get_db),
 ):
     """Catálogo de benefícios (RI + Savings Plans)."""
-    if not await _table_exists(CATALOG_TABLE):
+    if not await _table_exists(CATALOG_BASE):
         return {"available": False, "rows": []}
     where = []
     if benefit_type:
@@ -362,7 +388,7 @@ async def catalog(
         where.append(f"{_ident('connection_id')} = {int(connection_id)}")
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     rows = await trino_execute(
-        f"SELECT * FROM {_table(CATALOG_TABLE)}{where_sql} ORDER BY {_ident('benefit_end')} LIMIT {int(limit)}",
+        f"SELECT * FROM {await _table(CATALOG_BASE)}{where_sql} ORDER BY {_ident('benefit_end')} LIMIT {int(limit)}",
         timeout_s=TRINO_TIMEOUT_S,
     )
     return {"available": True, "rows": rows}
@@ -376,7 +402,7 @@ async def utilization(
     db: AsyncSession = Depends(get_db),
 ):
     """Série diária de utilização consolidada (benefitUtilizationSummaries)."""
-    if not await _table_exists(UTILIZATION_TABLE):
+    if not await _table_exists(UTILIZATION_BASE):
         return {"available": False, "rows": []}
     where = []
     if connection_id:
@@ -387,7 +413,7 @@ async def utilization(
     where.append(f"{_ident('usage_date')} >= '{cutoff}'")
     where_sql = " WHERE " + " AND ".join(where)
     rows = await trino_execute(
-        f"SELECT * FROM {_table(UTILIZATION_TABLE)}{where_sql} "
+        f"SELECT * FROM {await _table(UTILIZATION_BASE)}{where_sql} "
         f"ORDER BY {_ident('usage_date')}",
         timeout_s=TRINO_TIMEOUT_S,
     )
@@ -402,7 +428,7 @@ async def advisor_recommendations(
     db: AsyncSession = Depends(get_db),
 ):
     """Recomendações do Azure Advisor (filtro por categoria, ex. Cost)."""
-    if not await _table_exists(ADVISOR_TABLE):
+    if not await _table_exists(ADVISOR_BASE):
         return {"available": False, "rows": [], "categories": []}
     where = []
     if category:
@@ -411,11 +437,11 @@ async def advisor_recommendations(
         where.append(f"{_ident('connection_id')} = {int(connection_id)}")
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     rows = await trino_execute(
-        f"SELECT * FROM {_table(ADVISOR_TABLE)}{where_sql} ORDER BY {_ident('impact')} LIMIT {int(limit)}",
+        f"SELECT * FROM {await _table(ADVISOR_BASE)}{where_sql} ORDER BY {_ident('impact')} LIMIT {int(limit)}",
         timeout_s=TRINO_TIMEOUT_S,
     )
     cats = await trino_execute(
-        f"SELECT {_ident('category')}, count(*) AS n FROM {_table(ADVISOR_TABLE)} GROUP BY 1 ORDER BY 2 DESC",
+        f"SELECT {_ident('category')}, count(*) AS n FROM {await _table(ADVISOR_BASE)} GROUP BY 1 ORDER BY 2 DESC",
         timeout_s=TRINO_TIMEOUT_S,
     )
     return {"available": True, "rows": rows, "categories": cats}
@@ -429,7 +455,7 @@ async def benefit_recommendations(
     db: AsyncSession = Depends(get_db),
 ):
     """Recomendações de benefício (Savings Plan / RI) com savings estimado."""
-    if not await _table_exists(BENEFIT_REC_TABLE):
+    if not await _table_exists(BENEFIT_REC_BASE):
         return {"available": False, "rows": [], "summary": {}}
     where = []
     if kind:
@@ -438,7 +464,7 @@ async def benefit_recommendations(
         where.append(f"{_ident('connection_id')} = {int(connection_id)}")
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     rows = await trino_execute(
-        f"SELECT * FROM {_table(BENEFIT_REC_TABLE)}{where_sql} "
+        f"SELECT * FROM {await _table(BENEFIT_REC_BASE)}{where_sql} "
         f"ORDER BY {_ident('savings_amount')} DESC LIMIT {int(limit)}",
         timeout_s=TRINO_TIMEOUT_S,
     )
@@ -449,7 +475,7 @@ async def benefit_recommendations(
           round(sum(TRY_CAST(savings_amount AS DOUBLE)), 2) AS savings_total,
           round(avg(TRY_CAST(savings_pct AS DOUBLE)), 1) AS avg_savings_pct,
           round(sum(TRY_CAST(commitment_amount AS DOUBLE)), 2) AS commitment_total
-        FROM {_table(BENEFIT_REC_TABLE)}{where_sql}
+        FROM {await _table(BENEFIT_REC_BASE)}{where_sql}
         """,
         timeout_s=TRINO_TIMEOUT_S,
     )

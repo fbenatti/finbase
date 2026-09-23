@@ -414,6 +414,17 @@ async def collect_recommendations(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _tabela_bronze(connection_code: str, base: str) -> str:
+    """Nome da tabela Bronze no padrão da conexão.
+
+    `raw_azure_4p_advisor_recommendations`. Guardar várias conexões na mesma
+    tabela era desenho legado: sem o código no nome, uma conexão nova
+    sobrescreveria o dado da anterior.
+    """
+    codigo = (connection_code or "azure").replace("-", "_")
+    return f"raw_{codigo}_{base}"
+
 def persist_recommendations_bronze(
     connection_id: int,
     connection_code: str,
@@ -430,7 +441,7 @@ def persist_recommendations_bronze(
         df["connection_code"] = connection_code
         df["_collected_at"] = datetime.now(timezone.utc).isoformat()
         written["advisor"] = iceberg.write_bronze_catalog(
-            "azure_advisor_recommendations", df, collection_period,
+            _tabela_bronze(connection_code, "advisor_recommendations"), df, collection_period,
             column_types={
                 "subscription_id": "TEXT", "recommendation_id": "TEXT",
                 "category": "TEXT", "impact": "TEXT", "impacted_field": "TEXT",
@@ -447,7 +458,7 @@ def persist_recommendations_bronze(
         df["connection_code"] = connection_code
         df["_collected_at"] = datetime.now(timezone.utc).isoformat()
         written["benefit"] = iceberg.write_bronze_catalog(
-            "azure_benefit_recommendations", df, collection_period,
+            _tabela_bronze(connection_code, "benefit_recommendations"), df, collection_period,
             column_types={
                 "subscription_id": "TEXT", "recommendation_id": "TEXT",
                 "kind": "TEXT", "arm_sku_name": "TEXT", "term": "TEXT",
@@ -559,7 +570,7 @@ def persist_catalog_bronze(
         df["connection_code"] = connection_code
         df["_collected_at"] = datetime.now(timezone.utc).isoformat()
         written["catalog"] = iceberg.write_bronze_catalog(
-            "azure_reservations_catalog", df, collection_period,
+            _tabela_bronze(connection_code, "reservations_catalog"), df, collection_period,
             column_types={
                 "benefit_type": "TEXT", "benefit_id": "TEXT", "benefit_order_id": "TEXT",
                 "display_name": "TEXT", "sku_name": "TEXT", "sku_description": "TEXT",
@@ -581,7 +592,7 @@ def persist_catalog_bronze(
         df["connection_code"] = connection_code
         df["_collected_at"] = datetime.now(timezone.utc).isoformat()
         written["utilization"] = iceberg.write_bronze_catalog(
-            "azure_benefit_utilization", df, collection_period,
+            _tabela_bronze(connection_code, "benefit_utilization"), df, collection_period,
             column_types={
                 "benefit_id": "TEXT", "benefit_name": "TEXT", "benefit_type": "TEXT",
                 "usage_date": "TEXT", "avg_utilization_pct": "DOUBLE",
