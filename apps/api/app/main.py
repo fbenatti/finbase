@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, rightsizing
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -306,6 +306,19 @@ async def lifespan(app: FastAPI):
             # compartilham a conexão e várias miram a mesma coluna canônica.
             "ALTER TABLE etl_mapping ADD COLUMN IF NOT EXISTS source_key VARCHAR(60)",
             "CREATE INDEX IF NOT EXISTS ix_etl_mapping_source_key ON etl_mapping (source_key)",
+            # Revisão humana: tabela própria porque a decisão é append-only no
+            # Iceberg e o snapshot dela não pode ser reescrito.
+            """CREATE TABLE IF NOT EXISTS rightsizing_review (
+                 id SERIAL PRIMARY KEY,
+                 evidence_hash VARCHAR(64) NOT NULL,
+                 review_status VARCHAR(20) NOT NULL,
+                 previous_status VARCHAR(20),
+                 reviewer VARCHAR(160),
+                 note TEXT,
+                 reviewed_at TIMESTAMPTZ DEFAULT now(),
+                 created_at TIMESTAMPTZ DEFAULT now()
+               )""",
+            "CREATE INDEX IF NOT EXISTS ix_rightsizing_review_hash ON rightsizing_review (evidence_hash)",
             # Decisão assistida pelo Jev: o plano exige modelo, versão e motivo
             # auditados, e que o assistido nunca altere o fato.
             """CREATE TABLE IF NOT EXISTS assisted_decision_audit (
@@ -613,6 +626,7 @@ app.include_router(scheduled_shutdown.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(azure_sources.router)
 app.include_router(integrations.router)
+app.include_router(rightsizing.router)
 app.include_router(oci_operational.router)
 app.include_router(ideas.router)
 

@@ -641,6 +641,71 @@ RIGHTSIZING_CANDIDATE = SilverModel(
 )
 
 
+# ── Modelo: Decisão de rightsizing (P9) ───────────────────────────────────────
+# Persiste a decisão com o snapshot DE/PARA **imutável** e o estado de revisão.
+# O `evidence_hash` é o que garante o aceite "reexecução cria versão adequada, sem
+# duplicação indevida": enquanto as evidências não mudam, o hash é o mesmo e a
+# decisão não é duplicada; quando mudam, o hash muda e nasce uma versão nova.
+#
+# O veredito determinístico é **preservado na linha**: a revisão humana registra
+# concordância ou discordância, mas não reescreve o que o motor concluiu.
+RIGHTSIZING_DECISION = SilverModel(
+    name="rightsizing_decision",
+    table="rightsizing_decision",
+    description="Decisão de rightsizing com snapshot DE/PARA imutável e revisão.",
+    grain=("evidence_hash",),
+    primary_measure="saving_monthly",
+    time_field="created_at",
+    fields=(
+        _f("evidence_hash", "varchar", ROLE_IDENTITY, required=True,
+           notes="Hash das evidências; mesma evidência não gera versão nova."),
+        _f("run_id", "varchar", ROLE_IDENTITY, required=True,
+           notes="Execução em que a decisão nasceu."),
+        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("resource_name", "varchar", ROLE_DIMENSION),
+        _f("region_id", "varchar", ROLE_DIMENSION),
+        # Veredito do motor. A revisão não o altera.
+        _f("deterministic_verdict", "varchar", ROLE_QUALITY, required=True,
+           notes="VALID | INVALID | REQUIRES_VALIDATION, do motor."),
+        _f("veto_reason", "varchar", ROLE_QUALITY),
+        _f("confidence", "varchar", ROLE_QUALITY),
+        # Estado de revisão: o que o humano fez com a decisão.
+        _f("review_status", "varchar", ROLE_QUALITY, required=True,
+           notes="PENDING | APPROVED | REJECTED | DEFERRED."),
+        _f("reviewed_by", "varchar", ROLE_DIMENSION),
+        _f("reviewed_at", "varchar", ROLE_QUALITY),
+        _f("review_note", "varchar", ROLE_QUALITY),
+        # Snapshot DE/PARA congelado no momento da decisão.
+        _f("sku_from", "varchar", ROLE_DIMENSION),
+        _f("vcpus_from", "bigint", ROLE_DIMENSION),
+        _f("memory_gb_from", "double", ROLE_DIMENSION),
+        _f("cost_from_monthly", "double", ROLE_MEASURE),
+        _f("sku_to", "varchar", ROLE_DIMENSION),
+        _f("vcpus_to", "bigint", ROLE_DIMENSION),
+        _f("memory_gb_to", "double", ROLE_DIMENSION),
+        _f("cost_to_monthly", "double", ROLE_MEASURE),
+        _f("saving_monthly", "double", ROLE_MEASURE,
+           notes="NULL quando não há preço comparável."),
+        _f("price_source_from", "varchar", ROLE_QUALITY),
+        _f("price_source_to", "varchar", ROLE_QUALITY),
+        _f("price_comparable", "varchar", ROLE_QUALITY),
+        _f("cpu_p95", "double", ROLE_MEASURE),
+        _f("observed_days", "bigint", ROLE_QUALITY),
+        # Decisão assistida (P12). Separada do veredito: o Jev opina, não decide.
+        _f("assisted_status", "varchar", ROLE_QUALITY,
+           notes="OK | UNAVAILABLE. Falha do Jev não invalida a decisão."),
+        _f("assisted_model", "varchar", ROLE_DIMENSION),
+        _f("assisted_reason", "varchar", ROLE_QUALITY),
+        _f("created_at", "varchar", ROLE_TIME, required=True),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
+        _f("_silver_owner", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY),
+        _f("_source_connection_name", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
@@ -654,6 +719,7 @@ MODELS: dict[str, SilverModel] = {
     CONTAINER_METRIC.name: CONTAINER_METRIC,
     PTU.name: PTU,
     RIGHTSIZING_CANDIDATE.name: RIGHTSIZING_CANDIDATE,
+    RIGHTSIZING_DECISION.name: RIGHTSIZING_DECISION,
 }
 
 
