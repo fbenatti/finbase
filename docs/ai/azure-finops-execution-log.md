@@ -1325,3 +1325,76 @@ gravação de heartbeat, então reporta workers já mortos como ativos.
 As 8 falhas são todas de arquitetura antiga (schema anterior, módulo
 `app.routers.ai_cost_origin` inexistente e default de auth em ambiente de dev) e
 não foram perseguidas por decisão de escopo: o foco é a estrutura nova.
+
+---
+
+## 17. Modelo de custo e correlação com o inventário
+
+### 17.1 O que foi feito
+
+`cost_exports` passou a normalizar para o modelo canônico `resource_cost`, no grão
+do FOCUS. Medidas confirmadas contra a origem: `costinbillingcurrency` é o custo
+efetivo (já com reserva/desconto) e `paygcostinbillingcurrency` é o preço de lista.
+
+| Etapa | Resultado |
+|---|---|
+| `resource_cost` | **7.676.000 linhas** em 16 períodos, **zero custo nulo** |
+| Períodos | 202504 a 202607 (a origem tem poucos registros após 202603) |
+
+### 17.2 A correlação que o modelo habilita
+
+    SELECT i.resource_name, i.resource_sku, SUM(c.effective_cost)
+    FROM resource_cost c JOIN resource_inventory i USING (resource_id)
+
+| Recurso | SKU | Custo (202601) |
+|---|---|---|
+| core-local-4p-pro-gis-db | Standard_E8s_v3 | 7.209,31 |
+| SIG-PRO-APP1 | Standard_D16s_v3 | 5.347,46 |
+| 4p-pro-vivoaa-vm-br | Standard_E32s_v3 | 4.713,25 |
+| core-loca-4p-finops-vm | — | 128,21 |
+
+Custo por cluster AKS também responde: 33 clusters com custo em 202601,
+total 13.124,28.
+
+Isso era impossível antes: custo e inventário viviam em modelos separados sem
+chave comum.
+
+### 17.3 Quatro defeitos de forma de dado
+
+Todos do mesmo tipo — o dado está certo na origem, mas grafado de formas
+diferentes entre fontes, e a normalização precisa reconciliar.
+
+| Defeito | Sintoma | Correção |
+|---|---|---|
+| PyIceberg entrega `ResourceId` (camelCase), Trino `resourceid` | mapeamento não achava o campo; saída toda nula | resolução de coluna case-insensitive no motor |
+| `resource_id` com assinatura em maiúsculas no inventário e minúsculas no custo | JOIN não casava | identidade normalizada em minúsculas |
+| `sku` (Resource Graph) e `vm_size` (coletor de VM): mesmo dado, dois nomes; o nulo de um bloqueava o outro | `resource_sku` nulo | precedência por derivada `coalesce` |
+| `date` em `MM/DD/YYYY` | período derivado virava `NaT` | `mes` reconhece ISO e americano |
+
+### 17.4 Bug de perda de dados na tabela canônica
+
+O `resource_graph` **apagava** as 304 linhas do `vm_inventory`. A remoção antes de
+reescrever era só por período, e duas fontes gravam o mesmo período na mesma
+tabela canônica — a segunda apagava a primeira.
+
+Corrigido com escopo de dono (`_silver_owner`). Verificado: 9.230 linhas com os
+dois donos preservados (vm_inventory 304 + resource_graph 8.926) e SKU preenchido
+em ambos (61/61 e 71/71).
+
+**Consequência de projeto:** a tabela canônica aceita múltiplas fontes, então
+toda escrita precisa de escopo de dono. Isso vale para os próximos modelos.
+
+### 17.5 Derivação extraída para funções testáveis
+
+`_derivada_mes`, `_derivada_trecho`, `_derivada_minusculo` e `_derivada_coalesce`
+substituíram um bloco inline que não dava para depurar. Foi a extração que
+permitiu encontrar os quatro defeitos acima — antes disso, cada tentativa
+produzia um sintoma diferente sem causa visível.
+
+### 17.6 Estado da Silver canônica
+
+| Modelo | Linhas | Fontes |
+|---|---|---|
+| `resource_cost` | 7.676.000 | cost_exports |
+| `resource_inventory` | 9.230 | vm_inventory, resource_graph |
+| `resource_metric_series` | 615.002 | monitor_vm_metrics |
