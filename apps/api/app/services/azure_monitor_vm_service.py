@@ -61,6 +61,12 @@ ARG_API_VERSION = "2022-10-01"
 #: Endpoint de plano de dados de métricas, regional.
 METRICS_API_VERSION = "2023-10-01"
 METRIC_NAMESPACE = "microsoft.compute/virtualmachines"
+VMSS_METRIC_NAMESPACE = "microsoft.compute/virtualmachinescalesets"
+
+
+def _metric_namespace(resource_type: str | None) -> str:
+    """Namespace do batch por tipo: VM e VMSS nao aceitam o mesmo namespace."""
+    return VMSS_METRIC_NAMESPACE if "scaleset" in str(resource_type or "") else METRIC_NAMESPACE
 
 #: Teto documentado do `metrics:getBatch`.
 MAX_RESOURCES_PER_BATCH = 50
@@ -123,14 +129,22 @@ def _subscriptions(config: dict[str, Any]) -> list[str]:
 
 
 def _vm_query() -> str:
+    # VM e VMSS num so ARG: o SKU da VMSS vive em sku.name e o tipo distingue os
+    # dois. Sem VMSS o rightsizing so enxerga VM — e metade do compute some.
     return (
         "resources "
         "| where type =~ 'microsoft.compute/virtualmachines' "
+        "       or type =~ 'microsoft.compute/virtualmachinescalesets' "
         "| project resource_id = id, subscription_id = subscriptionId, "
         "          resource_group = resourceGroup, location = location, "
-        "          vm_size = tostring(properties.hardwareProfile.vmSize), "
+        "          resource_type = tolower(type), "
+        "          vm_size = case(type =~ 'microsoft.compute/virtualmachines', "
+        "                          tostring(properties.hardwareProfile.vmSize), "
+        "                          tostring(sku.name)), "
         "          power_state = tostring(properties.extended.instanceView.powerState.code), "
-        "          os_type = tostring(properties.storageProfile.osDisk.osType)"
+        "          os_type = case(type =~ 'microsoft.compute/virtualmachines', "
+        "                          tostring(properties.storageProfile.osDisk.osType), "
+        "                          tostring(properties.virtualMachineProfile.storageProfile.osDisk.osType))"
     )
 
 
@@ -189,10 +203,16 @@ def chunk_batches(vms: list[dict[str, Any]], size: int = MAX_RESOURCES_PER_BATCH
     O `metrics:getBatch` exige mesma subscription, mesma região e mesmo tipo.
     Regiões são agrupadas **antes** do corte por tamanho para nunca misturar.
     """
-    buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    order: list[tuple[str, str]] = []
+    buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    order: list[tuple[str, str, str]] = []
     for vm in vms:
-        key = (str(vm.get("subscription_id") or ""), str(vm.get("location") or ""))
+        # O terceiro elemento (tipo) e o que faltava: VM e VMSS nao podem dividir
+        # a mesma requisicao batch.
+        key = (
+            str(vm.get("subscription_id") or ""),
+            str(vm.get("location") or ""),
+            str(vm.get("resource_type") or "microsoft.compute/virtualmachines"),
+        )
         if key not in buckets:
             buckets[key] = []
             order.append(key)
@@ -280,6 +300,7 @@ def _rows_from_batch_multi(
             "power_state": vm.get("power_state"),
             "os_type": vm.get("os_type"),
             "resource_name": str(resource_id).rsplit("/", 1)[-1],
+            "resource_type": vm.get("resource_type") or "microsoft.compute/virtualmachines",
         }
 
     for item in payload.get("values") or []:
@@ -447,6 +468,7 @@ async def collect_metrics(
         for batch in batches:
             subscription = str(batch[0].get("subscription_id") or "")
             region = str(batch[0].get("location") or "")
+            resource_type = str(batch[0].get("resource_type") or "microsoft.compute/virtualmachines")
             resource_ids = [str(vm["resource_id"]) for vm in batch]
             # Todas as métricas vão numa requisição só: a API aceita lista em
             # `metricnames` e devolve um bloco por métrica. Isso corta o número
@@ -459,7 +481,7 @@ async def collect_metrics(
                     f"https://{region}.metrics.monitor.azure.com/subscriptions/{subscription}"
                     f"/metrics:getBatch?starttime={slice_since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                     f"&endtime={slice_until.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-                    f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': METRIC_NAMESPACE})['n']}"
+                    f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': _metric_namespace(resource_type)})['n']}"
                     f"&metricnames={httpx.QueryParams({'m': ','.join(metrics)})['m']}"
                     f"&aggregation={','.join(DEFAULT_AGGREGATIONS)}"
                     f"&api-version={METRICS_API_VERSION}"
@@ -725,7 +747,7 @@ async def discover_scope(config: dict[str, Any]) -> dict[str, Any]:
                     f"/subscriptions/{sample['subscription_id']}/metrics:getBatch"
                     f"?starttime={since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                     f"&endtime={until.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-                    f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': METRIC_NAMESPACE})['n']}"
+                    f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': _metric_namespace(resource_type)})['n']}"
                     f"&metricnames={httpx.QueryParams({'m': 'Percentage CPU'})['m']}"
                     f"&aggregation=Average&api-version={METRICS_API_VERSION}"
                 )

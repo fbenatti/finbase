@@ -150,6 +150,7 @@ _SERIES_COMMON: dict[str, str] = {
     "resource_group": "resource_group_id",
     "location": "region_id",
     "vm_size": "resource_sku",
+    "resource_type": "resource_type",
     "os_type": "operating_system",
     "power_state": "resource_state",
     "metric": "metric",
@@ -191,12 +192,9 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         model_name="resource_metric_series",
         bronze_table="raw_azure_{env}_monitor_vm",
         columns=_SERIES_COMMON,
-        constants={
-            "cloud_provider": "azure",
-            "resource_type": "microsoft.compute/virtualmachines",
-        },
+        constants={"cloud_provider": "azure"},
         measure_priority=("value_average", "value_total", "value_maximum", "value_minimum"),
-        notes="Séries de plataforma das VMs (Azure Monitor batch).",
+        notes="Séries de plataforma de VMs e VMSS (Azure Monitor batch).",
     ),
     "vm_inventory": SourceMapping(
         source_key="vm_inventory",
