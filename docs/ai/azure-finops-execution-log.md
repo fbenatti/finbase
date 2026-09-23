@@ -1536,3 +1536,90 @@ region_policy.
 O `resource_cost` do 4P cobre 202504–202603 com volume alto e 202604–202607 com
 poucos registros na origem. Não é defeito da normalização: é o que o export
 contém.
+
+---
+
+## 20. P5 fechado e P7 iniciado
+
+### 20.1 P5 — aceite atendido: reexecutar não duplica
+
+O plano exige em P5: *"reexecutar os 15 dias não duplica"*. **Não estava sendo
+cumprido** — a Bronze tinha 1.230.004 linhas para 615.002 reais, em duas fatias
+completas (`20260922T0000` e `20260923T0000`).
+
+**Causa:** a âncora de fim de janela derivava de `now()` e entrava na chave da
+fatia. Cada dia de execução gerava caminho novo, o `delete_bronze_slice` não
+encontrava nada para substituir, e as duas fatias ficavam válidas — a série
+dobrava em silêncio.
+
+**Correção:** âncora = dia da execução em 00:00Z. Repetir no mesmo dia reescreve
+a mesma fatia; coletar em outro dia é janela nova, que é o correto.
+
+Verificado com duas execuções consecutivas (tasks 5932 e 5933):
+
+| Execução | Linhas |
+|---|---|
+| 1ª | 615.002 |
+| 2ª | 612.722 |
+
+Bronze final: **612.722 linhas em 13 fatias**. A segunda substituiu a primeira.
+Antes: 26 fatias e 1.230.004 linhas.
+
+### 20.2 P7 — catálogos, preço e elegibilidade
+
+Dois avanços, guiados pelo contrato de preço do plano.
+
+**`price_source` no modelo de preço.** O contrato exige que "preço contratual e
+retail não se misturem" e que se registre a fonte. O modelo não tinha o campo —
+279.768 itens indistinguíveis. Adicionados:
+
+| Campo | Valores |
+|---|---|
+| `price_source` | `PUBLIC_RETAIL` \| `CONTRACTED` \| `OBSERVED_EFFECTIVE` |
+| `price_confidence` | `HIGH` \| `MEDIUM` \| `LOW` |
+
+O catálogo público marca `PUBLIC_RETAIL`/`LOW` como constante do mapeamento.
+
+**Coletor de SKUs de compute.** `Microsoft.Compute/skus`, por assinatura. É o que
+dá elegibilidade: sem ele um candidato pode ser sugerido num SKU que a região não
+permite — o aceite do P7 proíbe isso.
+
+| Verificação (1 assinatura) | Resultado |
+|---|---|
+| Linhas SKU × região | 69.242 |
+| SKUs de VM distintos | 1.507 |
+| Disponíveis | 63.042 |
+| **Bloqueados por restrição** | **6.200** |
+
+Capacidades extraídas: vCPU, memória, discos, PremiumIO, rede acelerada.
+
+Ajustes no caminho: filtrar `resourceType == virtualMachines` (a API devolve
+discos, snapshots e "Aligned", que não são candidatos) e configurar
+`subscription_ids` na conexão do 4P — o catálogo é por assinatura, e as 56 do 4P
+foram derivadas do custo.
+
+Coleta em andamento para as 56 assinaturas: **1.384.840 linhas** já na Bronze.
+
+### 20.3 Modelos canônicos: cinco
+
+| Modelo | Linhas na Silver | Fontes |
+|---|---|---|
+| `resource_cost` | 8.224.606 | 4P + TI |
+| `resource_metric_series` | 612.722 | 4P |
+| `price_catalog` | 279.768 | preço público |
+| `resource_inventory` | 10.862 | resource_graph, vm_inventory, aks_inventory |
+| `compute_sku_catalog` | (coletando) | compute_skus |
+
+### 20.4 Fontes do 4P
+
+**9 ligadas**: cost_exports, resource_graph, automation_jobs, monitor_vm_metrics,
+vm_inventory, aks_inventory, retail_price, openai_ptu, compute_skus.
+
+**5 planejadas**: compute_quota, customer_price (Price Sheet),
+aks_cost_allocation, container_insights, region_policy.
+
+### 20.5 Pendência do P7
+
+O aceite pede "ausência de Price Sheet vira status explícito". O coletor de
+`customer_price` não existe, então hoje o status é apenas implícito (a fonte
+aparece como planejada). Falta o status explícito `UNAVAILABLE` com motivo.
