@@ -2305,3 +2305,61 @@ Ficaram como estão.
 
 Bronze Azure: **21 tabelas, todas no padrão** `raw_azure_<conexão>_<fonte>`.
 Testes: 9 failed / 382 passed (baseline).
+
+---
+
+## 30. Bronze: nenhuma exceção ao padrão da conexão
+
+### 30.1 O que foi feito
+
+As três tabelas legadas que guardavam várias conexões na mesma tabela passaram ao
+padrão da conexão no nome. Era o último ponto fora do padrão na Bronze Azure.
+
+| Antes | Depois | Linhas |
+|---|---|---|
+| `azure_advisor_recommendations` | `raw_azure_4p_advisor_recommendations` | 17.004 |
+| | `raw_azure_ti_advisor_recommendations` | 59.589 |
+| `azure_benefit_recommendations` | `raw_azure_4p_benefit_recommendations` | 56 |
+| | `raw_azure_ti_benefit_recommendations` | 44 |
+| `azure_reservations_catalog` | `raw_azure_4p_reservations_catalog` | 176 |
+| | `raw_azure_ti_reservations_catalog` | 130 |
+
+Todas as linhas preservadas. As legadas foram removidas **depois** de validar a
+leitura unificada.
+
+### 30.2 Leitura sem quebrar consumidor
+
+O leitor passou a **descobrir as tabelas das conexões e unir**:
+
+```sql
+(SELECT * FROM iceberg.bronze.raw_azure_4p_advisor_recommendations
+ UNION ALL
+ SELECT * FROM iceberg.bronze.raw_azure_ti_advisor_recommendations)
+```
+
+Quem consome não precisa saber em quantas conexões o dado está, e **uma conexão nova
+entra na união sem alterar código**. `_table()` virou assíncrono porque a descoberta
+consulta o catálogo.
+
+O escritor deriva o nome de `connection_code` por `_tabela_bronze()` — mesma regra
+em um lugar só.
+
+Verificado: `/reservations/advisor` e `/reservations/catalog` respondem **200** com
+dado real das duas conexões.
+
+### 30.3 Estado final da Bronze
+
+**24 tabelas Azure, todas em `raw_azure_<conexão>_<fonte>`.** Nenhuma exceção.
+
+As 14 tabelas de outras nuvens seguem o padrão do próprio provedor
+(`raw_gcp_*`, `raw_oci_*`, `raw_claude_*`, `raw_notebooklm_*`, `raw_github_*`,
+`raw_ibm_*`, `raw_mongodb_*`) — não são Azure e não têm conexão no mesmo sentido.
+
+### 30.4 Lição consolidada do dia
+
+Três defeitos seguidos tiveram a mesma forma: **um identificador derivado em vários
+lugares independentes**. O nome da tabela Bronze (coletor, registro, mapeamento), o
+schema da tabela contra o modelo, e agora o nome da conexão (escritor e leitor).
+
+Em todos, o sintoma foi **dado errado sem erro**. A regra que fica: identidade
+derivada uma vez, em um lugar só, e consumida por referência.
