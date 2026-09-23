@@ -1468,3 +1468,71 @@ capturava o processo errado e o worker real nunca morria.
 
 Restam 6 planejados: `compute_skus`, `compute_quota`, `retail_price`,
 `customer_price`, `aks_cost_allocation`, `container_insights`, `region_policy`.
+
+---
+
+## 19. Cargas completas, preço público e a duplicação da âncora
+
+### 19.1 Cargas disparadas
+
+| Ambiente | Tasks | Resultado |
+|---|---|---|
+| 4P | 7 (com AKS) | todas COMPLETED |
+| TI | 3 | todas COMPLETED |
+
+Custo do 4P havia falhado por reinício de worker e foi reprocessado.
+
+### 19.2 Coletor de preço público
+
+Novo `azure_retail_price_service`, da API pública `prices.azure.com` (sem
+autenticação). Verificado pelo pipeline (task 5931): **279.768 itens · 80.743
+medidores · 16 serviços**, em BRL e USD.
+
+Quarto modelo canônico, `price_catalog`, no grão medidor × região × tipo × moeda
+× vigência. Silver: 279.768 linhas, zero sem valor.
+
+Defeitos encontrados: a API rejeita `$top` junto com o `NextPageLink`
+(`$top=-1000`, HTTP 400) — paginação passou a ser por `$skip`; e a coluna é
+`type`, não `priceType`.
+
+### 19.3 Duplicação na Bronze por âncora instável — **defeito de projeto**
+
+A Bronze de métricas ficou com **1.230.004 linhas em vez de 615.002**: duas
+fatias completas, `20260922T0000` e `20260923T0000`.
+
+**Causa:** o caminho da fatia usa a **data da coleta** como âncora. Coletar a
+mesma janela de 15 dias em dois dias diferentes cria uma fatia nova em vez de
+substituir a anterior — e as duas ficam válidas, duplicando a série
+silenciosamente.
+
+As demais fontes não têm o problema porque a fatia é ancorada no dado, não na
+execução: o custo usa `{billing_period}`, o inventário usa a data da fotografia.
+
+**Correção aplicada:** removida a fatia antiga da Bronze e rematerializada a
+Silver (615.002). **A correção definitiva é ancorar a fatia na janela**
+(`{início}_{fim}`), para reexecutar a mesma janela substituir em vez de somar —
+registrado como pendência, não implementado nesta rodada.
+
+### 19.4 Estado final da Silver canônica
+
+| Modelo | Linhas | Fontes |
+|---|---|---|
+| `resource_cost` | 8.224.606 | 4P (202504–202607) + TI (202609) |
+| `resource_metric_series` | 615.002 | monitor_vm_metrics (4P) |
+| `price_catalog` | 279.768 | retail_price |
+| `resource_inventory` | 10.862 | resource_graph (4P+TI), vm_inventory, aks_inventory |
+
+### 19.5 Fontes do 4P
+
+**8 ligadas** (todas com coletor): cost_exports, resource_graph, automation_jobs,
+monitor_vm_metrics, vm_inventory, aks_inventory, retail_price, openai_ptu.
+
+**6 planejadas**, puladas pela carga com motivo explícito: compute_skus,
+compute_quota, customer_price, aks_cost_allocation, container_insights,
+region_policy.
+
+### 19.6 Pendência conhecida
+
+O `resource_cost` do 4P cobre 202504–202603 com volume alto e 202604–202607 com
+poucos registros na origem. Não é defeito da normalização: é o que o export
+contém.
