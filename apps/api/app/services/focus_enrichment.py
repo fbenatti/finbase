@@ -1,9 +1,14 @@
-"""FOCUS enriquecida: liga a linha de custo ao recurso.
+"""GOLD — o FOCUS encontra os modelos canônicos.
 
-A FOCUS é a espinha do custo e continua sendo. O que faltava era a **ligação**:
-os modelos canônicos (`resource_inventory`, `resource_metric_series`,
-`price_catalog`) existiam ao lado dela, sem chave em comum — o join dava zero
-porque a FOCUS grafa `resourceGroups` e o inventário `resourcegroups`.
+A Silver **unifica padrão**: `resource_inventory`, `resource_metric_series`,
+`resource_cost` e `price_catalog` recebem todas as nuvens no mesmo formato. Ela
+não decide nem cruza. Cruzar é **descoberta**, e descoberta é Gold.
+
+Este serviço faz o encontro: pega o FOCUS (o livro financeiro detalhado, que já
+traz a normalização financeira do provedor) e liga cada linha ao recurso, à
+métrica e ao preço. O join dava zero porque a FOCUS grafa `resourceGroups` e o
+inventário `resourcegroups` — a chave de ligação é o `resource_id` normalizado,
+que a Silver produz.
 
 Este serviço resolve isso em duas partes:
 
@@ -81,7 +86,8 @@ metricas AS (
 )
 SELECT
     'azure' AS cloud_provider,
-    lower(CAST(f.resourceid AS VARCHAR)) AS resource_id,
+    -- Chave de ligação: o `resource_id` canônico que a Silver produz.
+    lower(CAST(f.resourceid AS VARCHAR)) AS canonical_resource_id,
     COALESCE(i.resource_name, CAST(f.resourcename AS VARCHAR)) AS resource_name,
     COALESCE(i.resource_type, CAST(f.resourcetype AS VARCHAR)) AS resource_type,
     lower(CAST(f.subaccountid AS VARCHAR)) AS sub_account_id,
@@ -143,17 +149,17 @@ async def build_focus_enriched(*, task_id: int | None = None) -> dict[str, Any]:
 
     staging = f"{TABLE}_stg_{time.time_ns()}"
     sql = (
-        f"CREATE TABLE iceberg.silver.{staging} "
+        f"CREATE TABLE iceberg.gold.{staging} "
         f"WITH (partitioning = ARRAY['_billing_period']) AS "
         + ENRICH_SQL.format(source=SOURCE)
     )
     logger.info("Construindo %s (staging %s)", TABLE, staging)
     await trino_execute(sql, timeout_s=7200)
 
-    contagem = await trino_execute(f"SELECT COUNT(*) AS n FROM iceberg.silver.{staging}", timeout_s=600)
+    contagem = await trino_execute(f"SELECT COUNT(*) AS n FROM iceberg.gold.{staging}", timeout_s=600)
     linhas = int((contagem[0] if contagem else {}).get("n") or 0)
     if not linhas:
-        iceberg.cleanup_staged_table(staging, namespace="silver")
+        iceberg.cleanup_staged_table(staging, namespace="gold")
         raise RuntimeError("Enriquecimento não produziu linhas")
 
     # A FOCUS não tem chave única (`source_record_id` é nulo em 97,9% das linhas),
@@ -166,7 +172,7 @@ async def build_focus_enriched(*, task_id: int | None = None) -> dict[str, Any]:
         timeout_s=900,
     )
     novo = await trino_execute(
-        f"SELECT SUM(effective_cost) AS custo FROM iceberg.silver.{staging}",
+        f"SELECT SUM(effective_cost) AS custo FROM iceberg.gold.{staging}",
         timeout_s=600,
     )
     linhas_origem = int((origem[0] if origem else {}).get("n") or 0)
@@ -174,12 +180,12 @@ async def build_focus_enriched(*, task_id: int | None = None) -> dict[str, Any]:
     custo_novo = float((novo[0] if novo else {}).get("custo") or 0)
     # Tolerância de 0,1%: arredondamento de ponto flutuante em 36 M linhas.
     if custo_origem and abs(custo_novo - custo_origem) / abs(custo_origem) > 0.001:
-        iceberg.cleanup_staged_table(staging, namespace="silver")
+        iceberg.cleanup_staged_table(staging, namespace="gold")
         raise RuntimeError(
             f"Enriquecimento alterou o custo: {custo_novo:.2f} contra {custo_origem:.2f} da FOCUS"
         )
 
-    iceberg.swap_staged_table(TABLE, staging, namespace="silver", known_row_count=linhas)
+    iceberg.swap_staged_table(TABLE, staging, namespace="gold", known_row_count=linhas)
     return {
         "table": TABLE,
         "rows": linhas,

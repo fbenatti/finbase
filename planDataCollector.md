@@ -169,6 +169,58 @@ Uma família de tabelas por dataset. Não misturar custos, métricas e catálogo
 
 O destino FOCUS detalhado que hoje vive na Gold deve passar a viver na Silver. Mappings, classificação, clone e regras de negócio continuam produzindo o mesmo resultado financeiro, agora no namespace correto. Não duplicar markup na Silver ou no cálculo de saving. Para métricas/SKUs/preços, usar transformações próprias e aplicar regra de negócio somente quando fizer sentido. Perfis, candidatos e pontes detalhadas também permanecem na Silver; Gold recebe apenas materializações finais.
 
+### ADR: onde cada coisa vive, e por que a unificação multi-cloud vem antes da Gold
+
+**Contexto.** As fontes chegam em formatos próprios por provedor: Azure Resource
+Graph, AWS Config, GCP Cloud Asset e OCI Search descrevem "recurso" de formas
+diferentes; Azure Monitor, CloudWatch e Cloud Monitoring descrevem "métrica" de
+formas diferentes. O FOCUS do Azure já traz a normalização financeira dele, mas
+cada provedor tem o seu export.
+
+**Decisão.** Três camadas, com papéis que não se misturam:
+
+| Camada | Papel | O que entra |
+|---|---|---|
+| **Bronze** | payload da origem, auditável | uma tabela por fonte, formato do provedor, texto |
+| **Silver** | **unificação de padrão** | tabelas canônicas por **tipo de dado**, com todas as nuvens juntas |
+| **Gold** | **descoberta e cruzamento** | join com o FOCUS, cubos, agregações finais |
+
+**As tabelas canônicas da Silver são por tipo de dado, não por provedor.** Toda
+fonte de inventário — Azure, GCP, AWS, OCI — grava em `resource_inventory`. Toda
+série de métrica grava em `resource_metric_series`. Todo custo grava em
+`resource_cost`. Todo preço grava em `price_catalog`. É o que permite perguntar
+"qual o custo deste recurso nesta janela" **uma vez** e a resposta valer para
+qualquer nuvem.
+
+Uma fonte nova **não cria tabela nem código de transformação**: ela declara um
+mapeamento (`SourceMapping`) do campo bruto para a coluna canônica do modelo que
+já existe. O motor (`silver_normalizer`) lê a Bronze, valida contra o modelo,
+resolve o valor canônico, força o tipo de cada coluna pelo modelo e grava de forma
+idempotente.
+
+**Por que o join com o FOCUS fica na Gold, e não na Silver.** A Silver unifica
+padrão; ela não decide. Cruzar custo com inventário e métrica é **descoberta** —
+envolve escolher medida, tratar recurso sem correspondência, aplicar nome de
+negócio e produzir o número que o consumidor lê. Isso é Gold. Além disso, a Silver
+precisa permanecer reutilizável: uma tabela canônica com colunas de FOCUS embutidas
+serviria a um consumidor e atrapalharia os outros.
+
+**Consequência: a Gold é onde o FOCUS encontra os canônicos.** O `resourceid` do
+FOCUS é case-sensitive por natureza (`resourceGroups` vs `resourcegroups`), então a
+chave de ligação é `canonical_resource_id` — normalizada na Silver conforme a
+seção anterior — e o join acontece na Gold.
+
+**Consequência: nenhuma transformação de negócio na Silver canônica.** Markup,
+regra de classificação e regra de negócio não entram nas tabelas canônicas:
+alterariam o padrão que todas as nuvens compartilham.
+
+**Por que este formato.** Se a unificação ficasse dentro de cada coletor, cada
+provedor novo repetiria a mesma lógica e os consumidores precisariam conhecer as
+diferenças. Se ficasse na Gold, a Gold viraria o lugar onde os formatos se
+encontram pela primeira vez — e qualquer cubo dependeria de tratar as diferenças
+de cada nuvem. Unificar na Silver deixa a Gold pequena: ela só cruza o que já está
+no mesmo padrão.
+
 ### Topologia de consumo e ponte FOCUS
 
 A visão semelhante à supply chain do Turbonomic exige combinar fontes, porque nenhuma delas descreve sozinha custo faturado, runtime Kubernetes e infraestrutura Azure:

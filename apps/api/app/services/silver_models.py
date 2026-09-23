@@ -283,7 +283,7 @@ COMPUTE_SKU = SilverModel(
 )
 
 
-# ── Modelo: FOCUS enriquecido ─────────────────────────────────────────────────
+# ── Modelo: FOCUS enriquecido (CUBO DA GOLD) ──────────────────────────────────
 # A FOCUS é a espinha do custo. Este modelo **não a substitui nem a duplica**:
 # ele a enriquece com o que as outras fontes sabem do recurso, no mesmo grão de
 # linha, para que uma pergunta de custo possa ser respondida por SKU, estado,
@@ -295,9 +295,10 @@ COMPUTE_SKU = SilverModel(
 
 FOCUS_ENRICHED = SilverModel(
     name="focus_enriched",
-    table="focus_enriched",
-    description="Linha de custo FOCUS com identidade normalizada e atributos de recurso.",
-    grain=("cloud_provider", "sub_account_id", "resource_id", "billing_period", "charge_category", "source_record_id"),
+    # Vive na Gold: é o cruzamento do FOCUS com os canônicos, não um padrão.
+    table="gold.focus_enriched",
+    description="Cubo Gold: custo FOCUS cruzado com recurso, métrica e preço.",
+    grain=("cloud_provider", "sub_account_id", "canonical_resource_id", "billing_period", "charge_category", "service_name", "region_id"),
     primary_measure="effective_cost",
     time_field="charge_period_start",
     fields=(
@@ -305,8 +306,9 @@ FOCUS_ENRICHED = SilverModel(
         _f("source_record_id", "varchar", ROLE_IDENTITY,
            notes="Chave da linha na FOCUS; preserva o grão original."),
         # Identidade normalizada: é o que liga a FOCUS ao inventário.
-        _f("resource_id", "varchar", ROLE_IDENTITY, required=True,
-           notes="FOCUS ResourceId normalizado (minúsculas)."),
+        _f("canonical_resource_id", "varchar", ROLE_IDENTITY, required=True,
+           notes="Chave de ligação: `resource_id` canônico que a Silver produz, "
+                 "aplicado ao `resourceid` do FOCUS (minúsculas)."),
         _f("resource_name", "varchar", ROLE_DIMENSION),
         _f("resource_type", "varchar", ROLE_DIMENSION),
         _f("sub_account_id", "varchar", ROLE_IDENTITY),

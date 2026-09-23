@@ -1829,3 +1829,85 @@ subir o worker**.
 
 **14 de 14 com coletor.** 12 ligadas; `amortized_cost` e `focus` são tipos de
 relatório disponíveis para habilitar por configuração quando fizer sentido.
+
+---
+
+## 24. ADR de camadas: Silver unifica padrão, Gold descobre
+
+### 24.1 O que estava errado
+
+Eu havia construído o cruzamento do FOCUS com os canônicos como uma tabela
+**Silver** (`focus_enrichment.py` escrevia em `iceberg.silver`). Está no lugar
+errado: cruzar é **descoberta**, e descoberta é Gold.
+
+A correção de camada foi apontada pelo usuário: primeiro a Silver **unifica o
+padrão** de todas as nuvens; depois a Gold **descobre** — e é lá que o FOCUS
+encontra os canônicos.
+
+### 24.2 A decisão (ADR registrado no plano, seção 5)
+
+| Camada | Papel | O que entra |
+|---|---|---|
+| **Bronze** | payload da origem, auditável | uma tabela por fonte, formato do provedor |
+| **Silver** | **unificação de padrão** | tabelas canônicas por **tipo de dado**, com todas as nuvens juntas |
+| **Gold** | **descoberta e cruzamento** | join com o FOCUS, cubos, agregações finais |
+
+**As tabelas canônicas são por tipo de dado, não por provedor.** Toda fonte de
+inventário — Azure, GCP, AWS, OCI — grava em `resource_inventory`; toda série em
+`resource_metric_series`; todo custo em `resource_cost`; todo preço em
+`price_catalog`.
+
+**Por que o join com o FOCUS fica na Gold.** A Silver unifica padrão, ela não
+decide. Cruzar envolve escolher medida, tratar recurso sem correspondência, aplicar
+nome de negócio e produzir o número que o consumidor lê. Além disso, a Silver
+precisa permanecer reutilizável: uma tabela canônica com colunas de FOCUS embutidas
+serviria a um consumidor e atrapalharia os outros.
+
+**Por que este formato, e não dentro do coletor nem na Gold.** Se a unificação
+ficasse dentro de cada coletor, cada provedor novo repetiria a lógica e os
+consumidores precisariam conhecer as diferenças. Se ficasse na Gold, a Gold viraria
+o lugar onde os formatos se encontram pela primeira vez — e todo cubo dependeria de
+tratar as diferenças de cada nuvem.
+
+### 24.3 O que mudou no código
+
+| Antes | Depois |
+|---|---|
+| `iceberg.silver.focus_enriched` | `iceberg.gold.focus_enriched` |
+| coluna `resource_id` no cubo | `canonical_resource_id` (o nome que o plano usa) |
+| grão com `source_record_id` | grão natural de custo (a FOCUS não tem chave única) |
+
+O grão mudou porque `source_record_id` é **nulo em 97,9%** das linhas do FOCUS
+(35.683.078 de 36.434.762) e `row_id` não existe. Sem chave de linha, o
+enriquecimento consolida no grão natural e **valida o total de custo** contra a
+FOCUS, em vez de exigir igualdade de contagem — que é o aceite do P3: "associar
+custo FOCUS sem multiplicar linhas".
+
+### 24.4 Estado das camadas
+
+**Silver — 5 modelos canônicos, cada um recebendo todas as nuvens:**
+
+| Modelo | Linhas | Fontes hoje |
+|---|---|---|
+| `resource_cost` | 8.224.606 | 4P + TI |
+| `price_catalog` | 3.946.787 | price sheet contratual + preço público |
+| `resource_metric_series` | 612.722 | Azure Monitor (4P) |
+| `resource_inventory` | 10.862 | Resource Graph, VM, AKS (4P + TI) |
+| `compute_sku_catalog` | coletando | SKUs de VM (4P) |
+
+**Gold — o cruzamento:** `focus_enriched` (pronto, construção pendente por
+sequência: primeiro esgotar as fontes, que agora estão esgotadas).
+
+### 24.5 Prova de que o desenho funciona para outra nuvem
+
+Uma fonte **AWS fictícia**, com nomes de campo completamente diferentes
+(`instanceArn`, `instanceType`, `availabilityZone`), normalizou para o mesmo
+`resource_inventory` com as 17 colunas idênticas ao modelo — **sem código novo**,
+apenas o dicionário de mapeamento.
+
+### 24.6 Pendência de nomenclatura
+
+O plano usa `canonical_resource_id`; as tabelas canônicas usam `resource_id`. O
+valor **é** o canônico (normalizado em minúsculas na Silver), mas o nome difere. A
+padronização do nome é decisão de migração e não foi feita nesta rodada — o cubo
+Gold já usa `canonical_resource_id` para deixar a ligação explícita.
