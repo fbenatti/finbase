@@ -319,6 +319,10 @@ async def lifespan(app: FastAPI):
                WHERE blob_prefixes IS NOT NULL
                  AND json_typeof(blob_prefixes) = 'array'
                  AND blob_prefixes::text <> '[]'""",
+            # O mapeamento passa a registrar a fonte dona: várias fontes
+            # compartilham a conexão e várias miram a mesma coluna canônica.
+            "ALTER TABLE etl_mapping ADD COLUMN IF NOT EXISTS source_key VARCHAR(60)",
+            "CREATE INDEX IF NOT EXISTS ix_etl_mapping_source_key ON etl_mapping (source_key)",
             """CREATE TABLE IF NOT EXISTS azure_connection_source (
               id SERIAL PRIMARY KEY,
               connection_id INTEGER NOT NULL REFERENCES source_connection(id) ON DELETE CASCADE,

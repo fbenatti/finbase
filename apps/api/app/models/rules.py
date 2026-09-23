@@ -9,6 +9,10 @@ class EtlMapping(Base):
     __tablename__ = "etl_mapping"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Fonte dona do mapeamento. Várias fontes compartilham a conexão, e
+    # várias mapeiam para a mesma coluna canônica — sem esta chave os
+    # mapeamentos de fontes diferentes se misturariam.
+    source_key = Column(String(60), nullable=True, index=True)
     connection_id = Column(Integer, ForeignKey("source_connection.id"), nullable=True, index=True)
     name = Column(String(200), nullable=False)
     source_column = Column(String(200), nullable=False)

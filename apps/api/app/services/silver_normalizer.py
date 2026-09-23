@@ -371,6 +371,57 @@ RESOURCE_TYPE_BY_SOURCE: dict[str, str] = {
 }
 
 
+def load_mapping_from_db(session, source_key: str) -> SourceMapping | None:
+    """Lê o mapeamento da fonte em `etl_mapping` — a mesma tabela que o FOCUS usa.
+
+    O de-para canônico vive no banco e é editável pela aba de relacionamento, em
+    vez de só no código. `etl_mapping` não guarda receita de derivada, então as
+    derivadas continuam vindo da declaração Python — mas as colunas e constantes
+    passam a ser dados, não código.
+    """
+    from sqlalchemy import select
+
+    from app.models.rules import EtlMapping
+
+    declarado = SOURCE_MAPPINGS.get(source_key)
+    if declarado is None:
+        return None
+
+    linhas = session.execute(
+        select(EtlMapping)
+        .where(EtlMapping.source_key == source_key, EtlMapping.active.is_(True))
+        .order_by(EtlMapping.priority)
+    ).scalars().all()
+    if not linhas:
+        return None
+
+    colunas: dict[str, str] = {}
+    constantes: dict[str, Any] = {}
+    for linha in linhas:
+        destino = str(linha.target_column or "")
+        if not destino:
+            continue
+        if linha.transform_type == "CONSTANT":
+            constantes[destino] = (linha.transform_config or {}).get("value")
+        else:
+            origem = str(linha.source_column or "")
+            if origem:
+                colunas[origem] = destino
+
+    return SourceMapping(
+        source_key=declarado.source_key,
+        model_name=declarado.model_name,
+        bronze_table=declarado.bronze_table,
+        columns=colunas or declarado.columns,
+        constants=constantes or declarado.constants,
+        # Derivadas só existem na declaração — o banco não as representa ainda.
+        derived=declarado.derived,
+        measure_priority=declarado.measure_priority,
+        period_field=declarado.period_field,
+        notes=declarado.notes,
+    )
+
+
 def register(mapping: SourceMapping) -> None:
     """Declara (ou substitui) o mapeamento de uma fonte."""
     SOURCE_MAPPINGS[mapping.source_key] = mapping
@@ -567,7 +618,9 @@ def materialise(
     from app.services import lakehouse_layers as layers
     from app.services.silver_models import model as _model
 
-    mapping = mapping_for(source_key)
+    # O de-para vem do banco (mesma tabela do FOCUS) quando existir; a
+    # declaração em código é o fallback e a fonte das derivadas.
+    mapping = load_mapping_from_db(session, source_key) or mapping_for(source_key)
     if mapping is None:
         raise KeyError(
             f"Fonte '{source_key}' não declara mapeamento. "

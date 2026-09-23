@@ -1911,3 +1911,90 @@ O plano usa `canonical_resource_id`; as tabelas canônicas usam `resource_id`. O
 valor **é** o canônico (normalizado em minúsculas na Silver), mas o nome difere. A
 padronização do nome é decisão de migração e não foi feita nesta rodada — o cubo
 Gold já usa `canonical_resource_id` para deixar a ligação explícita.
+
+---
+
+## 25. Bronze → Silver pelo mesmo mecanismo do FOCUS
+
+### 25.1 O que estava errado
+
+Eu havia criado um **registro paralelo** (`bronze_silver_mapping`) e um motor
+próprio (`silver_normalizer` com declarações só em Python). O FOCUS já tem um
+processo: `destination_table` + `etl_mapping`, editável em `/tables?tab=relationship`.
+
+A correção apontada pelo usuário: **o de-para canônico deve viver no mesmo lugar e
+passar pelo mesmo processo**, senão existem dois caminhos para a mesma coisa e a
+aba de relacionamento não conhece as tabelas novas.
+
+### 25.2 O que foi feito
+
+**As 5 canônicas viraram destinos Silver**, como o FOCUS:
+
+| id | Nome | `physical_name` |
+|---|---|---|
+| 42 | RESOURCE INVENTORY | `resource_inventory` |
+| 43 | RESOURCE COST | `resource_cost` |
+| 44 | RESOURCE METRIC SERIES | `resource_metric_series` |
+| 45 | PRICE CATALOG | `price_catalog` |
+| 46 | COMPUTE SKU CATALOG | `compute_sku_catalog` |
+
+Visíveis na API (`/destinations/tables/`) e, portanto, na aba de relacionamento.
+
+**145 mapeamentos no `etl_mapping`**, um de-para por campo bruto → coluna
+canônica, mais as constantes (`cloud_provider = azure`). O motor reusa o
+`_apply_mappings` que o FOCUS já usa (`RENAME`, `CONSTANT`, `CAST`).
+
+**O normalizador passou a ler do banco.** `load_mapping_from_db` monta o
+`SourceMapping` a partir de `etl_mapping`, com a declaração Python como fallback e
+como fonte das derivadas — o banco ainda não representa receita de derivada.
+
+### 25.3 Defeito encontrado no caminho
+
+O `etl_mapping` é indexado por **conexão**, e no 4P **todas as fontes
+compartilham a conexão 1**. Meu seed usava
+`WHERE NOT EXISTS (... connection_id, source_column, target_column)` — ou seja, a
+**primeira fonte que gravava uma coluna bloqueava todas as outras**. O
+`resource_graph` ficou com **1 mapeamento em vez de 15**, e o `materialise`
+quebrava com "campo obrigatório `resource_id` não mapeado".
+
+Correção: coluna `source_key` em `etl_mapping` (migração idempotente) e unicidade
+incluindo a fonte.
+
+| Fonte | Mapeamentos |
+|---|---|
+| `monitor_vm_metrics` | 24 |
+| `retail_price` | 22 |
+| `customer_price` | 21 |
+| `cost_exports` | 19 |
+| `compute_skus` | 16 |
+| `resource_graph` | 15 |
+| `vm_inventory` | 15 |
+| `aks_inventory` | 13 |
+
+### 25.4 Verificado
+
+| Fonte | Linhas na Silver |
+|---|---|
+| `cost_exports` | 7.955.768 |
+| `resource_graph` | 17.850 |
+| `vm_inventory` | 608 |
+| `aks_inventory` | 242 |
+
+A transformação Bronze → Silver passa a ser **dado, não código**: editar o de-para
+na aba de relacionamento muda o resultado, sem deploy.
+
+### 25.5 Sequência confirmada pelo usuário
+
+1. criar as tabelas Silver e o relacionamento (aba de relacionamento) — **feito**
+2. transformar Bronze em Silver — **feito, dirigido pelo banco**
+3. manter `ResourceId` como referência, como no FOCUS — **feito** (as canônicas
+   usam `resource_id`; o cubo Gold usa `canonical_resource_id`)
+4. só então os relacionamentos Silver FOCUS × novas Silver → cubos Gold
+
+### 25.6 Pendências
+
+- `compute_quota`, `region_policy`, `aks_cost_allocation` e `container_insights`
+  **não têm mapeamento canônico** (`SourceMapping`) — foram construídos como
+  Bronze analítico. Precisam de modelo canônico antes do passo 4.
+- `openai_ptu` também não tem mapeamento.
+- O banco ainda não representa **derivadas** (`derived`); elas vêm da declaração.
