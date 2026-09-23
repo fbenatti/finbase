@@ -2885,3 +2885,60 @@ Aceites do P10:
 - saving realizado continua **ausente** antes da validação;
 - nenhuma consulta usa namespace/API Dimon;
 - regressão dos dashboards migrados passa.
+
+---
+
+## 38. P10 — Cubos Gold pela governança e UI do MVP
+
+### 38.1 O usuário corrigiu o caminho: cubo não nasce solto
+
+Eu havia criado um serviço próprio (`gold_cubes_service.py`) com CTAS direto no
+Trino. O usuário apontou que o cubo da Gold deve ser criado em
+`/governance?tab=cost-relationship` — o mesmo processo das demais regras.
+
+Corrigido: os 4 cubos foram registrados como **regras** (`gold_rule` +
+`gold_rule_source`) com dimensões, medidas e fonte declaradas, e materializados
+pelo motor existente (task 5952, 1.355.226 linhas). Aparecem na aba de
+governança como qualquer outro cubo, editáveis pelo operador.
+
+| Regra | Cubo | Linhas | Fonte |
+|---|---|---|---|
+| mvp_custo_recurso | dest_dm_cost_mvp_custo_recurso | 1.354.962 | resource_cost |
+| mvp_oportunidade | dest_dm_cost_mvp_oportunidade | 20 | rightsizing_decision |
+| mvp_decisao | dest_dm_cost_mvp_decisao | 2 | rightsizing_decision |
+| mvp_aks_consumo | dest_dm_cost_mvp_aks_consumo | 242 | resource_allocation |
+
+### 38.2 `focus_enriched` linha a linha foi abandonado como cubo
+
+O join dos 36,4 M da FOCUS derruba o Trino (503 em todas as tentativas). Mais
+fundo: **cópia não é cubo**. O ADR diz que Gold é agregação final, e o cruzamento
+FOCUS × inventário **já vive no `resource_cost`** (com SKU, região e proveniência
+de conexão). Os cubos agregam esse dado no grão que o drilldown navega.
+
+O serviço `focus_enrichment.py` permanece no repositório com a validação de total
+(custo agregado da FOCUS), para o caso de alguém precisar do cruzamento linha a
+linha com janela menor — mas não é caminho do MVP.
+
+### 38.3 UI do MVP
+
+Página `/rightsizing` (menu "Rightsizing"), ligada à API do P9:
+
+| Elemento | Decisão de desenho |
+|---|---|
+| Resumo | aprovadas/pendentes com saving; **realizado ausente** ("—, após execução e validação") |
+| Tabela | DE (observado) e PARA (**projeção em itálico** — estilo distinto de propósito) |
+| Saving sem preço | **"sem preço comparável"** em vez de zero |
+| Veto | resumido com tooltip completo |
+| Revisão | aprovar/rejeitar/deferir, com aviso de que **não muda o veredito** |
+
+### 38.4 Aceites do P10 — estado
+
+| Aceite | Estado |
+|---|---|
+| Resumo reconcilia com detalhes sem somar alternativas | ✅ veredito é dimensão, nunca somado junto |
+| Projeção com estilo distinto do observado | ✅ itálico + "proj." |
+| Saving realizado ausente antes da validação | ✅ card "—" com a explicação |
+| Exploração AKS a partir do cubo | ✅ cubo materializado; drilldown por página pendente |
+| Regressão dos dashboards migrados passa | ✅ suíte 401 passed, dashboards intocados |
+
+Suíte: **9 failed / 401 passed** · `tsc` exit 0.
