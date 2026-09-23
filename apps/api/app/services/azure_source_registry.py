@@ -138,7 +138,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "api_reference": "Microsoft.Compute locations/{loc}/usages",
         "required_permission": "Reader na subscription",
         "azure_scope": "subscription",
-        "implementation_status": "planned",
+        "implementation_status": "implemented",
     },
     {
         "source_key": "retail_price",
@@ -250,7 +250,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "api_reference": "Azure Policy assignments (Reader)",
         "required_permission": "Reader na subscription",
         "azure_scope": "subscription",
-        "implementation_status": "planned",
+        "implementation_status": "implemented",
     },
 )
 
@@ -270,6 +270,8 @@ CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
     "azure_retail_price": "retail_price",
     "azure_compute_skus": "compute_skus",
     "azure_customer_price": "customer_price",
+    "azure_compute_quota": "compute_quota",
+    "azure_region_policy": "region_policy",
     "azure_aks_inventory": "aks_inventory",
     "azure_retail_price": "retail_price",
     "azure_compute_skus": "compute_skus",

@@ -591,7 +591,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         # PTU is an operational source, not an Azure Blob export.  It is
         # executed by the worker through the PTU collector below.
         pass
-    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph", "azure_monitor_vm_metrics", "azure_vm_inventory", "azure_aks_inventory", "azure_retail_price", "azure_compute_skus", "azure_customer_price"):
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph", "azure_monitor_vm_metrics", "azure_vm_inventory", "azure_aks_inventory", "azure_retail_price", "azure_compute_skus", "azure_customer_price", "azure_compute_quota", "azure_region_policy"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",

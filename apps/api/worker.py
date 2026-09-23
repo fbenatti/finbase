@@ -13,6 +13,8 @@ _DEDICATED_COLLECTORS: frozenset[str] = frozenset({
     "azure_monitor_vm_metrics",
     "azure_resource_graph",
     "azure_automation_jobs",
+    "azure_compute_quota",
+    "azure_region_policy",
 })
 
 #!/usr/bin/env python3
@@ -1433,6 +1435,57 @@ def consumer_main(worker_id: int):
                                     _t_vm.billing_periods = [_vm_result.get("period")] if _vm_result.get("period") else []
                                     _t_vm.result_json = _vm_result
                                     _t_vm.finished_at = datetime.now(timezone.utc)
+                                    _ptu_session.commit()
+                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks.pop(task_id, None)
+                                continue
+                            if _ptu_conn and _ptu_conn.connector_type in (
+                                "azure_compute_quota", "azure_region_policy"
+                            ):
+                                # Quota e policy: restrições de elegibilidade.
+                                from app.services.azure_quota_policy_service import (
+                                    run_compute_quota_collection,
+                                    run_region_policy_collection,
+                                )
+                                _coletor = (
+                                    run_compute_quota_collection
+                                    if _ptu_conn.connector_type == "azure_compute_quota"
+                                    else run_region_policy_collection
+                                )
+                                _rotulo = (
+                                    "Quota de compute"
+                                    if _ptu_conn.connector_type == "azure_compute_quota"
+                                    else "Policy de região"
+                                )
+                                try:
+                                    _qp = _coletor(
+                                        _ptu_session, _ptu_conn.id,
+                                        task_id=task_id, source_code=source_code,
+                                    )
+                                except Exception as _qp_exc:
+                                    import traceback as _tb_qp
+                                    _tb_qp.print_exc()
+                                    _t_qp = _ptu_session.get(EtlTask, task_id)
+                                    if _t_qp:
+                                        _t_qp.status = "FAILED"
+                                        _t_qp.phase = f"{_rotulo} falhou: {str(_qp_exc)[:380]}"
+                                        _t_qp.errors = [str(_qp_exc)[:1000]]
+                                        _t_qp.finished_at = datetime.now(timezone.utc)
+                                        _ptu_session.commit()
+                                    _inmemory_tasks[task_id]["status"] = "FAILED"
+                                    _inmemory_tasks.pop(task_id, None)
+                                    continue
+                                _t_qp_ok = _ptu_session.get(EtlTask, task_id)
+                                if _t_qp_ok:
+                                    _t_qp_ok.status = "COMPLETED"
+                                    _t_qp_ok.phase = (
+                                        f"{_rotulo}: {_qp.get('rows_bronze', 0)} linha(s) · "
+                                        f"{_qp.get('subscriptions', 0)} assinatura(s)"
+                                    )
+                                    _t_qp_ok.rows_raw = _qp.get("rows_bronze", 0)
+                                    _t_qp_ok.billing_periods = [_qp.get("period")] if _qp.get("period") else []
+                                    _t_qp_ok.result_json = _qp
+                                    _t_qp_ok.finished_at = datetime.now(timezone.utc)
                                     _ptu_session.commit()
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
