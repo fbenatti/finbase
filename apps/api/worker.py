@@ -1259,6 +1259,10 @@ def consumer_main(worker_id: int):
                         try:
                             from app.models.source_connection import SourceConnection as _PtuConnection
                             _ptu_conn = _ptu_session.get(_PtuConnection, conn_id)
+                            # O connector **da fonte** vence o da conexão: é ele que
+                            # decide o coletor. Antes esta vista só era montada dentro
+                            # do ramo de Automation, então as demais fontes nunca
+                            # chegavam ao seu próprio coletor e caíam no ETL de blob.
                             if _ptu_conn is not None and _source_connector:
                                 class _SourceConn:
                                     """Vista da conexão com o connector da fonte."""
@@ -1268,6 +1272,7 @@ def consumer_main(worker_id: int):
                                     def __getattr__(self, name):
                                         return getattr(self._base, name)
                                 _ptu_conn = _SourceConn(_ptu_conn, _source_connector)
+
                             if _ptu_conn and _ptu_conn.connector_type == "azure_automation_jobs":
                                 # Azure Automation é coletado via ARM (jobs e
                                 # schedules) e persistido na Bronze, seguindo o
