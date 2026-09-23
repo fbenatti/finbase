@@ -1753,3 +1753,79 @@ defeito de roteamento.
 | `resource_inventory` | 10.862 |
 | `compute_sku_catalog` | coletando |
 | `focus_enriched` | **parado por decisão de sequência** |
+
+---
+
+## 23. Fontes esgotadas: AKS alocação e Container Insights
+
+Com estes dois, **todas as fontes do catálogo têm coletor**.
+
+### 23.1 Spike antes de codificar (exigência do plano)
+
+| Capacidade | Disponibilidade no 4P |
+|---|---|
+| Clusters e node pools (Resource Graph) | 46 clusters / 242 pools |
+| Add-on Cost Analysis | **não ativo** |
+| API do Kubernetes | sem credencial configurada |
+| Container Insights | **5 de 46 clusters** |
+
+### 23.2 Alocação de custo AKS — `PARTIAL` honesto
+
+Sem add-on nem API do Kubernetes **não há dado de namespace/pod**. O plano
+proíbe inferir. O coletor faz o que o dado sustenta: distribui o custo do cluster
+pelos **node pools**, com a capacidade como peso — é o nó que se paga.
+
+| Verificação | Resultado |
+|---|---|
+| Linhas | **242** |
+| Clusters | 46 |
+| Base do peso | `node_capacity` |
+| Soma do peso por cluster | **1,0** (validado antes de gravar) |
+| Estado | `PARTIAL` com motivo explícito |
+
+Peso que não fecha **falha a coleta** em vez de alocar custo errado.
+
+### 23.3 Container Insights — cobertura registrada
+
+O dado vive no workspace do Log Analytics; descoberto pelo Resource Graph (o
+add-on declara o workspace), sem caminho chumbado.
+
+| Verificação | Resultado |
+|---|---|
+| Linhas | **9.177** |
+| Clusters com dado | 5 |
+| Clusters sem add-on | **41, registrados na Bronze com motivo** |
+
+**Defeito encontrado:** usei `ContainerInventory`, que **não existe** nesta
+implantação. O workspace tem `KubePodInventory`, `KubeNodeInventory` e `Perf`. O
+nome "padrão" dava erro semântico 400.
+
+### 23.4 Duas correções de robustez
+
+| Defeito | Sintoma | Correção |
+|---|---|---|
+| Texto longo na policy | `StringDataRightTruncation` derrubava a coleta por um campo acessório | truncar em 3800 chars antes da Bronze |
+| Assinatura fora do alcance da credencial | 401 abortava tudo (56 assinaturas, a credencial não alcança todas) | registra e segue; estado `PARTIAL` com contagem |
+
+| Fonte | Linhas | Cobertura |
+|---|---|---|
+| `compute_quota` | 23.200 | 100 coletas, 2 sem acesso |
+| `region_policy` | 5.527 | 54 coletas, 2 sem acesso |
+
+### 23.5 Incidente operacional: o frontend
+
+O Vite caiu porque o meu comando de reinício (`pgrep -f 'projetos/OpenFinops'`)
+matava **todos** os processos do projeto — inclusive o web. O log mostrou
+`http proxy error ... ECONNREFUSED` em `/etl/tasks/`, não erro do frontend.
+
+**Correção de método:** reiniciar por processo específico
+(`\.venv/bin/python worker\.py`, `uvicorn app.main`), nunca por diretório.
+
+Também houve `DeadlockDetectedError` no startup: o `ALTER TABLE` da migração
+disputa a tabela com o worker. A ordem que funciona é **parar o worker → migrar →
+subir o worker**.
+
+### 23.6 Estado das fontes do 4P
+
+**14 de 14 com coletor.** 12 ligadas; `amortized_cost` e `focus` são tipos de
+relatório disponíveis para habilitar por configuração quando fizer sentido.
