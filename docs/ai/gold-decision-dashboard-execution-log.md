@@ -1256,3 +1256,78 @@ materialização com erro explícito.
   ganha regra declarativa ou continua como serviço versionado no código — a
   decisão precisa ser registrada, porque a seção 6.1 pede um único caminho de
   governança.
+
+## G3.7 C2 `finops_cost_resource_monthly`
+
+**Status:** materializado, reconciliado (17 fatias).
+
+Grão: `billing_period + provider + connection_code + sub_account_id +
+canonical_resource_id + charge_category + currency`.
+
+```text
+resource_cost      : R$ 37.356.361,47 em 13.519.512 linhas
+C2                 : R$ 37.356.361,47 em  1.023.977 linhas de cubo (17 fatias)
+RECONCILIACAO: delta R$ 0,00 -> OK
+linhas de origem preservadas: True (13.519.512)
+recursos distintos: 968.339 | tipos de recurso: 92
+linhas com inventario: 39.420 | linhas NAO_RECURSO: 413.665
+```
+
+### G3.7.1 O join 1:1 com o inventário
+
+O inventário tem **26 snapshots por recurso** (39.343 linhas para 20.160 recursos,
+todos com `_billing_period = '202609'`). Um `LEFT JOIN` por `resource_id`
+multiplicaria o custo por até 26.
+
+O inventário é deduplicado para **uma linha por chave segura**
+(`provider + conta + id canônico`), escolhendo o snapshot mais recente por
+`valid_from` e desempatando por `_processed_at` — determinístico. A prova de que
+não multiplica é o próprio total: idêntico ao da origem, com as 13.519.512 linhas
+de origem preservadas.
+
+`inventory_snapshots` publica quantos snapshots existiam ("1 de 26" é informação
+diferente de "1 de 1"), e `inventory_status` distingue `INVENTARIADO` de
+`NAO_INVENTARIADO`. A maioria dos recursos de custo **não** tem inventário; isso é
+cobertura medida, não suposição.
+
+### G3.7.2 `resource_type` passa a existir
+
+`resource_type` é **NULL em 100 %** das linhas de `resource_cost`. O tipo do
+recurso existe só no inventário, então C2 é onde ele aparece: **92 tipos**
+distintos, contra zero antes. Recurso sem inventário fica com
+`resource_type_key = 'UNKNOWN'` — nulo explícito, nunca string vazia.
+
+### G3.7.3 `resource_id` inválido é marcado, não escondido
+
+**413.665 linhas** do cubo têm `resource_id_status = 'NAO_RECURSO'`: são as linhas
+de ajuste do 4P com `resource_id` igual a `'320core'`, `'100core'`, `'96core'`.
+Elas permanecem no cubo — o custo delas é real — mas ficam identificáveis, e é
+por isso que a contagem de recursos distintos (968.339) não está inflada por elas.
+
+### G3.7.4 Construção: SQL projeta, pandas agrega
+
+Terceira e última tentativa de construção, cada uma motivada por falha medida:
+
+| Tentativa | Forma | Resultado |
+|---|---|---|
+| 1 | uma CTAS com `GROUP BY` no grão do recurso | workers de 2,4 GiB estouram; 503 "still initializing" |
+| 2 | CTAS por competência (17 fatias) | falha igual: o estado do agrupamento é proporcional ao nº de recursos distintos (~1 M), não ao nº de linhas |
+| 3 | **SQL projeta, pandas agrega, publicador por fatia grava** | **17/17 fatias, 487 s, reconciliado** |
+
+O SQL continua responsável pela normalização das dimensões (não existe uma segunda
+definição em pandas) e pela projeção da fatia. A agregação roda no processo da API,
+onde a memória é do host. A publicação usa o publicador por fatia do projeto
+(`write_destination_staged` + `publish_staged_partition`), o mesmo que o
+`gold_builder` usa: a troca da fatia
+`(_billing_period, source_connection_id)` é uma transação Iceberg, então leitores
+veem a versão anterior ou a nova.
+
+Cada fatia registra manifesto.
+
+## G3.8 Pendente
+
+- **C3** `finops_cost_change_driver`;
+- **APIs `/finops/*`**;
+- **`resource_inventory` só tem 202609**: os atributos de recurso vêm do snapshot
+  atual mesmo para competências antigas. `inventory_snapshot_period` e
+  `inventory_snapshots` publicam essa defasagem em vez de escondê-la.
