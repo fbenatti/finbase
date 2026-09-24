@@ -37,8 +37,8 @@ from app.services.finops_cost_monthly import (
 )
 from app.services.finops_cost_resource import (
     C2_TABLE,
-    c2_cost_sql,
-    c2_enrich_sql,
+    aggregate_c2_bucket,
+    enrich_c2_aggregate,
     c2_projection_sql,
     inventory_temporal_sql,
     non_additive_measures,
@@ -147,33 +147,53 @@ def test_c1_select_sql_is_a_single_query_for_inspection():
 # --- C2 ------------------------------------------------------------------------
 
 
-def test_c2_bucket_sql_aggregates_in_trino():
-    """A agregação por bucket roda no Trino, não no processo da API."""
-    from app.services.finops_cost_resource import c2_bucket_select_sql
+def test_c2_bucket_projection_does_not_aggregate():
+    """A projeção traz linhas cruas do bucket; a agregação é etapa separada."""
+    from app.services.finops_cost_resource import c2_bucket_projection_sql
 
-    sql = c2_bucket_select_sql(
-        billing_period="202512", bucket=1, connection_code="azure-4p"
+    sql = c2_bucket_projection_sql(
+        billing_period="202512", bucket=3, connection_code="azure-4p"
     )
     assert "CRC32" in sql
-    assert "GROUP BY" in sql
-    assert "iceberg.silver.resource_cost" in sql
+    assert "GROUP BY" not in sql
+    assert "'202512'" in sql
 
 
-def test_c2_bucket_sql_escapes_injected_period():
-    """A competência vem da Silver, mas ainda assim vira literal escapado."""
-    from app.services.finops_cost_resource import c2_bucket_select_sql
+def test_c2_bucket_projection_escapes_injected_period():
+    from app.services.finops_cost_resource import c2_bucket_projection_sql
 
-    sql = c2_bucket_select_sql(
-        billing_period="202512'; DROP TABLE x --", bucket=0
-    )
+    sql = c2_bucket_projection_sql(billing_period="202512'; DROP TABLE x --", bucket=0)
     assert "202512''; DROP TABLE x --" in sql
 
 
-def test_c2_projection_is_over_bucket_tables():
-    """`c2_projection_sql` projeta a união dos buckets, não a Silver."""
-    sql = c2_projection_sql("SELECT 1 AS billing_period")
-    assert "FROM (SELECT 1 AS billing_period) c2_raw" in sql
-    assert "resource_cost" not in sql
+def test_c2_aggregation_is_by_the_cube_grain():
+    """O agrupamento usa as chaves do grão, e o bucket garante que não se divide."""
+    import inspect
+
+    from app.services.finops_cost_resource import _C2_GROUP_KEYS, aggregate_c2_bucket
+
+    assert "canonical_resource_id" in _C2_GROUP_KEYS
+    assert "charge_category" in _C2_GROUP_KEYS
+    fonte = inspect.getsource(aggregate_c2_bucket)
+    assert "groupby" in fonte
+
+
+def test_c2_aggregation_drops_non_additive_charge_days():
+    """`charge_days` era COUNT(DISTINCT) e não sobrevive à soma entre buckets."""
+    from app.services.finops_cost_resource import _C2_OUTPUT_COLUMNS
+
+    assert "charge_days" not in _C2_OUTPUT_COLUMNS
+
+
+def test_c2_enrich_fills_inventory_status_when_absent():
+    """Sem linha de inventário, o status é NO_TEMPORAL_SNAPSHOT, não nulo."""
+    import inspect
+
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert "NO_TEMPORAL_SNAPSHOT" in fonte
+    assert "inventory_resource_sku AS" not in fonte  # a atribuição é em pandas
 
 
 def test_inventory_is_deduplicated_by_safe_key_per_period():
@@ -192,32 +212,47 @@ def test_inventory_dedup_orders_by_closest_valid_snapshot():
     assert "b.snapshot_processed_at DESC" in sql
 
 
-def test_c2_enrich_joins_on_the_safe_key_not_resource_id_alone():
-    """A chave é provider + conta + id canônico (seção 4.1)."""
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    join = sql[sql.index("LEFT JOIN") :]
-    assert "i.provider = c.provider" in join
-    assert "i.sub_account_id = c.sub_account_id" in join
-    assert "i.canonical_resource_id = c.canonical_resource_id" in join
+def test_c2_enrich_joins_on_the_safe_key_and_period():
+    """A chave do merge é provider + conta + id canônico + competência."""
+    import inspect
+
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert "canonical_resource_id" in fonte
+    assert "sub_account_id" in fonte
+    assert "billing_period" in fonte
+    assert "how=\"left\"" in fonte
 
 
 def test_c2_marks_invalid_resource_id():
     """413.665 linhas de ajuste têm `resource_id` = '320core'."""
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    assert "NAO_RECURSO" in sql
-    assert "VALIDO" in sql
+    import inspect
+
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert "NAO_RECURSO" in fonte
+    assert "VALIDO" in fonte
 
 
 def test_c2_resource_type_falls_back_to_unknown():
     """O tipo só existe no inventário; ausência é UNKNOWN, não string vazia."""
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    assert "'UNKNOWN'" in sql
+    import inspect
+
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    assert "fillna(\"UNKNOWN\")" in inspect.getsource(enrich_c2_aggregate)
 
 
 def test_c2_publishes_unavailable_costs_as_null():
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    assert "CAST(NULL AS DOUBLE) AS billed_cost" in sql
-    assert "CAST(NULL AS DOUBLE) AS contracted_cost" in sql
+    import inspect
+
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert 'agregado["billed_cost"] = None' in fonte
+    assert 'agregado["contracted_cost"] = None' in fonte
 
 
 def test_c2_quality_columns_include_inventory_coverage():

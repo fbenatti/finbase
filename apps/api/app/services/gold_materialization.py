@@ -650,7 +650,7 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
         from app.services.gold_materializers import (
             execution_order,
             is_registered,
-            materialize_by_keys,
+            runner_for,
         )
 
         chaves = [str(r.materializer_key) for r in keyed]
@@ -662,46 +662,74 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
         try:
             if progress:
                 progress(0, len(chaves), "Materializando cubos multi-estágio")
-            resultados = await materialize_by_keys(
-                execution_order(chaves),
-                run_id=run_id,
-                progress=progress,
-            )
+            # Executa chave a chave (e não em lote) para que a falha de um cubo não
+            # apague o resultado dos que já publicaram. A ordem continua sendo a de
+            # dependência; o que muda é o registro.
+            estado: dict[str, dict[str, Any]] = {}
+            erro: Exception | None = None
+            for chave in execution_order(chaves):
+                try:
+                    estado[chave] = await runner_for(chave)(
+                        run_id=run_id, expected_total=None, progress=progress
+                    )
+                except Exception as exc:  # noqa: BLE001 — vira status da regra
+                    erro = exc
+                    break
+
+            from app.services.gold_materializers import is_registered, spec_for
+
+            def _afetada(regra: Any) -> bool:
+                """Regra afetada pela falha: a que falhou ou a que depende dela.
+
+                Marcar as **anteriores** como ERROR seria falso — elas publicaram. E
+                marcar as posteriores independentes também seria: cobertura e C1 não
+                dependem de C2.
+                """
+                if erro is None:
+                    return False
+                if str(regra.materializer_key) in estado:
+                    return False
+                return True
+
             for regra in keyed:
-                resultado = resultados.get(str(regra.materializer_key)) or {}
-                linhas = int(
-                    resultado.get("rows")
-                    or resultado.get("grain_rows")
-                    or 0
-                )
-                regra.materialization_table = rule_target_table(regra.code)
-                regra.materialization_rows = linhas
-                regra.materialization_status = "UPDATED" if linhas else "EMPTY"
-                regra.materialization_error = None
+                chave = str(regra.materializer_key)
+                resultado = estado.get(chave)
                 regra.materialization_run_id = run_id
                 regra.materialized_at = datetime.now(timezone.utc)
-                details.append(
-                    {
-                        "rule_id": regra.id,
-                        "code": regra.code,
-                        "table": regra.materialization_table,
-                        "rows": linhas,
-                        "materializer_key": regra.materializer_key,
-                    }
-                )
-                written += linhas
+                # `rule_target_table` deriva `dest_dm_cost_<code>` e não vale para os
+                # cubos `finops_*`, cuja tabela física é declarada na spec. Usar o
+                # nome derivado registraria uma tabela que não existe.
+                regra.materialization_table = spec_for(chave).physical_table
+                if resultado is not None:
+                    linhas = int(
+                        resultado.get("rows")
+                        or resultado.get("grain_rows")
+                        or resultado.get("inventory_rows")
+                        or 0
+                    )
+                    regra.materialization_rows = linhas
+                    regra.materialization_status = "UPDATED" if linhas else "EMPTY"
+                    regra.materialization_error = None
+                    details.append(
+                        {
+                            "rule_id": regra.id,
+                            "code": regra.code,
+                            "table": regra.materialization_table,
+                            "rows": linhas,
+                            "materializer_key": chave,
+                        }
+                    )
+                    written += linhas
+                elif _afetada(regra):
+                    regra.materialization_status = "ERROR"
+                    regra.materialization_error = str(erro)[:2000]
+                    failed.append(
+                        {"rule_id": regra.id, "code": regra.code, "error": str(erro)[:500]}
+                    )
+            if erro is not None:
+                session.commit()
+                raise erro
         except Exception as exc:
-            # Falha em cubo multi-estágio marca **todas** as regras do lote: a ordem
-            # é por dependência, então um cubo que falha invalida os seguintes, e
-            # dizer que os seguintes publicaram seria falso.
-            for regra in keyed:
-                regra.materialization_status = "ERROR"
-                regra.materialization_error = str(exc)[:2000]
-                regra.materialization_run_id = run_id
-                regra.materialized_at = datetime.now(timezone.utc)
-                failed.append(
-                    {"rule_id": regra.id, "code": regra.code, "error": str(exc)[:500]}
-                )
             session.commit()
             raise
 

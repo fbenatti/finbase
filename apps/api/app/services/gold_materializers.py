@@ -193,16 +193,19 @@ async def materialize_by_keys(
 ) -> dict[str, Any]:
     """Executa os materializadores das chaves, na ordem de dependência.
 
-    Cada resultado é agregado no retorno, com o total financeiro de cada cubo. O
-    executor **não** engole falha: um cubo que não reconcilia interrompe a fila, e
-    os cubos seguintes não são publicados sobre dado não reconciliado.
+    Cada resultado é agregado no retorno. O executor **não** engole falha: um cubo
+    que não reconcilia interrompe a fila, e os cubos seguintes não são publicados
+    sobre dado não reconciliado.
+
+    Quem precisa distinguir **qual** chave falhou deve iterar `execution_order` e
+    chamar `runner_for` diretamente — é o que `materialize_gold_cubes` faz, para não
+    marcar como `ERROR` um cubo que já publicou.
     """
     resultados: dict[str, Any] = {}
     for chave in execution_order(keys):
-        resultado = await runner_for(chave)(
+        resultados[chave] = await runner_for(chave)(
             run_id=run_id,
             expected_total=expected_total,
             progress=progress,
         )
-        resultados[chave] = resultado
     return resultados

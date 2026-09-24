@@ -32,7 +32,7 @@ from app.services.finops_cost_resource import (
     _C2_OUTPUT_TYPES,
     bucket_count,
     bucket_predicate,
-    c2_bucket_select_sql,
+    c2_bucket_projection_sql,
     c2_projection_sql,
     inventory_temporal_sql,
 )
@@ -317,22 +317,32 @@ def test_inventory_status_vocabulary_is_closed():
 
 
 def test_c2_enrich_does_not_retroproject_attributes():
-    """Sem snapshot vigente, SKU/estado/SO ficam NULL."""
-    from app.services.finops_cost_resource import c2_enrich_sql
+    """Sem snapshot vigente, SKU/estado/SO ficam NULL e o tipo cai em UNKNOWN.
 
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    assert "i.inventory_resource_sku AS resource_sku" in sql
-    assert "i.inventory_resource_state AS resource_state" in sql
-    assert "i.operating_system" in sql
-    # O tipo cai em UNKNOWN, nunca herda o do inventário sem vigência.
-    assert "COALESCE(i.inventory_resource_type, 'UNKNOWN')" in sql
+    A verificação é sobre o helper que aplica a regra: o `merge` com o inventário
+    temporal pode não trazer linha alguma, e nesse caso os atributos precisam
+    permanecer nulos — nunca herdados do snapshot de outro período.
+    """
+    import inspect
+
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert '"resource_sku"' in fonte
+    assert '"UNKNOWN"' in fonte
+    assert "NO_TEMPORAL_SNAPSHOT" in fonte
 
 
 def test_c2_enrich_joins_inventory_by_period():
-    from app.services.finops_cost_resource import c2_enrich_sql
+    """O merge do inventário inclui a competência: vigência por período."""
+    import inspect
 
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    assert "i.billing_period = c.billing_period" in sql
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert '"billing_period"' in fonte
+    assert "canonical_resource_id" in fonte
+    assert "sub_account_id" in fonte
 
 
 def test_period_end_is_computed_by_date_arithmetic():
@@ -375,12 +385,13 @@ def test_bucket_count_is_enough_for_the_heaviest_slice():
 
 
 def test_bucket_sql_filters_one_period_and_connection():
-    sql = c2_bucket_select_sql(
+    from app.services.finops_cost_resource import c2_bucket_projection_sql
+
+    sql = c2_bucket_projection_sql(
         billing_period="202512", bucket=3, connection_code="azure-4p"
     )
     assert "'202512'" in sql
     assert "'azure-4p'" in sql
-    assert "GROUP BY" in sql
 
 
 def test_bucket_sql_escapes_injected_period():
@@ -390,7 +401,9 @@ def test_bucket_sql_escapes_injected_period():
     O que se prova é que a aspa simples foi dobrada, então o valor permanece um
     literal e não fecha a string para virar SQL.
     """
-    sql = c2_bucket_select_sql(billing_period="202512'; DROP TABLE x --", bucket=0)
+    from app.services.finops_cost_resource import c2_bucket_projection_sql
+
+    sql = c2_bucket_projection_sql(billing_period="202512'; DROP TABLE x --", bucket=0)
     assert "202512''; DROP TABLE x --" in sql
     # Nenhuma aspa simples solta antes do predicado de bucket.
     predicado = sql.index("CRC32")
@@ -398,36 +411,36 @@ def test_bucket_sql_escapes_injected_period():
     assert trecho.count("'") % 2 == 0, "aspa ímpar significaria literal aberto"
 
 
-def test_c2_materializer_does_not_read_raw_cost_into_python():
-    """A construção por bucket roda no Trino; o agregado é que é publicado.
+def test_c2_does_not_hold_the_whole_slice_raw():
+    """A fatia é processada bucket a bucket, e as linhas cruas são descartadas.
 
-    O que não pode existir é agregação de milhões de linhas no processo da API: nem
-    `pandas` sobre linhas de custo, nem `execute` de uma projeção de 13,5 M linhas.
-    A montagem usa `c2_projection_sql`, mas sobre as **tabelas de bucket** já
-    agregadas — a fonte é o nome de tabela, não a Silver.
+    O processo segura o **agregado** acumulado, não as linhas Silver da fatia
+    inteira. Sem o `del frame` a cada bucket, uma fatia de 3,76 M linhas ficaria
+    toda em memória — que é exatamente o que a auditoria mandou evitar.
     """
     import inspect
 
     import app.services.finops_cost_resource as m
 
     fonte = inspect.getsource(m.materialize_c2_slice)
-    assert "pd.DataFrame" not in fonte
-    assert "resource_cost" not in fonte
-    assert "materialize_gold_sql" in fonte
-    # A projeção é aplicada sobre a união das tabelas de bucket.
-    assert "c2_projection_sql(uniao)" in fonte
+    # Itera bucket por bucket e descarta as linhas cruas.
+    assert "for bucket in range(total_buckets)" in fonte
+    assert "del frame" in fonte
+    # Acumula apenas os agregados.
+    assert "agregados.append(aggregate_c2_bucket(frame))" in fonte
 
 
-def test_c2_only_inventory_uses_a_frame():
-    """O único frame do C2 é o inventário deduplicado, não o custo."""
+def test_c2_frames_are_the_inventory_and_the_aggregate():
+    """Os frames do C2 são inventário e agregado — nunca a linha Silver inteira."""
     import inspect
 
     import app.services.finops_cost_resource as m
 
-    fonte_inventario = inspect.getsource(m.materialize_c2_inventory)
-    fonte_c2 = inspect.getsource(m.materialize_c2)
-    assert "pd.DataFrame" in fonte_inventario
-    assert "pd.DataFrame" not in fonte_c2
+    assert "pd.DataFrame" in inspect.getsource(m.materialize_c2_inventory)
+    fonte_slice = inspect.getsource(m.materialize_c2_slice)
+    # O frame por bucket existe, mas é do bucket e é descartado em seguida.
+    assert "pd.DataFrame(linhas)" in fonte_slice
+    assert "del frame" in fonte_slice
 
 
 def test_projection_declares_explicit_types():
@@ -641,10 +654,11 @@ def test_historical_period_gets_null_attributes():
 
     status = inventory_status_for(billing_period="202505", snapshot_period=None)
     assert status == "NO_TEMPORAL_SNAPSHOT"
-    # Sem snapshot, o contrato obriga NULL/UNKNOWN — está no SQL do enrich, que o
-    # teste abaixo confirma.
-    from app.services.finops_cost_resource import c2_enrich_sql
+    # Sem snapshot, o contrato obriga NULL/UNKNOWN — está no helper de enriquecimento.
+    import inspect
 
-    sql = c2_enrich_sql(cost_table="c", inventory_table="i")
-    assert "i.inventory_resource_sku AS resource_sku" in sql
-    assert "COALESCE(i.inventory_resource_type, 'UNKNOWN')" in sql
+    from app.services.finops_cost_resource import enrich_c2_aggregate
+
+    fonte = inspect.getsource(enrich_c2_aggregate)
+    assert '"resource_sku"' in fonte
+    assert '"UNKNOWN"' in fonte

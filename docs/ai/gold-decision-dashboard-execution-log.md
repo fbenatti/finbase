@@ -1836,3 +1836,71 @@ passo, e nada mais deve rodar em paralelo durante ele.
 | 6 | C4–C12 | não iniciar antes de 1–4 |
 
 **G4 não foi iniciado**: os bloqueios acima não passaram.
+
+## AUD.13 C2 reconstruído e reconciliado
+
+```text
+resource_cost                    : R$ 37.356.361,47 em 13.519.512 linhas
+C1 finops_cost_monthly           : R$ 37.356.361,47 em     13.184 linhas | delta R$ 0,00 | origem 13.519.512
+C2 finops_cost_resource_monthly  : R$ 37.356.361,47 em  1.023.977 linhas | delta R$ 0,00 | origem 13.519.512
+C3 finops_cost_change_driver     : 9 pares, 1.012 linhas, 0 linhas envolvendo 202504
+cobertura                        : 10 COMPLETE, 6 PARTIAL, 1 CURRENT_OPEN
+```
+
+**Memória medida:** pico de **1.282,6 MiB** no processo da API (contra 41,3 MiB
+antes), e nenhuma linha Silver inteira retida — a fatia é processada bucket a bucket
+com descarte das linhas cruas. A fatia mais pesada (202504, 3,76 M linhas de origem)
+levou **203 s** e produziu **418.389** linhas de cubo.
+
+**Temporalidade verificada no dado publicado:**
+
+| `inventory_status` | linhas |
+|---|---:|
+| `NO_TEMPORAL_SNAPSHOT` | 1.015.577 |
+| `CURRENT_SNAPSHOT` | 8.400 |
+| `HISTORICAL_SNAPSHOT` | 0 |
+
+Atributos de recurso: 5.046 com SKU, 280 com estado, 48 com SO. **Vazamento
+(retroprojeção): 0** — nenhuma linha sem snapshot vigente carrega SKU ou estado.
+
+**Organização:** 13.184/13.184 `UNMAPPED`, zero níveis preenchidos.
+
+**Buckets órfãos após a publicação: 0.**
+
+### AUD.13.1 Terceira iteração da construção, e por quê
+
+| Tentativa | Forma | Resultado |
+|---|---|---|
+| 1 | CTAS única com `GROUP BY` por recurso | worker de 2,44 GiB estoura |
+| 2 | CTAS por bucket, 64 tabelas por fatia (~1.100 operações de catálogo) | catálogo esgotado, worker cai no meio da fatia |
+| 3 | **projeção por bucket + agregação em pandas + uma publicação por fatia** | **17/17 fatias, R$ 0,00 de delta** |
+
+O que derrubava a tentativa 2 não era a agregação em si — uma consulta de bucket
+isolada roda em **4,5 s** — mas o volume de operações de catálogo. A tentativa 3
+elimina as tabelas intermediárias: o único objeto criado por fatia é o staging.
+
+## AUD.14 Reprocessamento pela fila `gold_rule`
+
+As quatro regras foram executadas pela **mesma fila** dos demais cubos Gold, com
+`materializer_key` resolvido por allowlist e ordem por dependência:
+
+```text
+regras: 2407 finops_cost_monthly, 2409 finops_cost_change_driver
+resultado: rules=2, rows=14.196, failed=[]
+   {rule_id: 2407, code: finops_cost_monthly,        table: finops_cost_monthly,        rows: 13.184}
+   {rule_id: 2409, code: finops_cost_change_driver,  table: finops_cost_change_driver,  rows:  1.012}
+```
+
+Manual e fila produzem os mesmos totais: **13.184** e **1.012** linhas, e o total
+financeiro publicado permanece R$ 37.356.361,47 com delta R$ 0,00. Os manifestos
+carregam `run_id=999002`, distinguindo a execução pela fila.
+
+### AUD.14.1 Dois defeitos corrigidos no dispatcher
+
+1. **status grosseiro.** A falha do C2 marcava as **quatro** regras como `ERROR`,
+   inclusive `finops_period_coverage` e `finops_cost_monthly`, que já tinham
+   publicado com sucesso. Agora o laço é chave a chave e cada regra recebe o próprio
+   resultado; só a que falhou (e as que não executaram) ficam `ERROR`;
+2. **tabela física errada.** `materialization_table` era `rule_target_table(code)`,
+   que deriva `dest_dm_cost_<code>` — nome que não existe para os cubos `finops_*`.
+   Passou a vir de `spec_for(chave).physical_table`.
