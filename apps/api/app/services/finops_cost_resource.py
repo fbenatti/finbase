@@ -922,7 +922,6 @@ WITH custo AS (
         COUNT(*) AS rows,
         MIN(DATE(charge_period_start)) AS first_charge_day,
         MAX(DATE(charge_period_start)) AS last_charge_day,
-        COUNT(DISTINCT DATE(charge_period_start)) AS charge_days,
         COUNT(*) FILTER (
             WHERE NULLIF(TRIM(CAST(tags_json AS VARCHAR)), '') IS NULL
                OR TRIM(CAST(tags_json AS VARCHAR)) IN ('{{}}', '[]')
@@ -967,7 +966,6 @@ SELECT
     c.rows,
     c.first_charge_day,
     c.last_charge_day,
-    c.charge_days,
     c.rows_without_tag,
     CASE WHEN {_is_valid_resource_sql("c.canonical_resource_id")}
          THEN 'VALIDO' ELSE 'NAO_RECURSO' END AS resource_id_status,
