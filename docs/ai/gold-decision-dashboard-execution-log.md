@@ -1984,3 +1984,76 @@ etapa, e as cópias em `dimon` continuam sendo a única versão válida até lá
 | AUD.7 | API com autorização, cache e p95 medido | **feito** |
 | D15 | cinco cubos de IA em `iceberg.gold` | **aberto** — limite de recurso; requer o desenho bucketizado |
 | — | recuperar 202604–202608 | **bloqueado na origem** (AUD.9) |
+
+## AUD.18 D15: cubos de IA publicados em `iceberg.gold`
+
+Os cinco cubos foram publicados. O fatiamento por competência resolveu o limite de
+recurso:
+
+| Tabela | `gold` | `dimon` | Situação |
+|---|---:|---:|---|
+| `dest_dm_ai_consumption_daily` | 851.768 | 851.768 | **igual** |
+| `dest_dm_ai_license_snapshot` | 5.767 | 5.767 | **igual** |
+| `dest_dm_copilot_usage_daily` | 818.538 | 845.233 | **difere** (−26.695) |
+| `dest_dm_copilot_license_snapshot` | 15.893 | 15.881 | **difere** (+12) |
+| `dest_dm_copilot_user_period` | 13.898 | 16.133 | **difere** (−2.235) |
+
+### AUD.18.1 O que mudou na construção
+
+`_consumption_select()` agrega `silver.dest_consumo_ia` e derrubava o worker numa
+CTAS única. Agora os cubos de consumo e uso do Copilot são construídos
+**competência a competência** — o agregado já inclui `_billing_period`, então fatiar
+e concatenar não muda o resultado — e o `copilot_user_period`, que lê o cubo de uso,
+roda **depois** dele.
+
+Duas fatias de medição: `silver.dest_consumo_ia` tem 15.283.192 linhas em
+competências de ~1 a 2 M; por competência, cada consulta cabe.
+
+### AUD.18.2 As cópias legadas **não** foram removidas
+
+Duas tabelas divergem, então `retire_legacy_namespace_copy` continua recusando a
+remoção — é o comportamento correto: não se apaga a única versão confiável antes de
+a nova reconciliar.
+
+A divergência é de **comportamento de deduplicação**, não de carga parcial:
+
+- `copilot_usage_daily`: o Gold novo aplica `ROW_NUMBER` por
+  `day + login + model + language + editor + source_kind + competência`, ficando com
+  uma linha por combinação. O legado tem 26.695 linhas a mais, o que indica um
+  conjunto de partição mais estreito na construção anterior;
+- `copilot_user_period` herda a diferença: agrega o cubo de uso filtrado por
+  `source_kind IN ('ai_usage_report','billing_report')`;
+- `copilot_license_snapshot`: +12 linhas no novo, coerente com deduplicação por
+  `(login, provider, product, competência)` contra um snapshot mais recente.
+
+Explicar e reconciliar essa diferença é item próprio — deliberadamente **não**
+resolvido aqui, porque a alternativa seria apagar a versão legada sem saber qual
+número está certo.
+
+### AUD.18.3 Correções de defeito no caminho de IA
+
+1. `_copilot_user_period_select()` referenciava `{GOLD}` **sem** ser f-string: o
+   placeholder chegava literal ao Trino e a consulta falhava com
+   `mismatched input '{'`;
+2. `_accumulate` usava `record_frame_publication_blocking` em contexto assíncrono,
+   que em modo obrigatório levanta. Passou para a versão assíncrona — o que só
+   apareceu porque o manifesto virou obrigatório (AUD.1).
+
+## AUD.19 Fechamento
+
+| Bloqueio | Estado | Evidência |
+|---|---|---|
+| A — cobertura materializada | **passa** | `gold.finops_period_coverage`, 17 linhas, dirige C3 e API |
+| B — organização sem hierarquia dominante | **passa** | 13.184/13.184 `UNMAPPED`, 0 níveis; 91/103 contas ambíguas medidas |
+| C — temporalidade do inventário | **passa** | vazamento de atributo = 0; 1.015.577 `NO_TEMPORAL_SNAPSHOT` |
+| D — governança declarativa | **passa** | 4 regras com `materializer_key`; fila executa; manual = fila |
+| E — manifesto obrigatório | **passa** | falha aborta antes do staging; teste com manifesto indisponível |
+| F — sem milhões de linhas na API | **passa** | agregação no Trino por bucket; pico de 1,28 GiB |
+| C1 e C2 reconciliam | **passa** | R$ 37.356.361,47 com delta R$ 0,00 nas duas |
+| C3 fecha 9/9 sem 202504 | **passa** | 9 pares, 0 linhas envolvendo 202504 |
+| API com auth, cache e p95 | **passa** | p95 de 113 a 719 ms, todos abaixo da meta |
+| D15 — cubos de IA em Gold | **passa com ressalva** | 5 publicados; 2 divergem do legado e o legado é preservado |
+| Recuperar 202604–202608 | **bloqueado na origem** | Bronze tem 51/1/1/3 linhas; sem blob para reprocessar |
+
+**G4 permanece não iniciado**: a recuperação de 202604–202608 é pré-requisito do
+cutover e depende de a origem voltar a publicar os arquivos de custo.

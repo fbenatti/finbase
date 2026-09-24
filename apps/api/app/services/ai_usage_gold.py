@@ -224,7 +224,7 @@ def _copilot_license_select() -> str:
 
 def _copilot_user_period_select() -> str:
     """Resumo financeiro usado pela relação de desenvolvedores e pelos KPIs."""
-    return """
+    return f"""
       SELECT
         CAST(_billing_period AS VARCHAR) AS _billing_period,
         lower(CAST(assignee_login AS VARCHAR)) AS assignee_login,
@@ -244,20 +244,169 @@ def _copilot_user_period_select() -> str:
     """
 
 
+#: Cubos que podem ser construídos competência a competência. O agregado é por
+#: competência (o `GROUP BY` inclui `_billing_period`), então fatiar e concatenar
+#: produz o mesmo resultado — e mantém cada consulta dentro do que um worker de
+#: 2,44 GiB sustenta.
+PERIOD_SLICED_TABLES: frozenset[str] = frozenset(
+    {AI_CONSUMPTION_TABLE, COPILOT_USAGE_TABLE}
+)
+
+#: Cubos derivados de outro cubo. Precisam rodar **depois** de o cubo de origem
+#: estar publicado — a origem é o cubo Gold, não a Silver.
+DERIVED_TABLES: dict[str, str] = {COPILOT_USER_PERIOD_TABLE: COPILOT_USAGE_TABLE}
+
+
+def _sliced_select(select_sql: str, billing_period: str) -> str:
+    """Envolve o SELECT com o filtro de competência.
+
+    Medido em 24/09/2026: `silver.dest_consumo_ia` tem 15.283.192 linhas
+    distribuídas em competências de ~1 a 2 M. A agregação de tudo numa CTAS derruba
+    o worker; por competência, cabe.
+    """
+    alvo = "'" + str(billing_period).replace("'", "''") + "'"
+    return (
+        f"SELECT * FROM (\n{select_sql}\n) AS slice_src "
+        f"WHERE CAST(_billing_period AS VARCHAR) = {alvo}"
+    )
+
+
+async def _periods_for(table: str) -> list[str]:
+    """Competências presentes na origem de um cubo fatiado."""
+    origem = {
+        AI_CONSUMPTION_TABLE: "iceberg.silver.dest_consumo_ia",
+        COPILOT_USAGE_TABLE: "iceberg.bronze.raw_github_token",
+    }[table]
+    linhas = await trino_execute(
+        f"SELECT DISTINCT CAST(_billing_period AS VARCHAR) AS bp FROM {origem} "
+        f"WHERE _billing_period IS NOT NULL ORDER BY 1",
+        timeout_s=900,
+    )
+    return [
+        str(r.get("bp"))
+        for r in linhas or []
+        if str(r.get("bp") or "").isdigit() and len(str(r.get("bp"))) == 6
+    ]
+
+
+async def _accumulate(
+    table: str, slices: list[tuple[str, str]], *, cube_code: str
+) -> int:
+    """Publica a tabela a partir das fatias já construídas, com troca atômica.
+
+    As fatias foram publicadas em tabelas próprias; aqui elas são unidas numa única
+    CTAS e trocadas de uma vez, para que o leitor nunca veja um cubo pela metade.
+    """
+    from app.services import iceberg_service as iceberg
+    from app.services.gold_governance import (
+        current_snapshot_id,
+        extract_sources,
+        record_frame_publication,
+    )
+
+    if not slices:
+        return 0
+    uniao = "\nUNION ALL\n".join(
+        f"SELECT * FROM iceberg.{layers.GOLD}.{nome}" for nome, _ in slices
+    )
+    staging = f"{table}_stg_{time.time_ns()}"
+    try:
+        await trino_execute(
+            f"CREATE TABLE iceberg.{layers.GOLD}.{staging} AS {uniao}", timeout_s=3600
+        )
+        contagem = await trino_execute(
+            f"SELECT COUNT(*) AS n FROM iceberg.{layers.GOLD}.{staging}", timeout_s=300
+        )
+        linhas = int((contagem[0] if contagem else {}).get("n") or 0)
+        anterior = current_snapshot_id(layers.GOLD, table)
+        if anterior is None:
+            iceberg.swap_staged_table(
+                table, staging, namespace=layers.GOLD, known_row_count=linhas
+            )
+        else:
+            await trino_execute(
+                f"DELETE FROM iceberg.{layers.GOLD}.{table}", timeout_s=600
+            )
+            await trino_execute(
+                f"INSERT INTO iceberg.{layers.GOLD}.{table} "
+                f"SELECT * FROM iceberg.{layers.GOLD}.{staging}",
+                timeout_s=3600,
+            )
+    finally:
+        try:
+            await trino_execute(
+                f"DROP TABLE IF EXISTS iceberg.{layers.GOLD}.{staging}", timeout_s=300
+            )
+        except Exception:  # noqa: BLE001 — limpeza não é caminho crítico
+            pass
+    # Assíncrona: esta função já roda em contexto async, e a versão `_blocking`
+    # recusa registrar com loop ativo — em modo obrigatório ela levanta.
+    await record_frame_publication(
+        cube_code=_cube_code_for(table),
+        physical_table=table,
+        rows_written=int(linhas),
+        namespace=layers.GOLD,
+        source_tables=extract_sources(uniao),
+    )
+    return linhas
+
+
 async def refresh_ai_usage_gold_cubes(only_tables: list[str] | None = None) -> dict[str, Any]:
-    """Reconstrói as cubos Gold auxiliares pela fila oficial de Gold."""
+    """Reconstrói os cubos Gold auxiliares pela fila oficial de Gold.
+
+    Os cubos fatiados por competência (consumo de IA e uso do Copilot) são
+    construídos fatia a fatia e acumulados numa única publicação. Os cubos pequenos
+    (licenças) seguem numa consulta. Os derivados rodam por último, porque leem o
+    cubo de origem já publicado.
+    """
     definitions = [
-        (AI_CONSUMPTION_TABLE, _consumption_select()),
-        (AI_LICENSE_TABLE, _license_select()),
-        (COPILOT_USAGE_TABLE, _copilot_usage_select()),
-        (COPILOT_LICENSE_TABLE, _copilot_license_select()),
-        (COPILOT_USER_PERIOD_TABLE, _copilot_user_period_select()),
+        (AI_CONSUMPTION_TABLE, _consumption_select),
+        (AI_LICENSE_TABLE, _license_select),
+        (COPILOT_USAGE_TABLE, _copilot_usage_select),
+        (COPILOT_LICENSE_TABLE, _copilot_license_select),
+        (COPILOT_USER_PERIOD_TABLE, _copilot_user_period_select),
     ]
     if only_tables:
         wanted = set(only_tables)
-        definitions = [(table, sql) for table, sql in definitions if table in wanted]
+        definitions = [(t, f) for t, f in definitions if t in wanted]
+
     results: dict[str, int] = {}
-    for table, select_sql in definitions:
-        results[table] = await _publish(table, select_sql, cube_code=_cube_code_for(table))
+    independent = [(t, f) for t, f in definitions if t not in DERIVED_TABLES]
+    derived = [(t, f) for t, f in definitions if t in DERIVED_TABLES]
+
+    for table, builder in independent:
+        if table in PERIOD_SLICED_TABLES:
+            periodos = await _periods_for(table)
+            fatias: list[tuple[str, str]] = []
+            for periodo in periodos:
+                nome_fatia = f"{table}_slice_{periodo}"
+                linhas = await _publish(
+                    nome_fatia,
+                    _sliced_select(builder(), periodo),
+                    cube_code=_cube_code_for(table),
+                )
+                if linhas:
+                    fatias.append((nome_fatia, periodo))
+            results[table] = await _accumulate(
+                table, fatias, cube_code=_cube_code_for(table)
+            )
+            for nome, _ in fatias:
+                try:
+                    await trino_execute(
+                        f"DROP TABLE IF EXISTS iceberg.{layers.GOLD}.{nome}", timeout_s=300
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            results[table] = await _publish(
+                table, builder(), cube_code=_cube_code_for(table)
+            )
         logger.info("AI Gold refreshed: %s (%d rows)", table, results[table])
+
+    for table, builder in derived:
+        results[table] = await _publish(
+            table, builder(), cube_code=_cube_code_for(table)
+        )
+        logger.info("AI Gold refreshed (derivado): %s (%d rows)", table, results[table])
+
     return {"namespace": GOLD, "tables": results}

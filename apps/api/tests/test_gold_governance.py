@@ -456,6 +456,9 @@ _IN_MEMORY_PUBLISHERS = {
     # Inventário temporal do C2: único frame do C2, dezenas de milhares de linhas.
     # O custo (13,5 M linhas) **não** passa por frame — é agregado no Trino.
     "finops_cost_resource.py",
+    # Cubos de IA: a acumulação por competência monta a tabela a partir das fatias
+    # já publicadas. Cada fatia em si é publicada pelo caminho SQL, não por frame.
+    "ai_usage_gold.py",
 }
 #: `gold_governance.py` é quem **implementa** o registro, então aparece nos dois
 #: lados; não é um publicador adicional.
