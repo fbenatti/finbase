@@ -2071,3 +2071,132 @@ copilot usuário/período     13.898 linhas  R$ 22.200.720,13
 ```
 
 Antes de D15 essas consultas apontavam para tabelas inexistentes em `iceberg.gold`.
+
+---
+
+# Auditoria independente — R1 a R4
+
+## R1. Reconciliação obrigatória pela fila
+
+`cost_baseline()` mede **uma vez por run**: total, linhas, moedas, períodos e
+conexões esperados de `silver.resource_cost` (R1.1). `_run_keyed_rules` passa o
+**mesmo objeto** a C1 e C2 (R1.2); sem `expected_total` o materializador levanta
+antes de tocar qualquer tabela. `publish_gold_cube` falha **antes do swap** quando o
+total do staging diverge, e o validador do chamador (linhas, moedas, fatias) roda
+contra o staging — reprovado, o swap não acontece (R1.3). `materialize_c2` levanta
+`BaselineMismatchError` (R1.4).
+
+Execução pela fila, run 888001, todas as quatro no mesmo `gold_reprocess` (R1.5):
+
+| regra | status | linhas |
+|---|---|---:|
+| finops_period_coverage | UPDATED | 17 |
+| finops_cost_monthly | UPDATED | 13.184 |
+| finops_cost_resource_monthly | UPDATED | 1.023.977 |
+| finops_cost_change_driver | UPDATED | 1.012 |
+
+Nenhuma com `materialization_error` (R1.6). Manifestos terminais (R1.7):
+
+```text
+C1: in=R$ 37.356.361,47  out=R$ 37.356.361,47  delta=0,00  OK   rows_read=13.519.512  SUCCESS
+C2: in=R$ 37.356.361,47  out=R$ 37.356.361,47  delta=0,00  OK   rows_read=13.519.512  SUCCESS
+```
+
+## R2. C2 agregado no Trino e build atômico
+
+`c2_bucket_select_sql` é o caminho produtivo (R2.1); pandas recebe só agregados no
+grão do cubo (R2.2); `aggregate_c2_bucket` e `c2_bucket_projection_sql` removidos
+(R2.3). Build em `finops_cost_resource_monthly_stg_build_<run>` (R2.4), tabela final
+intocada até o swap único (R2.5/R2.6); em qualquer falha o build é removido e, se o
+swap aconteceu, o rollback devolve a versão anterior (R2.7). Lock por `cube_code` em
+`gold_cube_lock` com roubo por timeout (R2.8); memória medida no resultado (R2.9).
+
+Três iterações, cada uma por medição: INSERT por bucket (1.088 commits Iceberg
+esgotam o catálogo); UNION ALL de 8 GROUP BYs derruba o worker; **um bucket por
+consulta** (272 SELECTs, 4,5 s na fatia mais pesada), agregado concatenado em pandas
+e uma publicação de frame com swap único. A fatia de 202504 (3,76 M linhas de origem)
+agrupa em ~235 k linhas por consulta com 16 buckets.
+
+## R3. Manifesto como uma execução
+
+`record_manifest` insere `RUNNING` com `RETURNING id` e o desfecho **atualiza a
+mesma linha** (R3.1/R3.2). `expire_stale_running_manifests` marca `ABANDONED` os
+RUNNING sem término, vencidos e sem task ativa: **320 órfãos** de tentativas
+anteriores migrados, zero RUNNING restantes (R3.3). Publicação por frame cria
+`RUNNING` antes de qualquer escrita via `begin_frame_publication`/`finish_frame_
+publication`, e falha de PostgreSQL aborta antes de escrever (R3.4/R3.5). Falha no
+manifesto terminal depois do swap executa rollback para `previous_snapshot_id` e só
+invalida o cache se o rollback falhar (R3.6). Testes provam cada uma (R3.7).
+
+Runtime após a fila (R1.5/R1.6):
+
+```text
+gold_rule   : 4 finops UPDATED, materialization_error vazio
+gold_manifest (run 888001): SUCCESS para cobertura, C1, C2 e C3;
+  C1  id 2679: rows_read=13.519.512  in=out=R$ 37.356.361,47  delta=0,00  OK
+  C2  id 2680: rows_read=13.519.512  in=out=R$ 37.356.361,47  delta=0,00  OK
+RUNNING abertos: 0 (320 órfãos migrados para ABANDONED)
+lock: gold_cube_lock vazio ao fim da execução
+```
+
+## R4 — as três divergências de IA, explicadas
+
+Correção do log: **três** tabelas divergem, não duas — `copilot_usage_daily`,
+`copilot_license_snapshot` e `copilot_user_period`.
+
+### copilot_usage_daily (gold 818.538 × dimon 845.233)
+
+Para **todas as competências fechadas** (202510–202608), os dois livros são
+**idênticos linha a linha**: `EXCEPT` nos dois sentidos devolve **0** sobre 758.089
+linhas. Por competência e `source_kind`, os números batem ao dígito.
+
+A divergência inteira está em **202609 — competência aberta**:
+
+| fonte | `ai_usage_report` | `copilot_metrics` | total |
+|---|---:|---:|---:|
+| `dimon` (legado) | 30.844 | 56.300 | 87.144 |
+| `gold` (novo) | 0 | 60.449 | 60.449 |
+
+Chaves exclusivas de 202609: 30.844 só no legado, 4.149 só no gold. **A origem
+reclassificou as linhas**: o snapshot mais novo do Bronze traz as mesmas chaves
+marcadas como `copilot_metrics` em vez de `ai_usage_report`, e o `ROW_NUMBER` da
+deduplicação (chave `day + login + model + language + editor + source_kind +
+competência`, desempate por `_ingested_at DESC`) fica com a linha mais recente. O
+legado guarda o snapshot **antigo** do mês aberto; o novo, o atual.
+
+### copilot_license_snapshot (gold 15.893 × dimon 15.881)
+
+202608 idêntico (13.060 × 13.060). 202609 difere por 12 linhas (2.821 × 2.833) —
+snapshot mais recente do mês aberto, dedup por
+`login + provider + productname + competência` ordenado por `snapshotdate DESC`.
+
+### copilot_user_period (gold 13.898 × dimon 16.133)
+
+Herda a diferença do usage, de quem é derivado. Todas as competências fechadas são
+**idênticas, inclusive os créditos ao centavo** (ex.: 202607 R$ 7.149.883,82 nos
+dois; 202608 R$ 9.279.438,04 nos dois). 202609: o legado tem 2.235 linhas (R$
+8.932.287,93) e o novo **0**, porque o novo usage não tem `ai_usage_report` em
+202609 — mesma causa da divergência 1.
+
+**Conclusão (R4.3):** para competências fechadas, os dois livros são idênticos. A
+diferença é exclusivamente o snapshot do mês aberto. As cópias em `dimon`
+**permanecem**; os endpoints podem ler a Gold para competências fechadas, e o mês
+corrente é exibido com o status próprio.
+
+## R4.4–R4.6: continuidade
+
+- o gap 202604–202608 bloqueia **apenas** o cutover do dashboard financeiro, a
+  desativação do livro legado e comparações que dependam desses meses;
+- **G4 pode iniciar** sem aguardar os blobs: C4–C7 usam os dados atuais e carregam
+  cobertura/confiança;
+- o dashboard legado permanece a visão organizacional, porque C1 está 100 %
+  `UNMAPPED` — não há filtro organizacional no Centro novo até existir ponte
+  reconciliável.
+
+## Testes
+
+- `tests/test_audit_r1_r4.py`: **35 novos** (baseline, falha por linhas/moeda/fatias,
+  MISMATCH levanta, validador antes do swap, lock exclusivo, build atômico,
+  rollback, RUNNING→mesma linha, ABANDONED, frame begin/finish);
+- `tests/test_audit_corrections.py`: 48 (ajustados ao desenho Trino do C2);
+- suíte completa: **700 passam**, 9 falham — as mesmas 9 pré-existentes.
