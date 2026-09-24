@@ -2057,3 +2057,17 @@ número está certo.
 
 **G4 permanece não iniciado**: a recuperação de 202604–202608 é pré-requisito do
 cutover e depende de a origem voltar a publicar os arquivos de custo.
+
+### AUD.19.1 Endpoints de IA contra a Gold
+
+As consultas que os endpoints de dashboards de IA executam agora resolvem:
+
+```text
+dashboards-ia consumo      851.768 linhas  R$ 4.579.876,18
+dashboards-ia licenças       5.767 linhas
+copilot uso                818.538 linhas  R$ 22.201.113,13
+copilot licenças            15.893 linhas
+copilot usuário/período     13.898 linhas  R$ 22.200.720,13
+```
+
+Antes de D15 essas consultas apontavam para tabelas inexistentes em `iceberg.gold`.
