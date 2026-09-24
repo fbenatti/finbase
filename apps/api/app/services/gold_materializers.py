@@ -48,6 +48,10 @@ class MaterializerSpec:
     #: Fontes declaradas para o manifesto e para o catálogo.
     sources: tuple[str, ...] = ()
     description: str = ""
+    #: Cubo financeiro: recebe o baseline medido na Silver e reprova a publicação
+    #: quando não fecha. A fila mede o baseline **uma vez por run** e o passa a
+    #: todos os cubos financeiros do lote.
+    financial: bool = False
 
 
 def _run_coverage(**kwargs: Any) -> Awaitable[dict[str, Any]]:
@@ -62,6 +66,7 @@ def _run_c1(**kwargs: Any) -> Awaitable[dict[str, Any]]:
     return materialize_c1(
         run_id=kwargs.get("run_id"),
         expected_total=kwargs.get("expected_total"),
+        baseline=kwargs.get("baseline"),
         progress=kwargs.get("progress"),
     )
 
@@ -72,6 +77,7 @@ def _run_c2(**kwargs: Any) -> Awaitable[dict[str, Any]]:
     return materialize_c2(
         run_id=kwargs.get("run_id"),
         expected_total=kwargs.get("expected_total"),
+        baseline=kwargs.get("baseline"),
         progress=kwargs.get("progress"),
     )
 
@@ -104,6 +110,7 @@ MATERIALIZERS: dict[str, tuple[MaterializerSpec, Callable[..., Awaitable[dict[st
             depends_on=(MATERIALIZER_COVERAGE,),
             sources=("silver.resource_cost",),
             description="Custo mensal por escopo e dimensões conformadas (C1).",
+            financial=True,
         ),
         _run_c1,
     ),
@@ -115,6 +122,7 @@ MATERIALIZERS: dict[str, tuple[MaterializerSpec, Callable[..., Awaitable[dict[st
             depends_on=(MATERIALIZER_C1,),
             sources=("silver.resource_cost", "silver.resource_inventory"),
             description="Custo por recurso com contexto de inventário vigente (C2).",
+            financial=True,
         ),
         _run_c2,
     ),

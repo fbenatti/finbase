@@ -432,6 +432,15 @@ async def lifespan(app: FastAPI):
             )""",
             "CREATE INDEX IF NOT EXISTS ix_gold_manifest_cube ON gold_manifest (cube_code, started_at DESC)",
             "CREATE INDEX IF NOT EXISTS ix_gold_manifest_status ON gold_manifest (status, started_at DESC)",
+            # Lock de materialização por cubo: duas execuções de C2 não podem rodar
+            # simultaneamente, e um worker morto não pode bloquear o cubo para
+            # sempre (expires_at permite roubar o lock após o timeout).
+            """CREATE TABLE IF NOT EXISTS gold_cube_lock (
+              cube_code VARCHAR(120) PRIMARY KEY,
+              holder VARCHAR(200) NOT NULL,
+              acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              expires_at TIMESTAMPTZ NOT NULL
+            )""",
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE gold_rule_source ADD COLUMN IF NOT EXISTS gold_tables JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS measure_columns JSONB NOT NULL DEFAULT '[]'::jsonb",

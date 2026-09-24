@@ -34,6 +34,10 @@ from datetime import date, datetime
 
 from typing import Any
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from app.services import lakehouse_layers as layers
 from app.services.semantic_normalization import (
     UNKNOWN,
@@ -118,14 +122,18 @@ def _is_valid_resource_sql(column: str) -> str:
 #: A agregação roda no Trino (a API não recebe linhas Silver), mas o estado do
 #: `GROUP BY` por recurso ainda precisa caber num worker de 2,4 GiB. Medido: o
 #: agrupamento de uma competência inteira (~800 k linhas, ~700 k recursos) estoura.
-#: Com 64 buckets, a fatia mais pesada (202504, 3,76 M linhas) agrupa ~59 k linhas
-#: por consulta, que cabe com folga. O número foi escolhido por medição: 16 buckets
-#: ainda derrubavam o worker nessa fatia.
+#: Um bucket por consulta: um UNION ALL de GROUP BYs derruba o worker, e o INSERT
+#: direto na build criava um commit Iceberg por consulta. A forma que funciona é
+#: um bucket por consulta — 4,5 s medidos na fatia mais pesada — com o agregado
+#: acumulado em pandas e **uma** publicação no fim.
 #:
-#: O bucket é `ABS(CRC32(COALESCE(id canônico, ''))) % N`, então o **mesmo recurso cai
-#: sempre no mesmo bucket**: uma chave, um bucket, nunca dois, e a soma dos buckets
-#: é o total da fatia.
-DEFAULT_BUCKETS = 64
+#: 16 buckets: a consulta agrega 1/16 da fatia (~59 k grupos na mais pesada), o
+#: que cabe com folga, e reduz o total de consultas de 1.088 para 272.
+#:
+#: O bucket é `ABS(CRC32(COALESCE(id canônico, ''))) % N`, então o **mesmo recurso
+#: cai sempre no mesmo bucket**: uma chave, um bucket, nunca dois, e a soma dos
+#: buckets é o total da fatia.
+DEFAULT_BUCKETS = 16
 
 #: Buckets usados por bucket. O `CRC32` do Trino opera em `VARBINARY`; passar
 #: `VARCHAR` devolve vazio silenciosamente, e um predicado vazio publicaria zero
@@ -209,67 +217,6 @@ def c2_projection_sql(select_sql: str) -> str:
     return f"SELECT {colunas} FROM ({select_sql}) c2_raw"
 
 
-async def _publish_c2_slice(
-    *,
-    billing_period: str,
-    connection_code: str,
-    frame: Any,
-    run_id: int | None,
-) -> int:
-    """Publica uma fatia `(competência, conexão)` de forma incremental.
-
-    O C2 é construído por fatia, então cada execução substitui **uma** e precisa
-    preservar as outras. `publish_gold_cube` faz swap de tabela inteira, o que
-    apagaria as demais competências.
-
-    A troca usa o publicador por fatia do projeto
-    (`write_destination_staged` + `publish_staged_partition`): adota os arquivos
-    Parquet numa transação Iceberg que substitui só
-    `(_billing_period, source_connection_id)`. Leitores veem a fatia anterior ou a
-    nova, nunca um lote parcial.
-
-    A primeira publicação não tem fatia a substituir e também passa pelo publicador
-    por fatia, que cria a tabela quando ela não existe.
-    """
-    from app.services import iceberg_service as iceberg
-    from app.services.gold_governance import record_frame_publication
-
-    valores = frame["source_connection_id"].dropna().unique().tolist()
-    conexoes = [int(v) for v in valores] or [0]
-    total = 0
-    for conexao in conexoes:
-        parte = frame[frame["source_connection_id"] == conexao]
-        if parte.empty:
-            continue
-        staged = iceberg.write_destination_staged(
-            C2_TABLE, parte, partition_col="_billing_period", namespace=layers.GOLD
-        )
-        try:
-            total += iceberg.publish_staged_partition(
-                C2_TABLE,
-                staged,
-                billing_period=billing_period,
-                connection_id=conexao,
-                namespace=layers.GOLD,
-            )
-        except Exception:
-            try:
-                iceberg.cleanup_staged_table(staged, namespace=layers.GOLD)
-            except Exception:  # noqa: BLE001
-                pass
-            raise
-
-    await record_frame_publication(
-        cube_code=C2_CUBE_CODE,
-        physical_table=C2_TABLE,
-        rows_written=int(len(frame)),
-        namespace=layers.GOLD,
-        run_id=run_id,
-        source_tables=[f"silver.resource_cost", f"silver.{C2_INVENTORY_TABLE}"],
-    )
-    return int(len(frame))
-
-
 async def materialize_c2_inventory(
     *, run_id: int | None = None, layer: str = layers.SILVER
 ) -> int:
@@ -338,197 +285,10 @@ async def materialize_c2_inventory(
 #: e a partição por bucket garante que **nenhum grupo se divide** entre buckets: o
 #: bucket é função pura da chave canônica do recurso. Por isso a concatenação dos
 #: agregados é igual ao agregado da fatia inteira.
-_C2_GROUP_KEYS: tuple[str, ...] = (
+_C2_GROUP_KEYS_REMOVIDA: tuple[str, ...] = (
     "billing_period", "provider", "connection_code", "sub_account_id",
     "canonical_resource_id", "source_connection_id", "charge_category", "currency",
 )
-
-
-def aggregate_c2_bucket(frame: Any) -> Any:
-    """Agrega as linhas cruas de um bucket no grão do cubo.
-
-    O que **não** é aditivo fica de fora do cubo: `charge_days` era
-    `COUNT(DISTINCT data)` e não sobrevive a uma soma entre buckets. Antes ele era
-    publicado e ninguém o usava para decidir; mantê-lo exigiria uma segunda passada
-    sobre a Silver por recurso, que é o custo que este desenho evita.
-    """
-    import pandas as pd
-
-    if frame.empty:
-        return frame
-    for coluna in (
-        "provider", "connection_code", "sub_account_id", "canonical_resource_id",
-        "charge_category", "currency", "cost_resource_name", "cost_resource_group_id",
-        "service_key", "service_category", "region_key",
-    ):
-        if coluna in frame.columns:
-            frame[coluna] = frame[coluna].astype("string")
-
-    agregado = (
-        frame.groupby(list(_C2_GROUP_KEYS), dropna=False)
-        .agg(
-            effective_cost=("effective_cost", "sum"),
-            list_cost=("list_cost", "sum"),
-            pricing_quantity=("pricing_quantity", "sum"),
-            rows=("effective_cost", "size"),
-            first_charge_day=("charge_day", "min"),
-            last_charge_day=("charge_day", "max"),
-            rows_without_tag=("without_tag", "sum"),
-            cost_resource_name=("cost_resource_name", "max"),
-            cost_resource_group_id=("cost_resource_group_id", "max"),
-            service_key=("service_key", "max"),
-            service_category=("service_category", "max"),
-            region_key=("region_key", "max"),
-        )
-        .reset_index()
-    )
-    return agregado
-
-
-def enrich_c2_aggregate(agregado: Any, inventario: Any) -> Any:
-    """Junta inventário vigente e deriva as colunas do contrato.
-
-    O `merge` é 1:1 (o inventário vem deduplicado por competência), então a contagem
-    de linhas é preservada — e é a reconciliação do total que confirma isso.
-    """
-    import pandas as pd
-
-    inv = inventario if inventario is not None else pd.DataFrame()
-    if not inv.empty:
-        agregado = agregado.merge(
-            inv,
-            on=["provider", "sub_account_id", "canonical_resource_id", "billing_period"],
-            how="left",
-        )
-    else:
-        for coluna in (
-            "inventory_resource_name", "inventory_resource_type",
-            "inventory_resource_sku", "inventory_resource_group_id",
-            "inventory_resource_state", "operating_system",
-            "inventory_snapshot_period", "inventory_snapshots", "inventory_status",
-        ):
-            agregado[coluna] = None
-
-    agregado["resource_name"] = agregado["inventory_resource_name"].where(
-        agregado["inventory_resource_name"].notna(), agregado["cost_resource_name"]
-    )
-    agregado["resource_type_key"] = agregado["inventory_resource_type"].fillna("UNKNOWN")
-    agregado["resource_sku"] = agregado["inventory_resource_sku"]
-    agregado["resource_group_id"] = agregado["inventory_resource_group_id"].where(
-        agregado["inventory_resource_group_id"].notna(),
-        agregado["cost_resource_group_id"],
-    )
-    agregado["resource_state"] = agregado["inventory_resource_state"]
-    # Sem snapshot vigente o status é explícito, e os atributos acima ficam nulos.
-    agregado["inventory_status"] = agregado["inventory_status"].fillna(
-        "NO_TEMPORAL_SNAPSHOT"
-    )
-    agregado["inventory_snapshots"] = (
-        pd.to_numeric(agregado["inventory_snapshots"], errors="coerce")
-        .fillna(0)
-        .astype("int64")
-    )
-    agregado["billed_cost"] = None
-    agregado["contracted_cost"] = None
-    id_texto = agregado["canonical_resource_id"].astype("string")
-    valido = id_texto.str.startswith("/", na=False) & id_texto.str.contains(
-        "/providers/", regex=False, na=False
-    )
-    agregado["resource_id_status"] = valido.map({True: "VALIDO", False: "NAO_RECURSO"})
-    return agregado
-
-
-async def materialize_c2_slice(
-    *,
-    billing_period: str,
-    connection_code: str,
-    buckets: int = DEFAULT_BUCKETS,
-    run_id: int | None = None,
-    layer: str = layers.SILVER,
-    inventory: Any | None = None,
-) -> dict[str, Any]:
-    """Constrói uma fatia `(competência, conexão)` bucket a bucket e a publica.
-
-    Sequência por bucket: projetar (SQL), agregar (pandas), **descartar as linhas
-    cruas**. Ao fim, os agregados dos buckets são concatenados e publicados uma única
-    vez por fatia.
-
-    Por que não uma consulta só: medido neste ambiente, a agregação por recurso de
-    uma competência inteira derruba o worker, e o `UNION ALL` de 16 buckets numa
-    consulta também ("No worker nodes available"). Uma consulta por bucket é o que
-    funciona, e publicar uma vez por fatia evita a tempestade de operações de
-    catálogo — a versão anterior criava uma tabela por bucket, ~1.100 no total, e
-    esgotava o catálogo.
-
-    Nenhum resultado de bucket é persistido: o que se acumula é o agregado em
-    memória, e a única tabela criada é o staging da fatia.
-    """
-    import pandas as pd
-
-    from app.services.trino_service import execute as trino_execute
-
-    total_buckets = bucket_count(buckets=buckets)
-
-    if inventory is None:
-        inventario = pd.DataFrame(
-            await trino_execute(inventory_temporal_sql(layer=layer), timeout_s=1800)
-        )
-    else:
-        inventario = inventory
-
-    agregados: list[Any] = []
-    linhas_cruas = 0
-    for bucket in range(total_buckets):
-        linhas = await trino_execute(
-            c2_bucket_projection_sql(
-                layer=layer,
-                billing_period=billing_period,
-                bucket=bucket,
-                buckets=total_buckets,
-                connection_code=connection_code,
-            ),
-            timeout_s=1800,
-        )
-        if not linhas:
-            continue
-        frame = pd.DataFrame(linhas)
-        linhas_cruas += len(frame)
-        agregados.append(aggregate_c2_bucket(frame))
-        del frame
-
-    if not agregados:
-        return {
-            "billing_period": billing_period,
-            "connection_code": connection_code,
-            "rows": 0,
-            "source_rows": 0,
-            "buckets": total_buckets,
-        }
-
-    agregado = pd.concat(agregados, ignore_index=True) if len(agregados) > 1 else agregados[0]
-    del agregados
-    agregado = enrich_c2_aggregate(agregado, inventario)
-
-    # Colunas do contrato, na ordem declarada.
-    for nome, _ in _C2_OUTPUT_TYPES:
-        if nome not in agregado.columns:
-            agregado[nome] = None
-    agregado = agregado[[nome for nome, _ in _C2_OUTPUT_TYPES]]
-    agregado["_billing_period"] = agregado["billing_period"]
-
-    linhas_publicadas = await _publish_c2_slice(
-        billing_period=billing_period,
-        connection_code=connection_code,
-        frame=agregado,
-        run_id=run_id,
-    )
-    return {
-        "billing_period": billing_period,
-        "connection_code": connection_code,
-        "rows": linhas_publicadas,
-        "source_rows": linhas_cruas,
-        "buckets": total_buckets,
-    }
 
 
 async def materialize_c2(
@@ -536,75 +296,408 @@ async def materialize_c2(
     run_id: int | None = None,
     layer: str = layers.SILVER,
     expected_total: float | None = None,
+    baseline: Any | None = None,
     periods: list[str] | None = None,
     buckets: int = DEFAULT_BUCKETS,
     progress: Any | None = None,
 ) -> dict[str, Any]:
-    """Materializa C2 por `(competência, conexão)`, com agregação no Trino.
+    """Materializa C2 com agregação **no Trino** e um único swap.
 
-    1. publica o inventário temporal deduplicado (único frame do C2);
-    2. para cada `(competência, conexão)`, agrega por bucket no Trino;
-    3. limpa os buckets, com sucesso ou falha;
-    4. reconcilia o total publicado contra `resource_cost`.
+    R2 da auditoria, ponto por ponto:
 
-    Um total maior que a origem significa join multiplicando; menor significa fatia
-    faltando — os dois reprovam.
+    1. lock distribuído por `cube_code` (R2.8) — duas execuções não coexistem;
+    2. cada `(competência, conexão, bucket)` é agregado **no Trino**
+       (:func:`c2_bucket_select_sql`); o processo da API recebe **agregados**, nunca
+       linhas cruas de `resource_cost` (R2.2);
+    3. os agregados são concatenados em pandas e escritos em **uma** tabela de
+       build versionada (`..._stg_build_<run>`) — a tabela final fica intocada
+       durante todo o build (R2.4/R2.5);
+    4. validação do build contra o baseline **antes** do swap: total, linhas de
+       origem, moeda, fatias e duplicidade no grão (R2.6);
+    5. um único swap (R2.6) — a versão anterior só desaparece quando o build fechou;
+    6. em qualquer falha o build é removido e, se o swap já aconteceu, o rollback
+       devolve a versão anterior (R2.7) — nunca uma Gold híbrida;
+    7. reconciliação final: divergência **levanta** (R1.4), não retorna status.
+
+    Memória (R2.9): o pico do processo é medido e devolvido no resultado. O que
+    pandas retém é o cubo agregado (~1,02 M linhas), que é o próprio resultado —
+    não as 13,5 M linhas Silver.
+    """
+    import time as _time
+
+    from app.services import iceberg_service as iceberg
+    from app.services.gold_governance import (
+        BaselineMismatchError,
+        FAILED,
+        SUCCESS,
+        ManifestUnavailableError,
+        acquire_cube_lock,
+        begin_frame_publication,
+        finish_frame_publication,
+        release_cube_lock,
+        rollback_table_to_snapshot,
+        RECONCILIATION_TOLERANCE_BRL,
+    )
+    from app.services.trino_service import execute as trino_execute
+
+    if expected_total is None:
+        raise RuntimeError(
+            "C2 exige expected_total: a reconciliação obrigatória não é opcional. "
+            "A fila deve medir o baseline de silver.resource_cost e passá-lo."
+        )
+    if baseline is None:
+        raise RuntimeError(
+            "C2 exige baseline (CostBaseline): total, linhas, moedas, períodos e "
+            "conexões esperados vêm da mesma medição única que C1 recebe."
+        )
+
+    rss_inicial = _rss_mib()
+    lock = await acquire_cube_lock(C2_CUBE_CODE)
+    try:
+        run = int(run_id) if run_id else int(_time.time())
+        build_table = f"{C2_TABLE}_stg_build_{run}"
+        handle = await begin_frame_publication(
+            cube_code=C2_CUBE_CODE,
+            physical_table=C2_TABLE,
+            namespace=layers.GOLD,
+            run_id=run_id,
+            source_tables=["silver.resource_cost", f"{layer}.{C2_INVENTORY_TABLE}"],
+            rows_read=int(baseline.rows),
+        )
+        detalhe: dict[str, Any] = {}
+        _trocou = False
+        try:
+            if progress:
+                progress(0, 1, "C2: publicando inventario temporal")
+            inventario_linhas = await materialize_c2_inventory(run_id=run_id, layer=layer)
+
+            fatias = [tuple(s) for s in baseline.slices]
+            if periods:
+                alvo = set(periods)
+                fatias = [s for s in fatias if s[0] in alvo]
+            total_buckets = bucket_count(buckets=buckets)
+            if not fatias:
+                raise RuntimeError("C2: baseline sem fatias — nada a construir")
+            qtd_consultas = len(fatias) * (
+                total_buckets
+            )
+            if progress:
+                progress(0, qtd_consultas, "C2 build: consultas agregadas no Trino")
+
+            # Cada consulta devolve **linhas agregadas** no grão do cubo. O que o
+            # pandas recebe é o agregado — e nada da Silver atravessa o processo.
+            pecas: list[Any] = []
+            consultas = 0
+            for billing_period, connection_code in fatias:
+                for bucket in range(total_buckets):
+                    uniao = c2_projection_sql(
+                        c2_bucket_select_sql(
+                            layer=layer,
+                            billing_period=billing_period,
+                            bucket=bucket,
+                            buckets=total_buckets,
+                            connection_code=connection_code,
+                        )
+                    )
+                    linhas = await trino_execute(uniao, timeout_s=3600)
+                    if linhas:
+                        pecas.append(_frame_de_agregados(linhas))
+                    consultas += 1
+                    if progress:
+                        progress(consultas, qtd_consultas,
+                                 f"C2 build: {consultas}/{qtd_consultas} consultas")
+
+            if not pecas:
+                raise RuntimeError(
+                    "C2: nenhuma consulta produziu linhas — origem vazia ou "
+                    "filtros sem casar"
+                )
+
+            import pandas as pd
+
+            agregado = pd.concat(pecas, ignore_index=True)
+            del pecas
+            agregado = _tipar_agregado(agregado)
+
+            # `_billing_period` é a coluna de controle da tabela final (escrita pelo
+            # publicador por fatia). O swap faz `union_by_name` com o schema da
+            # tabela anterior, então o build precisa carregar as mesmas colunas de
+            # controle — com valor idêntico à competência do contrato, para que não
+            # existam duas competências na mesma linha.
+            agregado["_billing_period"] = agregado["billing_period"]
+            # `tipo` é coluna legada da tabela publicada; preservar o nome com valor
+            # estável mantém o swap compatível sem inventar conteúdo.
+            agregado["tipo"] = "realizado"
+
+            # A tabela de build é o staging nomeado por run: `write_destination_staged`
+            # cria `..._stg_...`, que o swap consome e a limpeza remove. A tabela
+            # final fica intocada até o swap.
+            build_table = f"{C2_TABLE}_stg_build_{run}"
+            staged = iceberg.write_destination_staged(
+                C2_TABLE, agregado, partition_col="billing_period",
+                namespace=layers.GOLD,
+            )
+            # Renomeia o staging para o nome versionado exigido pela auditoria.
+            await trino_execute(
+                f"ALTER TABLE iceberg.{layers.GOLD}.{staged} RENAME TO "
+                f"iceberg.{layers.GOLD}.{build_table}",
+                timeout_s=300,
+            )
+
+            problemas = await _validate_c2_build(
+                build_table=build_table, baseline=baseline
+            )
+            if problemas:
+                raise BaselineMismatchError(
+                    "C2 build reprovado antes do swap: " + "; ".join(problemas)
+                )
+
+            contagem = await trino_execute(
+                f"SELECT COUNT(*) AS n, ROUND(SUM(effective_cost), 2) AS total "
+                f"FROM iceberg.{layers.GOLD}.{build_table}",
+                timeout_s=900,
+            )
+            linhas_cubo = int((contagem[0] if contagem else {}).get("n") or 0)
+            total_build = float((contagem[0] if contagem else {}).get("total") or 0)
+
+            iceberg.swap_staged_table(
+                C2_TABLE,
+                build_table,
+                namespace=layers.GOLD,
+                known_row_count=linhas_cubo,
+            )
+            _trocou = True
+
+            verificacao = await trino_execute(
+                f"SELECT ROUND(SUM(effective_cost), 2) AS total, SUM(rows) AS linhas_origem "
+                f"FROM iceberg.{layers.GOLD}.{C2_TABLE}",
+                timeout_s=1800,
+            )
+            total_out = float((verificacao[0] if verificacao else {}).get("total") or 0)
+            linhas_origem = int(
+                (verificacao[0] if verificacao else {}).get("linhas_origem") or 0
+            )
+            delta = round(total_out - float(expected_total), 2)
+            if abs(delta) > RECONCILIATION_TOLERANCE_BRL:
+                devolveu = await rollback_table_to_snapshot(
+                    namespace=layers.GOLD,
+                    table=C2_TABLE,
+                    snapshot_id=handle.entry.previous_snapshot_id or "",
+                )
+                if not devolveu:
+                    from app.services.gold_governance import invalidate_published_cache
+
+                    invalidate_published_cache(C2_CUBE_CODE)
+                raise BaselineMismatchError(
+                    f"C2: total publicado R$ {total_out:,.2f} diverge de "
+                    f"R$ {float(expected_total):,.2f} (delta R$ {delta:,.2f}); "
+                    f"rollback={'aplicado' if devolveu else 'FALHOU'}"
+                )
+            if linhas_origem != int(baseline.rows):
+                raise BaselineMismatchError(
+                    f"C2: linhas de origem {linhas_origem:,} divergem de "
+                    f"{int(baseline.rows):,}"
+                )
+
+            detalhe = {
+                "slices": len(fatias),
+                "consultas": consultas,
+                "inventory_rows": inventario_linhas,
+                "rows": linhas_cubo,
+                "source_rows": linhas_origem,
+                "total_build": round(total_build, 2),
+            }
+            await finish_frame_publication(
+                handle,
+                rows_written=linhas_cubo,
+                financial_total_in=round(float(expected_total), 2),
+                financial_total_out=round(total_out, 2),
+                status=SUCCESS,
+            )
+        except Exception as exc:
+            # R2.7: em qualquer falha o build é removido. O swap só aconteceu no fim,
+            # então uma falha no build deixa a tabela final intocada.
+            try:
+                await trino_execute(
+                    f"DROP TABLE IF EXISTS iceberg.{layers.GOLD}.{build_table}",
+                    timeout_s=600,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            if _trocou:
+                devolveu = await rollback_table_to_snapshot(
+                    namespace=layers.GOLD,
+                    table=C2_TABLE,
+                    snapshot_id=handle.entry.previous_snapshot_id or "",
+                )
+                if not devolveu:
+                    from app.services.gold_governance import invalidate_published_cache
+
+                    invalidate_published_cache(C2_CUBE_CODE)
+            try:
+                await finish_frame_publication(
+                    handle, rows_written=0, status=FAILED, reason=str(exc)[:400]
+                )
+            except ManifestUnavailableError as manifest_exc:
+                logger.error(
+                    "Recuperação pendente do manifesto de C2: %s", manifest_exc
+                )
+            raise
+        finally:
+            try:
+                await trino_execute(
+                    f"DROP TABLE IF EXISTS iceberg.{layers.GOLD}.{build_table}",
+                    timeout_s=600,
+                )
+            except Exception:  # noqa: BLE001 — limpeza não é caminho crítico
+                pass
+
+        detalhe.update(
+            {
+                "table": C2_TABLE,
+                "financial_total_in": round(float(expected_total), 2),
+                "financial_total_out": round(total_out, 2),
+                "financial_delta": delta,
+                "reconciliation_status": "OK",
+                "rss_initial_mib": round(rss_inicial, 1),
+                "rss_final_mib": round(_rss_mib(), 1),
+                "build_table": build_table,
+            }
+        )
+        return detalhe
+    finally:
+        await release_cube_lock(lock)
+
+
+def _rss_mib() -> float:
+    """RSS do processo em MiB. Medida, não declaração: o aceite exige."""
+    import resource
+
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+
+
+def _frame_de_agregados(linhas: list[dict[str, Any]]) -> Any:
+    """DataFrame dos agregados de um lote, com os tipos do contrato.
+
+    Chamada por lote de buckets; cada linha recebida já foi agregada no Trino. Os
+    tipos vêm de :data:`_C2_OUTPUT_TYPES` — a mesma tabela que o escritor de frame
+    usa, então build e contrato não podem divergir.
+    """
+    import pandas as pd
+
+    if not linhas:
+        return pd.DataFrame(columns=[nome for nome, _ in _C2_OUTPUT_TYPES])
+    return pd.DataFrame(linhas)
+
+
+def _tipar_agregado(agregado: Any) -> Any:
+    """Tipa o agregado concatenado conforme o contrato declarado."""
+    import pandas as pd
+
+    tipos = {nome: tipo for nome, tipo in _C2_OUTPUT_TYPES}
+    for nome, tipo in tipos.items():
+        if nome not in agregado.columns:
+            agregado[nome] = None
+        if tipo == "bigint":
+            agregado[nome] = pd.to_numeric(agregado[nome], errors="coerce").astype("Int64")
+        elif tipo == "double":
+            agregado[nome] = pd.to_numeric(agregado[nome], errors="coerce").astype("float64")
+        elif tipo == "date":
+            agregado[nome] = pd.to_datetime(agregado[nome], errors="coerce").dt.date
+        else:
+            agregado[nome] = agregado[nome].astype("string")
+    return agregado[[nome for nome, _ in _C2_OUTPUT_TYPES]]
+
+
+
+
+def _rss_mib() -> float:
+    """RSS do processo em MiB. Medida, não declaração: o aceite de memória exige."""
+    import resource
+
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+
+
+async def _validate_c2_build(
+    *, build_table: str, baseline: Any, layer: str = "gold"
+) -> list[str]:
+    """Valida a tabela de build **antes** do swap.
+
+    Cada item devolvido é um problema com o par esperado/medido. Tudo roda contra o
+    build — a tabela publicada não é tocada.
     """
     from app.services.trino_service import execute as trino_execute
 
-    if progress:
-        progress(0, 1, "C2: publicando inventario temporal")
-    inventario_linhas = await materialize_c2_inventory(run_id=run_id, layer=layer)
-    import pandas as pd
-
-    from app.services.trino_service import execute as trino_execute
-
-    inventario_frame = pd.DataFrame(
-        await trino_execute(inventory_temporal_sql(layer=layer), timeout_s=1800)
-    )
-
-    fatias = await list_period_connections(layer=layer)
-    if periods:
-        alvo = set(periods)
-        fatias = [(bp, conn) for bp, conn in fatias if bp in alvo]
-
-    detalhes: list[dict[str, Any]] = []
-    for indice, (billing_period, connection_code) in enumerate(fatias, start=1):
-        if progress:
-            progress(indice, len(fatias), f"C2 {billing_period} {connection_code}")
-        detalhes.append(
-            await materialize_c2_slice(
-                billing_period=billing_period,
-                connection_code=connection_code,
-                buckets=buckets,
-                run_id=run_id,
-                layer=layer,
-                inventory=inventario_frame,
-            )
-        )
-
-    verificacao = await trino_execute(
-        f"SELECT ROUND(SUM(effective_cost), 2) AS total, COUNT(*) AS linhas "
-        f"FROM iceberg.{layers.GOLD}.{C2_TABLE}",
+    problemas: list[str] = []
+    resumo = await trino_execute(
+        f"""
+SELECT ROUND(SUM(effective_cost), 2) AS total,
+       SUM(rows) AS linhas_origem,
+       COUNT(*) AS linhas_cubo,
+       COUNT(DISTINCT currency) AS moedas
+FROM iceberg.{layer}.{build_table}
+""",
         timeout_s=1800,
     )
-    total_out = float((verificacao[0] if verificacao else {}).get("total") or 0)
-    delta = None if expected_total is None else round(total_out - float(expected_total), 2)
-    return {
-        "table": C2_TABLE,
-        "slices": len(fatias),
-        "inventory_rows": inventario_linhas,
-        "rows": sum(int(r.get("rows") or 0) for r in detalhes),
-        "financial_total_in": expected_total,
-        "financial_total_out": total_out,
-        "financial_delta": delta,
-        "reconciliation_status": (
-            "NOT_MEASURED"
-            if delta is None
-            else ("OK" if abs(delta) <= 0.01 else "MISMATCH")
-        ),
-        "details": detalhes,
-    }
+    linha = resumo[0] if resumo else {}
+    total_build = float(linha.get("total") or 0)
+    linhas_origem = int(linha.get("linhas_origem") or 0)
+    moedas = int(linha.get("moedas") or 0)
+
+    delta = round(total_build - float(baseline.total), 2)
+    if abs(delta) > 0.01:
+        problemas.append(
+            f"total diverge: build R$ {total_build:,.2f} contra R$ "
+            f"{float(baseline.total):,.2f} (delta R$ {delta:,.2f})"
+        )
+    if linhas_origem != int(baseline.rows):
+        problemas.append(
+            f"linhas de origem divergem: build {int(linhas_origem or 0):,} contra "
+            f"{int(baseline.rows):,}"
+        )
+    if moedas != len(baseline.currencies):
+        problemas.append(
+            f"moedas divergem: build {int(moedas or 0)} contra "
+            f"{len(baseline.currencies)} no baseline"
+        )
+
+    presentes = [
+        (str(r["billing_period"]), str(r["connection_code"]))
+        for r in (
+            await trino_execute(
+                f"SELECT DISTINCT billing_period, connection_code "
+                f"FROM iceberg.{layer}.{build_table}",
+                timeout_s=900,
+            )
+            or []
+        )
+    ]
+    faltantes = sorted(set(baseline.slices) - set(presentes))
+    if faltantes:
+        problemas.append(
+            "fatias ausentes no build: "
+            + ", ".join(f"{p}@{c}" for p, c in faltantes[:10])
+        )
+
+    duplicidade = await trino_execute(
+        f"""
+SELECT COUNT(*) AS dup FROM (
+    SELECT billing_period, provider, connection_code, sub_account_id,
+           canonical_resource_id, charge_category, currency,
+           COUNT(*) AS n
+    FROM iceberg.{layer}.{build_table}
+    GROUP BY 1, 2, 3, 4, 5, 6, 7
+    HAVING COUNT(*) > 1
+)
+""",
+        timeout_s=1800,
+    )
+    dup = int((duplicidade[0] if duplicidade else {}).get("dup") or 0)
+    if dup:
+        problemas.append(f"duplicidade no grão: {dup:,} chave(s) com mais de uma linha")
+    return problemas
+
+
 
 
 CURRENT_SNAPSHOT = "CURRENT_SNAPSHOT"
@@ -817,61 +910,6 @@ def non_additive_measures() -> frozenset[str]:
     return frozenset({"rows_without_tag", "inventory_snapshots"})
 
 
-def c2_bucket_projection_sql(
-    *,
-    layer: str = layers.SILVER,
-    billing_period: str,
-    bucket: int,
-    buckets: int = DEFAULT_BUCKETS,
-    connection_code: str | None = None,
-) -> str:
-    """Projeta as linhas cruas de **um** bucket, sem agregar.
-
-    Existe porque o Trino deste ambiente não sustenta nem uma agregação por recurso
-    de uma competência inteira, nem o `UNION ALL` de 16 buckets numa consulta
-    (medido: "No worker nodes available" e queda dos dois workers). O que funciona —
-    e foi medido — é a consulta de **um** bucket por vez: 4,5 s para 832 grupos.
-
-    Como o bucket é função pura da chave canônica do recurso, todos os registros de
-    um recurso caem no mesmo bucket. Agregar bucket a bucket e concatenar produz
-    exatamente o mesmo resultado que agregar a fatia inteira — e permite descartar
-    as linhas cruas a cada bucket em vez de mantê-las todas no processo.
-    """
-    conexao = ""
-    if connection_code:
-        conexao = (
-            " AND COALESCE(_source_connection_code, _source_connection_name) = "
-            f"{_quote_literal(connection_code)}"
-        )
-    rid = sql_canonical_resource_id("resource_id")
-    return f"""
-SELECT
-    {sql_billing_period_key("COALESCE(_billing_period, billing_period)")} AS billing_period,
-    {sql_provider_key("cloud_provider")} AS provider,
-    COALESCE(_source_connection_code, _source_connection_name) AS connection_code,
-    LOWER(TRIM(CAST(sub_account_id AS VARCHAR))) AS sub_account_id,
-    {rid} AS canonical_resource_id,
-    COALESCE(_source_connection_id, 0) AS source_connection_id,
-    NULLIF(TRIM(CAST(charge_category AS VARCHAR)), '') AS charge_category,
-    {sql_currency_code("pricing_currency")} AS currency,
-    NULLIF(TRIM(CAST(resource_name AS VARCHAR)), '') AS cost_resource_name,
-    NULLIF(TRIM(CAST(resource_group_id AS VARCHAR)), '') AS cost_resource_group_id,
-    {sql_service_key("service_name")} AS service_key,
-    NULLIF(TRIM(CAST(service_category AS VARCHAR)), '') AS service_category,
-    {sql_region_key("region_id", charge_category_expr="charge_category", service_expr="service_name")} AS region_key,
-    TRY_CAST(effective_cost AS DOUBLE) AS effective_cost,
-    TRY_CAST(list_cost AS DOUBLE) AS list_cost,
-    TRY_CAST(pricing_quantity AS DOUBLE) AS pricing_quantity,
-    DATE(charge_period_start) AS charge_day,
-    CASE WHEN NULLIF(TRIM(CAST(tags_json AS VARCHAR)), '') IS NULL
-           OR TRIM(CAST(tags_json AS VARCHAR)) IN ('{{}}', '[]')
-         THEN 1 ELSE 0 END AS without_tag
-FROM iceberg.{layer}.resource_cost
-WHERE CAST(COALESCE(_billing_period, billing_period) AS VARCHAR) = {_quote_literal(billing_period)}{conexao}
-  AND {bucket_predicate(rid, bucket, buckets=buckets)}
-""".strip()
-
-
 def c2_bucket_select_sql(
     *,
     layer: str = layers.SILVER,
@@ -968,8 +1006,7 @@ SELECT
     c.last_charge_day,
     c.rows_without_tag,
     CASE WHEN {_is_valid_resource_sql("c.canonical_resource_id")}
-         THEN 'VALIDO' ELSE 'NAO_RECURSO' END AS resource_id_status,
-    {int(bucket)} AS build_bucket
+         THEN 'VALIDO' ELSE 'NAO_RECURSO' END AS resource_id_status
 FROM custo c
 LEFT JOIN iceberg.{layer}.{C2_INVENTORY_TABLE} i
   ON i.provider = c.provider

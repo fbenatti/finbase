@@ -433,37 +433,79 @@ async def materialize_c1(
     run_id: int | None = None,
     layer: str = layers.SILVER,
     expected_total: float | None = None,
+    baseline: Any | None = None,
     progress: Any | None = None,
 ) -> dict[str, Any]:
-    """Materializa C1 em duas etapas governadas, com manifesto e reconciliação.
+    """Materializa C1 em três etapas governadas, com reconciliação obrigatória.
 
-    Ordem:
+    R1 da auditoria: `expected_total` **não é opcional** para cubo financeiro. A
+    fila mede o baseline uma vez por run e o passa aqui; sem ele não há contra o
+    quê reconciliar, e publicar sem reconciliação é o defeito que a auditoria
+    apontou.
 
-    1. estágio 1 — agrega `resource_cost` no grão do cubo (1 CTAS, sem join);
-    2. estágio 2a — conta recursos distintos válidos por competência/conexão/conta;
-    3. estágio 2b — publica `finops_cost_monthly`, enriquecido com organização e
-       recursos, pelos joins deduplicados;
-    4. verifica que o total publicado é igual ao total de `resource_cost`.
-
-    Cada etapa registra manifesto. O total publicado é medido **na tabela
-    publicada**, não no staging, e a diferença acima de R$ 0,01 reprova a
-    materialização — cubo de custo que não bate com a origem não pode ser servido.
+    O validador roda **contra o staging, antes do swap**: total, linhas de origem,
+    moeda e fatias esperadas. Um problema reprova a publicação sem tocar a tabela
+    anterior — o swap só acontece quando o staging fechou.
     """
     from app.services.gold_governance import (
-        PARTIAL,
-        SUCCESS,
-        ManifestEntry,
-        current_snapshot_id,
+        BaselineMismatchError,
+        assert_baseline,
         materialize_gold_sql,
-        record_manifest,
+        publish_gold_cube,
+        RECONCILIATION_TOLERANCE_BRL,
     )
     from app.services.trino_service import execute as trino_execute
 
-    def _etapa(mensagem: str) -> None:
-        if progress:
-            progress(0, 4, mensagem)
+    if expected_total is None:
+        raise RuntimeError(
+            "C1 exige expected_total: a reconciliação obrigatória não é opcional. "
+            "A fila deve medir o baseline de silver.resource_cost e passá-lo."
+        )
+    if baseline is None:
+        raise RuntimeError(
+            "C1 exige baseline (CostBaseline): total, linhas, moedas, períodos e "
+            "conexões esperados vêm da mesma medição única do run."
+        )
 
-    _etapa("C1 estagio 1/4: agregando resource_cost no grao do cubo")
+    async def _validador(namespace: str, staging: str) -> list[str]:
+        """Verifica linhas de origem, moeda e fatias no staging, antes do swap.
+
+        Devolve problemas em vez de levantar, porque o publicador agrega o motivo
+        ao erro de publicação.
+        """
+        resumo = await trino_execute(
+            f"SELECT SUM(rows) AS linhas_origem, COUNT(DISTINCT currency) AS moedas "
+            f"FROM iceberg.{namespace}.{staging}",
+            timeout_s=900,
+        )
+        moedas = await trino_execute(
+            f"SELECT DISTINCT CAST(currency AS VARCHAR) AS currency "
+            f"FROM iceberg.{namespace}.{staging}",
+            timeout_s=900,
+        )
+        fatias = await trino_execute(
+            f"SELECT DISTINCT billing_period, connection_code "
+            f"FROM iceberg.{namespace}.{staging}",
+            timeout_s=900,
+        )
+        try:
+            assert_baseline(
+                baseline,
+                total_out=float(expected_total),
+                rows_out=int((resumo[0] if resumo else {}).get("linhas_origem") or 0),
+                currencies_out=[
+                    str(r["currency"]) for r in moedas or [] if r.get("currency")
+                ],
+                slices_out=[
+                    (str(r["billing_period"]), str(r["connection_code"]))
+                    for r in fatias or []
+                ],
+                table_label="C1 staging",
+            )
+            return []
+        except BaselineMismatchError as exc:
+            return [str(exc).split(": ", 1)[1]]
+
     etapa1 = await materialize_gold_sql(
         cube_code=C1_GRAIN_TABLE,
         table=C1_GRAIN_TABLE,
@@ -472,7 +514,6 @@ async def materialize_c1(
         run_id=run_id,
     )
 
-    _etapa("C1 estagio 2/4: contando recursos distintos validos")
     etapa2 = await materialize_gold_sql(
         cube_code=C1_RESOURCE_TABLE,
         table=C1_RESOURCE_TABLE,
@@ -481,8 +522,7 @@ async def materialize_c1(
         run_id=run_id,
     )
 
-    _etapa("C1 estagio 3/4: publicando finops_cost_monthly")
-    publicacao = await materialize_gold_sql(
+    publicacao = await publish_gold_cube(
         cube_code=C1_CUBE_CODE,
         table=C1_TABLE,
         select_sql=c1_stage2_sql(
@@ -491,59 +531,21 @@ async def materialize_c1(
             resource_table=C1_RESOURCE_TABLE,
         ),
         namespace=layers.GOLD,
-        partition_columns=("billing_period",),
+        partition_column="billing_period",
         run_id=run_id,
-        financial_total_in=expected_total,
+        financial_total_in=round(float(expected_total), 2),
+        rows_read=int(baseline.rows),
+        validate_staging=_validador,
     )
 
-    _etapa("C1 estagio 4/4: reconciliando o cubo publicado")
-    verificacao = await trino_execute(
-        f"SELECT ROUND(SUM(effective_cost), 2) AS total, COUNT(*) AS linhas "
-        f"FROM iceberg.{layers.GOLD}.{C1_TABLE}",
-        timeout_s=900,
-    )
-    total_out = float((verificacao[0] if verificacao else {}).get("total") or 0)
-    delta = (
-        None if expected_total is None else round(total_out - float(expected_total), 2)
-    )
-    if delta is None:
-        reconciliacao = "NOT_MEASURED"
-    elif abs(delta) <= RECONCILIATION_TOLERANCE_BRL:
-        reconciliacao = "OK"
-    else:
-        reconciliacao = "MISMATCH"
-    await record_manifest(
-        ManifestEntry(
-            cube_code=C1_CUBE_CODE,
-            physical_table=C1_TABLE,
-            namespace=layer,
-            run_id=run_id,
-            # A publicação já aconteceu; o que se registra aqui é o veredito da
-            # reconciliação sobre ela.
-            status=SUCCESS if reconciliacao == "OK" else PARTIAL,
-            financial_total_in=expected_total,
-            financial_total_out=total_out,
-            financial_delta=delta,
-            reconciliation_status=reconciliacao,
-            rows_written=publicacao.rows,
-            previous_snapshot_id=current_snapshot_id(layers.GOLD, C1_TABLE),
-            reason=None if reconciliacao == "OK" else "reconciliacao divergente",
-        )
-    )
-
-    if reconciliacao == "MISMATCH":
-        raise RuntimeError(
-            f"C1 nao reconcilia: publicado R$ {total_out:,.2f} contra "
-            f"R$ {float(expected_total):,.2f} de resource_cost (delta R$ {delta:,.2f})"
-        )
-
+    total_out = float(publicacao.financial_delta or 0) + round(float(expected_total), 2)
     return {
         "table": C1_TABLE,
         "rows": publicacao.rows,
         "grain_rows": etapa1.rows,
         "resource_rows": etapa2.rows,
-        "financial_total_in": expected_total,
-        "financial_total_out": total_out,
-        "financial_delta": delta,
-        "reconciliation_status": reconciliacao,
+        "financial_total_in": round(float(expected_total), 2),
+        "financial_total_out": round(total_out, 2),
+        "financial_delta": publicacao.financial_delta,
+        "reconciliation_status": publicacao.reconciliation_status,
     }

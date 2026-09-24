@@ -635,6 +635,18 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
         if user_period and all(existing.id != user_period.id for existing in rules):
             rules.append(user_period)
 
+    # R3: RUNNING órfão não pode ficar aberto para sempre. Um worker morto no meio
+    # de um build deixa um RUNNING sem término; expirar antes de começar evita que
+    # a leitura de "o que está materializando agora" minta.
+    from app.services.gold_governance import expire_stale_running_manifests
+
+    try:
+        expirados = await expire_stale_running_manifests()
+        if expirados:
+            logger.info("Manifestos RUNNING órfãos marcados ABANDONED: %d", expirados)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao expirar RUNNING órfãos: %s", exc)
+
     details: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     written = 0
@@ -651,6 +663,7 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
             execution_order,
             is_registered,
             runner_for,
+            spec_for,
         )
 
         chaves = [str(r.materializer_key) for r in keyed]
@@ -665,12 +678,29 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
             # Executa chave a chave (e não em lote) para que a falha de um cubo não
             # apague o resultado dos que já publicaram. A ordem continua sendo a de
             # dependência; o que muda é o registro.
+            from app.services.gold_governance import cost_baseline
+
+            financeiros = [
+                c for c in chaves
+                if is_registered(c) and spec_for(c).financial
+            ]
+            # Baseline medido **uma vez por run**: se cada materializador medisse a
+            # origem na hora própria, uma carga intermediária mudaria o número entre
+            # C1 e C2 e a comparação deixaria de provar a preservação.
+            baseline = await cost_baseline() if financeiros else None
             estado: dict[str, dict[str, Any]] = {}
             erro: Exception | None = None
             for chave in execution_order(chaves):
                 try:
                     estado[chave] = await runner_for(chave)(
-                        run_id=run_id, expected_total=None, progress=progress
+                        run_id=run_id,
+                        expected_total=(
+                            baseline.total
+                            if baseline is not None
+                            else None
+                        ),
+                        baseline=baseline,
+                        progress=progress,
                     )
                 except Exception as exc:  # noqa: BLE001 — vira status da regra
                     erro = exc
@@ -1419,3 +1449,30 @@ def enqueue_rule_materialization(session: Any, *, rule_ids: list[int] | None = N
     session.add(task)
     session.flush()  # popula task.id para o phase do chamador
     return task
+
+
+async def _run_keyed_rules(chaves: list[str], *, run_id: int | None = None, progress: Any | None = None) -> dict[str, Any]:
+    """Executa as regras com materializer_key. Exposta para teste da fila.
+
+    É o mesmo laço de `materialize_gold_cubes`, isolado para que o teste prove que
+    o baseline é medido uma vez por run e passado a todos os financeiros.
+    """
+    from app.services.gold_governance import cost_baseline
+    from app.services.gold_materializers import (
+        execution_order,
+        is_registered,
+        runner_for,
+        spec_for,
+    )
+
+    financeiros = [c for c in chaves if is_registered(c) and spec_for(c).financial]
+    baseline = await cost_baseline() if financeiros else None
+    resultados: dict[str, Any] = {}
+    for chave in execution_order(chaves):
+        resultados[chave] = await runner_for(chave)(
+            run_id=run_id,
+            expected_total=baseline.total if baseline is not None else None,
+            baseline=baseline,
+            progress=progress,
+        )
+    return resultados

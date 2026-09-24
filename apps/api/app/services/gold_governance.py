@@ -30,9 +30,12 @@ PostgreSQL guarda configuração, workflow e metadata de execução.
 from __future__ import annotations
 
 import hashlib
+import inspect
+import os
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -40,6 +43,7 @@ from typing import Any
 from app.services import iceberg_service as iceberg
 from app.services import lakehouse_layers as layers
 from app.services.semantic_normalization import (
+    UNKNOWN,
     CurrencyMixedError,
     assert_single_currency,
 )
@@ -63,6 +67,10 @@ RUNNING = "RUNNING"
 SUCCESS = "SUCCESS"
 PARTIAL = "PARTIAL"
 FAILED = "FAILED"
+#: Manifesto RUNNING que não terminou dentro do timeout operacional e não
+#: corresponde a uma task em execução. Nunca é inserido diretamente: é o desfecho
+#: de um RUNNING órfão.
+ABANDONED = "ABANDONED"
 
 #: Tabelas que são cubos Gold consumíveis por outros cubos. Um dependente só
 #: espera freshness de tabela que é cubo; ler Silver não entra no gate.
@@ -175,6 +183,11 @@ class ManifestEntry:
     #: `True` depois que a entrada RUNNING foi persistida com sucesso. Não vai para
     #: o banco: é controle de fluxo do publicador.
     manifest_started: bool = False
+    #: Identificador da linha `gold_manifest` desta execução. Uma materialização é
+    #: **uma** linha: RUNNING insere, e o desfecho atualiza o mesmo id. Inserir
+    #: outra linha terminal separaria a origem do resultado e os dois deixariam de
+    #: falar do mesmo run.
+    manifest_id: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -339,6 +352,13 @@ async def publish_gold_cube(
     progress: Any | None = None,
     timeout_s: float = 1800.0,
     max_source_age_hours: float = DEFAULT_SOURCE_MAX_AGE_HOURS,
+    #: Validador executado **contra o staging, antes do swap**. Recebe
+    #: (namespace, nome da tabela de staging) e devolve problemas. Um problema
+    #: reprova a publicação sem tocar a tabela publicada — é o que impede uma Gold
+    #: híbrida: o swap só acontece quando o staging fechou com o baseline.
+    validate_staging: Callable[[str, str], list[str]] | None = None,
+    #: Linhas de origem medidas pelo chamador (baseline), para o manifesto.
+    rows_read: int | None = None,
 ) -> PublishOutcome:
     """Publica um cubo Gold: valida, materializa em staging e troca atomicamente.
 
@@ -380,6 +400,7 @@ async def publish_gold_cube(
         status=RUNNING,
         sql_hash=sql_hash,
         source_tables=fontes,
+        rows_read=rows_read,
         financial_total_in=financial_total_in,
         currency=currency,
         previous_snapshot_id=anterior,
@@ -399,6 +420,7 @@ async def publish_gold_cube(
     else:
         create_sql = create_sql.replace("{staging}", staging).replace("{namespace}", namespace)
 
+    trocou = False
     try:
         if progress:
             progress(0, 1, f"Materializando {cube_code}")
@@ -438,11 +460,34 @@ async def publish_gold_cube(
         delta, veredito = compute_financial_delta(
             total_in=financial_total_in, total_out=total_out, tolerance=entrada.tolerance
         )
+        if veredito == "MISMATCH":
+            # Reprovado **antes** do swap: publicar um cubo que não fecha com a
+            # origem e depois descobrir significaria servir dado errado.
+            iceberg.cleanup_staged_table(staging, namespace=namespace)
+            raise BaselineMismatchError(
+                f"{cube_code}: total do staging R$ {total_out:,.2f} diverge de "
+                f"R$ {financial_total_in:,.2f} (delta R$ {delta:,.2f}); nada foi trocado"
+            )
+
+        # Validação do chamador contra o staging, antes do swap: linhas de origem,
+        # fatias esperadas e duplicidade são verificadas aqui, porque depois do swap
+        # seria tarde — a tabela anterior já teria sido substituída.
+        if validate_staging is not None:
+            resultado_validacao = validate_staging(namespace, staging)
+            if inspect.isawaitable(resultado_validacao):
+                resultado_validacao = await resultado_validacao
+            problemas = list(resultado_validacao or [])
+            if problemas:
+                iceberg.cleanup_staged_table(staging, namespace=namespace)
+                raise BaselineMismatchError(
+                    f"{cube_code}: staging reprovado antes do swap: " + "; ".join(problemas)
+                )
 
         iceberg.swap_staged_table(
             table, staging, namespace=namespace, known_row_count=linhas
         )
         entrada.financial_total_out = total_out
+        trocou = True
         saida = PublishOutcome(
             table=table,
             rows=linhas,
@@ -455,6 +500,30 @@ async def publish_gold_cube(
         )
         await _finish_manifest(entrada, saida)
         return saida
+    except ManifestUnavailableError:
+        # O manifesto terminal falhou **depois** do swap: a versão nova está
+        # publicada sem registro. Rollback para o snapshot anterior devolve a
+        # versão que tinha manifesto — e o cache só é invalidado se o rollback
+        # falhar, porque aí fica publicado um dado sem prova.
+        if trocou and anterior:
+            devolveu = await rollback_table_to_snapshot(
+                namespace=namespace, table=table, snapshot_id=anterior
+            )
+            if not devolveu:
+                invalidate_published_cache(cube_code)
+        try:
+            entrada.status = FAILED
+            entrada.error = "manifesto terminal não pôde ser gravado; publicação reprovada"
+            entrada.finished_at = datetime.now(timezone.utc)
+            await record_manifest(entrada)
+        except ManifestUnavailableError as manifest_exc:
+            # PostgreSQL continua indisponível: o RUNNING fica aberto e a migração
+            # de órfãos o marca como ABANDONED quando o timeout passar.
+            logger.error(
+                "Recuperação do manifesto de %s pendente (PostgreSQL indisponível): %s",
+                cube_code, manifest_exc,
+            )
+        raise
     except Exception as exc:  # noqa: BLE001 — falha precisa virar manifesto
         try:
             iceberg.cleanup_staged_table(staging, namespace=namespace)
@@ -463,16 +532,7 @@ async def publish_gold_cube(
         entrada.status = FAILED
         entrada.error = sanitize_error(exc)
         entrada.finished_at = datetime.now(timezone.utc)
-        # O manifesto de falha é registro de diagnóstico: se ele mesmo falhar, o
-        # erro original precisa subir — é ele que explica a falha da publicação.
-        try:
-            await record_manifest(entrada)
-        except ManifestUnavailableError as manifest_exc:
-            logger.error(
-                "Falha ao registrar o próprio manifesto de falha de %s: %s",
-                entrada.cube_code,
-                manifest_exc,
-            )
+        await record_manifest(entrada)
         raise
 
 
@@ -606,6 +666,84 @@ def manifest_mode_for(cube_code: str) -> str:
     )
 
 
+async def record_manifest(entry: ManifestEntry, *, mode: str | None = None) -> None:
+    """Persiste o manifesto no PostgreSQL.
+
+    Comportamento por chamada:
+
+    - ``manifest_id`` ausente → **INSERT** e guarda o id na entrada. Este é o
+      registro `RUNNING` do run;
+    - ``manifest_id`` presente → **UPDATE** da mesma linha. `SUCCESS`, `PARTIAL` e
+      `FAILED` são desfechos da execução que o `RUNNING` abriu, não eventos novos.
+
+    `mode` decide o comportamento em falha:
+
+    - `REQUIRED` (default): levanta `ManifestUnavailableError`. Quem chama precisa
+      abortar **antes** do staging quando a entrada é `RUNNING`, e marcar a task
+      como falha quando a entrada é final;
+    - `BEST_EFFORT`: registra o aviso e segue, para os cubos legados da allowlist.
+    """
+    modo = mode or manifest_mode_for(entry.cube_code)
+    try:
+        from app.database import async_session
+        from sqlalchemy import text
+    except Exception as exc:  # noqa: BLE001
+        mensagem = f"Manifesto Gold indisponível ({sanitize_error(exc)})"
+        if modo == MANIFEST_REQUIRED:
+            raise ManifestUnavailableError(mensagem) from exc
+        logger.warning("%s", mensagem)
+        return
+
+    dados = entry.as_dict()
+    try:
+        async with async_session() as session:
+            if entry.manifest_id is None:
+                resultado = await session.execute(
+                    text(_manifest_insert_sql() + " RETURNING id"),
+                    {
+                        **dados,
+                        "source_tables": _json_list(dados["source_tables"]),
+                    },
+                )
+                linha = resultado.first()
+                entry.manifest_id = int(linha[0]) if linha else None
+            else:
+                await session.execute(
+                    text(_manifest_update_sql()),
+                    {
+                        **dados,
+                        "id": entry.manifest_id,
+                        "source_tables": _json_list(dados["source_tables"]),
+                    },
+                )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        mensagem = f"Falha ao registrar manifesto de {entry.cube_code}: {sanitize_error(exc)}"
+        if modo == MANIFEST_REQUIRED:
+            raise ManifestUnavailableError(mensagem) from exc
+        logger.warning("%s", mensagem)
+
+
+#: Campos atualizados no desfecho. `manifest_id`, `cube_code` e a identidade da
+#: execução não mudam: só o resultado.
+_MANIFEST_UPDATE_FIELDS = (
+    "status", "reason", "rows_read", "rows_written",
+    "financial_total_in", "financial_total_out", "financial_delta",
+    "tolerance", "reconciliation_status", "currency",
+    "previous_snapshot_id", "rollback_table", "error",
+    "started_at", "finished_at",
+)
+
+
+def _manifest_update_sql() -> str:
+    campos = ",\n    ".join(f"{c} = :{c}" for c in _MANIFEST_UPDATE_FIELDS)
+    return f"""
+UPDATE gold_manifest SET
+    {campos}
+WHERE id = :id
+""".strip()
+
+
 def _manifest_insert_sql() -> str:
     return """
 INSERT INTO gold_manifest (
@@ -623,49 +761,6 @@ INSERT INTO gold_manifest (
     :previous_snapshot_id, :rollback_table, :error, :started_at, :finished_at
 )
 """
-
-
-async def record_manifest(entry: ManifestEntry, *, mode: str | None = None) -> None:
-    """Persiste o manifesto no PostgreSQL.
-
-    `mode` decide o comportamento em falha:
-
-    - `REQUIRED` (default): levanta `ManifestUnavailableError`. Quem chama precisa
-      abortar **antes** do staging quando a entrada é `RUNNING`, e marcar a task
-      como falha quando a entrada é final;
-    - `BEST_EFFORT`: registra o aviso e segue, para os cubos legados da allowlist.
-
-    O default obrigatório é deliberado: enquanto a falha era silenciosa, uma
-    publicação podia terminar com sucesso sem prova nenhuma. O manifesto é parte do
-    contrato de publicação, não observabilidade opcional.
-    """
-    modo = mode or manifest_mode_for(entry.cube_code)
-    try:
-        from app.database import async_session
-        from sqlalchemy import text
-    except Exception as exc:  # noqa: BLE001
-        mensagem = f"Manifesto Gold indisponível ({sanitize_error(exc)})"
-        if modo == MANIFEST_REQUIRED:
-            raise ManifestUnavailableError(mensagem) from exc
-        logger.warning("%s", mensagem)
-        return
-
-    dados = entry.as_dict()
-    try:
-        async with async_session() as session:
-            await session.execute(
-                text(_manifest_insert_sql()),
-                {
-                    **dados,
-                    "source_tables": _json_list(dados["source_tables"]),
-                },
-            )
-            await session.commit()
-    except Exception as exc:  # noqa: BLE001
-        mensagem = f"Falha ao registrar manifesto de {entry.cube_code}: {sanitize_error(exc)}"
-        if modo == MANIFEST_REQUIRED:
-            raise ManifestUnavailableError(mensagem) from exc
-        logger.warning("%s", mensagem)
 
 
 def _json_list(valores: list[str]) -> str:
@@ -705,30 +800,34 @@ async def record_frame_publication(
 ) -> ManifestEntry:
     """Registra no manifesto uma publicação feita de frame em memória.
 
-    Não levanta por materialização vazia a menos que o chamador exija; devolve a
-    entrada registrada para que o chamador saiba o status.
+    Mantém o contrato anterior (uma chamada, um registro), mas por baixo cria o
+    `RUNNING` **antes** de devolver o resultado e o fecha na mesma linha — a ordem
+    exigida para que um manifesto não seja um evento solto pós-swap.
+
+    Vazio é `PARTIAL` a menos que o chamador exija erro.
     """
-    vazio = rows_written <= 0
-    if vazio and empty_is_error:
-        raise RuntimeError(f"Materialização {cube_code} não produziu linhas")
-    entrada = ManifestEntry(
+    handle = await begin_frame_publication(
         cube_code=cube_code,
         physical_table=physical_table,
         namespace=namespace,
         run_id=run_id,
-        rows_written=rows_written,
-        source_tables=list(source_tables or []),
-        status=PARTIAL if vazio else SUCCESS,
-        reason="sem linhas" if vazio else None,
-        previous_snapshot_id=current_snapshot_id(namespace, physical_table),
-        started_at=datetime.now(timezone.utc),
-        finished_at=datetime.now(timezone.utc),
+        source_tables=source_tables,
     )
-    await record_manifest(entrada)
-    from app.services.finops_cache import invalidate_after_publish
-
-    invalidate_after_publish(entrada.cube_code)
-    return entrada
+    vazio = rows_written <= 0
+    if vazio and empty_is_error:
+        await finish_frame_publication(
+            handle, rows_written=0, status=FAILED,
+            reason="não produziu linhas",
+        )
+        raise RuntimeError(f"Materialização {cube_code} não produziu linhas")
+    status = PARTIAL if vazio else SUCCESS
+    await finish_frame_publication(
+        handle,
+        rows_written=rows_written,
+        status=status,
+        reason="sem linhas" if vazio else None,
+    )
+    return handle.entry
 
 
 def record_manifest_blocking(entry: ManifestEntry) -> None:
@@ -912,3 +1011,464 @@ async def materialize_gold_sql(
         progress=progress,
         timeout_s=timeout_s,
     )
+
+
+# ── Baseline financeiro único por run ────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class CostBaseline:
+    """Baseline financeiro medido **uma vez** na Silver por execução da fila.
+
+    A auditoria exige que C1 e C2 sejam reconciliados contra o **mesmo** número: se
+    cada materializador medisse a origem na hora própria, uma carga intermediária
+    mudaria o valor entre eles e a comparação deixaria de provar a preservação.
+    """
+
+    total: float
+    rows: int
+    currencies: tuple[str, ...]
+    periods: tuple[str, ...]
+    connections: tuple[str, ...]
+    slices: tuple[tuple[str, str], ...]
+    dataset: str = "resource_cost"
+    layer: str = "silver"
+    measured_at: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "rows": self.rows,
+            "currencies": list(self.currencies),
+            "periods": list(self.periods),
+            "connections": list(self.connections),
+            "slices": [list(s) for s in self.slices],
+            "dataset": self.dataset,
+            "layer": self.layer,
+            "measured_at": self.measured_at,
+        }
+
+
+class BaselineMismatchError(RuntimeError):
+    """O cubo publicado não fecha com o baseline medido na Silver."""
+
+
+async def cost_baseline(
+    *, dataset: str = "resource_cost", layer: str = "silver", timeout_s: float = 1800.0
+) -> CostBaseline:
+    """Lê de uma vez: total, linhas, moedas, períodos e conexões esperados.
+
+    Uma única função porque a reconciliação obrigatória precisa de **uma** fonte:
+    C1 e C2 recebem este objeto, e divergir dele reprova a publicação.
+    """
+    from app.services.trino_service import execute as trino_execute
+
+    resumo = await trino_execute(
+        f"""
+SELECT ROUND(SUM(TRY_CAST(effective_cost AS DOUBLE)), 2) AS total,
+       COUNT(*) AS rows
+FROM iceberg.{layer}.{dataset}
+WHERE COALESCE(_billing_period, billing_period) IS NOT NULL
+""",
+        timeout_s=timeout_s,
+    )
+    moedas = await trino_execute(
+        f"SELECT DISTINCT CAST(COALESCE(NULLIF(TRIM(CAST(pricing_currency AS VARCHAR)), ''), "
+        f"'{UNKNOWN}') AS VARCHAR) AS currency FROM iceberg.{layer}.{dataset}",
+        timeout_s=timeout_s,
+    )
+    fatias = await trino_execute(
+        f"""
+SELECT CAST(COALESCE(_billing_period, billing_period) AS VARCHAR) AS billing_period,
+       COALESCE(_source_connection_code, _source_connection_name) AS connection_code,
+       COUNT(*) AS rows
+FROM iceberg.{layer}.{dataset}
+WHERE COALESCE(_billing_period, billing_period) IS NOT NULL
+GROUP BY 1, 2 ORDER BY 1, 2
+""",
+        timeout_s=timeout_s,
+    )
+    total = float((resumo[0] if resumo else {}).get("total") or 0)
+    linhas = int((resumo[0] if resumo else {}).get("rows") or 0)
+    moedas = tuple(sorted(str(r["currency"]) for r in moedas or [] if r.get("currency")))
+    fatias = [
+        (str(r["billing_period"]), str(r["connection_code"]))
+        for r in (
+            await trino_execute(
+                f"""
+SELECT CAST(COALESCE(_billing_period, billing_period) AS VARCHAR) AS billing_period,
+       COALESCE(_source_connection_code, _source_connection_name) AS connection_code
+FROM iceberg.{layer}.{dataset}
+WHERE COALESCE(_billing_period, billing_period) IS NOT NULL
+GROUP BY 1, 2 ORDER BY 1, 2
+""",
+                timeout_s=timeout_s,
+            )
+            or []
+        )
+    ]
+    return CostBaseline(
+        total=round(total, 2),
+        rows=linhas,
+        currencies=moedas,
+        periods=tuple(sorted({p for p, _ in fatias})),
+        connections=tuple(sorted({c for _, c in fatias})),
+        slices=tuple(fatias),
+        dataset=dataset,
+        layer=layer,
+        measured_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def assert_baseline(
+    baseline: CostBaseline,
+    *,
+    total_out: float,
+    rows_out: int,
+    currencies_out: list[str] | None = None,
+    slices_out: list[tuple[str, str]] | None = None,
+    table_label: str,
+    tolerance: float = RECONCILIATION_TOLERANCE_BRL,
+) -> None:
+    """Reprova o cubo quando não fecha com o baseline, com o motivo exato.
+
+    Quatro verificações, na ordem em que a auditoria as lista: total, linhas de
+    origem, moeda única e fatias esperadas. Cada uma produz uma mensagem que diz o
+    **número esperado** e o **número medido** — "reconciliação falhou" sem o par de
+    números não permite investigar.
+    """
+    problemas: list[str] = []
+
+    delta = round(float(total_out) - float(baseline.total), 2)
+    if abs(delta) > tolerance:
+        problemas.append(
+            f"total diverge: publicado R$ {total_out:,.2f} contra "
+            f"R$ {baseline.total:,.2f} da Silver (delta R$ {delta:,.2f})"
+        )
+
+    if rows_out != baseline.rows:
+        problemas.append(
+            f"linhas de origem divergem: publicado {rows_out:,} contra "
+            f"{baseline.rows:,} da Silver"
+        )
+
+    if currencies_out:
+        if len(currencies_out) > 1:
+            problemas.append(
+                f"múltiplas moedas no cubo: {', '.join(sorted(currencies_out))}"
+            )
+        ausentes = set(baseline.currencies) - set(currencies_out)
+        if baseline.currencies and set(currencies_out) - set(baseline.currencies):
+            problemas.append(
+                f"moedas fora do baseline: "
+                f"{', '.join(sorted(set(currencies_out) - set(baseline.currencies)))}"
+            )
+
+    if slices_out is not None:
+        esperadas = set(baseline.slices)
+        presentes = set(slices_out)
+        faltantes = sorted(esperadas - presentes)
+        if faltantes:
+            problemas.append(
+                f"fatias esperadas ausentes: "
+                f"{', '.join(f'{p}@{c}' for p, c in faltantes[:10])}"
+                f"{'…' if len(faltantes) > 10 else ''}"
+            )
+
+    if problemas:
+        raise BaselineMismatchError(
+            f"{table_label}: " + "; ".join(problemas)
+        )
+
+
+# ── Publicação por frame: begin/finish, não um registro pós-swap ─────────────
+
+
+class FramePublicationHandle:
+    """Manifesto `RUNNING` de uma publicação por frame.
+
+    Antes deste handle, a publicação por frame registrava o manifesto **depois** do
+    swap: o cubo podia ter sido trocado e o registro falhar, deixando uma versão
+    publicada sem rastro. Agora o `RUNNING` existe antes de qualquer escrita e o
+    desfecho atualiza a **mesma** linha.
+    """
+
+    def __init__(self, entry: ManifestEntry) -> None:
+        self.entry = entry
+
+    @property
+    def manifest_id(self) -> int | None:
+        return self.entry.manifest_id
+
+
+async def begin_frame_publication(
+    *,
+    cube_code: str,
+    physical_table: str,
+    namespace: str = layers.GOLD,
+    run_id: int | None = None,
+    source_tables: list[str] | None = None,
+    rows_read: int | None = None,
+) -> FramePublicationHandle:
+    """Cria o manifesto `RUNNING` **antes** de qualquer escrita.
+
+    Em modo obrigatório, falha aqui aborta a publicação antes de o cubo ser
+    escrito — o mesmo contrato de `publish_gold_cube`, aplicado ao caminho por
+    frame.
+    """
+    entrada = ManifestEntry(
+        cube_code=cube_code,
+        physical_table=physical_table,
+        namespace=namespace,
+        run_id=run_id,
+        status=RUNNING,
+        source_tables=list(source_tables or []),
+        rows_read=rows_read,
+        previous_snapshot_id=current_snapshot_id(namespace, physical_table),
+        started_at=datetime.now(timezone.utc),
+    )
+    await record_manifest(entrada)
+    entrada.manifest_started = True
+    return FramePublicationHandle(entrada)
+
+
+async def finish_frame_publication(
+    handle: FramePublicationHandle,
+    *,
+    rows_written: int,
+    status: str = SUCCESS,
+    reason: str | None = None,
+    financial_total_out: float | None = None,
+    financial_total_in: float | None = None,
+) -> None:
+    """Fecha o manifesto aberto por :func:`begin_frame_publication`.
+
+    Atualiza **a mesma linha** (`manifest_id`). Falha aqui em modo obrigatório
+    reprova a publicação: o swap já aconteceu, então o chamador deve tentar
+    rollback e marcar a task como falha.
+    """
+    entrada = handle.entry
+    entrada.status = status
+    entrada.rows_written = rows_written
+    entrada.financial_total_out = financial_total_out
+    entrada.financial_total_in = financial_total_in
+    entrada.financial_delta = (
+        None
+        if financial_total_in is None or financial_total_out is None
+        else round(float(financial_total_out) - float(financial_total_in), 2)
+    )
+    if status == SUCCESS and entrada.financial_delta is not None:
+        entrada.reconciliation_status = (
+            "OK" if abs(entrada.financial_delta) <= entrada.tolerance else "MISMATCH"
+        )
+    entrada.reason = reason
+    entrada.finished_at = datetime.now(timezone.utc)
+    await record_manifest(entrada)
+    if status == SUCCESS:
+        invalidate_published_cache(entrada.cube_code)
+
+
+def invalidate_published_cache(cube_code: str) -> None:
+    """Invalida o cache de um cubo cuja versão publicada permaneceu válida."""
+    try:
+        from app.services.finops_cache import invalidate_after_publish
+
+        invalidate_after_publish(cube_code)
+    except Exception as exc:  # noqa: BLE001 — cache não derruba publicação
+        logger.warning("Falha ao invalidar cache de %s: %s", cube_code, exc)
+
+
+# Alias com o nome antigo: o ponto de chamada é único de propósito.
+def invalidate_published_cache_if_valid(cube_code: str) -> None:
+    invalidate_published_cache(cube_code)
+
+
+# Alias usado pelo caminho de SQL; nome antigo mantido para não quebrar chamadores.
+def invalidate_after_publish(cube_code: str) -> int:
+    try:
+        from app.services.finops_cache import invalidate_after_publish as _inv
+
+        return _inv(cube_code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao invalidar cache de %s: %s", cube_code, exc)
+        return 0
+
+
+async def rollback_table_to_snapshot(
+    *, namespace: str, table: str, snapshot_id: str
+) -> bool:
+    """Devolve a tabela ao snapshot anterior, quando há um para voltar.
+
+    É o rollback que a auditoria exige quando o manifesto terminal falha **depois**
+    do swap: publicar sem manifesto é o defeito, mas publicar e deixar a versão nova
+    sem registro é pior — o rollback devolve a versão anterior, que tinha manifesto.
+
+    ``False`` quando não havia snapshot anterior ou o rollback falhou; quem chama
+    decide o que fazer com essa informação.
+    """
+    if not snapshot_id:
+        return False
+    try:
+        cat = iceberg._get_catalog()  # noqa: SLF001
+        alvo = cat.load_table(iceberg._table_id(namespace, table.replace("-", "_")))
+        with alvo.manage_snapshots() as gestor:
+            gestor.rollback(int(snapshot_id))
+        return True
+    except Exception as exc:  # noqa: BLE001 — rollback falho precisa ser visível
+        logger.error(
+            "Rollback de %s.%s para o snapshot %s falhou: %s",
+            namespace, table, snapshot_id, sanitize_error(exc),
+        )
+        return False
+
+
+async def expire_stale_running_manifests(
+    *, timeout_hours: float = 2.0, limit: int = 5000
+) -> int:
+    """Marca como `ABANDONED` os `RUNNING` órfãos.
+
+    Um `RUNNING` é órfão quando: não tem `finished_at`, é mais velho que o timeout
+    operacional e não corresponde a nenhuma task em execução com o mesmo `run_id`.
+
+    Sem esta migração, um worker morto no meio de um build deixaria um `RUNNING`
+    aberto para sempre, e a leitura "quais cubos estão sendo materializados agora?"
+    mentiria.
+    """
+    try:
+        from app.database import async_session
+        from sqlalchemy import text
+    except Exception:  # noqa: BLE001
+        return 0
+    try:
+        async with async_session() as session:
+            resultado = await session.execute(
+                text(
+                    """
+                    UPDATE gold_manifest
+                    SET status = :abandoned,
+                        reason = :motivo,
+                        finished_at = now()
+                    WHERE id IN (
+                        SELECT m.id FROM gold_manifest m
+                        WHERE m.status = :running
+                          AND m.finished_at IS NULL
+                          AND m.started_at < now() - make_interval(hours => :h)
+                          AND NOT EXISTS (
+                              SELECT 1 FROM etl_task t
+                              WHERE t.id = m.run_id
+                                AND t.status IN ('QUEUED', 'RUNNING')
+                          )
+                    )
+                    """
+                ),
+                {
+                    "abandoned": ABANDONED,
+                    "running": RUNNING,
+                    "h": timeout_hours,
+                    "motivo": f"RUNNING órfão: sem término há mais de {timeout_hours:.0f}h",
+                },
+            )
+            await session.commit()
+            return int(resultado.rowcount or 0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao expirar manifestos RUNNING órfãos: %s", sanitize_error(exc))
+        return 0
+
+
+# ── Lock distribuído por cubo ────────────────────────────────────────────────
+
+
+class CubeLockUnavailableError(RuntimeError):
+    """Outra execução já materializa este cubo.
+
+    Duas execuções de C2 em paralelo publicariam builds distintos na mesma tabela
+    final — o segundo swap sobrescreveria o primeiro sem que nenhum dos dois soubesse.
+    """
+
+
+@dataclass(frozen=True)
+class CubeLock:
+    cube_code: str
+    holder: str
+    acquired_at: str = ""
+
+
+async def acquire_cube_lock(
+    cube_code: str, *, holder: str | None = None, timeout_hours: float = 2.0
+) -> CubeLock:
+    """Adquire o lock de materialização de um cubo no PostgreSQL.
+
+    Uma tabela de lock, e não um advisory lock de sessão: a materialização dura de
+   zenas de minutos e cruza várias transações, e um advisory lock amarraria uma
+    conexão por todo o build. Com linha própria, o lock é observável no banco e
+    pode ser inspecionado quando algo travar.
+
+    Um lock vencido é roubado: um worker morto não pode bloquear o cubo para
+    sempre — mas roubar exige que o tempo tenha passado, para que duas execuções
+    genuinamente simultâneas continuem sendo impossíveis.
+    """
+    import uuid as _uuid
+
+    try:
+        from app.database import async_session
+        from sqlalchemy import text
+    except Exception as exc:  # noqa: BLE001
+        raise CubeLockUnavailableError(f"lock de {cube_code} indisponível: {exc}") from exc
+
+    token = holder or f"pid-{os.getpid()}-{_uuid.uuid4().hex[:12]}"
+    try:
+        async with async_session() as session:
+            # Locks vencidos são liberados primeiro, para que um worker morto não
+            # bloqueie o cubo para sempre.
+            await session.execute(
+                text(
+                    "DELETE FROM gold_cube_lock WHERE expires_at < now()"
+                ),
+            )
+            resultado = await session.execute(
+                text(
+                    "INSERT INTO gold_cube_lock (cube_code, holder, expires_at) "
+                    "VALUES (:code, :holder, now() + make_interval(hours => :h)) "
+                    "ON CONFLICT (cube_code) DO NOTHING"
+                ),
+                {"code": cube_code, "holder": token, "h": timeout_hours},
+            )
+            if int(getattr(resultado, "rowcount", 0) or 0) == 0:
+                linha = (
+                    await session.execute(
+                        text("SELECT holder, expires_at FROM gold_cube_lock WHERE cube_code = :code"),
+                        {"code": cube_code},
+                    )
+                ).first()
+                dono = str(linha[0]) if linha else "desconhecido"
+                raise CubeLockUnavailableError(
+                    f"{cube_code}: já está em materialização por {dono or 'outro processo'}"
+                    if linha
+                    else f"{cube_code}: lock não adquirido"
+                )
+            await session.commit()
+    except Exception as exc:
+        if isinstance(exc, CubeLockUnavailableError):
+            raise
+        raise CubeLockUnavailableError(
+            f"falha ao adquirir lock de {cube_code}: {sanitize_error(exc)}"
+        ) from exc
+    return CubeLock(cube_code=cube_code, holder=token)
+
+
+async def release_cube_lock(lock: CubeLock) -> None:
+    """Libera o lock somente se for o nosso. Nunca o de outro."""
+    try:
+        from app.database import async_session
+        from sqlalchemy import text
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        async with async_session() as session:
+            await session.execute(
+                text("DELETE FROM gold_cube_lock WHERE cube_code = :code AND holder = :holder"),
+                {"code": lock.cube_code, "holder": lock.holder},
+            )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao liberar lock de %s: %s", lock.cube_code, sanitize_error(exc))

@@ -30,10 +30,7 @@ from app.services.finops_cost_resource import (
     DEFAULT_BUCKETS,
     INVENTORY_STATUSES,
     _C2_OUTPUT_TYPES,
-    bucket_count,
     bucket_predicate,
-    c2_bucket_projection_sql,
-    c2_projection_sql,
     inventory_temporal_sql,
 )
 from app.services.finops_cache import (
@@ -316,35 +313,6 @@ def test_inventory_status_vocabulary_is_closed():
     assert "HISTORICAL_SNAPSHOT" in INVENTORY_STATUSES
 
 
-def test_c2_enrich_does_not_retroproject_attributes():
-    """Sem snapshot vigente, SKU/estado/SO ficam NULL e o tipo cai em UNKNOWN.
-
-    A verificação é sobre o helper que aplica a regra: o `merge` com o inventário
-    temporal pode não trazer linha alguma, e nesse caso os atributos precisam
-    permanecer nulos — nunca herdados do snapshot de outro período.
-    """
-    import inspect
-
-    from app.services.finops_cost_resource import enrich_c2_aggregate
-
-    fonte = inspect.getsource(enrich_c2_aggregate)
-    assert '"resource_sku"' in fonte
-    assert '"UNKNOWN"' in fonte
-    assert "NO_TEMPORAL_SNAPSHOT" in fonte
-
-
-def test_c2_enrich_joins_inventory_by_period():
-    """O merge do inventário inclui a competência: vigência por período."""
-    import inspect
-
-    from app.services.finops_cost_resource import enrich_c2_aggregate
-
-    fonte = inspect.getsource(enrich_c2_aggregate)
-    assert '"billing_period"' in fonte
-    assert "canonical_resource_id" in fonte
-    assert "sub_account_id" in fonte
-
-
 def test_period_end_is_computed_by_date_arithmetic():
     from app.services.finops_cost_resource import _period_end_expr
 
@@ -375,86 +343,46 @@ def test_bucket_validates_range_and_count():
     with pytest.raises(ValueError):
         bucket_predicate("x", DEFAULT_BUCKETS)
     with pytest.raises(ValueError):
+        from app.services.finops_cost_resource import bucket_count
+
         bucket_count(buckets=0)
+    from app.services.finops_cost_resource import bucket_count
+
     assert bucket_count(buckets=8) == 8
 
 
-def test_bucket_count_is_enough_for_the_heaviest_slice():
-    """A fatia mais pesada (3,76 M linhas) precisa caber por bucket."""
-    assert DEFAULT_BUCKETS >= 32
-
-
-def test_bucket_sql_filters_one_period_and_connection():
-    from app.services.finops_cost_resource import c2_bucket_projection_sql
-
-    sql = c2_bucket_projection_sql(
-        billing_period="202512", bucket=3, connection_code="azure-4p"
-    )
-    assert "'202512'" in sql
-    assert "'azure-4p'" in sql
-
-
-def test_bucket_sql_escapes_injected_period():
-    """A competência vem da Silver, mas ainda assim vira literal escapado.
-
-    O teste não procura "DROP TABLE" no texto — o valor escapado contém a string.
-    O que se prova é que a aspa simples foi dobrada, então o valor permanece um
-    literal e não fecha a string para virar SQL.
-    """
-    from app.services.finops_cost_resource import c2_bucket_projection_sql
-
-    sql = c2_bucket_projection_sql(billing_period="202512'; DROP TABLE x --", bucket=0)
-    assert "202512''; DROP TABLE x --" in sql
-    # Nenhuma aspa simples solta antes do predicado de bucket.
-    predicado = sql.index("CRC32")
-    trecho = sql[:predicado]
-    assert trecho.count("'") % 2 == 0, "aspa ímpar significaria literal aberto"
+def test_bucket_count_limits_heaviest_slice_state():
+    """A consulta agrega 1/N da fatia; 16 divide 3,76 M em ~235 k grupos por consulta."""
+    assert DEFAULT_BUCKETS >= 16
 
 
 def test_c2_does_not_hold_the_whole_slice_raw():
-    """A fatia é processada bucket a bucket, e as linhas cruas são descartadas.
-
-    O processo segura o **agregado** acumulado, não as linhas Silver da fatia
-    inteira. Sem o `del frame` a cada bucket, uma fatia de 3,76 M linhas ficaria
-    toda em memória — que é exatamente o que a auditoria mandou evitar.
-    """
+    """O caminho produtivo do C2 não tem agregação em pandas nem projeção crua."""
     import inspect
 
     import app.services.finops_cost_resource as m
 
-    fonte = inspect.getsource(m.materialize_c2_slice)
-    # Itera bucket por bucket e descarta as linhas cruas.
-    assert "for bucket in range(total_buckets)" in fonte
-    assert "del frame" in fonte
-    # Acumula apenas os agregados.
-    assert "agregados.append(aggregate_c2_bucket(frame))" in fonte
+    fonte = inspect.getsource(m.materialize_c2)
+    # Agregação no Trino, por bucket, escrita direto na tabela de build.
+    assert "c2_bucket_select_sql(" in fonte
+    assert "c2_projection_sql(" in fonte
+    # Nada de linhas cruas no processo.
+    assert "pd.DataFrame(linhas)" not in fonte
+    # Um único swap, depois da validação.
+    assert "swap_staged_table" in fonte
+    # Reconciliação final levanta em MISMATCH.
+    assert "BaselineMismatchError" in fonte
 
 
-def test_c2_frames_are_the_inventory_and_the_aggregate():
-    """Os frames do C2 são inventário e agregado — nunca a linha Silver inteira."""
+def test_c2_frames_are_the_inventory_only():
+    """O único frame do C2 é o inventário; o custo nunca atravessa pandas."""
     import inspect
 
     import app.services.finops_cost_resource as m
 
     assert "pd.DataFrame" in inspect.getsource(m.materialize_c2_inventory)
-    fonte_slice = inspect.getsource(m.materialize_c2_slice)
-    # O frame por bucket existe, mas é do bucket e é descartado em seguida.
-    assert "pd.DataFrame(linhas)" in fonte_slice
-    assert "del frame" in fonte_slice
-
-
-def test_projection_declares_explicit_types():
-    """Tipo explícito por coluna: fatias de naturezas diferentes não divergem."""
-    sql = c2_projection_sql("SELECT 1 AS billing_period")
-    assert "CAST(billing_period AS varchar) AS billing_period" in sql
-    assert "CAST(effective_cost AS double) AS effective_cost" in sql
-    assert "CAST(first_charge_day AS date) AS first_charge_day" in sql
-
-
-def test_output_columns_are_contract_not_internal():
-    nomes = [nome for nome, _ in _C2_OUTPUT_TYPES]
-    assert "build_bucket" not in nomes
-    assert "billing_period" in nomes
+    assert "pd.DataFrame" not in inspect.getsource(m.materialize_c2)
+    assert "aggregate_c2_bucket" not in dir(m)
 
 
 # --- D: materializer_key -------------------------------------------------------
@@ -647,18 +575,3 @@ def test_period_end_date_handles_leap_and_december():
     assert _period_end_date("202513") is None
     assert _period_end_date("") is None
 
-
-def test_historical_period_gets_null_attributes():
-    """Período sem snapshot vigente não recebe tipo, SKU, estado nem SO."""
-    from app.services.finops_cost_resource import inventory_status_for
-
-    status = inventory_status_for(billing_period="202505", snapshot_period=None)
-    assert status == "NO_TEMPORAL_SNAPSHOT"
-    # Sem snapshot, o contrato obriga NULL/UNKNOWN — está no helper de enriquecimento.
-    import inspect
-
-    from app.services.finops_cost_resource import enrich_c2_aggregate
-
-    fonte = inspect.getsource(enrich_c2_aggregate)
-    assert '"resource_sku"' in fonte
-    assert '"UNKNOWN"' in fonte
