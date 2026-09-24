@@ -35,6 +35,7 @@ from app.services import lakehouse_layers as layers
 from app.services.finops_cache import (
     cache_key,
     get_cached,
+    record_cache_hit,
     record_request_metric,
     set_cached,
 )
@@ -393,38 +394,26 @@ async def _mom_and_run_rate(
     # Comparabilidade vem da tabela publicada, não de reclassificação no request.
     statuses = await load_coverage_map()
     conexoes = await _connections_in_scope(where)
-    fatos: list[PeriodFacts] = []
+
+    # Monta a cobertura a partir do **status publicado**, sem classificar nada aqui.
+    # `PeriodFacts` e o classificador não aparecem: a API pergunta, não decide.
+    coberturas = []
     for conexao in conexoes:
         for periodo in periods:
-            fatos.append(
-                PeriodFacts(
+            status = statuses.get((conexao, periodo))
+            if status is None:
+                # Período sem cobertura publicada não entra na comparação.
+                continue
+            coberturas.append(
+                PeriodCoverage(
                     connection_code=conexao,
                     billing_period=periodo,
                     dataset=C1_TABLE,
-                    row_count=1,
-                    days_expected=0,
-                    run_status="SUCCESS",
-                    is_current_period=statuses.get((conexao, periodo)) == "CURRENT_OPEN",
+                    status=status,
+                    reason="cobertura publicada",
+                    cost=_cost_of(financial, periodo),
                 )
             )
-    # Reclassifica localmente: o que importa é o status medido, não o recalculado.
-    coberturas = []
-    for fato in fatos:
-        status = statuses.get((fato.connection_code, fato.billing_period))
-        if status is None:
-            continue
-        from app.services.period_coverage import PeriodCoverage
-
-        coberturas.append(
-            PeriodCoverage(
-                connection_code=fato.connection_code,
-                billing_period=fato.billing_period,
-                dataset=C1_TABLE,
-                status=status,
-                reason="medido",
-                cost=_cost_of(financial, fato.billing_period),
-            )
-        )
 
     comparaveis = [c for c in coberturas if c.status in COMPARABLE_STATUSES]
     comparaveis.sort(key=lambda c: c.billing_period)
@@ -787,7 +776,7 @@ SELECT billing_period, provider, connection_code, sub_account_id,
        resource_group_id, resource_state, operating_system, region_key, service_key,
        charge_category, currency, inventory_status, inventory_snapshots,
        inventory_snapshot_period, resource_id_status,
-       effective_cost, list_cost, rows, charge_days, rows_without_tag
+       effective_cost, list_cost, rows, rows_without_tag
 FROM iceberg.{layers.GOLD}.{C2_TABLE}
 WHERE {where}
 ORDER BY {_resolved(order_by) or "effective_cost"} {direcao} NULLS LAST
@@ -828,7 +817,7 @@ FETCH NEXT {int(_resolved(limit) or 50)} ROWS ONLY
                 for r in linhas
             ],
             "non_additive": sorted(
-                {"rows_without_tag", "inventory_snapshots", "charge_days"}
+                {"rows_without_tag", "inventory_snapshots"}
             ),
         },
         page={

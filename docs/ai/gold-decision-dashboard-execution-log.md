@@ -1904,3 +1904,83 @@ carregam `run_id=999002`, distinguindo a execução pela fila.
 2. **tabela física errada.** `materialization_table` era `rule_target_table(code)`,
    que deriva `dest_dm_cost_<code>` — nome que não existe para os cubos `finops_*`.
    Passou a vir de `spec_for(chave).physical_table`.
+
+## AUD.15 API parcial: autorização, cache e p95 medidos
+
+Latência medida com 5 chamadas por endpoint, cache ativo, no ambiente de referência:
+
+| Endpoint | p50 | p95 | meta p95 |
+|---|---:|---:|---:|
+| `/finops/summary` | 265 ms | **718 ms** | 2 s |
+| `/finops/cost/trend` (period) | 3 ms | **146 ms** | 2 s |
+| `/finops/cost/trend` (service) | 4 ms | **113 ms** | 2 s |
+| `/finops/cost/drivers` | 2 ms | **118 ms** | 2 s |
+| `/finops/cost/resources` | 116 ms | **619 ms** | 5 s |
+| `/finops/cost/meta` | 0 ms | 0 ms | — |
+
+**Todos dentro da meta.** O p50 baixo das séries e dos drivers vem do cache: o
+segundo pedido com os mesmos filtros e o mesmo snapshot do cubo não vai ao Trino.
+
+`/finops/summary` devolve hoje, com as competências separadas como a auditoria pediu:
+
+```text
+total histórico      : BRL R$ 37.356.361,47 (17 competências)
+última competência   : 202609  R$ 1.987.748,46  status CURRENT_OPEN
+competências comparáveis: 202506 … 202603
+meses no run rate    : 10
+run rate anualizado  : R$ 37.791.438,04
+indisponíveis        : billed_cost, contracted_cost,
+                       departamento_nivel_1..7, org_classification_status
+cache                : {"hit": false, "version_source": "gold_manifest"}
+```
+
+O total histórico **não** é apresentado como custo de um período: ele vem com a
+contagem de competências, e o mês corrente aparece separado com o próprio status.
+
+### AUD.15.1 Dois defeitos que a medição expôs
+
+1. `/finops/summary` referenciava `PeriodFacts`, removido quando a API passou a ler a
+   cobertura publicada. O endpoint respondia **500** e o erro só apareceu porque a
+   latência foi medida, não porque o teste de contrato falhou;
+2. `/finops/cost/resources` selecionava `charge_days`, que saiu do contrato do C2 ao
+   virar `COUNT(DISTINCT)` incompatível com a soma entre buckets.
+
+## AUD.16 Cubos de IA: limite de recurso reafirmado (D15 ainda aberto)
+
+As cinco tabelas continuam **apenas** em `iceberg.dimon`:
+
+```text
+dest_dm_ai_consumption_daily       gold=AUSENTE | dimon=851.768
+dest_dm_ai_license_snapshot        gold=AUSENTE | dimon=5.767
+dest_dm_copilot_usage_daily        gold=AUSENTE | dimon=845.233
+dest_dm_copilot_license_snapshot   gold=AUSENTE | dimon=15.881
+dest_dm_copilot_user_period        gold=AUSENTE | dimon=16.133
+```
+
+A tentativa de republicação, com o cluster **livre** e nada mais rodando, falhou no
+mesmo ponto: `_consumption_select()` agrega `silver.dest_consumo_ia` (17.335.973
+linhas) numa única CTAS, e os workers de 2,44 GiB não sustentam. Não é concorrência
+— é a mesma restrição que obrigou C1 e C2 a serem construídos em etapas.
+
+A aposentadoria do namespace legado **preservou** as cinco cópias, como projetado:
+`retire_legacy_namespace_copy` recusa remover quando a canônica não existe.
+
+Correção necessária, não aplicada: aplicar aos cubos de IA o mesmo desenho do C2 —
+agregação por bucket no Trino e descarte do cru a cada bucket. É trabalho da próxima
+etapa, e as cópias em `dimon` continuam sendo a única versão válida até lá.
+
+## AUD.17 Estado final das correções
+
+| # | Correção | Estado |
+|---|---|---|
+| E | manifesto obrigatório, falha aborta antes do staging | **feito** |
+| A | `finops_period_coverage` publicada dirige C3 e API; default `NOT_COMPARABLE` | **feito** |
+| B | mapeamento dominante removido; `NULL` + `UNMAPPED`; ambiguidade medida | **feito** |
+| C | join de inventário temporal; vazamento de atributo igual a zero | **feito** |
+| D | quatro regras em `gold_rule` com `materializer_key` por allowlist; fila executa | **feito** |
+| F | C2 agrega no Trino por bucket; pico de 1,28 GiB na API | **feito** |
+| — | C1 e C2 reconciliam R$ 37.356.361,47 com delta R$ 0,00 | **feito** |
+| — | C3 com 9 pares e zero linhas envolvendo 202504 | **feito** |
+| AUD.7 | API com autorização, cache e p95 medido | **feito** |
+| D15 | cinco cubos de IA em `iceberg.gold` | **aberto** — limite de recurso; requer o desenho bucketizado |
+| — | recuperar 202604–202608 | **bloqueado na origem** (AUD.9) |
