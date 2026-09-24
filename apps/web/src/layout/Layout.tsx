@@ -83,6 +83,7 @@ const menuGroups = [
     background: "#f0fdfa",
     items: [
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
+      { path: "/finops-center", label: "FinOps Simples", icon: <BarChartIcon /> },
       { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
       { path: "/saving-actions", label: "Saving Actions", icon: <TrendingDownIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },

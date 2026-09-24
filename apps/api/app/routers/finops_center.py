@@ -876,3 +876,398 @@ async def finops_metrics(
         scope={"scope": "processo"},
         data={"metrics": metrics_report()},
     )
+
+
+# ── Visão simplificada (modelo CloudZero/Turbonomic) ─────────────────────────
+#
+# O Centro completo tem 7 abas e 23 KPIs — profundidade que atende FinOps, mas
+# que a direção não abre. Esta seção expõe os mesmos dados pré-digeridos em
+# três perguntas, na ordem que um gestor faz:
+#
+#   1. Quanto custou e como mudou?      -> /finops/overview
+#   2. O que devo fazer e quanto vale?  -> /finops/actions
+#   3. Onde está o custo?               -> /finops/navigate?dim=service
+#
+# Cada resposta é pré-mastigada: número, comparação, escopo e ação — sem que o
+# frontend precise montar KPI ou somar nada.
+
+_ACOES_SQL = """
+SELECT c.resource_name AS recurso,
+       CAST(c.resource_id AS VARCHAR) AS resource_id,
+       c.sku_from, c.sku_to,
+       TRY_CAST(c.vcpus_from AS BIGINT) AS vcpus_de,
+       TRY_CAST(c.vcpus_to AS BIGINT) AS vcpus_para,
+       TRY_CAST(c.memory_gb_from AS BIGINT) AS memoria_de,
+       TRY_CAST(c.memory_gb_to AS BIGINT) AS memoria_para,
+       ROUND(TRY_CAST(c.cost_from_current AS DOUBLE), 2) AS custo_atual,
+       ROUND(TRY_CAST(c.cost_to_estimated AS DOUBLE), 2) AS custo_projetado,
+       ROUND(TRY_CAST(c.saving_monthly AS DOUBLE), 2) AS economia_mensal,
+       TRY_CAST(c.saving_pct AS DOUBLE) AS economia_pct,
+       c.cpu_p95, c.observed_days, c.verdict, c.veto_reason,
+       COALESCE(p.resource_type, 'UNKNOWN') AS tipo
+FROM iceberg.silver.rightsizing_candidate c
+LEFT JOIN (
+    SELECT resource_id, MAX(resource_type) AS resource_type
+    FROM iceberg.silver.resource_profile_window GROUP BY 1
+) p ON p.resource_id = c.resource_id
+WHERE c.verdict IN ('VALID', 'REQUIRES_VALIDATION')
+"""
+
+
+@router.get("/overview")
+async def finops_overview(
+    user: User = Depends(require("finops", "read")),
+) -> dict[str, Any]:
+    """Visão de uma tela: cards, principais mudanças e ações priorizadas.
+
+    Responde as duas perguntas de entrada de um gestor — "como estamos" e
+    "o que fazer agora" — sem exigir que ele navegue sete abas. Cada card
+    carrega valor, comparação e escopo; nada aqui pede cálculo no navegador.
+    """
+    cards_sql = summary_sql("1 = 1")
+    linhas, ms = await _run(cards_sql, timeout_s=_SUMMARY_TIMEOUT)
+    moeda = _separate_currency(linhas)
+
+    from app.services.finops_cost_driver import period_statuses
+    from app.services.period_coverage import (
+        COMPARABLE_STATUSES,
+        DEFAULT_UNKNOWN_STATUS,
+        PeriodCoverage,
+        load_coverage_map,
+    )
+
+    cobertura = await load_coverage_map()
+    status_por_periodo: dict[str, str] = {}
+    for (conexao, periodo), estado in cobertura.items():
+        atual = status_por_periodo.get(periodo)
+        if atual == "PARTIAL" or (atual is None and estado != "COMPLETE"):
+            status_por_periodo[periodo] = estado if estado != "COMPLETE" else atual or estado
+        elif estado == "COMPLETE" and atual != "PARTIAL":
+            status_por_periodo.setdefault(periodo, estado)
+
+    por_periodo: list[dict[str, Any]] = []
+    for r in linhas:
+        estados = {
+            e for (_, p), e in cobertura.items() if p == str(r["billing_period"])
+        }
+        por_periodo.append(
+            {
+                "periodo": str(r["billing_period"]),
+                "custo": float(r.get("effective_cost") or 0),
+                "status": (
+                    sorted(estados)[0]
+                    if estados
+                    else DEFAULT_UNKNOWN_STATUS
+                ),
+            }
+        )
+    comparaveis = sorted(
+        p["periodo"] for p in por_periodo if p["status"] in COMPARABLE_STATUSES
+    )
+
+    # Cards: último mês completo, variação MoM, acumulado, run rate.
+    custo_mes, periodo_mes = None, None
+    for p in reversed(por_periodo):
+        if p["status"] in COMPARABLE_STATUSES:
+            custo_mes, periodo_mes = p["custo"], p["periodo"]
+            break
+    mom = {"comparavel": False, "reason": "sem par comparável"}
+    if len(comparaveis) >= 2:
+        custo_atual = next(
+            p["custo"] for p in por_periodo if p["periodo"] == comparaveis[-1]
+        )
+        custo_ant = next(
+            p["custo"] for p in por_periodo if p["periodo"] == comparaveis[-2]
+        )
+        delta = round(custo_mes - custo_ant, 2)
+        mom = {
+            "comparavel": True,
+            "periodo_anterior": comparaveis[-2],
+            "periodo_atual": comparaveis[-1],
+            "delta": delta,
+            "delta_pct": round(100.0 * delta / custo_ant, 2) if custo_ant else None,
+        }
+
+    total_historico = sum(p["custo"] for p in por_periodo)
+    run_rate = {
+        "mensal": round(sum(p["custo"] for p in por_periodo if p["status"] in COMPARABLE_STATUSES) / len(comparaveis), 2)
+        if comparaveis
+        else None,
+        "meses": len(comparaveis),
+    }
+    if run_rate["mensal"]:
+        run_rate["anual"] = round(run_rate["mensal"] * 12, 2)
+
+    # Economia identificada: candidatos VALID (o que a análise determinística
+    # reconhece), e o estado de revisão real vem do PostgreSQL.
+    acoes = await _acoes_detalhadas()
+    economia_identificada = round(
+        sum(float(a["economia_mensal"]) for a in acoes if a["status_revisao"] != "REJECTED"),
+        2,
+    )
+    economia_aprovada = round(
+        sum(float(a["economia_mensal"]) for a in acoes if a["status_revisao"] == "APPROVED"),
+        2,
+    )
+
+    movers = (await cost_drivers(
+        period_current=comparaveis[-1],
+        period_previous=comparaveis[-2],
+        driver_type="service",
+        limit=5,
+        user=None,
+    ))["data"]["drivers"] if len(comparaveis) >= 2 else []
+
+    return _envelope(
+        scope={"periodo_comparavel": comparaveis[-1] if comparaveis else None},
+        currency=moeda,
+        quality={"coverage_pct": None, "warnings": []},
+        data={
+            "cards": {
+                "custo_mes_completo": {
+                    "periodo": periodo_mes,
+                    "valor": custo_mes,
+                },
+                "variacao_mom": mom,
+                "custo_total_historico": {
+                    "valor": round(sum(p["custo"] for p in por_periodo), 2),
+                    "competencias": len(por_periodo),
+                    "nota": "acumula competências com escopos diferentes; não é um mês",
+                },
+                "run_rate": run_rate,
+                "economia": {
+                    "identificada": economia_identificada,
+                    "aprovada": economia_aprovada,
+                    "acoes": len(acoes),
+                    "nota": "estimativa mensal; aprovada não é realizada",
+                },
+            },
+            "principais_mudancas": movers,
+            "acoes_top": [
+                {
+                    "recurso": a["recurso"],
+                    "acao": a["tipo_acao"],
+                    "economia_mensal": a["economia_mensal"],
+                    "confianca": a["confianca"],
+                }
+                for a in sorted(
+                    acoes, key=lambda x: -float(x["economia_mensal"])
+                )[:5]
+            ],
+            "periodos": por_periodo,
+        },
+        elapsed_ms=ms,
+    )
+
+
+async def _acoes_detalhadas() -> list[dict[str, Any]]:
+    """Ações propostas com o estado de revisão real (PostgreSQL sobrepõe Silver)."""
+    candidatos, _ = await _run(_ACOES_SQL, timeout_s=_SUMMARY_TIMEOUT)
+    from app.services.trino_service import execute as trino_execute
+
+    revisoes = {
+        str(r["evidence_hash"]): str(r["review_status"])
+        for r in (
+            await trino_execute(
+                "SELECT evidence_hash, review_status FROM iceberg.silver.rightsizing_decision",
+                timeout_s=300,
+            )
+            or []
+        )
+    }
+    por_recurso: dict[str, str] = {}
+    for r in (
+        await trino_execute(
+            "SELECT d.evidence_hash, d.resource_id, d.review_status "
+            "FROM iceberg.silver.rightsizing_decision d",
+            timeout_s=300,
+        )
+        or []
+    ):
+        por_recurso[str(r["resource_id"])] = str(r["review_status"])
+
+    acoes: list[dict[str, Any]] = []
+    for r in candidatos:
+        rid = str(r.get("resource_id") or "")
+        estado = revisoes.get(rid) or por_recurso.get(rid) or "PENDING"
+        verdict = str(r.get("verdict") or "")
+        acoes.append(
+            {
+                "recurso": r.get("recurso"),
+                "resource_id": rid,
+                "tipo_acao": "Redimensionar",
+                "de": {
+                    "sku": r.get("sku_from"),
+                    "vcpus": r.get("vcpus_de"),
+                    "memoria_gb": r.get("memoria_de"),
+                    "custo_mensal": r.get("custo_atual"),
+                },
+                "para": {
+                    "sku": r.get("sku_to"),
+                    "vcpus": r.get("vcpus_para"),
+                    "memoria_gb": r.get("memoria_para"),
+                    "custo_mensal": r.get("custo_projetado"),
+                },
+                "economia_mensal": r.get("economia_mensal") or 0.0,
+                "economia_pct": r.get("economia_pct"),
+                "economia_anual": round(float(r.get("economia_mensal") or 0) * 12, 2),
+                "cpu_p95": r.get("cpu_p95"),
+                "dias_observados": int(r.get("observed_days") or 0),
+                "confianca": (
+                    "alta" if verdict == "VALID" and int(r.get("observed_days") or 0) >= 14
+                    else "media" if verdict == "VALID"
+                    else "baixa"
+                ),
+                "verdict": verdict,
+                "status_revisao": estado,
+                "vetor": r.get("veto_reason"),
+            }
+        )
+    return acoes
+
+
+@router.get("/actions")
+async def finops_actions(
+    user: User = Depends(require("finops", "read")),
+    incluir_sem_preco: bool = Query(False, description="inclui REQUIRES_VALIDATION"),
+) -> dict[str, Any]:
+    """Ações propostas, no formato de uma lista de decisão (Turbonomic).
+
+    Uma linha = uma ação com o que fazer, para quê, quanto vale e com quanta
+    confiança. Sem lógica no navegador: o que chega é a lista ordenada.
+    """
+    acoes = await _acoes_detalhadas()
+    # R4/aceite: REQUIRES_VALIDATION sem preço não contribui para saving — fica
+    # fora da lista por omissão, porque é ruído na decisão.
+    visiveis = [
+        a for a in acoes
+        if a["verdict"] == "VALID"
+        or (_resolved(incluir_sem_preco) and a["verdict"] == "REQUIRES_VALIDATION")
+    ]
+    visiveis.sort(key=lambda x: (-float(x["economia_mensal"]), x["recurso"]))
+    resumo_estados: dict[str, int] = {}
+    economia_por_estado: dict[str, float] = {}
+    for a in visiveis:
+        estado = "aprovada" if a["status_revisao"] == "APPROVED" else (
+            "rejeitada" if a["status_revisao"] == "REJECTED"
+            else "pendente de revisão" if a["status_revisao"] == "PENDING"
+            else a["verdict"]
+        )
+        resumo_estados[estado] = resumo_estados.get(estado, 0) + 1
+        economia_por_estado[estado] = round(
+            economia_por_estado.get(estado, 0.0) + float(a["economia_mensal"]), 2
+        )
+    return _envelope(
+        scope={"fonte": "rightsizing_candidate + rightsizing_decision"},
+        quality={
+            "coverage_pct": None,
+            "warnings": [
+                "economia é estimativa mensal; aprovada não é realizada",
+                "dias observados vêm de uma janela de 15 dias",
+            ],
+        },
+        data={
+            "resumo": {
+                "por_estado": resumo_estados,
+                "economia_identificada_mensal": round(
+                    sum(float(a["economia_mensal"]) for a in visiveis if a["status_revisao"] != "REJECTED"), 2
+                ),
+                "quantidade": len(visiveis),
+            },
+            "acoes": visiveis,
+        },
+    )
+
+
+_NAV_DIMENSIONS: dict[str, str] = {
+    "service": "service_key",
+    "region": "region_key",
+    "account": "sub_account_id",
+    "resource_type": "resource_type_key",
+}
+
+
+@router.get("/navigate")
+async def finops_navigate(
+    dim: str = Query("service"),
+    period: str | None = None,
+    service: str | None = None,
+    region: str | None = None,
+    resource_type: str | None = None,
+    account: str | None = None,
+    user: User = Depends(require("finops", "read")),
+) -> dict[str, Any]:
+    """Onde está o custo, com drill-down em um clique.
+
+    `dim=service` lista serviços; `dim=region&service=<serviço>` lista regiões
+    daquele serviço; `dim=resource_type&service=<s>&region=<r>` lista tipos de
+    recurso. O caminho dos ancestrais vem pelos parâmetros nomeados, e cada nível
+    traz custo, % do total e contagem de recursos — pareto pronto, sem cálculo no
+    navegador.
+    """
+    if dim not in _NAV_DIMENSIONS:
+        raise HTTPException(
+            status_code=400, detail=f"dim aceita: {', '.join(sorted(_NAV_DIMENSIONS))}"
+        )
+    coluna = _NAV_DIMENSIONS[dim]
+    valores = {"service": service, "region": region,
+               "account": account, "resource_type": resource_type}
+    condicoes = [
+        f"{_NAV_DIMENSIONS[d]} = {_quote_literal(v)}"
+        for d, v in valores.items()
+        if d != dim and v not in (None, "")
+    ]
+    base = _where(
+        filters=C2_FILTERS,
+        values={"period": period},
+    )
+    cond = " AND ".join([base] + condicoes) if condicoes else base
+
+    total_linhas, _ = await _run(
+        f"SELECT ROUND(SUM(effective_cost), 2) AS total "
+        f"FROM iceberg.{layers.GOLD}.{C2_TABLE} WHERE {cond}",
+        timeout_s=_SUMMARY_TIMEOUT,
+    )
+    total = float((total_linhas[0] if total_linhas else {}).get("total") or 0)
+    sql = f"""
+SELECT CAST({coluna} AS VARCHAR) AS chave,
+       ROUND(SUM(effective_cost), 2) AS custo,
+       SUM(rows) AS linhas_origem,
+       COUNT(DISTINCT CASE WHEN resource_id_status = 'VALIDO'
+              THEN canonical_resource_id END) AS recursos
+FROM iceberg.{layers.GOLD}.{C2_TABLE}
+WHERE {cond}
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 25
+"""
+    linhas, ms = await _run(sql, timeout_s=_SUMMARY_TIMEOUT)
+    moeda = "BRL"
+    proximo = {"service": "region", "region": "resource_type",
+               "resource_type": "account", "account": "service"}.get(dim)
+    return _envelope(
+        scope={"dim": dim, "period": period,
+               "moeda": moeda,
+               "filtros": {k: v for k, v in valores.items() if v and k != dim}},
+        currency=moeda,
+        quality={"coverage_pct": None, "warnings": []},
+        data={
+            "nivel": dim,
+            "proximo_nivel": proximo,
+            "total": total,
+            "itens": [
+                {
+                    "chave": r.get("chave") or "UNKNOWN",
+                    "custo": float(r.get("custo") or 0),
+                    "pct": (
+                        round(100.0 * float(r.get("custo") or 0) / total, 2)
+                        if total else None
+                    ),
+                    "linhas_origem": int(r.get("linhas_origem") or 0),
+                    "recursos": int(r.get("recursos") or 0),
+                }
+                for r in linhas
+            ],
+        },
+        elapsed_ms=ms,
+    )

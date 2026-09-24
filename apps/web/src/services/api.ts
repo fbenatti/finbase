@@ -5402,3 +5402,76 @@ export async function getRightsizingOverview(): Promise<RightsizingOverview> {
   const { data } = await api.get("/rightsizing/overview");
   return data;
 }
+
+// ── FinOps simplificado (CloudZero/Turbonomic) ───────────────────────────────
+
+export interface FinOpsOverview {
+  scope: Record<string, unknown>;
+  currency: string | null;
+  data: {
+    cards: {
+      custo_mes_completo: { periodo: string | null; valor: number | null };
+      variacao_mom: {
+        comparavel: boolean; reason?: string;
+        periodo_anterior?: string; periodo_atual?: string;
+        delta?: number; delta_pct?: number | null;
+      };
+      custo_total_historico: { valor: number; competencias: number; nota: string };
+      run_rate: { mensal: number | null; anual?: number | null; meses: number };
+      economia: { identificada: number; aprovada: number; acoes: number; nota: string };
+    };
+    principais_mudancas: Array<{
+      key: string; flag: string; delta: number;
+      delta_pct: number | null; contribution_pct: number | null;
+    }>;
+    acoes_top: Array<{ recurso: string; acao: string; economia_mensal: number; confianca: string }>;
+    periodos: Array<{ periodo: string; custo: number; status: string }>;
+  };
+}
+
+export async function getFinopsOverview(): Promise<FinOpsOverview> {
+  const { data } = await api.get("/finops/overview");
+  return data;
+}
+
+export interface FinOpsAcao {
+  recurso: string; resource_id: string; tipo_acao: string;
+  de: { sku: string; vcpus: number | null; memoria_gb: number | null; custo_mensal: number | null };
+  para: { sku: string; vcpus: number | null; memoria_gb: number | null; custo_mensal: number | null };
+  economia_mensal: number; economia_anual: number; economia_pct: number | null;
+  cpu_p95: number | null; dias_observados: number;
+  confianca: string; verdict: string; status_revisao: string; vetor: string | null;
+}
+
+export interface FinOpsActions {
+  data: {
+    resumo: { por_estado: Record<string, number>; economia_identificada_mensal: number; quantidade: number };
+    acoes: FinOpsAcao[];
+  };
+}
+
+export async function getFinopsActions(): Promise<FinOpsActions> {
+  const { data } = await api.get("/finops/actions");
+  return data;
+}
+
+export interface FinOpsNavItem {
+  chave: string; custo: number; pct: number | null;
+  linhas_origem: number; recursos: number;
+}
+
+export interface FinOpsNavigate {
+  data: {
+    nivel: string; proximo_nivel: string | null; total: number;
+    itens: FinOpsNavItem[];
+  };
+}
+
+export async function getFinopsNavigate(
+  dim: string, filtros: Record<string, string | undefined>
+): Promise<FinOpsNavigate> {
+  const { data } = await api.get("/finops/navigate", {
+    params: { dim, ...filtros },
+  });
+  return data;
+}

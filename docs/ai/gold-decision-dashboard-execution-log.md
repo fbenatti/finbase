@@ -2200,3 +2200,59 @@ corrente é exibido com o status próprio.
   rollback, RUNNING→mesma linha, ABANDONED, frame begin/finish);
 - `tests/test_audit_corrections.py`: 48 (ajustados ao desenho Trino do C2);
 - suíte completa: **700 passam**, 9 falham — as mesmas 9 pré-existentes.
+
+---
+
+# Revalidação e visão simplificada (CloudZero/Turbonomic)
+
+## RV.1 Revalidação — tudo confere
+
+| Verificação | Resultado |
+|---|---|
+| C1 reconciliado | R$ 37.356.361,47 = `resource_cost`, delta R$ 0,00, origem 13.519.512, 1 moeda |
+| C2 reconciliado | idem, delta R$ 0,00 |
+| C3 | 9 pares, 1.012 linhas, **0 linhas envolvendo 202504** |
+| Manifestos | 499 SUCCESS, 20 PARTIAL, 12 FAILED, **0 RUNNING** (320 ABANDONED migrados) |
+| Lock | `gold_cube_lock` vazio ao fim da execução |
+| Suíte | 699 passam, 9 falhas pré-existentes |
+
+## RV.2 Defeitos encontrados na revalidação e corrigidos
+
+1. `finops_navigate` ignorava `valor` quando `dim != 'resource_type'` — o drill
+   devolvia o total sem recorte. Semântica corrigida: `dim` lista o nível e os
+   ancestrais vêm pelos parâmetros nomeados (`service`, `region`, `resource_type`);
+2. `finops_actions` incluía `REQUIRES_VALIDATION` porque o default de `Query` fora
+   do ciclo FastAPI é objeto, não `False` — resolvido com `_resolved`;
+3. o validador de staging do C1 tinha um `_validador` duplicado que não seria
+   executado; simplificado para um único validador async.
+
+## RV.2.1 Visão simplificada (modelo CloudZero/Turbonomic)
+
+O Centro completo tem 7 abas e 23 KPIs. A direção precisa de **uma tela e um
+clique**. A nova visão expõe os mesmos cubos pré-digeridos em três perguntas:
+
+| Pergunta | Endpoint | Tela |
+|---|---|---|
+| Como estamos? | `GET /finops/overview` | 4 cards + status por competência + o que mudou |
+| O que fazer e quanto vale? | `GET /finops/actions` | tabela de ações com DE/PARA, economia e confiança |
+| Onde está o custo? | `GET /finops/navigate?dim=…` | pareto com drill-down em um clique |
+
+O que mudou em relação ao desenho anterior:
+
+- **nada é calculado no navegador**: cada card, cada lista e cada % chegam prontos
+  do cubo;
+- **ações em primeiro plano** (Turbonomic): uma linha = uma ação ("Redimensionar
+  aks-… para Standard_E4-2ads_v5"), com economia mensal e anual, confiança,
+  dias observados e status de revisão; clicar abre o detalhe com DE/PARA e
+  evidência (CPU p95, dias, veredito, revisão);
+- **navegação por clique** (CloudZero): serviço → região → tipo de recurso →
+  conta, cada nível com custo, % do total e contagem de recursos — pareto pronto;
+- **períodos rotulados** com chip colorido (COMPLETE/PARTIAL/CURRENT_OPEN) — o mês
+  parcial não entra em nenhuma comparação silenciosamente;
+- **REQUIRES_VALIDATION sem preço** fica fora da lista de ações por omissão (é
+  ruído na decisão), acessível por parâmetro;
+- o resumo do overview distingue custo histórico acumulado (com nota de que não é
+  um mês), último mês completo e competência corrente.
+
+Rotas: `/finops-center` no menu como **FinOps Simples**, acima de FinOps
+Intelligence (que continua servindo os cubos organizacionais legados).

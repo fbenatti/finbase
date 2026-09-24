@@ -8,6 +8,7 @@ import Login from "./pages/Login/Login";
 import Connections from "./pages/Connections/Connections";
 import Rightsizing from "./pages/Rightsizing/Rightsizing";
 import SavingActions from "./pages/SavingActions/SavingActions";
+import FinOpsCenter from "./pages/FinOpsCenter/FinOpsCenter";
 import Explorer from "./pages/Explorer/Explorer";
 import Mappings from "./pages/Mappings/Mappings";
 import Governance from "./pages/Governance/Governance";
@@ -80,6 +81,7 @@ function App() {
         <Route path="governance" element={<Governance />} />
         <Route path="rightsizing" element={<Rightsizing />} />
         <Route path="saving-actions" element={<SavingActions />} />
+        <Route path="finops-center" element={<FinOpsCenter />} />
         <Route path="rules" element={<Navigate to="/governance?tab=rules" replace />} />
         <Route path="classifications" element={<Navigate to="/governance?tab=classification" replace />} />
         <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />
