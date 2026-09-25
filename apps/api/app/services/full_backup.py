@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -69,6 +70,72 @@ def _database_parts() -> tuple[str, str, str, str, str]:
     )
 
 
+def _database_server_major() -> int:
+    """Return the connected PostgreSQL server major version.
+
+    ``pg_dump`` must be the same major as, or newer than, the server. Relying
+    on PATH alone is unsafe on developer machines where several libpq/Homebrew
+    versions may be installed.
+    """
+    from sqlalchemy import text
+    from app.database import SyncSession
+
+    session = SyncSession()
+    try:
+        version_num = int(session.execute(text("SELECT current_setting('server_version_num')")).scalar_one())
+        return version_num // 10000
+    finally:
+        session.close()
+
+
+def _pg_tool(name: str, server_major: int) -> str:
+    """Find a pg_dump/pg_restore that can read/write this server's format."""
+    override = os.getenv(f"OPENFINOPS_{name.upper()}_BIN")
+    candidates: list[Path] = []
+    if override:
+        candidates.append(Path(override).expanduser())
+    for candidate in (
+        shutil.which(name),
+        shutil.which(f"{name}-{server_major}"),
+        f"/opt/homebrew/opt/postgresql@{server_major}/bin/{name}",
+        f"/usr/local/opt/postgresql@{server_major}/bin/{name}",
+        f"/usr/lib/postgresql/{server_major}/bin/{name}",
+        f"/usr/pgsql-{server_major}/bin/{name}",
+    ):
+        if candidate:
+            candidates.append(Path(candidate))
+    for cellar in (Path("/opt/homebrew/Cellar"), Path("/usr/local/Cellar")):
+        if cellar.exists():
+            candidates.extend(cellar.glob(f"postgresql@{server_major}/*/bin/{name}"))
+            candidates.extend(cellar.glob(f"libpq/*/bin/{name}"))
+
+    versions: list[tuple[int, Path]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        path = str(candidate)
+        if path in seen or not Path(path).is_file():
+            continue
+        seen.add(path)
+        try:
+            output = subprocess.run([path, "--version"], check=True, capture_output=True, text=True, timeout=5).stdout
+            match = re.search(r"\b(\d+)\.", output)
+            if match:
+                versions.append((int(match.group(1)), Path(path)))
+        except (OSError, subprocess.SubprocessError):
+            continue
+    compatible = [item for item in versions if item[0] >= server_major]
+    if not compatible:
+        found = ", ".join(f"{version} ({path})" for version, path in versions) or "nenhum"
+        raise RuntimeError(
+            f"Não há {name} compatível com PostgreSQL {server_major}; versões encontradas: {found}. "
+            f"Instale o cliente PostgreSQL {server_major} ou defina OPENFINOPS_{name.upper()}_BIN."
+        )
+    # Prefer the exact server major; otherwise use the oldest compatible
+    # version to minimize dump-format surprises.
+    compatible.sort(key=lambda item: (item[0] != server_major, item[0]))
+    return str(compatible[0][1])
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -85,7 +152,6 @@ def create_full_backup(
 ) -> dict:
     """Create one compressed archive containing DB, Iceberg and the project.
 
-    The caller is expected to hold the application-wide write lock.  The
     backup directory itself is excluded to avoid recursively archiving prior
     backups and the archive currently being written.
     """
@@ -103,18 +169,21 @@ def create_full_backup(
         db_dir = staging / "postgres"
         db_dir.mkdir()
         host, port, user, password, database = _database_parts()
+        server_major = _database_server_major()
+        pg_dump = _pg_tool("pg_dump", server_major)
+        pg_restore = _pg_tool("pg_restore", server_major)
         dump = db_dir / "finops.dump"
         env = os.environ.copy()
         if password:
             env["PGPASSWORD"] = password
         _run_subprocess_abortable(
-            ["pg_dump", "--format=custom", "--no-owner", "--file", str(dump), "--host", host, "--port", port, "--username", user, database],
+            [pg_dump, "--format=custom", "--no-owner", "--file", str(dump), "--host", host, "--port", port, "--username", user, database],
             env=env,
             should_abort=should_abort,
         )
         _abort_if(should_abort)
         _run_subprocess_abortable(
-            ["pg_restore", "--list", str(dump)],
+            [pg_restore, "--list", str(dump)],
             env=env,
             should_abort=should_abort,
         )
