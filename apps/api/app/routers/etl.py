@@ -1144,7 +1144,21 @@ def _write_dest_chunk(
 
     target["_billing_period"] = billing_period
 
-    rows = iceberg.write_destination(phys_name, target, partition_col="_billing_period")
+    connection_id = int(target["source_connection_id"].iloc[0])
+    snapshot_date = None
+    for col in ("snapshot_date", "SnapshotDate"):
+        if col in target.columns:
+            values = target[col].dropna().astype(str).unique()
+            if len(values) == 1:
+                snapshot_date = str(values[0])
+                break
+    rows = iceberg.publish_silver_dataframe_slice(
+        phys_name,
+        target,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
+    )
     return total_written + rows
 
 
@@ -1396,7 +1410,8 @@ def _reprocess_destination_sync(
     connection_ids: list[int],
     billing_periods: list[str],
     replace_existing: bool = False,
-    publish_by_partition: bool = False,
+    publish_by_partition: bool = True,
+    snapshot_dates: list[str] | None = None,
 ) -> dict:
     """Read normalized data blob-by-blob via raw JSON → pandas → Iceberg. Granular progress."""
     import pandas as pd, json
@@ -1410,6 +1425,10 @@ def _reprocess_destination_sync(
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
     from app.services import gold_builder
+    from app.services.destination_slice import (
+        resolve_destination_slice_config,
+        snapshot_date_from_blob_path,
+    )
     from app.services.task_runner import _inmemory_tasks, _check_cancelled
     from app.services.cloud_scope import (
         allowed_rule_cloud_scopes,
@@ -1472,6 +1491,15 @@ def _reprocess_destination_sync(
             status["status"] = "FAILED"; status["error"] = "Tabela destino nao encontrada"
             return {"success": False, "error": "Tabela destino nao encontrada", "rows_written": 0}
         phys_name = dest_info.physical_name; status["table"] = dest_info.name
+        partition_spec_json = dest_info.partition_spec_json
+        slice_cfg = resolve_destination_slice_config(phys_name, partition_spec_json)
+        snapshot_dates = [str(s) for s in (snapshot_dates or [])]
+        if not publish_by_partition:
+            logger.warning(
+                "publish_by_partition=False ignorado para %s; publicação por fatia é obrigatória.",
+                phys_name,
+            )
+        publish_by_partition = True
         is_focus_destination = (
             (dest_info.name or "").strip().upper() == "MODELO FOCUS"
             or (phys_name or "").strip().lower() == "dest_modelo_focus"
@@ -1560,6 +1588,13 @@ def _reprocess_destination_sync(
                 preferred_table=preferred_table,
             ):
                 all_blobs.append((blob_id, cid, period, path))
+
+        if snapshot_dates:
+            allowed = set(snapshot_dates)
+            all_blobs = [
+                row for row in all_blobs
+                if (snapshot_date_from_blob_path(row[3]) or "") in allowed
+            ]
 
         total_blobs = len(all_blobs)
         blob_meta = {
@@ -1886,30 +1921,23 @@ def _reprocess_destination_sync(
                         details={"rows": len(chunk), "table": phys_name},
                     )
                     temp_name = iceberg.write_destination_staged(
-                        phys_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
+                        phys_name,
+                        chunk,
+                        partition_col="_billing_period",
+                        column_types=dest_col_types,
                         namespace="silver",
+                        partition_spec_json=partition_spec_json,
                     )
                 else:
                     iceberg.append_to_staged(
-                        temp_name, chunk, partition_col="_billing_period", column_types=dest_col_types,
+                        temp_name,
+                        chunk,
+                        partition_col="_billing_period",
+                        column_types=dest_col_types,
                         namespace="silver",
                     )
                 staged_rows += len(chunk)
             del prepared
-
-        # For partial reprocesses, preserve unaffected rows in the same
-        # temporary Gold table. Full rebuilds never read the old Gold table.
-        if billing_periods and connection_ids and not replace_existing and not publish_by_partition:
-            try:
-                for existing_batch in iceberg.read_destination_batches(
-                    phys_name, set(billing_periods), set(connection_ids),
-                    batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
-                ):
-                    _stage_frame(existing_batch)
-                    del existing_batch
-            except Exception as merge_err:
-                if "NoSuchTableException" not in type(merge_err).__name__ and "does not exist" not in str(merge_err).lower():
-                    raise RuntimeError(f"Falha ao preservar dados existentes: {merge_err}") from merge_err
 
         # ── Phase 1: process one blob and one batch at a time ──
         total_rows_processed = 0
@@ -2115,17 +2143,39 @@ def _reprocess_destination_sync(
             # Publishing a whole staged destination forced a full Arrow/Pandas
             # materialization and allowed a late Bronze error after millions
             # of rows. Reject broad calls rather than silently merging slices.
-            if len(connection_ids) != 1 or len(billing_periods) != 1:
+            if len(connection_ids) != 1:
                 raise RuntimeError(
-                    "Reprocessamento deve publicar uma única origem+mês por tarefa"
+                    "Reprocessamento deve publicar uma única origem por tarefa"
                 )
-            total_written = iceberg.publish_staged_partition(
-                phys_name,
-                temp_name,
-                billing_period=str(billing_periods[0]),
-                connection_id=int(connection_ids[0]),
-                namespace="silver",
-            )
+            if slice_cfg.grain == "snapshot_date":
+                if len(snapshot_dates) != 1:
+                    raise RuntimeError(
+                        "Reprocessamento diário deve publicar uma única origem+snapshot_date por tarefa"
+                    )
+                total_written = iceberg.publish_staged_partition(
+                    phys_name,
+                    temp_name,
+                    snapshot_date=str(snapshot_dates[0]),
+                    billing_period=str(billing_periods[0]) if billing_periods else None,
+                    connection_id=int(connection_ids[0]),
+                    namespace="silver",
+                    partition_spec_json=partition_spec_json,
+                    expected_row_count=staged_rows,
+                )
+            else:
+                if len(billing_periods) != 1:
+                    raise RuntimeError(
+                        "Reprocessamento deve publicar uma única origem+mês por tarefa"
+                    )
+                total_written = iceberg.publish_staged_partition(
+                    phys_name,
+                    temp_name,
+                    billing_period=str(billing_periods[0]),
+                    connection_id=int(connection_ids[0]),
+                    namespace="silver",
+                    partition_spec_json=partition_spec_json,
+                    expected_row_count=staged_rows,
+                )
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
             _sync_db()
@@ -2325,7 +2375,10 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
         is_focus = (dest.physical_name or "").lower() == "dest_modelo_focus"
         expected_total = sum(
             iceberg.estimate_destination_slice_rows(
-                dest.physical_name, billing_period=str(period), connection_id=cid,
+                dest.physical_name,
+                billing_period=str(period),
+                connection_id=cid,
+                partition_spec_json=dest.partition_spec_json,
             )
             for cid in connection_ids
             for period in billing_periods
@@ -2347,6 +2400,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     billing_period=str(period),
                     connection_id=cid,
                     batch_size=int(os.getenv("RECLASSIFY_BATCH_ROWS", "50000")),
+                    partition_spec_json=dest.partition_spec_json,
                 ):
                     if _check_cancelled(task_id):
                         return {"success": False, "error": "Cancelado", "rows_written": 0}
@@ -2369,13 +2423,28 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)
-                    if staged is None: staged = iceberg.write_destination_staged(dest.physical_name, frame, namespace="silver")
-                    else: iceberg.append_to_staged(staged, frame, namespace="silver")
+                    if staged is None:
+                        staged = iceberg.write_destination_staged(
+                            dest.physical_name,
+                            frame,
+                            namespace="silver",
+                            partition_spec_json=dest.partition_spec_json,
+                        )
+                    else:
+                        iceberg.append_to_staged(staged, frame, namespace="silver")
                     rows += len(frame)
                     _progress(f"Reclassificando {conn.code}/{period}", total + rows, expected_total)
                 if staged is None:
                     return {"success": False, "error": f"Nenhuma linha Gold para {conn.code}/{period}", "rows_written": total}
-                iceberg.publish_staged_partition(dest.physical_name, staged, billing_period=str(period), connection_id=cid, namespace="silver")
+                iceberg.publish_staged_partition(
+                    dest.physical_name,
+                    staged,
+                    billing_period=str(period),
+                    connection_id=cid,
+                    namespace="silver",
+                    partition_spec_json=dest.partition_spec_json,
+                    expected_row_count=rows,
+                )
                 total += rows
                 staged = None
         _progress("Publicação Gold concluída", total, expected_total)
@@ -2517,74 +2586,138 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             "message": message,
         }
 
-    available_stmt = select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
-        IngestedBlob.connection_id.in_(body.connection_ids)
-    )
-    if body.billing_periods:
-        available_stmt = available_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
-    available = {(int(connection_id), str(period)) for connection_id, period in (await db.execute(available_stmt)).all()
-                 if connection_id is not None and period}
-    # Fonte operacional nunca publica no livro financeiro, mesmo que um mapping
-    # antigo ainda exista. O bloqueio na criação do mapping
-    # (routers/destinations.py) é a primeira linha de defesa; esta é a segunda.
-    rejected_pairs = {
-        (connection_id, period)
-        for connection_id, period in available
-        if mapping_rejection_reason(conn_by_id.get(connection_id), body.destination_table_id)
-    }
-    if rejected_pairs:
-        logger.warning(
-            "Reprocess do destino %s ignorou fontes operacionais não-custo: %s",
-            body.destination_table_id, sorted({cid for cid, _ in rejected_pairs}),
-        )
-        available -= rejected_pairs
-    ordered_pairs = [
-        (connection_id, period)
-        for period in sorted({period for _, period in available})
-        for connection_id in body.connection_ids
-        if (connection_id, period) in available
-    ]
-    if not ordered_pairs:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Nenhum blob Bronze encontrado para as fontes e meses selecionados. "
-                "Importe a origem primeiro (Extração). Se a extração falhou, o Bronze "
-                "fica vazio e o reprocesso não tem meses para publicar."
-            ),
-        )
+    from app.models.destination import DestinationTable
+    from app.services.destination_slice import resolve_destination_slice_config, snapshot_date_from_blob_path
 
-    queue_group = str(uuid4())
+    dest_row = (
+        await db.execute(select(DestinationTable).where(DestinationTable.id == body.destination_table_id))
+    ).scalar_one_or_none()
+    if not dest_row:
+        raise HTTPException(status_code=404, detail="Tabela destino não encontrada")
+    slice_cfg = resolve_destination_slice_config(dest_row.physical_name, dest_row.partition_spec_json)
+    reprocess_group_id = str(uuid4())
+    phys_lower = (dest_row.physical_name or "").lower()
+
+    def _blob_allowed(path: str) -> bool:
+        if phys_lower == "dest_modelo_automation":
+            return path.startswith("automation/jobs/")
+        if phys_lower == "dest_modelo_automation_schedule":
+            return path.startswith("automation/schedules/")
+        if phys_lower == "dest_cloud_resource_inventory":
+            return path.startswith("arg/inventory/")
+        if phys_lower == "dest_cloud_orphan_resources":
+            return path.startswith("arg/orphans/")
+        return True
+
+    ordered_jobs: list[tuple[int, str, str | None]] = []
+    if slice_cfg.grain == "snapshot_date":
+        blob_stmt = select(
+            IngestedBlob.connection_id,
+            IngestedBlob.billing_period,
+            IngestedBlob.blob_path,
+        ).where(IngestedBlob.connection_id.in_(body.connection_ids))
+        if body.billing_periods:
+            blob_stmt = blob_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
+        seen_daily: set[tuple[int, str]] = set()
+        for connection_id, period, path in (await db.execute(blob_stmt)).all():
+            if connection_id is None or not period or not path:
+                continue
+            path_str = str(path)
+            if not _blob_allowed(path_str):
+                continue
+            if mapping_rejection_reason(conn_by_id.get(int(connection_id)), body.destination_table_id):
+                continue
+            snap = snapshot_date_from_blob_path(path_str)
+            if not snap:
+                continue
+            key = (int(connection_id), snap)
+            if key in seen_daily:
+                continue
+            seen_daily.add(key)
+            ordered_jobs.append((int(connection_id), str(period), snap))
+        ordered_jobs.sort(key=lambda item: (item[2] or "", item[0]))
+        empty_detail = (
+            "Nenhum blob Bronze diário encontrado para as fontes selecionadas. "
+            "Importe a origem primeiro (Extração)."
+        )
+        enqueue_label = "fonte+dia"
+    else:
+        available_stmt = select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
+            IngestedBlob.connection_id.in_(body.connection_ids)
+        )
+        if body.billing_periods:
+            available_stmt = available_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
+        available = {
+            (int(connection_id), str(period))
+            for connection_id, period in (await db.execute(available_stmt)).all()
+            if connection_id is not None and period
+        }
+        rejected_pairs = {
+            (connection_id, period)
+            for connection_id, period in available
+            if mapping_rejection_reason(conn_by_id.get(connection_id), body.destination_table_id)
+        }
+        if rejected_pairs:
+            logger.warning(
+                "Reprocess do destino %s ignorou fontes operacionais não-custo: %s",
+                body.destination_table_id,
+                sorted({cid for cid, _ in rejected_pairs}),
+            )
+            available -= rejected_pairs
+        ordered_jobs = [
+            (connection_id, period, None)
+            for period in sorted({period for _, period in available})
+            for connection_id in body.connection_ids
+            if (connection_id, period) in available
+        ]
+        empty_detail = (
+            "Nenhum blob Bronze encontrado para as fontes e meses selecionados. "
+            "Importe a origem primeiro (Extração). Se a extração falhou, o Bronze "
+            "fica vazio e o reprocesso não tem meses para publicar."
+        )
+        enqueue_label = "fonte+mês"
+
+    if not ordered_jobs:
+        raise HTTPException(status_code=422, detail=empty_detail)
+
     audit_result = await db.execute(
         insert(EtlTask).values(
             task_type="bronze_audit", status="QUEUED", destination_table_id=body.destination_table_id,
             connection_ids=list(body.connection_ids),
-            billing_periods=sorted({period for _, period in ordered_pairs}),
-            result_json={"queue_group": queue_group, "audit_scope": "reprocess_group"},
+            billing_periods=sorted({period for _, period, _ in ordered_jobs}),
+            result_json={"reprocess_group_id": reprocess_group_id, "audit_scope": "reprocess_group"},
             total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
             rows_destination=0, errors=[], phase="Na fila: auditoria física Bronze",
         ).returning(EtlTask.id)
     )
     audit_task_id = audit_result.scalar_one()
     task_ids: list[int] = []
-    for position, (connection_id, period) in enumerate(ordered_pairs, start=1):
+    for position, (connection_id, period, snapshot_date) in enumerate(ordered_jobs, start=1):
         details = {
-            "connection_ids": [connection_id], "billing_periods": [period],
-            "publish_by_partition": True, "queue_group": queue_group,
+            "connection_ids": [connection_id],
+            "billing_periods": [period],
+            "publish_by_partition": True,
+            "reprocess_group_id": reprocess_group_id,
             "bronze_audit_task_id": audit_task_id,
-            "queue_position": position, "queue_total": len(ordered_pairs),
+            "queue_position": position,
+            "queue_total": len(ordered_jobs),
         }
+        if snapshot_date:
+            details["snapshot_dates"] = [snapshot_date]
+            log_message = (
+                f"Fila {position}/{len(ordered_jobs)}: fonte {connection_id}, dia {snapshot_date}"
+            )
+        else:
+            log_message = f"Fila {position}/{len(ordered_jobs)}: fonte {connection_id}, mês {period}"
         result = await db.execute(
             insert(EtlTask).values(
                 task_type="reprocess", status="QUEUED", destination_table_id=body.destination_table_id,
                 connection_ids=[connection_id], billing_periods=[period],
-                # Each child replaces only its own source/month. ``replace_existing``
-                # must never erase the other queued months.
                 result_json={"replace_existing": False, **details,
                              "chain_gold_cubes": body.chain_gold_cubes.model_dump() if body.chain_gold_cubes else {},
                              "event_log": [{
                     "at": datetime.now(timezone.utc).isoformat(), "level": "INFO",
-                    "message": f"Fila {position}/{len(ordered_pairs)}: fonte {connection_id}, mês {period}",
+                    "message": log_message,
                     "details": details,
                 }]},
                 total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
@@ -2594,8 +2727,12 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         task_ids.append(result.scalar_one())
     await db.commit()
 
-    return {"task_id": audit_task_id, "task_ids": [audit_task_id, *task_ids], "queue_group": queue_group,
-            "message": f"Auditoria Bronze + {len(task_ids)} publicação(ões) fonte+mês enfileiradas"}
+    return {
+        "task_id": audit_task_id,
+        "task_ids": [audit_task_id, *task_ids],
+        "reprocess_group_id": reprocess_group_id,
+        "message": f"Auditoria Bronze + {len(task_ids)} publicação(ões) {enqueue_label} enfileiradas",
+    }
 
 
 @router.post("/reprocess-shared-cost")

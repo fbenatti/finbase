@@ -708,7 +708,14 @@ async def lifespan(app: FastAPI):
                   ('audit_log', 'changes_json', 'jsonb')
                 ) AS payload(table_name, column_name, storage_type)
               LOOP
-                IF to_regclass(rec.table_name) IS NOT NULL THEN
+                IF to_regclass(rec.table_name) IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1
+                     FROM information_schema.columns
+                     WHERE table_schema = current_schema()
+                       AND table_name = rec.table_name
+                       AND column_name = rec.column_name
+                   ) THEN
                   IF rec.storage_type = 'jsonb' THEN
                     EXECUTE format(
                       'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''organograma_nivel_'')::jsonb
@@ -758,7 +765,14 @@ async def lifespan(app: FastAPI):
                   ('audit_log', 'changes_json', 'jsonb')
                 ) AS payload(table_name, column_name, storage_type)
               LOOP
-                IF to_regclass(rec.table_name) IS NOT NULL THEN
+                IF to_regclass(rec.table_name) IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1
+                     FROM information_schema.columns
+                     WHERE table_schema = current_schema()
+                       AND table_name = rec.table_name
+                       AND column_name = rec.column_name
+                   ) THEN
                   IF rec.storage_type = 'jsonb' THEN
                     EXECUTE format(
                       'UPDATE %I SET %I = replace(replace(replace(replace(%I::text,
@@ -825,6 +839,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",
             "CREATE INDEX IF NOT EXISTS ix_classification_rule_cloud_scope ON classification_rule (cloud_scope)",
             "CREATE INDEX IF NOT EXISTS ix_classification_field_value_value_prefix ON classification_field_value (destination_table_id, cloud, field, value text_pattern_ops)",
+            "ALTER TABLE destination_table ADD COLUMN IF NOT EXISTS partition_spec_json JSONB",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_source_connection_cloud_scope ON source_connection (cloud_scope)",
             # forecast_run.cutoff_date is now NULL until the engine computes the

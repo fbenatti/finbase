@@ -410,16 +410,30 @@ class SkipBlobRequest(BaseModel):
 
 # ---- Destination Tables ----
 
+class DestinationPartitionExtra(BaseModel):
+    column: str
+    transform: str = "identity"  # identity | bucket
+    bucket_count: int = 16
+
+
+class DestinationPartitionSpec(BaseModel):
+    grain: str = "billing_period"  # billing_period | snapshot_date
+    snapshot_column: str | None = None
+    extra_partitions: list[DestinationPartitionExtra] = Field(default_factory=list)
+
+
 class DestinationTableCreate(BaseModel):
     name: str
     description: str | None = None
     physical_name: str | None = None  # auto-generated if not provided
+    partition_spec_json: DestinationPartitionSpec | dict | None = None
     active: bool = True
 
 
 class DestinationTableUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    partition_spec_json: DestinationPartitionSpec | dict | None = None
     active: bool | None = None
 
 
@@ -428,6 +442,7 @@ class DestinationTableOut(BaseModel):
     name: str
     description: str | None
     physical_name: str
+    partition_spec_json: dict | None = None
     active: bool
     created_at: datetime
     updated_at: datetime
@@ -501,6 +516,7 @@ class DestinationTableDetailOut(BaseModel):
     name: str
     description: str | None
     physical_name: str
+    partition_spec_json: dict | None = None
     active: bool
     created_at: datetime
     updated_at: datetime

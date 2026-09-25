@@ -1014,17 +1014,28 @@ def consumer_main(worker_id: int):
                             else:
                                 from app.services.write_lock import exclusive_write_lock
                                 with exclusive_write_lock():
+                                    payload = task.result_json or {}
+                                    snapshot_dates = [
+                                        str(s) for s in (payload.get("snapshot_dates") or [])
+                                    ]
                                     result = _reprocess_destination_sync(
-                                        task_id, dest_id, conn_ids, periods,
-                                        replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
+                                        task_id,
+                                        dest_id,
+                                        conn_ids,
+                                        periods,
+                                        replace_existing=bool(payload.get("replace_existing", False)),
                                         publish_by_partition=bool(
-                                            (task.result_json or {}).get("publish_by_partition")
+                                            payload.get("publish_by_partition", True)
                                             or (
-                                                (task.result_json or {}).get("scheduled_pipeline")
+                                                payload.get("scheduled_pipeline")
                                                 and len(task.connection_ids or []) == 1
-                                                and len(task.billing_periods or []) == 1
+                                                and (
+                                                    len(task.billing_periods or []) == 1
+                                                    or len(snapshot_dates) == 1
+                                                )
                                             )
                                         ),
+                                        snapshot_dates=snapshot_dates or None,
                                     )
                         print(f"Task {task_id} completed: {result}")
 
@@ -1074,7 +1085,10 @@ def consumer_main(worker_id: int):
                                             terminal_task.phase = ((terminal_task.phase or "") + f" · Forecast(s) na fila: {len(scheduled_forecasts)}")[:200]
                                     chain = terminal_task.result_json.get("chain_gold_cubes")
                                     if chain and isinstance(chain, dict) and chain.get("enabled"):
-                                        group = terminal_task.result_json.get("queue_group")
+                                        group = (
+                                            terminal_task.result_json.get("reprocess_group_id")
+                                            or terminal_task.result_json.get("queue_group")
+                                        )
                                         position = terminal_task.result_json.get("queue_position")
                                         total = terminal_task.result_json.get("queue_total")
                                         is_last_group_task = (
@@ -1090,7 +1104,8 @@ def consumer_main(worker_id: int):
                                             ).all()
                                             remaining = [
                                                 rid for rid, rj in group_rows
-                                                if (rj or {}).get("queue_group") == group
+                                                if (rj or {}).get("reprocess_group_id") == group
+                                                or (rj or {}).get("queue_group") == group
                                             ]
                                             is_last_group_task = not remaining
                                         if is_last_group_task:

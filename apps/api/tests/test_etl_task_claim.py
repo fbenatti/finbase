@@ -64,6 +64,20 @@ def test_task_resource_lock_keys_reprocess_slice():
     assert len(keys) == 2
 
 
+def test_task_resource_lock_keys_snapshot_slice():
+    task = EtlTask(
+        id=3,
+        task_type="reprocess",
+        status="QUEUED",
+        destination_table_id=11,
+        connection_ids=[4],
+        billing_periods=["202509"],
+        result_json={"snapshot_dates": ["2025-09-15"]},
+    )
+    keys = task_resource_lock_keys(task)
+    assert len(keys) == 2
+
+
 def test_stale_advisory_lock_recovery_is_noop_for_non_postgres():
     class Bind:
         class dialect:

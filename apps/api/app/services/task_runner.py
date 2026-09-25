@@ -265,11 +265,19 @@ def _process_blob_sync(
             _apply_business_rule_sync(target, rule, billing_period or "")
         _apply_classifications_sync(target, class_rules, session)
         normalized_count += len(target)
-        iceberg.write_silver_destination(
-            conn.code, physical_name, target, billing_period or "", column_types
-        )
-        destination_count += iceberg.write_destination(
-            physical_name, target, partition_col="_billing_period",
+        snapshot_date = None
+        for col in ("snapshot_date", "SnapshotDate"):
+            if col in target.columns:
+                values = target[col].dropna().astype(str).unique()
+                if len(values) == 1:
+                    snapshot_date = str(values[0])
+                    break
+        destination_count += iceberg.publish_silver_dataframe_slice(
+            physical_name,
+            target,
+            connection_id=int(conn.id),
+            billing_period=billing_period or None,
+            snapshot_date=snapshot_date,
             column_types=column_types,
         )
         try:
@@ -821,19 +829,22 @@ def _write_to_destination_tables_sync(
         target = target.where(pd.notna(target), None)
 
         # Write to Iceberg — pass column types so schema matches DestinationColumn
-        rows_written = iceberg.write_destination(
+        target["_billing_period"] = billing_period
+        snapshot_date = None
+        for col in ("snapshot_date", "SnapshotDate"):
+            if col in target.columns:
+                values = target[col].dropna().astype(str).unique()
+                if len(values) == 1:
+                    snapshot_date = str(values[0])
+                    break
+        rows_written = iceberg.publish_silver_dataframe_slice(
             phys_name,
             target,
-            partition_col="_billing_period",
+            connection_id=int(connection_id),
+            billing_period=billing_period,
+            snapshot_date=snapshot_date,
             column_types=dest_col_types,
         )
-        if not rows_written:
-            target["_billing_period"] = billing_period
-            rows_written = iceberg.write_destination(
-                phys_name, target,
-                partition_col="_billing_period",
-                column_types=dest_col_types,
-            )
 
         total_written += rows_written
         logger.info("Wrote %d rows to Iceberg %s (connection %s)", rows_written, phys_name, connection_code)

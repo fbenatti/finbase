@@ -18,6 +18,8 @@ class DestinationTable(Base):
     name = Column(String(100), nullable=False, unique=True)
     description = Column(String(500), nullable=True)
     physical_name = Column(String(100), nullable=False, unique=True)
+    # grain + optional Iceberg partition extras (identity / bucket); see destination_slice.py
+    partition_spec_json = Column(JSON, nullable=True)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

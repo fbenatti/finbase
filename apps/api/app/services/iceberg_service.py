@@ -665,15 +665,27 @@ def replace_bronze_slice(
     return len(frame)
 
 
+def _is_silver_destination_table(physical_name: str, namespace: str = "silver") -> bool:
+    if namespace != layers.detail_layer() and namespace != "silver":
+        return False
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    return safe_name.startswith("dest_")
+
+
 def delete_destination_slice(
     physical_name: str,
     *,
-    billing_period: str,
+    billing_period: str | None = None,
+    snapshot_date: str | None = None,
     connection_id: int,
     namespace: str = "silver",
+    partition_spec_json: dict | None = None,
 ) -> None:
-    """Remove one source/month from a Gold destination table."""
-    from pyiceberg.expressions import And, EqualTo
+    """Remove one replace-slice from a Silver destination table."""
+    from app.services.destination_slice import (
+        build_slice_row_filter,
+        resolve_destination_slice_config,
+    )
 
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     tid = _table_id(namespace, safe_name)
@@ -681,13 +693,22 @@ def delete_destination_slice(
         table = _get_catalog().load_table(tid)
     except Exception:
         return
-    table.delete(And(
-        EqualTo("_billing_period", str(billing_period)),
-        EqualTo("source_connection_id", int(connection_id)),
-    ))
+    config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    row_filter = build_slice_row_filter(
+        config,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
+    )
+    table.delete(row_filter)
     logger.info(
-        "Deleted Gold slice %s.%s period=%s connection_id=%s",
-        namespace, safe_name, billing_period, connection_id,
+        "Deleted Silver slice %s.%s grain=%s connection_id=%s billing_period=%s snapshot_date=%s",
+        namespace,
+        safe_name,
+        config.grain,
+        connection_id,
+        billing_period,
+        snapshot_date,
     )
 
 
@@ -927,6 +948,11 @@ def write_silver_destination(
     column_types: Optional[dict[str, str]] = None,
 ) -> int:
     """Write mapped, source-specific Silver data for a destination model."""
+    if _is_silver_destination_table(destination_physical_name):
+        raise RuntimeError(
+            "write_silver_destination não grava mais silver.dest_*; "
+            "use publish_silver_dataframe_slice no destino canônico."
+        )
     safe_source = source_code.replace("-", "_").replace(".", "_")
     safe_dest = destination_physical_name.replace("-", "_").replace(".", "_")
     return write_silver(
@@ -1057,21 +1083,30 @@ def read_destination_batches(physical_name: str, excluded_periods: set[str] | No
 def read_destination_slice_batches(
     physical_name: str,
     *,
-    billing_period: str,
+    billing_period: str | None = None,
+    snapshot_date: str | None = None,
     connection_id: int,
     batch_size: int = 50_000,
     namespace: str = "silver",
+    partition_spec_json: dict | None = None,
 ):
-    """Yield one exact Gold source/month slice in bounded pandas batches."""
+    """Yield one exact Silver replace-slice in bounded pandas batches."""
+    from app.services.destination_slice import (
+        build_slice_row_filter,
+        resolve_destination_slice_config,
+    )
+
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     try:
         table = _get_catalog().load_table(_table_id(namespace, safe_name))
     except Exception:
         return
-    from pyiceberg.expressions import And, EqualTo
-    row_filter = And(
-        EqualTo("_billing_period", str(billing_period)),
-        EqualTo("source_connection_id", int(connection_id)),
+    config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    row_filter = build_slice_row_filter(
+        config,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
     )
     for arrow_batch in table.scan(row_filter=row_filter).to_arrow_batch_reader():
         if arrow_batch.num_rows:
@@ -1093,25 +1128,29 @@ def read_destination_slice_batches(
 def estimate_destination_slice_rows(
     physical_name: str,
     *,
-    billing_period: str,
+    billing_period: str | None = None,
+    snapshot_date: str | None = None,
     connection_id: int,
     namespace: str = "silver",
+    partition_spec_json: dict | None = None,
 ) -> int:
-    """Return the manifest-level row count for one Gold source/month slice.
+    """Return the manifest-level row count for one Silver replace-slice."""
+    from app.services.destination_slice import (
+        build_slice_row_filter,
+        resolve_destination_slice_config,
+    )
 
-    The destination table is partitioned by this same slice, therefore this
-    avoids a second full scan just to render task progress. It is deliberately
-    an estimate in the unlikely event a legacy file spans more than one slice.
-    """
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     try:
         table = _get_catalog().load_table(_table_id(namespace, safe_name))
     except Exception:
         return 0
-    from pyiceberg.expressions import And, EqualTo
-    row_filter = And(
-        EqualTo("_billing_period", str(billing_period)),
-        EqualTo("source_connection_id", int(connection_id)),
+    config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    row_filter = build_slice_row_filter(
+        config,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
     )
     return sum(int(task.file.record_count or 0) for task in table.scan(row_filter=row_filter).plan_files())
 
@@ -1124,6 +1163,8 @@ def write_destination_staged(
     column_types: Optional[dict[str, str]] = None,
     namespace: str = "silver",
     add_tipo: bool = True,
+    partition_spec_json: dict | None = None,
+    slice_config=None,
 ) -> str:
     """Write a destination DataFrame to a temporary Iceberg table (staged).
 
@@ -1154,6 +1195,17 @@ def write_destination_staged(
     # Forecast projections are published separately in *_planning.
     if add_tipo and "tipo" not in df.columns:
         df["tipo"] = "realizado"
+    from app.services.destination_slice import (
+        build_iceberg_partition_spec,
+        primary_partition_column,
+        resolve_destination_slice_config,
+    )
+
+    config = slice_config or resolve_destination_slice_config(
+        physical_name, partition_spec_json, column_names=set(df.columns),
+    )
+    if partition_col == "_billing_period" and config.grain == "snapshot_date":
+        partition_col = primary_partition_column(config)
     if partition_col not in df.columns:
         df[partition_col] = "unknown"
 
@@ -1163,28 +1215,30 @@ def write_destination_staged(
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     iceberg_schema = pyarrow_to_schema(arrow_table.schema)
 
-    partition_field_idx = arrow_table.schema.get_field_index(partition_col)
-    if partition_field_idx < 0:
-        tbl = cat.create_table(tid, schema=iceberg_schema)
-        tbl.append(arrow_table)
-        return temp_safe_name
+    partition_spec = build_iceberg_partition_spec(iceberg_schema, config)
+    if not partition_spec.fields:
+        partition_field_idx = arrow_table.schema.get_field_index(partition_col)
+        if partition_field_idx < 0:
+            tbl = cat.create_table(tid, schema=iceberg_schema)
+            tbl.append(arrow_table)
+            return temp_safe_name
 
-    part_iceberg_field = iceberg_schema.find_field(partition_col)
-    if part_iceberg_field is None:
-        tbl = cat.create_table(tid, schema=iceberg_schema)
-        tbl.append(arrow_table)
-        return temp_safe_name
+        part_iceberg_field = iceberg_schema.find_field(partition_col)
+        if part_iceberg_field is None:
+            tbl = cat.create_table(tid, schema=iceberg_schema)
+            tbl.append(arrow_table)
+            return temp_safe_name
 
-    source_id = part_iceberg_field.field_id
-    new_field_id = iceberg_schema.highest_field_id + 1000
-    partition_spec = PartitionSpec(
-        PartitionField(
-            source_id=source_id,
-            field_id=new_field_id,
-            transform=IdentityTransform(),
-            name=partition_col,
+        source_id = part_iceberg_field.field_id
+        new_field_id = iceberg_schema.highest_field_id + 1000
+        partition_spec = PartitionSpec(
+            PartitionField(
+                source_id=source_id,
+                field_id=new_field_id,
+                transform=IdentityTransform(),
+                name=partition_col,
+            )
         )
-    )
 
     # Always create fresh temp table (delete old temp if exists)
     try:
@@ -1335,18 +1389,23 @@ def publish_staged_partition(
     physical_name: str,
     temp_safe_name: str,
     *,
-    billing_period: str,
+    billing_period: str | None = None,
+    snapshot_date: str | None = None,
     connection_id: int,
     namespace: str = "silver",
+    partition_spec_json: dict | None = None,
+    expected_row_count: int | None = None,
 ) -> int:
-    """Atomically replace one source/month slice with files from staging.
+    """Atomically replace one Silver slice with rows from staging.
 
-    The staging table is built and validated before this function is called.
-    Its Parquet files are adopted in the same Iceberg transaction that removes
-    the prior ``(_billing_period, source_connection_id)`` slice, so readers
-    see either the prior month/source or the new one, never a partial batch.
+    Replace keys follow destination_slice (month+connection or day+connection).
+    Iceberg partition extras affect pruning only, not the delete filter.
     """
-    from pyiceberg.expressions import And, EqualTo
+    from app.services.destination_slice import (
+        build_slice_row_filter,
+        resolve_destination_slice_config,
+        validate_staged_table_slice,
+    )
 
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     cat = _get_catalog()
@@ -1355,6 +1414,15 @@ def publish_staged_partition(
     staged = cat.load_table(staging_id)
     staged_tasks = list(staged.scan().plan_files())
     row_count = sum(task.file.record_count for task in staged_tasks)
+    slice_config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    validate_staged_table_slice(
+        staged,
+        slice_config,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
+        expected_row_count=expected_row_count if expected_row_count is not None else row_count,
+    )
 
     try:
         target = cat.load_table(target_id)
@@ -1404,9 +1472,11 @@ def publish_staged_partition(
     target_column_names = [field.name for field in target.schema().fields]
     target_arrow_fields = {field.name: field for field in target.schema().as_arrow()}
 
-    overwrite_filter = And(
-        EqualTo("_billing_period", str(billing_period)),
-        EqualTo("source_connection_id", int(connection_id)),
+    overwrite_filter = build_slice_row_filter(
+        slice_config,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
     )
     tx = target.transaction()
     tx.delete(overwrite_filter)
@@ -1425,8 +1495,66 @@ def publish_staged_partition(
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
     _force_delete_table(staging_id, temp_safe_name)
-    logger.info("Published %d rows for %s/%s into %s.%s", row_count, connection_id, billing_period, namespace, safe_name)
+    slice_label = snapshot_date if slice_config.grain == "snapshot_date" else billing_period
+    logger.info(
+        "Published %d rows for %s/%s into %s.%s",
+        row_count,
+        connection_id,
+        slice_label,
+        namespace,
+        safe_name,
+    )
     return int(row_count)
+
+
+def publish_silver_dataframe_slice(
+    physical_name: str,
+    df: pd.DataFrame,
+    *,
+    connection_id: int,
+    billing_period: str | None = None,
+    snapshot_date: str | None = None,
+    column_types: Optional[dict[str, str]] = None,
+    partition_spec_json: dict | None = None,
+    namespace: str = "silver",
+) -> int:
+    """Stage and atomically publish one Silver destination slice."""
+    from app.services.destination_slice import (
+        primary_partition_column,
+        resolve_destination_slice_config,
+        validate_staging_slice,
+    )
+
+    if df.empty:
+        return 0
+    config = resolve_destination_slice_config(
+        physical_name, partition_spec_json, column_names=set(df.columns),
+    )
+    validate_staging_slice(
+        df,
+        config,
+        connection_id=connection_id,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
+    )
+    temp_name = write_destination_staged(
+        physical_name,
+        df,
+        partition_col=primary_partition_column(config),
+        column_types=column_types,
+        namespace=namespace,
+        slice_config=config,
+    )
+    return publish_staged_partition(
+        physical_name,
+        temp_name,
+        billing_period=billing_period,
+        snapshot_date=snapshot_date,
+        connection_id=connection_id,
+        namespace=namespace,
+        partition_spec_json=partition_spec_json,
+        expected_row_count=len(df),
+    )
 
 
 def publish_staged_by_slices(physical_name: str, temp_safe_name: str, namespace: str = layers.GOLD) -> int:
@@ -1477,24 +1605,25 @@ def write_destination(
     *,
     partition_col: str = "_billing_period",
     column_types: Optional[dict[str, str]] = None,
+    namespace: str = "silver",
+    allow_append: bool = False,
 ) -> int:
     """Write a destination DataFrame to an Iceberg table (append-or-create).
 
-    For incremental (per-chunk) ETL writes. Uses tbl.append() when the table
-    exists and creates a fresh table when it doesn't.
-
-    For full reprocess with drop-and-replace, use write_destination_staged +
-    swap_staged_table instead.
-
-    Args:
-        column_types: Optional dict column_name → data_type for type coercion.
+    Silver ``dest_*`` tables reject append; use publish_silver_dataframe_slice.
     """
+    if _is_silver_destination_table(physical_name, namespace=namespace) and not allow_append:
+        raise RuntimeError(
+            f"Append direto em {namespace}.{physical_name} está desabilitado; "
+            "use write_destination_staged + publish_staged_partition "
+            "(ou publish_silver_dataframe_slice)."
+        )
     if df.empty:
         return 0
 
-    _ensure_namespace("silver")
+    _ensure_namespace(namespace)
     safe_name = physical_name.replace("-", "_").replace(".", "_")
-    tid = _table_id("silver", safe_name)
+    tid = _table_id(namespace, safe_name)
 
     df = df.copy()
     if partition_col not in df.columns:

@@ -45,7 +45,8 @@ async def get_destination_table(table_id: int, db: AsyncSession = Depends(get_db
 
     return DestinationTableDetailOut(
         id=dt.id, name=dt.name, description=dt.description,
-        physical_name=dt.physical_name, active=dt.active,
+        physical_name=dt.physical_name, partition_spec_json=dt.partition_spec_json,
+        active=dt.active,
         created_at=dt.created_at, updated_at=dt.updated_at,
         columns=[DestinationColumnOut.model_validate(c) for c in columns],
     )
@@ -55,13 +56,39 @@ async def get_destination_table(table_id: int, db: AsyncSession = Depends(get_db
 async def create_destination_table(data: DestinationTableCreate, db: AsyncSession = Depends(get_db)):
     physical_name = data.physical_name or f"dest_{data.name.lower().replace(' ', '_').replace('-', '_')}"
 
+    partition_spec = data.partition_spec_json
+    if hasattr(partition_spec, "model_dump"):
+        partition_spec = partition_spec.model_dump()
     dt = DestinationTable(
         name=data.name,
         description=data.description,
         physical_name=physical_name,
+        partition_spec_json=partition_spec,
         active=data.active,
     )
     db.add(dt)
+    await db.commit()
+    await db.refresh(dt)
+    return dt
+
+
+@router.patch("/tables/{table_id}", response_model=DestinationTableOut)
+async def update_destination_table(
+    table_id: int,
+    data: DestinationTableUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DestinationTable).where(DestinationTable.id == table_id))
+    dt = result.scalar_one_or_none()
+    if not dt:
+        raise HTTPException(status_code=404, detail="Destination table not found")
+    updates = data.model_dump(exclude_unset=True)
+    if "partition_spec_json" in updates:
+        spec = updates["partition_spec_json"]
+        if hasattr(spec, "model_dump"):
+            updates["partition_spec_json"] = spec.model_dump()
+    for key, value in updates.items():
+        setattr(dt, key, value)
     await db.commit()
     await db.refresh(dt)
     return dt

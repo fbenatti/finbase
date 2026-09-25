@@ -57,7 +57,14 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
     if task.task_type in {"reprocess", "reclassification"} and task.destination_table_id:
         conn_ids = list(task.connection_ids or [])
         periods = [str(p) for p in (task.billing_periods or [])]
-        if conn_ids and periods:
+        snapshot_dates = [str(s) for s in (payload.get("snapshot_dates") or [])]
+        if conn_ids and snapshot_dates:
+            for connection_id in conn_ids:
+                for snap in snapshot_dates:
+                    keys.append(_stable_lock_key(
+                        "gold_slice", task.destination_table_id, connection_id, snap,
+                    ))
+        elif conn_ids and periods:
             for connection_id in conn_ids:
                 for period in periods:
                     keys.append(_stable_lock_key(
