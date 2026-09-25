@@ -271,10 +271,55 @@ async def build_candidates(*, run_id: str | None = None) -> dict[str, Any]:
         table_name_override=f"silver.{TABLE}",
     )
 
+    # O FinOps Center consome oportunidades publicadas na Gold. A Silver segue
+    # sendo a origem técnica do cálculo; esta publicação cria a visão de decisão
+    # governada e garante que reexecutar candidates atualize o cubo exibido.
+    from app.services.gold_governance import publish_gold_cube
+
+    action_cube = await publish_gold_cube(
+        cube_code="finops_rightsizing_actions",
+        table="finops_rightsizing_actions",
+        namespace="gold",
+        run_id=None,
+        select_sql="""
+            WITH latest_candidate AS (
+                SELECT c.*,
+                       row_number() OVER (
+                           PARTITION BY c.resource_id
+                           ORDER BY c.created_at DESC NULLS LAST, c.run_id DESC
+                       ) AS candidate_rank
+                FROM iceberg.silver.rightsizing_candidate c
+            ), latest_profile AS (
+                SELECT p.*,
+                       row_number() OVER (
+                           PARTITION BY p.resource_id
+                           ORDER BY p.profile_built_at DESC NULLS LAST
+                       ) AS profile_rank
+                FROM iceberg.silver.resource_profile_window p
+            )
+            SELECT c.resource_id, c.resource_name, c.sku_from, c.sku_to,
+                   c.vcpus_from, c.vcpus_to, c.memory_gb_from, c.memory_gb_to,
+                   c.cost_from_current, c.cost_to_estimated, c.saving_monthly,
+                   c.saving_pct, c.cpu_p95, c.mem_p95, c.observed_days,
+                   c.verdict, c.veto_reason, c.run_id, c.created_at,
+                   p.resource_type, p.requested_days, p.profile_built_at,
+                   p.confidence,
+                   p.profile_hash
+            FROM latest_candidate c
+            LEFT JOIN latest_profile p
+              ON p.resource_id = c.resource_id AND p.profile_rank = 1
+            WHERE c.candidate_rank = 1
+        """,
+        partition_column=None,
+        timeout_s=900,
+    )
+
     por_veredito = frame["verdict"].value_counts().to_dict()
     return {
         "run_id": corrida,
         "rows": int(written or 0),
+        "gold_table": "finops_rightsizing_actions",
+        "gold_rows": action_cube.rows,
         "decision_hash": frame["decision_hash"].iloc[0],
         "verdicts": por_veredito,
         # O total de saving só conta o que é comparável — senão o número mentiria.

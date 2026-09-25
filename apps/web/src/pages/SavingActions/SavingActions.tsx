@@ -6,6 +6,7 @@
  * atual com o projetado, por recurso, ordenado pelo que mais economiza.
  */
 import { useEffect, useState } from "react";
+import { isAxiosError } from "axios";
 import {
   Alert, Box, Card, CardContent, Chip, CircularProgress, Stack,
   Table, TableBody, TableCell, TableHead, TableRow, Typography,
@@ -27,7 +28,11 @@ export default function SavingActions() {
   useEffect(() => {
     (async () => {
       try { setD(await getRightsizingOverview()); setErro(null); }
-      catch { setErro("Não foi possível carregar o dashboard."); }
+      catch (e) {
+        setErro(isAxiosError<{ detail?: string }>(e)
+          ? e.response?.data?.detail || "Não foi possível carregar o dashboard."
+          : "Não foi possível carregar o dashboard.");
+      }
       finally { setLoading(false); }
     })();
   }, []);
@@ -66,6 +71,9 @@ export default function SavingActions() {
             <Typography variant="caption" color="text.secondary">Oportunidade identificada</Typography>
             <Typography variant="h4" sx={{ color: "success.main" }}>{brl(o.saving_valid_total)}/mês</Typography>
             <Typography variant="caption" color="text.secondary">{o.by_type.length} tipo(s) de recurso</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              {o.before_after.length} recomendações · {o.before_after.filter((item) => item.verdict === "VALID").length} válidas · {o.before_after.filter((item) => item.verdict === "REQUIRES_VALIDATION").length} requerem validação
+            </Typography>
           </CardContent>
         </Card>
         <Card sx={{ minWidth: 230 }}>

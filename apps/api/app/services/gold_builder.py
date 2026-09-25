@@ -280,11 +280,11 @@ def rebuild_gold_cubes(*, table: str | None = None, gold: str | None = None) -> 
         rows = int((result[0] if result else {}).get("row_count") or 0)
         if rows:
             return iceberg.swap_staged_table(table, staging, known_row_count=rows)
-        iceberg.cleanup_staged_table(staging)
+        iceberg.cleanup_staged_table(staging, namespace=layers.GOLD)
         return 0
     except Exception:
         try:
-            iceberg.cleanup_staged_table(staging)
+            iceberg.cleanup_staged_table(staging, namespace=layers.GOLD)
         except Exception:  # noqa: BLE001
             pass
         raise

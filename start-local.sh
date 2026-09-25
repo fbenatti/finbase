@@ -250,19 +250,47 @@ kill_orphan_api() {
 
 kill_orphan_workers() {
   local worker_pids zombie_pids
-  worker_pids="$(pgrep -f "$ROOT_DIR/.venv/bin/python -u worker.py" 2>/dev/null || true)"
-  if [[ -z "$worker_pids" ]]; then
-    worker_pids="$(pgrep -f "$ROOT_DIR/apps/api/worker.py" 2>/dev/null || true)"
-  fi
+  worker_pids="$(OPENFINOPS_PROJECT_ROOT="$ROOT_DIR" "$ROOT_DIR/.venv/bin/python" - <<'PY'
+import os
+import psutil
+
+root = os.environ['OPENFINOPS_PROJECT_ROOT']
+interpreter = os.path.realpath(root + '/.venv/bin/python')
+for proc in psutil.process_iter(['pid', 'cmdline', 'cwd']):
+    try:
+        args = proc.info['cmdline'] or []
+        if (proc.info['cwd'] == root + '/apps/api' and args[-1:] == ['worker.py']
+                and os.path.realpath(args[0]) == interpreter):
+            print(proc.pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        continue
+PY
+)"
   if [[ -n "$worker_pids" ]]; then
     echo "Encerrando worker ETL órfão (PIDs:$(echo "$worker_pids" | tr '\n' ' ' | sed 's/ $//'))"
     kill_pids "$worker_pids"
   fi
 
-  # Limpa processos filho spawn_main/heartbeat do worker que ficam vivos após crash no macOS.
-  # Esses filhos herdam o file descriptor do flock e impedem reinicialização com
-  # "Another FinOps Worker already owns the worker lock".
-  zombie_pids="$(pgrep -f "multiprocessing.spawn import spawn_main" 2>/dev/null || true)"
+  # Only children from this project's worker that lost their parent. The API
+  # reload process also uses spawn_main and must never be killed here.
+  zombie_pids="$(OPENFINOPS_PROJECT_ROOT="$ROOT_DIR" "$ROOT_DIR/.venv/bin/python" - <<'PY'
+import os
+import psutil
+
+root = os.environ['OPENFINOPS_PROJECT_ROOT']
+for proc in psutil.process_iter(['pid', 'ppid', 'cmdline', 'cwd']):
+    try:
+        info = proc.info
+        command = ' '.join(info['cmdline'] or [])
+        if (info['ppid'] == 1 and 'multiprocessing.spawn import spawn_main' in command
+                and (info['cwd'] or '') == root + '/apps/api'
+                and info['cmdline']
+                and os.path.realpath(info['cmdline'][0]) == os.path.realpath(root + '/.venv/bin/python')):
+            print(info['pid'])
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        continue
+PY
+)"
   if [[ -n "$zombie_pids" ]]; then
     echo "Encerrando processos filho zumbis do worker (spawn_main, PIDs:$(echo "$zombie_pids" | tr '\n' ' ' | sed 's/ $//'))"
     kill -9 $zombie_pids 2>/dev/null || true
@@ -666,5 +694,12 @@ while true; do
       >>"$LOG_DIR/worker.log" 2>&1 &
     worker_pid=$!
     write_pid_file worker "$worker_pid"
+  fi
+  if ! kill -0 "$supervisor_pid" 2>/dev/null; then
+    echo "Monitor da fila encerrou; reiniciando."
+    (cd "$ROOT_DIR/apps/api" && DATABASE_URL_SYNC="${DATABASE_URL_SYNC:-postgresql://finops:finops@localhost:5433/finops}" DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://finops:finops@localhost:5433/finops}" exec "$ROOT_DIR/.venv/bin/python" -u supervisor.py) \
+      >>"$LOG_DIR/supervisor.log" 2>&1 &
+    supervisor_pid=$!
+    write_pid_file supervisor "$supervisor_pid"
   fi
 done

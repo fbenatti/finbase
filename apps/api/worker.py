@@ -36,8 +36,10 @@ import time
 import signal
 import sys
 import os
+import logging
 import multiprocessing
 import threading
+import psutil
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -49,6 +51,8 @@ from app.database import SyncSession
 from app.models.etl_task import EtlTask
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
 from app.models.source_connection import SourceConnection
+from app.models.metric_daily_collection import MetricDailyCollection
+from app.services.metric_daily_state import metric_failure_status
 from app.models.ingested_blob import IngestedBlob
 from app.models.rules import BusinessRule, ClassificationRule, Department
 from app.models.skipped_blob import SkippedBlob
@@ -59,6 +63,9 @@ from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject
 from sqlalchemy import select, text
 from app.services.etl_task_claim import (
     claim_next_etl_task,
+    find_stalled_worker_task,
+    recover_worker_orphaned_tasks,
+    recover_stalled_task,
     reconcile_stale_running_tasks,
     release_task_resource_locks,
     release_task_to_queue,
@@ -66,8 +73,10 @@ from app.services.etl_task_claim import (
     try_acquire_task_resource_locks,
 )
 from app.services.worker_runtime import (
+    consumer_record_path,
     heartbeat_path,
     pid_path,
+    register_consumer,
     runtime_dir,
     supervisor_pid_path,
     touch_heartbeat,
@@ -75,6 +84,26 @@ from app.services.worker_runtime import (
 )
 
 POLL_INTERVAL = 2  # seconds between polls when idle
+logger = logging.getLogger("openfinops.worker")
+
+
+def _save_metric_day_state(session, task_meta: dict, status: str, bronze_rows: int | None = None,
+                           silver_rows: int | None = None, reason: str | None = None) -> None:
+    day = str(task_meta.get("metric_day") or "")
+    source = str(task_meta.get("source_key") or "")
+    connection_id = task_meta.get("connection_id")
+    if not day or not source or not connection_id:
+        return
+    state = session.execute(select(MetricDailyCollection).where(
+        MetricDailyCollection.connection_id == int(connection_id),
+        MetricDailyCollection.source_key == source,
+        MetricDailyCollection.day_utc == day,
+    )).scalar_one_or_none()
+    if state:
+        state.status = status
+        state.bronze_rows = bronze_rows
+        state.silver_rows = silver_rows
+        state.reason = reason
 
 
 running = True
@@ -137,6 +166,10 @@ def _resolve_collection_reprocess_periods(
 def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: int, metadata: dict | None) -> list[int]:
     """Queue Gold reprocessing requested by a collection schedule."""
     if not metadata or not metadata.get("schedule_id"):
+        return []
+    if metadata.get("source_key") and metadata["source_key"] != "cost_exports":
+        # Operational telemetry has its own Silver model; it must not trigger
+        # the financial destination configured on a cloud collection schedule.
         return []
     session = SyncSession()
     try:
@@ -334,7 +367,7 @@ def consumer_main(worker_id: int):
     while running:
         session = SyncSession()
         try:
-            task = claim_next_etl_task(session)
+            task = claim_next_etl_task(session, worker_pid=os.getpid())
             if task is None:
                 session.close()
                 time.sleep(POLL_INTERVAL)
@@ -958,7 +991,14 @@ def consumer_main(worker_id: int):
                                     result = _reprocess_destination_sync(
                                         task_id, dest_id, conn_ids, periods,
                                         replace_existing=bool((task.result_json or {}).get("replace_existing", False)),
-                                        publish_by_partition=bool((task.result_json or {}).get("publish_by_partition", False)),
+                                        publish_by_partition=bool(
+                                            (task.result_json or {}).get("publish_by_partition")
+                                            or (
+                                                (task.result_json or {}).get("scheduled_pipeline")
+                                                and len(task.connection_ids or []) == 1
+                                                and len(task.billing_periods or []) == 1
+                                            )
+                                        ),
                                     )
                         print(f"Task {task_id} completed: {result}")
 
@@ -1211,6 +1251,13 @@ def consumer_main(worker_id: int):
                     _task_source_key = str(
                         (getattr(task, "result_json", None) or {}).get("source_key") or ""
                     )
+                    _task_result = dict(getattr(task, "result_json", None) or {})
+                    _metric_state_meta = {**_task_result, "connection_id": conn_id}
+                    _task_window_days = int(_task_result.get("window_days") or 0)
+                    _task_collection_until = (
+                        datetime.fromisoformat(_task_result["collection_until"])
+                        if _task_result.get("collection_until") else None
+                    )
                     _source_connector = ""
                     if _task_source_key:
                         try:
@@ -1332,17 +1379,20 @@ def consumer_main(worker_id: int):
                             if _ptu_conn and _ptu_conn.connector_type == "azure_monitor_vm_metrics":
                                 # Azure Monitor — série de métricas de plataforma
                                 # das VMs. Bronze exclusiva da fonte; janela padrão
-                                # de 15 dias (piloto), configurável até 90.
+                                # de 1 dia fechado, configurável até 90 para backfill.
                                 from app.services.azure_monitor_vm_service import (
                                     run_monitor_vm_collection,
                                 )
                                 _mon_cfg = dict(_ptu_conn.config_json or {})
-                                _mon_days = int(_mon_cfg.get("window_days") or 15)
+                                _mon_days = int(_task_window_days or _mon_cfg.get("window_days") or 1)
                                 try:
                                     _mon_result = run_monitor_vm_collection(
                                         _ptu_session,
                                         _ptu_conn.id,
                                         window_days=_mon_days,
+                                        until=_task_collection_until,
+                                        subscription_ids=_task_result.get("subscription_ids"),
+                                        metrics=_task_result.get("metrics"),
                                         task_id=task_id,
                                         source_code=source_code,
                                     )
@@ -1357,6 +1407,7 @@ def consumer_main(worker_id: int):
                                         )
                                         _t_mon_fail.errors = [str(_mon_exc)[:1000]]
                                         _t_mon_fail.finished_at = datetime.now(timezone.utc)
+                                        _save_metric_day_state(_ptu_session, _metric_state_meta, metric_failure_status(_mon_exc), reason=str(_mon_exc)[:1000])
                                         _ptu_session.commit()
                                     _inmemory_tasks[task_id]["status"] = "FAILED"
                                     _inmemory_tasks.pop(task_id, None)
@@ -1378,6 +1429,7 @@ def consumer_main(worker_id: int):
                                         # (explícito → cloud_name → code); montar o
                                         # nome da Bronze à mão já divergiu uma vez.
                                         environment=_env_of(_ptu_conn) or None,
+                                        periods=_mon_result.get("periods") or [],
                                     )
                                     _mon_result["silver_rows"] = _silver.get("rows_silver", 0)
                                     _mon_result["silver_table"] = _silver.get("silver_table")
@@ -1388,8 +1440,10 @@ def consumer_main(worker_id: int):
                                     _mon_result["silver_error"] = str(_sv_exc)[:300]
                                 _t_mon = _ptu_session.get(EtlTask, task_id)
                                 if _t_mon:
-                                    _t_mon.status = "COMPLETED"
-                                    _t_mon.phase = (
+                                    _silver_failed = bool(_mon_result.get("silver_error"))
+                                    _t_mon.status = "FAILED" if _silver_failed else "COMPLETED"
+                                    _t_mon.phase = ("Azure Monitor VM: Bronze gravada, Silver falhou: "
+                                                    + _mon_result["silver_error"][:140]) if _silver_failed else (
                                         f"Azure Monitor VM: {_mon_result.get('bronze_rows', 0)} linhas "
                                         f"({_mon_result.get('series_rows', 0)} série / "
                                         f"{_mon_result.get('gap_rows', 0)} ausência) em "
@@ -1401,9 +1455,19 @@ def consumer_main(worker_id: int):
                                     _t_mon.rows_raw = _mon_result.get("bronze_rows", 0)
                                     _t_mon.billing_periods = _mon_result.get("periods") or []
                                     _t_mon.result_json = _mon_result
+                                    if _task_result.get("metric_day"):
+                                        _save_metric_day_state(
+                                            _ptu_session, _metric_state_meta,
+                                            "FAILED" if _silver_failed else ("COMPLETED_WITH_DATA" if (_mon_result.get("bronze_rows", 0) or _mon_result.get("silver_rows", 0)) else "COMPLETED_EMPTY"),
+                                            int(_mon_result.get("bronze_rows", 0)),
+                                            int(_mon_result.get("silver_rows", 0)),
+                                            _mon_result.get("silver_error") or _mon_result.get("message"),
+                                        )
+                                    if _silver_failed:
+                                        _t_mon.errors = [_mon_result["silver_error"]]
                                     _t_mon.finished_at = datetime.now(timezone.utc)
                                     _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
+                                _inmemory_tasks[task_id]["status"] = "FAILED" if _mon_result.get("silver_error") else "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
                                 continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_vm_inventory":
@@ -1505,7 +1569,18 @@ def consumer_main(worker_id: int):
                                     _akc = _coletor_akc(
                                         _ptu_session, _ptu_conn.id,
                                         task_id=task_id, source_code=source_code,
+                                        **({"window_days": _task_window_days} if _task_window_days else {}),
+                                        **({"until": _task_collection_until} if _task_collection_until else {}),
                                     )
+                                    if not _eh_alocacao and _akc.get("periods"):
+                                        from app.services.silver_normalizer import materialise
+                                        from app.services.azure_source_registry import environment_slug
+                                        _silver = materialise(
+                                            _ptu_session, source_key="container_insights",
+                                            environment=environment_slug(_ptu_conn) or None,
+                                            periods=_akc["periods"],
+                                        )
+                                        _akc["silver_rows"] = _silver.get("rows_silver", 0)
                                 except Exception as _akc_exc:
                                     import traceback as _tb_akc
                                     _tb_akc.print_exc()
@@ -1515,6 +1590,8 @@ def consumer_main(worker_id: int):
                                         _t_akc.phase = f"{_rot} falhou: {str(_akc_exc)[:380]}"
                                         _t_akc.errors = [str(_akc_exc)[:1000]]
                                         _t_akc.finished_at = datetime.now(timezone.utc)
+                                        if _task_result.get("metric_day"):
+                                            _save_metric_day_state(_ptu_session, _metric_state_meta, metric_failure_status(_akc_exc), reason=str(_akc_exc)[:1000])
                                         _ptu_session.commit()
                                     _inmemory_tasks[task_id]["status"] = "FAILED"
                                     _inmemory_tasks.pop(task_id, None)
@@ -1527,9 +1604,20 @@ def consumer_main(worker_id: int):
                                         f"estado {_akc.get('status')}"
                                     )
                                     _t_akc_ok.rows_raw = _akc.get("rows_bronze", 0)
-                                    _t_akc_ok.billing_periods = [_akc.get("period")] if _akc.get("period") else []
+                                    _t_akc_ok.billing_periods = (
+                                        _akc.get("periods") or
+                                        ([_akc.get("period")] if _akc.get("period") else [])
+                                    )
                                     _t_akc_ok.result_json = _akc
                                     _t_akc_ok.finished_at = datetime.now(timezone.utc)
+                                    if not _eh_alocacao and _task_result.get("metric_day"):
+                                        _no_ci_workspaces = not (_akc.get("periods") or []) and not _akc.get("rows_bronze", 0)
+                                        _save_metric_day_state(
+                                            _ptu_session, _metric_state_meta,
+                                            "SOURCE_UNAVAILABLE" if _no_ci_workspaces else ("COMPLETED_WITH_DATA" if (_akc.get("rows_bronze", 0) or _akc.get("silver_rows", 0)) else "COMPLETED_EMPTY"),
+                                            int(_akc.get("rows_bronze", 0)), int(_akc.get("silver_rows", 0)),
+                                            "Nenhum cluster/workspace Container Insights disponível na conexão." if _no_ci_workspaces else _akc.get("status_reason"),
+                                        )
                                     _ptu_session.commit()
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)
@@ -1906,9 +1994,93 @@ def consumer_main(worker_id: int):
     print(f"Worker #{worker_id} stopped.")
 
 
-def _spawn_consumer(worker_id: int) -> None:
+def _spawn_consumer(worker_id: int, manager_pid: int, manager_created_at: float) -> None:
+    # Register inside the child as well: a manager can die between spawn and
+    # its own registry write, leaving an otherwise invisible lock holder.
+    register_consumer(os.getpid(), manager_pid, parent_created_at=manager_created_at)
     os.environ["OPENFINOPS_WORKER_ID"] = str(worker_id)
     consumer_main(worker_id)
+
+
+def _terminate_consumer(proc: multiprocessing.Process, *, grace_seconds: float = 5.0) -> None:
+    """Stop a synchronous consumer so its DB and filesystem locks are released."""
+    if not proc.is_alive():
+        proc.join(timeout=0)
+        return
+    proc.terminate()
+    proc.join(timeout=grace_seconds)
+    if proc.is_alive():
+        proc.kill()
+        proc.join(timeout=grace_seconds)
+
+
+def _watch_stalled_consumers(processes: dict[int, multiprocessing.Process]) -> None:
+    """Kill only the child that owns a stale task, then recover that task row."""
+    timeout_seconds = max(60, int(os.getenv("WORKER_TASK_STALL_TIMEOUT_SECONDS", "900")))
+    for proc in list(processes.values()):
+        if not proc.is_alive() or proc.pid is None:
+            continue
+
+        session = SyncSession()
+        try:
+            task = find_stalled_worker_task(
+                session,
+                proc.pid,
+                stale_after_seconds=timeout_seconds,
+            )
+            task_id = task.id if task is not None else None
+        except Exception:
+            logger.exception("Could not check progress for worker pid %s", proc.pid)
+            session.close()
+            continue
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+        if task_id is None:
+            continue
+
+        logger.error(
+            "Worker pid %s made no task progress for %ss; terminating task %s",
+            proc.pid,
+            timeout_seconds,
+            task_id,
+        )
+        _terminate_consumer(proc)
+        if proc.is_alive():
+            logger.critical("Worker pid %s did not exit after termination", proc.pid)
+            continue
+
+        recovery = SyncSession()
+        try:
+            from app.models.etl_task import EtlTask
+
+            row = recovery.get(EtlTask, task_id)
+            if row is None or row.status != "RUNNING" or row.worker_pid != proc.pid:
+                recovery.rollback()
+                continue
+            outcome = recover_stalled_task(
+                recovery,
+                row,
+                reason=(
+                    f"Sem progresso persistido por {timeout_seconds}s; "
+                    "subprocesso encerrado para liberar a fila"
+                ),
+            )
+            recovery.commit()
+            logger.warning(
+                "Stalled task %s recovered as %s (attempt %s)",
+                task_id,
+                outcome,
+                row.recovery_attempts,
+            )
+        except Exception:
+            recovery.rollback()
+            logger.exception("Could not recover stalled task %s", task_id)
+        finally:
+            recovery.close()
 
 
 def supervisor_main() -> None:
@@ -1929,32 +2101,65 @@ def supervisor_main() -> None:
         )
         if recovered_locks:
             print(f"Released {recovered_locks} stale PostgreSQL advisory lock holder(s)", flush=True)
-        reconcile_stale_running_tasks(startup)
+        # A previous manager may have died while its children are still alive.
+        # The independent supervisor stops those registered children before
+        # recovering their rows. Never reset RUNNING rows on manager startup.
     finally:
         startup.close()
 
     ctx = multiprocessing.get_context("spawn")
+    manager_created_at = psutil.Process(os.getpid()).create_time()
     processes: dict[int, multiprocessing.Process] = {}
     while running:
+        _watch_stalled_consumers(processes)
         for worker_id in range(concurrency):
             proc = processes.get(worker_id)
             if proc is not None and proc.is_alive():
                 continue
             if proc is not None:
                 proc.join(timeout=1)
+                if proc.pid is not None:
+                    recovery = SyncSession()
+                    try:
+                        orphaned = recover_worker_orphaned_tasks(recovery, proc.pid)
+                        if orphaned:
+                            recovery.commit()
+                            logger.warning(
+                                "Recovered tasks after worker pid %s exited: %s",
+                                proc.pid,
+                                orphaned,
+                            )
+                        else:
+                            recovery.rollback()
+                    except Exception:
+                        recovery.rollback()
+                        logger.exception("Could not recover tasks from exited worker pid %s", proc.pid)
+                    finally:
+                        recovery.close()
+                consumer_record_path(proc.pid).unlink(missing_ok=True)
             proc = ctx.Process(
                 target=_spawn_consumer,
-                args=(worker_id,),
+                args=(worker_id, os.getpid(), manager_created_at),
                 name=f"openfinops-worker-{worker_id}",
             )
             proc.start()
+            try:
+                register_consumer(proc.pid, os.getpid(), parent_created_at=manager_created_at)
+            except psutil.NoSuchProcess:
+                logger.warning("Worker child %s exited before registration", proc.pid)
             processes[worker_id] = proc
         time.sleep(2)
 
     for proc in processes.values():
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=5)
+        _terminate_consumer(proc)
+        if not proc.is_alive() and proc.pid is not None:
+            recovery = SyncSession()
+            try:
+                recover_worker_orphaned_tasks(recovery, proc.pid)
+                recovery.commit()
+                consumer_record_path(proc.pid).unlink(missing_ok=True)
+            finally:
+                recovery.close()
     print("FinOps Worker supervisor stopped.")
 
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 import time
+import json
 from pathlib import Path
+
+import psutil
 
 
 def runtime_dir() -> Path:
@@ -29,6 +32,50 @@ def pid_path(worker_id: int) -> Path:
 
 def supervisor_pid_path() -> Path:
     return runtime_dir() / "supervisor.pid"
+
+
+def consumer_record_path(pid: int) -> Path:
+    return runtime_dir() / f"consumer-{pid}.json"
+
+
+def process_matches(pid: int, created_at: float) -> bool:
+    """Guard against PID reuse before signaling a registered subprocess."""
+    try:
+        process = psutil.Process(pid)
+        return process.is_running() and abs(process.create_time() - created_at) < 1
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return False
+
+
+def register_consumer(
+    pid: int, parent_pid: int, *, parent_created_at: float | None = None,
+) -> None:
+    record = {
+        "pid": pid,
+        "created_at": psutil.Process(pid).create_time(),
+        "parent_pid": parent_pid,
+        "parent_created_at": (
+            parent_created_at if parent_created_at is not None
+            else psutil.Process(parent_pid).create_time()
+        ),
+    }
+    path = consumer_record_path(pid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(record))
+    temporary.replace(path)
+
+
+def registered_consumers() -> list[tuple[Path, dict]]:
+    records = []
+    for path in runtime_dir().glob("consumer-*.json"):
+        try:
+            record = json.loads(path.read_text())
+            if all(key in record for key in ("pid", "created_at", "parent_pid", "parent_created_at")):
+                records.append((path, record))
+        except (OSError, ValueError, TypeError):
+            continue
+    return records
 
 
 def touch_heartbeat(worker_id: int) -> None:

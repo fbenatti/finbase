@@ -2320,13 +2320,96 @@ async def get_tables():
     result: dict[str, list[str]] = {}
     for layer in ("bronze", "silver", "gold"):
         try:
-            tables = list_tables(layer)
+            # Temporary publication tables are implementation details, not
+            # datasets. Only hide the exact generated *_stg_<time_ns> shape.
+            tables = [name for name in list_tables(layer) if _staging_table_parts(str(name)) is None]
             if layer == "gold":
                 tables = [name for name in tables if name.startswith("dest_dm_")]
             result[layer] = tables
         except Exception as e:
             result[layer] = [f"error: {e}"]
     return result
+
+
+@router.get("/tables/{layer}/{table_name}/partitions")
+async def get_table_partitions(layer: str, table_name: str):
+    """Return partition metadata for one catalog table (loaded on demand)."""
+    if layer not in {"bronze", "silver", "gold"} or not re.fullmatch(r"[a-zA-Z0-9_]+", table_name):
+        raise HTTPException(status_code=422, detail="Camada ou nome de tabela inválido.")
+    if table_name not in set(list_tables(layer)):
+        raise HTTPException(status_code=404, detail="Tabela não encontrada no catálogo.")
+    qualified = f'iceberg.{layer}."{table_name}$partitions"'
+    catalog_table = None
+    try:
+        catalog_table = get_catalog().load_table((layer, table_name))
+        if not catalog_table.spec().fields:
+            # The logical monthly period for these slices is encoded in the
+            # physical name; asking Trino for $partitions only adds a failing
+            # round trip and made the UI appear to hang.
+            frame = catalog_table.inspect.partitions().to_pandas()
+            return {
+                "layer": layer, "table_name": table_name, "partitioned": False,
+                "partitions": [], "record_count": int(frame["record_count"].sum()) if "record_count" in frame else 0,
+                "file_count": int(frame["file_count"].sum()) if "file_count" in frame else 0,
+                "source": "pyiceberg",
+            }
+    except Exception as metadata_error:
+        logger.debug("Could not inspect Iceberg spec for %s.%s before Trino: %s", layer, table_name, metadata_error)
+    try:
+        rows = await trino_execute(
+            f"SELECT partition, record_count, file_count FROM {qualified} ORDER BY partition",
+            timeout_s=12, max_retries=1,
+        )
+        partitions = []
+        for row in rows:
+            partition = row.get("partition") or {}
+            # Trino exposes the Iceberg partition struct as a positional array
+            # in its REST protocol (one value per partition field).
+            period = (partition.get("_billing_period") if isinstance(partition, dict)
+                      else partition[0] if isinstance(partition, (list, tuple)) and len(partition) == 1
+                      else "/".join(str(value) for value in partition) if isinstance(partition, (list, tuple)) else None)
+            value = str(period) if period is not None else None
+            kind = "dia UTC de métrica" if value and re.fullmatch(r"\d{8}", value) else (
+                "mês de custo/licença" if value and re.fullmatch(r"\d{6}", value) else "partição"
+            )
+            partitions.append({"period": value, "period_kind": kind,
+                               "record_count": int(row.get("record_count") or 0),
+                               "file_count": int(row.get("file_count") or 0)})
+        return {"layer": layer, "table_name": table_name, "partitioned": True,
+                "partitions": partitions, "source": "trino"}
+    except Exception as trino_error:
+        logger.debug("Trino partition metadata unavailable for %s.%s: %s", layer, table_name, trino_error)
+        try:
+            table = catalog_table or get_catalog().load_table((layer, table_name))
+            frame = table.inspect.partitions().to_pandas()
+            if not table.spec().fields:
+                # Some materialized slices encode month/scope in their
+                # physical table name and are not Iceberg-partitioned tables.
+                return {
+                    "layer": layer, "table_name": table_name, "partitioned": False,
+                    "partitions": [], "record_count": int(frame["record_count"].sum()) if "record_count" in frame else 0,
+                    "file_count": int(frame["file_count"].sum()) if "file_count" in frame else 0,
+                    "source": "pyiceberg",
+                }
+            logger.warning("Using PyIceberg partition fallback for %s.%s: %s", layer, table_name, trino_error)
+            partitions = []
+            for row in frame.to_dict(orient="records"):
+                partition = row.get("partition") or {}
+                period = (partition.get("_billing_period") if isinstance(partition, dict)
+                          else partition[0] if isinstance(partition, (list, tuple)) and len(partition) == 1
+                          else None)
+                value = str(period) if period is not None else None
+                kind = "dia UTC de métrica" if value and re.fullmatch(r"\d{8}", value) else (
+                    "mês de custo/licença" if value and re.fullmatch(r"\d{6}", value) else "partição"
+                )
+                partitions.append({"period": value, "period_kind": kind,
+                                   "record_count": int(row.get("record_count") or 0),
+                                   "file_count": int(row.get("file_count") or 0)})
+            return {"layer": layer, "table_name": table_name, "partitioned": True,
+                    "partitions": partitions, "source": "pyiceberg"}
+        except Exception as fallback_error:
+            logger.exception("PyIceberg partition metadata unavailable for %s.%s", layer, table_name)
+            raise HTTPException(status_code=503, detail="Metadados de partição indisponíveis.") from fallback_error
 
 
 @router.get("/staging-tables")

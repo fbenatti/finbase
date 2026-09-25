@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, JSON, ForeignKey, func, Text
+from datetime import datetime, timezone
+
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, JSON, ForeignKey, func, Text, event, inspect
 from app.database import Base
 
 
@@ -33,3 +35,42 @@ class EtlTask(Base):
     finished_at = Column(DateTime(timezone=True), nullable=True)
     # Worker defers tasks that cannot acquire locks so FIFO claim does not spin on the head.
     available_at = Column(DateTime(timezone=True), nullable=True)
+    # Lease/progress metadata used by the worker supervisor to detect a live
+    # process whose synchronous task stopped making progress.
+    worker_pid = Column(Integer, nullable=True)
+    last_progress_at = Column(DateTime(timezone=True), nullable=True)
+    recovery_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+
+
+_PROGRESS_FIELDS = (
+    "phase",
+    "current_blob",
+    "processed_blobs",
+    "rows_raw",
+    "rows_normalized",
+    "rows_destination",
+    "downloaded_bytes_total",
+    "download_bytes",
+    "active_downloads",
+    "download_blobs",
+)
+
+
+@event.listens_for(EtlTask, "before_update")
+def _touch_task_progress_on_update(_mapper, _connection, task):
+    """Treat persisted worker progress changes as activity, not process heartbeats."""
+    if task.phase is not None:
+        task.phase = task.phase[:200]
+    if task.current_blob is not None:
+        task.current_blob = task.current_blob[:500]
+    state = inspect(task)
+    if any(state.attrs[name].history.has_changes() for name in _PROGRESS_FIELDS):
+        task.last_progress_at = datetime.now(timezone.utc)
+
+
+@event.listens_for(EtlTask, "before_insert")
+def _cap_task_text_on_insert(_mapper, _connection, task):
+    if task.phase is not None:
+        task.phase = task.phase[:200]
+    if task.current_blob is not None:
+        task.current_blob = task.current_blob[:500]

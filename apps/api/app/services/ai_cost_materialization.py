@@ -197,7 +197,7 @@ async def materialize_ai_cost_relationships(session: Any, *, run_id: int, progre
         session.commit()
     finally:
         if created:
-            iceberg.cleanup_staged_table(routed)
+            iceberg.cleanup_staged_table(routed, namespace=layers.GOLD)
     return {
         "links": len(links),
         "periods": periods,

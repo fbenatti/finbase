@@ -1,10 +1,12 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
+from app.models.metric_daily_collection import MetricDailyCollection  # noqa: F401
 from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, rightsizing, finops_center
 from app.seed import seed
 from app.services import scheduler_service
@@ -23,6 +25,39 @@ async def _execute_migration(conn, statement: str, *, attempts: int = 5) -> None
     import asyncio as _asyncio
 
     from sqlalchemy import text as _text
+
+    # PostgreSQL pede ACCESS EXCLUSIVE mesmo para ADD COLUMN IF NOT EXISTS.
+    # Em um startup com worker ativo, esse lock pode ficar na fila atrás da
+    # transação da coleta e bloquear as atualizações de progresso de etl_task.
+    # Evite emitir DDL quando o schema já está na versão solicitada.
+    add = re.fullmatch(
+        r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)\s+.+",
+        statement.strip(), re.IGNORECASE | re.DOTALL,
+    )
+    alter_type = re.fullmatch(
+        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) TYPE VARCHAR\((\d+)\)",
+        statement.strip(), re.IGNORECASE,
+    )
+    drop_not_null = re.fullmatch(
+        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) DROP NOT NULL",
+        statement.strip(), re.IGNORECASE,
+    )
+    match = add or alter_type or drop_not_null
+    if match:
+        table_name, column_name = match.group(1), match.group(2)
+        column = (await conn.execute(_text("""
+            SELECT data_type, character_maximum_length, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = :table_name AND column_name = :column_name
+        """), {"table_name": table_name, "column_name": column_name})).first()
+        if add and column:
+            return
+        if alter_type and column and column.data_type == "character varying" \
+                and column.character_maximum_length == int(alter_type.group(3)):
+            return
+        if drop_not_null and column and column.is_nullable == "YES":
+            return
 
     atraso = 1.0
     for tentativa in range(1, attempts + 1):
@@ -185,6 +220,11 @@ async def lifespan(app: FastAPI):
             # reservation_collection (22 chars) excede o VARCHAR(20) original.
             "ALTER TABLE etl_task ALTER COLUMN task_type TYPE VARCHAR(40)",
             "ALTER TABLE etl_task ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ",
+            "ALTER TABLE etl_task ADD COLUMN IF NOT EXISTS worker_pid INTEGER",
+            "ALTER TABLE etl_task ADD COLUMN IF NOT EXISTS last_progress_at TIMESTAMPTZ",
+            "ALTER TABLE etl_task ADD COLUMN IF NOT EXISTS recovery_attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ingested_blob ALTER COLUMN billing_period TYPE VARCHAR(8)",
+            "CREATE INDEX IF NOT EXISTS ix_etl_task_worker_status ON etl_task (worker_pid, status)",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'collection'",
             "ALTER TABLE scheduled_task ALTER COLUMN connection_id DROP NOT NULL",

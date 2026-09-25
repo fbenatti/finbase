@@ -627,8 +627,8 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
 
     elif conn.connector_type == "azure_monitor_vm_metrics":
         # Série de métricas de plataforma das VMs. Sem blob: a janela é em dias,
-        # com padrão de 15 (piloto) e teto de 90.
-        days = int(request.backfill_days or cfg.get("window_days") or 15)
+        # com padrão de 1 dia fechado e teto de 90 para backfill explícito.
+        days = int(request.backfill_days or cfg.get("window_days") or 1)
         days = max(1, min(days, 90))
         result_json = {"window_days": days, "metric_window": True, "user_triggered": True}
         phase = f"Na fila: buscar métricas do Azure Monitor ({days} dias, intervalos de 15 min)"
@@ -1267,7 +1267,7 @@ def _process_blob_for_reprocess(
                 status["phase"] = progress_text
             session.execute(text("""
                 UPDATE etl_task
-                   SET current_blob = :phase, phase = :phase
+                   SET current_blob = :phase, phase = :phase, last_progress_at = now()
                  WHERE id = :task_id AND status = 'RUNNING'
             """), {"phase": progress_text, "task_id": task_id})
             session.commit()

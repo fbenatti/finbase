@@ -6,14 +6,18 @@ import {
   TextField, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, CircularProgress,
   TablePagination, TableSortLabel,
+  Accordion, AccordionSummary, AccordionDetails,
 } from "@mui/material";
 import {
   Storage, AttachMoney, PlayArrow, Refresh, Delete,
   Schema as SchemaIcon, Tune, BarChart, Terminal, Search as SearchIcon, DeleteSweep, TableChart,
+  ExpandMore,
+  Add, Remove,
 } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   getAnalysisHealth, getAnalysisTables, runAnalysisQuery,
+  getAnalysisTablePartitions, AnalysisPartition, AnalysisTablePartitionResult,
   TrinoQueryResult, TrinoHealth, TrinoTableList,
   getAnalysisSources, queryAnalysisSource,
   getAnalysisDestinations, queryAnalysisDestination,
@@ -41,16 +45,44 @@ function filtersFromSearch(params: URLSearchParams): PivotFilter[] {
 
 type AnalysisTab = "destino" | "fontes" | "iceberg" | "staging" | "pivot" | "busca";
 
+interface IcebergTableMember {
+  tableName: string;
+  period?: string;
+  dimension?: string;
+  scopeId?: string;
+}
+
+interface IcebergTableGroup {
+  name: string;
+  members: IcebergTableMember[];
+}
+
+function groupIcebergTables(names: string[]): IcebergTableGroup[] {
+  const groups = new Map<string, IcebergTableGroup>();
+  const costSlice = /^(finops_cost_driver_slice_azure_4p)_(\d{6})_(service|sub_account|region|organization)_(\d+)$/;
+  for (const tableName of names) {
+    const match = tableName.match(costSlice);
+    const groupName = match?.[1] || tableName;
+    const group = groups.get(groupName) || { name: groupName, members: [] };
+    group.members.push(match
+      ? { tableName, period: match[2], dimension: match[3], scopeId: match[4] }
+      : { tableName });
+    groups.set(groupName, group);
+  }
+  return [...groups.values()].map(group => ({
+    ...group,
+    members: group.members.sort((a, b) =>
+      (b.period || "").localeCompare(a.period || "") ||
+      (a.dimension || "").localeCompare(b.dimension || "") ||
+      (a.scopeId || "").localeCompare(b.scopeId || "", undefined, { numeric: true }) ||
+      a.tableName.localeCompare(b.tableName)),
+  })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // Pre-built queries by layer
 const PREBUILT: Record<string, { label: string; sql: string }[]> = {
-  bronze: [
-    { label: "Listar tabelas raw", sql: "SELECT * FROM iceberg.bronze.raw_azure_4p LIMIT 10" },
-    { label: "Contagem por período", sql: "SELECT _billing_period, COUNT(*) AS rows FROM iceberg.bronze.raw_azure_4p GROUP BY _billing_period ORDER BY _billing_period DESC" },
-  ],
-  silver: [
-    { label: "Listar dados Silver Azure 4P", sql: "SELECT * FROM iceberg.silver.azure_4p_dest_modelo_focus LIMIT 10" },
-    { label: "Schema Silver Azure 4P", sql: "SELECT * FROM iceberg.silver.azure_4p_dest_modelo_focus LIMIT 1" },
-  ],
+  bronze: [],
+  silver: [],
   gold: [
     { label: "Top 10 serviços por custo", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
     { label: "Custo por departamento", sql: 'SELECT "departamento", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "departamento" ORDER BY total_billed DESC LIMIT 20' },
@@ -80,6 +112,13 @@ export default function Analysis() {
   const [page, setPage] = useState(0);
   const [stagingTables, setStagingTables] = useState<AnalysisStagingTable[]>([]);
   const [stagingLoading, setStagingLoading] = useState(false);
+  const [selectedIcebergTable, setSelectedIcebergTable] = useState("");
+  const [partitionRows, setPartitionRows] = useState<AnalysisPartition[]>([]);
+  const [partitionsLoading, setPartitionsLoading] = useState(false);
+  const [expandedTableGroups, setExpandedTableGroups] = useState<Set<string>>(new Set());
+  const [expandedTableDetails, setExpandedTableDetails] = useState<Set<string>>(new Set());
+  const [tablePartitionDetails, setTablePartitionDetails] = useState<Record<string, AnalysisTablePartitionResult>>({});
+  const [partitionDetailsLoading, setPartitionDetailsLoading] = useState<Set<string>>(new Set());
 
   // ─── Fontes (Sources) state ───
   const [sources, setSources] = useState<SourceAnalysis[]>([]);
@@ -201,6 +240,75 @@ export default function Analysis() {
   };
 
   const setPrebuilt = (q: string) => { setSql(q); executeSql(q); };
+
+  const selectIcebergTable = async (tableName: string) => {
+    setSelectedIcebergTable(tableName);
+    setSql(`SELECT * FROM iceberg.${layer}.${tableName} LIMIT 10`);
+    setPartitionRows([]);
+    setPartitionsLoading(true);
+    try {
+      const metadata = await getAnalysisTablePartitions(layer, tableName);
+      setPartitionRows(metadata.partitions || []);
+    } catch (e: unknown) {
+      setError(formatApiError(e, "Não foi possível carregar as partições"));
+    } finally { setPartitionsLoading(false); }
+  };
+
+  const toggleTableDetails = async (tableName: string) => {
+    setExpandedTableDetails(current => {
+      const next = new Set(current);
+      if (next.has(tableName)) next.delete(tableName); else next.add(tableName);
+      return next;
+    });
+    if (tablePartitionDetails[tableName]) return;
+    setPartitionDetailsLoading(current => new Set(current).add(tableName));
+    try {
+      const metadata = await getAnalysisTablePartitions(layer, tableName);
+      setTablePartitionDetails(current => ({ ...current, [tableName]: metadata }));
+    } catch (e: unknown) {
+      setError(formatApiError(e, `Não foi possível carregar partições de ${tableName}`));
+    } finally {
+      setPartitionDetailsLoading(current => {
+        const next = new Set(current);
+        next.delete(tableName);
+        return next;
+      });
+    }
+  };
+
+  const icebergTableGroups = useMemo(
+    () => groupIcebergTables(tables[layer] || []),
+    [tables, layer],
+  );
+
+  const renderIcebergMember = (member: IcebergTableMember) => {
+    const detail = tablePartitionDetails[member.tableName];
+    const detailExpanded = expandedTableDetails.has(member.tableName);
+    return (
+      <Paper key={member.tableName} variant="outlined" sx={{ p: 1, bgcolor: "action.hover" }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+          <Typography variant="caption" sx={{ flex: 1, minWidth: 220, overflowWrap: "anywhere", fontFamily: "monospace" }}>
+            {member.period ? `${member.period} · ${member.dimension} · ID ${member.scopeId}` : member.tableName}
+          </Typography>
+          <Button size="small" onClick={() => void selectIcebergTable(member.tableName)}>Usar tabela</Button>
+          <Button size="small" startIcon={detailExpanded ? <Remove /> : <Add />} onClick={() => void toggleTableDetails(member.tableName)}>
+            {detailExpanded ? "Fechar detalhes" : "Partições"}
+          </Button>
+        </Box>
+        {detailExpanded && (
+          <Box sx={{ mt: 1 }}>
+            {!detail && partitionDetailsLoading.has(member.tableName) ? <CircularProgress size={18} /> : detail?.partitioned ? (
+              detail.partitions.length ? <Table size="small"><TableHead><TableRow><TableCell>Dia / período</TableCell><TableCell>Tipo</TableCell><TableCell align="right">Registros</TableCell><TableCell align="right">Arquivos</TableCell></TableRow></TableHead><TableBody>{detail.partitions.map((p) => <TableRow key={`${p.period}-${p.period_kind}`}><TableCell>{p.period || "—"}</TableCell><TableCell>{p.period_kind}</TableCell><TableCell align="right">{p.record_count.toLocaleString()}</TableCell><TableCell align="right">{p.file_count.toLocaleString()}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="caption" color="text.secondary">Nenhuma partição Iceberg.</Typography>
+            ) : detail ? (
+              <Alert severity="info" sx={{ py: 0 }}>Esta tabela física não tem partição Iceberg interna. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).</Alert>
+            ) : !partitionDetailsLoading.has(member.tableName) && detailExpanded ? (
+              <Alert severity="error" sx={{ py: 0 }}>Não foi possível carregar os metadados. Feche e abra os detalhes para tentar novamente.</Alert>
+            ) : null}
+          </Box>
+        )}
+      </Paper>
+    );
+  };
 
   // ─── Data table helpers ───
   const filteredRows = useMemo(() => {
@@ -519,21 +627,13 @@ export default function Analysis() {
         <>
           {/* Layer sub-tabs */}
           <Paper sx={{ mb: 2 }}>
-            <Tabs value={layer} onChange={(_, v) => { setLayer(v); setResult(null); setError(""); }}>
+            <Tabs value={layer} onChange={(_, v) => { setLayer(v); setSelectedIcebergTable(""); setPartitionRows([]); setResult(null); setError(""); }}>
               <Tab label={`Bronze (${(tables.bronze || []).length})`} value="bronze" icon={<Storage />} iconPosition="start" />
               <Tab label={`Silver (${(tables.silver || []).length})`} value="silver" icon={<Tune />} iconPosition="start" />
               <Tab label={`Gold (${(tables.gold || []).length})`} value="gold" icon={<AttachMoney />} iconPosition="start" />
             </Tabs>
           </Paper>
 
-          {layer === "gold" && (
-            <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
-              {(tables.gold || []).map((t) => (
-                <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant="outlined"
-                  onClick={() => setSql(`SELECT * FROM iceberg.gold.${t} LIMIT 10`)} sx={{ cursor: "pointer" }} />
-              ))}
-            </Box>
-          )}
           {layer === "gold" && (
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
@@ -546,8 +646,9 @@ export default function Analysis() {
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
                   {(tables.gold || []).map((t) => (
-                    <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant="outlined"
-                      onClick={() => setSql(`SELECT * FROM iceberg.gold.${t} LIMIT 10`)} sx={{ cursor: "pointer" }}
+                    <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant={selectedIcebergTable === t ? "filled" : "outlined"}
+                      color={selectedIcebergTable === t ? "primary" : "default"}
+                      onClick={() => void selectIcebergTable(t)} sx={{ cursor: "pointer" }}
                       onDelete={() => void removeGoldTable(t)} deleteIcon={<Delete fontSize="small" />} />
                   ))}
                 </Box>
@@ -558,17 +659,80 @@ export default function Analysis() {
             </>
           )}
           {layer !== "gold" && (
-            <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
-              {(tables[layer] || []).map((t) => (
-                <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant="outlined"
-                  onClick={() => setSql(`SELECT * FROM iceberg.${layer}.${t} LIMIT 10`)} sx={{ cursor: "pointer" }} />
-              ))}
-            </Box>
+            <>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
+                <SchemaIcon color="primary" fontSize="small" />
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{layer === "bronze" ? "Bronze" : "Silver"} — grupos e tabelas</Typography>
+                <Chip label={`${(tables[layer] || []).length} tabela(s) física(s)`} size="small" color="primary" variant="outlined" />
+                <Chip label={`${icebergTableGroups.length} grupo(s)`} size="small" variant="outlined" />
+              </Box>
+              <Stack spacing={0.75} sx={{ mb: 2 }}>
+                {icebergTableGroups.map((group) => {
+                  const expanded = expandedTableGroups.has(group.name);
+                  const isFamily = group.members.length > 1;
+                  const toggleGroup = () => setExpandedTableGroups(current => {
+                    const next = new Set(current);
+                    if (next.has(group.name)) next.delete(group.name); else next.add(group.name);
+                    return next;
+                  });
+                  return (
+                    <Paper key={group.name} variant="outlined" sx={{ borderRadius: 1.5, overflow: "hidden" }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.25, py: 0.75 }}>
+                        <Button size="small" variant="outlined" onClick={toggleGroup} sx={{ minWidth: 34, width: 34, height: 32, p: 0 }} aria-label={`${expanded ? "Recolher" : "Expandir"} ${group.name}`}>
+                          {expanded ? <Remove fontSize="small" /> : <Add fontSize="small" />}
+                        </Button>
+                        <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, overflowWrap: "anywhere" }}>{group.name}</Typography>
+                        <Chip size="small" variant="outlined" label={isFamily ? `${group.members.length} tabelas · períodos no nome` : "1 tabela"} />
+                      </Box>
+                      {expanded && (
+                        <Stack spacing={0.5} sx={{ px: 2, pb: 1.25, pt: 0.25 }}>
+                          {isFamily
+                            ? Object.entries(group.members.reduce<Record<string, IcebergTableMember[]>>((byPeriod, member) => {
+                                const period = member.period || "Outros";
+                                (byPeriod[period] ||= []).push(member);
+                                return byPeriod;
+                              }, {})).sort(([a], [b]) => b.localeCompare(a)).map(([period, members]) => (
+                                <Accordion key={period} disableGutters variant="outlined" sx={{ borderRadius: 1.5 }}>
+                                  <AccordionSummary expandIcon={<ExpandMore />}>
+                                    <Typography variant="body2" sx={{ fontWeight: 600 }}>{period} <Typography component="span" variant="caption" color="text.secondary">· {members.length} tabela(s)</Typography></Typography>
+                                  </AccordionSummary>
+                                  <AccordionDetails><Stack spacing={0.5}>{members.map(renderIcebergMember)}</Stack></AccordionDetails>
+                                </Accordion>
+                              ))
+                            : group.members.map(renderIcebergMember)}
+                        </Stack>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            </>
+          )}
+          {layer === "gold" && selectedIcebergTable && (
+            <Accordion disableGutters sx={{ mb: 2, border: "1px solid", borderColor: "divider", borderRadius: "8px !important" }}>
+              <AccordionSummary expandIcon={<ExpandMore />}><Typography variant="body2" sx={{ fontWeight: 600 }}>Partições de {selectedIcebergTable}</Typography></AccordionSummary>
+              <AccordionDetails>
+                {partitionsLoading ? <CircularProgress size={20} /> : partitionRows.length ? (
+                  <Table size="small"><TableHead><TableRow><TableCell>Dia / período (UTC quando diário)</TableCell><TableCell>Tipo</TableCell><TableCell align="right">Registros</TableCell><TableCell align="right">Arquivos</TableCell></TableRow></TableHead>
+                    <TableBody>{partitionRows.map((p) => <TableRow key={`${p.period}-${p.period_kind}`}><TableCell>{p.period || "—"}</TableCell><TableCell>{p.period_kind}</TableCell><TableCell align="right">{p.record_count.toLocaleString()}</TableCell><TableCell align="right">{p.file_count.toLocaleString()}</TableCell></TableRow>)}</TableBody></Table>
+                ) : <Typography variant="body2" color="text.secondary">Nenhuma partição registrada.</Typography>}
+              </AccordionDetails>
+            </Accordion>
           )}
 
           <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
-              {(PREBUILT[layer] || []).map((q) => (
+              {((layer === "bronze" || layer === "silver")
+                ? (selectedIcebergTable ? [
+                    { label: "Amostra da tabela selecionada", sql: `SELECT * FROM iceberg.${layer}.${selectedIcebergTable} LIMIT 10` },
+                    { label: "Contagem por período", sql: `SELECT _billing_period, COUNT(*) AS rows FROM iceberg.${layer}.${selectedIcebergTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
+                  ] : [])
+                : layer === "gold"
+                  ? (selectedIcebergTable ? (PREBUILT.gold || []).map(q => ({
+                      ...q,
+                      sql: q.sql.split("iceberg.gold.dest_modelo_focus").join(`iceberg.gold.${selectedIcebergTable}`),
+                    })) : [])
+                  : (PREBUILT[layer] || [])).map((q) => (
                 <Button key={q.label} size="small" variant="outlined" onClick={() => setPrebuilt(q.sql)}>{q.label}</Button>
               ))}
             </Box>

@@ -3504,6 +3504,26 @@ export async function getAnalysisTables(): Promise<TrinoTableList> {
   return data;
 }
 
+export interface AnalysisPartition {
+  period: string | null;
+  period_kind: string;
+  record_count: number;
+  file_count: number;
+}
+
+export interface AnalysisTablePartitionResult {
+  partitions: AnalysisPartition[];
+  source: string;
+  partitioned?: boolean;
+  record_count?: number;
+  file_count?: number;
+}
+
+export async function getAnalysisTablePartitions(layer: string, table: string): Promise<AnalysisTablePartitionResult> {
+  const { data } = await api.get(`/analysis/tables/${layer}/${table}/partitions`, { timeout: 20000 });
+  return data;
+}
+
 export async function getAnalysisStagingTables(): Promise<
   AnalysisStagingTable[]
 > {
@@ -5408,6 +5428,7 @@ export async function getRightsizingOverview(): Promise<RightsizingOverview> {
 export interface FinOpsOverview {
   scope: Record<string, unknown>;
   currency: string | null;
+  quality: { warnings: string[] };
   data: {
     cards: {
       custo_mes_completo: { periodo: string | null; valor: number | null };
@@ -5417,7 +5438,14 @@ export interface FinOpsOverview {
         delta?: number; delta_pct?: number | null;
       };
       custo_total_historico: { valor: number; competencias: number; nota: string };
-      run_rate: { mensal: number | null; anual?: number | null; meses: number };
+      run_rate: { mensal: number | null; anual?: number | null; meses: number; periodos?: string[] };
+      freshness: {
+        latest_available_period: string | null; latest_available_status: string | null;
+        latest_complete_period: string | null; periods_without_complete_coverage: string[];
+        metric_observations_through_utc: string | null; metric_resources: number;
+        disk_resources_with_metrics: number; metric_window_days: number; metric_observed_days: number;
+        metric_observations_from_utc: string | null; metric_from_day: string; metric_to_day: string;
+      };
       economia: { identificada: number; aprovada: number; acoes: number; nota: string };
     };
     principais_mudancas: Array<{
@@ -5429,8 +5457,11 @@ export interface FinOpsOverview {
   };
 }
 
-export async function getFinopsOverview(): Promise<FinOpsOverview> {
-  const { data } = await api.get("/finops/overview");
+export interface FinOpsMetricWindow { from_day: string; to_day: string; requested_days: number; observed_days: number | null }
+export type FinOpsMetricWindowParams = Partial<Pick<FinOpsMetricWindow, "from_day" | "to_day">>;
+
+export async function getFinopsOverview(window: FinOpsMetricWindowParams = {}): Promise<FinOpsOverview> {
+  const { data } = await api.get("/finops/overview", { params: window });
   return data;
 }
 
@@ -5438,20 +5469,188 @@ export interface FinOpsAcao {
   recurso: string; resource_id: string; tipo_acao: string;
   de: { sku: string; vcpus: number | null; memoria_gb: number | null; custo_mensal: number | null };
   para: { sku: string; vcpus: number | null; memoria_gb: number | null; custo_mensal: number | null };
-  economia_mensal: number; economia_anual: number; economia_pct: number | null;
+  economia_mensal: number | null; economia_anual: number | null; economia_pct: number | null;
   cpu_p95: number | null; dias_observados: number;
+  janela_solicitada_dias: number; perfil_atualizado_em: string | null;
   confianca: string; verdict: string; status_revisao: string; vetor: string | null;
+  vendor_from?: "Intel" | "AMD" | null; vendor_to?: "Intel" | "AMD" | null;
+  family_change?: boolean;
+  profile_status?: "STALE" | "CURRENT" | "UNKNOWN";
+  dias_serie_atual?: number;
+  metrics_observed_through_utc?: string | null;
 }
 
 export interface FinOpsActions {
   data: {
-    resumo: { por_estado: Record<string, number>; economia_identificada_mensal: number; quantidade: number };
+    resumo: {
+      por_estado: Record<string, number>;
+      economia_identificada_mensal: number;
+      quantidade: number;
+      quantidade_validas: number;
+      quantidade_requer_validacao: number;
+      perfis_antigos: number;
+      janela_solicitada_dias: number; dias_observados: number; perfil_atualizado_em: string | null;
+    };
     acoes: FinOpsAcao[];
   };
 }
 
 export async function getFinopsActions(): Promise<FinOpsActions> {
   const { data } = await api.get("/finops/actions");
+  return data;
+}
+
+export interface FinOpsFamilyOption {
+  vendor: "Intel" | "AMD";
+  sku: string;
+  vcpus: number;
+  memory_gb: number;
+  cost_projected: number | null;
+  saving: number | null;
+  price_source: string | null;
+  price_comparable: boolean;
+  is_deterministic_target?: boolean;
+}
+export interface FinOpsActionDetail {
+  recommendation_profile_status: "STALE" | "CURRENT" | "UNKNOWN";
+  recommendation_built_at: string | null;
+  metrics_observed_through_utc: string | null;
+  action: {
+    resource_id: string;
+    resource_name: string | null;
+    region_id: string | null;
+    sku_from: string;
+    sku_to: string;
+    vcpus_from: number | null;
+    memory_gb_from: number | null;
+    vcpus_to: number | null;
+    memory_gb_to: number | null;
+    saving_monthly: number | null;
+    cost_from_current: number | null;
+    cost_to_estimated: number | null;
+    cpu_p95: number | null;
+    mem_p95: number | null;
+    observed_days: number;
+    verdict: string;
+    veto_reason: string | null;
+    confidence: string | null;
+    status_revisao: string;
+    vendor_from: "Intel" | "AMD" | null;
+    vendor_to: "Intel" | "AMD" | null;
+    family_change: boolean;
+    price_source_from: string | null;
+    cost_projection_method?: string | null;
+  };
+  profiles: Array<{
+    metric: string; metric_unit?: string | null; p50: number | null; p95: number | null; p99: number | null;
+    value_min: number | null; value_max: number | null; value_avg: number | null;
+    observed_days: number | null; samples: number | null; coverage: number | null;
+    confidence: string | null; profile_built_at?: string | null;
+  }>;
+  series: Array<{
+    bucket_start_utc: string; metric: string; value: number; value_min?: number; value_max?: number;
+    metric_unit: string | null; observed_samples?: number;
+    quality_status?: string; quality_reason?: string | null;
+  }>;
+  metric_window: FinOpsMetricWindow;
+  family_options: FinOpsFamilyOption[];
+  aks_topology?: {
+    status: "AVAILABLE" | "AMBIGUOUS" | "UNAVAILABLE";
+    cluster_resource_id?: string;
+    cluster_name?: string;
+    region?: string;
+    pool_name?: string;
+    workers?: number;
+    pool_mode?: string | null;
+    total_workers?: number;
+    snapshot_date?: string | null;
+    kubernetes_version?: string | null;
+    orchestrator?: string | null;
+    os_type?: string | null;
+    vmss_resource_group?: string | null;
+    vmss_inventory_snapshot?: string | null;
+    container_insights_status?: string;
+    container_insights_reason?: string;
+    cost_per_worker?: number | null;
+    saving_per_worker?: number | null;
+    pools?: Array<{
+      name: string; workers: number; sku: string | null; mode: string | null;
+      allocation_weight: number; allocation_status: string | null; snapshot_date: string | null;
+    }>;
+    container_metrics?: Array<{
+      record_kind: string | null; metric_name: string | null; metric_average: number | null;
+      samples: number | null; nodes: number | null; pods: number | null; containers: number | null;
+      kubernetes_version: string | null; coverage_status: string | null; coverage_reason: string | null;
+      namespace: string | null; computer: string | null; snapshot_date: string | null;
+    }>;
+    container_inventory?: Array<{
+      record_kind: string | null; metric_name: string | null; metric_average: number | null;
+      samples: number | null; nodes: number | null; pods: number | null; containers: number | null;
+      kubernetes_version: string | null; coverage_status: string | null; coverage_reason: string | null;
+      namespace: string | null; computer: string | null; snapshot_date: string | null;
+    }>;
+    container_coverage?: Array<{
+      record_kind: string | null; metric_name: string | null; metric_average: number | null;
+      samples: number | null; nodes: number | null; pods: number | null; containers: number | null;
+      kubernetes_version: string | null; coverage_status: string | null; coverage_reason: string | null;
+      namespace: string | null; computer: string | null; snapshot_date: string | null;
+    }>;
+    namespace_allocations?: Array<{
+      allocation_key: string | null; namespace: string | null; allocation_weight: number | null;
+      weight_basis: string | null; allocation_status: string | null; status_reason: string | null;
+      snapshot_date: string | null;
+    }>;
+    reason?: string;
+  } | null;
+  family_note: string;
+  projection_note: string;
+}
+export async function getFinopsActionDetail(resourceId: string, window: FinOpsMetricWindowParams = {}): Promise<FinOpsActionDetail> {
+  const { data } = await api.get("/finops/actions/detail", { params: { resource_id: resourceId, ...window } });
+  return data;
+}
+export interface FinOpsNamespaceDetail {
+  cluster_resource_id: string;
+  cluster_name: string | null;
+  region: string | null;
+  kubernetes_version: string | null;
+  namespace: string;
+  series: Array<{
+    snapshot_date: string | null; record_kind: string | null; metric_name: string | null;
+    metric_average: number | null; samples: number | null; nodes: number | null;
+    pods: number | null; containers: number | null; kubernetes_version: string | null;
+    namespace: string | null; computer: string | null; coverage_status: string | null;
+    coverage_reason: string | null;
+  }>;
+  allocations: Array<{
+    namespace: string | null; allocation_weight: number | null; weight_basis: string | null;
+    allocation_status: string | null; status_reason: string | null; snapshot_date: string | null;
+  }>;
+  metric_window: FinOpsMetricWindow;
+}
+export async function getFinopsNamespaceDetail(resourceId: string, namespace: string, window: FinOpsMetricWindowParams = {}): Promise<FinOpsNamespaceDetail> {
+  const { data } = await api.get("/finops/actions/namespace-detail", { params: { resource_id: resourceId, namespace, ...window } });
+  return data;
+}
+export interface FinOpsWorkerDetail {
+  cluster_resource_id: string;
+  cluster_name: string | null;
+  region: string | null;
+  kubernetes_version: string | null;
+  worker: string;
+  series: FinOpsNamespaceDetail["series"];
+  metric_window: FinOpsMetricWindow;
+}
+export async function getFinopsWorkerDetail(resourceId: string, worker: string, window: FinOpsMetricWindowParams = {}): Promise<FinOpsWorkerDetail> {
+  const { data } = await api.get("/finops/actions/worker-detail", { params: { resource_id: resourceId, worker, ...window } });
+  return data;
+}
+export async function getFinopsJevReview(resourceId: string): Promise<{
+  status: string; answers?: Record<string, unknown>; reason?: string;
+  model?: string | null;
+  deterministic_verdict: string; applied: boolean; choices?: Record<string, string>;
+}> {
+  const { data } = await api.post("/finops/actions/jev-review", { resource_id: resourceId });
   return data;
 }
 
@@ -5473,5 +5672,58 @@ export async function getFinopsNavigate(
   const { data } = await api.get("/finops/navigate", {
     params: { dim, ...filtros },
   });
+  return data;
+}
+
+export interface FinOpsVendorComparison {
+  counts: { Intel: number; AMD: number; other: number };
+  total_servers: number;
+  shares_pct: { Intel: number; AMD: number; other: number };
+  estimated_monthly_saving: number | null;
+  currency: string | null;
+  savings_by_currency: Record<string, number>;
+  servers_with_comparable_saving: number;
+  cost_basis?: { source: string; hours_per_month: number; region_must_match: boolean };
+  pairs: Array<{
+    sku_from: string; sku_to: string; vendor_from: string; vendor_to: string;
+    servers: number; saving_monthly: number | null; price_source: string | null; currency: string | null;
+    cost_current_monthly?: number | null; cost_target_monthly?: number | null; cost_basis?: string;
+    price_currency?: string | null; price_unit?: string | null; price_comparable?: boolean;
+    cost_available?: boolean; comparison_status?: string;
+  }>;
+  method: string;
+}
+export async function getFinopsVendorComparison(): Promise<FinOpsVendorComparison> {
+  const { data } = await api.get("/finops/vendor-comparison");
+  return data;
+}
+
+export interface FinOpsDiskAction {
+  resource_id: string; resource_name: string | null; sku: string; tier: string;
+  size_gib: number | null; region: string | null; billing_period: string | null;
+  effective_cost: number | null; currency: string | null; charge_description: string | null;
+  read_iops_p95: number | null; write_iops_p95: number | null;
+  total_iops_p95_conservative: number | null; throughput_mbps_p95_conservative: number | null;
+  samples: number; last_metric_at: string | null; action_state: string;
+  compatible_target_tiers: Array<{ family: string; tier: string; redundancy?: string; max_iops?: number;
+    max_throughput_mbps?: number; provisioned_iops?: number; provisioned_throughput_mbps?: number }>;
+}
+export interface FinOpsDiskActions {
+  total_disks: number; tier_counts: Record<string, number>; disks_with_direct_metrics: number;
+  disks_ready_for_comparison: number; billing_period: string | null; metric_window_days: number;
+  metric_window: FinOpsMetricWindow;
+  actions: FinOpsDiskAction[]; notes: string[];
+}
+export async function getFinopsDiskActions(window: FinOpsMetricWindowParams = {}): Promise<FinOpsDiskActions> {
+  const { data } = await api.get("/finops/disk-actions", { params: window });
+  return data;
+}
+export async function getFinopsDiskActionDetail(resourceId: string, window: FinOpsMetricWindowParams = {}): Promise<{
+  disk: { resource_id: string; resource_name: string; resource_sku: string; sku_capacity: number; region_id: string };
+  series: Array<{ bucket_start_utc: string; metric: string; value: number; metric_unit: string | null }>;
+  metric_window_days: number;
+  metric_window: FinOpsMetricWindow;
+}> {
+  const { data } = await api.get("/finops/disk-actions/detail", { params: { resource_id: resourceId, ...window } });
   return data;
 }

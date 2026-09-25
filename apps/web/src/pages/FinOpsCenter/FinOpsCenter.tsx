@@ -7,16 +7,18 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert, Box, Card, CardContent, Chip, CircularProgress, Collapse,
+  Alert, Box, Card, CardContent, Chip, CircularProgress,
   Stack, Tab, Tabs, Table, TableBody, TableCell, TableHead, TableRow,
   Typography,
 } from "@mui/material";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import {
   FinOpsAcao, FinOpsActions, FinOpsNavigate, FinOpsOverview,
   getFinopsActions, getFinopsOverview, getFinopsNavigate,
 } from "../../services/api";
+import FinOpsActionDialog from "./FinOpsActionDialog";
+import FinOpsVendorComparison from "./FinOpsVendorComparison";
+import FinOpsDiskActions from "./FinOpsDiskActions";
 
 const brl = (v: unknown) =>
   v == null
@@ -25,6 +27,20 @@ const brl = (v: unknown) =>
 
 const pctNum = (v: unknown) =>
   v == null ? "—" : `${Number(v) > 0 ? "+" : ""}${Number(v).toFixed(1)}%`;
+const periodLabel = (period: string | null | undefined) => {
+  if (!period || !/^\d{6}$/.test(period)) return period ?? "—";
+  return new Date(Number(period.slice(0, 4)), Number(period.slice(4, 6)) - 1, 1)
+    .toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+};
+const utcDateTime = (value: string | null | undefined) => {
+  if (!value) return "sem observação recente";
+  const iso = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+};
+const utcDayLabel = (value: string | null | undefined) => {
+  if (!value || !/^\d{8}$/.test(value)) return value ?? "—";
+  return `${value.slice(6, 8)}/${value.slice(4, 6)}/${value.slice(0, 4)}`;
+};
 
 const STATUS_COR: Record<string, "success" | "warning" | "info" | "default"> = {
   COMPLETE: "success",
@@ -48,7 +64,7 @@ export default function FinOpsCenter() {
   const [aba, setAba] = useState(0);
   const [ov, setOv] = useState<FinOpsOverview | null>(null);
   const [acoes, setAcoes] = useState<FinOpsActions | null>(null);
-  const [aberta, setAberta] = useState<number | null>(null);
+  const [resourceDetail, setResourceDetail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -105,11 +121,17 @@ export default function FinOpsCenter() {
       <Typography color="text.secondary" sx={{ mb: 2 }}>
         Custo, mudança e ação — no cubo reconciliado ({moeda}).
       </Typography>
+      {ov.quality.warnings.map((warning) => <Alert key={warning} severity="warning" sx={{ mb: 2 }}>{warning}</Alert>)}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Métricas de uso: janela UTC de {utcDayLabel(c.freshness.metric_from_day)} a {utcDayLabel(c.freshness.metric_to_day)} ({c.freshness.metric_window_days} dias pedidos); há amostras em {c.freshness.metric_observed_days} dias, de {utcDateTime(c.freshness.metric_observations_from_utc)} a {utcDateTime(c.freshness.metric_observations_through_utc)}. Há dados em {c.freshness.metric_observed_days} de {c.freshness.metric_window_days} dias; dias sem amostras permanecem como lacunas. {c.freshness.metric_resources.toLocaleString("pt-BR")} resource IDs têm métricas. Inventário, custo e série são vinculados por resource ID.
+      </Alert>
 
       <Tabs value={aba} onChange={(_e, v: number) => setAba(v)} sx={{ mb: 2 }}>
         <Tab label="Visão geral" />
-        <Tab label={`Ações (${acoes.data.resumo.quantidade})`} />
+        <Tab label={`Ações (${acoes.data.resumo.quantidade} · ${acoes.data.resumo.quantidade_validas} válidas)`} />
         <Tab label="Onde está o custo" />
+        <Tab label="Intel x AMD" />
+        <Tab label="Ações de disco" />
       </Tabs>
 
       {/* ── Visão geral ─────────────────────────────────────────── */}
@@ -117,11 +139,11 @@ export default function FinOpsCenter() {
         <>
           <Stack direction="row" spacing={2} sx={{ mb: 3, flexWrap: "wrap", gap: 2 }}>
             <CardKpi
-              titulo={`Custo — último mês completo (${c.custo_mes_completo.periodo ?? "—"})`}
+              titulo={`Última competência completa (${periodLabel(c.custo_mes_completo.periodo)})`}
               valor={brl(c.custo_mes_completo.valor)}
             />
             <CardKpi
-              titulo={`Variação vs ${c.variacao_mom.periodo_anterior ?? "—"}`}
+              titulo={`Variação ${periodLabel(c.variacao_mom.periodo_atual)} vs ${periodLabel(c.variacao_mom.periodo_anterior)}`}
               valor={c.variacao_mom.comparavel ? `${brl(c.variacao_mom.delta)} (${pctNum(c.variacao_mom.delta_pct)})` : "—"}
               cor={c.variacao_mom.comparavel && (c.variacao_mom.delta ?? 0) > 0 ? "error.main" : "success.main"}
               nota={c.variacao_mom.comparavel ? undefined : c.variacao_mom.reason}
@@ -129,7 +151,7 @@ export default function FinOpsCenter() {
             <CardKpi
               titulo="Run rate anual"
               valor={brl(c.run_rate.anual)}
-              nota={`${c.run_rate.meses} meses comparáveis`}
+              nota={`${c.run_rate.meses} meses consecutivos${c.run_rate.periodos?.length ? ` · ${periodLabel(c.run_rate.periodos[0])}–${periodLabel(c.run_rate.periodos[c.run_rate.periodos.length - 1])}` : ""}`}
             />
             <CardKpi
               titulo="Economia identificada/mês"
@@ -144,7 +166,7 @@ export default function FinOpsCenter() {
               <Chip
                 key={p.periodo}
                 size="small"
-                label={`${p.periodo} ${brl(p.custo)}`}
+                label={`${periodLabel(p.periodo)} · ${brl(p.custo)} · ${p.status === "COMPLETE" ? "fechado" : p.status === "CURRENT_OPEN" ? "em andamento" : "incompleto"}`}
                 color={STATUS_COR[p.status] ?? "default"}
                 variant={p.status === "COMPLETE" ? "outlined" : "filled"}
               />
@@ -199,11 +221,14 @@ export default function FinOpsCenter() {
         <Card>
           <CardContent>
             <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-              {acoes.data.resumo.quantidade} ações propostas — {brl(acoes.data.resumo.economia_identificada_mensal)}/mês
+              {acoes.data.resumo.quantidade} recomendações — {brl(acoes.data.resumo.economia_identificada_mensal)}/mês identificados
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-              estimativa mensal; aprovada não é realizada · janela de 15 dias
+              {acoes.data.resumo.quantidade_validas} válidas · {acoes.data.resumo.quantidade_requer_validacao} requerem validação · savings contam somente vereditos válidos · série atual: {acoes.data.resumo.dias_observados}/{acoes.data.resumo.janela_solicitada_dias} dias com amostras{acoes.data.resumo.perfil_atualizado_em ? ` · snapshots de recomendação atualizados ${utcDateTime(acoes.data.resumo.perfil_atualizado_em)}` : ""}
             </Typography>
+            {acoes.data.resumo.perfis_antigos > 0 && <Alert severity="warning" sx={{ mb: 2 }}>
+              {acoes.data.resumo.perfis_antigos} recomendações usam um perfil anterior à amostra 4P mais recente. Elas continuam visíveis como snapshot, mas não foram recalculadas com a janela diária atual.
+            </Alert>}
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -213,16 +238,15 @@ export default function FinOpsCenter() {
                   <TableCell align="right">Economia/mês</TableCell>
                   <TableCell>Economia/ano</TableCell>
                   <TableCell>Confiança</TableCell>
-                  <TableCell>Dias</TableCell>
+                  <TableCell>Observações</TableCell>
                   <TableCell>Status</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {acoes.data.acoes.map((a: FinOpsAcao, i: number) => (
-                  <>
-                    <TableRow key={a.resource_id} hover onClick={() => setAberta(aberta === i ? null : i)} sx={{ cursor: "pointer" }}>
+                {acoes.data.acoes.map((a: FinOpsAcao) => (
+                    <TableRow key={a.resource_id} hover onClick={() => setResourceDetail(a.resource_id)} sx={{ cursor: "pointer" }}>
                       <TableCell>
-                        {aberta === i ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                        <InfoOutlinedIcon fontSize="small" color="action" />
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>{a.recurso}</Typography>
@@ -233,42 +257,14 @@ export default function FinOpsCenter() {
                         <Typography variant="caption" color="text.secondary">
                           {a.de.vcpus} vCPU → {a.para.vcpus} vCPU · {a.de.memoria_gb} → {a.para.memoria_gb} GB
                         </Typography>
+                        {a.family_change && <Chip size="small" color="info" variant="outlined" label={`${a.vendor_from} → ${a.vendor_to}`} sx={{ mt: 0.5 }} />}
                       </TableCell>
                       <TableCell align="right" sx={{ color: "success.main", fontWeight: 700 }}>{brl(a.economia_mensal)}</TableCell>
                       <TableCell align="right">{brl(a.economia_anual)}</TableCell>
                       <TableCell><Chip size="small" label={a.confianca} color={a.confianca === "alta" ? "success" : a.confianca === "media" ? "warning" : "default"} /></TableCell>
-                      <TableCell>{a.dias_observados}</TableCell>
+                      <TableCell><Typography variant="body2">{a.dias_observados} no perfil</Typography><Typography variant="caption" color="text.secondary">{a.dias_serie_atual ?? 0} dias atuais</Typography></TableCell>
                       <TableCell><Chip size="small" label={a.status_revisao} /></TableCell>
                     </TableRow>
-                    <TableRow key={`${a.resource_id}-det`}>
-                      <TableCell colSpan={8} sx={{ py: 0 }}>
-                        <Collapse in={aberta === i} unmountOnExit>
-                          <Box sx={{ m: 2 }}>
-                            <Typography variant="caption" color="text.secondary">Detalhe da ação</Typography>
-                            <Stack direction="row" spacing={3} sx={{ mt: 1, flexWrap: "wrap", gap: 2 }}>
-                              <Box>
-                                <Typography variant="caption" color="text.secondary">Hoje</Typography>
-                                <Typography variant="body2">{a.de.sku} — {a.de.vcpus} vCPU, {a.de.memoria_gb} GB</Typography>
-                                <Typography variant="body2">{brl(a.de.custo_mensal)}/mês</Typography>
-                              </Box>
-                              <Box>
-                                <Typography variant="caption" color="text.secondary">Proposto</Typography>
-                                <Typography variant="body2" color="success.main">{a.para.sku} — {a.para.vcpus} vCPU, {a.para.memoria_gb} GB</Typography>
-                                <Typography variant="body2">{brl(a.para.custo_mensal)}/mês</Typography>
-                              </Box>
-                              <Box>
-                                <Typography variant="caption" color="text.secondary">Evidência</Typography>
-                                <Typography variant="body2">CPU p95 {a.cpu_p95 != null ? `${Number(a.cpu_p95).toFixed(1)}%` : "—"}</Typography>
-                                <Typography variant="body2">{a.dias_observados} dias observados</Typography>
-                                <Typography variant="body2">veredito {a.verdict}; revisão {a.status_revisao}</Typography>
-                              </Box>
-                            </Stack>
-                            {a.vetor && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>{a.vetor}</Typography>}
-                          </Box>
-                        </Collapse>
-                      </TableCell>
-                    </TableRow>
-                  </>
                 ))}
               </TableBody>
             </Table>
@@ -326,6 +322,13 @@ export default function FinOpsCenter() {
           </CardContent>
         </Card>
       )}
+      {aba === 3 && <FinOpsVendorComparison />}
+      {aba === 4 && <FinOpsDiskActions />}
+      <FinOpsActionDialog
+        open={resourceDetail !== null}
+        resourceId={resourceDetail}
+        onClose={() => setResourceDetail(null)}
+      />
     </Box>
   );
 }

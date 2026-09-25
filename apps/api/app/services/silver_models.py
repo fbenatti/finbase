@@ -96,7 +96,8 @@ METRIC_SERIES = SilverModel(
         _f("value_minimum", "decimal", ROLE_MEASURE),
         _f("value_maximum", "decimal", ROLE_MEASURE),
         _f("value_total", "decimal", ROLE_MEASURE),
-        _f("sample_count", "bigint", ROLE_MEASURE),
+        _f("sample_count", "double", ROLE_MEASURE,
+           notes="Agregação count devolvida pela Azure; pode ser fracionária em métricas de disco."),
         _f("value", "decimal", ROLE_MEASURE, notes="Valor canônico da série."),
         _f("quality_status", "varchar", ROLE_QUALITY, required=True,
            notes="OK | GAP | NOT_AVAILABLE. Ausência nunca vira zero."),
@@ -747,6 +748,55 @@ RESOURCE_PROFILE_WINDOW = SilverModel(
     ),
 )
 
+# Perfil diário separado do agregado legado mensal. A tabela antiga permanece
+# intacta para auditoria e não pode ser confundida com a nova série 4P.
+RESOURCE_PROFILE_DAILY_WINDOW = SilverModel(
+    name="resource_profile_daily_window",
+    table="resource_profile_daily_window",
+    description="Perfil de uso 4P calculado sobre partições diárias UTC e com custo mensal alocado explicitamente.",
+    grain=("resource_id", "metric", "window_from_day", "window_to_day", "series_source_connection_id", "series_owner"),
+    primary_measure="effective_cost",
+    time_field="window_to_day",
+    fields=(
+        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("resource_name", "varchar", ROLE_DIMENSION),
+        _f("resource_sku", "varchar", ROLE_DIMENSION),
+        _f("resource_state", "varchar", ROLE_DIMENSION),
+        _f("region_id", "varchar", ROLE_DIMENSION),
+        _f("sub_account_id", "varchar", ROLE_IDENTITY),
+        _f("resource_type", "varchar", ROLE_DIMENSION),
+        _f("metric", "varchar", ROLE_IDENTITY, required=True),
+        _f("billing_period", "varchar", ROLE_IDENTITY, notes="Mês de custo associado; distinto da janela de perfil."),
+        _f("window_from_day", "varchar", ROLE_TIME, required=True),
+        _f("window_to_day", "varchar", ROLE_TIME, required=True),
+        _f("requested_days", "bigint", ROLE_QUALITY),
+        _f("observed_days", "bigint", ROLE_QUALITY),
+        _f("samples", "bigint", ROLE_QUALITY),
+        _f("value_min", "double", ROLE_MEASURE),
+        _f("p50", "double", ROLE_MEASURE),
+        _f("p95", "double", ROLE_MEASURE),
+        _f("p99", "double", ROLE_MEASURE),
+        _f("value_max", "double", ROLE_MEASURE),
+        _f("value_avg", "double", ROLE_MEASURE),
+        _f("coverage", "double", ROLE_QUALITY),
+        _f("confidence", "varchar", ROLE_QUALITY),
+        _f("cost_window_amount", "double", ROLE_MEASURE,
+           notes="Custo mensal rateado pelos dias de cada mês que intersectam a janela UTC."),
+        _f("effective_cost", "double", ROLE_MEASURE,
+           notes="Run rate mensal: custo alocado na janela / dias da janela × 30,4375."),
+        _f("cost_proration_rule", "varchar", ROLE_QUALITY),
+        _f("billed_cost", "varchar", ROLE_QUALITY),
+        _f("consumed_quantity", "varchar", ROLE_QUALITY),
+        _f("pricing_currency", "varchar", ROLE_QUALITY),
+        _f("profile_hash", "varchar", ROLE_QUALITY),
+        _f("profile_built_at", "varchar", ROLE_TIME),
+        _f("series_source_connection_id", "bigint", ROLE_QUALITY, required=True),
+        _f("series_owner", "varchar", ROLE_QUALITY, required=True),
+        _f("_billing_period", "varchar", ROLE_QUALITY),
+        _f("_processed_at", "varchar", ROLE_QUALITY),
+    ),
+)
+
 
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
@@ -762,6 +812,7 @@ MODELS: dict[str, SilverModel] = {
     RIGHTSIZING_CANDIDATE.name: RIGHTSIZING_CANDIDATE,
     RIGHTSIZING_DECISION.name: RIGHTSIZING_DECISION,
     RESOURCE_PROFILE_WINDOW.name: RESOURCE_PROFILE_WINDOW,
+    RESOURCE_PROFILE_DAILY_WINDOW.name: RESOURCE_PROFILE_DAILY_WINDOW,
 }
 
 

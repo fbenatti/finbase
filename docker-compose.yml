@@ -108,6 +108,9 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     command: ["python", "-u", "supervisor.py"]
+    # The watchdog must signal the actual worker children before recovering
+    # their database leases. A separate PID namespace makes their PIDs invalid.
+    pid: "service:worker"
     restart: unless-stopped
     environment:
       DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
@@ -116,6 +119,9 @@ services:
     volumes:
       - worker_runtime:/run/openfinops-worker
     depends_on:
+      worker:
+        condition: service_started
+        restart: true
       postgres:
         condition: service_healthy
 

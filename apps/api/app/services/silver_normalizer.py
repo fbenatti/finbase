@@ -205,7 +205,13 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         # `sku` (Resource Graph) e `vm_size` (coletor de VM) são o mesmo dado
         # com nomes diferentes; a derivada evita que o nulo de um bloqueie o
         # outro, o que aconteceria com duas entradas no mapa de colunas.
-        derived={"resource_sku": "coalesce-null:sku+vm_size"},
+        derived={
+            "resource_sku": "coalesce-null:sku+vm_size",
+            # A coleta Resource Graph grava discos como `disk_size_gb`; outras
+            # fontes usam `sku_capacity`. Sem este alias, discos AKS/PVC entram
+            # no inventário sem tamanho e não podem ser comparados por tier.
+            "sku_capacity": "coalesce-null:sku_capacity+disk_size_gb",
+        },
         notes="VMs e VMSS via Resource Graph.",
     ),
     # Custo (FOCUS/export do Cost Management). As medidas foram confirmadas
@@ -759,7 +765,7 @@ def normalise(frame: pd.DataFrame, mapping: SourceMapping, silver_model: SilverM
             continue
         if campo.type in ("bigint", "long"):
             out[campo.name] = pd.to_numeric(out[campo.name], errors="coerce").astype("Int64")
-        elif campo.type == "decimal":
+        elif campo.type in ("decimal", "double"):
             out[campo.name] = pd.to_numeric(out[campo.name], errors="coerce").astype("float64")
         elif campo.type == "boolean":
             out[campo.name] = out[campo.name].astype("boolean")
@@ -830,10 +836,11 @@ def materialise(
     source_key: str,
     environment: str | None = None,
     bronze_table: str | None = None,
+    periods: list[str] | None = None,
 ) -> dict[str, Any]:
     """Normaliza a Bronze de uma fonte para o seu modelo Silver.
 
-    Idempotente por período: reprocessar o mesmo mês substitui a fatia.
+    Idempotente por período: reprocessar o mesmo dia ou mês substitui a fatia.
     """
     from app.services import iceberg_service as iceberg
     from app.services import lakehouse_layers as layers
@@ -850,55 +857,60 @@ def materialise(
     silver_model = _model(mapping.model_name)
     tabela_bronze = bronze_table or bronze_table_name(mapping, environment)
 
+    if periods is not None and not periods:
+        return {"source_key": source_key, "model": silver_model.name,
+                "silver_table": silver_model.table, "rows_silver": 0, "periods": []}
+
     try:
-        bronze = iceberg._get_catalog().load_table((layers.BRONZE, tabela_bronze)).scan().to_pandas()
+        table = iceberg._get_catalog().load_table((layers.BRONZE, tabela_bronze))
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Bronze {tabela_bronze} ilegível: {exc}") from exc
 
-    if bronze.empty:
-        return {
-            "source_key": source_key, "model": silver_model.name,
-            "silver_table": silver_model.table, "rows_silver": 0, "message": "Bronze vazia",
-        }
-
-    frame = normalise(bronze, mapping, silver_model)
-    # Marca o dono da linha: a tabela canônica recebe várias fontes e a
-    # religação de uma não pode apagar as linhas da outra.
-    frame["_silver_owner"] = source_key
-    # Proveniência de conexão: é o que permite agrupar o cubo por origem e
-    # excluir uma conexão sem tocar nas outras.
+    # Backfills de métricas podem conter milhões de linhas. Ler/normalizar um
+    # dia de cada vez limita a memória e deixa cada fatia Silver persistida.
+    selected_periods = list(dict.fromkeys(map(str, periods))) if periods is not None else [None]
     _conexao = _resolver_conexao(session, tabela_bronze)
-    # Int64 explícito: Iceberg usa `long` e o pandas promoveria a `int32`,
-    # causando "Mismatch in fields" na gravação.
-    frame["_source_connection_id"] = (
-        pd.array([_conexao.id if _conexao else None] * len(frame), dtype="Int64")
-    )
-    frame["_source_connection_code"] = _conexao.code if _conexao else None
-    # O nome registrado é o da tabela Bronze que originou a linha: é a
-    # identidade estável da origem, e sobrevive à conexão ser renomeada.
-    frame["_source_connection_name"] = tabela_bronze
     periodo_col = mapping.period_field
-    if periodo_col not in frame.columns:
-        raise ValueError(f"Período '{periodo_col}' ausente no modelo {silver_model.name}")
-    frame[periodo_col] = frame[periodo_col].fillna("").astype(str)
-
-    written, periods = 0, []
-    for periodo, chunk in frame.groupby(periodo_col, dropna=False):
-        chave = str(periodo or "")
-        if not chave:
+    written, written_periods, with_value, without_value = 0, [], 0, 0
+    for selected_period in selected_periods:
+        try:
+            if selected_period is None:
+                bronze = table.scan().to_pandas()
+            else:
+                from pyiceberg.expressions import EqualTo
+                bronze = table.scan(row_filter=EqualTo("_billing_period", selected_period)).to_pandas()
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Bronze {tabela_bronze} ilegível em {selected_period}: {exc}") from exc
+        if bronze.empty:
             continue
-        # O escopo do delete inclui a CONEXÃO: 4P e TI compartilham o mesmo
-        # `_silver_owner` (a fonte), e sem isto um ambiente apagava o dado do
-        # outro no mesmo período.
-        _delete_period(silver_model.table, chave, owner=source_key,
-                       connection=tabela_bronze)
-        written += int(iceberg.write_silver(
-            connection_code=source_key,
-            df=chunk.drop(columns=[periodo_col]),
-            billing_period=chave,
-            table_name_override=f"silver.{silver_model.table}",
-        ) or 0)
-        periods.append(chave)
+
+        frame = normalise(bronze, mapping, silver_model)
+        frame["_silver_owner"] = source_key
+        # A conexão faz parte da identidade, pois a Silver aceita várias origens.
+        frame["_source_connection_id"] = pd.array(
+            [_conexao.id if _conexao else None] * len(frame), dtype="Int64",
+        )
+        frame["_source_connection_code"] = _conexao.code if _conexao else None
+        frame["_source_connection_name"] = tabela_bronze
+        if periodo_col not in frame.columns:
+            raise ValueError(f"Período '{periodo_col}' ausente no modelo {silver_model.name}")
+        frame[periodo_col] = frame[periodo_col].fillna("").astype(str)
+        if silver_model.primary_measure and silver_model.primary_measure in frame.columns:
+            with_value += int(frame[silver_model.primary_measure].notna().sum())
+            without_value += int(frame[silver_model.primary_measure].isna().sum())
+        for periodo, chunk in frame.groupby(periodo_col, dropna=False):
+            chave = str(periodo or "")
+            if not chave:
+                continue
+            _delete_period(silver_model.table, chave, owner=source_key,
+                           connection=tabela_bronze)
+            written += int(iceberg.write_silver(
+                connection_code=source_key,
+                df=chunk.drop(columns=[periodo_col]),
+                billing_period=chave,
+                table_name_override=f"silver.{silver_model.table}",
+            ) or 0)
+            written_periods.append(chave)
 
     # O de-para vive em `etl_mapping`, editável na aba de relacionamento —
     # não há mais registro paralelo a fazer aqui.
@@ -909,11 +921,13 @@ def materialise(
         "silver_table": silver_model.table,
         "bronze_table": tabela_bronze,
         "rows_silver": written,
-        "periods": sorted(periods),
+        "periods": sorted(set(written_periods)),
     }
-    if silver_model.primary_measure and silver_model.primary_measure in frame.columns:
-        resultado["rows_with_value"] = int(frame[silver_model.primary_measure].notna().sum())
-        resultado["rows_without_value"] = int(frame[silver_model.primary_measure].isna().sum())
+    if not written_periods:
+        resultado["message"] = "Bronze vazia"
+    if silver_model.primary_measure:
+        resultado["rows_with_value"] = with_value
+        resultado["rows_without_value"] = without_value
     return resultado
 
 
@@ -944,5 +958,3 @@ def _delete_period(
         tabela.delete(filtro)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Silver %s: nada a remover em %s/%s (%s)", table, period, owner, type(exc).__name__)
-
-

@@ -620,7 +620,7 @@ async def collect_environment(
         }
         phase = "Na fila: coleta"
         if is_telemetry(source_key):
-            window = max(1, min(int(days or entry.get("default_window_days") or 15), 90))
+            window = max(1, min(int(days or entry.get("default_window_days") or 1), 90))
             result_json.update({"window_days": window, "metric_window": True})
             phase = f"Na fila: coletar {entry.get('display_name', connection.name)} ({window} dias)"
         else:

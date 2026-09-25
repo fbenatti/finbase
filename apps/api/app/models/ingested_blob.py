@@ -12,7 +12,8 @@ class IngestedBlob(Base):
     connection_id = Column(Integer, ForeignKey("source_connection.id"), nullable=False)
     blob_path = Column(Text, nullable=False)
     blob_prefix = Column(Text, nullable=False)
-    billing_period = Column(String(6), nullable=True)
+    # Cost periods use YYYYMM; daily metric partitions use YYYYMMDD.
+    billing_period = Column(String(8), nullable=True)
     last_modified = Column(DateTime(timezone=True), nullable=False)
     etag = Column(String(200), nullable=True)
     content_length = Column(BigInteger, nullable=True)

@@ -202,9 +202,19 @@ async def overview() -> dict[str, Any]:
     """
     async def _ag(sql: str, timeout: int = 300) -> list[dict[str, Any]]:
         try:
-            return await trino_execute(sql, timeout_s=timeout)
-        except Exception:  # noqa: BLE001
-            return []
+            # Dashboards must fail promptly when Trino is restarting. The
+            # service default retries transport errors up to 12 times, waiting
+            # for coordinator readiness on each retry; that can leave this
+            # page loading for many minutes. A single bounded attempt lets the
+            # caller show a useful unavailable state and retry after Trino is
+            # healthy.
+            return await trino_execute(sql, timeout_s=min(timeout, 30), max_retries=1)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rightsizing overview query failed: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="O dashboard Saving Actions está temporariamente indisponível porque o Trino não respondeu. Tente novamente em alguns instantes.",
+            ) from exc
 
     # Custo: total, por período, serviço, conta, região e top recursos.
     total = await _ag("SELECT ROUND(SUM(effective_cost),2) AS cost, count(DISTINCT _billing_period) AS periods, count(DISTINCT resource_id) AS resources FROM iceberg.silver.resource_cost")
@@ -221,6 +231,12 @@ async def overview() -> dict[str, Any]:
 
     # Oportunidade: antes/depois por recurso, com tipo do perfil.
     oportunidade = await _ag("""
+        WITH latest_candidate AS (
+            SELECT c.*, row_number() OVER (
+                PARTITION BY c.resource_id ORDER BY c.created_at DESC NULLS LAST, c.run_id DESC
+            ) AS candidate_rank
+            FROM iceberg.silver.rightsizing_candidate c
+        )
         SELECT c.resource_name, p.resource_type, c.sku_from, c.sku_to,
                c.vcpus_from, c.vcpus_to, c.memory_gb_from, c.memory_gb_to,
                ROUND(c.cost_from_current,2) AS cost_de,
@@ -228,21 +244,28 @@ async def overview() -> dict[str, Any]:
                ROUND(c.saving_monthly,2) AS saving_monthly,
                c.saving_pct, c.cpu_p95, c.observed_days, c.verdict,
                c.veto_reason, c.price_source_from, c.price_source_to
-        FROM iceberg.silver.rightsizing_candidate c
+        FROM latest_candidate c
         LEFT JOIN (SELECT resource_id, MAX(resource_type) AS resource_type
                    FROM iceberg.silver.resource_profile_window GROUP BY 1) p
           ON p.resource_id = c.resource_id
-        WHERE c.verdict IN ('VALID', 'REQUIRES_VALIDATION')
+        WHERE c.candidate_rank = 1
+          AND c.verdict IN ('VALID', 'REQUIRES_VALIDATION')
         ORDER BY c.saving_monthly DESC NULLS LAST
     """)
     por_tipo = await _ag("""
+        WITH latest_candidate AS (
+            SELECT c.*, row_number() OVER (
+                PARTITION BY c.resource_id ORDER BY c.created_at DESC NULLS LAST, c.run_id DESC
+            ) AS candidate_rank
+            FROM iceberg.silver.rightsizing_candidate c
+        )
         SELECT p.resource_type, count(*) AS candidatos,
                ROUND(SUM(COALESCE(c.saving_monthly,0)),2) AS saving
-        FROM iceberg.silver.rightsizing_candidate c
+        FROM latest_candidate c
         LEFT JOIN (SELECT resource_id, MAX(resource_type) AS resource_type
                    FROM iceberg.silver.resource_profile_window GROUP BY 1) p
           ON p.resource_id = c.resource_id
-        WHERE c.verdict = 'VALID' GROUP BY 1 ORDER BY 3 DESC
+        WHERE c.candidate_rank = 1 AND c.verdict = 'VALID' GROUP BY 1 ORDER BY 3 DESC
     """)
 
     return {

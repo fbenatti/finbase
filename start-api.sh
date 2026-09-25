@@ -46,11 +46,12 @@ ensure_analytics
 
 api_pid=""
 worker_pid=""
+supervisor_pid=""
 worker_restarts=0
 
 stop_backend() {
   trap - INT TERM EXIT
-  for process_pid in "$worker_pid" "$api_pid"; do
+  for process_pid in "$supervisor_pid" "$worker_pid" "$api_pid"; do
     if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then
       kill "$process_pid" 2>/dev/null || true
     fi
@@ -64,9 +65,15 @@ start_worker() {
   worker_pid=$!
 }
 
+start_supervisor() {
+  (cd "$API_DIR" && exec "$PYTHON_BIN" -u supervisor.py) &
+  supervisor_pid=$!
+}
+
 (cd "$API_DIR" && exec "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT") &
 api_pid=$!
 start_worker
+start_supervisor
 
 echo "Backend OpenFinops iniciado: API http://localhost:$API_PORT | Worker ETL PID $worker_pid"
 
@@ -86,5 +93,9 @@ while true; do
     fi
     echo "Worker ETL encerrou; reiniciando ($worker_restarts/$MAX_WORKER_RESTARTS)." >&2
     start_worker
+  fi
+  if ! kill -0 "$supervisor_pid" 2>/dev/null; then
+    echo "Monitor ETL encerrou; reiniciando." >&2
+    start_supervisor
   fi
 done

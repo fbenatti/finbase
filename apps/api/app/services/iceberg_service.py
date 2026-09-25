@@ -1287,7 +1287,7 @@ def cleanup_staged_table(temp_safe_name: str, namespace: str = "silver") -> None
     try:
         tid = _table_id(namespace, temp_safe_name)
         _force_delete_table(tid, temp_safe_name)
-        logger.info("Cleaned up staged table gold.%s", temp_safe_name)
+        logger.info("Cleaned up staged table %s.%s", namespace, temp_safe_name)
     except Exception as e:
         logger.warning("Cleanup staged table failed: %s", e)
 
@@ -1569,6 +1569,7 @@ def write_destination(
 def _force_delete_table(tid: tuple, safe_name: str) -> None:
     """Force-delete Iceberg table: SQL metadata + local Parquet/metadata files."""
     import shutil, os
+    from urllib.parse import urlparse
     target_locations: list[str] = []
     ns = tid[0] if isinstance(tid, tuple) and len(tid) > 0 else layers.GOLD
 
@@ -1581,6 +1582,34 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
             target_locations.append(loc.replace("file://", ""))
     except Exception:
         pass
+
+    # SQLCatalog can leave a staging table and its canonical table pointing at
+    # the same physical location after legacy renames. Drop the requested
+    # catalog entry, but never remove files still referenced by another table.
+    protected_locations: set[str] = set()
+    try:
+        from app.database import SyncSession
+        from sqlalchemy import text
+        pg = SyncSession()
+        try:
+            refs = pg.execute(text(
+                "SELECT table_namespace, table_name, metadata_location FROM iceberg_tables"
+            )).all()
+            for ref_namespace, ref_name, metadata_location in refs:
+                if (ref_namespace, ref_name) == (ns, safe_name) or not metadata_location:
+                    continue
+                metadata_path = urlparse(str(metadata_location)).path
+                table_location = os.path.realpath(_normalize_pyiceberg_location(
+                    str(Path(metadata_path).parent.parent)
+                ))
+                protected_locations.add(table_location)
+        finally:
+            pg.close()
+    except Exception as exc:
+        # Without a complete reference check, catalog removal is still safe;
+        # physical deletion is skipped below.
+        logger.warning("Could not verify shared Iceberg locations before deleting %s: %s", tid, exc)
+        protected_locations.add("__catalog_reference_check_failed__")
 
     # 2. Dropar tabela via catálogo (remove registro do Postgres no SqlCatalog)
     try:
@@ -1606,6 +1635,9 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
     # Canonical /data paths have a different host spelling in local dev.
     for loc_path in target_locations:
         physical = _normalize_pyiceberg_location(loc_path)
+        if os.path.realpath(physical) in protected_locations:
+            logger.warning("Preserving shared Iceberg location while deleting %s: %s", tid, physical)
+            continue
         if os.path.isdir(physical):
             shutil.rmtree(physical, ignore_errors=True)
             logger.info("Deleted warehouse dir via location: %s", physical)
@@ -1615,7 +1647,7 @@ def _force_delete_table(tid: tuple, safe_name: str) -> None:
     for namespace_pattern in [ns, f"{ns}.db"]:
         base = str(warehouse / namespace_pattern)
         candidate = os.path.join(base, safe_name)
-        if os.path.isdir(candidate):
+        if os.path.isdir(candidate) and os.path.realpath(candidate) not in protected_locations:
             shutil.rmtree(candidate, ignore_errors=True)
             logger.info("Deleted warehouse dir: %s", candidate)
 
@@ -1665,7 +1697,7 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
                 ).scalar_one_or_none() is not None
             return session.execute(
                 select(EtlTask.id).where(
-                    EtlTask.task_type.in_(["gold_reprocess", "shared_cost", "forecast", "forecast_accuracy", "ai_cost_relationship_reprocess"]),
+                    EtlTask.task_type.in_(["reprocess", "reclassification", "gold_reprocess", "shared_cost", "forecast", "forecast_accuracy", "ai_cost_relationship_reprocess"]),
                     EtlTask.status.in_(["QUEUED", "RUNNING"]),
                 ).limit(1)
             ).scalar_one_or_none() is not None

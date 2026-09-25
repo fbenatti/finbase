@@ -63,6 +63,7 @@ def _persist_download_progress(task_id: int, **values) -> None:
     """Persist worker progress so it is visible from the separate API process."""
     try:
         s = SyncSession()
+        values["last_progress_at"] = datetime.now(timezone.utc)
         s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(**values))
         s.commit()
         s.close()
@@ -75,6 +76,7 @@ def _persist_download_delta(task_id: int, delta: int, **values) -> None:
     try:
         s = SyncSession()
         values["downloaded_bytes_total"] = EtlTask.downloaded_bytes_total + max(0, delta)
+        values["last_progress_at"] = datetime.now(timezone.utc)
         s.execute(sa_update(EtlTask).where(EtlTask.id == task_id).values(**values))
         s.commit()
         s.close()
@@ -94,6 +96,7 @@ def _persist_download_blob(task_id: int, blob_path: str, status: str, downloaded
             blobs.append(item)
         item.update({"size": size or item.get("size", 0), "downloaded": max(0, downloaded), "status": status})
         row.download_blobs = blobs
+        row.last_progress_at = datetime.now(timezone.utc)
         s.commit()
         s.close()
     except Exception as exc:
@@ -2595,6 +2598,7 @@ def _save_progress_sync(task_id: int, result) -> None:
             t.rows_destination = result.rows_destination
             t.processed_blobs = result.processed_blobs
             t.current_blob = result.current_blob
+            t.last_progress_at = datetime.now(timezone.utc)
             s.commit()
         s.close()
     except Exception:
@@ -2887,6 +2891,7 @@ def _run_etl_sync(
                             t.processed_blobs = result.processed_blobs
                             t.current_blob = result.current_blob
                             t.errors = list(result.errors or [])
+                            t.last_progress_at = datetime.now(timezone.utc)
                             s.commit()
                         s.close()
 

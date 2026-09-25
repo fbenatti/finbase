@@ -6,12 +6,15 @@ import zlib
 from datetime import datetime, timedelta, timezone
 import os
 
-from sqlalchemy import Integer, exists, or_, select, text
+from sqlalchemy import Integer, exists, func, or_, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.models.etl_task import EtlTask
 
 TASK_DEFER_SECONDS = 3
+TASK_STALL_TIMEOUT_SECONDS = 15 * 60
+TASK_STALL_RETRY_DELAY_SECONDS = 3
+TASK_STALL_RETRYABLE_TYPES = frozenset({"extraction", "reprocess", "reclassification"})
 
 WORKER_TASK_TYPES: tuple[str, ...] = (
     "backup",
@@ -89,7 +92,7 @@ def _queue_group_busy_clause():
     )
 
 
-def claim_next_etl_task(session: Session) -> EtlTask | None:
+def claim_next_etl_task(session: Session, *, worker_pid: int | None = None) -> EtlTask | None:
     """Claim one QUEUED task using ``FOR UPDATE SKIP LOCKED``."""
     # A group child must not run before the physical Bronze audit that was
     # persisted for that exact group.  It stays queued rather than discovering
@@ -130,9 +133,110 @@ def claim_next_etl_task(session: Session) -> EtlTask | None:
     task.status = "RUNNING"
     task.phase = task.phase or "Worker assumiu a tarefa"
     task.started_at = now
+    task.last_progress_at = now
+    task.worker_pid = worker_pid
     task.available_at = None
     session.flush()
     return task
+
+
+def find_stalled_worker_task(
+    session: Session,
+    worker_pid: int,
+    *,
+    stale_after_seconds: int = TASK_STALL_TIMEOUT_SECONDS,
+    now: datetime | None = None,
+) -> EtlTask | None:
+    """Return the worker's RUNNING task only after persisted progress goes stale."""
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(seconds=max(1, stale_after_seconds))
+    return session.execute(
+        select(EtlTask)
+        .where(
+            EtlTask.worker_pid == worker_pid,
+            EtlTask.status == "RUNNING",
+            func.coalesce(EtlTask.last_progress_at, EtlTask.started_at) <= cutoff,
+        )
+        .order_by(EtlTask.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    ).scalar_one_or_none()
+
+
+def recover_stalled_task(
+    session: Session,
+    task: EtlTask,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> str:
+    """Requeue one safe task once, otherwise fail it so the queue can continue."""
+    now = now or datetime.now(timezone.utc)
+    if task.status != "RUNNING":
+        return "SKIPPED"
+
+    result = dict(task.result_json or {})
+    recovery_history = list(result.get("recovery_history") or [])
+    attempts = int(task.recovery_attempts or 0)
+    can_retry = task.task_type in TASK_STALL_RETRYABLE_TYPES and attempts < 1
+    outcome = "REQUEUED" if can_retry else "FAILED"
+    recovery_history.append({
+        "at": now.isoformat(),
+        "worker_pid": task.worker_pid,
+        "attempt": attempts + 1,
+        "outcome": outcome,
+        "reason": reason[:500],
+    })
+    result["recovery_history"] = recovery_history[-20:]
+
+    task.worker_pid = None
+    task.last_progress_at = now
+    if can_retry:
+        task.status = "QUEUED"
+        task.recovery_attempts = attempts + 1
+        task.started_at = None
+        task.available_at = now + timedelta(seconds=TASK_STALL_RETRY_DELAY_SECONDS)
+        task.phase = "Worker encerrou tarefa sem progresso; tentativa automática na fila"
+        task.current_blob = "Tarefa recuperada pelo watchdog do worker"
+        task.result_json = result
+        session.flush()
+        return outcome
+
+    task.status = "FAILED"
+    task.finished_at = now
+    task.available_at = None
+    task.phase = "Worker encerrou tarefa sem progresso; fila liberada"
+    task.current_blob = reason[:500]
+    task.recovery_attempts = attempts
+    task.errors = list(task.errors or []) + [reason[:2000]]
+    result["failure_kind"] = "worker_stalled"
+    task.result_json = result
+    session.flush()
+    return outcome
+
+
+def recover_worker_orphaned_tasks(
+    session: Session,
+    worker_pid: int,
+    *,
+    now: datetime | None = None,
+) -> list[tuple[int, str]]:
+    """Recover tasks left RUNNING when their owning worker process exits."""
+    rows = session.execute(
+        select(EtlTask).where(
+            EtlTask.worker_pid == worker_pid,
+            EtlTask.status == "RUNNING",
+        ).with_for_update(skip_locked=True)
+    ).scalars().all()
+    recovered = []
+    for task in rows:
+        outcome = recover_stalled_task(
+            session,
+            task,
+            reason="Worker encerrou inesperadamente durante a tarefa; fila recuperada",
+            now=now,
+        )
+        recovered.append((task.id, outcome))
+    return recovered
 
 
 def try_acquire_task_resource_locks(session: Session, task: EtlTask) -> bool:
@@ -217,6 +321,7 @@ def release_task_to_queue(
     task.status = "QUEUED"
     task.phase = phase or "Aguardando recurso exclusivo"
     task.started_at = None
+    task.worker_pid = None
     if defer_seconds > 0:
         task.available_at = datetime.now(timezone.utc) + timedelta(seconds=defer_seconds)
     session.flush()

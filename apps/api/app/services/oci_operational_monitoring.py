@@ -12,7 +12,7 @@ from app.models.source_connection import SourceConnection
 from app.services import iceberg_service as iceberg
 from app.services.oci_extractor import OciExtractor
 
-GOLD_TABLE = "dest_oci_operational_metrics"
+TABLE = "dest_oci_operational_metrics"
 METRICS = {
     "oci_generativeai": ["InputTokenCount", "OutputTokenCount", "TotalInvocationCount", "InvocationLatency", "ClientErrorCount", "ServerErrorCount"],
     "oci_computeagent": ["GpuUtilization", "GpuMemoryUtilization", "CpuUtilization", "MemoryUtilization", "NetworkBytesIn", "NetworkBytesOut"],
@@ -221,37 +221,42 @@ def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = Tr
             pass
 
     records = inventory + metrics
-    persisted = {"bronze_rows": 0, "gold_rows": 0}
+    persisted = {"bronze_rows": 0, "silver_rows": 0}
     if persist and records:
         frame = pd.DataFrame(records); period = now.strftime("%Y%m")
         persisted["bronze_rows"] = iceberg.write_bronze(f"{connection.code}_operational", frame, period, blob_path=f"oci-operational://{connection.code}/{now:%Y%m%d%H}")
         bronze = iceberg.read_bronze(f"{connection.code}_operational")
         if bronze is None or bronze.empty:
-            persisted["gold_error"] = "Bronze operacional OCI não retornou linhas; Gold anterior preservada"
-            logger.warning("OCI operational Gold publication skipped for %s: Bronze is empty", connection.code)
+            persisted["silver_error"] = "Bronze operacional OCI não retornou linhas; Silver anterior preservada"
+            logger.warning("OCI operational Silver publication skipped for %s: Bronze is empty", connection.code)
             return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}
         combined = gold_frame_from_bronze(bronze, connection=connection, period=period)
         if "collected_at" not in combined.columns:
             combined["collected_at"] = collected_at
         staged = None
         try:
-            staged = iceberg.write_destination_staged(GOLD_TABLE, combined, column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"})
-            persisted["gold_rows"] = iceberg.swap_staged_table(
-                GOLD_TABLE, staged, known_row_count=len(combined),
+            staged = iceberg.write_destination_staged(
+                TABLE, combined,
+                column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"},
+                namespace=layers.detail_layer(),
+            )
+            persisted["silver_rows"] = iceberg.swap_staged_table(
+                TABLE, staged, namespace=layers.detail_layer(), known_row_count=len(combined),
             )
             # Publicação por fatia a partir de frame em memória: registra no
-            # mesmo manifesto da Gold para que a tabela não fique sem rastro.
+            # mesmo manifesto para que a tabela Silver não fique sem rastro.
             from app.services.gold_governance import record_frame_publication_blocking
 
             record_frame_publication_blocking(
-                cube_code=GOLD_TABLE,
-                physical_table=GOLD_TABLE,
-                rows_written=int(persisted["gold_rows"] or 0),
+                cube_code=TABLE,
+                physical_table=TABLE,
+                rows_written=int(persisted["silver_rows"] or 0),
                 source_tables=[f"bronze.raw_{connection.code}_operational"],
+                namespace=layers.detail_layer(),
             )
         except Exception as exc:
-            persisted["gold_error"] = f"{type(exc).__name__}: {exc}"
-            logger.error("OCI operational Gold publication failed for %s", connection.code, exc_info=True)
+            persisted["silver_error"] = f"{type(exc).__name__}: {exc}"
+            logger.error("OCI operational Silver publication failed for %s", connection.code, exc_info=True)
             if staged:
-                iceberg.cleanup_staged_table(staged)
+                iceberg.cleanup_staged_table(staged, namespace=layers.detail_layer())
     return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}

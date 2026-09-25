@@ -6,8 +6,9 @@ Fonte lógica nova (`source_key = monitor_vm_metrics`) com Bronze exclusiva:
 Contrato da fonte (campos que o plano exige em registro único)
 --------------------------------------------------------------
 - **`source_key`**: `monitor_vm_metrics`.
-- **Escopo Azure**: subscriptions visíveis à credencial da conexão, restritas a
-  recursos `microsoft.compute/virtualmachines`.
+- **Escopo Azure**: subscriptions visíveis à credencial da conexão; VMs/VMSS
+  recebem métricas de plataforma e managed disks recebem séries de IOPS/throughput
+  no próprio resource ID.
 - **APIs**:
   - descoberta: `POST {ARM}/providers/Microsoft.ResourceGraph/resources`
     (`api-version=2022-10-01`), paginada por `$skipToken`;
@@ -22,16 +23,22 @@ Contrato da fonte (campos que o plano exige em registro único)
   silenciados.
 - **Limites**: `429`/`5xx`/`529` → backoff exponencial com jitter e retry; erro
   parcial **não** marca a coleta como completa (`PartialCollectionError`).
-- **Janela**: `window_days` (padrão **15**, teto 90); o `timespan` de cada
-  requisição é fatiado em no máximo 1 dia para não estourar o limite da API.
-- **Granularidade**: `interval` (padrão `PT15M`). Uma janela de 15 dias a 15 min
-  tem **até** 1.440 buckets por recurso × métrica — não garante 1.440 amostras.
-- **Idempotência**: fatia identificada por
-  `monitor/{subscription}/{region}/{until}/{window_days}d/{metric}.csv`;
-  reexecutar a mesma janela substitui aquela fatia.
+- **Janela**: `window_days` (padrão **1**, teto 90), encerrada em `until` UTC.
+  O intervalo é `[until - window_days, until)`; o agendamento diário usa o dia
+  UTC fechado anterior. Backfill de 7/30 dias deve ser explícito. Cada chamada
+  à API cobre no máximo 1 dia para respeitar seu limite.
+- **Granularidade**: `PT15M`; um dia completo tem até 96 buckets por recurso ×
+  métrica, sem garantia de 96 amostras válidas.
+- **Partição**: `_billing_period=YYYYMMDD` da data de `bucket_utc`, tanto na
+  Bronze quanto na Silver `resource_metric_series`; custo continua `YYYYMM`.
+- **Idempotência**: fatia `monitor/{subscription}/{region}/{YYYYMMDD}/metrics.csv`;
+  repetir o mesmo dia substitui a fatia daquele escopo.
 - **Chave natural**: `resource_id` + `metric` + `bucket_utc` + `dimension`.
 - **Ausência de dado**: métrica sem série vira linha com `quality_status`
-  explícito (`NOT_AVAILABLE`/`NO_DATA`), **nunca zero**.
+  explícito (`GAP`/`NOT_AVAILABLE`), **nunca zero**.
+- **`sample_count`**: a agregação `count` da Azure pode ser fracionária; a
+  Silver preserva o valor como `double`. Para contar buckets observados, usar
+  `count(*)` após `quality_status='OK'`.
 - **Métricas guest**: `azure.vm.linux.guestmetrics` / `azure.vm.windows.guestmetrics`
   **não são suportadas** pela API batch (é limitação documentada). Memória guest
   exige Azure Monitor Agent/DCR e só pode ser coletada por outra via; aqui a
@@ -62,10 +69,19 @@ ARG_API_VERSION = "2022-10-01"
 METRICS_API_VERSION = "2023-10-01"
 METRIC_NAMESPACE = "microsoft.compute/virtualmachines"
 VMSS_METRIC_NAMESPACE = "microsoft.compute/virtualmachinescalesets"
+DISK_METRIC_NAMESPACE = "microsoft.compute/disks"
+DISK_METRICS: tuple[str, ...] = (
+    "Composite Disk Read Operations/sec",
+    "Composite Disk Write Operations/sec",
+    "Composite Disk Read Bytes/sec",
+    "Composite Disk Write Bytes/sec",
+)
 
 
 def _metric_namespace(resource_type: str | None) -> str:
     """Namespace do batch por tipo: VM e VMSS nao aceitam o mesmo namespace."""
+    if "compute/disks" in str(resource_type or ""):
+        return DISK_METRIC_NAMESPACE
     return VMSS_METRIC_NAMESPACE if "scaleset" in str(resource_type or "") else METRIC_NAMESPACE
 
 #: Teto documentado do `metrics:getBatch`.
@@ -181,6 +197,50 @@ async def discover_vms(
             rows.extend(dict(item) for item in data if isinstance(item, dict))
         else:
             # `resultFormat: table`: data = {"columns": [...], "rows": [[...]]}
+            columns = [c.get("name") for c in ((data or {}).get("columns") or [])]
+            for raw in (data or {}).get("rows") or []:
+                rows.append({columns[i]: raw[i] for i in range(min(len(columns), len(raw)))})
+        skip_token = payload.get("$skipToken")
+        if not skip_token:
+            return rows
+
+
+async def discover_disks(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    subscriptions: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Descobre discos gerenciados para coletar métricas por recurso/disco."""
+    rows: list[dict[str, Any]] = []
+    skip_token: str | None = None
+    query = (
+        "resources | where type =~ 'microsoft.compute/disks' "
+        "| project resource_id = id, subscription_id = subscriptionId, "
+        "resource_group = resourceGroup, location = location, "
+        "resource_type = tolower(type), vm_size = tostring(sku.name), "
+        "power_state = tostring(properties.diskState), "
+        "sku_capacity = tolong(properties.diskSizeGB)"
+    )
+    while True:
+        options: dict[str, Any] = {"$top": 1000}
+        if skip_token:
+            options["$skipToken"] = skip_token
+        body: dict[str, Any] = {"query": query, "options": options}
+        if subscriptions:
+            body["subscriptions"] = subscriptions
+        response = await client.post(
+            f"{ARG_ENDPOINT}?api-version={ARG_API_VERSION}",
+            headers=headers, json=body, timeout=90.0,
+        )
+        if response.status_code in (401, 403):
+            raise PermissionError(f"Azure Resource Graph {response.status_code}: sem permissão para listar managed disks")
+        if response.status_code >= 400:
+            raise RuntimeError(f"Azure Resource Graph {response.status_code}: {response.text[:300]}")
+        payload = response.json()
+        data = payload.get("data")
+        if isinstance(data, list):
+            rows.extend(dict(item) for item in data if isinstance(item, dict))
+        else:
             columns = [c.get("name") for c in ((data or {}).get("columns") or [])]
             for raw in (data or {}).get("rows") or []:
                 rows.append({columns[i]: raw[i] for i in range(min(len(columns), len(raw)))})
@@ -428,13 +488,13 @@ def anchor_until(now: datetime | None = None, *, granularity_minutes: int = 0) -
 async def collect_metrics(
     config: dict[str, Any],
     *,
-    window_days: int = 15,
+    window_days: int = 1,
     until: datetime | None = None,
     metrics: tuple[str, ...] | None = None,
     progress: ProgressFn = None,
 ) -> dict[str, Any]:
-    """Coleta a série das VMs do escopo via batch, fatiando a janela por dia."""
-    window_days = max(1, min(int(window_days or 15), 90))
+    """Coleta séries de VMs/VMSS e managed disks por resource ID."""
+    window_days = max(1, min(int(window_days or 1), 90))
     metrics = tuple(metrics or config.get("metrics") or DEFAULT_METRICS)
     until = anchor_until(until)
     since = until - timedelta(days=window_days)
@@ -447,15 +507,19 @@ async def collect_metrics(
     requests_made = 0
     rate_limited = 0
     vms: list[dict[str, Any]] = []
+    disks: list[dict[str, Any]] = []
 
     async with httpx.AsyncClient() as client:
         vms = await discover_vms(client, headers, _subscriptions(config) or None)
+        disks = await discover_disks(client, headers, _subscriptions(config) or None)
         logger.info("Monitor VM: %d VMs descobertas (janela %dd)", len(vms), window_days)
         vms = [vm for vm in vms if vm.get("resource_id")]
-        vm_by_id = {str(vm["resource_id"]).lower(): vm for vm in vms}
+        disks = [disk for disk in disks if disk.get("resource_id")]
+        resources = vms + disks
+        vm_by_id = {str(vm["resource_id"]).lower(): vm for vm in resources}
         gaps.extend(_guest_gap_rows(vms))
 
-        batches = chunk_batches(vms)
+        batches = chunk_batches(resources)
         slices: list[tuple[datetime, datetime]] = []
         cursor = since
         while cursor < until:
@@ -469,6 +533,7 @@ async def collect_metrics(
             subscription = str(batch[0].get("subscription_id") or "")
             region = str(batch[0].get("location") or "")
             resource_type = str(batch[0].get("resource_type") or "microsoft.compute/virtualmachines")
+            batch_metrics = DISK_METRICS if "compute/disks" in resource_type else metrics
             resource_ids = [str(vm["resource_id"]) for vm in batch]
             # Todas as métricas vão numa requisição só: a API aceita lista em
             # `metricnames` e devolve um bloco por métrica. Isso corta o número
@@ -476,13 +541,13 @@ async def collect_metrics(
             for slice_since, slice_until in slices:
                 step += 1
                 if progress:
-                    progress(step, total_steps, f"{region} · {len(batch)} VM(s) · {len(metrics)} métrica(s)")
+                    progress(step, total_steps, f"{region} · {len(batch)} recurso(s) · {len(batch_metrics)} métrica(s)")
                 url = (
                     f"https://{region}.metrics.monitor.azure.com/subscriptions/{subscription}"
                     f"/metrics:getBatch?starttime={slice_since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                     f"&endtime={slice_until.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                     f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': _metric_namespace(resource_type)})['n']}"
-                    f"&metricnames={httpx.QueryParams({'m': ','.join(metrics)})['m']}"
+                    f"&metricnames={httpx.QueryParams({'m': ','.join(batch_metrics)})['m']}"
                     f"&aggregation={','.join(DEFAULT_AGGREGATIONS)}"
                     f"&api-version={METRICS_API_VERSION}"
                 )
@@ -492,7 +557,7 @@ async def collect_metrics(
                 except Exception as exc:  # noqa: BLE001
                     failures.append({
                         "subscription": subscription, "region": region,
-                        "metric": ",".join(metrics),
+                        "metric": ",".join(batch_metrics),
                         "window": f"{slice_since.isoformat()}/{slice_until.isoformat()}",
                         "error": f"{type(exc).__name__}: {exc}",
                     })
@@ -508,13 +573,13 @@ async def collect_metrics(
                 if response.status_code >= 400:
                     failures.append({
                         "subscription": subscription, "region": region,
-                        "metric": ",".join(metrics),
+                        "metric": ",".join(batch_metrics),
                         "window": f"{slice_since.isoformat()}/{slice_until.isoformat()}",
                         "error": f"HTTP {response.status_code}: {response.text[:200]}",
                     })
                     continue
                 rows, row_gaps = _rows_from_batch_multi(
-                    response.json(), metrics, vm_by_id=vm_by_id,
+                    response.json(), batch_metrics, vm_by_id=vm_by_id,
                 )
                 all_rows.extend(rows)
                 gaps.extend(row_gaps)
@@ -525,7 +590,10 @@ async def collect_metrics(
         "frame": frame,
         "gaps": pd.DataFrame(gaps),
         "vms": len(vms),
+        "disks": len(disks),
+        "resources": len(vms) + len(disks),
         "metrics": list(metrics),
+        "disk_metrics": list(DISK_METRICS),
         "window_days": window_days,
         "since": since.isoformat(),
         "until": until.isoformat(),
@@ -543,13 +611,9 @@ async def collect_metrics(
     }
 
 
-def bronze_blob_path(subscription_id: str, region: str, until: datetime, window_days: int, metric: str) -> str:
-    """Chave lógica estável da fatia — reexecutar a mesma janela substitui."""
-    safe_metric = metric.replace("/", "_").replace(" ", "_")
-    return (
-        f"monitor/{subscription_id or 'all'}/{region or 'all'}"
-        f"/{until.strftime('%Y%m%dT%H%M')}/{int(window_days)}d/{safe_metric}.csv"
-    )
+def bronze_blob_path(subscription_id: str, region: str, day: str) -> str:
+    """Chave estável do dia UTC; repetir o dia substitui a mesma fatia."""
+    return f"monitor/{subscription_id or 'all'}/{region or 'all'}/{day}/metrics.csv"
 
 
 def _frame_for_bronze(frame: pd.DataFrame, gaps: pd.DataFrame) -> pd.DataFrame:
@@ -591,6 +655,8 @@ def run_monitor_vm_collection(
     until: datetime | None = None,
     task_id: int | None = None,
     source_code: str | None = None,
+    subscription_ids: list[str] | None = None,
+    metrics: list[str] | None = None,
 ) -> dict[str, Any]:
     """Coleta completa de uma conexão e escrita na Bronze exclusiva.
 
@@ -608,20 +674,37 @@ def run_monitor_vm_collection(
         raise ValueError(f"conexão {connection_id} não encontrada")
 
     config = dict(connection.config_json or {})
-    days = int(window_days or config.get("window_days") or 15)
+    if subscription_ids:
+        config["subscription_ids"] = list(subscription_ids)
+    if metrics:
+        config["metrics"] = list(metrics)
+    days = int(window_days or config.get("window_days") or 1)
 
     progress = None
     if task_id is not None:
         from app.models.etl_task import EtlTask
+        from app.database import SyncSession
+        from sqlalchemy import update
 
-        # O progresso é atualizado na linha da task **sem commit**: a coleta roda
-        # dentro da transação do worker, e commitar a cada fatia disputava lock
-        # com o próprio worker (deadlock em `etl_task`). Automation e ARG seguem
-        # o mesmo padrão — o worker persiste o resultado ao terminar.
+        # The collection session also writes Bronze metadata. A separate short
+        # transaction commits progress without publishing that unfinished work.
         def progress(step: int, total: int, label: str) -> None:
-            row = session.get(EtlTask, task_id)
-            if row is not None:
-                row.phase = f"Azure Monitor VM: {step}/{total} · {label}"
+            progress_session = SyncSession()
+            try:
+                progress_session.execute(
+                    update(EtlTask).where(
+                        EtlTask.id == task_id, EtlTask.status == "RUNNING",
+                    ).values(
+                        phase=f"Azure Monitor VM: {step}/{total} · {label}"[:200],
+                        last_progress_at=datetime.now(timezone.utc),
+                    )
+                )
+                progress_session.commit()
+            except Exception:
+                progress_session.rollback()
+                logger.exception("Could not persist progress for Monitor VM task %s", task_id)
+            finally:
+                progress_session.close()
 
     result = asyncio.run(collect_metrics(
         config, window_days=days, until=until, progress=progress,
@@ -638,7 +721,8 @@ def run_monitor_vm_collection(
     if payload.empty:
         return {
             "bronze_rows": 0, "series_rows": 0, "gap_rows": 0,
-            "vms": result["vms"], "periods": [], "slices": [],
+            "vms": result["vms"], "disks": result["disks"], "metrics": result["metrics"],
+            "disk_metrics": result["disk_metrics"], "periods": [], "slices": [],
             "duration_seconds": result["duration_seconds"],
             "requests": result["requests"], "rate_limited": result["rate_limited"],
             "failures": [], "message": "nenhuma métrica retornada",
@@ -648,29 +732,38 @@ def run_monitor_vm_collection(
     written = 0
     slices: list[str] = []
     periods: set[str] = set()
-    for (subscription, region), group in payload.groupby(
-        ["subscription_id", "location"], dropna=False
-    ):
-        # Uma fatia por (subscription, região, janela): reexecutar a mesma
-        # janela substitui exatamente esta fatia e não toca nas outras.
-        blob_path = (
-            f"monitor/{subscription or 'all'}/{region or 'all'}"
-            f"/{until_dt.strftime('%Y%m%dT%H%M')}/{days}d/metrics.csv"
-        )
-        period = until_dt.strftime("%Y%m")
+    day = pd.to_datetime(payload.get("bucket_utc"), utc=True, errors="coerce")
+    payload["_partition_day"] = day.dt.strftime("%Y%m%d").fillna(
+        (until_dt - timedelta(microseconds=1)).strftime("%Y%m%d")
+    )
+    grouped = payload.groupby(
+        ["subscription_id", "location", "_partition_day"], dropna=False
+    )
+    total_slices = len(grouped)
+    for slice_index, ((subscription, region, period), group) in enumerate(grouped, start=1):
+        if progress:
+            progress(slice_index, total_slices, f"gravando Bronze {period}")
+        # One stable physical slice per UTC day and resource scope. A rerun
+        # replaces that day without rewriting a growing monthly partition.
+        blob_path = bronze_blob_path(subscription, region, str(period))
         written += _write_bronze_and_register(
-            session, connection, group.reset_index(drop=True), period, blob_path,
+            session, connection, group.drop(columns=["_partition_day"]).reset_index(drop=True),
+            str(period), blob_path,
             source_code=source_code,
         )
         slices.append(blob_path)
-        periods.add(period)
+        periods.add(str(period))
+        if progress:
+            progress(slice_index, total_slices, f"Bronze gravada {period}")
 
     return {
         "bronze_rows": written,
         "series_rows": result["series_rows"],
         "gap_rows": result["gap_rows"],
         "vms": result["vms"],
+        "disks": result["disks"],
         "metrics": result["metrics"],
+        "disk_metrics": result["disk_metrics"],
         "window_days": days,
         "since": result["since"],
         "until": result["until"],
@@ -747,7 +840,7 @@ async def discover_scope(config: dict[str, Any]) -> dict[str, Any]:
                     f"/subscriptions/{sample['subscription_id']}/metrics:getBatch"
                     f"?starttime={since.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                     f"&endtime={until.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-                    f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': _metric_namespace(resource_type)})['n']}"
+                    f"&interval=PT15M&metricNamespace={httpx.QueryParams({'n': _metric_namespace(sample.get('resource_type'))})['n']}"
                     f"&metricnames={httpx.QueryParams({'m': 'Percentage CPU'})['m']}"
                     f"&aggregation=Average&api-version={METRICS_API_VERSION}"
                 )
@@ -763,5 +856,6 @@ async def discover_scope(config: dict[str, Any]) -> dict[str, Any]:
         "metrics_api_ok": metrics_ok,
         "metrics_api_error": metrics_error,
         "metrics_available": list(DEFAULT_METRICS),
+        "disk_metrics_available": list(DISK_METRICS),
         "metrics_guest_unsupported": list(GUEST_METRICS),
     }

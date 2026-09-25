@@ -19,6 +19,11 @@ entender, modificar ou depurar o projeto.
    (`/dimon-dashboard`), camada Dimon (materialização, dimensões, reprocessamento),
    abas Decisão e Visão Contábil (pares Realizado × Provisão do Forecast Accuracy),
    endpoints, armadilhas e o checklist de "caminhos" para tarefas comuns.
+10. **[metricas-diarias-4p.md](metricas-diarias-4p.md)** — contrato de período diário
+    UTC para Monitor VM e Container Insights, tabelas Bronze/Silver, validação real
+    de sete dias e cuidados para dashboards históricos.
+11. **[prompt-continuacao-metricas-4p.md](prompt-continuacao-metricas-4p.md)** — prompt
+    pronto para continuar os dashboards e definir os períodos de perfil/30 dias.
 
 ## Resumo executivo (TL;DR para a IA)
 

@@ -7,12 +7,24 @@ de add-on/API fica `PARTIAL/UNAVAILABLE`, sem inferir namespace por nome".
 
 O coletor descobre os workspaces a partir do próprio Resource Graph (o add-on
 declara o workspace), então não há caminho nem workspace chumbado no código.
+
+Janela operacional padrão: 1 dia UTC completo, `[until - 1 dia, until)`, com
+`until` na meia-noite UTC. Backfills de 7/30 dias são explícitos e produzem
+partições Iceberg `_billing_period=YYYYMMDD` do dia de `snapshot_date`.
+Inventários de pod/node são agregados por dia; `Perf` é agregada por hora e
+consultada em janelas de 1 dia para não exceder 8 MB por resposta do Log
+Analytics. Datas diárias e horários coexistem no mesmo frame: o parser precisa
+aceitar formato misto. A linha `record_kind='coverage'` representa apenas o
+dia final do backfill e não substitui a série de performance.
+
+Dashboards leem `silver.container_metric_series`, filtrando fonte, conexão,
+intervalo de `_billing_period` e `record_kind`. Não inferir zero de ausência.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
 
 import httpx
 import pandas as pd
@@ -22,7 +34,7 @@ logger = logging.getLogger(__name__)
 BRONZE_TABLE = "azure_container_insights"
 ARM = "https://management.azure.com"
 QUERY_API_VERSION = "2017-10-01"
-LOOKBACK_DAYS = 7
+LOOKBACK_DAYS = 1
 MAX_WORKSPACES = 60
 
 # Tabelas confirmadas no workspace do 4P: `KubePodInventory` (inventário),
@@ -31,20 +43,25 @@ MAX_WORKSPACES = 60
 QUERY_PODS = """
 KubePodInventory
 | summarize pods = count(), containers = sum(ContainerRestartCount + 1)
-    by Namespace, Computer, PodStatus
+    by Day = bin(TimeGenerated, 1d), Namespace, Computer, PodStatus
+| extend Day = format_datetime(Day, 'yyyy-MM-dd')
 """
 
 QUERY_NODES = """
 KubeNodeInventory
-| summarize nodes = count() by Computer, KubernetesVersion
+| summarize nodes = count() by Day = bin(TimeGenerated, 1d), Computer, KubernetesVersion
+| extend Day = format_datetime(Day, 'yyyy-MM-dd')
 """
 
 QUERY_PERFORMANCE = """
 Perf
 | where ObjectName == "K8SContainer"
 | where CounterName in ("cpuUsageNanoCores", "memoryWorkingSetBytes")
+| extend TimeBucket = bin(TimeGenerated, 1h)
 | summarize media = avg(CounterValue), amostras = count()
-    by CounterName, Namespace = InstanceName, Computer
+    by TimeBucket, CounterName, Namespace = InstanceName, Computer
+| project TimeBucket = format_datetime(TimeBucket, 'yyyy-MM-dd HH:mm:ss'),
+          CounterName, Namespace, Computer, media, amostras
 """
 
 # Restrição de conteúdo: o cluster declara o add-on e o workspace.
@@ -85,15 +102,24 @@ async def discover_workspaces(config: dict[str, Any]) -> pd.DataFrame:
 
 
 async def _consultar_workspace(
-    cliente: httpx.AsyncClient, headers: dict[str, str], workspace_id: str, consulta: str
+    cliente: httpx.AsyncClient, headers: dict[str, str], workspace_id: str, consulta: str,
+    *, window_days: int = LOOKBACK_DAYS, until: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Executa uma consulta KQL no workspace e devolve as linhas como dicts."""
+    timespan = f"P{window_days}D"
+    if until is not None:
+        end = until.astimezone(timezone.utc)
+        start = end - timedelta(days=window_days)
+        timespan = f"{start.isoformat()}/{end.isoformat()}"
     resposta = await cliente.post(
         f"{ARM}{workspace_id}/query?api-version={QUERY_API_VERSION}",
         headers=headers,
-        json={"query": consulta, "timespan": f"P{LOOKBACK_DAYS}D"},
+        json={"query": consulta, "timespan": timespan},
     )
-    resposta.raise_for_status()
+    if resposta.status_code >= 400:
+        raise RuntimeError(
+            f"Log Analytics HTTP {resposta.status_code}: {resposta.text[:500]}"
+        )
     corpo = resposta.json()
     saida: list[dict[str, Any]] = []
     for tabela in corpo.get("tables") or []:
@@ -103,7 +129,11 @@ async def _consultar_workspace(
     return saida
 
 
-async def collect_container_insights(config: dict[str, Any]) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+async def collect_container_insights(
+    config: dict[str, Any], *, window_days: int = LOOKBACK_DAYS,
+    until: datetime | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """Inventário e desempenho dos containers, por cluster com add-on.
 
     Devolve também a **cobertura**: quais clusters não têm o add-on, para que a
@@ -139,16 +169,30 @@ async def collect_container_insights(config: dict[str, Any]) -> tuple[pd.DataFra
         })
 
     async with httpx.AsyncClient(timeout=180.0) as cliente:
-        for ws, donos in list(workspaces.items())[:MAX_WORKSPACES]:
+        selected_workspaces = list(workspaces.items())[:MAX_WORKSPACES]
+        for index, (ws, donos) in enumerate(selected_workspaces, start=1):
+            if progress:
+                progress(index, len(selected_workspaces), ws)
             try:
-                pods = await _consultar_workspace(cliente, headers, ws, QUERY_PODS)
+                pods = await _consultar_workspace(cliente, headers, ws, QUERY_PODS, window_days=window_days, until=until)
                 # `KubeNodeInventory` pode não existir em workspace antigo; a
                 # ausência é do workspace, não defeito do coletor.
                 try:
-                    nos = await _consultar_workspace(cliente, headers, ws, QUERY_NODES)
+                    nos = await _consultar_workspace(cliente, headers, ws, QUERY_NODES, window_days=window_days, until=until)
                 except Exception:  # noqa: BLE001
                     nos = []
-                desempenho = await _consultar_workspace(cliente, headers, ws, QUERY_PERFORMANCE)
+                # A resposta de Perf para vários dias pode ultrapassar o limite
+                # de 8 MB do Log Analytics e fazer o workspace inteiro parecer
+                # indisponível. Consultar cada dia separadamente também preserva
+                # a granularidade da partição durante backfills de 30 dias.
+                desempenho = []
+                end = until.astimezone(timezone.utc) if until else datetime.now(timezone.utc)
+                for days_before_end in range(window_days - 1, -1, -1):
+                    day_end = end - timedelta(days=days_before_end)
+                    desempenho.extend(await _consultar_workspace(
+                        cliente, headers, ws, QUERY_PERFORMANCE,
+                        window_days=1, until=day_end,
+                    ))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Container Insights: workspace %s falhou: %s", ws[:60], exc)
                 for dono in donos:
@@ -172,6 +216,7 @@ async def collect_container_insights(config: dict[str, Any]) -> tuple[pd.DataFra
                     "pods": item.get("pods"),
                     "containers": item.get("containers"),
                     "nodes": None,
+                    "snapshot_date": item.get("Day"),
                     "record_kind": "pod_inventory",
                     "workspace_id": ws,
                 })
@@ -185,6 +230,7 @@ async def collect_container_insights(config: dict[str, Any]) -> tuple[pd.DataFra
                     "pods": None,
                     "containers": None,
                     "nodes": item.get("nodes"),
+                    "snapshot_date": item.get("Day"),
                     "kubernetes_version": item.get("KubernetesVersion"),
                     "record_kind": "node_inventory",
                     "workspace_id": ws,
@@ -198,6 +244,7 @@ async def collect_container_insights(config: dict[str, Any]) -> tuple[pd.DataFra
                     "metric_name": item.get("CounterName"),
                     "metric_average": item.get("media"),
                     "samples": item.get("amostras"),
+                    "snapshot_date": item.get("TimeBucket"),
                     "record_kind": "performance",
                     "workspace_id": ws,
                 })
@@ -244,7 +291,9 @@ def _write_bronze(
 
 
 def run_container_insights_collection(
-    session, connection_id: int, *, task_id: int | None = None, source_code: str | None = None
+    session, connection_id: int, *, task_id: int | None = None, source_code: str | None = None,
+    window_days: int = LOOKBACK_DAYS,
+    until: datetime | None = None,
 ) -> dict[str, Any]:
     """Coleta inventário e desempenho dos clusters com Container Insights."""
     from app.database import SyncSession as _Sync
@@ -256,23 +305,72 @@ def run_container_insights_collection(
     if not conn:
         raise ValueError(f"Conexão {connection_id} não encontrada")
 
-    frame, cobertura = asyncio_run(collect_container_insights(dict(conn.config_json or {})))
-    dia = datetime.now(timezone.utc).date().isoformat()
-    periodo = dia.replace("-", "")[:6]
+    window_days = max(1, min(int(window_days or LOOKBACK_DAYS), 90))
+    until = (until.astimezone(timezone.utc) if until else
+             datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0))
+    progress = None
+    if task_id is not None:
+        from app.models.etl_task import EtlTask
+        from sqlalchemy import update
+
+        def progress(step: int, total: int, workspace: str) -> None:
+            progress_session = _Sync()
+            try:
+                progress_session.execute(
+                    update(EtlTask).where(
+                        EtlTask.id == task_id, EtlTask.status == "RUNNING",
+                    ).values(
+                        phase=f"Container Insights: workspace {step}/{total} · {workspace}"[:200],
+                        last_progress_at=datetime.now(timezone.utc),
+                    )
+                )
+                progress_session.commit()
+            except Exception:
+                progress_session.rollback()
+                logger.exception("Could not persist progress for Container Insights task %s", task_id)
+            finally:
+                progress_session.close()
+    frame, cobertura = asyncio_run(collect_container_insights(
+        dict(conn.config_json or {}), window_days=window_days, until=until,
+        progress=progress,
+    ))
+    end = until
+    dia = (end - timedelta(microseconds=1)).date().isoformat()
+    periodo = dia.replace("-", "")
 
     total = 0
+    periods: set[str] = set()
     if not frame.empty:
-        frame["snapshot_date"] = dia
-        total += _write_bronze(
-            s, conn, frame, periodo, f"{BRONZE_TABLE}/{dia}/dados", source_code=source_code
-        )
+        if "snapshot_date" not in frame:
+            frame["snapshot_date"] = dia
+        else:
+            frame["snapshot_date"] = frame["snapshot_date"].fillna(dia)
+        frame["_partition_day"] = pd.to_datetime(
+            frame["snapshot_date"], utc=True, errors="coerce", format="mixed"
+        ).dt.strftime("%Y%m%d").fillna(periodo)
+        grouped = frame.groupby("_partition_day")
+        total_days = len(grouped)
+        for day_index, (day, group) in enumerate(grouped, start=1):
+            if progress:
+                progress(day_index, total_days, f"gravando Bronze {day}")
+            total += _write_bronze(
+                s, conn, group.drop(columns=["_partition_day"]), str(day),
+                f"{BRONZE_TABLE}/{day}/dados", source_code=source_code,
+            )
+            periods.add(str(day))
+            if progress:
+                progress(day_index, total_days, f"Bronze gravada {day}")
     # A cobertura é dado, não log: registra quem ficou de fora e por quê.
     if cobertura:
+        if progress:
+            progress(1, 1, f"gravando cobertura {periodo}")
         cobertura_frame = pd.DataFrame(cobertura)
         cobertura_frame["snapshot_date"] = dia
+        cobertura_frame["record_kind"] = "coverage"
         total += _write_bronze(
             s, conn, cobertura_frame, periodo, f"{BRONZE_TABLE}/{dia}/cobertura", source_code=source_code
         )
+        periods.add(periodo)
     s.commit()
 
     com_dado = sum(1 for c in cobertura if c["coverage_status"] == "AVAILABLE")
@@ -281,8 +379,10 @@ def run_container_insights_collection(
         "connection_id": connection_id,
         "rows_bronze": total,
         "period": periodo,
+        "periods": sorted(periods),
         "clusters_with_data": com_dado,
         "clusters_without_data": sem_dado,
+        "window_days": window_days,
         "status": "PARTIAL" if sem_dado else "AVAILABLE",
         "status_reason": (
             f"{sem_dado} cluster(s) sem o add-on Container Insights; "

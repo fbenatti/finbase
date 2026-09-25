@@ -43,6 +43,7 @@ resources
 | project resource_id = id, resource_name = name, resource_type = type,
           subscription_id = subscriptionId, resource_group = resourceGroup,
           location = location, sku = tostring(sku.name),
+          sku_capacity = tolong(properties.diskSizeGB),
           tags = tags,
           power_state = tostring(properties.extended.instanceView.powerState.code),
           created_at = tostring(properties.timeCreated)
