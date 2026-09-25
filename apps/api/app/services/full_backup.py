@@ -16,6 +16,34 @@ from typing import Callable
 from urllib.parse import unquote, urlparse
 
 BackupAbort = Callable[[], bool]
+BackupProgress = Callable[[int], None]
+
+
+class _ProgressWriter:
+    """Count compressed bytes written while tarfile streams the archive."""
+
+    def __init__(self, stream, on_progress: BackupProgress | None, should_abort: BackupAbort | None) -> None:
+        self._stream = stream
+        self._on_progress = on_progress
+        self._should_abort = should_abort
+        self.bytes_written = 0
+        self._reported_at = 0
+        self._abort_checked_at = 0
+
+    def write(self, payload: bytes) -> int:
+        written = self._stream.write(payload)
+        self.bytes_written += written
+        if self._should_abort and self.bytes_written - self._abort_checked_at >= 4 * 1024 * 1024:
+            self._abort_checked_at = self.bytes_written
+            _abort_if(self._should_abort)
+        # Avoid a database update for every tiny tar header.
+        if self._on_progress and self.bytes_written - self._reported_at >= 32 * 1024 * 1024:
+            self._reported_at = self.bytes_written
+            self._on_progress(self.bytes_written)
+        return written
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
 
 
 class BackupCancelledError(RuntimeError):
@@ -149,6 +177,7 @@ def create_full_backup(
     retention_days: int = 30,
     output_dir: str | None = None,
     should_abort: BackupAbort | None = None,
+    on_progress: BackupProgress | None = None,
 ) -> dict:
     """Create one compressed archive containing DB, Iceberg and the project.
 
@@ -213,15 +242,25 @@ def create_full_backup(
         # Stream directly into the compressed archive. The previous
         # copytree-based implementation duplicated the 15GB warehouse before
         # compression and made a full backup appear hung.
-        with tarfile.open(archive, "w:gz", compresslevel=1) as tar:
-            tar.add(root, arcname="openfinops", recursive=True, filter=_filter)
-            tar.add(db_dir, arcname="openfinops/postgres", recursive=True)
-            tar.add(manifest_path, arcname="openfinops/BACKUP_MANIFEST.json")
-            # When the warehouse lives inside the project, it was skipped by
-            # the project filter above and must be added explicitly.  For an
-            # external warehouse this is the sole copy as well.
-            if warehouse.exists():
-                tar.add(warehouse, arcname="openfinops/apps/data/iceberg", recursive=True)
+        with archive.open("wb") as archive_stream:
+            progress_stream = _ProgressWriter(archive_stream, on_progress, should_abort)
+            try:
+                with tarfile.open(fileobj=progress_stream, mode="w:gz", compresslevel=1) as tar:
+                    tar.add(root, arcname="openfinops", recursive=True, filter=_filter)
+                    tar.add(db_dir, arcname="openfinops/postgres", recursive=True)
+                    tar.add(manifest_path, arcname="openfinops/BACKUP_MANIFEST.json")
+                    # When the warehouse lives inside the project, it was skipped by
+                    # the project filter above and must be added explicitly.  For an
+                    # external warehouse this is the sole copy as well.
+                    if warehouse.exists():
+                        tar.add(warehouse, arcname="openfinops/apps/data/iceberg", recursive=True)
+                if on_progress:
+                    on_progress(progress_stream.bytes_written)
+            except BaseException:
+                # Never leave a partial archive that could be mistaken for a
+                # usable full backup after cancellation or an I/O failure.
+                archive.unlink(missing_ok=True)
+                raise
 
     archive.chmod(0o600)
     checksum = archive.with_suffix(archive.suffix + ".sha256")

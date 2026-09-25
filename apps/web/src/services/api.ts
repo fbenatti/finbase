@@ -1096,6 +1096,7 @@ export interface TaskStatus {
   table?: string;
   error?: string;
   errors?: string[];
+  started_at?: string | null;
 }
 
 export async function getTaskStatus(taskId: number): Promise<TaskStatus> {
@@ -4822,8 +4823,8 @@ export async function getPadroesRecursos(
 }
 
 export interface SavingDepartamentoItem {
-  departamento_nivel_4: string | null;
-  departamento_nivel_5: string | null;
+  organograma_nivel_4: string | null;
+  organograma_nivel_5: string | null;
   vms: number;
   saved_hours: number;
   saving_brl: number;

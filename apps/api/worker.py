@@ -437,6 +437,27 @@ def consumer_main(worker_id: int):
                     try:
                         from app.services.full_backup import BackupCancelledError, create_full_backup
                         from app.services.write_lock import exclusive_write_lock
+
+                        def _report_backup_progress(bytes_written: int) -> None:
+                            progress = SyncSession()
+                            try:
+                                row = progress.get(EtlTask, task_id)
+                                if row and row.status == "RUNNING":
+                                    gib = bytes_written / (1024 ** 3)
+                                    row.phase = "Compactando backup full do projeto"
+                                    row.current_blob = f"Arquivo parcial: {gib:.1f} GiB compactados"
+                                    row.downloaded_bytes_total = bytes_written
+                                    # The compressed final size is not known in
+                                    # advance; do not display a made-up percent.
+                                    row.total_download_bytes = 0
+                                    progress.commit()
+                            except Exception:
+                                # Progress reporting must never invalidate the
+                                # backup archive itself.
+                                logger.debug("Could not persist backup progress", exc_info=True)
+                            finally:
+                                progress.close()
+
                         if _is_etl_task_cancelled(task_id):
                             continue
                         with exclusive_write_lock():
@@ -445,6 +466,7 @@ def consumer_main(worker_id: int):
                             result = create_full_backup(
                                 retention_days=int((task.result_json or {}).get("retention_days", 30)),
                                 should_abort=lambda: _is_etl_task_cancelled(task_id),
+                                on_progress=_report_backup_progress,
                             )
                         terminal = SyncSession()
                         row = terminal.get(EtlTask, task_id)
@@ -453,6 +475,9 @@ def consumer_main(worker_id: int):
                             row.phase = "Backup full concluído"
                             row.total_blobs = 1
                             row.processed_blobs = 1
+                            row.downloaded_bytes_total = Path(result["archive"]).stat().st_size
+                            row.total_download_bytes = 0
+                            row.current_blob = "Arquivo full validado e checksum gerado"
                             row.result_json = {**(row.result_json or {}), **result}
                             row.finished_at = datetime.now(timezone.utc)
                             terminal.commit()

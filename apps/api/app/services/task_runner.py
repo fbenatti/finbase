@@ -608,10 +608,10 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
     for col in ['departamento', 'centro_custo', 'id_orcamento', 'ambiente',
                 'custom_fields', 'subscription_rg',
-                'departamento_nivel_1', 'departamento_nivel_2',
-                'departamento_nivel_3', 'departamento_nivel_4',
-                'departamento_nivel_5', 'departamento_nivel_6',
-                'departamento_nivel_7', 'business_rule']:
+                'organograma_nivel_1', 'organograma_nivel_2',
+                'organograma_nivel_3', 'organograma_nivel_4',
+                'organograma_nivel_5', 'organograma_nivel_6',
+                'organograma_nivel_7', 'business_rule']:
         if col not in df.columns:
             df[col] = None
 
@@ -686,7 +686,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                 # first-class dimension. nivel_1 = root (diretoria).
                 root_to_leaf = list(reversed(chain))
                 for i, d in enumerate(root_to_leaf, start=1):
-                    col_name = f"departamento_nivel_{i}"
+                    col_name = f"organograma_nivel_{i}"
                     if col_name not in df.columns:
                         df[col_name] = None
                     df.loc[effective_mask, col_name] = d.name or ""
@@ -3126,6 +3126,7 @@ def get_task_status(task_id: int) -> dict | None:
             db.close()
             if row:
                 status["status"] = row.status
+                status["started_at"] = row.started_at.isoformat() if row.started_at else None
                 status["total_blobs"] = row.total_blobs
                 status["processed_blobs"] = row.processed_blobs
                 status["rows_raw"] = row.rows_raw
@@ -3168,6 +3169,7 @@ def get_task_status(task_id: int) -> dict | None:
                 "connection_id": row.connection_id,
                 "connector_type": connector_type,
                 "status": row.status,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
                 "task_type": row.task_type,
                 "total_blobs": row.total_blobs,
                 "processed_blobs": row.processed_blobs,
@@ -3251,6 +3253,7 @@ def get_running_tasks() -> list[dict]:
                 "active_downloads": dt.active_downloads,
                 "download_blobs": dt.download_blobs or [],
                 "phase": dt.phase,
+                "started_at": dt.started_at.isoformat() if dt.started_at else None,
                 "table": (dt.result_json or {}).get("table", ""),
                 "error": "",
             }

@@ -30,7 +30,7 @@ import {
   TaskStatus,
 } from "../services/api";
 
-type NotificationKind = "extraction" | "reprocess" | "forecast" | "shared_cost" | "other";
+type NotificationKind = "extraction" | "reprocess" | "forecast" | "shared_cost" | "backup" | "other";
 
 export interface NotificationItem {
   id: number;
@@ -43,6 +43,9 @@ export interface NotificationItem {
   rows: number;
   phase: string;
   current: string;
+  bytesWritten: number;
+  totalBytes: number;
+  startedAt: number;
   connectorType?: string;
   timestamp: number;
   read: boolean;
@@ -50,6 +53,7 @@ export interface NotificationItem {
 
 function kindOf(task: TaskStatus): NotificationKind {
   const type = String(task.task_type || task.type || "");
+  if (type === "backup") return "backup";
   if (type === "forecast") return "forecast";
   if (type === "shared_cost") return "shared_cost";
   if (type === "gold_reprocess" || type === "ai_cost_relationship_reprocess") return "reprocess";
@@ -59,6 +63,7 @@ function kindOf(task: TaskStatus): NotificationKind {
 
 function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   const k = kindOf(task);
+  if (k === "backup") return "Backup Diário Full · #" + task.id;
   if (k === "shared_cost") return "Custo compartilhado";
   if (k === "forecast") return "Forecast";
   if (String(task.task_type || task.type || "") === "gold_reprocess") {
@@ -81,6 +86,10 @@ function isOperationalSource(task: TaskStatus): boolean {
 }
 
 function progressFor(task: TaskStatus): number {
+  if (kindOf(task) === "backup") {
+    const total = Number(task.total_download_bytes || 0);
+    return total > 0 ? Math.min(99, Math.round((Number(task.downloaded_bytes_total || 0) / total) * 100)) : 0;
+  }
   if (isOperationalSource(task)) {
     if ((task.total_blobs || 0) > 0) {
       return Math.round(((task.processed_blobs || 0) / task.total_blobs) * 100);
@@ -94,6 +103,12 @@ function progressFor(task: TaskStatus): number {
 }
 
 function progressCaption(task: TaskStatus): string {
+  if (String(task.task_type || task.type || "") === "backup") {
+    const bytes = Number(task.downloaded_bytes_total || 0);
+    const elapsed = task.started_at ? formatElapsed(Date.now() - new Date(task.started_at).getTime()) : "calculando";
+    const volume = bytes > 0 ? `${formatBytes(bytes)} compactados` : "preparando dump do PostgreSQL";
+    return `${volume} · ${elapsed} decorridos · projeto + banco + Iceberg`;
+  }
   if (isOperationalSource(task)) {
     const total = task.total_blobs || 0;
     const processed = task.processed_blobs || 0;
@@ -104,6 +119,23 @@ function progressCaption(task: TaskStatus): string {
     return `${gold} registros Gold · ARM/Monitor`;
   }
   return `${(task.rows_destination || 0).toLocaleString("pt-BR")} linhas · ${task.processed_blobs}/${task.total_blobs || "?"}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const step = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** step)).toFixed(step >= 3 ? 1 : 0)} ${units[step]}`;
+}
+
+function formatElapsed(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${hours}h ${String(minutes).padStart(2, "0")}m`
+    : `${minutes}m ${String(remainder).padStart(2, "0")}s`;
 }
 
 interface NotificationContextValue {
@@ -153,6 +185,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       rows: task.rows_destination || 0,
       phase: task.phase || "",
       current: task.current_blob || "",
+      bytesWritten: Number(task.downloaded_bytes_total || 0),
+      totalBytes: Number(task.total_download_bytes || 0),
+      startedAt: task.started_at ? new Date(task.started_at).getTime() : Date.now(),
       connectorType: task.connector_type,
       timestamp: Date.now(),
       read: false,
@@ -188,6 +223,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             rows: task.rows_destination || 0,
             phase: task.phase || "",
             current: task.current_blob || "",
+            bytesWritten: Number(task.downloaded_bytes_total || 0),
+            totalBytes: Number(task.total_download_bytes || 0),
+            startedAt: task.started_at ? new Date(task.started_at).getTime() : existing.startedAt,
             connectorType: task.connector_type || existing.connectorType,
             read: existing.read && (task.status === "QUEUED" || task.status === "RUNNING") ? existing.read : false,
           };
@@ -267,6 +305,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                     rows: task.rows_destination || 0,
                     phase: task.phase || "",
                     current: task.current_blob || "",
+                    bytesWritten: Number(task.downloaded_bytes_total || 0),
+                    totalBytes: Number(task.total_download_bytes || 0),
+                    startedAt: task.started_at ? new Date(task.started_at).getTime() : i.startedAt,
                     connectorType: task.connector_type || i.connectorType,
                     read: i.read && (task.status === "QUEUED" || task.status === "RUNNING") ? i.read : false,
                   }
@@ -384,11 +425,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         {item.phase || item.status}
-                        {item.current ? " · " + item.current : ""}
+                        {item.kind !== "backup" && item.current ? " · " + item.current : ""}
                       </Typography>
                     </Box>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Chip size="small" color={color} label={isActive ? item.progress + "%" : item.status} />
+                      <Chip
+                        size="small"
+                        color={color}
+                        label={isActive ? (item.kind === "backup" && item.totalBytes === 0 ? "EM ANDAMENTO" : item.progress + "%") : item.status}
+                      />
                       {isActive && (
                         <IconButton size="small" color="error" onClick={() => void doCancel(item)}>
                           <Stop fontSize="small" />
@@ -401,7 +446,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                   </Box>
                   {isActive && (
                     <LinearProgress
-                      variant={item.total > 0 ? "determinate" : "indeterminate"}
+                      variant={item.kind === "backup" && item.totalBytes === 0 ? "indeterminate" : item.total > 0 ? "determinate" : "indeterminate"}
                       value={item.progress}
                       sx={{ height: 5, borderRadius: 2, mt: 1 }}
                     />
@@ -413,6 +458,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       total_blobs: item.total,
                       processed_blobs: item.processed,
                       rows_destination: item.rows,
+                      task_type: item.kind === "backup" ? "backup" : undefined,
+                      downloaded_bytes_total: item.bytesWritten,
+                      started_at: new Date(item.startedAt).toISOString(),
+                      total_download_bytes: item.totalBytes,
                       phase: item.phase,
                       connector_type: item.connectorType,
                     } as TaskStatus)}
