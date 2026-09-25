@@ -35,7 +35,13 @@ from app.models.pivot_view import PivotView
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
-from app.services.iceberg_service import list_tables, get_catalog, read_bronze
+from app.services.iceberg_service import (
+    list_tables,
+    get_catalog,
+    read_bronze,
+    prune_stale_catalog_entries,
+    remove_catalog_table,
+)
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
 from app.services import lakehouse_layers as layers
@@ -2320,6 +2326,7 @@ async def get_tables():
     result: dict[str, list[str]] = {}
     for layer in ("bronze", "silver", "gold"):
         try:
+            prune_stale_catalog_entries(layer)
             # Temporary publication tables are implementation details, not
             # datasets. Only hide the exact generated *_stg_<time_ns> shape.
             tables = [name for name in list_tables(layer) if _staging_table_parts(str(name)) is None]
@@ -2336,6 +2343,7 @@ async def get_table_partitions(layer: str, table_name: str):
     """Return partition metadata for one catalog table (loaded on demand)."""
     if layer not in {"bronze", "silver", "gold"} or not re.fullmatch(r"[a-zA-Z0-9_]+", table_name):
         raise HTTPException(status_code=422, detail="Camada ou nome de tabela inválido.")
+    prune_stale_catalog_entries(layer)
     if table_name not in set(list_tables(layer)):
         raise HTTPException(status_code=404, detail="Tabela não encontrada no catálogo.")
     qualified = f'iceberg.{layer}."{table_name}$partitions"'
@@ -2408,13 +2416,23 @@ async def get_table_partitions(layer: str, table_name: str):
             return {"layer": layer, "table_name": table_name, "partitioned": True,
                     "partitions": partitions, "source": "pyiceberg"}
         except Exception as fallback_error:
-            logger.exception("PyIceberg partition metadata unavailable for %s.%s", layer, table_name)
-            raise HTTPException(status_code=503, detail="Metadados de partição indisponíveis.") from fallback_error
+            logger.warning(
+                "Partition metadata unavailable for %s.%s; pruning catalog entry: %s",
+                layer,
+                table_name,
+                fallback_error,
+            )
+            remove_catalog_table(layer, table_name)
+            raise HTTPException(
+                status_code=404,
+                detail="Tabela removida do catálogo (dados físicos indisponíveis).",
+            ) from fallback_error
 
 
 @router.get("/staging-tables")
 async def get_staging_tables(db: AsyncSession = Depends(get_db)):
     """List generated Gold staging tables and protect active reprocesses."""
+    prune_stale_catalog_entries(layers.detail_layer())
     catalog = get_catalog()
     rows: list[dict[str, Any]] = []
     for table_name in sorted(list_tables(layers.detail_layer())):

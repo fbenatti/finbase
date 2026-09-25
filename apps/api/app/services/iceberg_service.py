@@ -1215,7 +1215,7 @@ def write_destination_staged(
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     iceberg_schema = pyarrow_to_schema(arrow_table.schema)
 
-    partition_spec = build_iceberg_partition_spec(iceberg_schema, config)
+    partition_spec = build_iceberg_partition_spec(iceberg_schema, config, pyarrow_safe=True)
     if not partition_spec.fields:
         partition_field_idx = arrow_table.schema.get_field_index(partition_col)
         if partition_field_idx < 0:
@@ -2189,6 +2189,41 @@ def rename_legacy_organograma_columns(namespace: str) -> dict[str, list[tuple[st
             short_name,
         )
     return renamed
+
+
+def prune_stale_catalog_entries(namespace: str) -> int:
+    """Drop catalog metadata for tables whose warehouse/metadata no longer loads.
+
+    After a filesystem-only reset, ``iceberg_tables`` can still list silver/gold
+    names while PyIceberg cannot open them — Analysis would show ghosts and
+    partition metadata would fail with 503.
+    """
+    cat = _get_catalog()
+    try:
+        catalog_tables = list(cat.list_tables(namespace))
+    except Exception:
+        return 0
+    removed = 0
+    for tup in catalog_tables:
+        table_name = tup[1] if isinstance(tup, tuple) and len(tup) > 1 else tup
+        safe_name = str(table_name)
+        try:
+            cat.load_table((namespace, safe_name))
+        except Exception as exc:
+            logger.info(
+                "Pruning stale Iceberg catalog entry %s.%s: %s",
+                namespace,
+                safe_name,
+                exc,
+            )
+            _force_delete_table((namespace, safe_name), safe_name)
+            removed += 1
+    return removed
+
+
+def remove_catalog_table(namespace: str, table_name: str) -> None:
+    """Remove one table from the SQL catalog (metadata only when files are gone)."""
+    _force_delete_table((namespace, str(table_name)), str(table_name))
 
 
 def list_tables(namespace: str) -> list[str]:

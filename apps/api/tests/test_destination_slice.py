@@ -43,6 +43,30 @@ def test_validate_staging_rejects_mixed_periods():
         )
 
 
+def test_build_partition_spec_pyarrow_safe_downgrades_bucket():
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField, StringType
+
+    from app.services.destination_slice import (
+        PartitionExtra,
+        DestinationSliceConfig,
+        build_iceberg_partition_spec,
+    )
+
+    schema = Schema(
+        NestedField(1, "_billing_period", StringType(), required=False),
+        NestedField(2, "source_connection_id", LongType(), required=False),
+        NestedField(3, "subaccountname", StringType(), required=False),
+    )
+    config = DestinationSliceConfig(
+        grain="billing_period",
+        extras=(PartitionExtra(column="subaccountname", transform="bucket", bucket_count=16),),
+    )
+    spec = build_iceberg_partition_spec(schema, config, pyarrow_safe=True)
+    assert len(spec.fields) == 3
+    assert all(f.name != "subaccountname_bucket_16" for f in spec.fields)
+
+
 def test_partition_spec_json_extra_requires_column():
     spec = {
         "grain": "billing_period",

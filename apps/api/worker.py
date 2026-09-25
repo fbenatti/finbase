@@ -379,7 +379,7 @@ def consumer_main(worker_id: int):
             # A full backup freezes all PostgreSQL/Iceberg writers. Tasks
             # claimed while it is active are returned to the queue.
             from app.services.write_lock import is_locked, task_waits_on_warehouse_flock
-            if task_waits_on_warehouse_flock(task.task_type) and is_locked():
+            if task_waits_on_warehouse_flock(task) and is_locked():
                 retry = SyncSession()
                 try:
                     queued = retry.get(EtlTask, task_id)
@@ -403,11 +403,20 @@ def consumer_main(worker_id: int):
                     try:
                         queued = retry.get(EtlTask, task_id)
                         if queued and queued.status == "RUNNING":
-                            wait_phase = (
-                                "Aguardando conexão de origem"
-                                if queued.task_type == "extraction"
-                                else "Aguardando escritor Gold/Gold"
+                            from app.services.etl_task_claim import (
+                                _reprocess_task_has_slice_lock,
+                                parallel_reprocess_slices_enabled,
                             )
+                            if queued.task_type == "extraction":
+                                wait_phase = "Aguardando conexão de origem"
+                            elif (
+                                queued.task_type in {"reprocess", "reclassification"}
+                                and parallel_reprocess_slices_enabled()
+                                and _reprocess_task_has_slice_lock(queued)
+                            ):
+                                wait_phase = "Aguardando fatia Silver (mesma origem+mês em execução)"
+                            else:
+                                wait_phase = "Aguardando escritor Silver/Gold"
                             release_task_to_queue(retry, queued, phase=wait_phase)
                             retry.commit()
                     finally:
@@ -1007,36 +1016,45 @@ def consumer_main(worker_id: int):
                             }
                             _append_reprocess_log(task_id, "Worker assumiu a tarefa da fila")
 
-                            if task.task_type == "reclassification":
-                                from app.services.write_lock import exclusive_write_lock
-                                with exclusive_write_lock():
-                                    result = _reclassify_destination_sync(task_id, dest_id, conn_ids, periods)
-                            else:
-                                from app.services.write_lock import exclusive_write_lock
-                                with exclusive_write_lock():
-                                    payload = task.result_json or {}
-                                    snapshot_dates = [
-                                        str(s) for s in (payload.get("snapshot_dates") or [])
-                                    ]
-                                    result = _reprocess_destination_sync(
-                                        task_id,
-                                        dest_id,
-                                        conn_ids,
-                                        periods,
-                                        replace_existing=bool(payload.get("replace_existing", False)),
-                                        publish_by_partition=bool(
-                                            payload.get("publish_by_partition", True)
-                                            or (
-                                                payload.get("scheduled_pipeline")
-                                                and len(task.connection_ids or []) == 1
-                                                and (
-                                                    len(task.billing_periods or []) == 1
-                                                    or len(snapshot_dates) == 1
-                                                )
-                                            )
-                                        ),
-                                        snapshot_dates=snapshot_dates or None,
+                            from app.services.write_lock import (
+                                exclusive_write_lock,
+                                task_holds_exclusive_warehouse_flock,
+                            )
+
+                            def _run_reprocess_job():
+                                if task.task_type == "reclassification":
+                                    return _reclassify_destination_sync(
+                                        task_id, dest_id, conn_ids, periods,
                                     )
+                                payload = task.result_json or {}
+                                snapshot_dates = [
+                                    str(s) for s in (payload.get("snapshot_dates") or [])
+                                ]
+                                return _reprocess_destination_sync(
+                                    task_id,
+                                    dest_id,
+                                    conn_ids,
+                                    periods,
+                                    replace_existing=bool(payload.get("replace_existing", False)),
+                                    publish_by_partition=bool(
+                                        payload.get("publish_by_partition", True)
+                                        or (
+                                            payload.get("scheduled_pipeline")
+                                            and len(task.connection_ids or []) == 1
+                                            and (
+                                                len(task.billing_periods or []) == 1
+                                                or len(snapshot_dates) == 1
+                                            )
+                                        )
+                                    ),
+                                    snapshot_dates=snapshot_dates or None,
+                                )
+
+                            if task_holds_exclusive_warehouse_flock(task):
+                                with exclusive_write_lock():
+                                    result = _run_reprocess_job()
+                            else:
+                                result = _run_reprocess_job()
                         print(f"Task {task_id} completed: {result}")
 
                         # Persist the terminal state explicitly.  The

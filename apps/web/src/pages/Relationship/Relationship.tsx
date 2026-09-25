@@ -10,12 +10,13 @@ import {
 } from "@mui/icons-material";
 import {
   getConnections, SourceConnection, discoverSchema, ColumnInfo,
-  getDestinationTables, getDestinationSchema, DestinationTable,
+  getDestinationTables, getDestinationSchema, DestinationTable, DestinationPartitionSpec,
   getSourceDestMappings, createSourceDestMapping, deleteSourceDestMapping,
   SourceDestinationMapping,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable, { ColumnDef } from "../../components/SortableTable";
+import DestinationPartitionSettings from "../../components/DestinationPartitionSettings";
 
 interface MappingState {
   savedId: number;
@@ -222,6 +223,16 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
     getDestinationTables(true).then(setDestTables).catch(() => {});
     loadAllMappings();
   }, []);
+
+  useEffect(() => {
+    if (!selectedDestId) {
+      setDestCols([]);
+      return;
+    }
+    getDestinationSchema(selectedDestId as number)
+      .then((schema) => setDestCols(schema.columns))
+      .catch(() => setDestCols([]));
+  }, [selectedDestId]);
 
   const loadAllMappings = async () => {
     setMappingsLoading(true);
@@ -575,6 +586,25 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
   const connName = selectedConnId ? connections.find(c => c.id === selectedConnId)?.name : "";
   const destTableName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : "";
 
+  const scrollToPartitionSettings = () => {
+    document.getElementById("destination-partition-settings")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const formatPartitionSummary = (spec: DestinationPartitionSpec | null | undefined): string => {
+    if (!spec) return "Padrão (mês + conexão)";
+    const grain = spec.grain === "snapshot_date" ? "dia + conexão" : "mês + conexão";
+    const extras = (spec.extra_partitions || []).map((e) => {
+      const col = e.column;
+      if (e.transform === "bucket") return `${col} bucket(${e.bucket_count ?? 16})`;
+      return col;
+    });
+    return extras.length ? `${grain} · ${extras.join(", ")}` : grain;
+  };
+
+  const selectedConnection = selectedConnId
+    ? connections.find((c) => c.id === selectedConnId)
+    : undefined;
+
   // ── Datagrid: aggregated table-level relationships ──
   const connById = new Map(connections.map(c => [c.id, c]));
   const destById = new Map(destTables.map(t => [t.id, t]));
@@ -659,6 +689,25 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       },
     },
     {
+      key: "partition_spec_json" as keyof TableRelationship, label: "Partição Silver", width: 220,
+      sortable: false,
+      render: (r) => {
+        const dest = destById.get(r.destination_table_id);
+        const summary = formatPartitionSummary(dest?.partition_spec_json);
+        const conn = connById.get(r.source_connection_id);
+        return (
+          <Box>
+            <Typography variant="caption" sx={{ display: "block", fontSize: "0.68rem" }}>
+              {summary}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.62rem" }}>
+              replace: período + source_connection_id ({conn?.code || r.source_connection_id})
+            </Typography>
+          </Box>
+        );
+      },
+    },
+    {
       key: "column_count", label: "Colunas", width: 80,
       render: (r) => (
         <Chip
@@ -694,6 +743,22 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       ),
     },
     {
+      key: "_partition" as keyof TableRelationship, label: "Partição", width: 100, sortable: false, filterable: false,
+      render: (r) => (
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={() => {
+            setSelectedDestId(r.destination_table_id);
+            setSelectedConnId(r.source_connection_id);
+            scrollToPartitionSettings();
+          }}
+        >
+          Configurar
+        </Button>
+      ),
+    },
+    {
       key: "_edit" as keyof TableRelationship, label: "", width: 50, sortable: false, filterable: false,
       render: (r) => (
         <Tooltip title="Editar mapeamentos de colunas">
@@ -701,6 +766,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
             onClick={() => {
               setSelectedConnId(r.source_connection_id);
               setSelectedDestId(r.destination_table_id);
+              void loadAll();
             }}>
             <Refresh sx={{ fontSize: 16 }} />
           </IconButton>
@@ -819,9 +885,11 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
 
   return (
     <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-        <Typography variant="h4">Relacionamento</Typography>
-      </Box>
+      {!embedded && (
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+          <Typography variant="h4">Relacionamento</Typography>
+        </Box>
+      )}
 
       {/* ── Toolbar ── */}
       <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "center" }}>
@@ -845,7 +913,12 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           <Select
             value={selectedDestId}
             label="Tabela Destino"
-            onChange={(e) => { setSelectedDestId(e.target.value as number | ""); setMappings([]); }}
+            onChange={(e) => {
+              const id = e.target.value as number | "";
+              setSelectedDestId(id);
+              setMappings([]);
+              if (id) scrollToPartitionSettings();
+            }}
           >
             {destTables.map((t) => (
               <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
@@ -875,6 +948,31 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
               {saving ? "Salvando..." : "Salvar"}
             </Button>
           </>
+        )}
+      </Box>
+
+      <Box id="destination-partition-settings" sx={{ mb: 2 }}>
+        {!selectedDestId ? (
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: "#fafbff" }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              Partição Silver (destino)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Escolha <strong>Fonte</strong> (ex. azure-4p) e <strong>Tabela Destino</strong> (ex. MODELO FOCUS).
+              A fatia de replace usa <code>_billing_period</code> + <code>source_connection_id</code>; extras como
+              <code>SubAccountName</code> aparecem abaixo.
+            </Typography>
+          </Paper>
+        ) : (
+          <DestinationPartitionSettings
+            destinationTableId={selectedDestId as number}
+            columnNames={destCols.map((c) => c.name)}
+            sourceConnectionId={selectedConnId}
+            sourceConnectionLabel={selectedConnection
+              ? `${selectedConnection.name} (${selectedConnection.code})`
+              : undefined}
+            onSaved={() => { getDestinationTables(true).then(setDestTables).catch(() => {}); }}
+          />
         )}
       </Box>
 

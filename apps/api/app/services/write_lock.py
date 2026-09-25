@@ -10,8 +10,23 @@ from typing import Callable
 WAREHOUSE_FLOCK_TASK_TYPES = frozenset({"backup", "extraction", "reprocess", "reclassification"})
 
 
-def task_waits_on_warehouse_flock(task_type: str) -> bool:
-    return task_type in WAREHOUSE_FLOCK_TASK_TYPES
+def task_waits_on_warehouse_flock(task) -> bool:
+    """Whether *task* must wait on / hold the process-wide warehouse flock."""
+    task_type = task if isinstance(task, str) else getattr(task, "task_type", "")
+    if task_type not in WAREHOUSE_FLOCK_TASK_TYPES:
+        return False
+    if task_type in {"reprocess", "reclassification"} and not isinstance(task, str):
+        from app.services.etl_task_claim import (
+            _reprocess_task_has_slice_lock,
+            parallel_reprocess_slices_enabled,
+        )
+        if parallel_reprocess_slices_enabled() and _reprocess_task_has_slice_lock(task):
+            return False
+    return True
+
+
+def task_holds_exclusive_warehouse_flock(task) -> bool:
+    return task_waits_on_warehouse_flock(task)
 
 
 def lock_path() -> Path:

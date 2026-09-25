@@ -1491,7 +1491,7 @@ def _reprocess_destination_sync(
             status["status"] = "FAILED"; status["error"] = "Tabela destino nao encontrada"
             return {"success": False, "error": "Tabela destino nao encontrada", "rows_written": 0}
         phys_name = dest_info.physical_name; status["table"] = dest_info.name
-        partition_spec_json = dest_info.partition_spec_json
+        partition_spec_json = getattr(dest_info, "partition_spec_json", None)
         slice_cfg = resolve_destination_slice_config(phys_name, partition_spec_json)
         snapshot_dates = [str(s) for s in (snapshot_dates or [])]
         if not publish_by_partition:
@@ -2378,7 +2378,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                 dest.physical_name,
                 billing_period=str(period),
                 connection_id=cid,
-                partition_spec_json=dest.partition_spec_json,
+                partition_spec_json=getattr(dest, "partition_spec_json", None),
             )
             for cid in connection_ids
             for period in billing_periods
@@ -2400,7 +2400,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     billing_period=str(period),
                     connection_id=cid,
                     batch_size=int(os.getenv("RECLASSIFY_BATCH_ROWS", "50000")),
-                    partition_spec_json=dest.partition_spec_json,
+                    partition_spec_json=getattr(dest, "partition_spec_json", None),
                 ):
                     if _check_cancelled(task_id):
                         return {"success": False, "error": "Cancelado", "rows_written": 0}
@@ -2428,7 +2428,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                             dest.physical_name,
                             frame,
                             namespace="silver",
-                            partition_spec_json=dest.partition_spec_json,
+                            partition_spec_json=getattr(dest, "partition_spec_json", None),
                         )
                     else:
                         iceberg.append_to_staged(staged, frame, namespace="silver")
@@ -2442,7 +2442,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     billing_period=str(period),
                     connection_id=cid,
                     namespace="silver",
-                    partition_spec_json=dest.partition_spec_json,
+                    partition_spec_json=getattr(dest, "partition_spec_json", None),
                     expected_row_count=rows,
                 )
                 total += rows

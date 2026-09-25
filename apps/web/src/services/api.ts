@@ -1849,11 +1849,24 @@ export async function unskipBlob(skipId: number): Promise<void> {
 }
 
 // Destination Tables
+export interface DestinationPartitionExtra {
+  column: string;
+  transform?: "identity" | "bucket";
+  bucket_count?: number;
+}
+
+export interface DestinationPartitionSpec {
+  grain: "billing_period" | "snapshot_date";
+  snapshot_column?: string | null;
+  extra_partitions?: DestinationPartitionExtra[];
+}
+
 export interface DestinationTable {
   id: number;
   name: string;
   description: string | null;
   physical_name: string;
+  partition_spec_json?: DestinationPartitionSpec | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -1908,8 +1921,22 @@ export async function getDestinationTable(
 export async function createDestinationTable(body: {
   name: string;
   description?: string;
+  partition_spec_json?: DestinationPartitionSpec;
 }): Promise<DestinationTable> {
   const { data } = await api.post("/destinations/tables/", body);
+  return data;
+}
+
+export async function updateDestinationTable(
+  tableId: number,
+  body: {
+    name?: string;
+    description?: string;
+    active?: boolean;
+    partition_spec_json?: DestinationPartitionSpec | null;
+  },
+): Promise<DestinationTable> {
+  const { data } = await api.patch(`/destinations/tables/${tableId}`, body);
   return data;
 }
 

@@ -14,6 +14,7 @@ import {
   ExpandMore,
   Add, Remove,
 } from "@mui/icons-material";
+import axios from "axios";
 import * as XLSX from "xlsx";
 import {
   getAnalysisHealth, getAnalysisTables, runAnalysisQuery,
@@ -250,6 +251,10 @@ export default function Analysis() {
       const metadata = await getAnalysisTablePartitions(layer, tableName);
       setPartitionRows(metadata.partitions || []);
     } catch (e: unknown) {
+      if (axios.isAxiosError(e) && e.response?.status === 404) {
+        getAnalysisTables().then(setTables).catch(() => {});
+        return;
+      }
       setError(formatApiError(e, "Não foi possível carregar as partições"));
     } finally { setPartitionsLoading(false); }
   };
@@ -266,6 +271,10 @@ export default function Analysis() {
       const metadata = await getAnalysisTablePartitions(layer, tableName);
       setTablePartitionDetails(current => ({ ...current, [tableName]: metadata }));
     } catch (e: unknown) {
+      if (axios.isAxiosError(e) && e.response?.status === 404) {
+        getAnalysisTables().then(setTables).catch(() => {});
+        return;
+      }
       setError(formatApiError(e, `Não foi possível carregar partições de ${tableName}`));
     } finally {
       setPartitionDetailsLoading(current => {

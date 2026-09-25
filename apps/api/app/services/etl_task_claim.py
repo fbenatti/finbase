@@ -38,6 +38,29 @@ _ANALYTIC_WRITER_TASK_TYPES = {
 }
 
 
+def parallel_reprocess_slices_enabled() -> bool:
+    """When >= 2, reprocess/reclassify tasks with a slice key skip the global writer lock.
+
+    The per-slice advisory lock (destination + connection + month/day) still prevents
+    two workers from publishing the same source and billing period at once.
+    """
+    return max(1, int(os.getenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "2"))) >= 2
+
+
+def _reprocess_task_has_slice_lock(task: EtlTask) -> bool:
+    if task.task_type not in {"reprocess", "reclassification"} or not task.destination_table_id:
+        return False
+    payload = task.result_json if isinstance(task.result_json, dict) else {}
+    conn_ids = list(task.connection_ids or [])
+    periods = [str(p) for p in (task.billing_periods or []) if p]
+    snapshot_dates = [str(s) for s in (payload.get("snapshot_dates") or []) if s]
+    if conn_ids and snapshot_dates:
+        return len(conn_ids) == 1 and len(snapshot_dates) == 1
+    if conn_ids and periods:
+        return len(conn_ids) == 1 and len(periods) == 1
+    return False
+
+
 def _stable_lock_key(namespace: str, *parts: object) -> int:
     payload = namespace + "|" + "|".join(str(part) for part in parts)
     return zlib.crc32(payload.encode("utf-8")) & 0x7FFFFFFF
@@ -51,7 +74,11 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
     if queue_group:
         keys.append(_stable_lock_key("queue_group", queue_group))
 
-    if task.task_type in _ANALYTIC_WRITER_TASK_TYPES:
+    slice_parallel = (
+        parallel_reprocess_slices_enabled()
+        and _reprocess_task_has_slice_lock(task)
+    )
+    if task.task_type in _ANALYTIC_WRITER_TASK_TYPES and not slice_parallel:
         keys.append(_stable_lock_key("iceberg_analytic_writer"))
 
     if task.task_type in {"reprocess", "reclassification"} and task.destination_table_id:

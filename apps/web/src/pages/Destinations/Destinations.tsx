@@ -14,6 +14,7 @@ import {
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
+import DestinationPartitionSettings from "../../components/DestinationPartitionSettings";
 
 const DATA_TYPES = ["TEXT", "VARCHAR(50)", "VARCHAR(100)", "VARCHAR(200)", "NUMERIC", "DATE", "TIMESTAMPTZ", "JSONB", "BOOLEAN"];
 
@@ -158,6 +159,12 @@ export default function Destinations({ embedded }: { embedded?: boolean } = {}) 
                 Nova Coluna
               </Button>
             </Box>
+
+            <DestinationPartitionSettings
+              destinationTableId={selectedTable.id}
+              columnNames={selectedTable.columns.map((c) => c.column_name)}
+              onSaved={() => selectTable(selectedTable)}
+            />
 
             {/* Columns */}
             <Typography variant="subtitle1" sx={{ mb: 1 }}>

@@ -11,6 +11,7 @@ from app.services.cloud_scope import allowed_rule_cloud_scopes
 from app.services.etl_task_claim import (
     claim_next_etl_task,
     find_stalled_worker_task,
+    parallel_reprocess_slices_enabled,
     recover_stalled_task,
     recover_worker_orphaned_tasks,
     task_resource_lock_keys,
@@ -33,7 +34,8 @@ def test_allowed_rule_cloud_scopes_for_mongodb_includes_atlas():
     assert "atlas" in scopes
 
 
-def test_task_resource_lock_keys_queue_group():
+def test_task_resource_lock_keys_queue_group(monkeypatch):
+    monkeypatch.setenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "1")
     task = EtlTask(
         id=1,
         task_type="reprocess",
@@ -49,7 +51,8 @@ def test_task_resource_lock_keys_queue_group():
     assert len(set(keys)) == 3
 
 
-def test_task_resource_lock_keys_reprocess_slice():
+def test_task_resource_lock_keys_reprocess_slice_parallel(monkeypatch):
+    monkeypatch.setenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "2")
     task = EtlTask(
         id=2,
         task_type="reprocess",
@@ -60,11 +63,27 @@ def test_task_resource_lock_keys_reprocess_slice():
         result_json={},
     )
     keys = task_resource_lock_keys(task)
-    # global analytic writer + exact destination slice
+    assert len(keys) == 1
+    assert parallel_reprocess_slices_enabled()
+
+
+def test_task_resource_lock_keys_reprocess_slice_serial(monkeypatch):
+    monkeypatch.setenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "1")
+    task = EtlTask(
+        id=2,
+        task_type="reprocess",
+        status="QUEUED",
+        destination_table_id=10,
+        connection_ids=[4],
+        billing_periods=["202501"],
+        result_json={},
+    )
+    keys = task_resource_lock_keys(task)
     assert len(keys) == 2
 
 
-def test_task_resource_lock_keys_snapshot_slice():
+def test_task_resource_lock_keys_snapshot_slice(monkeypatch):
+    monkeypatch.setenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "2")
     task = EtlTask(
         id=3,
         task_type="reprocess",
@@ -75,7 +94,7 @@ def test_task_resource_lock_keys_snapshot_slice():
         result_json={"snapshot_dates": ["2025-09-15"]},
     )
     keys = task_resource_lock_keys(task)
-    assert len(keys) == 2
+    assert len(keys) == 1
 
 
 def test_stale_advisory_lock_recovery_is_noop_for_non_postgres():

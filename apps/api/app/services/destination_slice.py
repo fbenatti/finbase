@@ -164,10 +164,24 @@ def build_slice_row_filter(
     return And(*clauses)
 
 
-def build_iceberg_partition_spec(iceberg_schema, config: DestinationSliceConfig):
+def build_iceberg_partition_spec(
+    iceberg_schema,
+    config: DestinationSliceConfig,
+    *,
+    pyarrow_safe: bool = False,
+):
+    """Build Iceberg partition spec for destination tables.
+
+    PyIceberg's PyArrow append path only supports identity/time transforms.
+    When ``pyarrow_safe=True``, bucket extras fall back to identity so Silver
+    publication does not fail (replace keys are unchanged).
+    """
+    import logging
+
     from pyiceberg.partitioning import PartitionField, PartitionSpec
     from pyiceberg.transforms import BucketTransform, IdentityTransform
 
+    log = logging.getLogger(__name__)
     fields: list[PartitionField] = []
     next_id = iceberg_schema.highest_field_id + 1000
     for col in config.partition_columns():
@@ -176,8 +190,18 @@ def build_iceberg_partition_spec(iceberg_schema, config: DestinationSliceConfig)
             continue
         extra = next((e for e in config.extras if e.column == col), None)
         if extra and extra.transform == "bucket":
-            transform = BucketTransform(extra.bucket_count)
-            name = f"{col}_bucket_{extra.bucket_count}"
+            if pyarrow_safe:
+                log.warning(
+                    "Partition extra %s: bucket(%s) indisponível no writer PyArrow; "
+                    "usando identity nesta publicação.",
+                    col,
+                    extra.bucket_count,
+                )
+                transform = IdentityTransform()
+                name = col
+            else:
+                transform = BucketTransform(extra.bucket_count)
+                name = f"{col}_bucket_{extra.bucket_count}"
         else:
             transform = IdentityTransform()
             name = col
