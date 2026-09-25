@@ -1262,15 +1262,15 @@ def _align_staged_batch_to_target(batch, target) -> pa.Table:
     )
 
 
-def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = layers.GOLD,
-                      known_row_count: int | None = None) -> int:
-    """Replace a final table from staging without promoting its staging path.
-
-    SQLCatalog ``rename_table`` only changes the catalog identity; it does not
-    move the physical table directory.  Promoting a ``*_stg_*`` table therefore
-    leaves a live table in a disposable directory.  Publish into the canonical
-    table instead and remove the staging table only after the data commit.
-    """
+def _merge_staged_into_canonical_table(
+    physical_name: str,
+    temp_safe_name: str,
+    *,
+    namespace: str,
+    delete_filter: Any,
+    known_row_count: int | None = None,
+) -> int:
+    """Atomic DELETE (filter) + append from staging into the canonical table."""
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     main_tid = _table_id(namespace, safe_name)
     temp_tid = _table_id(namespace, temp_safe_name)
@@ -1280,10 +1280,6 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
     try:
         target = cat.load_table(main_tid)
     except Exception as exc:
-        # A catalog row with missing metadata cannot be repaired by renaming a
-        # staging table.  Its contents are unavailable, while the validated
-        # staging table is recoverable. Remove only that broken catalog entry
-        # and create a canonical destination location.
         from pyiceberg.exceptions import NoSuchTableError
         if not isinstance(exc, (NoSuchTableError, FileNotFoundError)):
             raise
@@ -1291,8 +1287,6 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
             cat.drop_table(main_tid)
         target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec())
 
-    # This function receives a complete replacement, therefore a live legacy
-    # staging-backed target can safely be replaced by the verified full input.
     if _is_staging_location(target):
         cat.drop_table(main_tid)
         target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec())
@@ -1303,37 +1297,192 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
         schema_update.union_by_name(staged.schema())
     target = cat.load_table(main_tid)
 
-    # A table-wide replacement is one Iceberg transaction. Readers see either
-    # the previous snapshot or the complete staged result, never a directory
-    # renamed from staging.
-    from pyiceberg.expressions import AlwaysTrue
     tx = target.transaction()
-    tx.delete(AlwaysTrue())
+    tx.delete(delete_filter)
     for batch in staged.scan().to_arrow_batch_reader():
         if batch.num_rows:
-            # Iceberg appends fields by position. A collector can produce the
-            # same columns in a different order on a later run, so always
-            # align the staged batch to the canonical Gold schema.
             tx.append(_align_staged_batch_to_target(batch, target))
     tx.commit_transaction()
     _force_delete_table(temp_tid, temp_safe_name)
 
-    # 3. Never re-read a multi-million-row table just to obtain a number we
-    # already know from the writer.  The former scan().to_arrow() was an
-    # unnecessary full materialization after every successful publication.
     if known_row_count is not None:
-        logger.info("Published staged %s into %s.%s (%d rows supplied by writer)", temp_safe_name, namespace, safe_name, known_row_count)
+        logger.info(
+            "Published staged %s into %s.%s (%d rows supplied by writer)",
+            temp_safe_name,
+            namespace,
+            safe_name,
+            known_row_count,
+        )
         return int(known_row_count)
 
-    # Backward-compatible fallback for callers that genuinely do not know it.
     try:
         tbl = cat.load_table(main_tid)
         rows = len(tbl.scan().to_arrow())
         logger.info("Published staged %s into %s.%s (%d rows)", temp_safe_name, namespace, safe_name, rows)
         return rows
     except Exception as e:
-        logger.warning("Load after swap failed (table may still be accessible): %s", e)
+        logger.warning("Load after merge failed (table may still be accessible): %s", e)
         return -1
+
+
+def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = layers.GOLD,
+                      known_row_count: int | None = None) -> int:
+    """Replace a final table from staging without promoting its staging path.
+
+    SQLCatalog ``rename_table`` only changes the catalog identity; it does not
+    move the physical table directory.  Promoting a ``*_stg_*`` table therefore
+    leaves a live table in a disposable directory.  Publish into the canonical
+    table instead and remove the staging table only after the data commit.
+    """
+    from pyiceberg.expressions import AlwaysTrue
+
+    return _merge_staged_into_canonical_table(
+        physical_name,
+        temp_safe_name,
+        namespace=namespace,
+        delete_filter=AlwaysTrue(),
+        known_row_count=known_row_count,
+    )
+
+
+def staging_column_single_value(
+    temp_safe_name: str,
+    column: str,
+    *,
+    namespace: str = layers.GOLD,
+) -> str:
+    """Return the single distinct value of *column* in a staging table."""
+    tid = _table_id(namespace, temp_safe_name.replace("-", "_").replace(".", "_"))
+    staged = _get_catalog().load_table(tid)
+    if column not in {field.name for field in staged.schema().fields}:
+        raise ValueError(f"Coluna {column} ausente no staging {temp_safe_name}")
+    arrow = staged.scan().select(column).to_arrow()
+    if arrow.num_rows == 0:
+        raise ValueError(f"Staging {temp_safe_name} vazio")
+    series = arrow[column].to_pandas().dropna().astype(str).unique()
+    if len(series) != 1:
+        raise ValueError(
+            f"Staging {temp_safe_name} deve ter um único valor em {column}, encontrados: {series[:5]}"
+        )
+    return str(series[0])
+
+
+def purge_gold_cube_snapshots(physical_name: str, *, namespace: str = layers.GOLD) -> bool:
+    """Expire Iceberg snapshots anteriores ao corrente em um cubo gold (libera disco)."""
+    if namespace != layers.GOLD:
+        return False
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    try:
+        table = _get_catalog().load_table(_table_id(namespace, safe_name))
+    except Exception as exc:
+        logger.warning("Purge de snapshots ignorado para %s.%s: %s", namespace, safe_name, exc)
+        return False
+    if table.current_snapshot() is None or _is_staging_location(table):
+        return False
+    try:
+        from datetime import datetime, timezone
+        from pyiceberg.table.maintenance import MaintenanceTable
+
+        MaintenanceTable(table).expire_snapshots().older_than(
+            datetime.now(timezone.utc)
+        ).commit()
+    except Exception as exc:
+        logger.warning("expire_snapshots PyIceberg falhou em %s.%s: %s", namespace, safe_name, exc)
+    return _trino_remove_orphan_files(namespace, safe_name)
+
+
+def _trino_remove_orphan_files(namespace: str, safe_name: str, retention: str = "1s") -> bool:
+    from urllib.parse import urljoin
+    import httpx
+    from app.services.trino_service import TRINO_URL, TRINO_USER
+
+    session_prop = (
+        f"iceberg.remove_orphan_files_min_retention={retention}"
+    )
+    headers = {
+        "X-Trino-User": TRINO_USER,
+        "X-Trino-Catalog": "iceberg",
+        "X-Trino-Schema": namespace,
+        "X-Trino-Session": session_prop,
+    }
+    sql = (
+        f"ALTER TABLE iceberg.{namespace}.{safe_name} "
+        f"EXECUTE remove_orphan_files(retention_threshold => '{retention}')"
+    )
+    submit_url = urljoin(TRINO_URL, "/v1/statement")
+    try:
+        with httpx.Client(timeout=300.0) as client:
+            resp = client.post(submit_url, content=sql, headers=headers)
+            if resp.status_code != 200:
+                logger.warning("Trino remove_orphan_files HTTP %d: %s", resp.status_code, resp.text[:200])
+                return False
+            data = resp.json()
+            next_uri = data.get("nextUri")
+            while next_uri:
+                resp = client.get(next_uri, headers=headers)
+                data = resp.json()
+                if "error" in data:
+                    logger.warning(
+                        "Trino remove_orphan_files: %s",
+                        data["error"].get("message"),
+                    )
+                    return False
+                if data.get("stats", {}).get("state") in ("FINISHED", "FAILED", "CANCELED"):
+                    break
+                next_uri = data.get("nextUri")
+        logger.info("remove_orphan_files concluído para iceberg.%s.%s", namespace, safe_name)
+        return True
+    except Exception as exc:
+        logger.warning("remove_orphan_files falhou para %s.%s: %s", namespace, safe_name, exc)
+        return False
+
+
+def replace_staged_cube(
+    physical_name: str,
+    temp_safe_name: str,
+    *,
+    namespace: str = layers.GOLD,
+    known_row_count: int | None = None,
+    purge_snapshots: bool = True,
+) -> int:
+    """Replace completo de cubo Gold (mesma transação da Silver) + purge de snapshots."""
+    if namespace != layers.GOLD:
+        raise ValueError("replace_staged_cube só se aplica ao namespace gold")
+    from pyiceberg.expressions import AlwaysTrue
+
+    rows = _merge_staged_into_canonical_table(
+        physical_name,
+        temp_safe_name,
+        namespace=namespace,
+        delete_filter=AlwaysTrue(),
+        known_row_count=known_row_count,
+    )
+    if purge_snapshots:
+        purge_gold_cube_snapshots(physical_name, namespace=namespace)
+    return rows
+
+
+def replace_staged_cube_snapshot_day(
+    physical_name: str,
+    temp_safe_name: str,
+    *,
+    snapshot_col: str,
+    snapshot_value: str,
+    namespace: str = layers.GOLD,
+    known_row_count: int | None = None,
+) -> int:
+    """Replace de um dia em cubo Gold com snapshot_mode (demais dias preservados)."""
+    if namespace != layers.GOLD:
+        raise ValueError("replace_staged_cube_snapshot_day só se aplica ao namespace gold")
+    from pyiceberg.expressions import EqualTo
+
+    return _merge_staged_into_canonical_table(
+        physical_name,
+        temp_safe_name,
+        namespace=namespace,
+        delete_filter=EqualTo(snapshot_col, str(snapshot_value)),
+        known_row_count=known_row_count,
+    )
 
 
 def cleanup_staged_table(temp_safe_name: str, namespace: str = "silver") -> None:
@@ -1995,6 +2144,16 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
 def get_catalog() -> Catalog:
     """Expose the catalog for external use (e.g., health checks)."""
     return _get_catalog()
+
+
+def table_exists(physical_name: str, namespace: str = layers.GOLD) -> bool:
+    """Return whether the Iceberg table is registered in the catalog."""
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    try:
+        _get_catalog().load_table(_table_id(namespace, safe_name))
+        return True
+    except Exception:
+        return False
 
 
 def rename_legacy_organograma_columns(namespace: str) -> dict[str, list[tuple[str, str]]]:

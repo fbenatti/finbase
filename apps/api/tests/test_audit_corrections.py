@@ -82,7 +82,7 @@ async def test_manifest_failure_aborts_before_staging(monkeypatch):
         return [{"row_count": 1}]
 
     monkeypatch.setattr(gov, "record_manifest", _record_falha)
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: swaps.append(a))
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: swaps.append(a))
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
     import app.services.trino_service as trino_service
 
@@ -118,7 +118,7 @@ async def test_final_manifest_failure_marks_failure(monkeypatch):
 
     monkeypatch.setattr(gov, "record_manifest", _record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: "snap")
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: None)
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: None)
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
     import app.services.trino_service as trino_service
 
@@ -369,7 +369,7 @@ def test_c2_does_not_hold_the_whole_slice_raw():
     # Nada de linhas cruas no processo.
     assert "pd.DataFrame(linhas)" not in fonte
     # Um único swap, depois da validação.
-    assert "swap_staged_table" in fonte
+    assert "replace_staged_cube" in fonte
     # Reconciliação final levanta em MISMATCH.
     assert "BaselineMismatchError" in fonte
 

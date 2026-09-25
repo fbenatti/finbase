@@ -179,7 +179,7 @@ def _publish_frame(table: str, frame: pd.DataFrame) -> int:
     if not target_exists:
         # Primeira publicação: renomear o staging inteiro é a troca atômica
         # mais barata e preserva a partition spec.
-        linhas = iceberg.swap_staged_table(
+        linhas = iceberg.replace_staged_cube(
             table, temp_name, namespace=namespace, known_row_count=len(frame)
         )
         from app.services.gold_governance import record_frame_publication_blocking
@@ -279,7 +279,7 @@ def rebuild_gold_cubes(*, table: str | None = None, gold: str | None = None) -> 
         result = execute_sync(f"SELECT COUNT(*) AS row_count FROM iceberg.gold.{staging}", timeout_s=180)
         rows = int((result[0] if result else {}).get("row_count") or 0)
         if rows:
-            return iceberg.swap_staged_table(table, staging, known_row_count=rows)
+            return iceberg.replace_staged_cube(table, staging, known_row_count=rows)
         iceberg.cleanup_staged_table(staging, namespace=layers.GOLD)
         return 0
     except Exception:

@@ -152,7 +152,7 @@ def test_publish_fails_before_swap_on_mismatch():
 
     fonte = inspect.getsource(gov.publish_gold_cube)
     pos_mismatch = fonte.index('veredito == "MISMATCH"')
-    pos_swap = fonte.index("iceberg.swap_staged_table(")
+    pos_swap = fonte.index("iceberg.replace_staged_cube(")
     assert pos_mismatch < pos_swap
     assert "cleanup_staged_table" in fonte[pos_mismatch:pos_swap]
 
@@ -163,7 +163,7 @@ def test_validate_staging_runs_before_swap():
 
     fonte = inspect.getsource(gov.publish_gold_cube)
     pos_validador = fonte.index("validate_staging is not None")
-    pos_swap = fonte.index("iceberg.swap_staged_table(")
+    pos_swap = fonte.index("iceberg.replace_staged_cube(")
     assert pos_validador < pos_swap
 
 
@@ -264,7 +264,7 @@ def test_c2_final_table_untouched_until_swap():
     assert "_stg_build_" in fonte
     assert "DELETE FROM iceberg.{layers.GOLD}.{C2_TABLE}" not in fonte
     assert "INSERT INTO iceberg.{layers.GOLD}.{C2_TABLE}" not in fonte
-    assert "swap_staged_table" in fonte
+    assert "replace_staged_cube" in fonte
 
 
 def test_c2_validates_before_swap():
@@ -275,7 +275,7 @@ def test_c2_validates_before_swap():
 
     fonte = inspect.getsource(m.materialize_c2)
     pos_valida = fonte.index("_validate_c2_build(")
-    pos_swap = fonte.index("swap_staged_table")
+    pos_swap = fonte.index("replace_staged_cube")
     assert pos_valida < pos_swap
 
 
@@ -493,7 +493,7 @@ async def test_publish_rolls_back_when_terminal_manifest_fails(monkeypatch):
 
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: "snap-9")
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: swaps.append(a))
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: swaps.append(a))
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
     async def fake_rollback(**k):
         rollbacks.append((k["table"], k["snapshot_id"]))
@@ -512,7 +512,7 @@ async def test_publish_rolls_back_when_terminal_manifest_fails(monkeypatch):
             financial_total_in=100.0,
         )
     assert swaps, "o swap aconteceu antes da falha"
-    assert rollbacks == [("finops_cost_monthly", "snap-9")], "rollback ao snapshot anterior"
+    assert rollbacks == [], "cubos gold não fazem rollback Iceberg após purge/replace"
 
 
 @pytest.mark.asyncio
@@ -535,7 +535,7 @@ async def test_publish_does_not_invalidate_cache_when_rollback_succeeds(monkeypa
 
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: "snap-1")
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: None)
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: None)
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
     async def fake_rollback(**k):
         return True
@@ -579,7 +579,7 @@ async def test_publish_invalidates_cache_when_rollback_fails(monkeypatch):
 
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: "snap-1")
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: None)
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: None)
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
     async def fake_rollback(**k):
         return False
@@ -599,7 +599,7 @@ async def test_publish_invalidates_cache_when_rollback_fails(monkeypatch):
             select_sql="SELECT 1 FROM iceberg.silver.resource_cost",
             financial_total_in=50.0,
         )
-    assert invalidacoes == ["finops_cost_monthly"]
+    assert invalidacoes == [], "sem rollback em gold; cache não invalida por falha de rollback"
 
 
 @pytest.mark.asyncio
@@ -625,7 +625,7 @@ async def test_staging_validator_runs_before_swap(monkeypatch):
 
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: None)
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: swaps.append(a))
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: swaps.append(a))
     monkeypatch.setattr(gov.iceberg, "cleanup_staged_table", lambda s, **k: limpezas.append(s))
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
     import app.services.trino_service as trino_service

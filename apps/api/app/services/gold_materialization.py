@@ -428,26 +428,28 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
             result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=180)
             rows = int((result[0] if result else {}).get("row_count") or 0)
             if snapshot_mode:
-                # Snapshot mode é append datado: não há swap, e portanto não há
-                # versão anterior a preservar. O manifesto registra a publicação
-                # pelo mesmo ponto de governança, sem troca.
                 if rows:
-                    try:
-                        await execute(
-                            f"INSERT INTO iceberg.{GOLD}.{table} SELECT * FROM iceberg.{GOLD}.{staging}",
-                            timeout_s=900,
+                    snapshot_val = iceberg.staging_column_single_value(
+                        staging, snapshot_col, namespace=GOLD
+                    )
+                    if iceberg.table_exists(table, namespace=GOLD):
+                        iceberg.replace_staged_cube_snapshot_day(
+                            table,
+                            staging,
+                            snapshot_col=snapshot_col,
+                            snapshot_value=snapshot_val,
+                            known_row_count=rows,
                         )
-                    except Exception:
-                        # Tabela ainda não existe → cria a partir do staging.
-                        await execute(
-                            f"CREATE TABLE iceberg.{GOLD}.{table} AS SELECT * FROM iceberg.{GOLD}.{staging}",
-                            timeout_s=900,
+                    else:
+                        iceberg.replace_staged_cube(
+                            table, staging, namespace=GOLD, known_row_count=rows, purge_snapshots=False
                         )
-                iceberg.cleanup_staged_table(staging, namespace=GOLD)
+                else:
+                    iceberg.cleanup_staged_table(staging, namespace=GOLD)
                 await _record_rule_manifest(rule, rows=rows, sql=rule.sql_template, run_id=run_id)
                 return rows
             if rows:
-                iceberg.swap_staged_table(table, staging, namespace=GOLD, known_row_count=rows)
+                iceberg.replace_staged_cube(table, staging, namespace=GOLD, known_row_count=rows)
             else:
                 iceberg.cleanup_staged_table(staging, namespace=GOLD)
             await _record_rule_manifest(rule, rows=rows, sql=rule.sql_template, run_id=run_id)
@@ -566,7 +568,7 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
         result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=180)
         rows = int((result[0] if result else {}).get("row_count") or 0)
         if rows:
-            iceberg.swap_staged_table(table, staging, namespace=GOLD, known_row_count=rows)
+            iceberg.replace_staged_cube(table, staging, namespace=GOLD, known_row_count=rows)
         else:
             iceberg.cleanup_staged_table(staging, namespace=GOLD)
         await _record_rule_manifest(rule, rows=rows, sql=full_sql, run_id=run_id)

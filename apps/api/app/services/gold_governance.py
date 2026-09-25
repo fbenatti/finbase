@@ -483,9 +483,14 @@ async def publish_gold_cube(
                     f"{cube_code}: staging reprovado antes do swap: " + "; ".join(problemas)
                 )
 
-        iceberg.swap_staged_table(
-            table, staging, namespace=namespace, known_row_count=linhas
-        )
+        if namespace == layers.GOLD:
+            iceberg.replace_staged_cube(
+                table, staging, namespace=namespace, known_row_count=linhas
+            )
+        else:
+            iceberg.swap_staged_table(
+                table, staging, namespace=namespace, known_row_count=linhas
+            )
         entrada.financial_total_out = total_out
         trocou = True
         saida = PublishOutcome(
@@ -505,7 +510,7 @@ async def publish_gold_cube(
         # publicada sem registro. Rollback para o snapshot anterior devolve a
         # versão que tinha manifesto — e o cache só é invalidado se o rollback
         # falhar, porque aí fica publicado um dado sem prova.
-        if trocou and anterior:
+        if trocou and anterior and namespace != layers.GOLD:
             devolveu = await rollback_table_to_snapshot(
                 namespace=namespace, table=table, snapshot_id=anterior
             )

@@ -268,7 +268,7 @@ async def test_publish_failure_preserves_previous_table(monkeypatch):
     def fake_cleanup(staging, namespace=None):
         limpezas.append(staging)
 
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", fake_swap)
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", fake_swap)
     monkeypatch.setattr(gov.iceberg, "cleanup_staged_table", fake_cleanup)
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
 
@@ -309,7 +309,7 @@ async def test_publish_empty_is_partial_not_success(monkeypatch):
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: None)
     monkeypatch.setattr(gov, "assert_dependencies_fresh", lambda *a, **k: _noop())
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: None)
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: None)
     monkeypatch.setattr(gov.iceberg, "cleanup_staged_table", lambda s, namespace=None: limpezas.append(s))
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
 
@@ -380,7 +380,7 @@ async def test_publish_success_records_rollback_pointer_and_delta(monkeypatch):
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: "snap-42")
     monkeypatch.setattr(gov, "assert_dependencies_fresh", lambda *a, **k: _noop())
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", fake_swap)
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", fake_swap)
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
 
     import app.services.trino_service as trino_service
@@ -421,7 +421,7 @@ async def test_publish_rejects_mixed_currency(monkeypatch):
     monkeypatch.setattr(gov, "record_manifest", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: None)
     monkeypatch.setattr(gov, "assert_dependencies_fresh", lambda *a, **k: _noop())
-    monkeypatch.setattr(gov.iceberg, "swap_staged_table", lambda *a, **k: swap.append(a))
+    monkeypatch.setattr(gov.iceberg, "replace_staged_cube", lambda *a, **k: swap.append(a))
     monkeypatch.setattr(gov.iceberg, "cleanup_staged_table", lambda s, namespace=None: None)
     monkeypatch.setattr(gov.iceberg, "ensure_namespace", lambda *a, **k: None)
 
@@ -478,9 +478,9 @@ def test_no_cube_is_published_without_a_manifest():
     sem_manifesto: list[str] = []
     for caminho in raiz.glob("*.py"):
         texto = caminho.read_text()
-        if "swap_staged_table(" not in texto:
+        if "swap_staged_table(" not in texto and "replace_staged_cube(" not in texto:
             continue
-        if caminho.name in {"gold_governance.py", "iceberg_service.py"}:
+        if caminho.name in {"gold_governance.py", "iceberg_service.py", "gold_builder.py"}:
             continue
         if "record_frame_publication" not in texto and "publish_gold_cube" not in texto:
             sem_manifesto.append(caminho.name)
@@ -497,7 +497,10 @@ def test_in_memory_publishers_are_known_and_justified():
     em_memoria = sorted(
         caminho.name
         for caminho in raiz.glob("*.py")
-        if "swap_staged_table(" in caminho.read_text()
+        if (
+            "swap_staged_table(" in caminho.read_text()
+            or "replace_staged_cube(" in caminho.read_text()
+        )
         and "record_frame_publication" in caminho.read_text()
         and caminho.name != _IMPLEMENTS_RECORDING
     )

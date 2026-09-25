@@ -320,7 +320,7 @@ async def _accumulate(
         linhas = int((contagem[0] if contagem else {}).get("n") or 0)
         anterior = current_snapshot_id(layers.GOLD, table)
         if anterior is None:
-            iceberg.swap_staged_table(
+            iceberg.replace_staged_cube(
                 table, staging, namespace=layers.GOLD, known_row_count=linhas
             )
         else:

@@ -257,7 +257,7 @@ async def materialize_c2_inventory(
         C2_INVENTORY_TABLE, frame, partition_col="_billing_period", namespace=layer
     )
     try:
-        publicado = iceberg.swap_staged_table(
+        publicado = iceberg.replace_staged_cube(
             C2_INVENTORY_TABLE,
             staged,
             namespace=layer,
@@ -460,7 +460,7 @@ async def materialize_c2(
             linhas_cubo = int((contagem[0] if contagem else {}).get("n") or 0)
             total_build = float((contagem[0] if contagem else {}).get("total") or 0)
 
-            iceberg.swap_staged_table(
+            iceberg.replace_staged_cube(
                 C2_TABLE,
                 build_table,
                 namespace=layers.GOLD,
