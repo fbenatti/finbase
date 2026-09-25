@@ -3,12 +3,14 @@ import {
   Box, Typography, Button, Chip, Alert, CircularProgress, Tooltip, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField, FormControl, InputLabel,
   Select, MenuItem, FormHelperText, FormControlLabel, Switch, IconButton,
+  Checkbox,
 } from "@mui/material";
 import { Schedule, Add, Edit, Delete, PlayArrow } from "@mui/icons-material";
 import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   ScheduledTask, SourceConnection, formatApiError, getDestinationTables, getForecastConfigs,
   getGoldCubeRules, DestinationTable, ForecastConfig, GoldCubeRule,
+  getBackupSizeEstimates,
 } from "../../services/api";
 import SortableTable from "../../components/SortableTable";
 
@@ -39,6 +41,7 @@ interface SchedForm {
   gold_rule_ids: number[];
   accuracy: boolean;
   shared_cost: boolean;
+  backup_layers: ("bronze" | "silver" | "gold")[];
 }
 
 const EMPTY_FORM: SchedForm = {
@@ -49,6 +52,7 @@ const EMPTY_FORM: SchedForm = {
   forecast_after_ingestion: false, forecast_config_id: "",
   destination_table_ids: [], period_mode: "all", billing_periods: "",
   forecast_config_ids: [], gold_rule_ids: [], accuracy: true, shared_cost: false,
+  backup_layers: ["bronze"],
 };
 
 export default function SchedulesPanel({ connections }: { connections: SourceConnection[] }) {
@@ -62,6 +66,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const [forecastConfigs, setForecastConfigs] = useState<ForecastConfig[]>([]);
   const [goldRules, setGoldRules] = useState<GoldCubeRule[]>([]);
   const [forecastConfigsError, setForecastConfigsError] = useState(false);
+  const [backupSizes, setBackupSizes] = useState<Record<"bronze" | "silver" | "gold", number> | null>(null);
 
   const focusDimonIds = (goldIds: number[]): number[] => {
     const goldNames = new Set(
@@ -93,6 +98,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
       })
       .catch(() => setForecastConfigsError(true));
     getGoldCubeRules().then(setGoldRules).catch(() => {});
+    getBackupSizeEstimates().then(setBackupSizes).catch(() => setBackupSizes(null));
   }, []);
 
   const openNew = () => {
@@ -123,6 +129,9 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         ? cfg.gold_rule_ids.map(Number)
         : focusDimonIds(Array.isArray(cfg.destination_table_ids) ? cfg.destination_table_ids.map(Number) : []),
       accuracy: cfg.accuracy !== false, shared_cost: cfg.shared_cost === true,
+      backup_layers: Array.isArray(cfg.backup_layers) && cfg.backup_layers.length
+        ? cfg.backup_layers.filter((layer): layer is "bronze" | "silver" | "gold" => ["bronze", "silver", "gold"].includes(String(layer)))
+        : ["bronze"],
     });
     setDialogOpen(true);
   };
@@ -154,6 +163,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
           gold_rule_ids: form.gold_rule_ids,
           accuracy: form.accuracy,
           shared_cost: form.shared_cost,
+          backup_layers: form.backup_layers.length ? form.backup_layers : ["bronze"],
         },
       };
       if (editing) {
@@ -190,6 +200,14 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const formatNextRun = (s: ScheduledTask): string => {
     if (!s.next_run_at) return "—";
     return new Date(s.next_run_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const formatSize = (bytes?: number) => {
+    if (bytes == null) return "Carregando…";
+    if (bytes === 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / (1024 ** index)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${units[index]}`;
   };
 
   const formatLastRun = (s: ScheduledTask): string => {
@@ -331,7 +349,31 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                 <MenuItem value="backup">Backup Full</MenuItem>
               </Select>
             </FormControl>
-            {form.schedule_type === "backup" && <Alert severity="info">Backup completo do projeto, PostgreSQL e warehouse Iceberg. Não requer conexão.</Alert>}
+            {form.schedule_type === "backup" && <>
+              <Alert severity="info">Backup do projeto, PostgreSQL e camadas Iceberg selecionadas. As estimativas abaixo representam o volume atual dos dados antes da compressão do arquivo.</Alert>
+              <Box sx={{ border: 1, borderColor: "divider", borderRadius: 2, p: 1.5 }}>
+                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Tabelas incluídas no backup</Typography>
+                {(["bronze", "silver", "gold"] as const).map(layer => (
+                  <FormControlLabel key={layer} sx={{ display: "flex", justifyContent: "space-between", mx: 0 }}
+                    control={<Checkbox checked={form.backup_layers.includes(layer)} onChange={e => {
+                      setForm(current => {
+                        const selected = e.target.checked
+                          ? [...current.backup_layers, layer]
+                          : current.backup_layers.filter(item => item !== layer);
+                        return { ...current, backup_layers: selected.length ? selected : [layer] };
+                      });
+                    }} />}
+                    label={<Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, width: 300 }}>
+                      <Typography variant="body2">{layer[0].toUpperCase() + layer.slice(1)}</Typography>
+                      <Typography variant="body2" color="text.secondary">{formatSize(backupSizes?.[layer])}</Typography>
+                    </Box>} />
+                ))}
+                <FormHelperText>Estimativa do volume dos arquivos da camada; tamanho final varia após compactação. Pelo menos uma camada deve permanecer selecionada.</FormHelperText>
+                <Typography variant="body2" fontWeight={600} sx={{ mt: 1 }}>
+                  Selecionado: {formatSize(backupSizes ? form.backup_layers.reduce((sum, layer) => sum + backupSizes[layer], 0) : undefined)}
+                </Typography>
+              </Box>
+            </>}
             {form.schedule_type !== "backup" && <FormControl size="small">
               <InputLabel>Conexoes (uma ou varias)</InputLabel>
               <Select

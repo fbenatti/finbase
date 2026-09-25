@@ -116,7 +116,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
 async def load_datamesh_dashboard(*, cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
     rows = await trino_execute(f"""
         SELECT _billing_period AS period, tipo, cloud_origem,
-               departamento AS organograma_nivel_6,
+               organograma AS organograma_nivel_6,
                centro_custo, subaccountname, regionname, servicename, servicesubcategory, skumeter,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
         FROM {GOLD_TABLE}

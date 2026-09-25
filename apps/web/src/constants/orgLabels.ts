@@ -1,6 +1,6 @@
 /**
  * Rótulos de UI do modelo organizacional.
- * Backend/API mantém nomenclatura técnica (departamento, department_id, departamento_nivel_*).
+ * Backend/API mantém nomenclatura técnica (organograma, organograma_nivel_*, department_id).
  */
 export const ORG = {
   modelTitle: "Modelo Organizacional",
@@ -26,7 +26,7 @@ export const ORG = {
   deleteAction: "Excluir organograma",
   financialTooltip: "Cadastro financeiro deste nó",
   configureModel: "Configurar modelo organizacional",
-  /** Nível 5 da hierarquia de custo (coluna departamento_nivel_5) */
+  /** Nível 5 da hierarquia de custo (coluna organograma_nivel_5) */
   level5: "Área",
   directorViewChain: "Segmento → Modelo → Diretoria → Cloud → Projeto → SubProjeto",
   directorViewLevels: "1→2→4→3→5→6",

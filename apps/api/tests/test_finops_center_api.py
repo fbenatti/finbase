@@ -82,7 +82,7 @@ def test_unavailable_measures_are_declared_with_reason():
     motivos = unavailable_measures()
     for campo in ("billed_cost", "contracted_cost"):
         assert "13.519.512" in motivos[campo]
-    assert "UNMAPPED" in motivos["departamento_nivel_1..7"]
+    assert "UNMAPPED" in motivos["organograma_nivel_1..7"]
 
 
 # --- ordenação e paginação ----------------------------------------------------

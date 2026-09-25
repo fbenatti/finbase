@@ -78,8 +78,8 @@ async def _publish(
 def _consumption_select() -> str:
     dimensions = [
         "provider", "productname", "modelname", "recordtype", "useremail", "userlogin",
-        "aggregationlevel", "editor", "language", "departamento",
-        *(f"departamento_nivel_{level}" for level in range(1, 8)),
+        "aggregationlevel", "editor", "language", "organograma",
+        *(f"organograma_nivel_{level}" for level in range(1, 8)),
     ]
     dim_select = ",\n        ".join(f"CAST({name} AS VARCHAR) AS {name}" for name in dimensions)
     group_positions = ", ".join(str(position) for position in range(1, 3 + len(dimensions)))
@@ -126,14 +126,14 @@ def _license_select() -> str:
         CAST(activitystatus AS VARCHAR) AS activitystatus,
         TRY_CAST(allocatedlicensecost AS DOUBLE) AS allocatedlicensecost,
         TRY_CAST(listcost AS DOUBLE) AS listcost,
-        CAST(departamento AS VARCHAR) AS departamento,
-        CAST(departamento_nivel_1 AS VARCHAR) AS departamento_nivel_1,
-        CAST(departamento_nivel_2 AS VARCHAR) AS departamento_nivel_2,
-        CAST(departamento_nivel_3 AS VARCHAR) AS departamento_nivel_3,
-        CAST(departamento_nivel_4 AS VARCHAR) AS departamento_nivel_4,
-        CAST(departamento_nivel_5 AS VARCHAR) AS departamento_nivel_5,
-        CAST(departamento_nivel_6 AS VARCHAR) AS departamento_nivel_6,
-        CAST(departamento_nivel_7 AS VARCHAR) AS departamento_nivel_7,
+        CAST(organograma AS VARCHAR) AS organograma,
+        CAST(organograma_nivel_1 AS VARCHAR) AS organograma_nivel_1,
+        CAST(organograma_nivel_2 AS VARCHAR) AS organograma_nivel_2,
+        CAST(organograma_nivel_3 AS VARCHAR) AS organograma_nivel_3,
+        CAST(organograma_nivel_4 AS VARCHAR) AS organograma_nivel_4,
+        CAST(organograma_nivel_5 AS VARCHAR) AS organograma_nivel_5,
+        CAST(organograma_nivel_6 AS VARCHAR) AS organograma_nivel_6,
+        CAST(organograma_nivel_7 AS VARCHAR) AS organograma_nivel_7,
         CAST(snapshotdate AS VARCHAR) AS snapshotdate,
         CAST(_billing_period AS VARCHAR) AS _billing_period
       FROM (

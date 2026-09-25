@@ -8,7 +8,7 @@ import {
 } from "./HierarchicalDecompTree";
 
 describe("normalizeDirectorPath", () => {
-  it("remove Consumo Cloud para alinhar profundidade com departamento_nivel_N", () => {
+  it("remove Consumo Cloud para alinhar profundidade com organograma_nivel_N", () => {
     const raw = ["Consumo Cloud", "Seg", "Mod", "Dir", "Azure", "Projeto A"];
     expect(normalizeDirectorPath(raw, true)).toEqual(["Seg", "Mod", "Dir", "Azure", "Projeto A"]);
   });
@@ -27,11 +27,11 @@ describe("pathSegmentFilters (visão diretoria)", () => {
   it("mapeia Segmento→Modelo→Diretoria→Cloud→Projeto para níveis 1,2,4,3,5", () => {
     const path = ["Seg", "Mod", "Dir", "Azure", "Projeto A"];
     expect(pathSegmentFilters(path, true)).toEqual([
-      { column: "departamento_nivel_1", operator: "IN", values: ["Seg"] },
-      { column: "departamento_nivel_2", operator: "IN", values: ["Mod"] },
-      { column: "departamento_nivel_4", operator: "IN", values: ["Dir"] },
-      { column: "departamento_nivel_3", operator: "IN", values: ["Azure"] },
-      { column: "departamento_nivel_5", operator: "IN", values: ["Projeto A"] },
+      { column: "organograma_nivel_1", operator: "IN", values: ["Seg"] },
+      { column: "organograma_nivel_2", operator: "IN", values: ["Mod"] },
+      { column: "organograma_nivel_4", operator: "IN", values: ["Dir"] },
+      { column: "organograma_nivel_3", operator: "IN", values: ["Azure"] },
+      { column: "organograma_nivel_5", operator: "IN", values: ["Projeto A"] },
     ]);
   });
 
@@ -42,8 +42,8 @@ describe("pathSegmentFilters (visão diretoria)", () => {
 });
 
 describe("isEmptyOrgLevel", () => {
-  it("detecta único filho Não informado em departamento_nivel_6", () => {
-    expect(isEmptyOrgLevel("departamento_nivel_6", [{ key: "Não informado" }])).toBe(true);
+  it("detecta único filho Não informado em organograma_nivel_6", () => {
+    expect(isEmptyOrgLevel("organograma_nivel_6", [{ key: "Não informado" }])).toBe(true);
   });
 
   it("não trata servicename como nível vazio", () => {
@@ -51,7 +51,7 @@ describe("isEmptyOrgLevel", () => {
   });
 
   it("não pula quando há filhos distintos", () => {
-    expect(isEmptyOrgLevel("departamento_nivel_6", [
+    expect(isEmptyOrgLevel("organograma_nivel_6", [
       { key: "Não informado" },
       { key: "Unidade A" },
     ])).toBe(false);
@@ -63,9 +63,9 @@ describe("buildExecutiveDecompChain", () => {
     const start = executiveChainStartIndex(["Seg", "Mod", "Dir", "Azure", "Projeto A"], true);
     expect(start).toBe(5);
     const chain = buildExecutiveDecompChain(true, start);
-    expect(chain[0]).toEqual({ field: "departamento_nivel_6", label: "SubProjeto" });
+    expect(chain[0]).toEqual({ field: "organograma_nivel_6", label: "SubProjeto" });
     expect(chain.map(c => c.field)).toEqual([
-      "departamento_nivel_6",
+      "organograma_nivel_6",
       "servicename",
       "servicesubcategory",
       "skumeter",
@@ -75,12 +75,12 @@ describe("buildExecutiveDecompChain", () => {
   it("não inclui cloud_origem na cadeia executiva", () => {
     const chain = buildExecutiveDecompChain(true, 0);
     expect(chain.some(c => c.field === "cloud_origem")).toBe(false);
-    expect(chain[0].field).toBe("departamento_nivel_1");
+    expect(chain[0].field).toBe("organograma_nivel_1");
   });
 
   it("após Área (nivel_5) próximo nível é Unidade e depois Serviço", () => {
     const chain = buildExecutiveDecompChain(false, 5);
-    expect(chain[0]).toEqual({ field: "departamento_nivel_6", label: "Unidade" });
+    expect(chain[0]).toEqual({ field: "organograma_nivel_6", label: "Unidade" });
     expect(chain[1]).toEqual({ field: "servicename", label: "Serviço" });
   });
 
@@ -88,6 +88,6 @@ describe("buildExecutiveDecompChain", () => {
     const path = ["Consumo Cloud", "Azure"];
     expect(executiveChainStartIndex(path, false)).toBe(2);
     const chain = buildExecutiveDecompChain(false, 2);
-    expect(chain[0]).toEqual({ field: "departamento_nivel_3", label: "Plataforma" });
+    expect(chain[0]).toEqual({ field: "organograma_nivel_3", label: "Plataforma" });
   });
 });

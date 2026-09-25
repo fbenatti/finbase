@@ -71,7 +71,7 @@ class RuleRow:
     self.pattern = row.get("pattern") or ""
     self.pattern_type = row.get("pattern_type") or ""
     self.match_value = row.get("match_value") or ""
-    self.target_field = row.get("target_field") or "departamento"
+    self.target_field = row.get("target_field") or "organograma"
     self.conditions = row.get("conditions")
     self.priority = row.get("priority") or 0
     self.cloud_scope = row.get("cloud_scope")
@@ -247,7 +247,7 @@ def main() -> None:
                 ) VALUES (
                     NULL, %s, %s,
                     %s, %s, %s, %s, %s,
-                    'multi_condition', %s, 'departamento', %s,
+                    'multi_condition', %s, 'organograma', %s,
                     %s, true, NOW(), NOW()
                 )
                 """,

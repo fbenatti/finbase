@@ -70,7 +70,7 @@ _DRIVER_KEY_COLUMN: dict[str, str] = {
     "service": "service_key",
     "sub_account": "sub_account_id",
     "region": "region_key",
-    "organization": "departamento_nivel_5",
+    "organization": "organograma_nivel_5",
 }
 
 

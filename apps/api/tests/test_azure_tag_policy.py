@@ -15,7 +15,7 @@ def _rule(**values):
     data = {
         "id": 1, "name": "Regra", "department_id": 10, "priority": 10,
         "cloud_scope": "azure", "source_field": "", "pattern": "", "pattern_type": "multi_condition",
-        "match_value": "Projeto", "target_field": "departamento", "active": True,
+        "match_value": "Projeto", "target_field": "organograma", "active": True,
         "conditions": [{"field": "SubAccountId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
     }
     data.update(values)
@@ -265,8 +265,8 @@ def test_hierarchy():
     root = Department(id=1, name="TI", centro_custo="CC1", ambiente="Prod")
     project = Department(id=2, name="Terra Brasil", parent_id=1)
     tags = service._hierarchy(project, {1: root, 2: project})
-    assert tags["departamento_nivel_1"] == "TI"
-    assert tags["departamento_nivel_2"] == "Terra Brasil"
+    assert tags["organograma_nivel_1"] == "TI"
+    assert tags["organograma_nivel_2"] == "Terra Brasil"
     assert tags["centro_custo"] == "CC1"
 
 
@@ -278,8 +278,8 @@ def test_tag_mapping_uses_global_key_and_focus_field_value():
         [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["ignored"]}],
         [{"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "evidence_count": 1,
           "tag_value_0": "Terra Brasil", "tag_value_1": "Financeiro"}],
-        {"departamento_nivel_5": "Terra Brasil"},
-        [{"tag_key": "projeto", "focus_field": "departamento_nivel_5"},
+        {"organograma_nivel_5": "Terra Brasil"},
+        [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
          {"tag_key": "area", "focus_field": "billing_account_name"}],
         True, diagnostics,
     )

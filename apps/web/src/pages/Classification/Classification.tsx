@@ -52,7 +52,7 @@ const cloudScopeLabel = (scope: string | null | undefined) => {
 
 
 const emptyForm = {
-  name: "", target_field: "departamento",
+  name: "", target_field: "organograma",
   department_id: null as number | null,
   cloud_scope: "global" as string,
   conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] as CondEntry[],
@@ -204,7 +204,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
       destination_table_id: destinationTableId,
       department_id: form.department_id,
       name: form.name,
-      target_field: "departamento",
+      target_field: "organograma",
       priority: form.priority,
       active: form.active,
       cloud_scope: form.cloud_scope === "global" ? null : form.cloud_scope,

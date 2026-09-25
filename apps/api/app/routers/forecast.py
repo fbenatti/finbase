@@ -1057,7 +1057,7 @@ def _accuracy_snapshot_context(run: ForecastRun, snapshot: dict[str, Any], schem
 
 def _department_scope_filter(department: str | None) -> str:
     """AND-chain that matches the selected department path prefix against
-    departamento_nivel_{1..7} (children are included because deeper levels are
+    organograma_nivel_{1..7} (children are included because deeper levels are
     not constrained) — same semantics as the ExpectedView director filter."""
     if not department or not str(department).strip():
         return ""
@@ -1065,7 +1065,7 @@ def _department_scope_filter(department: str | None) -> str:
     if not parts:
         return ""
     checks = [
-        f"TRIM({_qi(f'departamento_nivel_{level}')}) = {_ql(name)}"
+        f"TRIM({_qi(f'organograma_nivel_{level}')}) = {_ql(name)}"
         for level, name in enumerate(parts, start=1)
         if level <= 7
     ]
@@ -1075,12 +1075,12 @@ def _department_scope_filter(department: str | None) -> str:
 def _accuracy_mode_filter(mode: str) -> str:
     """showback (default) excludes Chargeback; chargeback keeps only it."""
     if mode == "chargeback":
-        return f" AND {_qi('departamento_nivel_2')} = 'Chargeback'"
+        return f" AND {_qi('organograma_nivel_2')} = 'Chargeback'"
     if mode == "showback":
         return (
-            f" AND ({_qi('departamento_nivel_2')} <> 'Chargeback'"
-            f" OR {_qi('departamento_nivel_2')} IS NULL"
-            f" OR {_qi('departamento_nivel_2')} = '')"
+            f" AND ({_qi('organograma_nivel_2')} <> 'Chargeback'"
+            f" OR {_qi('organograma_nivel_2')} IS NULL"
+            f" OR {_qi('organograma_nivel_2')} = '')"
         )
     return ""
 
@@ -1410,7 +1410,7 @@ async def accuracy_delta(
         }
 
     driver_level = _driver_level(scope_path)
-    dim = f"departamento_nivel_{driver_level}"
+    dim = f"organograma_nivel_{driver_level}"
     null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
     dim_expr = f"COALESCE(CAST({_qi(dim)} AS VARCHAR), {_ql(null_label)})"
     period_col = snapshot.get("period_column")
@@ -1528,11 +1528,11 @@ async def _desvios_grain(
         if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
     )
     scope_filter = "".join(
-        f" AND {_qi(f'departamento_nivel_{index + 1}')} = {_ql(name)}"
+        f" AND {_qi(f'organograma_nivel_{index + 1}')} = {_ql(name)}"
         for index, name in enumerate(scope_path)
         if index < 7
     )
-    levels = ", ".join(_qi(f"departamento_nivel_{level}") for level in range(1, 8))
+    levels = ", ".join(_qi(f"organograma_nivel_{level}") for level in range(1, 8))
     try:
         a_records = await trino_execute(
             f"SELECT {levels}, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
@@ -1549,7 +1549,7 @@ async def _desvios_grain(
         raise HTTPException(503, f"Falha ao agregar desvios: {exc}")
 
     def key_of(row: dict[str, Any]) -> tuple[Any, ...]:
-        return tuple(row.get(f"departamento_nivel_{level}") for level in range(1, 8))
+        return tuple(row.get(f"organograma_nivel_{level}") for level in range(1, 8))
 
     actual_grain = {key_of(r): float(r.get("av") or 0) for r in a_records}
     forecast_grain = {key_of(r): float(r.get("fv") or 0) for r in f_records}
@@ -1595,11 +1595,11 @@ async def _desvios_subcat_grain(
         if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
     )
     scope_filter = "".join(
-        f" AND {_qi(f'departamento_nivel_{index + 1}')} = {_ql(name)}"
+        f" AND {_qi(f'organograma_nivel_{index + 1}')} = {_ql(name)}"
         for index, name in enumerate(scope_path)
         if index < 7
     )
-    levels = ", ".join(_qi(f"departamento_nivel_{level}") for level in range(1, 8))
+    levels = ", ".join(_qi(f"organograma_nivel_{level}") for level in range(1, 8))
     subcat = _qi("servicesubcategory")
     try:
         a_records = await trino_execute(
@@ -1617,7 +1617,7 @@ async def _desvios_subcat_grain(
         raise HTTPException(503, f"Falha ao agregar subcategorias: {exc}")
 
     def key_of(row: dict[str, Any]) -> tuple[Any, ...]:
-        return tuple(row.get(f"departamento_nivel_{level}") for level in range(1, 8)) + (row.get("subcat"),)
+        return tuple(row.get(f"organograma_nivel_{level}") for level in range(1, 8)) + (row.get("subcat"),)
 
     amap = {key_of(r): float(r.get("av") or 0) for r in a_records}
     fmap = {key_of(r): float(r.get("fv") or 0) for r in f_records}
@@ -1797,14 +1797,14 @@ async def accuracy_delta_series(
     )
     depth = len(leaf)
     scope_filter = "".join(
-        f" AND TRIM({_qi(f'departamento_nivel_{index + 1}')}) = {_ql(name)}"
+        f" AND TRIM({_qi(f'organograma_nivel_{index + 1}')}) = {_ql(name)}"
         for index, name in enumerate(leaf)
         if index < 7
     )
     # A folha não tem filhos: os níveis abaixo do caminho devem estar vazios,
     # igual à semântica de _desvios_subcat.
     deeper_filter = "".join(
-        f" AND TRIM(COALESCE(CAST({_qi(f'departamento_nivel_{level}')} AS VARCHAR), '')) = ''"
+        f" AND TRIM(COALESCE(CAST({_qi(f'organograma_nivel_{level}')} AS VARCHAR), '')) = ''"
         for level in range(depth + 1, 8)
     )
     subcat_filter = _subcategory_filter(subcategory)

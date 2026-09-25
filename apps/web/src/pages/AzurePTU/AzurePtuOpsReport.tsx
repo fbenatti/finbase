@@ -280,7 +280,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
           ))}
           <Typography variant="body2" sx={{ mt: 1 }}><strong>Horas ≥80%/≥95%:</strong> horas Gold observadas que cruzaram esses limiares; são fatos do recorte, não previsão nem confirmação de cobrança.</Typography>
           <Typography variant="body2"><strong>Heatmaps:</strong> a escala de verde vai de uso baixo (verde fraco) a uso alto (verde forte), aplicada igualmente no portal e neste relatório.</Typography>
-          <Typography variant="body2"><strong>Financeiro (Gold):</strong> valores em BRL (realizado) da Gold FOCUS. Reserva = Microsoft.Capacity (100 PTUs/mês, Vivo Mais); on-demand = Provisioned Throughput Units · 1/Month (100 PTUs/mês, Aura Brain); uso horário da capacidade = meter Provisioned Managed (1/Hour, informativo). Classificação por departamento_nivel_5 (projeto).</Typography>
+          <Typography variant="body2"><strong>Financeiro (Gold):</strong> valores em BRL (realizado) da Gold FOCUS. Reserva = Microsoft.Capacity (100 PTUs/mês, Vivo Mais); on-demand = Provisioned Throughput Units · 1/Month (100 PTUs/mês, Aura Brain); uso horário da capacidade = meter Provisioned Managed (1/Hour, informativo). Classificação por organograma_nivel_5 (projeto).</Typography>
         </Stack>
       </Section>
 

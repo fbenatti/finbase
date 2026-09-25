@@ -190,7 +190,11 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
                     task_type="backup", status="QUEUED", phase="Na fila: backup full",
                     connection_id=None, destination_table_id=None, connection_ids=[],
                     billing_periods=[], selected_blobs=[], errors=[],
-                    result_json={"schedule_id": schedule_id, "retention_days": int((sched.config_json or {}).get("retention_days", 30))},
+                    result_json={
+                        "schedule_id": schedule_id,
+                        "retention_days": int((sched.config_json or {}).get("retention_days", 30)),
+                        "backup_layers": (sched.config_json or {}).get("backup_layers") or ["bronze"],
+                    },
                 )
                 session.add(task)
                 session.commit()

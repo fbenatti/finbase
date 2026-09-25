@@ -227,7 +227,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         // Its useful default is immediately comparable realized × forecast.
         // Forecast manual is a single-tipo planning source: default to the
         // department hierarchy × future periods instead of the tipo axis.
-        setRows(isForecastManual ? ["departamento"] : ["tipo"]);
+        setRows(isForecastManual ? ["organograma"] : ["tipo"]);
         setCols(["period"]);
         setMeasures([{ column: "value", aggregation: "SUM" }]);
         return;

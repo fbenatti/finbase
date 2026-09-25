@@ -44,7 +44,7 @@ async def test_vivo_mais_queries_its_own_gold_and_normalizes_project(monkeypatch
     assert len(captured) == 2
     for sql in captured:
         assert "iceberg.gold.dest_dm_cost_custo_vivo_mais" in sql
-        assert "lower(CAST(departamento_nivel_5 AS VARCHAR)) = 'vivo+'" in sql
+        assert "lower(CAST(organograma_nivel_5 AS VARCHAR)) = 'vivo+'" in sql
     assert "'Vivo Mais' AS project" in captured[0]
 
 
@@ -60,7 +60,7 @@ async def test_aura_brain_keeps_combined_gold(monkeypatch):
     await dashboard_service._query_cost_rows("aura-brain", None)
 
     assert "iceberg.gold.dest_dm_cost_custo_aura_brain_vivo_mais" in captured[0]
-    assert "lower(CAST(departamento_nivel_5 AS VARCHAR)) = 'aura brain'" in captured[0]
+    assert "lower(CAST(organograma_nivel_5 AS VARCHAR)) = 'aura brain'" in captured[0]
 
 
 # ── classificação ──────────────────────────────────────────────────────────

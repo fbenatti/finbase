@@ -264,7 +264,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
 
           {/* ═══════════ PIVOT: DIMENSÕES (GROUP BY) ═══════════ */}
           <Typography variant="subtitle1">Dimensões de agrupamento (linhas do pivot)</Typography>
-          <Typography variant="caption" color="text.secondary">Colunas que agrupam os dados (ex.: _billing_period, departamento_nivel_1, servicename). Vazio → dimensões analíticas padrão.</Typography>
+          <Typography variant="caption" color="text.secondary">Colunas que agrupam os dados (ex.: _billing_period, organograma_nivel_1, servicename). Vazio → dimensões analíticas padrão.</Typography>
           {!selectedGolds.length && <Alert severity="info" sx={{ mb: 1 }}>Selecione uma Gold na Origem para ver os campos disponíveis.</Alert>}
           {selectedGolds.length > 0 && <Autocomplete
             size="small"

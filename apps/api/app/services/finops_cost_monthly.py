@@ -48,7 +48,7 @@ C1_CUBE_CODE = "finops_cost_monthly"
 
 #: Níveis organizacionais publicados. São os mesmos que o livro legado expõe e que
 #: a árvore de decomposição das telas navega.
-ORG_LEVELS: tuple[str, ...] = tuple(f"departamento_nivel_{n}" for n in range(1, 8))
+ORG_LEVELS: tuple[str, ...] = tuple(f"organograma_nivel_{n}" for n in range(1, 8))
 
 #: Medidas que **não são aditivas**. Somar `resources` pelas dimensões do cubo
 #: conta o mesmo recurso em cada serviço, região e categoria em que ele aparece:
@@ -79,7 +79,7 @@ _UNAVAILABLE_COSTS = ("billed_cost", "contracted_cost")
 #: classificação organizacional: a única ponte disponível seria
 #: `sub_account_id → subaccountid` do livro FOCUS legado, e ela é **1:N**. Medido
 #: em 23/09/2026, contas do canônico aparecem no legado com dezenas de hierarquias
-#: distintas — uma delas com 52 valores diferentes em `departamento_nivel_5`.
+#: distintas — uma delas com 52 valores diferentes em `organograma_nivel_5`.
 #:
 #: A versão anterior desta materialização escolhia a hierarquia de maior custo por
 #: conta (`ROW_NUMBER` sobre `SUM(effectivecost)`) e atribuía essa hierarquia a
@@ -120,18 +120,18 @@ def org_hierarchy_audit_sql(
 WITH legado AS (
     SELECT
         LOWER(TRIM(CAST(subaccountid AS VARCHAR))) AS account_key,
-        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_1 AS VARCHAR), '')) AS n1,
-        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_2 AS VARCHAR), '')) AS n2,
-        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_5 AS VARCHAR), '')) AS n5,
-        COUNT(DISTINCT COALESCE(CAST(departamento_nivel_6 AS VARCHAR), '')) AS n6,
+        COUNT(DISTINCT COALESCE(CAST(organograma_nivel_1 AS VARCHAR), '')) AS n1,
+        COUNT(DISTINCT COALESCE(CAST(organograma_nivel_2 AS VARCHAR), '')) AS n2,
+        COUNT(DISTINCT COALESCE(CAST(organograma_nivel_5 AS VARCHAR), '')) AS n5,
+        COUNT(DISTINCT COALESCE(CAST(organograma_nivel_6 AS VARCHAR), '')) AS n6,
         COUNT(DISTINCT CONCAT_WS('|',
-            COALESCE(CAST(departamento_nivel_1 AS VARCHAR), ''),
-            COALESCE(CAST(departamento_nivel_2 AS VARCHAR), ''),
-            COALESCE(CAST(departamento_nivel_3 AS VARCHAR), ''),
-            COALESCE(CAST(departamento_nivel_4 AS VARCHAR), ''),
-            COALESCE(CAST(departamento_nivel_5 AS VARCHAR), ''),
-            COALESCE(CAST(departamento_nivel_6 AS VARCHAR), ''),
-            COALESCE(CAST(departamento_nivel_7 AS VARCHAR), '')
+            COALESCE(CAST(organograma_nivel_1 AS VARCHAR), ''),
+            COALESCE(CAST(organograma_nivel_2 AS VARCHAR), ''),
+            COALESCE(CAST(organograma_nivel_3 AS VARCHAR), ''),
+            COALESCE(CAST(organograma_nivel_4 AS VARCHAR), ''),
+            COALESCE(CAST(organograma_nivel_5 AS VARCHAR), ''),
+            COALESCE(CAST(organograma_nivel_6 AS VARCHAR), ''),
+            COALESCE(CAST(organograma_nivel_7 AS VARCHAR), '')
         )) AS hierarquias
     FROM iceberg.{layer}.{legacy_table}
     WHERE NULLIF(TRIM(CAST(subaccountid AS VARCHAR)), '') IS NOT NULL
@@ -398,7 +398,7 @@ def unavailable_measures() -> dict[str, str]:
             "contracted_cost é NULL em 13.519.512/13.519.512 linhas; "
             "list_cost é igual a effective_cost, então não há desconto a medir"
         ),
-        "departamento_nivel_1..7": (
+        "organograma_nivel_1..7": (
             "sem chave reconciliável entre resource_cost e a classificação "
             "organizacional: a ponte conta→hierarquia do livro legado é 1:N. "
             "Publicado como NULL com org_classification_status='UNMAPPED'; a "

@@ -234,7 +234,7 @@ class AzureTagPolicyService:
             seen.add(current.id); chain.append(current)
             current = departments.get(current.parent_id) if current.parent_id else None
         chain.reverse()
-        tags = {f"departamento_nivel_{i}": item.name for i, item in enumerate(chain[:5], 1) if item.name}
+        tags = {f"organograma_nivel_{i}": item.name for i, item in enumerate(chain[:5], 1) if item.name}
         centro = next((item.centro_custo for item in reversed(chain) if item.centro_custo), None)
         ambiente = next((item.ambiente for item in reversed(chain) if item.ambiente), None)
         if centro: tags["centro_custo"] = centro

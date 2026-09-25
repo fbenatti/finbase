@@ -172,7 +172,7 @@ async def _query_focus_dashboard_costs(
 ) -> dict[str, Any]:
     """PTU vs IA OnDemand (Foundry/tokens) vs VM/Storage/Network for Aura Brain and Vivo Mais."""
     category = focus_category_sql_expr()
-    dept = "lower(CAST(\"departamento\" AS VARCHAR))"
+    dept = "lower(CAST(\"organograma\" AS VARCHAR))"
     empty = {
         "ptu_capacity_cost": 0.0,
         "billed": 0.0,

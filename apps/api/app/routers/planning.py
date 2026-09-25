@@ -386,7 +386,7 @@ async def _budget_accuracy_actuals(
     scope_path: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     levels = ", ".join(
-        f'CAST("departamento_nivel_{level}" AS VARCHAR) AS departamento_nivel_{level}'
+        f'CAST("organograma_nivel_{level}" AS VARCHAR) AS organograma_nivel_{level}'
         for level in range(1, 8)
     )
     periods = ", ".join(f"'{year}{month:02d}'" for month in months)
@@ -416,12 +416,12 @@ async def _budget_accuracy_actuals(
         candidate_sql = []
         for levels_order in candidates:
             checks = [
-                f'TRIM(CAST("departamento_nivel_{physical_level}" AS VARCHAR)) = \'{escaped[index]}\''
+                f'TRIM(CAST("organograma_nivel_{physical_level}" AS VARCHAR)) = \'{escaped[index]}\''
                 for index, physical_level in enumerate(levels_order[:len(escaped)])
             ]
             candidate_sql.append(" AND ".join(checks))
         scope_filter = " AND (" + " OR ".join(f"({item})" for item in candidate_sql) + ")"
-    group_levels = ", ".join(f'"departamento_nivel_{level}"' for level in range(1, 8))
+    group_levels = ", ".join(f'"organograma_nivel_{level}"' for level in range(1, 8))
     sql = f"""
         SELECT {levels}, period, SUM(actual_value) AS actual_value, SUM(forecast_value) AS forecast_value, MAX(has_actual) AS has_actual
         FROM (
@@ -565,8 +565,8 @@ async def download_simulated_budget(
         columns = {str(row.get("Column") or row.get("column_name") or "").lower(): str(row.get("Column") or row.get("column_name") or "") for row in schema_rows}
         if "_billing_period" not in columns or "realizado" not in columns:
             raise HTTPException(422, "A tabela Gold selecionada não possui _billing_period e realizado")
-        level_columns = [columns.get(f"departamento_nivel_{level}") for level in range(1, 8)]
-        level_select = [f'CAST("{column}" AS VARCHAR) AS departamento_nivel_{index}' if column else f'CAST(NULL AS VARCHAR) AS departamento_nivel_{index}' for index, column in enumerate(level_columns, 1)]
+        level_columns = [columns.get(f"organograma_nivel_{level}") for level in range(1, 8)]
+        level_select = [f'CAST("{column}" AS VARCHAR) AS organograma_nivel_{index}' if column else f'CAST(NULL AS VARCHAR) AS organograma_nivel_{index}' for index, column in enumerate(level_columns, 1)]
         suggested_column = next((column for key, column in columns.items() if key.replace("_", "") in {"servicename", "metercategory"}), None)
         selected_detail_column = columns.get((detail_column or "").lower()) or suggested_column
         detail_select = f', COALESCE(NULLIF(TRIM(CAST("{selected_detail_column}" AS VARCHAR)), \'\'), \'Sem sugestão FOCUS\') AS focus_detail_suggestion' if detailed and selected_detail_column else ", 'Sem sugestão FOCUS' AS focus_detail_suggestion" if detailed else ""
@@ -591,7 +591,7 @@ async def download_simulated_budget(
     by_path = {tuple(_levels(d, departments)): d for d in departments.values() if d.active}
     baseline_by_department: dict[int, float] = defaultdict(float)
     for row in source_rows:
-        path = tuple(str(row.get(f"departamento_nivel_{level}") or "").strip() for level in range(1, 8))
+        path = tuple(str(row.get(f"organograma_nivel_{level}") or "").strip() for level in range(1, 8))
         path = tuple(level for level in path if level)
         department = by_path.get(path)
         if department:
@@ -604,7 +604,7 @@ async def download_simulated_budget(
         detailed_headers = [*LEVELS, f"{detail_label} FOCUS (sugestão)", "Valor de referência", *MONTHS]
         ws.append(detailed_headers)
         for row in source_rows:
-            levels = [str(row.get(f"departamento_nivel_{level}") or "").strip() for level in range(1, 8)]
+            levels = [str(row.get(f"organograma_nivel_{level}") or "").strip() for level in range(1, 8)]
             value = float(row.get("value") or 0)
             ws.append([*levels, str(row.get("focus_detail_suggestion") or "Sem sugestão FOCUS"), value, *([value] * 12)])
     else:
@@ -976,7 +976,7 @@ async def budget_accuracy(
         actual_total += actual_value
         if not row.get("has_actual") or period_key == current_month_key:
             forecast_total += forecast_value
-        path = tuple(str(row.get(f"departamento_nivel_{level}") or "").strip() for level in range(1, 8))
+        path = tuple(str(row.get(f"organograma_nivel_{level}") or "").strip() for level in range(1, 8))
         path = tuple(item for item in path if item)
         current_id = path_to_department.get(path)
         if consolidate_selected_project and department_id is not None:
@@ -1065,7 +1065,7 @@ async def budget_accuracy_detail(
     scope_checks = []
     for order in candidates:
         scope_checks.append(" AND ".join(
-            f'TRIM(CAST("departamento_nivel_{physical}" AS VARCHAR)) = \'{escaped_path[index]}\''
+            f'TRIM(CAST("organograma_nivel_{physical}" AS VARCHAR)) = \'{escaped_path[index]}\''
             for index, physical in enumerate(order[:len(escaped_path)])
         ))
     scope_sql = " AND (" + " OR ".join(f"({item})" for item in scope_checks) + ")"

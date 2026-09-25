@@ -27,7 +27,7 @@ def test_merged_dimensions_uses_analytic_default():
         "_billing_period": "_billing_period",
         "tipo": "tipo",
         "cloud_origem": "cloud_origem",
-        "departamento_nivel_1": "departamento_nivel_1",
+        "organograma_nivel_1": "organograma_nivel_1",
         "servicename": "servicename",
         "realizado": "realizado",
         "resourcename": "resourcename",  # high-cardinality — not in default
@@ -35,7 +35,7 @@ def test_merged_dimensions_uses_analytic_default():
     dims = _merged_dimensions({"dest_modelo_focus": schema}, [])
     assert "_billing_period" in dims
     assert "servicename" in dims
-    assert "departamento_nivel_1" in dims
+    assert "organograma_nivel_1" in dims
     # High-cardinality columns are excluded by default.
     assert "resourcename" not in dims
     # Period is always first.
@@ -87,20 +87,20 @@ def test_source_gold_tables_list_kept_in_order():
     assert "servicename" in clause
 
 
-def test_alias_for_missing_departamento_on_planning():
-    """A filter on 'departamento' applies to planning as departamento_nivel_1."""
+def test_alias_for_missing_organograma_on_planning():
+    """A filter on 'organograma' applies to planning as organograma_nivel_1."""
     from app.services.gold_materialization import _normalized_conditions
     planning_schema = {
-        "departamento_nivel_1": "departamento_nivel_1",
+        "organograma_nivel_1": "organograma_nivel_1",
         "servicename": "servicename",
         "realizado": "realizado",
     }
     conds, missing = _normalized_conditions(
         planning_schema,
-        [{"column": "departamento", "operator": "NOT_EMPTY", "values": []}],
+        [{"column": "organograma", "operator": "NOT_EMPTY", "values": []}],
     )
     assert missing == []
-    assert conds[0]["column"] == "departamento_nivel_1"
+    assert conds[0]["column"] == "organograma_nivel_1"
 
 
 def test_desligue_validation_dates_last_14_days_of_month():

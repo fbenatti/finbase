@@ -286,7 +286,7 @@ async def _seed_ptu_cost_links(db: AsyncSession) -> None:
     vivo.sources.append(AiCostLinkSource(
         filter_json={"conditions": [
             {"column": "cloud_origem", "operator": "CONTAINS", "values": ["Azure"]},
-            {"column": "departamento", "operator": "IN", "values": ["Vivo Mais"]},
+            {"column": "organograma", "operator": "IN", "values": ["Vivo Mais"]},
             {"column": "skumeter", "operator": "IN", "values": ["Provisioned Managed Global Unit", "Provisioned Managed Unit"]},
             {"column": "ReservationName", "operator": "NOT_EMPTY", "values": []},
         ]},
@@ -308,7 +308,7 @@ async def _seed_ptu_cost_links(db: AsyncSession) -> None:
     aura.sources.append(AiCostLinkSource(
         filter_json={"conditions": [
             {"column": "cloud_origem", "operator": "CONTAINS", "values": ["Azure"]},
-            {"column": "departamento", "operator": "IN", "values": ["Aura Brain"]},
+            {"column": "organograma", "operator": "IN", "values": ["Aura Brain"]},
             {"column": "skumeter", "operator": "IN", "values": ["Provisioned Managed Global Unit", "Provisioned Managed Unit"]},
             {"column": "ReservationName", "operator": "EMPTY", "values": []},
         ]},
@@ -401,7 +401,7 @@ async def _seed_pivot_views(db: AsyncSession):
     if not focus:
         return
     templates = [
-        ("Departamento / Projeto / Origem por mês", ["departamento", "projeto_nome", "cloud_origem"], ["_billing_period"]),
+        ("Departamento / Projeto / Origem por mês", ["organograma", "projeto_nome", "cloud_origem"], ["_billing_period"]),
         ("Serviço por mês", ["ServiceName"], ["_billing_period"]),
         ("Região por mês", ["RegionName"], ["_billing_period"]),
         ("Assinatura por mês", ["SubscriptionName"], ["_billing_period"]),

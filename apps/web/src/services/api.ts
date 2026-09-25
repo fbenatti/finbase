@@ -3972,6 +3972,11 @@ export async function getSchedules(): Promise<ScheduledTask[]> {
   return data;
 }
 
+export async function getBackupSizeEstimates(): Promise<Record<"bronze" | "silver" | "gold", number>> {
+  const { data } = await api.get("/etl/schedules/backup-size-estimates");
+  return data;
+}
+
 export async function createSchedule(body: {
   name: string;
   connection_id?: number | null;
@@ -4822,7 +4827,7 @@ export async function getPadroesRecursos(
   return data;
 }
 
-export interface SavingDepartamentoItem {
+export interface SavingOrganogramaItem {
   organograma_nivel_4: string | null;
   organograma_nivel_5: string | null;
   vms: number;
@@ -4830,19 +4835,26 @@ export interface SavingDepartamentoItem {
   saving_brl: number;
 }
 
-export interface SavingDepartamentoResponse {
+export type SavingDepartamentoItem = SavingOrganogramaItem;
+
+export interface SavingOrganogramaResponse {
   billing_period: string;
-  rows: SavingDepartamentoItem[];
+  rows: SavingOrganogramaItem[];
 }
 
-export async function getSavingDepartamento(
+export type SavingDepartamentoResponse = SavingOrganogramaResponse;
+
+export async function getSavingOrganograma(
   period?: string,
-): Promise<SavingDepartamentoResponse> {
-  const { data } = await api.get("/scheduled-shutdown/saving-departamento", {
+): Promise<SavingOrganogramaResponse> {
+  const { data } = await api.get("/scheduled-shutdown/saving-organograma", {
     params: period ? { period } : {},
   });
   return data;
 }
+
+/** @deprecated use getSavingOrganograma */
+export const getSavingDepartamento = getSavingOrganograma;
 
 export interface VmDailyUsageItem {
   day: string;

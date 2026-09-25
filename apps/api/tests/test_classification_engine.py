@@ -27,7 +27,7 @@ def _rule(**kwargs):
         "match_value": "",
         "active": True,
         "department_id": 1,
-        "target_field": "departamento",
+        "target_field": "organograma",
         "priority": 10,
         "project_id": None,
         "cloud_scope": None,
@@ -78,7 +78,7 @@ class TestEvaluateRuleConditions:
     def test_focus_field_matches(self):
         df = pd.DataFrame({
             "source_resource_group_name": ["vivo-ti-vicky-hml", "other-project"],
-            "departamento": ["", ""],
+            "organograma": ["", ""],
         })
         rule = _rule(conditions=[{
             "field": "source_resource_group_name",
@@ -92,7 +92,7 @@ class TestEvaluateRuleConditions:
     def test_legacy_resource_group_name_does_not_match_focus_column(self):
         df = pd.DataFrame({
             "source_resource_group_name": ["vivo-ti-vicky-hml"],
-            "departamento": [""],
+            "organograma": [""],
         })
         rule = _rule(conditions=[{
             "field": "resourceGroupName",
@@ -105,7 +105,7 @@ class TestEvaluateRuleConditions:
         assert mask.tolist() == [True]
 
     def test_empty_conditions_match_nothing(self):
-        df = pd.DataFrame({"source_resource_group_name": ["x"], "departamento": [""]})
+        df = pd.DataFrame({"source_resource_group_name": ["x"], "organograma": [""]})
         rule = _rule(conditions=[])
         mask = evaluate_rule_conditions(df, rule)
         assert mask.tolist() == [False]
@@ -113,7 +113,7 @@ class TestEvaluateRuleConditions:
     def test_catch_all_matches_any_row(self):
         df = pd.DataFrame({
             "source_resource_group_name": ["anything", ""],
-            "departamento": ["", ""],
+            "organograma": ["", ""],
         })
         rule = _rule(
             source_field="source_resource_group_name",
@@ -149,7 +149,7 @@ class TestGcpClassification:
     def test_sub_account_id_matches_project_id(self):
         df = pd.DataFrame({
             "SubAccountId": ["vivo-ti-vicky-hml", "seguranca-patrimonial-385514"],
-            "departamento": ["", ""],
+            "organograma": ["", ""],
         })
         rule = _rule(conditions=[{
             "field": "SubAccountId",

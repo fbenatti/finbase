@@ -159,7 +159,7 @@ def _dept_filter(scope_path: list[str], alias: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     checks: list[str] = []
     for level, name in enumerate(scope_path, start=1):
-        col = f"{prefix}{_quote_ident(f'departamento_nivel_{level}')}"
+        col = f"{prefix}{_quote_ident(f'organograma_nivel_{level}')}"
         checks.append(f"TRIM(CAST({col} AS VARCHAR)) = {_quote_literal(name.strip())}")
     return " AND ".join(checks)
 
@@ -332,7 +332,7 @@ async def ai_overview(body: AIDashboardBaseRequest, request: Request, db: AsyncS
             monthly_series = await _run_query(series_sql, interactive)
 
             dept_level = min(len(scope_path) + 1, 7) if scope_path else 1
-            dept_col = _quote_ident(f"departamento_nivel_{dept_level}")
+            dept_col = _quote_ident(f"organograma_nivel_{dept_level}")
             util_sql = f"""
             SELECT
               COALESCE(NULLIF(TRIM(CAST({dept_col} AS VARCHAR)), ''), 'Sem departamento') AS department,

@@ -285,7 +285,7 @@ def main():
                     ) VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, 'departamento', %s, %s,
+                        %s, 'organograma', %s, %s,
                         true, NOW(), NOW()
                     )
                     """,

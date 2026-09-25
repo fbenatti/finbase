@@ -335,7 +335,10 @@ def _build_department_path(
     # dimension. department_nivel_1 is the root (diretoria), increasing toward
     # the leaf. Levels beyond the actual depth remain empty.
     for i, dept in enumerate(visited, start=1):
-        info[f"departamento_nivel_{i}"] = dept.name or ""
+        info[f"organograma_nivel_{i}"] = dept.name or ""
+
+    if visited:
+        info["organograma"] = visited[-1].name or ""
 
     # Add custom fields as flat keys
     for k, v in custom_fields.items():
@@ -380,7 +383,7 @@ async def apply_classification_rules(
     dept_map = await _load_department_tree(db)
 
     # Initialize target columns if they don't exist
-    default_targets = {"departamento", "centro_custo", "ambiente"}
+    default_targets = {"organograma", "centro_custo", "ambiente"}
     for col in default_targets:
         if col not in df.columns:
             df[col] = ""
@@ -401,7 +404,7 @@ async def apply_classification_rules(
             continue
 
         # Apply classification value
-        target_field = rule.target_field or rule.match_value or "departamento"
+        target_field = rule.target_field or rule.match_value or "organograma"
         if target_field not in df.columns:
             df[target_field] = ""
 

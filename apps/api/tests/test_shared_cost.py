@@ -106,8 +106,8 @@ def test_rateio_rows_are_positive_on_consumer_negative_on_donor():
          {"period": "202601", "path": ["Consumo Cloud", "Showback", "Azure", "DIR A", "Proj X"], "value": 50.0}],
         [],
     )
-    donor = next(row for row in rows if row["departamento_nivel_4"] == "Rateio Azure")
-    consumer = next(row for row in rows if row["departamento_nivel_5"] == "Proj X")
+    donor = next(row for row in rows if row["organograma_nivel_4"] == "Rateio Azure")
+    consumer = next(row for row in rows if row["organograma_nivel_5"] == "Proj X")
     assert donor["tipo"] == "rateio"
     assert donor["rateio_medida"] == "realizado"
     assert donor["realizado"] == -100
@@ -231,7 +231,7 @@ def test_forecast_rateio_when_only_other_projects_have_gold_in_the_month():
     ]
     rows = build_rateio_rows([config], actual, forecast)
     assert {row["rateio_medida"] for row in rows} == {"forecast"}
-    donor = next(row for row in rows if row["departamento_nivel_4"] == "Rateio Azure")
+    donor = next(row for row in rows if row["organograma_nivel_4"] == "Rateio Azure")
     assert donor["realizado"] == -80
 
 
@@ -260,7 +260,7 @@ def test_forecast_rateio_follows_actual_consumption_mix():
     ]
     rows = build_rateio_rows([config], actual, forecast)
     sep = [row for row in rows if row["period"] == "202609" and row["realizado"] > 0]
-    by_proj = {row["departamento_nivel_5"]: row["realizado"] for row in sep}
+    by_proj = {row["organograma_nivel_5"]: row["realizado"] for row in sep}
     assert by_proj["Proj X"] == 60
     assert by_proj["Proj Y"] == 20
 
@@ -361,7 +361,7 @@ def test_consumption_splits_parent_project_and_sibling_leaf():
         ],
         [],
     )
-    consumers = {(row["departamento_nivel_5"] or "").strip(): row["realizado"] for row in rows if row["realizado"] > 0}
+    consumers = {(row["organograma_nivel_5"] or "").strip(): row["realizado"] for row in rows if row["realizado"] > 0}
     assert consumers["Sinfonia - Watson"] == 50
     assert consumers["Sinfonia - VivoCog"] == 50
     assert "env" not in consumers

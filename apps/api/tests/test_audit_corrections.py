@@ -246,8 +246,8 @@ def test_c1_stage2_publishes_null_org_levels_and_unmapped():
     sql = c1_stage2_sql(grain_table="g", resource_table="r")
     assert f"'{ORG_UNMAPPED}' AS org_classification_status" in sql
     # Nenhum nível organizacional é preenchido.
-    assert "departamento_nivel_1 AS departamento_nivel_1" not in sql
-    assert sql.count("CAST(NULL AS VARCHAR) AS departamento_nivel_") == 7
+    assert "organograma_nivel_1 AS organograma_nivel_1" not in sql
+    assert sql.count("CAST(NULL AS VARCHAR) AS organograma_nivel_") == 7
 
 
 def test_c1_stage2_has_no_organization_join():
@@ -280,7 +280,7 @@ def test_org_unavailable_reason_is_declared():
     from app.services.finops_cost_monthly import unavailable_measures
 
     motivos = unavailable_measures()
-    assert any("departamento_nivel_1" in k for k in motivos)
+    assert any("organograma_nivel_1" in k for k in motivos)
     assert "org_classification_status" in motivos
 
 

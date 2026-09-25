@@ -36,7 +36,7 @@ function filtersFromSearch(params: URLSearchParams): PivotFilter[] {
   const filters: PivotFilter[] = [];
   const path = params.get("path") || "";
   path.split(" > ").map(part => part.trim()).filter(Boolean).forEach((name, index) => {
-    filters.push({ column: `departamento_nivel_${index + 1}`, values: [name], operator: "IN" });
+    filters.push({ column: `organograma_nivel_${index + 1}`, values: [name], operator: "IN" });
   });
   const year = params.get("year");
   if (year) filters.push({ column: "_billing_period", values: [year], operator: "CONTAINS" });
@@ -85,11 +85,11 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
   silver: [],
   gold: [
     { label: "Top 10 serviços por custo", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
-    { label: "Custo por departamento", sql: 'SELECT "departamento", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "departamento" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por departamento", sql: 'SELECT "organograma", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma" ORDER BY total_billed DESC LIMIT 20' },
     { label: "Custo por período", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
     { label: "Custo por região", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
     { label: "Custo por origem e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
-    { label: "Departamento / origem por mês", sql: 'SELECT "departamento", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "departamento", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
+    { label: "Departamento / origem por mês", sql: 'SELECT "organograma", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
   ],
 };
 

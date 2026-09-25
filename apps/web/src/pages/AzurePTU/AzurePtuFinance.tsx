@@ -109,7 +109,7 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
     <Stack gap={2.5}>
       <Alert severity="info" sx={{ mb: 0.5 }}>
         <b>Fonte:</b> Gold FOCUS <code>{costs.table}</code> (+ planejamento) · mês de referência: <b>{costs.current_label}</b> · janela de faturamento intersectada: {costs.window_label}.
-        A capacidade PTU é faturada como <b>reserva</b> (<i>Microsoft.Capacity</i>) e <b>on-demand</b> (<i>Provisioned Throughput Units · 1/Month</i>), classificadas no <b>departamento_nivel_5</b>. Valores em BRL (realizado; previsto quando marcado).
+        A capacidade PTU é faturada como <b>reserva</b> (<i>Microsoft.Capacity</i>) e <b>on-demand</b> (<i>Provisioned Throughput Units · 1/Month</i>), classificadas no <b>organograma_nivel_5</b>. Valores em BRL (realizado; previsto quando marcado).
         As <b>unidades faturadas</b> (reserva + on-demand) <b>não são a capacidade provisionada física</b> — o inventário Azure mostra os PTUs realmente configurados nos deployments ({provisioned?.total_ptus != null ? `${n(provisioned.total_ptus)} PTUs em ${n(provisioned.deployment_count)} deployments` : "ver KPIs operacionais"}).
       </Alert>
       {notes.map((note: string, i: number) => <Alert key={i} severity="warning" sx={{ mb: 0.5 }}>{note}</Alert>)}

@@ -325,7 +325,7 @@ async def lifespan(app: FastAPI):
             )""",
             """INSERT INTO azure_tag_mapping (tag_key, focus_field, active)
                SELECT seed.tag_key, seed.focus_field, TRUE
-               FROM (VALUES ('projeto', 'departamento_nivel_5'), ('diretoria', 'departamento_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
+               FROM (VALUES ('projeto', 'organograma_nivel_5'), ('diretoria', 'organograma_nivel_4'), ('centro_custo', 'centro_custo')) AS seed(tag_key, focus_field)
                WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
             # `blob_prefixes` passa de lista de caminhos para mapa
             # `{tipo de relatório: caminho}`: o tipo é variável, não código.
@@ -540,9 +540,250 @@ async def lifespan(app: FastAPI):
         await _execute_migration(conn, """
             DO $$ BEGIN
               IF to_regclass('fact_cost') IS NOT NULL THEN
-                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS departamento_nivel_6 VARCHAR(200);
-                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS departamento_nivel_7 VARCHAR(200);
+                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS organograma_nivel_6 VARCHAR(200);
+                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS organograma_nivel_7 VARCHAR(200);
               END IF;
+            END $$
+        """)
+        await _execute_migration(conn, """
+            DO $$
+            DECLARE level int;
+            BEGIN
+              IF to_regclass('fact_cost') IS NOT NULL THEN
+                FOR level IN 1..7 LOOP
+                  IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'fact_cost'
+                      AND column_name = 'departamento_nivel_' || level
+                  ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'fact_cost'
+                      AND column_name = 'organograma_nivel_' || level
+                  ) THEN
+                    EXECUTE format(
+                      'ALTER TABLE fact_cost RENAME COLUMN departamento_nivel_%s TO organograma_nivel_%s',
+                      level, level
+                    );
+                  END IF;
+                END LOOP;
+              END IF;
+            END $$
+        """)
+        await _execute_migration(conn, """
+            DO $$
+            DECLARE
+              rec record;
+            BEGIN
+              IF to_regclass('azure_tag_mapping') IS NOT NULL THEN
+                UPDATE azure_tag_mapping
+                SET focus_field = REPLACE(focus_field, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE focus_field LIKE 'departamento_nivel_%';
+                UPDATE azure_tag_mapping
+                SET focus_field = 'organograma_nivel_5', updated_at = now()
+                WHERE tag_key = 'projeto' AND focus_field LIKE 'departamento%';
+                UPDATE azure_tag_mapping
+                SET focus_field = 'organograma_nivel_4', updated_at = now()
+                WHERE tag_key = 'diretoria' AND focus_field LIKE 'departamento%';
+              END IF;
+
+              IF to_regclass('destination_column') IS NOT NULL THEN
+                UPDATE destination_column
+                SET column_name = REPLACE(column_name, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE column_name LIKE 'departamento_nivel_%';
+                UPDATE destination_column
+                SET column_name = 'organograma'
+                WHERE column_name = 'departamento';
+              END IF;
+
+              IF to_regclass('source_destination_mapping') IS NOT NULL THEN
+                UPDATE source_destination_mapping
+                SET
+                  source_column = REPLACE(source_column, 'departamento_nivel_', 'organograma_nivel_'),
+                  destination_column = REPLACE(destination_column, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE source_column LIKE 'departamento_nivel_%'
+                   OR destination_column LIKE 'departamento_nivel_%';
+                UPDATE source_destination_mapping
+                SET
+                  source_column = 'organograma'
+                WHERE source_column = 'departamento';
+                UPDATE source_destination_mapping
+                SET destination_column = 'organograma'
+                WHERE destination_column = 'departamento';
+              END IF;
+
+              IF to_regclass('etl_mapping') IS NOT NULL THEN
+                UPDATE etl_mapping
+                SET
+                  source_column = REPLACE(source_column, 'departamento_nivel_', 'organograma_nivel_'),
+                  target_column = REPLACE(target_column, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE source_column LIKE 'departamento_nivel_%'
+                   OR target_column LIKE 'departamento_nivel_%';
+                UPDATE etl_mapping
+                SET source_column = 'organograma'
+                WHERE source_column = 'departamento';
+                UPDATE etl_mapping
+                SET target_column = 'organograma'
+                WHERE target_column = 'departamento';
+              END IF;
+
+              IF to_regclass('classification_field_value') IS NOT NULL THEN
+                UPDATE classification_field_value
+                SET field = REPLACE(field, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE field LIKE 'departamento_nivel_%';
+                UPDATE classification_field_value
+                SET field = 'organograma'
+                WHERE field = 'departamento';
+              END IF;
+
+              IF to_regclass('classification_rule') IS NOT NULL THEN
+                UPDATE classification_rule
+                SET
+                  source_field = REPLACE(source_field, 'departamento_nivel_', 'organograma_nivel_'),
+                  target_field = REPLACE(target_field, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE source_field LIKE 'departamento_nivel_%'
+                   OR target_field LIKE 'departamento_nivel_%';
+                UPDATE classification_rule
+                SET source_field = 'organograma'
+                WHERE source_field = 'departamento';
+                UPDATE classification_rule
+                SET target_field = 'organograma'
+                WHERE target_field = 'departamento';
+              END IF;
+
+              IF to_regclass('business_rule') IS NOT NULL THEN
+                UPDATE business_rule
+                SET target_column = REPLACE(target_column, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE target_column LIKE 'departamento_nivel_%';
+                UPDATE business_rule
+                SET target_column = 'organograma'
+                WHERE target_column = 'departamento';
+              END IF;
+
+              IF to_regclass('gold_rule') IS NOT NULL THEN
+                UPDATE gold_rule
+                SET sql_template = REPLACE(sql_template, 'departamento_nivel_', 'organograma_nivel_')
+                WHERE sql_template IS NOT NULL
+                  AND sql_template LIKE '%departamento_nivel_%';
+                UPDATE gold_rule
+                SET sql_template = REPLACE(sql_template, '"departamento"', '"organograma"')
+                WHERE sql_template IS NOT NULL
+                  AND sql_template LIKE '%"departamento"%';
+              END IF;
+
+              FOR rec IN
+                SELECT *
+                FROM (VALUES
+                  ('gold_rule', 'filter_json', 'json'),
+                  ('gold_rule', 'dimensions', 'json'),
+                  ('gold_rule', 'measure_columns', 'json'),
+                  ('gold_rule_source', 'filter_json', 'json'),
+                  ('gold_rule_source', 'gold_tables', 'json'),
+                  ('forecast_config', 'dimensions', 'json'),
+                  ('forecast_config', 'filters', 'json'),
+                  ('forecast_config', 'connection_allocation_rules', 'json'),
+                  ('forecast_business_rule', 'scope', 'json'),
+                  ('forecast_business_rule', 'identification_clauses', 'json'),
+                  ('forecast_business_rule', 'reference_values', 'json'),
+                  ('forecast_run', 'config_snapshot', 'json'),
+                  ('classification_rule', 'conditions', 'json'),
+                  ('business_rule', 'conditions', 'json'),
+                  ('saving_action', 'filters', 'json'),
+                  ('shutdown_exception_rule', 'filter_json', 'json'),
+                  ('pivot_view', 'config_json', 'json'),
+                  ('dashboard', 'global_filters', 'json'),
+                  ('dashboard_widget', 'config_json', 'json'),
+                  ('dashboard_widget', 'position_json', 'json'),
+                  ('ai_cost_link', 'filter_json', 'json'),
+                  ('ai_cost_link_source', 'filter_json', 'json'),
+                  ('ai_cost_allocation', 'source_refs', 'json'),
+                  ('ai_cost_pool_allocation', 'source_refs', 'json'),
+                  ('clone_rule', 'conditions', 'json'),
+                  ('clone_rule', 'roles', 'json'),
+                  ('clone_rule', 'original_changes', 'json'),
+                  ('clone_rule', 'clone_changes', 'json'),
+                  ('scheduled_task', 'config_json', 'json'),
+                  ('etl_task', 'result_json', 'json'),
+                  ('audit_log', 'before_json', 'jsonb'),
+                  ('audit_log', 'after_json', 'jsonb'),
+                  ('audit_log', 'changes_json', 'jsonb')
+                ) AS payload(table_name, column_name, storage_type)
+              LOOP
+                IF to_regclass(rec.table_name) IS NOT NULL THEN
+                  IF rec.storage_type = 'jsonb' THEN
+                    EXECUTE format(
+                      'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''organograma_nivel_'')::jsonb
+                       WHERE %I IS NOT NULL AND %I::text LIKE ''%%departamento_nivel_%%''',
+                      rec.table_name, rec.column_name, rec.column_name,
+                      rec.column_name, rec.column_name
+                    );
+                  ELSE
+                    EXECUTE format(
+                      'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''organograma_nivel_'')::json
+                       WHERE %I IS NOT NULL AND %I::text LIKE ''%%departamento_nivel_%%''',
+                      rec.table_name, rec.column_name, rec.column_name,
+                      rec.column_name, rec.column_name
+                    );
+                  END IF;
+                END IF;
+              END LOOP;
+
+              FOR rec IN
+                SELECT *
+                FROM (VALUES
+                  ('gold_rule', 'filter_json', 'json'),
+                  ('gold_rule', 'dimensions', 'json'),
+                  ('gold_rule', 'measure_columns', 'json'),
+                  ('gold_rule_source', 'filter_json', 'json'),
+                  ('forecast_config', 'dimensions', 'json'),
+                  ('forecast_config', 'filters', 'json'),
+                  ('forecast_config', 'connection_allocation_rules', 'json'),
+                  ('forecast_business_rule', 'scope', 'json'),
+                  ('forecast_business_rule', 'identification_clauses', 'json'),
+                  ('forecast_business_rule', 'reference_values', 'json'),
+                  ('forecast_run', 'config_snapshot', 'json'),
+                  ('classification_rule', 'conditions', 'json'),
+                  ('business_rule', 'conditions', 'json'),
+                  ('saving_action', 'filters', 'json'),
+                  ('shutdown_exception_rule', 'filter_json', 'json'),
+                  ('pivot_view', 'config_json', 'json'),
+                  ('dashboard', 'global_filters', 'json'),
+                  ('dashboard_widget', 'config_json', 'json'),
+                  ('ai_cost_link', 'filter_json', 'json'),
+                  ('ai_cost_link_source', 'filter_json', 'json'),
+                  ('clone_rule', 'conditions', 'json'),
+                  ('scheduled_task', 'config_json', 'json'),
+                  ('etl_task', 'result_json', 'json'),
+                  ('audit_log', 'before_json', 'jsonb'),
+                  ('audit_log', 'after_json', 'jsonb'),
+                  ('audit_log', 'changes_json', 'jsonb')
+                ) AS payload(table_name, column_name, storage_type)
+              LOOP
+                IF to_regclass(rec.table_name) IS NOT NULL THEN
+                  IF rec.storage_type = 'jsonb' THEN
+                    EXECUTE format(
+                      'UPDATE %I SET %I = replace(replace(replace(replace(%I::text,
+                        ''"column": "departamento"'', ''"column": "organograma"''),
+                        ''"field": "departamento"'', ''"field": "organograma"''),
+                        ''"target_field": "departamento"'', ''"target_field": "organograma"''),
+                        ''"rows": ["departamento"'', ''"rows": ["organograma"'')::jsonb
+                       WHERE %I IS NOT NULL AND %I::text LIKE ''%%"departamento"%%''',
+                      rec.table_name, rec.column_name, rec.column_name,
+                      rec.column_name, rec.column_name
+                    );
+                  ELSE
+                    EXECUTE format(
+                      'UPDATE %I SET %I = replace(replace(replace(replace(%I::text,
+                        ''"column": "departamento"'', ''"column": "organograma"''),
+                        ''"field": "departamento"'', ''"field": "organograma"''),
+                        ''"target_field": "departamento"'', ''"target_field": "organograma"''),
+                        ''"rows": ["departamento"'', ''"rows": ["organograma"'')::json
+                       WHERE %I IS NOT NULL AND %I::text LIKE ''%%"departamento"%%''',
+                      rec.table_name, rec.column_name, rec.column_name,
+                      rec.column_name, rec.column_name
+                    );
+                  END IF;
+                END IF;
+              END LOOP;
             END $$
         """)
         await _execute_migration(conn, """

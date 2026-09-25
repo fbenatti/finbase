@@ -253,16 +253,22 @@ async def _setup_for_connection(db: AsyncSession, conn: SourceConnection) -> Set
             db.add(rule)
         code_tags = normalize_code("snapshot_tags_automacao")
         exists_tags = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code_tags))).scalar_one_or_none()
-        if not exists_tags:
+        if exists_tags:
+            # Tag history is not a retained snapshot source. Keep this rule
+            # from re-enabling append-only snapshots on setup.
+            if exists_tags.snapshot_mode or exists_tags.active:
+                exists_tags.snapshot_mode = False
+                exists_tags.active = False
+        else:
             db.add(GoldMartRule(
                 code=code_tags,
                 name="Snapshot tags shutdown=auto",
-                description="Snapshot diário da tag shutdown=auto por recurso (modo snapshot: append datado sem replace).",
-                active=True,
+                description="Consulta atual das tags shutdown=auto por recurso; histórico de snapshots desativado.",
+                active=False,
                 dimensions=["resource_id", "resource_name", "connection_code", "_billing_period", "has_shutdown_auto"],
                 measure_columns=[],
                 sql_template=TAG_SNAPSHOT_SQL,
-                snapshot_mode=True,
+                snapshot_mode=False,
                 snapshot_col="_snapshot_date",
                 sources=[],
             ))
@@ -1321,12 +1327,16 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
     )
 
 
-class SavingDepartamentoItem(BaseModel):
-    departamento_nivel_4: str | None
-    departamento_nivel_5: str | None
+class SavingOrganogramaItem(BaseModel):
+    organograma_nivel_4: str | None
+    organograma_nivel_5: str | None
     vms: int
     saved_hours: float
     saving_brl: float
+
+
+# Compat: clientes antigos importavam SavingDepartamentoItem.
+SavingDepartamentoItem = SavingOrganogramaItem
 
 
 class VmDailyUsageItem(BaseModel):
@@ -1496,18 +1506,22 @@ async def vm_usage_daily(resource_name: str, days: int = 30):
     )
 
 
-class SavingDepartamentoResponse(BaseModel):
+class SavingOrganogramaResponse(BaseModel):
     billing_period: str
-    rows: list[SavingDepartamentoItem]
+    rows: list[SavingOrganogramaItem]
 
 
-@router.get("/saving-departamento", response_model=SavingDepartamentoResponse)
-async def saving_departamento(period: str | None = None):
-    """Saving por desligue agrupado por Departamento Nível 4 e 5 (Gold FOCUS).
+SavingDepartamentoResponse = SavingOrganogramaResponse
 
-    Junta a Gold de saving (por resource_id) com a Gold dest_modelo_focus para
-    obter o departamento_nivel_4/5 de cada recurso (1 departamento por recurso,
-    via MAX na Gold). ``period`` opcional (YYYYMM); default = mês mais recente.
+
+@router.get("/saving-organograma", response_model=SavingOrganogramaResponse)
+@router.get("/saving-departamento", response_model=SavingOrganogramaResponse, include_in_schema=False)
+async def saving_organograma(period: str | None = None):
+    """Saving por desligue agrupado por organograma_nivel_4 e organograma_nivel_5 (FOCUS).
+
+    Junta a Gold de saving (por resource_id) com dest_modelo_focus para
+    obter organograma_nivel_4/5 de cada recurso (via MAX na camada de detalhe).
+    ``period`` opcional (YYYYMM); default = mês mais recente.
     """
     if not period:
         try:
@@ -1519,8 +1533,8 @@ async def saving_departamento(period: str | None = None):
         except Exception:
             pass
     if not period:
-        return SavingDepartamentoResponse(billing_period="", rows=[])
-    # Junta a Gold (saving) com a Gold para obter departamento_nivel_4/5 por
+        return SavingOrganogramaResponse(billing_period="", rows=[])
+    # Junta a Gold (saving) com a Gold para obter organograma_nivel_4/5 por
     # recurso. O join é restrito aos resource_ids da Gold (pequeno), então o
     # scan da Gold é filtrado pelo mês — sem varrer tudo por requisição.
     sql = f"""
@@ -1533,16 +1547,16 @@ async def saving_departamento(period: str | None = None):
     gold_dept AS (
         SELECT
             LOWER(TRIM(g."ResourceId")) AS rid,
-            MAX(g.departamento_nivel_4) AS n4,
-            MAX(g.departamento_nivel_5) AS n5
+            MAX(g.organograma_nivel_4) AS n4,
+            MAX(g.organograma_nivel_5) AS n5
         FROM iceberg.{layers.detail_layer()}.dest_modelo_focus g
         JOIN gold_vms d ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(d.resource_id))
         WHERE g._billing_period = '{period}'
         GROUP BY 1
     )
     SELECT
-        COALESCE(g.n4, 'SEM DEPARTAMENTO') AS departamento_nivel_4,
-        COALESCE(g.n5, 'SEM PROJETO') AS departamento_nivel_5,
+        COALESCE(g.n4, 'SEM DEPARTAMENTO') AS organograma_nivel_4,
+        COALESCE(g.n5, 'SEM PROJETO') AS organograma_nivel_5,
         COUNT(DISTINCT d.resource_id) AS vms,
         COALESCE(SUM(d.saved_hours), 0) AS saved_hours,
         COALESCE(SUM(d.saving_brl), 0) AS saving_brl
@@ -1554,13 +1568,13 @@ async def saving_departamento(period: str | None = None):
     try:
         rows = await execute(sql, timeout_s=180)
     except Exception:
-        return SavingDepartamentoResponse(billing_period=period, rows=[])
-    return SavingDepartamentoResponse(
+        return SavingOrganogramaResponse(billing_period=period, rows=[])
+    return SavingOrganogramaResponse(
         billing_period=period,
         rows=[
-            SavingDepartamentoItem(
-                departamento_nivel_4=str(r["departamento_nivel_4"]),
-                departamento_nivel_5=str(r["departamento_nivel_5"]),
+            SavingOrganogramaItem(
+                organograma_nivel_4=str(r["organograma_nivel_4"]),
+                organograma_nivel_5=str(r["organograma_nivel_5"]),
                 vms=int(r["vms"] or 0),
                 saved_hours=round(float(r["saved_hours"] or 0), 0),
                 saving_brl=round(float(r["saving_brl"] or 0), 2),
@@ -1871,24 +1885,27 @@ async def seed_tag_snapshot_gold(db: AsyncSession = Depends(get_db)):
     code = normalize_code("snapshot_tags_automacao")
     existing = (await db.execute(select(GoldMartRule).where(GoldMartRule.code == code))).scalar_one_or_none()
     if existing:
+        existing.snapshot_mode = False
+        existing.active = False
+        await db.commit()
         return {"status": "EXISTS", "code": code, "rule_id": existing.id, "message": "Regra Gold de tags já existe."}
 
     rule = GoldMartRule(
         code=code,
         name="Snapshot tags shutdown=auto",
-        description="Snapshot diário da tag shutdown=auto por recurso (modo snapshot: append datado sem replace).",
-        active=True,
+        description="Consulta atual das tags shutdown=auto por recurso; histórico de snapshots desativado.",
+        active=False,
         dimensions=["resource_id", "resource_name", "connection_code", "_billing_period", "has_shutdown_auto"],
         measure_columns=[],
         sql_template=TAG_SNAPSHOT_SQL,
-        snapshot_mode=True,
+        snapshot_mode=False,
         snapshot_col="_snapshot_date",
         sources=[],
     )
     db.add(rule)
     await db.commit()
     await db.refresh(rule)
-    return {"status": "CREATED", "code": code, "rule_id": rule.id, "message": "Regra Gold de tags criada (modo snapshot)."}
+    return {"status": "CREATED", "code": code, "rule_id": rule.id, "message": "Regra Gold de tags criada desativada, sem histórico de snapshots."}
 
 
 class TagDeltaItem(BaseModel):

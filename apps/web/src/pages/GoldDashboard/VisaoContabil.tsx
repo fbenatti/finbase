@@ -44,11 +44,11 @@ function filtersOf(f: Filters, extra: GoldQueryFilter[] = []): GoldQueryFilter[]
   const out: GoldQueryFilter[] = [...extra];
   if (f.months.length) out.push({ column: "_billing_period", operator: "IN", values: f.months });
   if (f.clouds.length) out.push({ column: "cloud_origem", operator: "IN", values: f.clouds });
-  if (f.dirs.length) out.push({ column: "departamento_nivel_4", operator: "IN", values: f.dirs });
-  if (f.depts.length) out.push({ column: "departamento_nivel_5", operator: "IN", values: f.depts });
+  if (f.dirs.length) out.push({ column: "organograma_nivel_4", operator: "IN", values: f.dirs });
+  if (f.depts.length) out.push({ column: "organograma_nivel_5", operator: "IN", values: f.depts });
   if (f.servicos.length) out.push({ column: "servicename", operator: "IN", values: f.servicos });
   if (f.cats.length) out.push({ column: "servicecategory", operator: "IN", values: f.cats });
-  if (f.path.length) f.path.forEach((segment, index) => out.push({ column: `departamento_nivel_${index + 1}`, operator: "IN", values: [segment] }));
+  if (f.path.length) f.path.forEach((segment, index) => out.push({ column: `organograma_nivel_${index + 1}`, operator: "IN", values: [segment] }));
   Object.entries(f.extra || {}).forEach(([column, values]) => { if (values && values.length) out.push({ column, operator: "IN", values }); });
   return out;
 }
@@ -56,11 +56,11 @@ function filtersOf(f: Filters, extra: GoldQueryFilter[] = []): GoldQueryFilter[]
 function pivotFiltersFrom(filters: Filters): Record<string, HistoryFilter> {
   const out: Record<string, HistoryFilter> = {};
   if (filters.clouds.length) out.cloud_origem = { operator: "in", value: filters.clouds };
-  if (filters.dirs.length) out.departamento_nivel_4 = { operator: "in", value: filters.dirs };
-  if (filters.depts.length) out.departamento_nivel_5 = { operator: "in", value: filters.depts };
+  if (filters.dirs.length) out.organograma_nivel_4 = { operator: "in", value: filters.dirs };
+  if (filters.depts.length) out.organograma_nivel_5 = { operator: "in", value: filters.depts };
   if (filters.servicos.length) out.servicename = { operator: "in", value: filters.servicos };
   if (filters.cats.length) out.servicecategory = { operator: "in", value: filters.cats };
-  if (filters.path.length) filters.path.forEach((seg, i) => { if (seg) out[`departamento_nivel_${i + 1}`] = { operator: "in", value: [seg] }; });
+  if (filters.path.length) filters.path.forEach((seg, i) => { if (seg) out[`organograma_nivel_${i + 1}`] = { operator: "in", value: [seg] }; });
   Object.entries(filters.extra || {}).forEach(([col, vals]) => { if (vals && vals.length) out[col] = { operator: "in", value: vals }; });
   return out;
 }

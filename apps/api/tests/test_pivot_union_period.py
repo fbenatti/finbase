@@ -22,9 +22,9 @@ def test_schema_period_column_prefers_billing_period():
 
 
 def test_period_on_axes_detects_billing_column():
-    assert _period_on_axes(["departamento"], ["_billing_period"])
+    assert _period_on_axes(["organograma"], ["_billing_period"])
     assert _period_on_axes(["period"], [])
-    assert not _period_on_axes(["departamento"], ["cloud_origem"])
+    assert not _period_on_axes(["organograma"], ["cloud_origem"])
 
 
 def test_filters_for_side_remap_billing_period_to_planning_period():
@@ -73,7 +73,7 @@ def test_union_request_does_not_put_origem_on_axes():
     """origem is optional: the client must request it as a row or column."""
     req = PivotUnionRequest(
         destination_table_ids=[1, -1],
-        rows=["departamento"],
+        rows=["organograma"],
         columns=["_billing_period"],
         measures=[PivotMeasure(column="EffectiveCost", aggregation="SUM")],
     )
@@ -84,11 +84,11 @@ def test_union_request_does_not_put_origem_on_axes():
 def test_origin_is_stripped_from_cell_filters():
     remaining, origin = _origin_from_cell_filters({
         "origem": "realizado",
-        "departamento": "TI",
+        "organograma": "TI",
         "_billing_period": "202607",
     })
     assert origin == "realizado"
-    assert remaining == {"departamento": "TI", "_billing_period": "202607"}
+    assert remaining == {"organograma": "TI", "_billing_period": "202607"}
 
 
 def test_origin_maps_to_planning_destination_id():

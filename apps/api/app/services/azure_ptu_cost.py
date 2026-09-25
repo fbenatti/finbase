@@ -16,7 +16,7 @@ financeiro do dashboard com a separação correta de capacidade PTU:
 O consumo diário/horário da capacidade (meter ``Provisioned Managed*``,
 ``1/Hour``) não é retornado: ele já está incluído no custo da compra mensal.
 
-Os projetos são classificados no ``departamento_nivel_5``. O Vivo Mais
+Os projetos são classificados no ``organograma_nivel_5``. O Vivo Mais
 publica a reserva PTU como ``Vivo+`` na Gold (subconta de faturamento);
 o dashboard normaliza para o rótulo ``Vivo Mais``. Aura Brain usa o
 mesmo nome na Gold.
@@ -52,14 +52,14 @@ GOLD_PROJECT_NAMES: dict[str, tuple[str, ...]] = {
 }
 
 _PROJECT_SQL = (
-    "CASE WHEN COALESCE(NULLIF(departamento_nivel_5, ''), departamento) = 'Vivo+' "
+    "CASE WHEN COALESCE(NULLIF(organograma_nivel_5, ''), organograma) = 'Vivo+' "
     "THEN 'Vivo Mais' "
-    "ELSE COALESCE(NULLIF(departamento_nivel_5, ''), departamento) END"
+    "ELSE COALESCE(NULLIF(organograma_nivel_5, ''), organograma) END"
 )
 _PLANNING_PROJECT_SQL = (
-    "CASE WHEN COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) = 'Vivo+' "
+    "CASE WHEN COALESCE(NULLIF(organograma_nivel_5, ''), organograma_nivel_5) = 'Vivo+' "
     "THEN 'Vivo Mais' "
-    "ELSE COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) END"
+    "ELSE COALESCE(NULLIF(organograma_nivel_5, ''), organograma_nivel_5) END"
 )
 
 # Classificação dos meters PTU na Gold FOCUS.
@@ -152,7 +152,7 @@ async def _load_realized_rows(
     sql = f"""
         SELECT _billing_period AS periodo,
                {_PROJECT_SQL} AS projeto,
-               MAX(departamento_nivel_4) AS departamento_nivel_4,
+               MAX(organograma_nivel_4) AS organograma_nivel_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))     AS realizado,
                SUM(COALESCE(TRY_CAST(billedcost AS DOUBLE), 0))    AS billedcost,
                SUM(CASE WHEN servicename = '{RESERVATION_SERVICE}'
@@ -177,7 +177,7 @@ async def _load_realized_rows(
                                  AND commitmentdiscounttype = 'OnDemand') AS ondemand_rows
         FROM {DETAIL_NAMESPACE}.{FOCUS_TABLE}
         WHERE _billing_period IN ({period_list})
-          AND COALESCE(NULLIF(departamento_nivel_5, ''), departamento) IN ({project_list})
+          AND COALESCE(NULLIF(organograma_nivel_5, ''), organograma) IN ({project_list})
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
@@ -203,11 +203,11 @@ async def _load_forecast_rows(
     sql = f"""
         SELECT period AS periodo,
                {_PLANNING_PROJECT_SQL} AS projeto,
-               MAX(departamento_nivel_4) AS departamento_nivel_4,
+               MAX(organograma_nivel_4) AS organograma_nivel_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realizado
         FROM {DETAIL_NAMESPACE}.{PLANNING_TABLE}
         WHERE period IN ({period_list})
-          AND COALESCE(NULLIF(departamento_nivel_5, ''), departamento_nivel_5) IN ({project_list})
+          AND COALESCE(NULLIF(organograma_nivel_5, ''), organograma_nivel_5) IN ({project_list})
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
@@ -227,7 +227,7 @@ def _monthly_rows(
             "period": period,
             "label": _period_label(period),
             "project": project,
-            "department": row.get("departamento_nivel_4"),
+            "department": row.get("organograma_nivel_4"),
             "reservation_units": 0.0,
             "reservation_cost": 0.0,
             "ondemand_units": None,
@@ -254,7 +254,7 @@ def _monthly_rows(
             "period": period,
             "label": _period_label(period),
             "project": project,
-            "department": row.get("departamento_nivel_4"),
+            "department": row.get("organograma_nivel_4"),
             "reservation_units": 0.0,
             "reservation_cost": 0.0,
             "ondemand_units": None,

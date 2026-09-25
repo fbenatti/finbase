@@ -1392,7 +1392,7 @@ def publish_staged_partition(
 
     # A partial reprocess publishes one connection/month at a time.  The
     # staging table can legitimately contain newly materialized organizational
-    # dimensions (for example departamento_nivel_6 and _7) while the existing
+    # dimensions (for example organograma_nivel_6 and organograma_nivel_7) while the existing
     # Gold table still has the prior schema.  Evolve the target by name before
     # appending Arrow batches; otherwise PyArrow rejects the new fields and the
     # atomic publication fails after all processing has completed.
@@ -1866,6 +1866,41 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
 def get_catalog() -> Catalog:
     """Expose the catalog for external use (e.g., health checks)."""
     return _get_catalog()
+
+
+def rename_legacy_organograma_columns(namespace: str) -> dict[str, list[tuple[str, str]]]:
+    """Rename legacy departamento_* columns to organograma_* on existing Iceberg tables."""
+    cat = _get_catalog()
+    _ensure_namespace(namespace)
+    renamed: dict[str, list[tuple[str, str]]] = {}
+    for short_name in list_tables(namespace):
+        table_id = (namespace, short_name)
+        try:
+            tbl = cat.load_table(table_id)
+        except Exception:
+            continue
+        field_names = {field.name for field in tbl.schema().fields}
+        pairs: list[tuple[str, str]] = []
+        for level in range(1, 8):
+            old_name = f"departamento_nivel_{level}"
+            new_name = f"organograma_nivel_{level}"
+            if old_name in field_names and new_name not in field_names:
+                pairs.append((old_name, new_name))
+        if "departamento" in field_names and "organograma" not in field_names:
+            pairs.append(("departamento", "organograma"))
+        if not pairs:
+            continue
+        with tbl.update_schema() as schema_update:
+            for old_name, new_name in pairs:
+                schema_update.rename_column(old_name, new_name)
+        renamed[short_name] = pairs
+        logger.info(
+            "Renamed %d hierarchy column(s) on %s.%s",
+            len(pairs),
+            namespace,
+            short_name,
+        )
+    return renamed
 
 
 def list_tables(namespace: str) -> list[str]:

@@ -12,33 +12,33 @@ const COMPACT_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency
 const PURPLE = "#5b00cb";
 
 const VISAO_DIRETORIA_LEVELS = [
-  "departamento_nivel_1",
-  "departamento_nivel_2",
-  "departamento_nivel_4",
-  "departamento_nivel_3",
-  "departamento_nivel_5",
-  "departamento_nivel_6",
+  "organograma_nivel_1",
+  "organograma_nivel_2",
+  "organograma_nivel_4",
+  "organograma_nivel_3",
+  "organograma_nivel_5",
+  "organograma_nivel_6",
 ] as const;
 
 const VISAO_DIRETORIA_DEPTH_TO_NIVEL = [1, 2, 4, 3, 5, 6] as const;
 
 const DIRECTOR_VIEW_LABELS: Record<string, string> = {
-  departamento_nivel_1: "Segmento",
-  departamento_nivel_2: "Modelo",
-  departamento_nivel_4: "Diretoria",
-  departamento_nivel_3: "Cloud",
-  departamento_nivel_5: "Projeto",
-  departamento_nivel_6: "SubProjeto",
+  organograma_nivel_1: "Segmento",
+  organograma_nivel_2: "Modelo",
+  organograma_nivel_4: "Diretoria",
+  organograma_nivel_3: "Cloud",
+  organograma_nivel_5: "Projeto",
+  organograma_nivel_6: "SubProjeto",
 };
 
-/** Raiz do organograma na UI — não corresponde a departamento_nivel_1 nos dados Gold. */
+/** Raiz do organograma na UI — não corresponde a organograma_nivel_1 nos dados Gold. */
 const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo Cloud"] as const;
 
 const DEFAULT_CHILD_LIMIT = 7;
 export const EMPTY_DIMENSION_LABEL = "Não informado";
 const MAX_EMPTY_ORG_SKIP = 6;
 
-/** Remove prefixo de raiz da árvore para alinhar profundidade → departamento_nivel_N. */
+/** Remove prefixo de raiz da árvore para alinhar profundidade → organograma_nivel_N. */
 export function normalizeDirectorPath(path: string[], visaoDiretoria: boolean): string[] {
   if (!visaoDiretoria || path.length === 0) return path;
   if (path.length === 1 && DIRECTOR_PATH_ROOT_PREFIXES.includes(path[0] as typeof DIRECTOR_PATH_ROOT_PREFIXES[number])) {
@@ -51,7 +51,7 @@ export function normalizeDirectorPath(path: string[], visaoDiretoria: boolean): 
 }
 
 export function isOrgField(field: string): boolean {
-  return field.startsWith("departamento_nivel_");
+  return field.startsWith("organograma_nivel_");
 }
 
 /** Nível org cujo único filho agrega todo o custo em valor ausente — deve ser pulado. */
@@ -126,7 +126,7 @@ export function pathSegmentFilters(path: string[], visaoDiretoria: boolean): Gol
     const nivel = visaoDiretoria
       ? (VISAO_DIRETORIA_DEPTH_TO_NIVEL[depth] ?? depth + 1)
       : depth + 1;
-    out.push({ column: `departamento_nivel_${nivel}`, operator: "IN", values: [segment] });
+    out.push({ column: `organograma_nivel_${nivel}`, operator: "IN", values: [segment] });
   });
   return out;
 }
@@ -136,11 +136,11 @@ export function buildDecompChain(visaoDiretoria: boolean): DecompChainItem[] {
   const org: DecompChainItem[] = visaoDiretoria
     ? VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: DIRECTOR_VIEW_LABELS[field] || field }))
     : [
-      { field: "departamento_nivel_1", label: "Segmento" },
-      { field: "departamento_nivel_2", label: "Modelo" },
-      { field: "departamento_nivel_3", label: "Plataforma" },
-      { field: "departamento_nivel_4", label: "Diretoria" },
-      { field: "departamento_nivel_5", label: ORG.level5 },
+      { field: "organograma_nivel_1", label: "Segmento" },
+      { field: "organograma_nivel_2", label: "Modelo" },
+      { field: "organograma_nivel_3", label: "Plataforma" },
+      { field: "organograma_nivel_4", label: "Diretoria" },
+      { field: "organograma_nivel_5", label: ORG.level5 },
     ];
   return [
     { field: "cloud_origem", label: "Cloud" },
@@ -157,12 +157,12 @@ export function buildExecutiveDecompChain(visaoDiretoria: boolean, scopedPathDep
   const org: DecompChainItem[] = visaoDiretoria
     ? VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: DIRECTOR_VIEW_LABELS[field] || field }))
     : [
-      { field: "departamento_nivel_1", label: "Segmento" },
-      { field: "departamento_nivel_2", label: "Modelo" },
-      { field: "departamento_nivel_3", label: "Plataforma" },
-      { field: "departamento_nivel_4", label: "Diretoria" },
-      { field: "departamento_nivel_5", label: ORG.level5 },
-      { field: "departamento_nivel_6", label: "Unidade" },
+      { field: "organograma_nivel_1", label: "Segmento" },
+      { field: "organograma_nivel_2", label: "Modelo" },
+      { field: "organograma_nivel_3", label: "Plataforma" },
+      { field: "organograma_nivel_4", label: "Diretoria" },
+      { field: "organograma_nivel_5", label: ORG.level5 },
+      { field: "organograma_nivel_6", label: "Unidade" },
     ];
   const orgTail = org.slice(Math.max(0, scopedPathDepth));
   return [

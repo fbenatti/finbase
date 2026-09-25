@@ -3,7 +3,7 @@ from app.services.sinfonia_dashboard import build_dashboard, ia_family_for, norm
 
 def row(**values):
     base = {"period": "202608", "tipo": "realizado", "cloud_origem": "azure-ti",
-            "departamento_nivel_5": " Fábrica de Agente", "departamento_nivel_6": "Fábrica de Agente - Comercial",
+            "organograma_nivel_5": " Fábrica de Agente", "organograma_nivel_6": "Fábrica de Agente - Comercial",
             "servicename": "Azure OpenAI", "servicesubcategory": "Azure OpenAI", "skumeter": "Tokens", "realized": 100}
     base.update(values)
     return base
@@ -11,8 +11,8 @@ def row(**values):
 
 def test_normalizes_portfolio_and_excludes_legacy_sinfonia_ia():
     assert normalize_row(row())["project"] == "Comercial"
-    assert normalize_row(row(departamento_nivel_5="Sinfonia - Watson ", departamento_nivel_6=None))["cloud"] == "IBM"
-    assert normalize_row(row(departamento_nivel_5="Sinfonia IA", departamento_nivel_6=None)) is None
+    assert normalize_row(row(organograma_nivel_5="Sinfonia - Watson ", organograma_nivel_6=None))["cloud"] == "IBM"
+    assert normalize_row(row(organograma_nivel_5="Sinfonia IA", organograma_nivel_6=None)) is None
 
 
 def test_current_month_prefers_forecast_and_includes_rateio_in_closed_month():

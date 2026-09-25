@@ -64,7 +64,7 @@ def _classification_rule(**kwargs):
         "pattern": '["vivo-ti-vicky-hml"]',
         "pattern_type": "exact",
         "match_value": "Vicky",
-        "target_field": "departamento",
+        "target_field": "organograma",
         "conditions": None,
         "priority": 10,
         "cloud_scope": "gcp",

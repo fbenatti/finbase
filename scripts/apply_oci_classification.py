@@ -119,7 +119,7 @@ def main() -> None:
                 conditions, priority, active, created_at, updated_at
             ) VALUES (
                 %s, %s, 'oci', %s, %s,
-                'SubAccountName', %s, 'multi_condition', %s, 'departamento',
+                'SubAccountName', %s, 'multi_condition', %s, 'organograma',
                 %s, %s, true, NOW(), NOW()
             )
             """,
@@ -139,7 +139,7 @@ def main() -> None:
             conditions, priority, active, created_at, updated_at
         ) VALUES (
             %s, %s, 'oci', %s, 'OCI | Fallback',
-            'SubAccountName', 'SubAccountName~.', 'multi_condition', 'SEM PROJETO DEFINIDO', 'departamento',
+            'SubAccountName', 'SubAccountName~.', 'multi_condition', 'SEM PROJETO DEFINIDO', 'organograma',
             %s, 9990, true, NOW(), NOW()
         )
         """,

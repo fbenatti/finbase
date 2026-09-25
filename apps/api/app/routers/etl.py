@@ -1620,12 +1620,12 @@ def _reprocess_destination_sync(
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
         unique_cids = set(cid for _, cid, _, _ in all_blobs)
-        output_cols = {'departamento', 'centro_custo', 'id_orcamento',
+        output_cols = {'organograma', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
-                       'departamento_nivel_1', 'departamento_nivel_2',
-                       'departamento_nivel_3', 'departamento_nivel_4',
-                       'departamento_nivel_5', 'departamento_nivel_6',
-                       'departamento_nivel_7',
+                       'organograma_nivel_1', 'organograma_nivel_2',
+                       'organograma_nivel_3', 'organograma_nivel_4',
+                       'organograma_nivel_5', 'organograma_nivel_6',
+                       'organograma_nivel_7',
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
                        'VL_CUSTO_FINAL_BRL'}
@@ -2035,6 +2035,22 @@ def _reprocess_destination_sync(
                         f"esperado pelo menos {blob_input_rows}, lido {blob_input_rows}, "
                         f"escrito {blob_output_rows}"
                     )
+                # Transformations preserve row cardinality. The only allowed
+                # expansion is a synthetic clone, and each active clone rule
+                # can add at most one row for each input row. A prior OCI
+                # reprocess published 70.6M rows from a 788K-row Bronze blob;
+                # without an upper bound that silently inflated later forecast
+                # runs. Abort before publication and keep the existing slice.
+                clone_engine = clone_engines.get(cid)
+                clone_rule_count = len(clone_engine.rules) if clone_engine else 0
+                max_blob_output_rows = blob_input_rows * (1 + clone_rule_count)
+                if blob_output_rows > max_blob_output_rows:
+                    raise RuntimeError(
+                        f"Expansão anormal no blob {blob_id} ({bperiod}): "
+                        f"entrada {blob_input_rows:,}, saída {blob_output_rows:,}, "
+                        f"limite {max_blob_output_rows:,} para {clone_rule_count} regra(s) de clone; "
+                        "publicação abortada para preservar o destino anterior"
+                    )
                 processed += 1
                 status["processed_blobs"] = processed
                 status["current_blob"] = f"blob {processed}/{total_blobs}: {bperiod} ({total_rows_processed:,} linhas acumuladas)"
@@ -2348,8 +2364,8 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     # Never erase fields on rows owned only by business rules.
                     # Rows with prior classification (or empty dimensions) are
                     # safe to recompute from the current classification rules.
-                    reset_mask = was_classified | frame.get("departamento", pd.Series(None, index=frame.index)).isna()
-                    for col in ("departamento", "centro_custo", "id_orcamento", "ambiente", "custom_fields", "subscription_rg", "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5", "departamento_nivel_6", "departamento_nivel_7"):
+                    reset_mask = was_classified | frame.get("organograma", pd.Series(None, index=frame.index)).isna()
+                    for col in ("organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields", "subscription_rg", "organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4", "organograma_nivel_5", "organograma_nivel_6", "organograma_nivel_7"):
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)
@@ -3047,6 +3063,13 @@ async def list_schedules(db: AsyncSession = Depends(get_db)):
         select(ScheduledTask).order_by(ScheduledTask.created_at.desc())
     )
     return result.scalars().all()
+
+
+@router.get("/schedules/backup-size-estimates")
+async def backup_size_estimates():
+    """Current uncompressed data volume per selectable Iceberg layer."""
+    from app.services.full_backup import backup_layer_size_estimates
+    return await asyncio.to_thread(backup_layer_size_estimates)
 
 
 @router.post("/schedules", response_model=ScheduledTaskOut, status_code=201)

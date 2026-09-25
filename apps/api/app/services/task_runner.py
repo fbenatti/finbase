@@ -549,7 +549,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
     When session is provided and caches are None, loads from DB (backward compat).
 
     For each rule that matches, populates:
-    - target_field (e.g., 'departamento') with match_value
+    - target_field (e.g., 'organograma') with match_value
     - department hierarchy fields: centro_custo, ambiente, custom_fields
     """
     from app.models.rules import Department
@@ -606,7 +606,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         return result
 
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
-    for col in ['departamento', 'centro_custo', 'id_orcamento', 'ambiente',
+    for col in ['organograma', 'centro_custo', 'id_orcamento', 'ambiente',
                 'custom_fields', 'subscription_rg',
                 'organograma_nivel_1', 'organograma_nivel_2',
                 'organograma_nivel_3', 'organograma_nivel_4',
@@ -672,7 +672,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                         ambiente_val = d.ambiente
 
                 for col_name, col_val in [
-                    ('departamento', leaf.name),
+                    ('organograma', leaf.name),
                     ('centro_custo', centro_custo_val),
                     ('id_orcamento', id_orcamento_val),
                     ('ambiente', ambiente_val),

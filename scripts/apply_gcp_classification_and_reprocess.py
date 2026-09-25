@@ -67,7 +67,7 @@ def build_rule_insert(
         pattern[:500],
         "multi_condition",
         match_value,
-        "departamento",
+        "organograma",
         json.dumps(conditions),
         priority,
     )

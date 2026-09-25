@@ -17,6 +17,55 @@ from urllib.parse import unquote, urlparse
 
 BackupAbort = Callable[[], bool]
 BackupProgress = Callable[[int], None]
+BACKUP_LAYERS = ("bronze", "silver", "gold")
+
+
+def normalize_backup_layers(layers: list[str] | None) -> list[str]:
+    """Validate selected Iceberg table layers; legacy schedules default to Bronze."""
+    if not layers:
+        return ["bronze"]
+    normalized = list(dict.fromkeys(str(layer).strip().lower() for layer in layers))
+    if any(layer not in BACKUP_LAYERS for layer in normalized):
+        raise ValueError("Camada de backup inválida; use bronze, silver ou gold")
+    return normalized
+
+
+def backup_layer_size_estimates(warehouse: Path | None = None) -> dict[str, int]:
+    """Logical bytes included from each Iceberg layer, before archive compression."""
+    if warehouse is None:
+        root = _project_root().resolve()
+        warehouse = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(root / "apps" / "data" / "iceberg"))).expanduser().resolve()
+    estimates: dict[str, int] = {}
+    for layer in BACKUP_LAYERS:
+        total = 0
+        for namespace in (layer, f"{layer}.db"):
+            folder = warehouse / namespace
+            if not folder.is_dir():
+                continue
+            for current, dirs, files in os.walk(folder, followlinks=False):
+                dirs[:] = [name for name in dirs if not (Path(current) / name).is_symlink()]
+                for name in files:
+                    path = Path(current) / name
+                    try:
+                        if not path.is_symlink():
+                            total += path.stat().st_size
+                    except OSError:
+                        continue
+        estimates[layer] = total
+    return estimates
+
+
+def _add_selected_iceberg_layers(tar: tarfile.TarFile, warehouse: Path, layers: list[str]) -> None:
+    archive_root = "openfinops/apps/data/iceberg"
+    for layer in layers:
+        for namespace in (layer, f"{layer}.db"):
+            folder = warehouse / namespace
+            if folder.exists():
+                tar.add(folder, arcname=f"{archive_root}/{namespace}", recursive=True)
+    # The catalog is small and holds the table metadata needed to locate selected tables.
+    catalog = warehouse / "catalog.db"
+    if catalog.exists():
+        tar.add(catalog, arcname=f"{archive_root}/catalog.db", recursive=True)
 
 
 class _ProgressWriter:
@@ -178,6 +227,7 @@ def create_full_backup(
     output_dir: str | None = None,
     should_abort: BackupAbort | None = None,
     on_progress: BackupProgress | None = None,
+    backup_layers: list[str] | None = None,
 ) -> dict:
     """Create one compressed archive containing DB, Iceberg and the project.
 
@@ -185,6 +235,7 @@ def create_full_backup(
     backups and the archive currently being written.
     """
     root = _project_root().resolve()
+    backup_layers = normalize_backup_layers(backup_layers)
     destination = Path(output_dir or os.getenv("OPENFINOPS_BACKUP_DIR", str(root / "backups" / "scheduled"))).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -222,18 +273,20 @@ def create_full_backup(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "database": database,
             "warehouse": str(warehouse),
+            "backup_layers": backup_layers,
+            "backup_layer_source_bytes": backup_layer_size_estimates(warehouse),
             "includes_env": True,
             "project_root": str(root),
-            "archive_excludes": ["backups/scheduled", "temporary staging"],
+            "archive_excludes": ["backups", ".git", "node_modules", ".venv", "temporary staging", "unselected Iceberg layers"],
             "postgres_dump_sha256": _sha256(dump),
         }
         manifest_path = staging / "BACKUP_MANIFEST.json"
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-        backups_root = (root / "backups" / "scheduled").resolve()
         project_warehouse = (root / "apps" / "data" / "iceberg").resolve()
         def _filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
             name = info.name.rstrip("/")
-            if name == "openfinops/backups/scheduled" or name.startswith("openfinops/backups/scheduled/"):
+            parts = Path(name).parts
+            if any(part in {"backups", ".git", "node_modules", ".venv", "__pycache__"} for part in parts):
                 return None
             if project_warehouse == (root / "apps" / "data" / "iceberg").resolve() and (name == "openfinops/apps/data/iceberg" or name.startswith("openfinops/apps/data/iceberg/")):
                 return None
@@ -249,11 +302,9 @@ def create_full_backup(
                     tar.add(root, arcname="openfinops", recursive=True, filter=_filter)
                     tar.add(db_dir, arcname="openfinops/postgres", recursive=True)
                     tar.add(manifest_path, arcname="openfinops/BACKUP_MANIFEST.json")
-                    # When the warehouse lives inside the project, it was skipped by
-                    # the project filter above and must be added explicitly.  For an
-                    # external warehouse this is the sole copy as well.
+                    # Include only the selected table layers and their shared catalog.
                     if warehouse.exists():
-                        tar.add(warehouse, arcname="openfinops/apps/data/iceberg", recursive=True)
+                        _add_selected_iceberg_layers(tar, warehouse, backup_layers)
                 if on_progress:
                     on_progress(progress_stream.bytes_written)
             except BaseException:

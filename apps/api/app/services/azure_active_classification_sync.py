@@ -334,7 +334,7 @@ async def sync_active_azure_classifications(
             pattern_type="multi_condition",
             pattern=("source_resource_group_name=" + "|".join(uncovered_values))[:500],
             match_value=department.name[:200],
-            target_field="departamento",
+            target_field="organograma",
             conditions=[
                 {"field": "source_resource_group_name", "operator": "=", "values": uncovered_values, "logic": "AND"},
             ],

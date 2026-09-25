@@ -376,14 +376,14 @@ _FORECAST_MANUAL_PIVOT_NAME = "forecast_manual_planning"
 _FORECAST_MANUAL_SCHEMA = {
     "period": "varchar",
     "tipo": "varchar",
-    "departamento": "varchar",
-    "departamento_nivel_1": "varchar",
-    "departamento_nivel_2": "varchar",
-    "departamento_nivel_3": "varchar",
-    "departamento_nivel_4": "varchar",
-    "departamento_nivel_5": "varchar",
-    "departamento_nivel_6": "varchar",
-    "departamento_nivel_7": "varchar",
+    "organograma": "varchar",
+    "organograma_nivel_1": "varchar",
+    "organograma_nivel_2": "varchar",
+    "organograma_nivel_3": "varchar",
+    "organograma_nivel_4": "varchar",
+    "organograma_nivel_5": "varchar",
+    "organograma_nivel_6": "varchar",
+    "organograma_nivel_7": "varchar",
     "value": "double",
 }
 
@@ -683,7 +683,7 @@ def _dimension_order_by(row_count: int, column_count: int) -> str:
     """Order the outer pivot by positional aliases ``d0..dn``.
 
     After ``_apply_pivot_axis_limits`` the result set only exposes those
-    aliases, so ``ORDER BY "departamento"`` 503s in Trino.
+    aliases, so ``ORDER BY "organograma"`` 503s in Trino.
     """
     total = row_count + column_count
     if total <= 0:
@@ -870,11 +870,11 @@ async def _search_pivot_table_core(
             name for name in (
                 "servicename", "resourcename", "tags", "custom_fields",
                 "chargedescription", "invoicedetaildescription",
-                "source_resource_group_name", "departamento",
-                "departamento_nivel_1", "departamento_nivel_2",
-                "departamento_nivel_3", "departamento_nivel_4",
-                "departamento_nivel_5", "departamento_nivel_6",
-                "departamento_nivel_7", "cloud_origem",
+                "source_resource_group_name", "organograma",
+                "organograma_nivel_1", "organograma_nivel_2",
+                "organograma_nivel_3", "organograma_nivel_4",
+                "organograma_nivel_5", "organograma_nivel_6",
+                "organograma_nivel_7", "cloud_origem",
             ) if name in text_columns
         ]
         ordered_text_columns = priority + [name for name in text_columns if name not in priority]
@@ -1175,10 +1175,10 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
         record: dict[str, Any] = {
             "period": period,
             "tipo": "forecast-manual",
-            "departamento": levels[-1] if levels else "",
+            "organograma": levels[-1] if levels else "",
         }
         for index, name in enumerate(levels, 1):
-            record[f"departamento_nivel_{index}"] = name
+            record[f"organograma_nivel_{index}"] = name
         key = tuple(record.get(name) for name in dimensions)
         bucket = grouped.setdefault(key, [0.0] * len(measures))
         for measure_index, measure in enumerate(measures):
@@ -1838,7 +1838,7 @@ async def _expected_view_period_detail_core(
     table = body.gold_table.strip().replace('"', "")
     schema = await _describe_layer_schema(table, max_retries=2, namespace=GOLD)
     columns = {name.lower(): name for name in schema}
-    for required in ("period", "realizado", "tipo", "departamento_nivel_1"):
+    for required in ("period", "realizado", "tipo", "organograma_nivel_1"):
         if required not in columns:
             raise HTTPException(status_code=422, detail=f"A tabela de cubo Gold não possui a coluna {required}")
     period_col = _quote_ident(columns.get("_billing_period") or columns["period"])
@@ -1867,7 +1867,7 @@ async def _expected_view_period_detail_core(
     def scope_filter() -> str:
         checks: list[str] = []
         for level, name in enumerate(scope_path, start=1):
-            key = f"departamento_nivel_{level}"
+            key = f"organograma_nivel_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}")
             checks.append(f"TRIM(CAST({_quote_ident(columns[key])} AS VARCHAR)) = {_quote_literal(name.strip())}")
@@ -1881,7 +1881,7 @@ async def _expected_view_period_detail_core(
     else:
         tipo_sql = f"lower(CAST({type_col} AS VARCHAR)) = 'forecast'"
 
-    level_cols = [f"departamento_nivel_{level}" for level in range(1, 8)]
+    level_cols = [f"organograma_nivel_{level}" for level in range(1, 8)]
     group_cols = [_quote_ident(columns[col]) for col in level_cols if col in columns]
     cloud_filter = _expected_view_cloud_filter(scope_path, selected, columns)
     sql = f"""
@@ -1907,7 +1907,7 @@ async def _expected_view_period_detail_core(
         value = float(row.get("value") or 0)
         total += value
         for level in range(1, 8):
-            name = str(row.get(f"departamento_nivel_{level}") or "").strip()
+            name = str(row.get(f"organograma_nivel_{level}") or "").strip()
             if not name:
                 break
             path.append(name)
@@ -1952,8 +1952,8 @@ async def _expected_view_core(
     actual_schema = forecast_schema = gold_schema
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = actual_columns
-    required_actual = {"_billing_period", "realizado", "departamento_nivel_1"}
-    required_forecast = {"period", "realizado", "tipo", "departamento_nivel_1", "rateio_medida"}
+    required_actual = {"_billing_period", "realizado", "organograma_nivel_1"}
+    required_forecast = {"period", "realizado", "tipo", "organograma_nivel_1", "rateio_medida"}
     if not required_actual.issubset(actual_columns) or not required_forecast.issubset(forecast_columns):
         raise HTTPException(status_code=422, detail="A tabela de cubo Gold não possui as colunas necessárias para a Visão Esperada")
     actual_period = _quote_ident(actual_columns.get("_billing_period") or actual_columns["period"])
@@ -1992,15 +1992,15 @@ async def _expected_view_core(
         pairs = list(zip(scope_level_order, scope_path))
         if len(scope_path) >= 5 and scope_path[1] in _CLOUD_BRANCHES:
             pairs = [(level, name) for level, name in pairs if level != 2]
-            if body.director_view and "departamento_nivel_3" in columns and "departamento_nivel_4" in columns:
+            if body.director_view and "organograma_nivel_3" in columns and "organograma_nivel_4" in columns:
                 first = _quote_literal(scope_path[2])
                 second = _quote_literal(scope_path[3])
-                level3 = _quote_ident(columns["departamento_nivel_3"])
-                level4 = _quote_ident(columns["departamento_nivel_4"])
+                level3 = _quote_ident(columns["organograma_nivel_3"])
+                level4 = _quote_ident(columns["organograma_nivel_4"])
                 checks.append(f"(({level3} = {first} AND {level4} = {second}) OR ({level3} = {second} AND {level4} = {first}))")
                 pairs = [(level, name) for level, name in pairs if level not in (3, 4)]
         for level, name in pairs:
-            key = f"departamento_nivel_{level}"
+            key = f"organograma_nivel_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}; reprocese os dados após ajustar o organograma")
             checks.append(
@@ -2059,9 +2059,9 @@ async def _expected_view_core(
         driver_level = scope_level_order[len(scope_path)]
     else:
         driver_level = min(len(scope_path) + 1, 7)
-    driver_key = f"departamento_nivel_{driver_level}"
-    actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"departamento_nivel_{len(scope_path)}"]))
-    forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"departamento_nivel_{len(scope_path)}"]))
+    driver_key = f"organograma_nivel_{driver_level}"
+    actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"organograma_nivel_{len(scope_path)}"]))
+    forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"organograma_nivel_{len(scope_path)}"]))
     actual_from = f"iceberg.{GOLD}.{actual_name}"
     actual_sql = f"""
       SELECT {actual_period} AS period,
@@ -2527,7 +2527,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
         if not generic:
             return None
         fields = [f.strip().strip('"') for f in generic.group(2).split(",")]
-        allowed = {"departamento", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
+        allowed = {"organograma", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
         if not fields or any(f not in allowed for f in fields):
             return None
         table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
@@ -2614,7 +2614,7 @@ async def get_summary(
                 COUNT(*) AS total_rows,
                 SUM(COALESCE("BilledCost", 0)) AS total_billed,
                 SUM(COALESCE("EffectiveCost", 0)) AS total_effective,
-                COUNT(DISTINCT "departamento_nivel_1") AS num_diretorias,
+                COUNT(DISTINCT "organograma_nivel_1") AS num_diretorias,
                 COUNT(DISTINCT "ServiceName") AS num_services
             FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
             WHERE {' AND '.join(where)}

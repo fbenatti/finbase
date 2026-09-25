@@ -56,16 +56,16 @@ _FOCUS_FIELD_ALIASES = {
 def _alias_for_missing(schema: dict[str, str], requested: str) -> str | None:
     # Resolve a filter field that a table lacks onto an equivalent column.
     # Gold and its *_planning mirror share the same normalized structure except
-    # for small naming differences: the Gold exposes departamento while the
-    # planning mirror only keeps departamento_nivel_1..7. When a source unites
-    # both tables, a filter on departamento must apply on the planning side
-    # as departamento_nivel_1 so the union stays a single clean dataset.
+    # for small naming differences: the Gold exposes organograma (folha) while the
+    # planning mirror only keeps organograma_nivel_1..7. When a source unites
+    # both tables, a filter on organograma must apply on the planning side
+    # as organograma_nivel_1 so the union stays a single clean dataset.
     key = str(requested or "").strip().lower()
-    if key == "departamento":
-        candidate = schema.get("departamento_nivel_1")
+    if key == "organograma":
+        candidate = schema.get("organograma_nivel_1")
         if candidate:
             return candidate
-    if key.startswith("departamento_nivel_"):
+    if key.startswith("organograma_nivel_"):
         candidate = schema.get(key)
         if candidate:
             return candidate
@@ -109,12 +109,7 @@ def _schema_map(rows: list[dict[str, Any]]) -> dict[str, str]:
 
 def _resolve_column(schema: dict[str, str], name: str) -> str | None:
     key = str(name or "").lower()
-    found = schema.get(key)
-    if found:
-        return found
-    if key.startswith("organograma_nivel_"):
-        return schema.get(key.replace("organograma_", "departamento_"))
-    return None
+    return schema.get(key)
 
 
 def _normalized_conditions(schema: dict[str, str], raw_conditions: Any) -> tuple[list[dict[str, Any]], list[str]]:
@@ -282,7 +277,7 @@ _ANALYTIC_DIMENSIONS = (
     "period",
     "tipo",
     "cloud_origem",
-    "departamento",
+    "organograma",
     "organograma_nivel_1",
     "organograma_nivel_2",
     "organograma_nivel_3",
@@ -1231,8 +1226,8 @@ async def materialize_saving_history(
         resource_type VARCHAR,
         connection_code VARCHAR,
         subscription_name VARCHAR,
-        departamento_nivel_4 VARCHAR,
-        departamento_nivel_5 VARCHAR,
+        organograma_nivel_4 VARCHAR,
+        organograma_nivel_5 VARCHAR,
         _billing_period VARCHAR,
         billing_period VARCHAR,
         total_hours DOUBLE,
@@ -1300,8 +1295,8 @@ async def materialize_saving_history(
         gold_dept AS (
             SELECT
                 LOWER(TRIM(g."ResourceId")) AS rid,
-                MAX(g.departamento_nivel_4) AS n4,
-                MAX(g.departamento_nivel_5) AS n5
+                MAX(g.organograma_nivel_4) AS n4,
+                MAX(g.organograma_nivel_5) AS n5
             FROM iceberg.silver.dest_modelo_focus g
             JOIN stats s ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(s.resource_id))
             WHERE g._billing_period = '{target}'
@@ -1314,8 +1309,8 @@ async def materialize_saving_history(
                 CASE WHEN POSITION('virtualMachineScaleSets' IN s.resource_id) > 0 THEN 'VMSS' ELSE 'VM' END AS resource_type,
                 s.connection_code,
                 s.subscription_name,
-                COALESCE(g.n4, 'SEM DEPARTAMENTO') AS departamento_nivel_4,
-                COALESCE(g.n5, 'SEM PROJETO') AS departamento_nivel_5,
+                COALESCE(g.n4, 'SEM DEPARTAMENTO') AS organograma_nivel_4,
+                COALESCE(g.n5, 'SEM PROJETO') AS organograma_nivel_5,
                 '{target}' AS _billing_period,
                 '{target}' AS billing_period,
                 s.cur_hours AS total_hours,

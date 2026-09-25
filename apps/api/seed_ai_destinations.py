@@ -18,15 +18,15 @@ PLATFORM_COLUMNS = [
     ("source_connection_id", "INTEGER"),
     ("_billing_period", "TEXT"),
     ("tipo", "TEXT"),
-    ("departamento", "TEXT"),
+    ("organograma", "TEXT"),
     ("centro_custo", "TEXT"),
-    ("departamento_nivel_1", "TEXT"),
-    ("departamento_nivel_2", "TEXT"),
-    ("departamento_nivel_3", "TEXT"),
-    ("departamento_nivel_4", "TEXT"),
-    ("departamento_nivel_5", "TEXT"),
-    ("departamento_nivel_6", "TEXT"),
-    ("departamento_nivel_7", "TEXT"),
+    ("organograma_nivel_1", "TEXT"),
+    ("organograma_nivel_2", "TEXT"),
+    ("organograma_nivel_3", "TEXT"),
+    ("organograma_nivel_4", "TEXT"),
+    ("organograma_nivel_5", "TEXT"),
+    ("organograma_nivel_6", "TEXT"),
+    ("organograma_nivel_7", "TEXT"),
 ]
 
 LICENSE_COLUMNS = [

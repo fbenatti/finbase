@@ -465,6 +465,7 @@ def consumer_main(worker_id: int):
                                 raise BackupCancelledError("Backup cancelado pelo usuário")
                             result = create_full_backup(
                                 retention_days=int((task.result_json or {}).get("retention_days", 30)),
+                                backup_layers=(task.result_json or {}).get("backup_layers") or ["bronze"],
                                 should_abort=lambda: _is_etl_task_cancelled(task_id),
                                 on_progress=_report_backup_progress,
                             )

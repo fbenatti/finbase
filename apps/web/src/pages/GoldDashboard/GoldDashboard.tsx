@@ -35,18 +35,18 @@ const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
 
 /** Hierarquia da Visão Diretoria: nivel_1 → 2 → 4 → 3 → 5 → 6 */
 const VISAO_DIRETORIA_LEVELS = [
-  "departamento_nivel_1",
-  "departamento_nivel_2",
-  "departamento_nivel_4",
-  "departamento_nivel_3",
-  "departamento_nivel_5",
-  "departamento_nivel_6",
+  "organograma_nivel_1",
+  "organograma_nivel_2",
+  "organograma_nivel_4",
+  "organograma_nivel_3",
+  "organograma_nivel_5",
+  "organograma_nivel_6",
 ] as const;
 
 /** Ordem de exibição do caminho legado (árvore linear → visão diretoria) */
 const VISAO_DIRETORIA_PATH_ORDER = [1, 2, 4, 3, 5, 6] as const;
 
-/** Profundidade na árvore → coluna departamento_nivel_N (Visão Diretoria: 1,2,4,3,5,6). */
+/** Profundidade na árvore → coluna organograma_nivel_N (Visão Diretoria: 1,2,4,3,5,6). */
 const VISAO_DIRETORIA_DEPTH_TO_NIVEL = [1, 2, 4, 3, 5, 6] as const;
 
 function pathSegmentFilters(path: string[], visaoDiretoria: boolean): GoldQueryFilter[] {
@@ -56,7 +56,7 @@ function pathSegmentFilters(path: string[], visaoDiretoria: boolean): GoldQueryF
     const nivel = visaoDiretoria
       ? (VISAO_DIRETORIA_DEPTH_TO_NIVEL[depth] ?? depth + 1)
       : depth + 1;
-    out.push({ column: `departamento_nivel_${nivel}`, operator: "IN", values: [segment] });
+    out.push({ column: `organograma_nivel_${nivel}`, operator: "IN", values: [segment] });
   });
   return out;
 }
@@ -115,7 +115,7 @@ function swapDirectorTreeLevels(nodes: Department[], depth = 0): Department[] {
 }
 
 function nivelNum(field: string): number {
-  const m = field.match(/^departamento_nivel_(\d+)$/);
+  const m = field.match(/^organograma_nivel_(\d+)$/);
   return m ? Number(m[1]) : 0;
 }
 const PURPLE = "#660099", ORANGE = "#ff7a00", BLUE = "#155eef",
@@ -124,13 +124,13 @@ const PURPLE = "#660099", ORANGE = "#ff7a00", BLUE = "#155eef",
 const DIM_LABELS: Record<string, string> = {
   _billing_period: "Mês",
   cloud_origem: "Cloud",
-  departamento_nivel_1: "Segmento",
-  departamento_nivel_2: "Modelo",
-  departamento_nivel_3: "VP",
-  departamento_nivel_4: "Diretoria",
-  departamento_nivel_5: ORG.level5,
-  departamento_nivel_6: "Unidade",
-  departamento: "Área",
+  organograma_nivel_1: "Segmento",
+  organograma_nivel_2: "Modelo",
+  organograma_nivel_3: "VP",
+  organograma_nivel_4: "Diretoria",
+  organograma_nivel_5: ORG.level5,
+  organograma_nivel_6: "Unidade",
+  organograma: "Área",
   centro_custo: "Centro de Custo",
   ambiente: "Ambiente",
   servicecategory: "Categoria",
@@ -143,18 +143,18 @@ const DIM_LABELS: Record<string, string> = {
 };
 
 const DIRECTOR_VIEW_LABELS: Record<string, string> = {
-  departamento_nivel_1: "Segmento",
-  departamento_nivel_2: "Modelo",
-  departamento_nivel_4: "Diretoria",
-  departamento_nivel_3: "Cloud",
-  departamento_nivel_5: "Projeto",
-  departamento_nivel_6: "SubProjeto",
+  organograma_nivel_1: "Segmento",
+  organograma_nivel_2: "Modelo",
+  organograma_nivel_4: "Diretoria",
+  organograma_nivel_3: "Cloud",
+  organograma_nivel_5: "Projeto",
+  organograma_nivel_6: "SubProjeto",
 };
 
 function directorNivelLabel(depth: number): string | null {
   const nivel = VISAO_DIRETORIA_DEPTH_TO_NIVEL[depth];
   if (!nivel) return null;
-  return DIRECTOR_VIEW_LABELS[`departamento_nivel_${nivel}`] || `Nível ${nivel}`;
+  return DIRECTOR_VIEW_LABELS[`organograma_nivel_${nivel}`] || `Nível ${nivel}`;
 }
 
 function visaoDiretoriaChain(): Array<{ field: string; label: string }> {
@@ -162,17 +162,17 @@ function visaoDiretoriaChain(): Array<{ field: string; label: string }> {
 }
 
 function analysisDimOptions(visaoDiretoria: boolean): string[] {
-  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_4", "departamento_nivel_5"];
+  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["organograma_nivel_4", "organograma_nivel_5"];
   return ["cloud_origem", ...dept, "servicename", "servicecategory", "regionname", "subaccountname"];
 }
 
 function investigationDimOptions(visaoDiretoria: boolean): string[] {
-  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_4", "departamento_nivel_5"];
+  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["organograma_nivel_4", "organograma_nivel_5"];
   return ["servicename", "cloud_origem", ...dept, "servicecategory", "regionname", "subaccountname"];
 }
 
 function heatmapDimOptions(visaoDiretoria: boolean): string[] {
-  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_4"];
+  const dept = visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["organograma_nivel_4"];
   return [...dept, "cloud_origem", "servicename", "servicecategory", "regionname", "subaccountname"];
 }
 
@@ -258,8 +258,8 @@ function filtersOf(f: Filters, extra: GoldQueryFilter[] = []): GoldQueryFilter[]
   const out: GoldQueryFilter[] = [...extra];
   if (f.months.length) out.push({ column: "_billing_period", operator: "IN", values: f.months });
   if (f.clouds.length) out.push({ column: "cloud_origem", operator: "IN", values: f.clouds });
-  if (f.dirs.length) out.push({ column: "departamento_nivel_4", operator: "IN", values: f.dirs });
-  if (f.depts.length) out.push({ column: "departamento_nivel_5", operator: "IN", values: f.depts });
+  if (f.dirs.length) out.push({ column: "organograma_nivel_4", operator: "IN", values: f.dirs });
+  if (f.depts.length) out.push({ column: "organograma_nivel_5", operator: "IN", values: f.depts });
   if (f.servicos.length) out.push({ column: "servicename", operator: "IN", values: f.servicos });
   if (f.cats.length) out.push({ column: "servicecategory", operator: "IN", values: f.cats });
   if (f.path.length) out.push(...pathSegmentFilters(f.path, f.visaoDiretoria));
@@ -374,7 +374,7 @@ function LoadingBlock({ loading, error, children }: { loading: boolean; error?: 
 }
 
 function ExecutiveMatrix({ table, filters, filterKey, ackMonth }: { table: string; filters: Filters; filterKey: string; ackMonth?: string }) {
-  const defs = useMemo<QueryDef[]>(() => [{ id: "matrix", rows: ["departamento_nivel_4", "departamento_nivel_5", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]), row_limit: 10000 }], [filterKey]);
+  const defs = useMemo<QueryDef[]>(() => [{ id: "matrix", rows: ["organograma_nivel_4", "organograma_nivel_5", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]), row_limit: 10000 }], [filterKey]);
   const { results, loading, error } = useTabQueries(table, defs, "executive-matrix-" + filterKey);
   const rows = rowsOf(results.matrix);
   const months = [...new Set(rows.map(r => String(r._billing_period || "")))].filter(Boolean).sort();
@@ -385,7 +385,7 @@ function ExecutiveMatrix({ table, filters, filterKey, ackMonth }: { table: strin
   const points = useMemo(() => {
     if (!latest || !previous) return [];
     const map = new Map<string, { cur: number; prev: number }>();
-    rows.forEach(r => { const key = `${esc(r.departamento_nivel_4)} · ${esc(r.departamento_nivel_5)}`; const item = map.get(key) || { cur: 0, prev: 0 }; if (String(r._billing_period) === latest) item.cur += Number(r.realizado || 0); if (String(r._billing_period) === previous) item.prev += Number(r.realizado || 0); map.set(key, item); });
+    rows.forEach(r => { const key = `${esc(r.organograma_nivel_4)} · ${esc(r.organograma_nivel_5)}`; const item = map.get(key) || { cur: 0, prev: 0 }; if (String(r._billing_period) === latest) item.cur += Number(r.realizado || 0); if (String(r._billing_period) === previous) item.prev += Number(r.realizado || 0); map.set(key, item); });
     return [...map].map(([key, v]) => ({ key, cost: Math.abs(v.cur), growth: v.prev ? ((v.cur - v.prev) / Math.abs(v.prev)) * 100 : 0, cur: v.cur })).sort((a, b) => b.cost - a.cost).slice(0, 30);
   }, [rows, latest, previous]);
   const costs = points.map(p => p.cost).sort((a, b) => a - b); const growths = points.map(p => p.growth).sort((a, b) => a - b); const mc = costs[Math.floor(costs.length / 2)] || 0; const mg = growths[Math.floor(growths.length / 2)] || 0;
@@ -416,10 +416,10 @@ function ExecutiveMatrix({ table, filters, filterKey, ackMonth }: { table: strin
 function DataQuality({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
   const [service, setService] = useState("");
   const base = filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]);
-  const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["departamento_nivel_4", "departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
+  const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
   const { results, loading, error } = useTabQueries(table, defs, "data-quality-" + filterKey + service);
   const services = rowsOf(results.services); const consumers = rowsOf(results.consumers);
-  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Data Quality</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Selecione um serviço para identificar todos os projetos e diretorias consumidores, com o valor realizado no escopo filtrado.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Realizado", "% do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.departamento_nivel_4)}</TableCell><TableCell>{esc(r.departamento_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Sem consumidores no escopo selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
+  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Data Quality</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Selecione um serviço para identificar todos os projetos e diretorias consumidores, com o valor realizado no escopo filtrado.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Realizado", "% do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.organograma_nivel_4)}</TableCell><TableCell>{esc(r.organograma_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Sem consumidores no escopo selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
 }
 
 function monthlySeries(r: GoldQueryResult | null | undefined, measure: string) {
@@ -696,7 +696,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   const defs = useMemo<QueryDef[]>(() => [
     { id: "totais", measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters) },
     { id: "mensal", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
-    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
     { id: "clouds", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
     { id: "servicos", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
     { id: "categorias", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
@@ -730,7 +730,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   )));
   const healthStatus = health >= 85 ? { label: "CONTROLADO", color: GREEN } : health >= 70 ? { label: "MONITORAR", color: YELLOW } : { label: "AÇÃO", color: RED };
 
-  const dirField = filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4";
+  const dirField = filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4";
   const dirLabel = DIM_LABELS[dirField] || dirField;
 
   const email = useMemo(() => {
@@ -913,32 +913,32 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
 // Aba 3 — Organização (rankings + hierarquia + governança)
 // ═══════════════════════════════════════════════════════════════════
 function Organizacao({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
-  const hierLevels = filters.visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5"];
+  const hierLevels = filters.visaoDiretoria ? [...VISAO_DIRETORIA_LEVELS] : ["organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4", "organograma_nivel_5"];
   const defs = useMemo<QueryDef[]>(() => {
     if (filters.visaoDiretoria) {
       return [
-        { id: "n1", rows: ["departamento_nivel_1"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "n2", rows: ["departamento_nivel_2"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "n4", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "n3", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "n5", rows: ["departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "n6", rows: ["departamento_nivel_6"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "dept", rows: ["departamento"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n1", rows: ["organograma_nivel_1"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n2", rows: ["organograma_nivel_2"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n4", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n3", rows: ["organograma_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n5", rows: ["organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n6", rows: ["organograma_nivel_6"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "dept", rows: ["organograma"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
         { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
         { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
         { id: "hier", rows: [...VISAO_DIRETORIA_LEVELS], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
-        { id: "gov", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
+        { id: "gov", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
       ];
     }
     return [
-      { id: "n3", rows: ["departamento_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-      { id: "n4", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-      { id: "n5", rows: ["departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-      { id: "dept", rows: ["departamento"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "n3", rows: ["organograma_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "n4", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "n5", rows: ["organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "dept", rows: ["organograma"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
       { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
       { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-      { id: "hier", rows: ["departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3", "departamento_nivel_4", "departamento_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
-      { id: "gov", rows: ["departamento_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
+      { id: "hier", rows: ["organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
+      { id: "gov", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
     ];
   }, [filterKey, filters.visaoDiretoria]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey);
@@ -946,7 +946,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
   const hierRows = rowsOf(results.hier);
   const govRows = rowsOf(results.gov);
   const govTotal = govRows.reduce((s, r) => s + Number(r.realizado || 0), 0);
-  const govClassified = govRows.filter(r => r.departamento_nivel_4).reduce((s, r) => s + Number(r.realizado || 0), 0);
+  const govClassified = govRows.filter(r => r.organograma_nivel_4).reduce((s, r) => s + Number(r.realizado || 0), 0);
   const govShare = govTotal ? govClassified / govTotal * 100 : 0;
 
   return (
@@ -1026,7 +1026,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
 // ═══════════════════════════════════════════════════════════════════
 function Servicos({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
   const heatOptions = useMemo(() => heatmapDimOptions(filters.visaoDiretoria), [filters.visaoDiretoria]);
-  const [heatDim, setHeatDim] = useState("departamento_nivel_4");
+  const [heatDim, setHeatDim] = useState("organograma_nivel_4");
   useEffect(() => {
     if (filters.visaoDiretoria) setHeatDim(VISAO_DIRETORIA_LEVELS[0]);
   }, [filters.visaoDiretoria]);
@@ -1098,7 +1098,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
   const defs = useMemo<QueryDef[]>(() => [
     { id: "serie", rows: [dim, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 2000 },
     { id: "cloud", rows: ["cloud_origem", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
-    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "departamento_nivel_4", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
+    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
     { id: "pareto", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 300 },
   ], [filterKey, dim, filters.visaoDiretoria]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey + dim);
@@ -1277,9 +1277,9 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // Dimensões disponíveis para os widgets de decisão (colunas válidas da Gold).
 const DECISAO_DIMS_BASE: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
-  { field: "departamento_nivel_3", label: "Plataforma" },
-  { field: "departamento_nivel_4", label: "Diretoria" },
-  { field: "departamento_nivel_5", label: ORG.level5 },
+  { field: "organograma_nivel_3", label: "Plataforma" },
+  { field: "organograma_nivel_4", label: "Diretoria" },
+  { field: "organograma_nivel_5", label: ORG.level5 },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "subaccountname", label: "Subconta" },
@@ -1366,12 +1366,12 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     () => (filters.visaoDiretoria
       ? VISAO_DIRETORIA_LEVELS.map((field, index) => ({ id: `gov${index + 1}`, field, label: DIM_LABELS[field] || field }))
       : [
-        { id: "gov1", field: "departamento_nivel_3", label: "Plataforma" },
-        { id: "gov2", field: "departamento_nivel_4", label: "Diretoria" },
+        { id: "gov1", field: "organograma_nivel_3", label: "Plataforma" },
+        { id: "gov2", field: "organograma_nivel_4", label: "Diretoria" },
       ]),
     [filters.visaoDiretoria],
   );
-  const [dim, setDim] = useState("departamento_nivel_4");
+  const [dim, setDim] = useState("organograma_nivel_4");
   const [compA, setCompA] = useState("");
   const [compB, setCompB] = useState("");
   useEffect(() => {
@@ -1652,7 +1652,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     const extra: Record<string, string[]> = {};
     const path: string[] = [];
     for (const p of treePath) {
-      const m = p.field.match(/^departamento_nivel_(\d+)$/);
+      const m = p.field.match(/^organograma_nivel_(\d+)$/);
       if (m) path[Number(m[1]) - 1] = p.value;
       else extra[p.field] = [p.value];
     }
@@ -2093,8 +2093,8 @@ function Decisao({ table, filters, filterKey, setFilters }: {
 function pivotFiltersFrom(filters: Filters): Record<string, HistoryFilter> {
   const out: Record<string, HistoryFilter> = {};
   if (filters.clouds.length) out.cloud_origem = { operator: "in", value: filters.clouds };
-  if (filters.dirs.length) out.departamento_nivel_4 = { operator: "in", value: filters.dirs };
-  if (filters.depts.length) out.departamento_nivel_5 = { operator: "in", value: filters.depts };
+  if (filters.dirs.length) out.organograma_nivel_4 = { operator: "in", value: filters.dirs };
+  if (filters.depts.length) out.organograma_nivel_5 = { operator: "in", value: filters.depts };
   if (filters.servicos.length) out.servicename = { operator: "in", value: filters.servicos };
   if (filters.cats.length) out.servicecategory = { operator: "in", value: filters.cats };
   if (filters.path.length) {
@@ -2108,8 +2108,8 @@ function pivotFiltersFrom(filters: Filters): Record<string, HistoryFilter> {
 
 const DRILL_CHAIN_BASE: Array<{ field: string; label: string }> = [
   { field: "cloud_origem", label: "Cloud" },
-  { field: "departamento_nivel_4", label: "Diretoria" },
-  { field: "departamento_nivel_5", label: ORG.level5 },
+  { field: "organograma_nivel_4", label: "Diretoria" },
+  { field: "organograma_nivel_5", label: ORG.level5 },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "regionname", label: "Região" },

@@ -97,14 +97,14 @@ def test_unavailable_measures_explain_the_reason():
     motivos = unavailable_measures()
     assert {"billed_cost", "contracted_cost"} <= set(motivos)
     assert "13.519.512" in motivos["billed_cost"]
-    assert "departamento_nivel_1..7" in motivos
-    assert "UNMAPPED" in motivos["departamento_nivel_1..7"]
+    assert "organograma_nivel_1..7" in motivos
+    assert "UNMAPPED" in motivos["organograma_nivel_1..7"]
 
 
 def test_org_levels_are_seven():
     assert len(ORG_LEVELS) == 7
-    assert ORG_LEVELS[0] == "departamento_nivel_1"
-    assert ORG_LEVELS[-1] == "departamento_nivel_7"
+    assert ORG_LEVELS[0] == "organograma_nivel_1"
+    assert ORG_LEVELS[-1] == "organograma_nivel_7"
 
 
 def test_org_hierarchy_audit_measures_ambiguity():
@@ -188,7 +188,7 @@ def test_driver_key_column_maps_each_type():
     assert driver_key_column("service") == "service_key"
     assert driver_key_column("sub_account") == "sub_account_id"
     assert driver_key_column("region") == "region_key"
-    assert driver_key_column("organization") == "departamento_nivel_5"
+    assert driver_key_column("organization") == "organograma_nivel_5"
 
 
 def test_unknown_driver_type_raises_instead_of_defaulting():

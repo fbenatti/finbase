@@ -122,7 +122,7 @@ export default function BudgetAccuracy() {
     Number(params.get("mes")?.slice(-2) || new Date().getMonth() || 1),
   );
   const [departmentId, setDepartmentId] = useState<number | null>(
-    Number(params.get("departamento")) || null,
+    Number(params.get("organograma")) || Number(params.get("departamento")) || null,
   );
   const [departments, setDepartments] = useState<Department[]>([]);
   const [data, setData] = useState<BudgetAccuracyResponse | null>(null);
@@ -169,8 +169,8 @@ export default function BudgetAccuracy() {
   const changeDepartment = (value: number | null) => {
     setDepartmentId(value);
     const next = new URLSearchParams(params);
-    if (value) next.set("departamento", String(value));
-    else next.delete("departamento");
+    if (value) next.set("organograma", String(value));
+    else next.delete("organograma");
     updateUrl(next);
   };
 

@@ -352,7 +352,7 @@ def accumulate_series(
 
 
 def hierarchy_fields(path: list[str]) -> dict[str, str]:
-    return {f"departamento_nivel_{level}": path[level - 1] if level <= len(path) else "" for level in range(1, 8)}
+    return {f"organograma_nivel_{level}": path[level - 1] if level <= len(path) else "" for level in range(1, 8)}
 
 
 def build_rateio_rows(
@@ -429,7 +429,7 @@ def build_rateio_rows(
         key = (
             row["period"],
             row["rateio_medida"],
-            tuple(row[f"departamento_nivel_{level}"] for level in range(1, 8)),
+            tuple(row[f"organograma_nivel_{level}"] for level in range(1, 8)),
             row.get("cloud_origem") or "",
         )
         current = collapsed.get(key)
@@ -559,7 +559,7 @@ def _schema_map(rows: list[dict[str, Any]]) -> dict[str, str]:
 def _hierarchy_select_sql(columns: dict[str, str]) -> str:
     parts: list[str] = []
     for level in range(1, 8):
-        key = f"departamento_nivel_{level}"
+        key = f"organograma_nivel_{level}"
         if key in columns:
             parts.append(
                 f"COALESCE(NULLIF(TRIM(CAST({_quote_ident(columns[key])} AS VARCHAR)), ''), '') AS nivel_{level}"
@@ -684,7 +684,7 @@ async def run_shared_cost_job(session: Any, *, allow_empty: bool = False) -> dic
             "period": "period",
             "realizado": "realizado",
             "tipo": "tipo",
-            **{f"departamento_nivel_{level}": f"departamento_nivel_{level}" for level in range(1, 8)},
+            **{f"organograma_nivel_{level}": f"organograma_nivel_{level}" for level in range(1, 8)},
         }
     if "period" not in planning_schema or "realizado" not in planning_schema or "tipo" not in planning_schema:
         raise RuntimeError("A tabela de planejamento não possui as colunas necessárias para o rateio")

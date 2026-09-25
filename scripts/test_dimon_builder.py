@@ -34,8 +34,8 @@ def main():
     # 1) Puxa a fatia real da Gold (todas as colunas, como um frame do reprocess)
     gold_cols = [
         "_billing_period", "source_connection_id", "cloud_origem", "tipo",
-        "departamento_nivel_1", "departamento_nivel_2", "departamento_nivel_3",
-        "departamento_nivel_4", "departamento_nivel_5", "departamento",
+        "organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3",
+        "organograma_nivel_4", "organograma_nivel_5", "organograma",
         "centro_custo", "ambiente", "ServiceCategory", "ServiceName",
         "ServiceSubcategory", "SkuMeter", "SubAccountName", "RegionName",
         "ChargeCategory", "ConsumedQuantity", "realizado", "BilledCost",

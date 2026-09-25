@@ -14,7 +14,7 @@ function Chart(props: any) {
 import {
   getShutdownSavings, setupScheduledShutdown, listShutdownExceptions,
   saveShutdownException, deleteShutdownException, createExceptionFromDelta, getScheduleDelta, getTagDelta, getOpportunity, getSavingsMonthly, getOpportunitySubscriptions,
-  getPadroes, getPadroesPeriodos, getPadroesRecursos, getSavingDepartamento, getVmDailyUsage, PadroesResponse, PadraoRecursosResponse, SavingDepartamentoResponse, VmDailyUsageResponse,
+  getPadroes, getPadroesPeriodos, getPadroesRecursos, getSavingOrganograma, getVmDailyUsage, PadroesResponse, PadraoRecursosResponse, SavingOrganogramaResponse, VmDailyUsageResponse,
   SavingsFilter, VmMonthSaving, ShutdownExceptionRule, ScheduleDeltaResponse, TagDeltaResponse, OpportunityResponse, SavingsMonthlyRow, OpportunitySubscription,
   formatApiError,
 } from "../../services/api";
@@ -89,7 +89,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   const [padroes, setPadroes] = useState<PadroesResponse | null>(null);
   const [padraoPeriod, setPadraoPeriod] = useState<string>("");
   const [padroesPeriodos, setPadroesPeriodos] = useState<string[]>([]);
-  const [savingDept, setSavingDept] = useState<SavingDepartamentoResponse | null>(null);
+  const [savingDept, setSavingDept] = useState<SavingOrganogramaResponse | null>(null);
   const [padraoSelected, setPadraoSelected] = useState<string | null>(null);
   const [padraoRecursos, setPadraoRecursos] = useState<PadraoRecursosResponse | null>(null);
   const [padraoRecursosLoading, setPadraoRecursosLoading] = useState(false);
@@ -131,7 +131,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
       setPadraoSelected(null);
       setPadraoRecursos(null);
     }).catch(() => setPadroes(null));
-    getSavingDepartamento(padraoPeriod || undefined).then(setSavingDept).catch(() => setSavingDept(null));
+    getSavingOrganograma(padraoPeriod || undefined).then(setSavingDept).catch(() => setSavingDept(null));
   }, [refreshTick, padraoPeriod]);
 
   const loadOpportunity = () => {
@@ -460,11 +460,11 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     data={[{
                       type: "bar",
                       orientation: "h",
-                      y: savingDept.rows.slice(0, 10).map(r => r.departamento_nivel_4),
+                      y: savingDept.rows.slice(0, 10).map(r => r.organograma_nivel_4),
                       x: savingDept.rows.slice(0, 10).map(r => r.saving_brl),
                       marker: { color: PURPLE },
                       hovertemplate: "%{y}<br>%{x:,.2f} · %{customdata}<extra></extra>",
-                      customdata: savingDept.rows.slice(0, 10).map(r => `${r.departamento_nivel_5} · ${r.vms} VMs`),
+                      customdata: savingDept.rows.slice(0, 10).map(r => `${r.organograma_nivel_5} · ${r.vms} VMs`),
                     }]}
                     layout={{
                       height: Math.max(240, Math.min(savingDept.rows.slice(0, 10).length, 10) * 40),
