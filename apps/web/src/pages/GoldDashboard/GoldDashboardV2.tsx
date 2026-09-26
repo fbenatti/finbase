@@ -146,20 +146,6 @@ export default function GoldDashboardV2() {
           <Box sx={{ minWidth: { xs: "100%", md: 320 }, flex: "1 1 360px" }}><DepartmentTreeMultiPicker departments={org} values={selectedNodes.map((node) => node.id)} onChange={chooseNodes} label="Organograma · selecione níveis" placeholder="Navegue e marque níveis" /></Box>
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
-          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", whiteSpace: "nowrap" }}>Adicionar filtro FOCUS{dimensionColumns.length > 0 ? ` · ${dimensionColumns.length}` : ""}</Button>
-          <Popover anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} PaperProps={{ sx: { p: 1.25, width: 340, borderRadius: "12px" } }}>
-            <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
-            <Autocomplete
-              autoHighlight
-              open
-              disablePortal
-              options={availableDimensionColumns}
-              getOptionLabel={labelColumn}
-              onChange={(_, column) => { if (column) addDimension(column); }}
-              noOptionsText={!info ? "Carregando esquema Gold…" : dimensionColumns.length ? "Todas as colunas FOCUS já foram adicionadas" : "Nenhuma dimensão filtrável foi encontrada."}
-              renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar campo FOCUS" />}
-            />
-          </Popover>
           <Button startIcon={<FilterAltOff />} onClick={clear}>Limpar</Button>
         </Stack>
         <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
@@ -177,6 +163,22 @@ export default function GoldDashboardV2() {
           </Stack>
         </Popover>
         {selectedNodes.length > 0 && <Stack direction="row" flexWrap="wrap" gap={.5} mt={1}>{selectedNodes.map((node) => <Chip key={node.id} label={node.path} onDelete={() => setSelectedNodes((current) => current.filter((item) => item.id !== node.id))} />)}</Stack>}
+        <Box sx={{ mt: 1 }}>
+          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 38, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", whiteSpace: "nowrap" }}>Adicionar filtro</Button>
+          <Popover anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} PaperProps={{ sx: { p: 1.25, width: 340, borderRadius: "12px" } }}>
+            <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
+            <Autocomplete
+              autoHighlight
+              open
+              disablePortal
+              options={availableDimensionColumns}
+              getOptionLabel={labelColumn}
+              onChange={(_, column) => { if (column) addDimension(column); }}
+              noOptionsText={!info ? "Carregando esquema Gold…" : dimensionColumns.length ? "Todas as colunas já foram adicionadas" : "Nenhuma dimensão filtrável foi encontrada."}
+              renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar coluna" />}
+            />
+          </Popover>
+        </Box>
         {filters.length > 0 && <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center" mt={1}>
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 1, width: "100%" }}>
             {filters.map((filter) => <Stack key={filter.column} direction="row" alignItems="flex-start" gap={.5}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={filter.column} label={labelColumn(filter.column)} table={TABLE} value={filter.values} filters={scopeFilters.filter((item) => item.column !== filter.column)} filterGroups={organizationGroups} onChange={(values) => setDimensionValues(filter.column, values)} /></Box><IconButton size="small" aria-label={`Remover filtro ${labelColumn(filter.column)}`} onClick={() => setFilters((current) => current.filter((item) => item.column !== filter.column))}><Close fontSize="small" /></IconButton></Stack>)}
