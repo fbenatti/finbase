@@ -1184,7 +1184,9 @@ export default function ExpectedViewV2({
                       Gasto ao longo do tempo
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {cumulative
+                      {chartGranularity === "daily"
+                        ? "Diário · consumo realizado agrupado pela data real disponível na fonte"
+                        : cumulative
                         ? sharedOn
                           ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast"
                           : "Acumulado · Realizado, orçamento e forecast"
@@ -1214,7 +1216,7 @@ export default function ExpectedViewV2({
                 </Stack>
                 {chartQueryError && <Alert severity="error" sx={{ mt: 1 }}>{chartQueryError}</Alert>}
                 {chartGranularity === "daily" && dailyGold?.available === false
-                  ? <Alert severity="info" sx={{ mt: 1 }}>A fonte Gold não expõe uma data diária para este recorte.</Alert>
+                  ? <Alert severity="info" sx={{ mt: 1 }}>A tabela Gold deste dashboard só tem competência mensal; não há coluna com a data real do consumo para montar o gráfico diário. É necessário incluir essa data na tabela Gold a partir da fonte de origem.</Alert>
                   : chartQueryLoading
                     ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Carregando série no Trino…</Typography></Stack>
                     : chartGranularity === "daily" && !dailyGold?.rows.length
