@@ -79,6 +79,7 @@ export default function ExpectedViewV2({
   includeSharedCost: externalSharedCost,
   groupByOptions = [],
   chartHasType = false,
+  chartHasDailyDate = false,
   chartFilters = [],
   chartFilterGroups = [],
 }: {
@@ -96,6 +97,7 @@ export default function ExpectedViewV2({
   includeSharedCost?: boolean;
   groupByOptions?: string[];
   chartHasType?: boolean;
+  chartHasDailyDate?: boolean;
   chartFilters?: GoldQueryFilter[];
   chartFilterGroups?: GoldQueryFilter[][];
 } = {}) {
@@ -1209,7 +1211,9 @@ export default function ExpectedViewV2({
                       <Select label="Granularidade" value={chartGranularity} onChange={(event) => setChartGranularity(event.target.value as ChartGranularity)}>
                         <MenuItem value="accumulated">Acumulado</MenuItem>
                         <MenuItem value="monthly">Mensal</MenuItem>
-                        <MenuItem value="daily" disabled={rangeDays > 45}>Diário · até 45 dias</MenuItem>
+                        <MenuItem value="daily" disabled={rangeDays > 45 || !chartHasDailyDate}>
+                          {chartHasDailyDate ? "Diário · até 45 dias" : "Diário · sem data na Gold"}
+                        </MenuItem>
                       </Select>
                     </FormControl>
                   </Stack>
