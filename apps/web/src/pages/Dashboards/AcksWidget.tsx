@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
+import Plot from "@/components/Plot";
 import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Table,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogContent, DialogTitle, FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, Typography,
 } from "@mui/material";
 import { Add, Remove } from "@mui/icons-material";
-import { ForecastAck, ForecastDesvioItem, ForecastDesvioSubcat, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, getForecastAccuracyMonths, getForecastAcks } from "../../services/api";
+import { ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvioSubcat, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, getForecastAccuracyMonths, getForecastAcks } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+const pct = (value: number | null | undefined) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const prettyMonth = (month: string) => `${MONTH_NAMES[Number(month.slice(4, 6)) - 1]}/${month.slice(2, 4)}`;
 
@@ -43,7 +45,7 @@ const SEVERITY_ORDER: Record<string, number> = {
   "crítico": 0, "critico": 0, "perigo": 1, "informação": 2, "informacao": 2, "sucesso": 3,
 };
 
-function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle }: { item: ForecastDesvioItem; ack: ForecastAck | undefined; expanded: boolean; subcategories?: ForecastDesvioSubcat[]; loading: boolean; onToggle: () => void }) {
+function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle, onSubcatSeries }: { item: ForecastDesvioItem; ack: ForecastAck | undefined; expanded: boolean; subcategories?: ForecastDesvioSubcat[]; loading: boolean; onToggle: () => void; onSubcatSeries: (item: ForecastDesvioItem, subcategory: ForecastDesvioSubcat) => void }) {
   const justified = Boolean(ack && ack.active !== false);
   return (
     <>
@@ -73,7 +75,7 @@ function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle }: { 
     </TableRow>
     <TableRow><TableCell colSpan={6} sx={{ py: 0, borderBottom: expanded ? undefined : 0 }}><Collapse in={expanded} timeout="auto" unmountOnExit><Box sx={{ py: 1.5, px: 2 }}>
       <Typography variant="subtitle2" fontWeight={700} mb={1}>Detalhe por subcategoria · {item.path.join(" > ")}</Typography>
-      {loading ? <CircularProgress size={20} /> : subcategories?.length ? <Table size="small"><TableHead><TableRow><TableCell>Subcategoria</TableCell><TableCell align="right">Projetado</TableCell><TableCell align="right">Realizado</TableCell><TableCell align="right">Desvio</TableCell></TableRow></TableHead><TableBody>{subcategories.map((sub) => <TableRow key={sub.subcategory}><TableCell>{sub.subcategory}</TableCell><TableCell align="right">{money.format(sub.forecast_value)}</TableCell><TableCell align="right">{money.format(sub.actual_value)}</TableCell><TableCell align="right">{money.format(sub.variance)}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria encontrada.</Typography>}
+      {loading ? <CircularProgress size={20} /> : subcategories?.length ? <Table size="small"><TableHead><TableRow><TableCell>Subcategoria</TableCell><TableCell align="right">Projetado</TableCell><TableCell align="right">Realizado</TableCell><TableCell align="right">Desvio</TableCell></TableRow></TableHead><TableBody>{subcategories.map((sub) => <TableRow key={sub.subcategory}><TableCell><Stack direction="row" alignItems="center" gap={0.5}><IconButton size="small" onClick={() => onSubcatSeries(item, sub)} aria-label={`Abrir série diária de ${sub.subcategory}`} title="Ver delta dia a dia"><Add fontSize="small" /></IconButton><Typography variant="body2">{sub.subcategory}</Typography></Stack></TableCell><TableCell align="right">{money.format(sub.forecast_value)}</TableCell><TableCell align="right">{money.format(sub.actual_value)}</TableCell><TableCell align="right">{money.format(sub.variance)}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria encontrada.</Typography>}
     </Box></Collapse></TableCell></TableRow>
     </>
   );
@@ -93,6 +95,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [desviosWarning, setDesviosWarning] = useState("");
+  const [seriesDialog, setSeriesDialog] = useState<{ subcategory: string; data: ForecastAccuracyDeltaSeries | null; loading: boolean; error: string } | null>(null);
   const options = lastMonths(13);
 
   useEffect(() => {
@@ -149,6 +152,14 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
       .then((result) => setSubcategories((current) => ({ ...current, [key]: result.records })))
       .catch((reason) => setDesviosWarning(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setSubcatLoading(null));
+  };
+
+  const openSubcatSeries = (item: ForecastDesvioItem, sub: ForecastDesvioSubcat) => {
+    if (runId == null) return;
+    setSeriesDialog({ subcategory: sub.subcategory, data: null, loading: true, error: "" });
+    getForecastAccuracyDeltaSeries(runId, month || undefined, item.path.join(" > "), sub.subcategory)
+      .then((data) => setSeriesDialog({ subcategory: sub.subcategory, data, loading: false, error: "" }))
+      .catch((error) => setSeriesDialog({ subcategory: sub.subcategory, data: null, loading: false, error: error instanceof Error ? error.message : String(error) }));
   };
 
   const ackByPath = new Map<string, ForecastAck>();
@@ -211,7 +222,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                   </TableHead>
                   <TableBody>
                     {(showAllPositive ? positive : positive.slice(0, 5)).map(item => (
-                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} expanded={expanded === item.path.join(" > ")} subcategories={subcategories[item.path.join(" > ")]} loading={subcatLoading === item.path.join(" > ")} onToggle={() => toggleDetail(item)} />
+                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} expanded={expanded === item.path.join(" > ")} subcategories={subcategories[item.path.join(" > ")]} loading={subcatLoading === item.path.join(" > ")} onToggle={() => toggleDetail(item)} onSubcatSeries={openSubcatSeries} />
                     ))}
                   </TableBody>
               </Table>
@@ -239,7 +250,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                   </TableHead>
                   <TableBody>
                     {(showAllNegative ? negative : negative.slice(0, 5)).map(item => (
-                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} expanded={expanded === item.path.join(" > ")} subcategories={subcategories[item.path.join(" > ")]} loading={subcatLoading === item.path.join(" > ")} onToggle={() => toggleDetail(item)} />
+                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} expanded={expanded === item.path.join(" > ")} subcategories={subcategories[item.path.join(" > ")]} loading={subcatLoading === item.path.join(" > ")} onToggle={() => toggleDetail(item)} onSubcatSeries={openSubcatSeries} />
                     ))}
                   </TableBody>
               </Table>
@@ -278,6 +289,32 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
           )}
         </>
       )}
+      <Dialog open={seriesDialog !== null} onClose={() => setSeriesDialog(null)} maxWidth="lg" fullWidth>
+        {seriesDialog && <>
+          <DialogTitle>Período — {seriesDialog.subcategory}</DialogTitle>
+          <DialogContent dividers>
+            {seriesDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
+            {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{seriesDialog.error}</Alert>}
+            {seriesDialog.data && <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{prettyMonth(seriesDialog.data.target_month)} · {seriesDialog.data.department || department || "Todos os departamentos"}</Typography>
+              <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">
+                <Box><Typography variant="caption" color="text.secondary">Projetado</Typography><Typography fontWeight={600}>{money.format(seriesDialog.data.forecast_total)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Realizado</Typography><Typography fontWeight={600}>{money.format(seriesDialog.data.actual_total)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Delta</Typography><Typography fontWeight={600} color={seriesDialog.data.variance >= 0 ? "error.main" : "success.main"}>{money.format(seriesDialog.data.variance)} ({pct(seriesDialog.data.variance_pct)})</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Acurácia</Typography><Typography fontWeight={600}>{pct(seriesDialog.data.accuracy)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Desvio diário</Typography><Typography fontWeight={600}>{seriesDialog.data.daily_deviation_day != null ? `dia ${seriesDialog.data.daily_deviation_day}` : "não houve"}</Typography></Box>
+              </Stack>
+              {seriesDialog.data.points.length ? <Plot data={[
+                { type: "bar", name: "Realizado até o rate", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => Math.min(point.actual, point.forecast_rate)), marker: { color: "#16A34A" } },
+                { type: "bar", name: "Excesso do dia", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => Math.max(0, point.actual - point.forecast_rate)), marker: { color: "#DC2626" } },
+                { type: "scatter", mode: "lines", name: "Rate projetado", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => point.forecast_rate), line: { color: "#2563eb", dash: "dash", width: 2 } },
+                ...(seriesDialog.data.daily_deviation_day != null ? [{ type: "scatter" as const, mode: "lines" as const, name: "Desvio começou", x: [seriesDialog.data.daily_deviation_day, seriesDialog.data.daily_deviation_day], y: [0, Math.max(...seriesDialog.data.points.map((point) => point.actual))], line: { color: "#DC2626", dash: "dot" as const, width: 1.5 }, hovertemplate: `Desvio começou a crescer — dia ${seriesDialog.data.daily_deviation_day}<extra></extra>` }] : []),
+              ]} layout={{ autosize: true, height: 420, margin: { l: 70, r: 20, t: 40, b: 50 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent", barmode: "stack", xaxis: { title: { text: "Dia do mês" }, dtick: 1 }, yaxis: { title: { text: "Valor diário (R$)" }, tickformat: ".2s" }, showlegend: true, legend: { orientation: "h", y: -0.18 } }} config={{ displayModeBar: true, responsive: true }} style={{ width: "100%" }} useResizeHandler /> : <Typography color="text.secondary">Sem pontos diários para este item.</Typography>}
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>Consumo diário vs rate projetado (total mensal ÷ dias). A partir do dia {seriesDialog.data.daily_deviation_day ?? "—"} o realizado do dia passa a ultrapassar o rate projetado — é quando o desvio começa a crescer (excesso empilhado em vermelho).</Typography>
+            </>}
+          </DialogContent>
+        </>}
+      </Dialog>
     </Paper>
   );
 }
