@@ -3535,6 +3535,10 @@ export async function getAnalysisTables(): Promise<TrinoTableList> {
 export interface AnalysisPartition {
   period: string | null;
   period_kind: string;
+  source_connection_id?: number | null;
+  source_label?: string | null;
+  subaccount?: string | null;
+  subaccount_id?: string | null;
   record_count: number;
   file_count: number;
 }
@@ -3905,6 +3909,7 @@ export async function getExpectedView(
   signal?: AbortSignal,
   includeSharedCost = false,
   directorView = false,
+  goldTable = "dest_dm_cost_visao_completa",
 ): Promise<ExpectedViewResult> {
   const key =
     director +
@@ -3915,7 +3920,9 @@ export async function getExpectedView(
     "|" +
     (includeSharedCost ? 1 : 0) +
     "|" +
-    (directorView ? 1 : 0);
+    (directorView ? 1 : 0) +
+    "|" +
+    goldTable;
   const cached = expectedViewCache.get(key);
   if (cached) {
     if (cached.expiresAt > Date.now()) return cached.data;
@@ -3934,6 +3941,7 @@ export async function getExpectedView(
           department_id: departmentId,
           include_shared_cost: includeSharedCost,
           director_view: directorView,
+          gold_table: goldTable,
         },
         { timeout: 120000, signal: controller.signal },
       )

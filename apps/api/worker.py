@@ -556,7 +556,8 @@ def consumer_main(worker_id: int):
                         run.error = None
                         run.started_at = datetime.now(timezone.utc)
                         s.commit()
-                        metadata = asyncio.run(fetch_metadata(dest.physical_name, "silver"))
+                        from app.database import run_async_isolated
+                        metadata = run_async_isolated(fetch_metadata(dest.physical_name, "silver"))
                         errors = validate_config(config, metadata)
                         if errors:
                             raise RuntimeError("; ".join(errors))
@@ -571,7 +572,8 @@ def consumer_main(worker_id: int):
                         simulated_as_of = None
                         if (run.config_snapshot or {}).get("simulated_as_of"):
                             simulated_as_of = date.fromisoformat(run.config_snapshot["simulated_as_of"])
-                        result = asyncio.run(run_forecast(
+                        from app.database import run_async_isolated
+                        result = run_async_isolated(run_forecast(
                             config, adjustments,
                             date.fromisoformat(run.cutoff_date) if run.cutoff_date else None,
                             business_rules=business_rules, result_table=f"result_run_{run.id}",
@@ -704,7 +706,8 @@ def consumer_main(worker_id: int):
                             ForecastBusinessRule.forecast_config_id == config_id,
                             ForecastBusinessRule.active == True,
                         ).all()
-                        metadata = asyncio.run(fetch_metadata(dest.physical_name, "silver"))
+                        from app.database import run_async_isolated
+                        metadata = run_async_isolated(fetch_metadata(dest.physical_name, "silver"))
                         errors = validate_config(config, metadata)
                         if errors:
                             raise RuntimeError("; ".join(errors))
@@ -745,7 +748,8 @@ def consumer_main(worker_id: int):
                                 )
                                 s.add(run)
                                 s.flush()
-                                result = asyncio.run(run_forecast(
+                                from app.database import run_async_isolated
+                                result = run_async_isolated(run_forecast(
                                     config, adjustments, as_of,
                                     business_rules=business_rules,
                                     result_table=f"result_run_{run.id}",
@@ -811,7 +815,7 @@ def consumer_main(worker_id: int):
                     session.commit()
                     session.close()
                     try:
-                        import asyncio
+                        from app.database import run_async_isolated
                         from app.services.gold_materialization import materialize_gold_cubes
                         s = SyncSession()
                         task_row = s.get(EtlTask, task_id)
@@ -823,7 +827,7 @@ def consumer_main(worker_id: int):
                                 current.phase = f"Materializando {done}/{total}: {name}"
                                 s.commit()
                         rule_ids = list((task_row.result_json or {}).get("rule_ids") or []) if task_row else []
-                        result = asyncio.run(materialize_gold_cubes(s, run_id=task_id, progress=progress, rule_ids=rule_ids or None))
+                        result = run_async_isolated(materialize_gold_cubes(s, run_id=task_id, progress=progress, rule_ids=rule_ids or None))
                         task_row = s.get(EtlTask, task_id)
                         if task_row:
                             failed = list(result.get("failed") or [])
@@ -1989,12 +1993,10 @@ def consumer_main(worker_id: int):
                         if _is_etl_task_cancelled(task_id):
                             _inmemory_tasks.pop(task_id, None)
                             continue
-                        from app.services.write_lock import exclusive_write_lock
-                        with exclusive_write_lock():
-                            if _is_etl_task_cancelled(task_id):
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            _run_etl_sync(task_id, conn_id, selected or None, periods)
+                        if _is_etl_task_cancelled(task_id):
+                            _inmemory_tasks.pop(task_id, None)
+                            continue
+                        _run_etl_sync(task_id, conn_id, selected or None, periods)
                         followups = _queue_schedule_destination_tasks(task_id, conn_id, task.result_json or {})
                         if followups:
                             followup_session = SyncSession()

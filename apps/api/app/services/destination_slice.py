@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Iterable, Literal, Optional
 
 import pandas as pd
 
@@ -17,12 +17,16 @@ _SNAPSHOT_PHYSICAL_DEFAULTS = frozenset({
 })
 
 _MAX_EXTRA_PARTITIONS = 2
+# Sentinel for null/empty values when a column is used as an Iceberg identity partition.
+_PARTITION_UNSET = "__UNSET__"
 _BUCKET_CARDINALITY_COLUMNS = frozenset({
     "subaccountname",
     "useremail",
     "resource_id",
     "resourceid",
 })
+# Display names are unsafe as Iceberg path segments (spaces, punctuation).
+_UNSAFE_IDENTITY_PARTITION = frozenset({"subaccountname"})
 
 
 @dataclass(frozen=True)
@@ -51,23 +55,40 @@ class DestinationSliceConfig:
                 cols.append(extra.column)
         return cols
 
+    def physical_iceberg_partition_columns(self, *, pyarrow_safe: bool = False) -> list[str]:
+        """Columns that become Iceberg partition fields on write."""
+        cols = list(self.replace_columns)
+        for extra in self.extras:
+            if extra.column in cols:
+                continue
+            if extra.column.lower() in _UNSAFE_IDENTITY_PARTITION:
+                continue
+            if pyarrow_safe and extra.transform == "bucket":
+                continue
+            cols.append(extra.column)
+        return cols
+
 
 def _normalise_physical_name(physical_name: str) -> str:
     return physical_name.replace("-", "_").replace(".", "_").strip().lower()
 
 
 def snapshot_date_from_blob_path(blob_path: str) -> str | None:
-    """Extract YYYY-MM-DD from ARG/inventory and similar Bronze paths."""
+    """Extract YYYY-MM-DD from Bronze blob paths (ARG, licenças IA, etc.)."""
     if not blob_path:
         return None
+    path = str(blob_path).strip()
+    # Licenças IA (GitHub/Claude/NotebookLM): blob_path = YYYYMM, uma fatia por mês.
+    if re.fullmatch(r"\d{6}", path):
+        return f"{path[:4]}-{path[4:6]}-01"
     match = re.search(
         r"(?:arg/(?:inventory|orphans/[^/]+)|licenses?|license)/(\d{4}-\d{2}-\d{2})",
-        blob_path,
+        path,
         flags=re.IGNORECASE,
     )
     if match:
         return match.group(1)
-    match = re.search(r"/(\d{4}-\d{2}-\d{2})(?:\.[a-z0-9]+)?$", blob_path, flags=re.IGNORECASE)
+    match = re.search(r"/(\d{4}-\d{2}-\d{2})(?:\.[a-z0-9]+)?$", path, flags=re.IGNORECASE)
     return match.group(1) if match else None
 
 
@@ -112,6 +133,19 @@ def _parse_extras(
             bucket_count = max(2, min(bucket_count, 128))
         extras.append(PartitionExtra(column=canonical, transform=transform, bucket_count=bucket_count))
     return tuple(extras)
+
+
+def resolve_destination_slice_config_for_fields(
+    physical_name: str,
+    partition_spec_json: dict[str, Any] | None,
+    field_names: set[str] | Iterable[str],
+) -> DestinationSliceConfig:
+    """Resolve slice keys using the physical column names on an Iceberg table."""
+    return resolve_destination_slice_config(
+        physical_name,
+        partition_spec_json,
+        column_names=set(field_names),
+    )
 
 
 def resolve_destination_slice_config(
@@ -164,6 +198,25 @@ def build_slice_row_filter(
     return And(*clauses)
 
 
+def sanitize_partition_source_values(
+    df: pd.DataFrame,
+    config: DestinationSliceConfig,
+) -> pd.DataFrame:
+    """Normalize null/blank values in columns that may be used as partition sources."""
+    if df.empty:
+        return df
+    out = df.copy()
+    for col in config.partition_columns():
+        if col not in out.columns:
+            continue
+        series = out[col]
+        if series.dtype == object or str(series.dtype).startswith("string"):
+            blank = series.isna() | (series.astype(str).str.strip() == "")
+            if blank.any():
+                out.loc[blank, col] = _PARTITION_UNSET
+    return out
+
+
 def build_iceberg_partition_spec(
     iceberg_schema,
     config: DestinationSliceConfig,
@@ -172,36 +225,23 @@ def build_iceberg_partition_spec(
 ):
     """Build Iceberg partition spec for destination tables.
 
-    PyIceberg's PyArrow append path only supports identity/time transforms.
-    When ``pyarrow_safe=True``, bucket extras fall back to identity so Silver
-    publication does not fail (replace keys are unchanged).
+    When ``pyarrow_safe=True``, bucket extras are skipped (PyArrow cannot write
+    them) and ``SubAccountName`` is never a path segment. Identity extras such
+    as ``SubAccountId`` are applied. Blank values become ``__UNSET__``.
     """
-    import logging
-
     from pyiceberg.partitioning import PartitionField, PartitionSpec
     from pyiceberg.transforms import BucketTransform, IdentityTransform
 
-    log = logging.getLogger(__name__)
     fields: list[PartitionField] = []
     next_id = iceberg_schema.highest_field_id + 1000
-    for col in config.partition_columns():
+    for col in config.physical_iceberg_partition_columns(pyarrow_safe=pyarrow_safe):
         part_field = iceberg_schema.find_field(col)
         if part_field is None:
             continue
         extra = next((e for e in config.extras if e.column == col), None)
-        if extra and extra.transform == "bucket":
-            if pyarrow_safe:
-                log.warning(
-                    "Partition extra %s: bucket(%s) indisponível no writer PyArrow; "
-                    "usando identity nesta publicação.",
-                    col,
-                    extra.bucket_count,
-                )
-                transform = IdentityTransform()
-                name = col
-            else:
-                transform = BucketTransform(extra.bucket_count)
-                name = f"{col}_bucket_{extra.bucket_count}"
+        if extra and extra.transform == "bucket" and not pyarrow_safe:
+            transform = BucketTransform(extra.bucket_count)
+            name = f"{col}_bucket_{extra.bucket_count}"
         else:
             transform = IdentityTransform()
             name = col

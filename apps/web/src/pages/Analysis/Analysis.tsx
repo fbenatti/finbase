@@ -117,7 +117,7 @@ export default function Analysis() {
   const [partitionRows, setPartitionRows] = useState<AnalysisPartition[]>([]);
   const [partitionsLoading, setPartitionsLoading] = useState(false);
   const [expandedTableGroups, setExpandedTableGroups] = useState<Set<string>>(new Set());
-  const [expandedTableDetails, setExpandedTableDetails] = useState<Set<string>>(new Set());
+  const [openPartitionNodes, setOpenPartitionNodes] = useState<Set<string>>(new Set());
   const [tablePartitionDetails, setTablePartitionDetails] = useState<Record<string, AnalysisTablePartitionResult>>({});
   const [partitionDetailsLoading, setPartitionDetailsLoading] = useState<Set<string>>(new Set());
 
@@ -259,13 +259,8 @@ export default function Analysis() {
     } finally { setPartitionsLoading(false); }
   };
 
-  const toggleTableDetails = async (tableName: string) => {
-    setExpandedTableDetails(current => {
-      const next = new Set(current);
-      if (next.has(tableName)) next.delete(tableName); else next.add(tableName);
-      return next;
-    });
-    if (tablePartitionDetails[tableName]) return;
+  const loadTablePartitions = async (tableName: string) => {
+    if (tablePartitionDetails[tableName] || partitionDetailsLoading.has(tableName)) return;
     setPartitionDetailsLoading(current => new Set(current).add(tableName));
     try {
       const metadata = await getAnalysisTablePartitions(layer, tableName);
@@ -285,36 +280,138 @@ export default function Analysis() {
     }
   };
 
+  const sqlLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
+
+  const useIcebergSlice = (tableName: string, partition?: Partial<AnalysisPartition>) => {
+    const clauses: string[] = [];
+    if (partition?.period && /^\d{8}$/.test(partition.period)) {
+      clauses.push(`snapshot_date = ${sqlLiteral(partition.period)}`);
+    } else if (partition?.period && /^\d{6}$/.test(partition.period)) {
+      clauses.push(`_billing_period = ${sqlLiteral(partition.period)}`);
+    }
+    if (partition?.source_connection_id != null) {
+      clauses.push(`source_connection_id = ${partition.source_connection_id}`);
+    }
+    if (partition?.subaccount_id) {
+      clauses.push(`SubAccountId = ${sqlLiteral(partition.subaccount_id)}`);
+    } else if (partition?.subaccount) {
+      clauses.push(`SubAccountName = ${sqlLiteral(partition.subaccount)}`);
+    }
+    const where = clauses.length ? `\nWHERE ${clauses.join(" AND ")}` : "";
+    setSelectedIcebergTable(tableName);
+    setSql(`SELECT * FROM iceberg.${layer}.${tableName}${where}\nLIMIT 10`);
+  };
+
+  const togglePartitionNode = (key: string) => {
+    setOpenPartitionNodes(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
   const icebergTableGroups = useMemo(
     () => groupIcebergTables(tables[layer] || []),
     [tables, layer],
   );
 
+  const renderPartitionTree = (tableName: string, partitions: AnalysisPartition[]) => {
+    const totals = (rows: AnalysisPartition[]) => ({
+      records: rows.reduce((sum, row) => sum + row.record_count, 0),
+      files: rows.reduce((sum, row) => sum + row.file_count, 0),
+    });
+    const byPeriod = new Map<string, AnalysisPartition[]>();
+    partitions.forEach((row) => {
+      const key = row.period || "—";
+      const bucket = byPeriod.get(key) || [];
+      bucket.push(row);
+      byPeriod.set(key, bucket);
+    });
+    const periods = [...byPeriod.keys()].sort((a, b) => b.localeCompare(a));
+    const hasAccount = partitions.some((row) => row.subaccount_id || row.subaccount);
+
+    const rowBar = (label: string, meta: string, records: number, files: number, nodeKey: string | null, onUse: () => void, depth: number) => (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, pl: depth * 2, py: 0.25 }}>
+        {nodeKey ? (
+          <Button size="small" variant="outlined" onClick={() => togglePartitionNode(nodeKey)} sx={{ minWidth: 28, width: 28, height: 28, p: 0 }} aria-label={openPartitionNodes.has(nodeKey) ? "Recolher" : "Expandir"}>
+            {openPartitionNodes.has(nodeKey) ? <Remove fontSize="small" /> : <Add fontSize="small" />}
+          </Button>
+        ) : <Box sx={{ width: 28 }} />}
+        <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere" }}>{label}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>{meta}</Typography>
+        <Typography variant="caption" sx={{ minWidth: 72, textAlign: "right" }}>{records.toLocaleString()} reg.</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ minWidth: 56, textAlign: "right" }}>{files.toLocaleString()} arq.</Typography>
+        <Button size="small" onClick={onUse}>Usar</Button>
+      </Box>
+    );
+
+    return (
+      <Stack spacing={0.25}>
+        {periods.map((period) => {
+          const periodRows = byPeriod.get(period) || [];
+          const periodKey = `${tableName}|${period}`;
+          const periodOpen = openPartitionNodes.has(periodKey);
+          const periodTotals = totals(periodRows);
+          const bySource = new Map<string, AnalysisPartition[]>();
+          periodRows.forEach((row) => {
+            const sourceKey = row.source_label || (row.source_connection_id != null ? `conexão ${row.source_connection_id}` : "sem fonte");
+            const bucket = bySource.get(sourceKey) || [];
+            bucket.push(row);
+            bySource.set(sourceKey, bucket);
+          });
+          return (
+            <Box key={periodKey}>
+              {rowBar(period, periodRows[0]?.period_kind || "período", periodTotals.records, periodTotals.files, periodKey, () => useIcebergSlice(tableName, { period }), 0)}
+              {periodOpen && [...bySource.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([source, sourceRows]) => {
+                const sourceKey = `${periodKey}|${source}`;
+                const sourceOpen = openPartitionNodes.has(sourceKey);
+                const sourceTotals = totals(sourceRows);
+                const sample = sourceRows[0];
+                return (
+                  <Box key={sourceKey}>
+                    {rowBar(source, "fonte", sourceTotals.records, sourceTotals.files, hasAccount ? sourceKey : null, () => useIcebergSlice(tableName, { period, source_connection_id: sample?.source_connection_id }), 1)}
+                    {hasAccount && sourceOpen && sourceRows
+                      .slice()
+                      .sort((a, b) => (a.subaccount_id || a.subaccount || "").localeCompare(b.subaccount_id || b.subaccount || ""))
+                      .map((row) => {
+                        const account = row.subaccount_id || row.subaccount || "—";
+                        return (
+                          <Box key={`${sourceKey}|${account}`}>
+                            {rowBar(account, row.subaccount_id ? "SubAccountId" : "conta", row.record_count, row.file_count, null, () => useIcebergSlice(tableName, row), 2)}
+                          </Box>
+                        );
+                      })}
+                  </Box>
+                );
+              })}
+            </Box>
+          );
+        })}
+      </Stack>
+    );
+  };
+
   const renderIcebergMember = (member: IcebergTableMember) => {
     const detail = tablePartitionDetails[member.tableName];
-    const detailExpanded = expandedTableDetails.has(member.tableName);
     return (
       <Paper key={member.tableName} variant="outlined" sx={{ p: 1, bgcolor: "action.hover" }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
           <Typography variant="caption" sx={{ flex: 1, minWidth: 220, overflowWrap: "anywhere", fontFamily: "monospace" }}>
             {member.period ? `${member.period} · ${member.dimension} · ID ${member.scopeId}` : member.tableName}
           </Typography>
-          <Button size="small" onClick={() => void selectIcebergTable(member.tableName)}>Usar tabela</Button>
-          <Button size="small" startIcon={detailExpanded ? <Remove /> : <Add />} onClick={() => void toggleTableDetails(member.tableName)}>
-            {detailExpanded ? "Fechar detalhes" : "Partições"}
-          </Button>
+          <Button size="small" onClick={() => useIcebergSlice(member.tableName)}>Usar tabela</Button>
         </Box>
-        {detailExpanded && (
-          <Box sx={{ mt: 1 }}>
-            {!detail && partitionDetailsLoading.has(member.tableName) ? <CircularProgress size={18} /> : detail?.partitioned ? (
-              detail.partitions.length ? <Table size="small"><TableHead><TableRow><TableCell>Dia / período</TableCell><TableCell>Tipo</TableCell><TableCell align="right">Registros</TableCell><TableCell align="right">Arquivos</TableCell></TableRow></TableHead><TableBody>{detail.partitions.map((p) => <TableRow key={`${p.period}-${p.period_kind}`}><TableCell>{p.period || "—"}</TableCell><TableCell>{p.period_kind}</TableCell><TableCell align="right">{p.record_count.toLocaleString()}</TableCell><TableCell align="right">{p.file_count.toLocaleString()}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="caption" color="text.secondary">Nenhuma partição Iceberg.</Typography>
-            ) : detail ? (
-              <Alert severity="info" sx={{ py: 0 }}>Esta tabela física não tem partição Iceberg interna. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).</Alert>
-            ) : !partitionDetailsLoading.has(member.tableName) && detailExpanded ? (
-              <Alert severity="error" sx={{ py: 0 }}>Não foi possível carregar os metadados. Feche e abra os detalhes para tentar novamente.</Alert>
-            ) : null}
-          </Box>
-        )}
+        <Box sx={{ mt: 1 }}>
+          {!detail && partitionDetailsLoading.has(member.tableName) ? <CircularProgress size={18} /> : detail?.partitioned ? (
+            detail.partitions.length ? renderPartitionTree(member.tableName, detail.partitions) : <Typography variant="caption" color="text.secondary">Nenhuma partição Iceberg.</Typography>
+          ) : detail ? (
+            <Alert severity="info" sx={{ py: 0 }}>Esta tabela física não tem partição Iceberg interna. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).
+              <Button size="small" sx={{ ml: 1 }} onClick={() => useIcebergSlice(member.tableName)}>Usar tabela</Button>
+            </Alert>
+          ) : !partitionDetailsLoading.has(member.tableName) ? (
+            <Alert severity="error" sx={{ py: 0 }}>Não foi possível carregar as partições. Recolha e expanda de novo.</Alert>
+          ) : null}
+        </Box>
       </Paper>
     );
   };
@@ -679,11 +776,15 @@ export default function Analysis() {
                 {icebergTableGroups.map((group) => {
                   const expanded = expandedTableGroups.has(group.name);
                   const isFamily = group.members.length > 1;
-                  const toggleGroup = () => setExpandedTableGroups(current => {
-                    const next = new Set(current);
-                    if (next.has(group.name)) next.delete(group.name); else next.add(group.name);
-                    return next;
-                  });
+                  const toggleGroup = () => {
+                    const opening = !expandedTableGroups.has(group.name);
+                    setExpandedTableGroups(current => {
+                      const next = new Set(current);
+                      if (next.has(group.name)) next.delete(group.name); else next.add(group.name);
+                      return next;
+                    });
+                    if (opening) group.members.forEach((member) => { void loadTablePartitions(member.tableName); });
+                  };
                   return (
                     <Paper key={group.name} variant="outlined" sx={{ borderRadius: 1.5, overflow: "hidden" }}>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.25, py: 0.75 }}>

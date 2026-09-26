@@ -97,7 +97,8 @@ class CloneEngine:
         return result
 
     def apply(self, frame: pd.DataFrame, period: str) -> tuple[pd.DataFrame, int]:
-        if frame.empty: return frame, 0
+        if frame.empty or not period:
+            return frame, 0
         if "is_synthetic" not in frame.columns:
             frame["is_synthetic"] = False
         else:

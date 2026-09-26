@@ -1015,55 +1015,14 @@ def _select_reprocess_blobs(
     connector_type: str,
     preferred_table: str | None = None,
 ) -> list[tuple[int, str, str]]:
-    """Choose Bronze blobs to reprocess for one connection.
+    """Choose Bronze blobs to reprocess for one connection."""
+    from app.services.reprocess_blob_selection import select_reprocess_blobs
 
-    Azure keeps only the latest export execution per billing month because
-    stale executions duplicate the same financial rows.  GCP BigQuery keeps
-    distinct export tables (current vs legacy) as separate blob paths; the
-    monthly dedup must not collapse them into the most recently ingested
-    table, or Gold loses the detailed resource export.
-    """
-    if connector_type == "gcp_bigquery":
-        by_period: dict[str, list[tuple[int, str, str, object]]] = {}
-        for blob_id, period, path, modified in candidates:
-            by_period.setdefault(str(period), []).append((blob_id, period, path, modified))
-        selected: list[tuple[int, str, str]] = []
-        for period, blobs in by_period.items():
-            # GCP keeps distinct export tables (current resource_v1 vs legacy v1)
-            # as separate blob paths per billing month.  The legacy v1 table
-            # holds THIRD_PARTY_RESELLER subscriptions (private marketplace,
-            # e.g. Denodo) that the resource export does not contain, so all
-            # distinct tables for the period must be reprocessed — never only
-            # the preferred table or Gold loses the marketplace rows.
-            if preferred_table:
-                preferred = [b for b in blobs if preferred_table in str(b[2])]
-                rest = [b for b in blobs if preferred_table not in str(b[2])]
-                picked: list[tuple[int, str, str, object]] = []
-                if preferred:
-                    picked.append(max(preferred, key=lambda b: b[3]))
-                for other in rest:
-                    picked.append(other)
-                selected.extend((blob_id, period, path) for blob_id, period, path, _ in picked)
-                continue
-            blob_id, period, path, _ = max(blobs, key=lambda b: b[3])
-            selected.append((blob_id, period, path))
-        return selected
-
-    if connector_type == "azure_blob":
-        latest_run: dict[str, tuple[str, object]] = {}
-        for _, period, path, modified in candidates:
-            run_id = _azure_blob_run_id(path)
-            current = latest_run.get(str(period))
-            if current is None or modified > current[1]:
-                latest_run[str(period)] = (run_id, modified)
-        selected = []
-        for blob_id, period, path, _ in candidates:
-            run_id = _azure_blob_run_id(path)
-            if latest_run.get(str(period), (None, None))[0] == run_id:
-                selected.append((blob_id, period, path))
-        return selected
-
-    return [(blob_id, period, path) for blob_id, period, path, _ in candidates]
+    return select_reprocess_blobs(
+        candidates,
+        connector_type=connector_type,
+        preferred_table=preferred_table,
+    )
 
 def _append_reprocess_log(task_id: int, message: str, *, level: str = "INFO", details: dict | None = None) -> None:
     """Persist compact lifecycle events for the Reprocess history screen.
@@ -1492,7 +1451,6 @@ def _reprocess_destination_sync(
             return {"success": False, "error": "Tabela destino nao encontrada", "rows_written": 0}
         phys_name = dest_info.physical_name; status["table"] = dest_info.name
         partition_spec_json = getattr(dest_info, "partition_spec_json", None)
-        slice_cfg = resolve_destination_slice_config(phys_name, partition_spec_json)
         snapshot_dates = [str(s) for s in (snapshot_dates or [])]
         if not publish_by_partition:
             logger.warning(
@@ -1531,6 +1489,13 @@ def _reprocess_destination_sync(
         ).all()
         dest_col_names = {r[0] for r in dest_col_meta}
         dest_col_types: dict[str, str] = {r[0]: (r[1] or "TEXT") for r in dest_col_meta}
+        from app.services.destination_slice import primary_partition_column
+
+        slice_cfg = resolve_destination_slice_config(
+            phys_name, partition_spec_json, column_names=dest_col_names,
+        )
+        slice_period_col = primary_partition_column(slice_cfg)
+        resolved_snapshot = snapshot_dates[0] if snapshot_dates else None
 
         # Gather Bronze blobs per connection. Azure deduplicates stale export
         # executions; GCP keeps the configured current BigQuery table.
@@ -1893,6 +1858,8 @@ def _reprocess_destination_sync(
                     staged[_bc] = pd.to_numeric(staged[_bc], errors="coerce").astype("Int64")
             if "is_synthetic" in staged.columns:
                 staged["is_synthetic"] = staged["is_synthetic"].fillna(False).astype(bool)
+            if slice_cfg.grain == "snapshot_date" and resolved_snapshot and slice_period_col in staged.columns:
+                staged[slice_period_col] = resolved_snapshot
             return staged
 
         temp_name: str | None = None
@@ -1923,16 +1890,17 @@ def _reprocess_destination_sync(
                     temp_name = iceberg.write_destination_staged(
                         phys_name,
                         chunk,
-                        partition_col="_billing_period",
+                        partition_col=slice_period_col,
                         column_types=dest_col_types,
                         namespace="silver",
                         partition_spec_json=partition_spec_json,
+                        slice_config=slice_cfg,
                     )
                 else:
                     iceberg.append_to_staged(
                         temp_name,
                         chunk,
-                        partition_col="_billing_period",
+                        partition_col=slice_period_col,
                         column_types=dest_col_types,
                         namespace="silver",
                     )

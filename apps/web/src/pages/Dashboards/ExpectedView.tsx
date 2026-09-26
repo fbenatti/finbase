@@ -179,6 +179,7 @@ export default function ExpectedView({
         controller.signal,
         includeSharedCost,
         directorView,
+        table,
       )
         .then((result) => {
           setRows(result.rows);

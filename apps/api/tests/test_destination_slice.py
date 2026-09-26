@@ -14,6 +14,10 @@ def test_snapshot_date_from_arg_inventory_path():
     assert snapshot_date_from_blob_path("arg/inventory/2025-09-15.csv") == "2025-09-15"
 
 
+def test_snapshot_date_from_license_month_blob():
+    assert snapshot_date_from_blob_path("202608") == "2026-08-01"
+
+
 def test_default_grain_for_focus_is_billing_period():
     cfg = resolve_destination_slice_config("dest_modelo_focus", None)
     assert cfg.grain == "billing_period"
@@ -23,6 +27,17 @@ def test_default_grain_for_focus_is_billing_period():
 def test_default_grain_for_inventory_is_snapshot_date():
     cfg = resolve_destination_slice_config("dest_cloud_resource_inventory", None)
     assert cfg.grain == "snapshot_date"
+
+
+def test_licencas_ia_uses_snapshotdate_column():
+    cfg = resolve_destination_slice_config(
+        "dest_licencas_ia",
+        None,
+        column_names={"SnapshotDate", "source_connection_id", "UserId"},
+    )
+    assert cfg.grain == "snapshot_date"
+    assert cfg.snapshot_column == "SnapshotDate"
+    assert cfg.replace_columns[0] == "SnapshotDate"
 
 
 def test_build_slice_row_filter_billing():
@@ -63,8 +78,36 @@ def test_build_partition_spec_pyarrow_safe_downgrades_bucket():
         extras=(PartitionExtra(column="subaccountname", transform="bucket", bucket_count=16),),
     )
     spec = build_iceberg_partition_spec(schema, config, pyarrow_safe=True)
-    assert len(spec.fields) == 3
+    assert len(spec.fields) == 2
     assert all(f.name != "subaccountname_bucket_16" for f in spec.fields)
+
+
+def test_build_partition_spec_includes_subaccount_id():
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField, StringType
+
+    from app.services.destination_slice import (
+        PartitionExtra,
+        DestinationSliceConfig,
+        build_iceberg_partition_spec,
+    )
+
+    schema = Schema(
+        NestedField(1, "_billing_period", StringType(), required=False),
+        NestedField(2, "source_connection_id", LongType(), required=False),
+        NestedField(3, "SubAccountId", StringType(), required=False),
+        NestedField(4, "SubAccountName", StringType(), required=False),
+    )
+    config = DestinationSliceConfig(
+        grain="billing_period",
+        extras=(
+            PartitionExtra(column="SubAccountId", transform="identity"),
+            PartitionExtra(column="SubAccountName", transform="identity"),
+        ),
+    )
+    spec = build_iceberg_partition_spec(schema, config, pyarrow_safe=True)
+    names = [field.name for field in spec.fields]
+    assert names == ["_billing_period", "source_connection_id", "SubAccountId"]
 
 
 def test_partition_spec_json_extra_requires_column():

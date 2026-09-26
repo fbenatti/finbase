@@ -166,7 +166,8 @@ export default function DestinationPartitionSettings({
       </Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
         A fatia de <strong>replace</strong> (anti-duplicata no ETL) é sempre período + conexão de origem.
-        Abaixo você define o grão e partições físicas extras (ex. SubAccountName / subaccountname).
+        Extra de identidade em <strong>SubAccountId</strong> entra na partição física (Azure: SubscriptionId;
+        GCP: id do projeto). Valor vazio vira <code>__UNSET__</code>. SubAccountName não entra no caminho.
       </Typography>
 
       <Box sx={{ mb: 1.5, display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>

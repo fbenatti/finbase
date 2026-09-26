@@ -7,7 +7,9 @@ from typing import Callable
 
 # Only these task types acquire ``exclusive_write_lock``; others must not wait on
 # ``is_locked()`` (forecast/Gold use the analytic advisory lock only).
-WAREHOUSE_FLOCK_TASK_TYPES = frozenset({"backup", "extraction", "reprocess", "reclassification"})
+# Extraction downloads run in parallel; only Bronze/Gold/Silver commits that
+# hold this flock are serialized (backup, reprocess paths that opt in).
+WAREHOUSE_FLOCK_TASK_TYPES = frozenset({"backup", "reprocess", "reclassification"})
 
 
 def task_waits_on_warehouse_flock(task) -> bool:

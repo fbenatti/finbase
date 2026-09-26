@@ -671,27 +671,17 @@ def manifest_mode_for(cube_code: str) -> str:
     )
 
 
-async def record_manifest(entry: ManifestEntry, *, mode: str | None = None) -> None:
-    """Persiste o manifesto no PostgreSQL.
+def record_manifest_sync(entry: ManifestEntry, *, mode: str | None = None) -> None:
+    """Persiste o manifesto via engine síncrono (psycopg2).
 
-    Comportamento por chamada:
-
-    - ``manifest_id`` ausente → **INSERT** e guarda o id na entrada. Este é o
-      registro `RUNNING` do run;
-    - ``manifest_id`` presente → **UPDATE** da mesma linha. `SUCCESS`, `PARTIAL` e
-      `FAILED` são desfechos da execução que o `RUNNING` abriu, não eventos novos.
-
-    `mode` decide o comportamento em falha:
-
-    - `REQUIRED` (default): levanta `ManifestUnavailableError`. Quem chama precisa
-      abortar **antes** do staging quando a entrada é `RUNNING`, e marcar a task
-      como falha quando a entrada é final;
-    - `BEST_EFFORT`: registra o aviso e segue, para os cubos legados da allowlist.
+    O worker materializa Gold dentro de ``asyncio.run`` e misturar asyncpg com
+    o pool global gerava ``another operation is in progress`` no INSERT.
     """
     modo = mode or manifest_mode_for(entry.cube_code)
     try:
-        from app.database import async_session
         from sqlalchemy import text
+
+        from app.database import sync_engine
     except Exception as exc:  # noqa: BLE001
         mensagem = f"Manifesto Gold indisponível ({sanitize_error(exc)})"
         if modo == MANIFEST_REQUIRED:
@@ -700,33 +690,33 @@ async def record_manifest(entry: ManifestEntry, *, mode: str | None = None) -> N
         return
 
     dados = entry.as_dict()
+    params = {**dados, "source_tables": _json_list(dados["source_tables"])}
     try:
-        async with async_session() as session:
+        with sync_engine.begin() as conn:
             if entry.manifest_id is None:
-                resultado = await session.execute(
+                resultado = conn.execute(
                     text(_manifest_insert_sql() + " RETURNING id"),
-                    {
-                        **dados,
-                        "source_tables": _json_list(dados["source_tables"]),
-                    },
+                    params,
                 )
                 linha = resultado.first()
                 entry.manifest_id = int(linha[0]) if linha else None
             else:
-                await session.execute(
+                conn.execute(
                     text(_manifest_update_sql()),
-                    {
-                        **dados,
-                        "id": entry.manifest_id,
-                        "source_tables": _json_list(dados["source_tables"]),
-                    },
+                    {**params, "id": entry.manifest_id},
                 )
-            await session.commit()
     except Exception as exc:  # noqa: BLE001
         mensagem = f"Falha ao registrar manifesto de {entry.cube_code}: {sanitize_error(exc)}"
         if modo == MANIFEST_REQUIRED:
             raise ManifestUnavailableError(mensagem) from exc
         logger.warning("%s", mensagem)
+
+
+async def record_manifest(entry: ManifestEntry, *, mode: str | None = None) -> None:
+    """Persiste o manifesto no PostgreSQL (delega ao caminho síncrono)."""
+    import asyncio
+
+    await asyncio.to_thread(record_manifest_sync, entry, mode=mode)
 
 
 #: Campos atualizados no desfecho. `manifest_id`, `cube_code` e a identidade da
@@ -836,40 +826,8 @@ async def record_frame_publication(
 
 
 def record_manifest_blocking(entry: ManifestEntry) -> None:
-    """Versão síncrona de :func:`record_manifest`, para caminhos que já são sync.
-
-    O agregador do reprocess roda dentro de função síncrona (pandas + Iceberg
-    local). Criar um loop novo quando não há loop rodando é seguro.
-
-    Quando **há** loop assíncrono ativo, registrar de forma síncrona é impossível
-    sem bloquear o loop. O comportamento depende do modo:
-
-    - `REQUIRED`: levanta. Um cubo governado não pode terminar sem manifesto, e um
-      caminho síncrono dentro de loop é um defeito de arquitetura que precisa
-      aparecer, não ser absorvido;
-    - `BEST_EFFORT` (legado): registra o aviso e segue.
-    """
-    import asyncio
-
-    modo = manifest_mode_for(entry.cube_code)
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            asyncio.run(record_manifest(entry))
-        except Exception as exc:  # noqa: BLE001
-            if modo == MANIFEST_REQUIRED:
-                raise ManifestUnavailableError(sanitize_error(exc)) from exc
-            logger.warning("Manifesto não registrado: %s", sanitize_error(exc))
-        return
-
-    mensagem = (
-        f"Manifesto de {entry.cube_code} não registrado: há loop assíncrono ativo "
-        "no caminho síncrono"
-    )
-    if modo == MANIFEST_REQUIRED:
-        raise ManifestUnavailableError(mensagem)
-    logger.warning("%s", mensagem)
+    """Versão síncrona de :func:`record_manifest`, para caminhos que já são sync."""
+    record_manifest_sync(entry)
 
 
 def record_frame_publication_blocking(
@@ -1327,26 +1285,17 @@ async def rollback_table_to_snapshot(
         return False
 
 
-async def expire_stale_running_manifests(
-    *, timeout_hours: float = 2.0, limit: int = 5000
-) -> int:
-    """Marca como `ABANDONED` os `RUNNING` órfãos.
-
-    Um `RUNNING` é órfão quando: não tem `finished_at`, é mais velho que o timeout
-    operacional e não corresponde a nenhuma task em execução com o mesmo `run_id`.
-
-    Sem esta migração, um worker morto no meio de um build deixaria um `RUNNING`
-    aberto para sempre, e a leitura "quais cubos estão sendo materializados agora?"
-    mentiria.
-    """
+def expire_stale_running_manifests_sync(*, timeout_hours: float = 2.0) -> int:
+    """Versão síncrona — usada no worker Gold junto com ``record_manifest_sync``."""
     try:
-        from app.database import async_session
         from sqlalchemy import text
+
+        from app.database import sync_engine
     except Exception:  # noqa: BLE001
         return 0
     try:
-        async with async_session() as session:
-            resultado = await session.execute(
+        with sync_engine.begin() as conn:
+            resultado = conn.execute(
                 text(
                     """
                     UPDATE gold_manifest
@@ -1373,11 +1322,31 @@ async def expire_stale_running_manifests(
                     "motivo": f"RUNNING órfão: sem término há mais de {timeout_hours:.0f}h",
                 },
             )
-            await session.commit()
             return int(resultado.rowcount or 0)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Falha ao expirar manifestos RUNNING órfãos: %s", sanitize_error(exc))
         return 0
+
+
+async def expire_stale_running_manifests(
+    *, timeout_hours: float = 2.0, limit: int = 5000
+) -> int:
+    """Marca como `ABANDONED` os `RUNNING` órfãos.
+
+    Um `RUNNING` é órfão quando: não tem `finished_at`, é mais velho que o timeout
+    operacional e não corresponde a nenhuma task em execução com o mesmo `run_id`.
+
+    Sem esta migração, um worker morto no meio de um build deixaria um `RUNNING`
+    aberto para sempre, e a leitura "quais cubos estão sendo materializados agora?"
+    mentiria.
+    """
+    import asyncio
+
+    _ = limit  # reservado; a query SQL não pagina hoje
+    return await asyncio.to_thread(
+        expire_stale_running_manifests_sync,
+        timeout_hours=timeout_hours,
+    )
 
 
 # ── Lock distribuído por cubo ────────────────────────────────────────────────

@@ -425,6 +425,8 @@ def _record_financial_rule(df: pd.DataFrame, mask: pd.Series, rule: BusinessRule
 
 def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_period: str) -> None:
     """Synchronous business-rule application."""
+    if not billing_period:
+        return
     if rule.valid_from and billing_period < rule.valid_from:
         return
     if rule.valid_until and billing_period > rule.valid_until:

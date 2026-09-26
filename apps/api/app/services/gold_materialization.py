@@ -635,10 +635,10 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
     # R3: RUNNING órfão não pode ficar aberto para sempre. Um worker morto no meio
     # de um build deixa um RUNNING sem término; expirar antes de começar evita que
     # a leitura de "o que está materializando agora" minta.
-    from app.services.gold_governance import expire_stale_running_manifests
+    from app.services.gold_governance import expire_stale_running_manifests_sync
 
     try:
-        expirados = await expire_stale_running_manifests()
+        expirados = expire_stale_running_manifests_sync()
         if expirados:
             logger.info("Manifestos RUNNING órfãos marcados ABANDONED: %d", expirados)
     except Exception as exc:  # noqa: BLE001
@@ -793,7 +793,8 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
 
 
 def materialize_golds_sync(session: Any, *, run_id: int, progress: Any | None = None, rule_ids: list[int] | None = None) -> dict[str, Any]:
-    return asyncio.run(materialize_gold_cubes(session, run_id=run_id, progress=progress, rule_ids=rule_ids))
+    from app.database import run_async_isolated
+    return run_async_isolated(materialize_gold_cubes(session, run_id=run_id, progress=progress, rule_ids=rule_ids))
 
 
 # ---------------------------------------------------------------------------

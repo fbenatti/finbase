@@ -130,6 +130,92 @@ def _staging_table_parts(table_name: str) -> tuple[str, int] | None:
     return match.group("base"), int(match.group("timestamp"))
 
 
+def _partition_kind(period_raw: str | None) -> str:
+    if period_raw and re.fullmatch(r"\d{8}", period_raw):
+        return "dia UTC de métrica"
+    if period_raw and re.fullmatch(r"\d{6}", period_raw):
+        return "mês de custo/licença"
+    return "partição"
+
+
+def _describe_iceberg_partition(partition: object) -> dict:
+    """Split Iceberg partition metadata into period, connection and extras."""
+    period_raw: str | None = None
+    conn_raw: str | None = None
+    subaccount: str | None = None
+    subaccount_id: str | None = None
+    values: list[str] = []
+
+    if isinstance(partition, dict):
+        raw_period = partition.get("_billing_period") or partition.get("snapshot_date") or partition.get("period")
+        if raw_period is not None:
+            period_raw = str(raw_period)
+        if partition.get("source_connection_id") is not None:
+            conn_raw = str(partition.get("source_connection_id"))
+        for key in ("SubAccountId", "subaccountid"):
+            if partition.get(key) not in (None, ""):
+                subaccount_id = str(partition.get(key))
+                break
+        for key in ("SubAccountName", "subaccountname"):
+            if partition.get(key) not in (None, ""):
+                subaccount = str(partition.get(key))
+                break
+    elif isinstance(partition, (list, tuple)):
+        values = [str(item) for item in partition if item is not None]
+    elif partition is not None:
+        text_value = str(partition).strip()
+        if "/" in text_value:
+            values = [part.strip() for part in text_value.split("/") if part.strip()]
+        else:
+            period_raw = text_value
+
+    if values:
+        period_raw = period_raw or values[0]
+        if len(values) > 1 and values[1].isdigit():
+            conn_raw = conn_raw or values[1]
+            if len(values) > 2:
+                subaccount_id = subaccount_id or values[2]
+        elif len(values) > 1:
+            subaccount = subaccount or values[1]
+
+    conn_id: int | None = None
+    if conn_raw and conn_raw.isdigit():
+        conn_id = int(conn_raw)
+
+    return {
+        "period": period_raw,
+        "period_kind": _partition_kind(period_raw),
+        "source_connection_id": conn_id,
+        "subaccount": subaccount,
+        "subaccount_id": subaccount_id,
+    }
+
+
+async def _connection_labels(db: AsyncSession) -> dict[int, str]:
+    rows = (await db.execute(text("SELECT id, code, name FROM source_connection"))).all()
+    labels: dict[int, str] = {}
+    for row in rows:
+        code = (row.code or "").strip()
+        name = (row.name or "").strip()
+        labels[int(row.id)] = code or name or str(row.id)
+    return labels
+
+
+def _partition_payload(partition: object, *, record_count: int, file_count: int, labels: dict[int, str]) -> dict:
+    described = _describe_iceberg_partition(partition)
+    conn_id = described["source_connection_id"]
+    return {
+        "period": described["period"],
+        "period_kind": described["period_kind"],
+        "source_connection_id": conn_id,
+        "source_label": labels.get(conn_id) if conn_id is not None else None,
+        "subaccount": described["subaccount"],
+        "subaccount_id": described["subaccount_id"],
+        "record_count": record_count,
+        "file_count": file_count,
+    }
+
+
 async def _staging_base_has_active_reprocess(db: AsyncSession, base_name: str) -> bool:
     row = (await db.execute(text("""
         SELECT 1
@@ -1960,8 +2046,22 @@ async def _expected_view_core(
     forecast_columns = actual_columns
     required_actual = {"_billing_period", "realizado", "organograma_nivel_1"}
     required_forecast = {"period", "realizado", "tipo", "organograma_nivel_1", "rateio_medida"}
-    if not required_actual.issubset(actual_columns) or not required_forecast.issubset(forecast_columns):
-        raise HTTPException(status_code=422, detail="A tabela de cubo Gold não possui as colunas necessárias para a Visão Esperada")
+    missing_actual = sorted(required_actual - set(actual_columns))
+    missing_forecast = sorted(required_forecast - set(forecast_columns))
+    if missing_actual or missing_forecast:
+        parts = []
+        if missing_actual:
+            parts.append(f"realizado: {', '.join(missing_actual)}")
+        if missing_forecast:
+            parts.append(f"forecast/planning: {', '.join(missing_forecast)}")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "A tabela de cubo Gold não possui as colunas necessárias para a Visão Esperada "
+                f"({actual_name}): {'; '.join(parts)}. "
+                "Reprocesse o cubo visao-completa (dest_dm_cost_visao_completa)."
+            ),
+        )
     actual_period = _quote_ident(actual_columns.get("_billing_period") or actual_columns["period"])
     # ``realizado`` is the executive financial measure.  ``EffectiveCost`` is
     # a provider net-cost field and includes credit/return adjustments, which
@@ -2339,7 +2439,7 @@ async def get_tables():
 
 
 @router.get("/tables/{layer}/{table_name}/partitions")
-async def get_table_partitions(layer: str, table_name: str):
+async def get_table_partitions(layer: str, table_name: str, db: AsyncSession = Depends(get_db)):
     """Return partition metadata for one catalog table (loaded on demand)."""
     if layer not in {"bronze", "silver", "gold"} or not re.fullmatch(r"[a-zA-Z0-9_]+", table_name):
         raise HTTPException(status_code=422, detail="Camada ou nome de tabela inválido.")
@@ -2368,21 +2468,15 @@ async def get_table_partitions(layer: str, table_name: str):
             f"SELECT partition, record_count, file_count FROM {qualified} ORDER BY partition",
             timeout_s=12, max_retries=1,
         )
+        labels = await _connection_labels(db)
         partitions = []
         for row in rows:
-            partition = row.get("partition") or {}
-            # Trino exposes the Iceberg partition struct as a positional array
-            # in its REST protocol (one value per partition field).
-            period = (partition.get("_billing_period") if isinstance(partition, dict)
-                      else partition[0] if isinstance(partition, (list, tuple)) and len(partition) == 1
-                      else "/".join(str(value) for value in partition) if isinstance(partition, (list, tuple)) else None)
-            value = str(period) if period is not None else None
-            kind = "dia UTC de métrica" if value and re.fullmatch(r"\d{8}", value) else (
-                "mês de custo/licença" if value and re.fullmatch(r"\d{6}", value) else "partição"
-            )
-            partitions.append({"period": value, "period_kind": kind,
-                               "record_count": int(row.get("record_count") or 0),
-                               "file_count": int(row.get("file_count") or 0)})
+            partitions.append(_partition_payload(
+                row.get("partition"),
+                record_count=int(row.get("record_count") or 0),
+                file_count=int(row.get("file_count") or 0),
+                labels=labels,
+            ))
         return {"layer": layer, "table_name": table_name, "partitioned": True,
                 "partitions": partitions, "source": "trino"}
     except Exception as trino_error:
@@ -2400,19 +2494,15 @@ async def get_table_partitions(layer: str, table_name: str):
                     "source": "pyiceberg",
                 }
             logger.warning("Using PyIceberg partition fallback for %s.%s: %s", layer, table_name, trino_error)
+            labels = await _connection_labels(db)
             partitions = []
             for row in frame.to_dict(orient="records"):
-                partition = row.get("partition") or {}
-                period = (partition.get("_billing_period") if isinstance(partition, dict)
-                          else partition[0] if isinstance(partition, (list, tuple)) and len(partition) == 1
-                          else None)
-                value = str(period) if period is not None else None
-                kind = "dia UTC de métrica" if value and re.fullmatch(r"\d{8}", value) else (
-                    "mês de custo/licença" if value and re.fullmatch(r"\d{6}", value) else "partição"
-                )
-                partitions.append({"period": value, "period_kind": kind,
-                                   "record_count": int(row.get("record_count") or 0),
-                                   "file_count": int(row.get("file_count") or 0)})
+                partitions.append(_partition_payload(
+                    row.get("partition"),
+                    record_count=int(row.get("record_count") or 0),
+                    file_count=int(row.get("file_count") or 0),
+                    labels=labels,
+                ))
             return {"layer": layer, "table_name": table_name, "partitioned": True,
                     "partitions": partitions, "source": "pyiceberg"}
         except Exception as fallback_error:
@@ -2460,25 +2550,29 @@ async def get_staging_tables(db: AsyncSession = Depends(get_db)):
 
 @router.delete("/staging-tables/{table_name}")
 async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_db)):
-    """Drop only a system-generated, inactive Gold staging table."""
+    """Drop only a system-generated, inactive Silver staging table.
+
+    The catalog can change between listing a staging table and the user's
+    deletion request (for example, the scheduled orphan cleanup may win that
+    race). Treat deletion as idempotent and let the catalog cleanup resolve
+    both live entries and stale physical/catalog remnants.
+    """
     parts = _staging_table_parts(table_name)
     if not parts:
         raise HTTPException(status_code=422, detail="Nome de tabela staging inválido")
     base_name, _ = parts
-    if table_name not in set(list_tables(layers.detail_layer())):
-        raise HTTPException(status_code=404, detail="Tabela staging não encontrada")
     if await _staging_base_has_active_reprocess(db, base_name):
         raise HTTPException(
             status_code=409,
             detail="A tabela pertence a um destino com reprocessamento ativo e não pode ser excluída",
         )
     try:
-        await trino_execute(
-            f'DROP TABLE iceberg.{layers.detail_layer()}.{_quote_ident(table_name)}',
-            timeout_s=90,
-            max_retries=1,
-        )
-    except (TrinoError, ConnectionError) as exc:
+        # Use the Iceberg catalog path used by the list endpoint. A Trino DROP
+        # can report "table not found" when its metadata view lags the catalog,
+        # even though the table is visible to PyIceberg. This cleanup also
+        # preserves data locations still referenced by another table.
+        remove_catalog_table(layers.detail_layer(), table_name)
+    except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Falha ao excluir staging no Iceberg: {exc}")
     return {"deleted": True, "table_name": table_name}
 

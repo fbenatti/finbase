@@ -19,6 +19,24 @@ sync_engine = create_engine(
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 
+def run_async_isolated(coro):
+    """Run one coroutine, then drop the asyncpg pool.
+
+    The worker calls this once per task. The global async engine keeps
+    connections tied to that loop; the next task would otherwise fail with
+    asyncpg ``another operation is in progress``.
+    """
+    import asyncio
+
+    async def _wrapped():
+        try:
+            return await coro
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_wrapped())
+
+
 class Base(DeclarativeBase):
     pass
 

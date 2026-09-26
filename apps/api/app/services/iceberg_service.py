@@ -656,12 +656,39 @@ def replace_bronze_slice(
         with table.update_schema() as schema_update:
             schema_update.union_by_name(incoming_schema)
         table = _get_catalog().load_table(table_id)
-    arrow_table = _df_to_arrow(frame, column_types=bronze_types, target_schema=table.schema())
-    tx = table.transaction()
-    tx.delete(_bronze_slice_filter(blob_path=blob_path, billing_period=str(billing_period)))
-    tx.append(arrow_table)
-    tx.commit_transaction()
-    logger.info("Replaced Bronze slice %s/%s (%d rows)", connection_code, billing_period, len(frame))
+    slice_filter = _bronze_slice_filter(blob_path=blob_path, billing_period=str(billing_period))
+    from app.services.write_lock import exclusive_write_lock
+
+    with exclusive_write_lock():
+        last_exc: Exception | None = None
+        for attempt in range(5):
+            table = _get_catalog().load_table(table_id)
+            arrow_table = _df_to_arrow(frame, column_types=bronze_types, target_schema=table.schema())
+            try:
+                tx = table.transaction()
+                tx.delete(slice_filter)
+                tx.append(arrow_table)
+                tx.commit_transaction()
+                logger.info(
+                    "Replaced Bronze slice %s/%s (%d rows)",
+                    connection_code,
+                    billing_period,
+                    len(frame),
+                )
+                return len(frame)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 4 and "branch main has changed" in str(exc):
+                    logger.warning(
+                        "Bronze slice commit conflict %s/%s attempt %s/5, retrying",
+                        connection_code,
+                        billing_period,
+                        attempt + 1,
+                    )
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
     return len(frame)
 
 
@@ -684,7 +711,7 @@ def delete_destination_slice(
     """Remove one replace-slice from a Silver destination table."""
     from app.services.destination_slice import (
         build_slice_row_filter,
-        resolve_destination_slice_config,
+        resolve_destination_slice_config_for_fields,
     )
 
     safe_name = physical_name.replace("-", "_").replace(".", "_")
@@ -693,7 +720,11 @@ def delete_destination_slice(
         table = _get_catalog().load_table(tid)
     except Exception:
         return
-    config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    config = resolve_destination_slice_config_for_fields(
+        physical_name,
+        partition_spec_json,
+        {field.name for field in table.schema().fields},
+    )
     row_filter = build_slice_row_filter(
         config,
         connection_id=connection_id,
@@ -1093,7 +1124,7 @@ def read_destination_slice_batches(
     """Yield one exact Silver replace-slice in bounded pandas batches."""
     from app.services.destination_slice import (
         build_slice_row_filter,
-        resolve_destination_slice_config,
+        resolve_destination_slice_config_for_fields,
     )
 
     safe_name = physical_name.replace("-", "_").replace(".", "_")
@@ -1101,7 +1132,11 @@ def read_destination_slice_batches(
         table = _get_catalog().load_table(_table_id(namespace, safe_name))
     except Exception:
         return
-    config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    config = resolve_destination_slice_config_for_fields(
+        physical_name,
+        partition_spec_json,
+        {field.name for field in table.schema().fields},
+    )
     row_filter = build_slice_row_filter(
         config,
         connection_id=connection_id,
@@ -1137,7 +1172,7 @@ def estimate_destination_slice_rows(
     """Return the manifest-level row count for one Silver replace-slice."""
     from app.services.destination_slice import (
         build_slice_row_filter,
-        resolve_destination_slice_config,
+        resolve_destination_slice_config_for_fields,
     )
 
     safe_name = physical_name.replace("-", "_").replace(".", "_")
@@ -1145,7 +1180,11 @@ def estimate_destination_slice_rows(
         table = _get_catalog().load_table(_table_id(namespace, safe_name))
     except Exception:
         return 0
-    config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    config = resolve_destination_slice_config_for_fields(
+        physical_name,
+        partition_spec_json,
+        {field.name for field in table.schema().fields},
+    )
     row_filter = build_slice_row_filter(
         config,
         connection_id=connection_id,
@@ -1199,11 +1238,13 @@ def write_destination_staged(
         build_iceberg_partition_spec,
         primary_partition_column,
         resolve_destination_slice_config,
+        sanitize_partition_source_values,
     )
 
     config = slice_config or resolve_destination_slice_config(
         physical_name, partition_spec_json, column_names=set(df.columns),
     )
+    df = sanitize_partition_source_values(df, config)
     if partition_col == "_billing_period" and config.grain == "snapshot_date":
         partition_col = primary_partition_column(config)
     if partition_col not in df.columns:
@@ -1552,7 +1593,7 @@ def publish_staged_partition(
     """
     from app.services.destination_slice import (
         build_slice_row_filter,
-        resolve_destination_slice_config,
+        resolve_destination_slice_config_for_fields,
         validate_staged_table_slice,
     )
 
@@ -1563,7 +1604,11 @@ def publish_staged_partition(
     staged = cat.load_table(staging_id)
     staged_tasks = list(staged.scan().plan_files())
     row_count = sum(task.file.record_count for task in staged_tasks)
-    slice_config = resolve_destination_slice_config(physical_name, partition_spec_json)
+    slice_config = resolve_destination_slice_config_for_fields(
+        physical_name,
+        partition_spec_json,
+        {field.name for field in staged.schema().fields},
+    )
     validate_staged_table_slice(
         staged,
         slice_config,
@@ -1627,20 +1672,32 @@ def publish_staged_partition(
         billing_period=billing_period,
         snapshot_date=snapshot_date,
     )
-    tx = target.transaction()
-    tx.delete(overwrite_filter)
-    # ``add_files`` only accepts external Parquet without Iceberg field IDs.
-    # Staging is produced by PyIceberg and therefore contains those IDs; write
-    # each bounded Arrow batch natively into this transaction instead.  This
-    # keeps publication atomic without materializing a whole month in memory.
-    for batch in staged.scan().to_arrow_batch_reader():
-        if batch.num_rows:
-            import pyarrow as pa
-            # Arrow batches preserve staging order, while the target schema
-            # may have evolved by name. Reorder before the native append so
-            # fields with different positions cannot be paired by position.
-            tx.append(_align_staged_batch_to_target(batch, target))
-    tx.commit_transaction()
+    batches = [batch for batch in staged.scan().to_arrow_batch_reader() if batch.num_rows]
+    last_exc: Exception | None = None
+    for attempt in range(5):
+        target = cat.load_table(target_id)
+        try:
+            tx = target.transaction()
+            tx.delete(overwrite_filter)
+            # ``add_files`` only accepts external Parquet without Iceberg field IDs.
+            # Staging is produced by PyIceberg and therefore contains those IDs; write
+            # each bounded Arrow batch natively into this transaction instead.  This
+            # keeps publication atomic without materializing a whole month in memory.
+            for batch in batches:
+                tx.append(_align_staged_batch_to_target(batch, target))
+            tx.commit_transaction()
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 4 and "branch main has changed" in str(exc):
+                logger.warning(
+                    "Silver slice commit conflict %s.%s attempt %s/5, retrying",
+                    namespace,
+                    safe_name,
+                    attempt + 1,
+                )
+                continue
+            raise
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
     _force_delete_table(staging_id, temp_safe_name)
@@ -1671,6 +1728,7 @@ def publish_silver_dataframe_slice(
     from app.services.destination_slice import (
         primary_partition_column,
         resolve_destination_slice_config,
+        sanitize_partition_source_values,
         validate_staging_slice,
     )
 
@@ -1679,6 +1737,7 @@ def publish_silver_dataframe_slice(
     config = resolve_destination_slice_config(
         physical_name, partition_spec_json, column_names=set(df.columns),
     )
+    df = sanitize_partition_source_values(df, config)
     validate_staging_slice(
         df,
         config,

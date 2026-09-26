@@ -394,18 +394,41 @@ async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = De
     if not active:
         raise HTTPException(status_code=422, detail="Nenhuma regra Gold ativa para materializar.")
 
+    from sqlalchemy import select
+
+    running = (
+        await db.execute(
+            select(EtlTask.id).where(
+                EtlTask.task_type == "gold_reprocess",
+                EtlTask.status.in_(["QUEUED", "RUNNING"]),
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if running is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe materialização Gold ativa (task {running})",
+        )
+
     now = datetime.now(timezone.utc)
-    tasks = []
-    for rule in active:
-        task = EtlTask(task_type="gold_reprocess", status="QUEUED", errors=[])
-        task.phase = f"Na fila: materializar {rule.code}"
-        task.started_at = now
-        task.total_blobs = 1
-        task.result_json = {"event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}], "rule_ids": [rule.id]}
-        db.add(task)
-        tasks.append(task)
+    task = EtlTask(task_type="gold_reprocess", status="QUEUED", errors=[])
+    task.phase = f"Na fila: materializar {len(active)} cubo(s) Gold"
+    task.started_at = now
+    task.total_blobs = len(active)
+    task.result_json = {
+        "event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}],
+        "rule_ids": [rule.id for rule in active],
+    }
+    db.add(task)
     await db.commit()
-    return {"task_id": tasks[0].id, "task_ids": [task.id for task in tasks], "status": "QUEUED", "message": f"{len(tasks)} cubo(s) Gold colocada(s) em fila individual", "rules": len(tasks)}
+    await db.refresh(task)
+    return {
+        "task_id": task.id,
+        "task_ids": [task.id],
+        "status": "QUEUED",
+        "message": f"Materialização Gold enfileirada ({len(active)} regra(s) em uma tarefa)",
+        "rules": len(active),
+    }
 
 
 @router.get("/history")
