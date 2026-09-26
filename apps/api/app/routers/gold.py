@@ -473,9 +473,21 @@ class GoldQueryRequest(BaseModel):
     rows: list[str] = Field(default_factory=list)
     measures: list[GoldQueryMeasure] = Field(default_factory=lambda: [GoldQueryMeasure()])
     filters: list[GoldQueryFilter] = Field(default_factory=list)
+    # Grupos alternativos (OR) para caminhos hierárquicos; filtros padrão seguem AND.
+    filter_groups: list[list[GoldQueryFilter]] = Field(default_factory=list)
     row_limit: int = Field(default=2000, ge=1, le=10000)
     sort_column: str | None = None
     sort_direction: _Literal["asc", "desc"] = "desc"
+
+
+class GoldFilterOptionsRequest(BaseModel):
+    table: str = "dest_dm_cost_visao_completa"
+    column: str
+    filters: list[GoldQueryFilter] = Field(default_factory=list)
+    filter_groups: list[list[GoldQueryFilter]] = Field(default_factory=list)
+    search: str = ""
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=500)
 
 
 async def _gold_schema(table: str) -> dict[str, str]:
@@ -578,6 +590,14 @@ async def query_gold_cubes(body: GoldQueryRequest):
     select_parts.extend(f"{expr} AS {_quote_ident(label)}" for expr, label in measures)
     group_by = ", ".join(_quote_ident(p) for p in rows_physical)
     where = _gold_filter_clause(schema, body.filters)
+    if body.filter_groups:
+        group_clauses = [
+            _gold_filter_clause(schema, group)
+            for group in body.filter_groups
+            if group
+        ]
+        if group_clauses:
+            where = f"({where}) AND ({' OR '.join(f'({clause})' for clause in group_clauses)})"
 
     sort_col = None
     if body.sort_column:
@@ -604,6 +624,71 @@ async def query_gold_cubes(body: GoldQueryRequest):
         _raise_gold_query_error(body.table, exc)
     columns = [*[p.lower() for p in rows_physical], *[label for _, label in measures]]
     return {"table": body.table, "columns": columns, "rows": rows, "row_count": len(rows)}
+
+
+@router.post("/filter-options")
+async def query_gold_filter_options(body: GoldFilterOptionsRequest):
+    """Search distinct dimension values in Trino with bounded pagination."""
+    schema = await _gold_schema(body.table)
+    physical = _gold_resolve(schema, body.column)
+    if not physical:
+        raise HTTPException(status_code=422, detail=f"Coluna de filtro inexistente na Gold: {body.column}")
+    where = _gold_filter_clause(schema, body.filters)
+    if body.filter_groups:
+        groups = [_gold_filter_clause(schema, group) for group in body.filter_groups if group]
+        if groups:
+            where = f"({where}) AND ({' OR '.join(f'({group})' for group in groups)})"
+    if body.search.strip():
+        where += f" AND lower(CAST({_quote_ident(physical)} AS VARCHAR)) LIKE {_quote_literal('%' + body.search.strip().lower() + '%')}"
+    sql = (
+        f"SELECT DISTINCT CAST({_quote_ident(physical)} AS VARCHAR) AS value "
+        f"FROM iceberg.{GOLD}.{body.table} WHERE ({where}) AND {_quote_ident(physical)} IS NOT NULL "
+        f"ORDER BY value LIMIT {int(body.limit)} OFFSET {int(body.offset)}"
+    )
+    try:
+        result = await execute(sql, timeout_s=120)
+    except Exception as exc:  # noqa: BLE001
+        _raise_gold_query_error(body.table, exc)
+    values = [str(row.get("value")) for row in result if row.get("value") is not None]
+    return {"table": body.table, "column": physical, "values": values, "offset": body.offset, "limit": body.limit, "has_more": len(values) == body.limit}
+
+
+@router.post("/daily-consumption")
+async def query_gold_daily_consumption(body: GoldQueryRequest):
+    """Return realized Gold consumption grouped by a real source date column."""
+    from app.services.forecast_service import gold_date_expr
+
+    schema = await _gold_schema(body.table)
+    date_col = next((schema[name] for name in (
+        "date", "chargedate", "chargeperiodstart", "billingperiodstart",
+        "usage_date", "usagedate", "chargeperiodend", "billingperiodend",
+    ) if name in schema), None)
+    if not date_col:
+        return {"table": body.table, "available": False, "day_column": None, "rows": [], "row_count": 0}
+    value_col = schema.get("realizado")
+    if not value_col:
+        return {"table": body.table, "available": False, "day_column": date_col, "rows": [], "row_count": 0}
+    period_col = schema.get("_billing_period")
+    day_expr = gold_date_expr(date_col, period_col)
+    where = _gold_filter_clause(schema, body.filters)
+    if body.filter_groups:
+        group_clauses = [_gold_filter_clause(schema, group) for group in body.filter_groups if group]
+        if group_clauses:
+            where = f"({where}) AND ({' OR '.join(f'({clause})' for clause in group_clauses)})"
+    tipo = schema.get("tipo")
+    if tipo:
+        where = f"({where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
+    sql = (
+        f"SELECT CAST({day_expr} AS VARCHAR) AS day, "
+        f"SUM(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0)) AS realizado "
+        f"FROM iceberg.{GOLD}.{body.table} WHERE ({where}) AND {day_expr} IS NOT NULL "
+        f"GROUP BY 1 ORDER BY 1 LIMIT 10000"
+    )
+    try:
+        result = await execute(sql, timeout_s=180)
+    except Exception as exc:  # noqa: BLE001
+        _raise_gold_query_error(body.table, exc)
+    return {"table": body.table, "available": True, "day_column": date_col, "rows": result, "row_count": len(result)}
 
 
 @router.get("/info")

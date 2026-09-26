@@ -1,6 +1,7 @@
 from __future__ import annotations
 import calendar
 import os
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
@@ -1978,6 +1979,29 @@ async def list_acks(
         for item in items:
             item["history"] = history_by_ack.get(item["id"], [])
     return {"items": items}
+
+
+@router.get("/accuracy/acks/range")
+async def list_executive_manual_acks(
+    month_from: str,
+    month_to: str,
+    department_path: list[str] = Query(default=[]),
+    db: AsyncSession = Depends(get_db),
+):
+    """Active manually authored highlights for an inclusive executive month range."""
+    if not re.fullmatch(r"\d{6}", month_from) or not re.fullmatch(r"\d{6}", month_to) or month_from > month_to:
+        raise HTTPException(status_code=422, detail="Informe um intervalo válido em YYYYMM")
+    stmt = select(ForecastAck).where(
+        ForecastAck.active == True,
+        ForecastAck.run_id.is_(None),
+        ForecastAck.target_month >= month_from,
+        ForecastAck.target_month <= month_to,
+    ).order_by(ForecastAck.ordem.asc(), ForecastAck.created_at.asc()).limit(5000)
+    rows = (await db.execute(stmt)).scalars().all()
+    prefixes = [[part.strip() for part in path.split(" > ") if part.strip()] for path in department_path]
+    if prefixes:
+        rows = [row for row in rows if any((row.department_path or [])[:len(prefix)] == prefix for prefix in prefixes)]
+    return {"items": [_out(row) for row in rows], "row_count": len(rows)}
 
 
 class AckUpdateIn(BaseModel):

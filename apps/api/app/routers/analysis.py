@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 import pandas as pd
 from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, text, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -358,6 +358,11 @@ class ExpectedViewRequest(BaseModel):
     # Nome físico da Gold pré-agregada que alimenta a Visão Esperada.
     # Default: a regra visao-completa (dest_dm_cost_visao_completa).
     gold_table: str = "dest_dm_cost_visao_completa"
+    # Escopo aditivo usado pelo dashboard executivo v2; os campos antigos do v1 permanecem iguais.
+    month_from: str | None = None
+    month_to: str | None = None
+    department_ids: list[int] = Field(default_factory=list)
+    dimension_filters: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ExpectedViewPeriodDetailRequest(BaseModel):
@@ -2072,35 +2077,48 @@ async def _expected_view_core(
     forecast_type = _quote_ident(forecast_columns["tipo"])
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
     department_map = {department.id: department for department in departments}
-    selected = department_map.get(body.department_id) if body.department_id is not None and not body.director_view else None
+    requested_department_ids = list(dict.fromkeys(body.department_ids or ([] if body.department_id is None else [body.department_id])))
+    if len(requested_department_ids) > 200:
+        raise HTTPException(status_code=422, detail="Selecione até 200 nós do organograma")
+    selected_departments = [department_map.get(node_id) for node_id in requested_department_ids] if (body.department_ids or not body.director_view) else []
+    if any(department is None for department in selected_departments):
+        raise HTTPException(status_code=422, detail="Um ou mais nós selecionados não existem ou estão inativos")
+    selected_departments = [department for department in selected_departments if department is not None]
+    selected = selected_departments[0] if selected_departments else None
     if body.department_id is not None and not body.director_view and not selected:
         raise HTTPException(status_code=422, detail="Departamento selecionado não existe ou está inativo")
-    if selected:
+    def department_path(department: Department) -> list[str]:
         scope_path: list[str] = []
-        current: Department | None = selected
+        current: Department | None = department
         seen: set[int] = set()
         while current and current.id not in seen:
             seen.add(current.id); scope_path.append((current.name or "").strip())
             current = department_map.get(current.parent_id) if current.parent_id else None
         scope_path.reverse()
+        if body.director_view and len(scope_path) >= 4:
+            scope_path[2], scope_path[3] = scope_path[3], scope_path[2]
+        return scope_path
+
+    if selected:
+        scope_path = department_path(selected)
     else:
-        scope_path = [part.strip() for part in body.director.split(" > ") if part.strip()] if body.director_view else [body.director]
+        scope_path = [part.strip() for part in body.director.split(" > ") if part.strip()] if body.director_view else ([body.director] if body.director.strip() else [])
     if len(scope_path) > 7:
         raise HTTPException(status_code=422, detail="A Visão Esperada suporta até 7 níveis de departamento")
     scope_level_order = [1, 2, 4, 3, 5, 6] if body.director_view else list(range(1, len(scope_path) + 1))
 
-    def scope_filter(columns: dict[str, str]) -> str:
+    def scope_filter(columns: dict[str, str], path: list[str]) -> str:
         checks: list[str] = []
         # A project can be reached through Showback or Chargeback. At project
         # level the executive realized value is the consumption total, not
         # only the small chargeback allocation. Historical Gold snapshots
         # also contain both orders for the Azure/Diretoria levels.
-        pairs = list(zip(scope_level_order, scope_path))
-        if len(scope_path) >= 5 and scope_path[1] in _CLOUD_BRANCHES:
+        pairs = list(zip(scope_level_order, path))
+        if len(path) >= 5 and path[1] in _CLOUD_BRANCHES:
             pairs = [(level, name) for level, name in pairs if level != 2]
             if body.director_view and "organograma_nivel_3" in columns and "organograma_nivel_4" in columns:
-                first = _quote_literal(scope_path[2])
-                second = _quote_literal(scope_path[3])
+                first = _quote_literal(path[2])
+                second = _quote_literal(path[3])
                 level3 = _quote_ident(columns["organograma_nivel_3"])
                 level4 = _quote_ident(columns["organograma_nivel_4"])
                 checks.append(f"(({level3} = {first} AND {level4} = {second}) OR ({level3} = {second} AND {level4} = {first}))")
@@ -2114,17 +2132,46 @@ async def _expected_view_core(
             )
         return " AND ".join(checks)
 
-    actual_scope_filter = scope_filter(actual_columns)
-    forecast_scope_filter = scope_filter(forecast_columns)
-    actual_cloud_filter = _expected_view_cloud_filter(scope_path, selected, actual_columns)
-    forecast_cloud_filter = _expected_view_cloud_filter(scope_path, selected, forecast_columns)
+    selected_paths = [(department_path(department), department) for department in selected_departments]
+    if not selected_paths:
+        selected_paths = [(scope_path, None)]
+    actual_scope_options = [
+        f"({scope_filter(actual_columns, path) or '1=1'}{_expected_view_cloud_filter(path, department, actual_columns)})"
+        for path, department in selected_paths
+    ]
+    forecast_scope_options = [
+        f"({scope_filter(forecast_columns, path) or '1=1'}{_expected_view_cloud_filter(path, department, forecast_columns)})"
+        for path, department in selected_paths
+    ]
+    actual_scope_filter = " OR ".join(actual_scope_options)
+    forecast_scope_filter = " OR ".join(forecast_scope_options)
+    actual_cloud_filter = forecast_cloud_filter = ""
+    # Column filter names are always resolved against the physical Gold schema.
+    # A dimension missing from the cube cannot silently degrade into a global result.
+    dimension_predicates: list[str] = []
+    for requested_column, values in (body.dimension_filters or {}).items():
+        if not values:
+            continue
+        actual_physical = actual_columns.get(requested_column.lower())
+        forecast_physical = forecast_columns.get(requested_column.lower())
+        if not actual_physical or not forecast_physical:
+            raise HTTPException(status_code=422, detail=f"Filtro dimensional indisponível na Gold: {requested_column}")
+        if len(values) > 500:
+            raise HTTPException(status_code=422, detail=f"Selecione até 500 valores em {requested_column}")
+        literals = ", ".join(_quote_literal(str(value).lower()) for value in values)
+        dimension_predicates.append(f"lower(CAST({_quote_ident(actual_physical)} AS VARCHAR)) IN ({literals})")
+    dimension_filter = " AND " + " AND ".join(dimension_predicates) if dimension_predicates else ""
     # year <= 0 = "todos os períodos": sem recorte de ano — traz todo o
     # realizado e todo o forecast disponível na Gold, inclusive meses futuros.
-    all_periods = body.year <= 0
+    if body.month_from and (len(body.month_from) != 6 or not body.month_from.isdigit()) or body.month_to and (len(body.month_to) != 6 or not body.month_to.isdigit()):
+        raise HTTPException(status_code=422, detail="Período deve usar YYYYMM")
+    if body.month_from and body.month_to and body.month_from > body.month_to:
+        raise HTTPException(status_code=422, detail="Mês inicial deve ser anterior ou igual ao mês final")
+    all_periods = body.year <= 0 and not body.month_from and not body.month_to
     year_start = _quote_literal(f"{max(body.year, 1):04d}01")
     year_end = _quote_literal(f"{max(body.year, 1) + 1:04d}01")
-    actual_year_clause = "" if all_periods else f" AND {actual_period} >= {year_start} AND {actual_period} < {year_end}"
-    forecast_year_clause = "" if all_periods else f" AND {forecast_period} >= {year_start} AND {forecast_period} < {year_end}"
+    actual_year_clause = "" if all_periods else (f" AND {actual_period} >= {_quote_literal(body.month_from)}" if body.month_from else f" AND {actual_period} >= {year_start}") + (f" AND {actual_period} <= {_quote_literal(body.month_to)}" if body.month_to else f" AND {actual_period} < {year_end}")
+    forecast_year_clause = "" if all_periods else (f" AND {forecast_period} >= {_quote_literal(body.month_from)}" if body.month_from else f" AND {forecast_period} >= {year_start}") + (f" AND {forecast_period} <= {_quote_literal(body.month_to)}" if body.month_to else f" AND {forecast_period} < {year_end}")
     # O mês corrente é aberto: a planning carrega só o forecast do restante
     # (baseline × dias restantes), aditivo sobre o realizado parcial da Gold.
     # Por isso ele precisa ser empilhado — mesma semântica da projeção do
@@ -2139,7 +2186,7 @@ async def _expected_view_core(
             f"""
             SELECT MIN({forecast_period}) AS period
             FROM iceberg.{GOLD}.{forecast_name}
-            WHERE {forecast_scope_filter}{forecast_cloud_filter}
+            WHERE ({forecast_scope_filter}){dimension_filter}
               {forecast_year_clause}
               AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
             """,
@@ -2174,7 +2221,7 @@ async def _expected_view_core(
              COALESCE(NULLIF(TRIM(CAST({actual_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
              SUM(COALESCE(TRY_CAST({actual_value} AS DOUBLE), 0)) AS actual_value
       FROM {actual_from}
-      WHERE {actual_scope_filter}{actual_cloud_filter}
+      WHERE ({actual_scope_filter}){dimension_filter}
         {actual_year_clause}
         {tipo_actual}
       GROUP BY 1, 2
@@ -2184,7 +2231,7 @@ async def _expected_view_core(
              COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
       FROM iceberg.{GOLD}.{forecast_name}
-      WHERE {forecast_scope_filter}{forecast_cloud_filter}
+      WHERE ({forecast_scope_filter}){dimension_filter}
         {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
         {forecast_from}
@@ -2236,7 +2283,7 @@ async def _expected_view_core(
                  {medida_sql},
                  SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
           FROM iceberg.{GOLD}.{forecast_name}
-          WHERE {forecast_scope_filter}{forecast_cloud_filter}
+          WHERE ({forecast_scope_filter}){dimension_filter}
             {forecast_year_clause}
             AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
           GROUP BY 1, 2{', 3' if medida_col else ''}
@@ -2265,26 +2312,31 @@ async def _expected_view_core(
         apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_value")
         apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_value")
     fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
-    # Em "todos os períodos" o orçamento/forecast manual continua ancorado no
-    # ano corrente (planejamento anual), enquanto a série de realizado/forecast
-    # da Gold cobre todos os meses disponíveis.
     budget_year = body.year if body.year > 0 else datetime.now().year
-    budget_entries = (await db.execute(
-        select(PlanningEntry).join(PlanningVersion).join(FinancialType).where(
+    if body.month_from and body.month_to:
+        budget_years = list(range(int(body.month_from[:4]), int(body.month_to[:4]) + 1))
+    elif body.month_from:
+        budget_years = [int(body.month_from[:4])]
+    elif body.month_to:
+        budget_years = [int(body.month_to[:4])]
+    else:
+        budget_years = [budget_year]
+    budget_rows = (await db.execute(
+        select(PlanningEntry, PlanningVersion.year).join(PlanningVersion).join(FinancialType).where(
             FinancialType.code == "orcamento",
-            PlanningVersion.year == budget_year,
+            PlanningVersion.year.in_(budget_years),
             PlanningVersion.is_current == True,
             PlanningEntry.entity_type == "department",
         )
-    )).scalars().all()
+    )).all() if not body.dimension_filters else []
     budget_by_period: dict[str, float] = {}
     budget_by_driver: dict[str, float] = {}
     children_by_parent: dict[int | None, list[Department]] = {}
     for department in departments:
         children_by_parent.setdefault(department.parent_id, []).append(department)
     selected_ids: set[int] = set()
-    if selected:
-        pending = [selected.id]
+    if selected_departments:
+        pending = [department.id for department in selected_departments]
         while pending:
             current_id = pending.pop()
             if current_id in selected_ids:
@@ -2307,12 +2359,14 @@ async def _expected_view_core(
                 return str(path[next_level - 1])
         return str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
 
-    for entry in budget_entries:
+    for entry, entry_year in budget_rows:
         legacy_match = planning_scope_match(entry.department_levels)
-        if (selected and entry.department_id in selected_ids) or (not selected and legacy_match):
-            period = f"{budget_year:04d}{entry.month:02d}"
+        if (selected_departments and entry.department_id in selected_ids) or (not selected_departments and legacy_match):
+            period = f"{entry_year:04d}{entry.month:02d}"
+            if (body.month_from and period < body.month_from) or (body.month_to and period > body.month_to):
+                continue
             budget_by_period[period] = budget_by_period.get(period, 0.0) + float(entry.value or 0)
-            if selected and entry.department_id:
+            if selected_departments and entry.department_id:
                 path = []
                 cursor = department_map.get(entry.department_id)
                 while cursor:
@@ -2328,28 +2382,30 @@ async def _expected_view_core(
     # the exact same aggregation rules as the orçamento (per department and its
     # descendants). Only future months surface here: periods that already have
     # realized data in Gold drop their manual forecast.
-    forecast_manual_entries = (await db.execute(
-        select(PlanningEntry).join(PlanningVersion).join(FinancialType).where(
+    forecast_manual_rows = (await db.execute(
+        select(PlanningEntry, PlanningVersion.year).join(PlanningVersion).join(FinancialType).where(
             FinancialType.code == "forecast-manual",
-            PlanningVersion.year == budget_year,
+            PlanningVersion.year.in_(budget_years),
             PlanningVersion.is_current == True,
             PlanningEntry.entity_type == "department",
         )
-    )).scalars().all()
+    )).all() if not body.dimension_filters else []
     realized_periods = await _fetch_realized_periods({})
     forecast_manual_by_period: dict[str, float] = {}
     forecast_manual_by_driver: dict[str, float] = {}
-    for entry in forecast_manual_entries:
+    for entry, entry_year in forecast_manual_rows:
         legacy_match = planning_scope_match(entry.department_levels)
-        if (selected and entry.department_id in selected_ids) or (not selected and legacy_match):
-            period = f"{budget_year:04d}{entry.month:02d}"
+        if (selected_departments and entry.department_id in selected_ids) or (not selected_departments and legacy_match):
+            period = f"{entry_year:04d}{entry.month:02d}"
+            if (body.month_from and period < body.month_from) or (body.month_to and period > body.month_to):
+                continue
             if period in realized_periods:
                 continue
             value = float(entry.value or 0)
             if abs(value) < 1e-12:
                 continue
             forecast_manual_by_period[period] = forecast_manual_by_period.get(period, 0.0) + value
-            if selected and entry.department_id:
+            if selected_departments and entry.department_id:
                 path = []
                 cursor = department_map.get(entry.department_id)
                 while cursor:
@@ -2416,7 +2472,7 @@ async def _expected_view_core(
          "variance": budget_by_driver.get(name, 0.0) - composed_forecast_by_driver.get(name, 0.0)}
         for name in sorted(set(budget_by_driver) | set(composed_forecast_by_driver))
     ]
-    return {"director": " > ".join(scope_path), "department_id": selected.id if selected else None, "rows": rows, "drivers": drivers,
+    return {"director": " > ".join(scope_path), "department_id": selected.id if selected else None, "budget_available": not bool(body.dimension_filters), "rows": rows, "drivers": drivers,
             "period_column": "period", "value_column": "cumulative_value"}
 
 

@@ -71,7 +71,7 @@ function DesvioRow({ item, ack }: { item: ForecastDesvioItem; ack: ForecastAck |
   );
 }
 
-export default function AcksWidget({ department }: { department?: string }) {
+export default function AcksWidget({ department, hideManualHighlights = false }: { department?: string; hideManualHighlights?: boolean }) {
   const [month, setMonth] = useState(previousMonth());
   const [acks, setAcks] = useState<ForecastAck[]>([]);
   const [positive, setPositive] = useState<ForecastDesvioItem[]>([]);
@@ -212,7 +212,7 @@ export default function AcksWidget({ department }: { department?: string }) {
             </Box>
           )}
           {/* Highlights — registros criados manualmente (sem run_id), como alertas ordenados */}
-          {orderedManual.length > 0 && (
+          {!hideManualHighlights && orderedManual.length > 0 && (
             <Box>
               <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
                 Highlights

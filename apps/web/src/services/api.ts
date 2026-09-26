@@ -2636,6 +2636,12 @@ export async function getForecastAcks(
   });
   return data;
 }
+export async function getExecutiveManualAcks(monthFrom: string, monthTo: string, departmentPaths: string[] = []): Promise<{ items: ForecastAck[]; row_count: number }> {
+  const params = new URLSearchParams({ month_from: monthFrom, month_to: monthTo });
+  departmentPaths.forEach((path) => params.append("department_path", path));
+  const { data } = await api.get("/forecast/accuracy/acks/range", { params });
+  return data;
+}
 export async function deactivateForecastAck(
   ackId: number,
 ): Promise<ForecastAck> {
@@ -3900,6 +3906,7 @@ type ExpectedViewResult = {
   department_id?: number;
   rows: ExpectedViewRow[];
   drivers: ExpectedViewDriver[];
+  budget_available?: boolean;
 };
 
 export async function getExpectedView(
@@ -3910,6 +3917,7 @@ export async function getExpectedView(
   includeSharedCost = false,
   directorView = false,
   goldTable = "dest_dm_cost_visao_completa",
+  scope?: { monthFrom?: string; monthTo?: string; departmentIds?: number[]; dimensionFilters?: Record<string, string[]> },
 ): Promise<ExpectedViewResult> {
   const key =
     director +
@@ -3922,7 +3930,7 @@ export async function getExpectedView(
     "|" +
     (directorView ? 1 : 0) +
     "|" +
-    goldTable;
+    goldTable + "|" + JSON.stringify(scope || {});
   const cached = expectedViewCache.get(key);
   if (cached) {
     if (cached.expiresAt > Date.now()) return cached.data;
@@ -3942,6 +3950,12 @@ export async function getExpectedView(
           include_shared_cost: includeSharedCost,
           director_view: directorView,
           gold_table: goldTable,
+          ...(scope ? {
+            month_from: scope.monthFrom,
+            month_to: scope.monthTo,
+            department_ids: scope.departmentIds || [],
+            dimension_filters: scope.dimensionFilters || {},
+          } : {}),
         },
         { timeout: 120000, signal: controller.signal },
       )
@@ -4674,6 +4688,17 @@ export interface GoldQueryFilter {
   values: (string | number)[];
 }
 
+export interface GoldQueryRequestV2 {
+  table: string;
+  rows?: string[];
+  measures?: GoldQueryMeasure[];
+  filters?: GoldQueryFilter[];
+  filter_groups?: GoldQueryFilter[][];
+  row_limit?: number;
+  sort_column?: string | null;
+  sort_direction?: "asc" | "desc";
+}
+
 export interface GoldQueryResult {
   table: string;
   columns: string[];
@@ -4699,12 +4724,29 @@ export async function queryDimonTable(body: {
   row_limit?: number;
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
+  filter_groups?: GoldQueryFilter[][];
 }): Promise<GoldQueryResult> {
   const key = `gold-query:${JSON.stringify(body)}`;
   return cachedAnalytics(key, async () => {
     const { data } = await api.post("/gold/query", body, { timeout: 180000 });
     return data as GoldQueryResult;
   });
+}
+
+export async function queryGoldDailyConsumption(body: GoldQueryRequestV2): Promise<{
+  table: string; available: boolean; day_column: string | null;
+  rows: Array<{ day: string; realizado: number }>; row_count: number;
+}> {
+  const { data } = await api.post("/gold/daily-consumption", body, { timeout: 180000 });
+  return data;
+}
+
+export async function getGoldFilterOptions(body: {
+  table: string; column: string; filters?: GoldQueryFilter[];
+  filter_groups?: GoldQueryFilter[][]; search?: string; offset?: number; limit?: number;
+}): Promise<{ values: string[]; offset: number; limit: number; has_more: boolean }> {
+  const { data } = await api.post("/gold/filter-options", body, { timeout: 120000 });
+  return data;
 }
 
 export async function getDimonInfo(table: string): Promise<GoldInfo> {

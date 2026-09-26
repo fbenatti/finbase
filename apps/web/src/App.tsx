@@ -32,6 +32,7 @@ import FinancialPlanning from "./pages/Planning/FinancialPlanning";
 import Savings from "./pages/Savings/Savings";
 import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
 import GoldDashboard from "./pages/GoldDashboard/GoldDashboard";
+import GoldDashboardV2 from "./pages/GoldDashboard/GoldDashboardV2";
 import Admin from "./pages/Admin/Admin";
 import SsoProviders from "./pages/Admin/SsoProviders";
 import Audit from "./pages/Admin/Audit";
@@ -90,6 +91,7 @@ function App() {
         <Route path="expected-view" element={<Navigate to="/gold-dashboard?tab=visao-executiva" replace />} />
         <Route path="dashboards-ia" element={<DashboardsIA />} />
         <Route path="gold-dashboard" element={<GoldDashboard />} />
+        <Route path="gold-dashboard-v2" element={<GoldDashboardV2 />} />
         {/* Rota legada: mantém links antigos vivos sem reintroduzir o nome no código. */}
         <Route path="gold-dashboard" element={<Navigate to="/gold-dashboard" replace />} />
         <Route path="visoes-consumo-ia" element={<AzurePtuOps />} />
