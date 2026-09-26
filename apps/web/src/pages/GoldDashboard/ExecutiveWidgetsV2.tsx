@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, ButtonGroup, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs, Typography } from "@mui/material";
 import Plot from "@/components/Plot";
-import { GoldInfo, GoldQueryFilter, GoldQueryResult, queryDimonTable, queryGoldDailyConsumption } from "../../services/api";
+import { GoldInfo, GoldQueryFilter, GoldQueryResult, queryDimonTable } from "../../services/api";
 
 const LENSES: Array<{ label: string; field: string }> = [
   { label: "VP", field: "organograma_nivel_3" },
@@ -30,7 +30,6 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
   const [error, setError] = useState("");
   const [monthly, setMonthly] = useState<GoldQueryResult | null>(null);
   const [annualHeat, setAnnualHeat] = useState<GoldQueryResult | null>(null);
-  const [daily, setDaily] = useState<{ available: boolean; rows: Array<{ day: string; realizado: number }> } | null>(null);
   const key = JSON.stringify([table, filters, filterGroups, lens, refreshKey, heatYear]);
   useEffect(() => {
     if (availableLenses.length && !availableLenses.some((item) => item.field === lens)) setLens(availableLenses[0].field);
@@ -48,9 +47,8 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
     Promise.all([
       queryDimonTable({ ...context, rows: [lens, "_billing_period"] }),
       queryDimonTable({ table, filters: yearFilters, filter_groups: filterGroups.length ? filterGroups : undefined, rows: [lens, "_billing_period"], row_limit: 10000 }),
-      queryGoldDailyConsumption({ table, filters: realized, filter_groups: filterGroups.length ? filterGroups : undefined, row_limit: 10000 }),
-    ]).then(([byMonth, heatmap, day]) => {
-      if (active) { setMonthly(byMonth); setAnnualHeat(heatmap); setDaily(day); }
+    ]).then(([byMonth, heatmap]) => {
+      if (active) { setMonthly(byMonth); setAnnualHeat(heatmap); }
     }).catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "Falha ao carregar os quadros executivos"); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -109,6 +107,5 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
       </>}
       <Typography variant="caption" color="text.secondary" display="block" mt={1}>Ajuda: Cost Concentration usa a última competência realizada dentro do período selecionado; Top 5 é calculado sobre o total do filtro antes do limite da lista. O Heatmap sempre cobre janeiro a dezembro do ano exibido. Clique em uma linha para aplicar sua dimensão aos filtros globais.</Typography>
     </Paper>
-    <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "20px", borderColor: "#e2e7f0", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}><Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Consumo realizado dia a dia</Typography><Typography variant="caption" color="text.secondary">Data real de consumo da fonte Gold, sem distribuir a competência mensal entre dias.</Typography>{daily?.available && daily.rows.length ? <Plot data={[{ x: daily.rows.map((row) => row.day), y: daily.rows.map((row) => Number(row.realizado)), type: "scatter", mode: "lines+markers", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra></extra>" } as any]} layout={{ height: 320, autosize: true, margin: { l: 80, r: 20, t: 20, b: 50 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ displayModeBar: false, responsive: true }} style={{ width: "100%" }} /> : <Alert severity="info" sx={{ mt: 1 }}>{daily?.available === false ? "A fonte atual não expõe uma data diária para esse recorte." : loading ? "Consultando datas diárias…" : "Sem dados diários no recorte atual."}</Alert>}</Paper>
   </>;
 }

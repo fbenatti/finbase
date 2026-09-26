@@ -47,7 +47,7 @@ const monthLong = (period: string) => `${monthNames[Number(period.slice(4, 6)) -
 const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
   ? `R$ ${(value / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MM`
   : `R$ ${money.format(value)}`;
-const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative";
+const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative.v2";
 const flattenDepartments = (
   nodes: Department[],
   parents: string[] = [],
@@ -120,7 +120,7 @@ export default function ExpectedViewV2({
   const [periodFilter, setPeriodFilter] = useState("current");
   const [cumulative, setCumulative] = useState(() => {
     const saved = window.localStorage.getItem(CUMULATIVE_STORAGE_KEY);
-    return saved === null ? true : saved === "1";
+    return saved === null ? false : saved === "1";
   });
   const [includeSharedCost, setIncludeSharedCost] = useState(
     params.get("shared") === "1",
