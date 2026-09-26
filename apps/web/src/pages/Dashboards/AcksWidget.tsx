@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import {
-  Alert, Box, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Table,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { ForecastAck, ForecastDesvioItem, getForecastAccuracyDesvios, getForecastAccuracyMonths, getForecastAcks } from "../../services/api";
+import { Add, Remove } from "@mui/icons-material";
+import { ForecastAck, ForecastDesvioItem, ForecastDesvioSubcat, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, getForecastAccuracyMonths, getForecastAcks } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -42,10 +43,12 @@ const SEVERITY_ORDER: Record<string, number> = {
   "crítico": 0, "critico": 0, "perigo": 1, "informação": 2, "informacao": 2, "sucesso": 3,
 };
 
-function DesvioRow({ item, ack }: { item: ForecastDesvioItem; ack: ForecastAck | undefined }) {
+function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle }: { item: ForecastDesvioItem; ack: ForecastAck | undefined; expanded: boolean; subcategories?: ForecastDesvioSubcat[]; loading: boolean; onToggle: () => void }) {
   const justified = Boolean(ack && ack.active !== false);
   return (
+    <>
     <TableRow hover>
+      <TableCell padding="checkbox"><IconButton size="small" aria-label={`${expanded ? "Fechar" : "Abrir"} detalhe de ${item.name}`} onClick={onToggle}>{expanded ? <Remove fontSize="small" /> : <Add fontSize="small" />}</IconButton></TableCell>
       <TableCell>
         <Typography variant="body2" fontWeight={600}>{item.name}</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", maxWidth: 240 }}>
@@ -68,6 +71,11 @@ function DesvioRow({ item, ack }: { item: ForecastDesvioItem; ack: ForecastAck |
         {money.format(Number(item.variance || 0))}
       </TableCell>
     </TableRow>
+    <TableRow><TableCell colSpan={6} sx={{ py: 0, borderBottom: expanded ? undefined : 0 }}><Collapse in={expanded} timeout="auto" unmountOnExit><Box sx={{ py: 1.5, px: 2 }}>
+      <Typography variant="subtitle2" fontWeight={700} mb={1}>Detalhe por subcategoria · {item.path.join(" > ")}</Typography>
+      {loading ? <CircularProgress size={20} /> : subcategories?.length ? <Table size="small"><TableHead><TableRow><TableCell>Subcategoria</TableCell><TableCell align="right">Projetado</TableCell><TableCell align="right">Realizado</TableCell><TableCell align="right">Desvio</TableCell></TableRow></TableHead><TableBody>{subcategories.map((sub) => <TableRow key={sub.subcategory}><TableCell>{sub.subcategory}</TableCell><TableCell align="right">{money.format(sub.forecast_value)}</TableCell><TableCell align="right">{money.format(sub.actual_value)}</TableCell><TableCell align="right">{money.format(sub.variance)}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria encontrada.</Typography>}
+    </Box></Collapse></TableCell></TableRow>
+    </>
   );
 }
 
@@ -76,6 +84,12 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
   const [acks, setAcks] = useState<ForecastAck[]>([]);
   const [positive, setPositive] = useState<ForecastDesvioItem[]>([]);
   const [negative, setNegative] = useState<ForecastDesvioItem[]>([]);
+  const [runId, setRunId] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [subcategories, setSubcategories] = useState<Record<string, ForecastDesvioSubcat[]>>({});
+  const [subcatLoading, setSubcatLoading] = useState<string | null>(null);
+  const [showAllPositive, setShowAllPositive] = useState(false);
+  const [showAllNegative, setShowAllNegative] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [desviosWarning, setDesviosWarning] = useState("");
@@ -88,6 +102,11 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
     setDesviosWarning("");
     setPositive([]);
     setNegative([]);
+    setRunId(null);
+    setExpanded(null);
+    setSubcategories({});
+    setShowAllPositive(false);
+    setShowAllNegative(false);
     // Só acks ativos aparecem no dashboard — desativados ficam fora.
     getForecastAcks(month, department || undefined, true)
       .then(result => { if (!cancelled) setAcks(result.items); })
@@ -103,21 +122,34 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
           if (!cancelled) setDesviosWarning(`Nenhum simulado de acurácia para ${prettyMonth(month)} — sem Top 5 de desvios.`);
           return;
         }
-        return getForecastAccuracyDesvios(run.run_id, month, department || undefined)
+        setRunId(run.run_id);
+        return getForecastAccuracyDesvios(run.run_id, month, department || undefined, undefined, 0)
           .then(desvios => {
             if (cancelled) return;
             // No widget executivo, os grupos recebidos do endpoint chegam
             // invertidos em relação ao rótulo exibido (subestimou = gastou
             // mais; superestimou = gastou menos). Corrige somente a camada
             // de apresentação, sem alterar a semântica da API nas demais telas.
-            setPositive(desvios.negative.slice(0, 5));
-            setNegative(desvios.positive.slice(0, 5));
+            setPositive(desvios.negative);
+            setNegative(desvios.positive);
           })
           .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
       })
       .catch(e => { if (!cancelled) setDesviosWarning(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
   }, [month, department]);
+
+  const toggleDetail = (item: ForecastDesvioItem) => {
+    const key = item.path.join(" > ");
+    if (expanded === key) { setExpanded(null); return; }
+    setExpanded(key);
+    if (runId == null || subcategories[key]) return;
+    setSubcatLoading(key);
+    getForecastAccuracyDesviosSubcategories(runId, month, key, department || undefined)
+      .then((result) => setSubcategories((current) => ({ ...current, [key]: result.records })))
+      .catch((reason) => setDesviosWarning(reason instanceof Error ? reason.message : String(reason)))
+      .finally(() => setSubcatLoading(null));
+  };
 
   const ackByPath = new Map<string, ForecastAck>();
   acks.forEach(ack => ackByPath.set(ack.department_path.join(" > "), ack));
@@ -163,12 +195,13 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
           {positive.length > 0 && (
             <Box sx={{ mb: 2 }}>
               <Typography variant="subtitle2" fontWeight={700} sx={{ color: "#DC2626", mb: 0.5 }}>
-                Top 5 subestimou (gastou mais)
+                {showAllPositive ? "Subestimou (gastou mais)" : "Top 5 subestimou (gastou mais)"}
               </Typography>
               <TableContainer>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell />
                       <TableCell>Departamento</TableCell>
                       <TableCell>Motivo</TableCell>
                       <TableCell align="right">Projetado</TableCell>
@@ -177,24 +210,26 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {positive.map(item => (
-                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} />
+                    {(showAllPositive ? positive : positive.slice(0, 5)).map(item => (
+                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} expanded={expanded === item.path.join(" > ")} subcategories={subcategories[item.path.join(" > ")]} loading={subcatLoading === item.path.join(" > ")} onToggle={() => toggleDetail(item)} />
                     ))}
                   </TableBody>
-                </Table>
+              </Table>
               </TableContainer>
+              {positive.length > 5 && <Button size="small" onClick={() => setShowAllPositive((value) => !value)}>{showAllPositive ? "Ver menos" : "Ver tudo"}</Button>}
             </Box>
           )}
           {/* Top 5 negativos (superestimou) */}
           {negative.length > 0 && (
             <Box sx={{ mb: 2 }}>
               <Typography variant="subtitle2" fontWeight={700} sx={{ color: "#16A34A", mb: 0.5 }}>
-                Top 5 superestimou (gastou menos)
+                {showAllNegative ? "Superestimou (gastou menos)" : "Top 5 superestimou (gastou menos)"}
               </Typography>
               <TableContainer>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell />
                       <TableCell>Departamento</TableCell>
                       <TableCell>Motivo</TableCell>
                       <TableCell align="right">Projetado</TableCell>
@@ -203,12 +238,13 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {negative.map(item => (
-                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} />
+                    {(showAllNegative ? negative : negative.slice(0, 5)).map(item => (
+                      <DesvioRow key={item.path.join(" > ")} item={item} ack={ackByPath.get(item.path.join(" > "))} expanded={expanded === item.path.join(" > ")} subcategories={subcategories[item.path.join(" > ")]} loading={subcatLoading === item.path.join(" > ")} onToggle={() => toggleDetail(item)} />
                     ))}
                   </TableBody>
-                </Table>
+              </Table>
               </TableContainer>
+              {negative.length > 5 && <Button size="small" onClick={() => setShowAllNegative((value) => !value)}>{showAllNegative ? "Ver menos" : "Ver tudo"}</Button>}
             </Box>
           )}
           {/* Highlights — registros criados manualmente (sem run_id), como alertas ordenados */}

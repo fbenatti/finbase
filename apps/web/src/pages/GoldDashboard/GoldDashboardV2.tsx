@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Chip, FormControlLabel, IconButton, Menu, MenuItem, Paper, Popover, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Chip, FormControlLabel, IconButton, Paper, Popover, Stack, Switch, TextField, Typography } from "@mui/material";
 import { Add, CalendarMonth, Close, FilterAltOff, Refresh } from "@mui/icons-material";
 import ExpectedViewV2 from "../Dashboards/ExpectedViewV2";
 import ExecutiveWidgetsV2 from "./ExecutiveWidgetsV2";
@@ -41,7 +41,12 @@ export default function GoldDashboardV2() {
     if (!validRange) { setHighlights([]); setHighlightsLoading(false); return; }
     let active = true;
     Promise.all([getDimonInfo(TABLE), getDepartments()]).then(([gold, departments]) => {
-      if (active) { setInfo(gold); setOrg(departments); }
+      if (active) {
+        setInfo(gold);
+        setOrg(departments);
+        const root = flattenDepartments(departments).find((node) => node.path === "Consumo Cloud");
+        if (root) setSelectedNodes([root]);
+      }
     }).catch((reason) => { if (active) setError(formatApiError(reason, "Falha ao carregar o contexto do dashboard")); });
     return () => { active = false; };
   }, []);
@@ -57,8 +62,7 @@ export default function GoldDashboardV2() {
 
   const chooseNodes = (ids: number[]) => {
     const values = ids.map((id) => flat.find((node) => node.id === id)).filter((node): node is Department & { path: string } => Boolean(node));
-    const compressed = values.filter((node) => !values.some((parent) => parent.id !== node.id && node.path.startsWith(`${parent.path} > `)));
-    setSelectedNodes(compressed);
+    setSelectedNodes(values);
   };
   const setDimensionValues = (column: string, values: string[]) => setFilters((current) => {
     const remaining = current.filter((filter) => filter.column !== column);
@@ -94,6 +98,7 @@ export default function GoldDashboardV2() {
       .filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()))
       .sort((a, b) => labelColumn(a).localeCompare(labelColumn(b), "pt-BR"));
   }, [info]);
+  const availableDimensionColumns = dimensionColumns.filter((column) => !filters.some((item) => item.column === column));
   const dimensionFilters = useMemo(() => Object.fromEntries(filters.filter((item) => item.values.length > 0).map((item) => [item.column, item.values])), [filters]);
   const selectedNodeIds = useMemo(() => selectedNodes.map((node) => node.id), [selectedNodes]);
   const scopeFilters = useMemo<GoldQueryFilter[]>(() => {
@@ -110,10 +115,12 @@ export default function GoldDashboardV2() {
   const chartFilters = scopeFilters;
   const organizationGroups = useMemo<GoldQueryFilter[][]>(() => selectedNodes.map((node) => {
     const path = node.path.split(" > ");
+    if (path[0] === "Consumo Cloud") path.shift();
+    if (!path.length) return [];
     if (directorView && path.length >= 4) [path[2], path[3]] = [path[3], path[2]];
     const levels = directorView ? [1, 2, 4, 3, 5, 6] : [1, 2, 3, 4, 5, 6];
-    return path.slice(0, 6).map((value, index) => ({ column: `organograma_nivel_${levels[index] || index + 1}`, operator: "IN", values: [value] }));
-  }), [selectedNodes, directorView]);
+    return path.slice(0, 6).map((value, index) => ({ column: `organograma_nivel_${levels[index] || index + 1}`, operator: "IN" as const, values: [value] }));
+  }).filter((group) => group.length > 0), [selectedNodes, directorView]);
   const filterContextKey = JSON.stringify({ monthFrom, monthTo, nodes: selectedNodes.map((n) => n.id), directorView, filters, sharedCost, refresh });
   const highlightsWidget = <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
     <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>EXECUTIVE HIGHLIGHTS</Typography>
@@ -140,13 +147,19 @@ export default function GoldDashboardV2() {
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
           <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", whiteSpace: "nowrap" }}>Adicionar filtro FOCUS{dimensionColumns.length > 0 ? ` · ${dimensionColumns.length}` : ""}</Button>
-          <Menu anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} PaperProps={{ sx: { maxHeight: 420, minWidth: 250, borderRadius: "12px" } }}>
-            <MenuItem disabled sx={{ opacity: "1 !important", fontWeight: 800, fontSize: 12, color: "text.secondary" }}>COLUNAS FILTRÁVEIS DO CUBO</MenuItem>
-            {dimensionColumns.filter((column) => !filters.some((item) => item.column === column)).map((column) => <MenuItem key={column} onClick={() => addDimension(column)}>{labelColumn(column)}</MenuItem>)}
-            {!info && <MenuItem disabled>Carregando esquema Gold…</MenuItem>}
-            {info && dimensionColumns.length === 0 && <MenuItem disabled>Nenhuma dimensão filtrável foi encontrada.</MenuItem>}
-            {dimensionColumns.every((column) => filters.some((item) => item.column === column)) && <MenuItem disabled>Todas as colunas FOCUS já foram adicionadas</MenuItem>}
-          </Menu>
+          <Popover anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} PaperProps={{ sx: { p: 1.25, width: 340, borderRadius: "12px" } }}>
+            <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
+            <Autocomplete
+              autoHighlight
+              open
+              disablePortal
+              options={availableDimensionColumns}
+              getOptionLabel={labelColumn}
+              onChange={(_, column) => { if (column) addDimension(column); }}
+              noOptionsText={!info ? "Carregando esquema Gold…" : dimensionColumns.length ? "Todas as colunas FOCUS já foram adicionadas" : "Nenhuma dimensão filtrável foi encontrada."}
+              renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar campo FOCUS" />}
+            />
+          </Popover>
           <Button startIcon={<FilterAltOff />} onClick={clear}>Limpar</Button>
         </Stack>
         <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
@@ -172,7 +185,7 @@ export default function GoldDashboardV2() {
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.</Typography>
         {monthFrom > monthTo && <Alert severity="warning" sx={{ mt: 1 }}>O mês inicial precisa ser anterior ou igual ao final.</Alert>}
       </Paper>
-      {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} groupByOptions={dimensionColumns} chartFilters={chartFilters} chartFilterGroups={organizationGroups} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} directorView={directorView} organizationPathDepth={selectedNodes.length ? Math.min(...selectedNodes.map((node) => node.path.split(" > ").length)) : 0} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
+      {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} groupByOptions={dimensionColumns} chartHasType={Boolean(info?.columns.some((column) => column.name.toLowerCase() === "tipo"))} chartFilters={chartFilters} chartFilterGroups={organizationGroups} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
       {highlightsWidget}
     </Paper></Box>
   </Box>;

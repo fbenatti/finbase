@@ -78,6 +78,7 @@ export default function ExpectedViewV2({
   organizationNodeIds = [],
   includeSharedCost: externalSharedCost,
   groupByOptions = [],
+  chartHasType = false,
   chartFilters = [],
   chartFilterGroups = [],
 }: {
@@ -94,6 +95,7 @@ export default function ExpectedViewV2({
   organizationNodeIds?: number[];
   includeSharedCost?: boolean;
   groupByOptions?: string[];
+  chartHasType?: boolean;
   chartFilters?: GoldQueryFilter[];
   chartFilterGroups?: GoldQueryFilter[][];
 } = {}) {
@@ -130,6 +132,10 @@ export default function ExpectedViewV2({
   const [periodFilter, setPeriodFilter] = useState("current");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("accumulated");
   const [groupBy, setGroupBy] = useState("");
+  const orderedGroupByOptions = useMemo(() => [...groupByOptions].sort((a, b) => {
+    const label = (field: string) => field.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+    return label(a).localeCompare(label(b), "pt-BR", { sensitivity: "base" });
+  }), [groupByOptions]);
   const [groupedGold, setGroupedGold] = useState<GoldQueryResult | null>(null);
   const [dailyGold, setDailyGold] = useState<{ available: boolean; rows: Array<{ day: string; realizado: number; [column: string]: unknown }> } | null>(null);
   const [chartQueryLoading, setChartQueryLoading] = useState(false);
@@ -275,7 +281,7 @@ export default function ExpectedViewV2({
     }
     const query = chartGranularity === "daily"
       ? queryGoldDailyConsumption({ table, filters: chartFilters, filter_groups: chartFilterGroups, group_by: groupBy || null, row_limit: 10000 })
-      : queryDimonTable({ table, rows: [groupBy, "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: chartFilters, filter_groups: chartFilterGroups, row_limit: 10000 });
+      : queryDimonTable({ table, rows: [groupBy, "_billing_period", ...(chartHasType ? ["tipo"] : [])], measures: [{ column: "realizado", aggregation: "SUM" }], filters: chartFilters, filter_groups: chartFilterGroups, row_limit: 10000 });
     query.then((result) => {
       if (!active) return;
       if (chartGranularity === "daily") setDailyGold(result as { available: boolean; rows: Array<{ day: string; realizado: number; [column: string]: unknown }> });
@@ -284,7 +290,7 @@ export default function ExpectedViewV2({
       if (active) setChartQueryError(formatApiError(reason, "Não foi possível carregar a série do gráfico"));
     }).finally(() => { if (active) setChartQueryLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [embedded, table, chartGranularity, groupBy, chartFilters, chartFilterGroups, scopeKey]);
+  }, [embedded, table, chartGranularity, groupBy, chartFilters, chartFilterGroups, scopeKey, chartHasType]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows = periodFrom && periodTo
     ? rows.filter((row) => row.period >= periodFrom && row.period <= periodTo)
@@ -600,25 +606,33 @@ export default function ExpectedViewV2({
       ];
   const groupedRows = groupedGold?.rows || [];
   const dailyRows = dailyGold?.rows || [];
+  // Trino returns source column names with their physical casing. Gold
+  // metadata and some logical fields are lowercase, so resolve row values
+  // case-insensitively instead of silently treating every row as missing.
+  const groupedField = (row: Record<string, unknown>, field: string) => {
+    if (field in row) return row[field];
+    const key = Object.keys(row).find((candidate) => candidate.toLowerCase() === field.toLowerCase());
+    return key ? row[key] : undefined;
+  };
   const groupedLabels = chartGranularity === "daily"
-    ? [...new Set(dailyRows.map((row) => String(row.day)))].sort()
+    ? [...new Set(dailyRows.map((row) => String(groupedField(row, "day"))))].sort()
     : filteredRows.map((row) => row.period);
   const groupedSource = chartGranularity === "daily" ? dailyRows : groupedRows;
   const groupKeyField = chartGranularity === "daily" ? "day" : "_billing_period";
   const groupNames = groupBy
-    ? [...new Set(groupedSource.map((row) => String(row[groupBy] ?? "Não informado")))].sort((a, b) => {
-        const sum = (name: string) => groupedSource.filter((row) => String(row[groupBy] ?? "Não informado") === name && String(row.tipo ?? "").toLowerCase() !== "forecast").reduce((total, row) => total + Number(row.realizado || 0), 0);
+    ? [...new Set(groupedSource.map((row) => String(groupedField(row, groupBy) ?? "Não informado")))].sort((a, b) => {
+        const sum = (name: string) => groupedSource.filter((row) => String(groupedField(row, groupBy) ?? "Não informado") === name && String(groupedField(row, "tipo") ?? "").toLowerCase() !== "forecast").reduce((total, row) => total + Number(groupedField(row, "realizado") || 0), 0);
         return sum(b) - sum(a);
       })
     : ["Realizado"];
   const visibleGroups = groupNames.slice(0, 6);
   const rowValues = (name: string, period: string, kind: "actual" | "forecast") => groupedSource
     .filter((row) => {
-      const rowType = String(row.tipo ?? "").trim().toLowerCase();
+      const rowType = String(groupedField(row, "tipo") ?? "").trim().toLowerCase();
       const matchesKind = kind === "forecast" ? rowType === "forecast" : rowType !== "forecast" && rowType !== "rateio";
-      return String(row[groupKeyField]) === period && (!groupBy || String(row[groupBy] ?? "Não informado") === name) && matchesKind;
+      return String(groupedField(row, groupKeyField)) === period && (!groupBy || String(groupedField(row, groupBy) ?? "Não informado") === name) && matchesKind;
     })
-    .reduce((total, row) => total + Number(row.realizado || 0), 0);
+    .reduce((total, row) => total + Number(groupedField(row, "realizado") || 0), 0);
   const forecastEligible = (period: string) => {
     const expectedRow = filteredRows.find((row) => row.period === period);
     return Boolean(expectedRow && (expectedRow.actual_value == null || isCurrentMonth(expectedRow)));
@@ -1185,7 +1199,7 @@ export default function ExpectedViewV2({
                       <InputLabel>Agrupar por</InputLabel>
                       <Select label="Agrupar por" value={groupBy} onChange={(event) => setGroupBy(String(event.target.value))}>
                         <MenuItem value="">Nenhum</MenuItem>
-                        {groupByOptions.map((field) => <MenuItem key={field} value={field}>{field.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase())}</MenuItem>)}
+                        {orderedGroupByOptions.map((field) => <MenuItem key={field} value={field}>{field.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase())}</MenuItem>)}
                       </Select>
                     </FormControl>
                     <FormControl size="small" sx={{ minWidth: 170 }}>
@@ -1205,7 +1219,7 @@ export default function ExpectedViewV2({
                     ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Carregando série no Trino…</Typography></Stack>
                     : chartGranularity === "daily" && !dailyGold?.rows.length
                       ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários disponíveis neste período.</Alert>
-                      : groupBy && chartGranularity !== "daily" && !groupedGold?.rows.length
+                      : groupBy && chartGranularity !== "daily" && groupedGold && !groupedGold.rows.length
                         ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados realizados para agrupar por esta coluna no período selecionado.</Alert>
                         : <Plot
                   useResizeHandler

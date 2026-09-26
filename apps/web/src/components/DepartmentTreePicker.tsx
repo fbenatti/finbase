@@ -249,11 +249,13 @@ export function DepartmentTreeMultiPicker({
       onChange(values.filter((id) => id !== department.id));
       return;
     }
-    // A selected parent already includes every child; avoid duplicate query paths.
-    if (selectedPaths.some((parent) => item.path.startsWith(`${parent.path} > `))) return;
-    const next = selectedPaths
-      .filter((child) => !child.path.startsWith(`${item.path} > `))
-      .map((entry) => entry.id);
+    // A selection represents one hierarchy level: allow several siblings,
+    // but changing level replaces the previous selection (including parents).
+    const depth = item.path.split(" > ").length;
+    const selectedAtSameDepth = selectedPaths.filter(
+      (entry) => entry.path.split(" > ").length === depth,
+    );
+    const next = selectedAtSameDepth.map((entry) => entry.id);
     onChange([...next, department.id]);
   };
   const term = search.trim().toLocaleLowerCase("pt-BR");
