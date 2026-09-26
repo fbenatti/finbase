@@ -630,16 +630,11 @@ export default function ExpectedViewV2({
       return [{ x: groupedLabels, y: plotted, type: "bar", name: "Outros", marker: { color: "#aab3c2" } }];
     })() : []),
   ];
-  const accumulatedBarData = chartData
-    .filter((trace) => ["Realizado", "Orçamento", "Forecast", "Forecast manual", "Custo compartilhado"].includes(trace.name))
-    .map((trace) => ({ ...trace, type: "bar", mode: undefined, fill: undefined, fillcolor: undefined, line: undefined, marker: { color: trace.marker?.color || trace.line?.color || "#6416dc" } }));
   const chartDataForRender = chartGranularity === "daily"
     ? dimensionTraces
     : groupBy
       ? dimensionTraces
-      : cumulative
-        ? accumulatedBarData
-        : chartData;
+      : chartData;
   const chartLayout: any = {
     autosize: true,
     barmode: "stack",
@@ -672,13 +667,14 @@ export default function ExpectedViewV2({
   };
   const chartLayoutForRender = {
     ...chartLayout,
-    barmode: chartGranularity === "accumulated" && !groupBy ? "group" : "stack",
+    barmode: chartGranularity === "daily" || groupBy ? "stack" : chartLayout.barmode,
     xaxis: {
       ...chartLayout.xaxis,
-      type: chartGranularity === "daily" ? "date" : "category",
-      tickformat: chartGranularity === "daily" ? "%d/%m" : "%b %Y",
-      dtick: chartGranularity === "daily" ? undefined : "M1",
-      tickangle: chartGranularity === "daily" ? -35 : chartLayout.xaxis.tickangle,
+      ...(chartGranularity === "daily"
+        ? { type: "date", tickformat: "%d/%m", dtick: undefined, tickangle: -35 }
+        : groupBy
+          ? { type: "category", tickformat: undefined, dtick: undefined }
+          : {}),
     },
   };
   const sortedDrivers = drivers

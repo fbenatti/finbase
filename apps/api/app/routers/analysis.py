@@ -2213,8 +2213,16 @@ async def _expected_view_core(
     else:
         driver_level = min(len(scope_path) + 1, 7)
     driver_key = f"organograma_nivel_{driver_level}"
-    actual_driver = _quote_ident(actual_columns.get(driver_key, actual_columns[f"organograma_nivel_{len(scope_path)}"]))
-    forecast_driver = _quote_ident(forecast_columns.get(driver_key, forecast_columns[f"organograma_nivel_{len(scope_path)}"]))
+    # dict.get evaluates its default eagerly. At the root (empty scope_path)
+    # the old fallback tried to resolve organograma_nivel_0 even when level 1
+    # existed, causing the whole executive view request to fail with HTTP 500.
+    fallback_driver_key = f"organograma_nivel_{max(1, len(scope_path))}"
+    actual_driver_column = actual_columns.get(driver_key) or actual_columns.get(fallback_driver_key) or actual_columns.get("organograma_nivel_1")
+    forecast_driver_column = forecast_columns.get(driver_key) or forecast_columns.get(fallback_driver_key) or forecast_columns.get("organograma_nivel_1")
+    if not actual_driver_column or not forecast_driver_column:
+        raise HTTPException(status_code=422, detail="A tabela Gold não possui uma coluna de organograma para detalhar os drivers")
+    actual_driver = _quote_ident(actual_driver_column)
+    forecast_driver = _quote_ident(forecast_driver_column)
     actual_from = f"iceberg.{GOLD}.{actual_name}"
     actual_sql = f"""
       SELECT {actual_period} AS period,
