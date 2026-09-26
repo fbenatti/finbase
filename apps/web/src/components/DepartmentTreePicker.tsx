@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 import {
-  Box, Button, Typography, Menu, List, ListItemButton, ListItemText, Collapse, IconButton, TextField,
+  Box, Button, Checkbox, Typography, Menu, List, ListItemButton, ListItemText, Collapse, IconButton, TextField,
 } from "@mui/material";
 import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import type { Department } from "../services/api";
@@ -214,4 +214,77 @@ export default function DepartmentTreePicker({
       )}
     </Box>
   );
+}
+
+/** Hierarchical organogram picker with persistent menu and multiple selection. */
+export function DepartmentTreeMultiPicker({
+  departments,
+  values,
+  onChange,
+  label = ORG.node,
+  placeholder = ORG.selectNode,
+}: {
+  departments: Department[];
+  values: number[];
+  onChange: (departmentIds: number[]) => void;
+  label?: string;
+  placeholder?: string;
+}) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [search, setSearch] = useState("");
+  const flat = useMemo(() => flattenDepartments(departments), [departments]);
+  const selected = useMemo(() => new Set(values), [values]);
+  const selectedPaths = useMemo(() => flat.filter((item) => selected.has(item.id)), [flat, selected]);
+  const expandedBySelection = () => new Set(selectedPaths.flatMap((item) => [...ancestorIdsFromFlat(flat, item.id)]));
+  const toggleExpanded = (id: number) => setExpanded((previous) => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleSelection = (department: Department) => {
+    const item = flat.find((entry) => entry.id === department.id);
+    if (!item) return;
+    if (selected.has(department.id)) {
+      onChange(values.filter((id) => id !== department.id));
+      return;
+    }
+    // A selected parent already includes every child; avoid duplicate query paths.
+    if (selectedPaths.some((parent) => item.path.startsWith(`${parent.path} > `))) return;
+    const next = selectedPaths
+      .filter((child) => !child.path.startsWith(`${item.path} > `))
+      .map((entry) => entry.id);
+    onChange([...next, department.id]);
+  };
+  const term = search.trim().toLocaleLowerCase("pt-BR");
+  const matches = term ? flat.filter((item) => item.active && `${item.name} ${item.path}`.toLocaleLowerCase("pt-BR").includes(term)).slice(0, 100) : [];
+  const renderNode = (department: Department, depth = 0): ReactElement | null => {
+    if (!department.active) return null;
+    const children = (department.children || []).filter((child) => child.active);
+    const isExpanded = expanded.has(department.id);
+    return <Box key={department.id}>
+      <ListItemButton selected={selected.has(department.id)} onClick={() => toggleSelection(department)} sx={{ pl: 1 + depth * 2, py: 0.25 }}>
+        <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
+          {children.length > 0 && <IconButton size="small" tabIndex={-1} onClick={(event) => { event.stopPropagation(); toggleExpanded(department.id); }}>{isExpanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}</IconButton>}
+        </Box>
+        <Checkbox size="small" checked={selected.has(department.id)} tabIndex={-1} sx={{ p: .5, mr: .5 }} />
+        <ListItemText primary={department.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
+      </ListItemButton>
+      <Collapse in={isExpanded} timeout="auto" unmountOnExit>{children.map((child) => renderNode(child, depth + 1))}</Collapse>
+    </Box>;
+  };
+  const display = selectedPaths.length ? `${selectedPaths.length} nível(is) selecionado(s)` : placeholder;
+  return <Box>
+    <Typography variant="caption" color="text.secondary">{label}</Typography>
+    <Button variant="outlined" fullWidth onClick={(event) => { setExpanded(expandedBySelection()); setAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, justifyContent: "flex-start", textTransform: "none", textAlign: "left", borderRadius: "12px", color: "#111b4e", borderColor: "#dce2ee" }}>{display}</Button>
+    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => { setAnchor(null); setSearch(""); }} disablePortal PaperProps={{ sx: { width: 460, maxHeight: 560, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>Navegue pela hierarquia e marque um ou mais níveis. Marcar um nível pai inclui seus descendentes.</Typography>
+      <Box sx={{ px: 1.5, pt: 1 }}><TextField autoFocus fullWidth size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou caminho completo" /></Box>
+      <List dense disablePadding sx={{ maxHeight: 390, overflow: "auto", mt: .5 }}>
+        {term ? matches.map((item) => <ListItemButton key={item.id} selected={selected.has(item.id)} onClick={() => toggleSelection(item)} sx={{ py: .5 }}><Checkbox size="small" checked={selected.has(item.id)} tabIndex={-1} sx={{ p: .5, mr: .75 }} /><ListItemText primary={item.name} secondary={item.path} primaryTypographyProps={{ variant: "body2", fontWeight: 600 }} secondaryTypographyProps={{ variant: "caption", noWrap: true }} /></ListItemButton>) : departments.filter((item) => item.active).map((item) => renderNode(item))}
+        {term && matches.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>Nenhum nível encontrado.</Typography>}
+      </List>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 1.5, py: 1, borderTop: "1px solid #edf0f6" }}><Button size="small" color="inherit" onClick={() => onChange([])}>Limpar seleção</Button><Button size="small" variant="contained" onClick={() => { setAnchor(null); setSearch(""); }} sx={{ bgcolor: "#6416dc", "&:hover": { bgcolor: "#5311b8" } }}>Concluir · {values.length}</Button></Box>
+    </Menu>
+  </Box>;
 }

@@ -725,9 +725,13 @@ export default function ExpectedViewV2({
       sx={{
         flex: 1,
         minWidth: 190,
+        border: "1px solid #e2e7f0",
+        borderRadius: "16px",
         borderTop: `3px solid ${color}`,
+        boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
         cursor: onOpen ? "pointer" : "default",
-        "&:hover": onOpen ? { boxShadow: 3 } : undefined,
+        "&:hover": onOpen ? { boxShadow: "0 12px 28px rgba(24, 39, 75, 0.10)", transform: "translateY(-1px)" } : undefined,
+        transition: "box-shadow .16s ease, transform .16s ease",
       }}
     >
       <CardContent>
@@ -1128,24 +1132,16 @@ export default function ExpectedViewV2({
             {card("Variação", budgetAvailable ? variance : "Sem base", variance >= 0 ? "#16A34A" : "#EF4444")}
             {card("Forecast", forecastOnly, "#7C3AED", undefined, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
           </Stack>
-          <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6">Tendência mensal · Forecast × Realizado</Typography>
-            <Typography variant="caption" color="text.secondary">Consumo realizado e projeção exibidos por competência; competências futuras sem dados permanecem ausentes.</Typography>
-            <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
-              { x: filteredRows.filter((row) => row.actual_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.actual_value != null).map((row) => Number(row.actual_value || 0)), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#F2A900", width: 3 } },
-              { x: filteredRows.filter((row) => row.forecast_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.forecast_value != null).map((row) => Number(row.forecast_value || 0)), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#16A34A", width: 3 } },
-            ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 45 }, yaxis: { tickprefix: "R$ ", separatethousands: true }, legend: { orientation: "h" } }} config={{ responsive: true, displaylogo: false }} />
-          </Paper>
           <Grid container spacing={2}>
             <Grid item xs={12} md={7}>
               <Paper
                 elevation={0}
                 sx={{
                   p: 2,
-                  borderRadius: 2,
-                  bgcolor: "background.paper",
-                  border: "1px solid",
-                  borderColor: "divider",
+                  borderRadius: "18px",
+                  bgcolor: "#fff",
+                  border: "1px solid #e2e7f0",
+                  boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
                 }}
               >
                 <Stack
@@ -1193,10 +1189,10 @@ export default function ExpectedViewV2({
                 elevation={0}
                 sx={{
                   p: 2,
-                  borderRadius: 2,
-                  bgcolor: "background.paper",
-                  border: "1px solid",
-                  borderColor: "divider",
+                  borderRadius: "18px",
+                  bgcolor: "#fff",
+                  border: "1px solid #e2e7f0",
+                  boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
                 }}
               >
                 <Typography variant="h6">
@@ -1221,15 +1217,25 @@ export default function ExpectedViewV2({
             </Grid>
           </Grid>
 
+          <Paper variant="outlined" sx={{ p: 2, mb: 2, mt: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+            <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
+            <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Tendência mensal · Forecast × Realizado</Typography>
+            <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; competências futuras sem dados permanecem ausentes.</Typography>
+            <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
+              { x: filteredRows.filter((row) => row.actual_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.actual_value != null).map((row) => Number(row.actual_value || 0)), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
+              { x: filteredRows.filter((row) => row.forecast_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.forecast_value != null).map((row) => Number(row.forecast_value || 0)), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
+            ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 45 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, xaxis: { gridcolor: "#fff" }, legend: { orientation: "h" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
+          </Paper>
+
           <Paper
             elevation={0}
             sx={{
               mt: 2,
               p: 2,
-              borderRadius: 2,
-              bgcolor: "background.paper",
-              border: "1px solid",
-              borderColor: "divider",
+              borderRadius: "18px",
+              bgcolor: "#fff",
+              border: "1px solid #e2e7f0",
+              boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
             }}
           >
             <Stack
@@ -1392,10 +1398,10 @@ export default function ExpectedViewV2({
           elevation={0}
           sx={{
             p: { xs: 2, md: 2.5 },
-            borderRadius: 2,
-            bgcolor: "background.paper",
-            border: "1px solid",
-            borderColor: "divider",
+            borderRadius: "18px",
+            bgcolor: "#fff",
+            border: "1px solid #e2e7f0",
+            boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
           }}
         >
           {body}

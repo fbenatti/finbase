@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Chip, FormControlLabel, Paper, Stack, Switch, TextField, Typography } from "@mui/material";
 import { FilterAltOff, Refresh } from "@mui/icons-material";
 import ExpectedViewV2 from "../Dashboards/ExpectedViewV2";
 import ExecutiveWidgetsV2 from "./ExecutiveWidgetsV2";
 import { Department, ForecastAck, GoldInfo, GoldQueryFilter, formatApiError, getDepartments, getDimonInfo, getExecutiveManualAcks, getGoldFilterOptions } from "../../services/api";
-import { flattenDepartments } from "../../components/DepartmentTreePicker";
+import { DepartmentTreeMultiPicker, flattenDepartments } from "../../components/DepartmentTreePicker";
 
 const TABLE = "dest_dm_cost_visao_completa";
 type DimFilter = { column: string; values: string[] };
@@ -46,7 +46,8 @@ export default function GoldDashboardV2() {
     return () => { active = false; };
   }, [monthFrom, monthTo, selectedNodePaths, validRange]);
 
-  const chooseNodes = (_: unknown, values: Array<Department & { path: string }>) => {
+  const chooseNodes = (ids: number[]) => {
+    const values = ids.map((id) => flat.find((node) => node.id === id)).filter((node): node is Department & { path: string } => Boolean(node));
     const compressed = values.filter((node) => !values.some((parent) => parent.id !== node.id && node.path.startsWith(`${parent.path} > `)));
     setSelectedNodes(compressed);
   };
@@ -86,13 +87,13 @@ export default function GoldDashboardV2() {
         <Button startIcon={<Refresh />} onClick={() => setRefresh((value) => value + 1)}>Atualizar</Button>
       </Stack>
     </Box>
-    <Box sx={{ p: { xs: 1.5, md: 3 } }}><Paper elevation={0} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+    <Box sx={{ p: { xs: 1.5, md: 3 } }}><Paper elevation={0} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: "20px", border: "1px solid #e2e7f0", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
           <TextField size="small" type="month" label="De" value={monthFrom} onChange={(event) => setMonthFrom(event.target.value)} InputLabelProps={{ shrink: true }} />
           <TextField size="small" type="month" label="Até" value={monthTo} onChange={(event) => setMonthTo(event.target.value)} InputLabelProps={{ shrink: true }} />
-          <Autocomplete multiple disableCloseOnSelect size="small" options={flat.filter((node) => node.active)} value={selectedNodes} onChange={chooseNodes} getOptionLabel={(node) => node.path} isOptionEqualToValue={(a, b) => a.id === b.id} renderOption={(props, option, state) => <li {...props}><Checkbox checked={state.selected} sx={{ mr: 1 }} />{option.path}</li>} renderInput={(params) => <TextField {...params} label="Organograma · buscar e selecionar" placeholder="Nome ou caminho" />} sx={{ minWidth: 320, flex: "1 1 320px" }} />
+          <Box sx={{ minWidth: 320, flex: "1 1 320px" }}><DepartmentTreeMultiPicker departments={org} values={selectedNodes.map((node) => node.id)} onChange={chooseNodes} label="Organograma · selecione níveis" placeholder="Navegue e marque níveis" /></Box>
           <FormControlLabel control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
           <FormControlLabel control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
           <Button startIcon={<FilterAltOff />} onClick={clear}>Limpar</Button>
@@ -106,8 +107,8 @@ export default function GoldDashboardV2() {
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>Período e filtros dimensionais são compartilhados pelos widgets executivos. Uma mesma coluna aceita vários valores; colunas diferentes refinam o contexto em conjunto.</Typography>
         {monthFrom > monthTo && <Alert severity="warning" sx={{ mt: 1 }}>O mês inicial precisa ser anterior ou igual ao final.</Alert>}
       </Paper>
-      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h6" fontWeight={750}>Executive Highlights</Typography>
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
+        <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>EXECUTIVE HIGHLIGHTS</Typography>
         <Typography variant="caption" color="text.secondary">Anotações administrativas ativas no intervalo e nos caminhos de organograma selecionados; filtros dimensionais sem campo no cadastro não alteram esta lista.</Typography>
         {highlightsLoading ? <Typography display="block" color="text.secondary" mt={1}>Carregando registros do período…</Typography> : highlights.length ? <Stack spacing={1} mt={1}>{[...highlights].sort((a, b) => Number(a.ordem ?? 999) - Number(b.ordem ?? 999) || severityRank(a.severity) - severityRank(b.severity) || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at))).map((ack) => <Alert key={ack.id} severity={ack.severity?.toLocaleLowerCase().includes("crít") ? "error" : ack.severity?.toLocaleLowerCase().includes("perigo") ? "warning" : "info"}><b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />{ack.department_path.join(" > ")}<br />{ack.reason}<Typography variant="caption" display="block">{ack.registered_at ? new Date(ack.registered_at).toLocaleDateString("pt-BR") : ""}</Typography></Alert>)}</Stack> : <Typography display="block" color="text.secondary" mt={1}>Nenhum highlight ativo nos meses e caminhos selecionados.</Typography>}
       </Paper>
