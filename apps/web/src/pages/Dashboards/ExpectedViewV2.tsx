@@ -1121,6 +1121,7 @@ export default function ExpectedViewV2({
           {!budgetAvailable && <Alert severity="info" sx={{ mb: 2 }}>Orçamento e forecast manual indisponíveis para filtros dimensionais: o planejamento não tem granularidade nessa coluna. A tela omite esses valores em vez de reutilizar totais globais.</Alert>}
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
             {card("Realizado", actual, "#F2A900", openActualDetails)}
+            {card("Forecast", forecastOnly, "#7C3AED", undefined, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
             {card("Orçamento", budgetAvailable ? budget : "Sem orçamento para este filtro", "#64748B")}
             {card(
               "Total projetado",
@@ -1130,7 +1131,6 @@ export default function ExpectedViewV2({
               "Realizado + Forecast",
             )}
             {card("Variação", budgetAvailable ? variance : "Sem base", variance >= 0 ? "#16A34A" : "#EF4444")}
-            {card("Forecast", forecastOnly, "#7C3AED", undefined, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
           </Stack>
           <Grid container spacing={2}>
             <Grid item xs={12} md={7}>

@@ -105,6 +105,11 @@ export default function GoldDashboardV2() {
     return path.slice(0, 6).map((value, index) => ({ column: `organograma_nivel_${levels[index] || index + 1}`, operator: "IN", values: [value] }));
   }), [selectedNodes, directorView]);
   const filterContextKey = JSON.stringify({ monthFrom, monthTo, nodes: selectedNodes.map((n) => n.id), directorView, filters, sharedCost, refresh });
+  const highlightsWidget = <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
+    <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>EXECUTIVE HIGHLIGHTS</Typography>
+    <Typography variant="caption" color="text.secondary" display="block">Anotações administrativas ativas no intervalo e nos caminhos de organograma selecionados; filtros dimensionais sem campo no cadastro não alteram esta lista.</Typography>
+    {highlightsLoading ? <Typography display="block" color="text.secondary" mt={1}>Carregando registros do período…</Typography> : highlights.length ? <Stack spacing={1} mt={1}>{[...highlights].sort((a, b) => Number(a.ordem ?? 999) - Number(b.ordem ?? 999) || severityRank(a.severity) - severityRank(b.severity) || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at))).map((ack) => <Alert key={ack.id} severity={ack.severity?.toLocaleLowerCase().includes("crít") ? "error" : ack.severity?.toLocaleLowerCase().includes("perigo") ? "warning" : "info"}><b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />{ack.department_path.join(" > ")}<br />{ack.reason}<Typography variant="caption" display="block">{ack.registered_at ? new Date(ack.registered_at).toLocaleDateString("pt-BR") : ""}</Typography></Alert>)}</Stack> : <Typography display="block" color="text.secondary" mt={1}>Nenhum highlight ativo nos meses e caminhos selecionados.</Typography>}
+  </Paper>;
 
   return <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
     <Box sx={{ px: 3, pt: 3, pb: 2, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
@@ -116,12 +121,15 @@ export default function GoldDashboardV2() {
     <Box sx={{ p: { xs: 1.5, md: 3 } }}><Paper elevation={0} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: "20px", border: "1px solid #e2e7f0", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
-        <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
-          <Button variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(monthFrom); setDraftTo(monthTo); setDateAnchor(event.currentTarget); }} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", bgcolor: "#fff" }}>{labelMonth(monthFrom)} – {labelMonth(monthTo)}</Button>
-          <Box sx={{ minWidth: 320, flex: "1 1 320px" }}><DepartmentTreeMultiPicker departments={org} values={selectedNodes.map((node) => node.id)} onChange={chooseNodes} label="Organograma · selecione níveis" placeholder="Navegue e marque níveis" /></Box>
-          <FormControlLabel control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
-          <FormControlLabel control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
-          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee" }}>Adicionar filtro FOCUS</Button>
+        <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="flex-end">
+          <Box sx={{ width: { xs: "100%", md: 330 }, minWidth: { xs: 0, md: 330 }, flex: { xs: "1 1 100%", md: "0 0 330px" } }}>
+            <Typography variant="caption" color="text.secondary">Período · mensal</Typography>
+            <Button fullWidth variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(monthFrom); setDraftTo(monthTo); setDateAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, px: 1.5, borderRadius: "12px", justifyContent: "flex-start", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", bgcolor: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{labelMonth(monthFrom)} – {labelMonth(monthTo)}</Button>
+          </Box>
+          <Box sx={{ minWidth: { xs: "100%", md: 320 }, flex: "1 1 360px" }}><DepartmentTreeMultiPicker departments={org} values={selectedNodes.map((node) => node.id)} onChange={chooseNodes} label="Organograma · selecione níveis" placeholder="Navegue e marque níveis" /></Box>
+          <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
+          <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
+          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", whiteSpace: "nowrap" }}>Adicionar filtro FOCUS</Button>
           <Menu anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} PaperProps={{ sx: { maxHeight: 420, minWidth: 250, borderRadius: "12px" } }}>
             {dimensionColumns.filter((column) => !filters.some((item) => item.column === column)).map((column) => <MenuItem key={column} onClick={() => addDimension(column)}>{labelColumn(column)}</MenuItem>)}
             {dimensionColumns.every((column) => filters.some((item) => item.column === column)) && <MenuItem disabled>Todas as colunas FOCUS já foram adicionadas</MenuItem>}
@@ -151,12 +159,8 @@ export default function GoldDashboardV2() {
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.</Typography>
         {monthFrom > monthTo && <Alert severity="warning" sx={{ mt: 1 }}>O mês inicial precisa ser anterior ou igual ao final.</Alert>}
       </Paper>
-      <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
-        <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>EXECUTIVE HIGHLIGHTS</Typography>
-        <Typography variant="caption" color="text.secondary">Anotações administrativas ativas no intervalo e nos caminhos de organograma selecionados; filtros dimensionais sem campo no cadastro não alteram esta lista.</Typography>
-        {highlightsLoading ? <Typography display="block" color="text.secondary" mt={1}>Carregando registros do período…</Typography> : highlights.length ? <Stack spacing={1} mt={1}>{[...highlights].sort((a, b) => Number(a.ordem ?? 999) - Number(b.ordem ?? 999) || severityRank(a.severity) - severityRank(b.severity) || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at))).map((ack) => <Alert key={ack.id} severity={ack.severity?.toLocaleLowerCase().includes("crít") ? "error" : ack.severity?.toLocaleLowerCase().includes("perigo") ? "warning" : "info"}><b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />{ack.department_path.join(" > ")}<br />{ack.reason}<Typography variant="caption" display="block">{ack.registered_at ? new Date(ack.registered_at).toLocaleDateString("pt-BR") : ""}</Typography></Alert>)}</Stack> : <Typography display="block" color="text.secondary" mt={1}>Nenhum highlight ativo nos meses e caminhos selecionados.</Typography>}
-      </Paper>
       {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao mês final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
+      {highlightsWidget}
     </Paper></Box>
   </Box>;
 }
