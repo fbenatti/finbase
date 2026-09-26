@@ -107,12 +107,7 @@ export default function GoldDashboardV2() {
     filters.filter((item) => item.values.length > 0).forEach((item) => result.push({ column: item.column, operator: "IN", values: item.values }));
     return result;
   }, [monthFrom, monthTo, filters]);
-  const chartFilters = useMemo<GoldQueryFilter[]>(() => [
-    ...scopeFilters,
-    ...(info?.columns.some((column) => column.name.toLowerCase() === "tipo")
-      ? [{ column: "tipo", operator: "IS_REALIZED" as const, values: [] }]
-      : []),
-  ], [scopeFilters, info]);
+  const chartFilters = scopeFilters;
   const organizationGroups = useMemo<GoldQueryFilter[][]>(() => selectedNodes.map((node) => {
     const path = node.path.split(" > ");
     if (directorView && path.length >= 4) [path[2], path[3]] = [path[3], path[2]];
@@ -177,7 +172,7 @@ export default function GoldDashboardV2() {
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.</Typography>
         {monthFrom > monthTo && <Alert severity="warning" sx={{ mt: 1 }}>O mês inicial precisa ser anterior ou igual ao final.</Alert>}
       </Paper>
-      {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} groupByOptions={dimensionColumns} chartFilters={chartFilters} chartFilterGroups={organizationGroups} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao mês final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
+      {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} groupByOptions={dimensionColumns} chartFilters={chartFilters} chartFilterGroups={organizationGroups} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} directorView={directorView} organizationPathDepth={selectedNodes.length ? Math.min(...selectedNodes.map((node) => node.path.split(" > ").length)) : 0} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
       {highlightsWidget}
     </Paper></Box>
   </Box>;

@@ -28,8 +28,7 @@ import {
   Switch,
   Typography,
 } from "@mui/material";
-import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import {
   Department,
   formatApiError,
@@ -143,7 +142,6 @@ export default function ExpectedViewV2({
     if (externalSharedCost !== undefined) setIncludeSharedCost(externalSharedCost);
   }, [externalSharedCost]);
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [showBudget, setShowBudget] = useState(true);
   const [drillOpen, setDrillOpen] = useState(false);
   const [drillPeriod, setDrillPeriod] = useState<string | undefined>();
   const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast">(
@@ -277,7 +275,7 @@ export default function ExpectedViewV2({
     }
     const query = chartGranularity === "daily"
       ? queryGoldDailyConsumption({ table, filters: chartFilters, filter_groups: chartFilterGroups, group_by: groupBy || null, row_limit: 10000 })
-      : queryDimonTable({ table, rows: [groupBy, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: chartFilters, filter_groups: chartFilterGroups, row_limit: 10000 });
+      : queryDimonTable({ table, rows: [groupBy, "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: chartFilters, filter_groups: chartFilterGroups, row_limit: 10000 });
     query.then((result) => {
       if (!active) return;
       if (chartGranularity === "daily") setDailyGold(result as { available: boolean; rows: Array<{ day: string; realizado: number; [column: string]: unknown }> });
@@ -609,31 +607,57 @@ export default function ExpectedViewV2({
   const groupKeyField = chartGranularity === "daily" ? "day" : "_billing_period";
   const groupNames = groupBy
     ? [...new Set(groupedSource.map((row) => String(row[groupBy] ?? "Não informado")))].sort((a, b) => {
-        const sum = (name: string) => groupedSource.filter((row) => String(row[groupBy] ?? "Não informado") === name).reduce((total, row) => total + Number(row.realizado || 0), 0);
+        const sum = (name: string) => groupedSource.filter((row) => String(row[groupBy] ?? "Não informado") === name && String(row.tipo ?? "").toLowerCase() !== "forecast").reduce((total, row) => total + Number(row.realizado || 0), 0);
         return sum(b) - sum(a);
       })
     : ["Realizado"];
-  const visibleGroups = groupNames.slice(0, 8);
-  const traceValues = (name: string | null) => groupedLabels.map((period) => groupedSource
-    .filter((row) => String(row[groupKeyField]) === period && (name == null || String(row[groupBy] ?? "Não informado") === name))
-    .reduce((total, row) => total + Number(row.realizado || 0), 0));
-  const dimensionTraces = [
-    ...visibleGroups.map((name, index) => {
-      const values = traceValues(groupBy ? name : null);
-      const plotted = chartGranularity === "accumulated" ? values.map((_, i) => values.slice(0, i + 1).reduce((sum, value) => sum + value, 0)) : values;
-      return { x: groupedLabels, y: plotted, type: "bar", name, marker: { color: FILTER_PALETTE[index % FILTER_PALETTE.length] } };
-    }),
-    ...(groupNames.length > 8 ? (() => {
-      const omitted = new Set(groupNames.slice(8));
-      const values = groupedLabels.map((period) => groupedSource.filter((row) => String(row[groupKeyField]) === period && omitted.has(String(row[groupBy] ?? "Não informado"))).reduce((sum, row) => sum + Number(row.realizado || 0), 0));
-      const plotted = chartGranularity === "accumulated" ? values.map((_, i) => values.slice(0, i + 1).reduce((sum, value) => sum + value, 0)) : values;
-      return [{ x: groupedLabels, y: plotted, type: "bar", name: "Outros", marker: { color: "#aab3c2" } }];
-    })() : []),
-  ];
+  const visibleGroups = groupNames.slice(0, 6);
+  const rowValues = (name: string, period: string, kind: "actual" | "forecast") => groupedSource
+    .filter((row) => {
+      const rowType = String(row.tipo ?? "").trim().toLowerCase();
+      const matchesKind = kind === "forecast" ? rowType === "forecast" : rowType !== "forecast" && rowType !== "rateio";
+      return String(row[groupKeyField]) === period && (!groupBy || String(row[groupBy] ?? "Não informado") === name) && matchesKind;
+    })
+    .reduce((total, row) => total + Number(row.realizado || 0), 0);
+  const forecastEligible = (period: string) => {
+    const expectedRow = filteredRows.find((row) => row.period === period);
+    return Boolean(expectedRow && (expectedRow.actual_value == null || isCurrentMonth(expectedRow)));
+  };
+  const groupTraces: any[] = visibleGroups.flatMap<any>((name, index) => {
+    const color = FILTER_PALETTE[index % FILTER_PALETTE.length];
+    const forecastColor = color;
+    const actualValues = groupedLabels.map((period) => rowValues(name, period, "actual"));
+    const forecastValues = groupedLabels.map((period) => forecastEligible(period) ? rowValues(name, period, "forecast") : 0);
+    if (chartGranularity === "accumulated") {
+      const actualCumulativeByMonth = actualValues.map((_, i) => i <= realizedEnd ? actualValues.slice(0, i + 1).reduce((sum, value) => sum + value, 0) : null);
+      const forecastCumulativeByMonth = actualValues.map((_, i) => groupedLabels.slice(0, i + 1).reduce((sum, period, j) => sum + actualValues[j] + forecastValues[j], 0));
+      const projectedValues = forecastCumulativeByMonth.map((value, i) => i < forecastStart ? null : value);
+      return [
+        { x: groupedLabels, y: actualCumulativeByMonth, type: "scatter", mode: "lines+markers", name: `${name} · Realizado`, fill: "tozeroy", fillcolor: `${color}22`, line: { color, width: 2.5 }, marker: { size: 5 } },
+        { x: groupedLabels, y: projectedValues, type: "scatter", mode: "lines+markers", name: `${name} · Forecast`, fill: "tozeroy", fillcolor: `${forecastColor}18`, line: { color: forecastColor, width: 2.5, dash: "dash" }, marker: { size: 5 } },
+      ];
+    }
+    return [
+      { x: groupedLabels, y: actualValues, type: "bar", name: `${name} · Realizado`, marker: { color } },
+      { x: groupedLabels, y: forecastValues, type: "bar", name: `${name} · Forecast`, marker: { color: forecastColor, pattern: { shape: "/" } } },
+    ];
+  });
+  const dimensionTraces = groupTraces;
+  const groupedBudgetTrace = groupBy && chartGranularity !== "daily" && budgetAvailable
+    ? [{
+        x: groupedLabels,
+        y: cumulative ? budgetCumulative : filteredRows.map((row) => Number(row.budget_value || 0)),
+        type: "scatter",
+        mode: "lines+markers",
+        name: "Orçamento",
+        line: { color: "#64748B", width: 3 },
+        marker: { size: 5 },
+      }]
+    : [];
   const chartDataForRender = chartGranularity === "daily"
     ? dimensionTraces
     : groupBy
-      ? dimensionTraces
+      ? [...dimensionTraces, ...groupedBudgetTrace]
       : chartData;
   const chartLayout: any = {
     autosize: true,
@@ -929,103 +953,6 @@ export default function ExpectedViewV2({
     if (found) chooseDepartment(found);
   };
 
-  // ── Quadro executivo: pivot com drill (cloud → diretorias → departamentos) ──
-  const currentDept = departmentId
-    ? departmentOptions.find((department) => department.id === departmentId)
-    : undefined;
-  const parentDept = currentDept?.parent_id
-    ? departmentOptions.find(
-        (department) => department.id === currentDept.parent_id,
-      )
-    : undefined;
-  const pivotDrivers = useMemo(
-    () =>
-      [...drivers]
-        .filter(
-          (driver) =>
-            Math.abs(Number(driver.actual_value || 0)) +
-              Math.abs(Number(driver.shared_value || 0)) +
-              Math.abs(Number(driver.forecast_value || 0)) >
-            0.005,
-        )
-        .sort(
-          (a, b) =>
-            Number(b.actual_value || 0) +
-            Number(b.shared_value || 0) -
-            (Number(a.actual_value || 0) + Number(a.shared_value || 0)),
-        ),
-    [drivers],
-  );
-  const offenderSet = useMemo(
-    () =>
-      new Set(
-        [...pivotDrivers]
-          .sort(
-            (a, b) =>
-              Math.abs(Number(b.variance || 0)) -
-              Math.abs(Number(a.variance || 0)),
-          )
-          .slice(0, 5)
-          .map((driver) => driver.name),
-      ),
-    [pivotDrivers],
-  );
-  const measureRows = useMemo(() => {
-    const realized = pivotDrivers.map(
-      (driver) =>
-        Number(driver.actual_value || 0) +
-        (sharedOn ? Number(driver.shared_value || 0) : 0),
-    );
-    const forecast = pivotDrivers.map((driver) =>
-      Number(driver.forecast_value || 0),
-    );
-    const budget = pivotDrivers.map((driver) =>
-      Number(driver.budget_value || 0),
-    );
-    const toRow = (id: string, medida: string, values: number[]) =>
-      Object.fromEntries([
-        ["id", id],
-        ["medida", medida],
-        ...pivotDrivers.map((driver, index) => [
-          driver.name,
-          values[index] || 0,
-        ]),
-      ]);
-    return [
-      toRow("realizado", "Realizado", realized),
-      toRow("forecast", "Forecast", forecast),
-      ...(showBudget && budgetAvailable ? [toRow("orcamento", "Orçamento", budget)] : []),
-    ];
-  }, [pivotDrivers, showBudget, sharedOn, budgetAvailable]);
-  const pivotColumns: GridColDef[] = useMemo(
-    () => [
-      {
-        field: "medida",
-        headerName: "Medida",
-        width: 140,
-        sortable: false,
-        pinned: "left",
-        disableColumnMenu: true,
-      },
-      ...pivotDrivers.map((driver) => ({
-        field: driver.name,
-        headerName: driver.name,
-        type: "number" as const,
-        width: 170,
-        sortable: false,
-        disableColumnMenu: true,
-        headerClassName: offenderSet.has(driver.name)
-          ? "offender-header"
-          : undefined,
-        valueFormatter: (value: unknown) => money.format(Number(value || 0)),
-      })),
-    ],
-    [pivotDrivers, offenderSet],
-  );
-  const onPivotCellClick = (params: { field: string }) => {
-    if (params.field === "medida") return;
-    openDriver(params.field);
-  };
   const renderOrganizationNode = (
     department: Department,
     depth = 0,
@@ -1226,7 +1153,7 @@ export default function ExpectedViewV2({
             {card("Variação", budgetAvailable ? variance : "Sem base", variance >= 0 ? "#16A34A" : "#EF4444")}
           </Stack>
           <Grid container spacing={2}>
-            <Grid item xs={12} md={7}>
+            <Grid item xs={12}>
               <Paper
                 elevation={0}
                 sx={{
@@ -1290,154 +1217,30 @@ export default function ExpectedViewV2({
                 />}
               </Paper>
             </Grid>
-            <Grid item xs={12} md={5}>
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 2,
-                  borderRadius: "18px",
-                  bgcolor: "#fff",
-                  border: "1px solid #e2e7f0",
-                  boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
-                }}
-              >
-                <Typography variant="h6">
-                  {sharedOn ? "Rateio por departamento" : "Drivers da variação"}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {sharedOn
-                    ? "Laranja empilhado no filho que recebe o custo · clique para abrir"
-                    : "Filhos do departamento selecionado · clique na barra para abrir o subnível"}
-                </Typography>
-                <Plot
-                  useResizeHandler
-                  style={{ width: "100%", height: 420, cursor: "pointer" }}
-                  data={waterfallData}
-                  layout={waterfallLayout}
-                  config={{ responsive: true, displaylogo: false }}
-                  onClick={(event) =>
-                    openDriver(String(event.points?.[0]?.x ?? ""))
-                  }
-                />
+          </Grid>
+
+          <Grid container spacing={2} sx={{ mt: 0.5 }}>
+            <Grid item xs={12} md={6}>
+              <Paper elevation={0} sx={{ p: 2, height: "100%", borderRadius: "18px", bgcolor: "#fff", border: "1px solid #e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+                <Typography variant="h6">{sharedOn ? "Rateio por departamento" : "Drivers da variação"}</Typography>
+                <Typography variant="caption" color="text.secondary">{sharedOn ? "Laranja empilhado no filho que recebe o custo · clique para abrir" : "Filhos do departamento selecionado · clique na barra para abrir o subnível"}</Typography>
+                <Plot useResizeHandler style={{ width: "100%", height: 360, cursor: "pointer" }} data={waterfallData} layout={{ ...waterfallLayout, height: 360 }} config={{ responsive: true, displaylogo: false }} onClick={(event) => openDriver(String(event.points?.[0]?.x ?? ""))} />
+              </Paper>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+                <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
+                <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Tendência mensal · Forecast × Realizado</Typography>
+                <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; competências futuras sem dados permanecem ausentes.</Typography>
+                <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
+                  { x: filteredRows.filter((row) => row.actual_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.actual_value != null).map((row) => Number(row.actual_value || 0)), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
+                  { x: filteredRows.filter((row) => row.forecast_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.forecast_value != null).map((row) => Number(row.forecast_value || 0)), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
+                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 45 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, xaxis: { gridcolor: "#fff" }, legend: { orientation: "h" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
               </Paper>
             </Grid>
           </Grid>
 
-          <Paper variant="outlined" sx={{ p: 2, mb: 2, mt: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
-            <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
-            <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Tendência mensal · Forecast × Realizado</Typography>
-            <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; competências futuras sem dados permanecem ausentes.</Typography>
-            <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
-              { x: filteredRows.filter((row) => row.actual_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.actual_value != null).map((row) => Number(row.actual_value || 0)), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
-              { x: filteredRows.filter((row) => row.forecast_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.forecast_value != null).map((row) => Number(row.forecast_value || 0)), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
-            ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 45 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, xaxis: { gridcolor: "#fff" }, legend: { orientation: "h" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
-          </Paper>
-
-          <Paper
-            elevation={0}
-            sx={{
-              mt: 2,
-              p: 2,
-              borderRadius: "18px",
-              bgcolor: "#fff",
-              border: "1px solid #e2e7f0",
-              boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
-            }}
-          >
-            <Stack
-              direction="row"
-              justifyContent="space-between"
-              alignItems="center"
-              flexWrap="wrap"
-              gap={1}
-              sx={{ mb: 1 }}
-            >
-              <Box>
-                <Typography variant="h6">
-                  Quadro executivo - drill por{" "}
-                  {pathParts.length <= 1 ? "cloud" : "departamento"}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Clique em uma coluna para abrir o nivel abaixo -{" "}
-                  {pathParts.join(" > ") || "Consumo Cloud"}
-                </Typography>
-              </Box>
-              <Stack direction="row" gap={1} alignItems="center">
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={!parentDept}
-                  onClick={() => parentDept && chooseDepartment(parentDept)}
-                >
-                  Voltar
-                </Button>
-                <Button
-                  size="small"
-                  variant="text"
-                  startIcon={showBudget ? <Remove /> : <Add />}
-                  onClick={() => setShowBudget((value: boolean) => !value)}
-                >
-                  {showBudget ? "Ocultar orcamento" : "Mostrar orcamento"}
-                </Button>
-              </Stack>
-            </Stack>
-            {offenderSet.size > 0 && (
-              <Stack
-                direction="row"
-                spacing={0.5}
-                flexWrap="wrap"
-                alignItems="center"
-                sx={{ mb: 1.5 }}
-              >
-                <Typography variant="caption" fontWeight={700}>
-                  Top ofensores:
-                </Typography>
-                {pivotDrivers
-                  .filter((driver) => offenderSet.has(driver.name))
-                  .map((driver) => (
-                    <Chip
-                      key={driver.name}
-                      size="small"
-                      variant="outlined"
-                      color={
-                        Number(driver.variance || 0) >= 0 ? "success" : "error"
-                      }
-                      label={
-                        driver.name +
-                        " - " +
-                        money.format(Number(driver.variance || 0))
-                      }
-                    />
-                  ))}
-              </Stack>
-            )}
-            {pivotDrivers.length === 0 ? (
-              <Typography color="text.secondary">
-                Nenhum dado no nivel atual para o periodo selecionado.
-              </Typography>
-            ) : (
-              <DataGrid
-                rows={measureRows}
-                columns={pivotColumns}
-                autoHeight
-                disableColumnMenu
-                hideFooter
-                density="compact"
-                onCellClick={(params) =>
-                  onPivotCellClick(params as { field: string })
-                }
-                getCellClassName={(params) =>
-                  params.field !== "medida" && offenderSet.has(params.field)
-                    ? "offender-cell"
-                    : ""
-                }
-                sx={{
-                  "& .offender-header": { bgcolor: "#FEF3C7", fontWeight: 700 },
-                  "& .offender-cell": { bgcolor: "#FFF7E6" },
-                }}
-              />
-            )}
-          </Paper>
+          {footer}
         </>
       )}
 
@@ -1470,7 +1273,6 @@ export default function ExpectedViewV2({
     <Box sx={workspaceSx}>
       {body}
       {acksBox}
-      {footer}
     </Box>
   ) : (
     <Box

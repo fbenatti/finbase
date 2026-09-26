@@ -176,6 +176,7 @@ export function buildExecutiveDecompChain(visaoDiretoria: boolean, scopedPathDep
 export default function HierarchicalDecompTree({
   table,
   baseFilters,
+  filterGroups = [],
   chain,
   queryKey,
   onApplyContext,
@@ -184,6 +185,7 @@ export default function HierarchicalDecompTree({
 }: {
   table: string;
   baseFilters: GoldQueryFilter[];
+  filterGroups?: GoldQueryFilter[][];
   chain: DecompChainItem[];
   queryKey: string;
   onApplyContext?: (path: DecompPathStep[]) => void;
@@ -242,6 +244,7 @@ export default function HierarchicalDecompTree({
           rows: d.rows ?? [],
           measures: [{ column: "realizado", aggregation: "SUM" }],
           filters: d.filters,
+          filter_groups: filterGroups.length ? filterGroups : undefined,
           row_limit: d.row_limit,
         })),
       );
@@ -264,6 +267,7 @@ export default function HierarchicalDecompTree({
             rows: [field, "_billing_period", "tipo"],
             measures: [{ column: "realizado", aggregation: "SUM" }],
             filters: [...baseFilters, ...pathFilters(treeStart)],
+            filter_groups: filterGroups.length ? filterGroups : undefined,
             row_limit: 10000,
           });
           if (!alive) return;
