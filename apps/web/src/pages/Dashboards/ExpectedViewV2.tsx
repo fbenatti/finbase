@@ -37,6 +37,10 @@ import {
   getExpectedView,
   ExpectedViewDriver,
   ExpectedViewRow,
+  GoldQueryFilter,
+  GoldQueryResult,
+  queryDimonTable,
+  queryGoldDailyConsumption,
 } from "../../services/api";
 import AccuracyWidget from "./BudgetAccuracyWidgetV2";
 import ConsumptionDrillDialog from "../GoldDashboard/ConsumptionDrillDialog";
@@ -47,7 +51,8 @@ const monthLong = (period: string) => `${monthNames[Number(period.slice(4, 6)) -
 const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
   ? `R$ ${(value / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MM`
   : `R$ ${money.format(value)}`;
-const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative.v2";
+type ChartGranularity = "accumulated" | "monthly" | "daily";
+const FILTER_PALETTE = ["#6416dc", "#9c4dff", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d", "#53627d", "#00a8cc", "#a33bd1", "#6f9b20"];
 const flattenDepartments = (
   nodes: Department[],
   parents: string[] = [],
@@ -73,6 +78,9 @@ export default function ExpectedViewV2({
   dimensionFilters = {},
   organizationNodeIds = [],
   includeSharedCost: externalSharedCost,
+  groupByOptions = [],
+  chartFilters = [],
+  chartFilterGroups = [],
 }: {
   embedded?: boolean;
   director?: string;
@@ -86,6 +94,9 @@ export default function ExpectedViewV2({
   dimensionFilters?: Record<string, string[]>;
   organizationNodeIds?: number[];
   includeSharedCost?: boolean;
+  groupByOptions?: string[];
+  chartFilters?: GoldQueryFilter[];
+  chartFilterGroups?: GoldQueryFilter[][];
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -118,10 +129,13 @@ export default function ExpectedViewV2({
     useState<HTMLElement | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [periodFilter, setPeriodFilter] = useState("current");
-  const [cumulative, setCumulative] = useState(() => {
-    const saved = window.localStorage.getItem(CUMULATIVE_STORAGE_KEY);
-    return saved === null ? false : saved === "1";
-  });
+  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("accumulated");
+  const [groupBy, setGroupBy] = useState("");
+  const [groupedGold, setGroupedGold] = useState<GoldQueryResult | null>(null);
+  const [dailyGold, setDailyGold] = useState<{ available: boolean; rows: Array<{ day: string; realizado: number; [column: string]: unknown }> } | null>(null);
+  const [chartQueryLoading, setChartQueryLoading] = useState(false);
+  const [chartQueryError, setChartQueryError] = useState("");
+  const cumulative = chartGranularity === "accumulated";
   const [includeSharedCost, setIncludeSharedCost] = useState(
     params.get("shared") === "1",
   );
@@ -135,9 +149,15 @@ export default function ExpectedViewV2({
   const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast">(
     "realizado",
   );
+  const rangeDays = useMemo(() => {
+    if (!periodFrom || !periodTo) return 0;
+    const start = new Date(Number(periodFrom.slice(0, 4)), Number(periodFrom.slice(4, 6)) - 1, 1);
+    const end = new Date(Number(periodTo.slice(0, 4)), Number(periodTo.slice(4, 6)), 0);
+    return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+  }, [periodFrom, periodTo]);
   useEffect(() => {
-    window.localStorage.setItem(CUMULATIVE_STORAGE_KEY, cumulative ? "1" : "0");
-  }, [cumulative]);
+    if (chartGranularity === "daily" && rangeDays > 45) setChartGranularity("monthly");
+  }, [chartGranularity, rangeDays]);
   useEffect(() => {
     let cancelled = false;
     getDepartments()
@@ -241,6 +261,32 @@ export default function ExpectedViewV2({
     organizationNodeIds,
     dimensionFilters,
   ]);
+  useEffect(() => {
+    if (!embedded || !table) return;
+    const controller = new AbortController();
+    let active = true;
+    setChartQueryError("");
+    setGroupedGold(null);
+    setDailyGold(null);
+    if (chartGranularity === "daily" || groupBy) setChartQueryLoading(true);
+    else {
+      setGroupedGold(null);
+      setDailyGold(null);
+      setChartQueryLoading(false);
+      return;
+    }
+    const query = chartGranularity === "daily"
+      ? queryGoldDailyConsumption({ table, filters: chartFilters, filter_groups: chartFilterGroups, group_by: groupBy || null, row_limit: 10000 })
+      : queryDimonTable({ table, rows: [groupBy, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: chartFilters, filter_groups: chartFilterGroups, row_limit: 10000 });
+    query.then((result) => {
+      if (!active) return;
+      if (chartGranularity === "daily") setDailyGold(result as { available: boolean; rows: Array<{ day: string; realizado: number; [column: string]: unknown }> });
+      else setGroupedGold(result as GoldQueryResult);
+    }).catch((reason: unknown) => {
+      if (active) setChartQueryError(formatApiError(reason, "Não foi possível carregar a série do gráfico"));
+    }).finally(() => { if (active) setChartQueryLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [embedded, table, chartGranularity, groupBy, chartFilters, chartFilterGroups, scopeKey]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows = periodFrom && periodTo
     ? rows.filter((row) => row.period >= periodFrom && row.period <= periodTo)
@@ -554,6 +600,46 @@ export default function ExpectedViewV2({
           marker: { size: 6 },
         }] : []),
       ];
+  const groupedRows = groupedGold?.rows || [];
+  const dailyRows = dailyGold?.rows || [];
+  const groupedLabels = chartGranularity === "daily"
+    ? [...new Set(dailyRows.map((row) => String(row.day)))].sort()
+    : filteredRows.map((row) => row.period);
+  const groupedSource = chartGranularity === "daily" ? dailyRows : groupedRows;
+  const groupKeyField = chartGranularity === "daily" ? "day" : "_billing_period";
+  const groupNames = groupBy
+    ? [...new Set(groupedSource.map((row) => String(row[groupBy] ?? "Não informado")))].sort((a, b) => {
+        const sum = (name: string) => groupedSource.filter((row) => String(row[groupBy] ?? "Não informado") === name).reduce((total, row) => total + Number(row.realizado || 0), 0);
+        return sum(b) - sum(a);
+      })
+    : ["Realizado"];
+  const visibleGroups = groupNames.slice(0, 8);
+  const traceValues = (name: string | null) => groupedLabels.map((period) => groupedSource
+    .filter((row) => String(row[groupKeyField]) === period && (name == null || String(row[groupBy] ?? "Não informado") === name))
+    .reduce((total, row) => total + Number(row.realizado || 0), 0));
+  const dimensionTraces = [
+    ...visibleGroups.map((name, index) => {
+      const values = traceValues(groupBy ? name : null);
+      const plotted = chartGranularity === "accumulated" ? values.map((_, i) => values.slice(0, i + 1).reduce((sum, value) => sum + value, 0)) : values;
+      return { x: groupedLabels, y: plotted, type: "bar", name, marker: { color: FILTER_PALETTE[index % FILTER_PALETTE.length] } };
+    }),
+    ...(groupNames.length > 8 ? (() => {
+      const omitted = new Set(groupNames.slice(8));
+      const values = groupedLabels.map((period) => groupedSource.filter((row) => String(row[groupKeyField]) === period && omitted.has(String(row[groupBy] ?? "Não informado"))).reduce((sum, row) => sum + Number(row.realizado || 0), 0));
+      const plotted = chartGranularity === "accumulated" ? values.map((_, i) => values.slice(0, i + 1).reduce((sum, value) => sum + value, 0)) : values;
+      return [{ x: groupedLabels, y: plotted, type: "bar", name: "Outros", marker: { color: "#aab3c2" } }];
+    })() : []),
+  ];
+  const accumulatedBarData = chartData
+    .filter((trace) => ["Realizado", "Orçamento", "Forecast", "Forecast manual", "Custo compartilhado"].includes(trace.name))
+    .map((trace) => ({ ...trace, type: "bar", mode: undefined, fill: undefined, fillcolor: undefined, line: undefined, marker: { color: trace.marker?.color || trace.line?.color || "#6416dc" } }));
+  const chartDataForRender = chartGranularity === "daily"
+    ? dimensionTraces
+    : groupBy
+      ? dimensionTraces
+      : cumulative
+        ? accumulatedBarData
+        : chartData;
   const chartLayout: any = {
     autosize: true,
     barmode: "stack",
@@ -583,6 +669,17 @@ export default function ExpectedViewV2({
     legend: { orientation: "h", y: -0.28 },
     paper_bgcolor: "transparent",
     plot_bgcolor: "transparent",
+  };
+  const chartLayoutForRender = {
+    ...chartLayout,
+    barmode: chartGranularity === "accumulated" && !groupBy ? "group" : "stack",
+    xaxis: {
+      ...chartLayout.xaxis,
+      type: chartGranularity === "daily" ? "date" : "category",
+      tickformat: chartGranularity === "daily" ? "%d/%m" : "%b %Y",
+      dtick: chartGranularity === "daily" ? undefined : "M1",
+      tickangle: chartGranularity === "daily" ? -35 : chartLayout.xaxis.tickangle,
+    },
   };
   const sortedDrivers = drivers
     .filter((driver) => Math.abs(driver.variance) > 0.005)
@@ -1144,11 +1241,7 @@ export default function ExpectedViewV2({
                   boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
                 }}
               >
-                <Stack
-                  direction="row"
-                  justifyContent="space-between"
-                  alignItems="center"
-                >
+                <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", lg: "center" }} gap={1}>
                   <Box>
                     <Typography variant="h6">
                       Gasto ao longo do tempo
@@ -1164,24 +1257,41 @@ export default function ExpectedViewV2({
                       · clique para decompor o consumo
                     </Typography>
                   </Box>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={cumulative}
-                        onChange={(_, checked) => setCumulative(checked)}
-                      />
-                    }
-                    label="Acumulado"
-                  />
+                  <Stack direction="row" gap={1} flexWrap="wrap" justifyContent={{ xs: "flex-start", lg: "flex-end" }}>
+                    <FormControl size="small" sx={{ minWidth: 190 }}>
+                      <InputLabel>Agrupar por</InputLabel>
+                      <Select label="Agrupar por" value={groupBy} onChange={(event) => setGroupBy(String(event.target.value))}>
+                        <MenuItem value="">Nenhum</MenuItem>
+                        {groupByOptions.map((field) => <MenuItem key={field} value={field}>{field.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase())}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <FormControl size="small" sx={{ minWidth: 170 }}>
+                      <InputLabel>Granularidade</InputLabel>
+                      <Select label="Granularidade" value={chartGranularity} onChange={(event) => setChartGranularity(event.target.value as ChartGranularity)}>
+                        <MenuItem value="accumulated">Acumulado</MenuItem>
+                        <MenuItem value="monthly">Mensal</MenuItem>
+                        <MenuItem value="daily" disabled={rangeDays > 45}>Diário · até 45 dias</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Stack>
                 </Stack>
-                {budgetAvailable ? <Plot
+                {chartQueryError && <Alert severity="error" sx={{ mt: 1 }}>{chartQueryError}</Alert>}
+                {chartGranularity === "daily" && dailyGold?.available === false
+                  ? <Alert severity="info" sx={{ mt: 1 }}>A fonte Gold não expõe uma data diária para este recorte.</Alert>
+                  : chartQueryLoading
+                    ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Carregando série no Trino…</Typography></Stack>
+                    : chartGranularity === "daily" && !dailyGold?.rows.length
+                      ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários disponíveis neste período.</Alert>
+                      : groupBy && chartGranularity !== "daily" && !groupedGold?.rows.length
+                        ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados realizados para agrupar por esta coluna no período selecionado.</Alert>
+                        : <Plot
                   useResizeHandler
                   style={{ width: "100%", height: 420, cursor: "pointer" }}
-                  data={chartData}
-                  layout={chartLayout}
+                  data={chartDataForRender}
+                  layout={chartLayoutForRender}
                   config={{ responsive: true, displaylogo: false }}
-                  onClick={onMainChartClick}
-                /> : <Alert severity="info">A decomposição de orçamento não está disponível para este filtro porque o planejamento não possui esta granularidade.</Alert>}
+                  onClick={groupBy || chartGranularity === "daily" ? undefined : onMainChartClick}
+                />}
               </Paper>
             </Grid>
             <Grid item xs={12} md={5}>

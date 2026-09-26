@@ -4694,6 +4694,7 @@ export interface GoldQueryRequestV2 {
   measures?: GoldQueryMeasure[];
   filters?: GoldQueryFilter[];
   filter_groups?: GoldQueryFilter[][];
+  group_by?: string | null;
   row_limit?: number;
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
@@ -4735,7 +4736,7 @@ export async function queryDimonTable(body: {
 
 export async function queryGoldDailyConsumption(body: GoldQueryRequestV2): Promise<{
   table: string; available: boolean; day_column: string | null;
-  rows: Array<{ day: string; realizado: number }>; row_count: number;
+  rows: Array<{ day: string; realizado: number; [column: string]: unknown }>; row_count: number;
 }> {
   const { data } = await api.post("/gold/daily-consumption", body, { timeout: 180000 });
   return data;

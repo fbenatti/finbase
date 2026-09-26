@@ -84,7 +84,16 @@ export default function GoldDashboardV2() {
   const clear = () => {
     setMonthFrom(`${year}-01`); setMonthTo(`${year}-12`); setSelectedNodes([]); setFilters([]); setDirectorView(false); setSharedCost(false);
   };
-  const dimensionColumns = (info?.dimensions || []).filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()));
+  // `/gold/info` exposes both the curated dimension list and the complete
+  // physical schema. Some older Gold tables omit dimensions, so use the
+  // schema as a fallback instead of rendering an empty FOCUS menu.
+  const dimensionColumns = useMemo(() => {
+    const fromDimensions = info?.dimensions || [];
+    const fromSchema = info?.columns?.filter((column) => column.type !== "measure").map((column) => column.name) || [];
+    return [...new Set([...fromDimensions, ...fromSchema])]
+      .filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()))
+      .sort((a, b) => labelColumn(a).localeCompare(labelColumn(b), "pt-BR"));
+  }, [info]);
   const dimensionFilters = useMemo(() => Object.fromEntries(filters.filter((item) => item.values.length > 0).map((item) => [item.column, item.values])), [filters]);
   const selectedNodeIds = useMemo(() => selectedNodes.map((node) => node.id), [selectedNodes]);
   const scopeFilters = useMemo<GoldQueryFilter[]>(() => {
@@ -98,6 +107,12 @@ export default function GoldDashboardV2() {
     filters.filter((item) => item.values.length > 0).forEach((item) => result.push({ column: item.column, operator: "IN", values: item.values }));
     return result;
   }, [monthFrom, monthTo, filters]);
+  const chartFilters = useMemo<GoldQueryFilter[]>(() => [
+    ...scopeFilters,
+    ...(info?.columns.some((column) => column.name.toLowerCase() === "tipo")
+      ? [{ column: "tipo", operator: "IS_REALIZED" as const, values: [] }]
+      : []),
+  ], [scopeFilters, info]);
   const organizationGroups = useMemo<GoldQueryFilter[][]>(() => selectedNodes.map((node) => {
     const path = node.path.split(" > ");
     if (directorView && path.length >= 4) [path[2], path[3]] = [path[3], path[2]];
@@ -129,9 +144,12 @@ export default function GoldDashboardV2() {
           <Box sx={{ minWidth: { xs: "100%", md: 320 }, flex: "1 1 360px" }}><DepartmentTreeMultiPicker departments={org} values={selectedNodes.map((node) => node.id)} onChange={chooseNodes} label="Organograma · selecione níveis" placeholder="Navegue e marque níveis" /></Box>
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
-          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", whiteSpace: "nowrap" }}>Adicionar filtro FOCUS</Button>
+          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 40, borderRadius: "12px", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", whiteSpace: "nowrap" }}>Adicionar filtro FOCUS{dimensionColumns.length > 0 ? ` · ${dimensionColumns.length}` : ""}</Button>
           <Menu anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} PaperProps={{ sx: { maxHeight: 420, minWidth: 250, borderRadius: "12px" } }}>
+            <MenuItem disabled sx={{ opacity: "1 !important", fontWeight: 800, fontSize: 12, color: "text.secondary" }}>COLUNAS FILTRÁVEIS DO CUBO</MenuItem>
             {dimensionColumns.filter((column) => !filters.some((item) => item.column === column)).map((column) => <MenuItem key={column} onClick={() => addDimension(column)}>{labelColumn(column)}</MenuItem>)}
+            {!info && <MenuItem disabled>Carregando esquema Gold…</MenuItem>}
+            {info && dimensionColumns.length === 0 && <MenuItem disabled>Nenhuma dimensão filtrável foi encontrada.</MenuItem>}
             {dimensionColumns.every((column) => filters.some((item) => item.column === column)) && <MenuItem disabled>Todas as colunas FOCUS já foram adicionadas</MenuItem>}
           </Menu>
           <Button startIcon={<FilterAltOff />} onClick={clear}>Limpar</Button>
@@ -159,7 +177,7 @@ export default function GoldDashboardV2() {
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.</Typography>
         {monthFrom > monthTo && <Alert severity="warning" sx={{ mt: 1 }}>O mês inicial precisa ser anterior ou igual ao final.</Alert>}
       </Paper>
-      {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao mês final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
+      {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} groupByOptions={dimensionColumns} chartFilters={chartFilters} chartFilterGroups={organizationGroups} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">O mês inicial precisa ser anterior ou igual ao mês final. Os dados não serão consultados até corrigir o intervalo.</Alert>}
       {highlightsWidget}
     </Paper></Box>
   </Box>;

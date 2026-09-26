@@ -475,6 +475,9 @@ class GoldQueryRequest(BaseModel):
     filters: list[GoldQueryFilter] = Field(default_factory=list)
     # Grupos alternativos (OR) para caminhos hierárquicos; filtros padrão seguem AND.
     filter_groups: list[list[GoldQueryFilter]] = Field(default_factory=list)
+    # Optional breakdown for the date-granularity endpoint; validated against
+    # the live Gold schema before interpolation into SQL.
+    group_by: str | None = None
     row_limit: int = Field(default=2000, ge=1, le=10000)
     sort_column: str | None = None
     sort_direction: _Literal["asc", "desc"] = "desc"
@@ -670,6 +673,9 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
         return {"table": body.table, "available": False, "day_column": date_col, "rows": [], "row_count": 0}
     period_col = schema.get("_billing_period")
     day_expr = gold_date_expr(date_col, period_col)
+    group_by_physical = _gold_resolve(schema, body.group_by) if body.group_by else None
+    if body.group_by and not group_by_physical:
+        raise HTTPException(status_code=422, detail=f"Coluna de agrupamento inexistente na Gold: {body.group_by}")
     where = _gold_filter_clause(schema, body.filters)
     if body.filter_groups:
         group_clauses = [_gold_filter_clause(schema, group) for group in body.filter_groups if group]
@@ -678,11 +684,13 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     tipo = schema.get("tipo")
     if tipo:
         where = f"({where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
+    group_select = f", {_quote_ident(group_by_physical)} AS {_quote_ident(group_by_physical.lower())}" if group_by_physical else ""
+    group_by_sql = "GROUP BY 1, 2" if group_by_physical else "GROUP BY 1"
     sql = (
-        f"SELECT CAST({day_expr} AS VARCHAR) AS day, "
+        f"SELECT CAST({day_expr} AS VARCHAR) AS day{group_select}, "
         f"SUM(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0)) AS realizado "
         f"FROM iceberg.{GOLD}.{body.table} WHERE ({where}) AND {day_expr} IS NOT NULL "
-        f"GROUP BY 1 ORDER BY 1 LIMIT 10000"
+        f"{group_by_sql} ORDER BY 1 LIMIT 10000"
     )
     try:
         result = await execute(sql, timeout_s=180)
