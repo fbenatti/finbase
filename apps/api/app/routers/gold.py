@@ -658,17 +658,41 @@ async def query_gold_filter_options(body: GoldFilterOptionsRequest):
 
 @router.post("/daily-consumption")
 async def query_gold_daily_consumption(body: GoldQueryRequest):
-    """Return realized Gold consumption grouped by a real source date column."""
+    """Return realized consumption by its source date, reading the Silver detail.
+
+    Executive Gold cubes are monthly aggregates and cannot supply this series.
+    The current executive cube is materialized from ``silver.dest_modelo_focus``;
+    query that detail table with the same dimensional scope and billing-period
+    filters, then group by the original FOCUS charge date.
+    """
     from app.services.forecast_service import gold_date_expr
 
-    schema = await _gold_schema(body.table)
+    # Keep the source selection server-owned: the request only names a validated
+    # Gold cube, never an arbitrary Silver table.
+    silver_sources = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}
+    silver_table = silver_sources.get(body.table)
+    if not silver_table:
+        raise HTTPException(status_code=422, detail=f"Série diária indisponível para o cubo: {body.table}")
+    try:
+        described = await execute(f"DESCRIBE iceberg.silver.{silver_table}", timeout_s=30)
+    except Exception as exc:  # noqa: BLE001
+        _raise_gold_query_error(body.table, exc)
+    schema: dict[str, str] = {}
+    for row in described:
+        name = str(row.get("Column") or row.get("column_name") or row.get("column") or "")
+        if name:
+            schema[name.lower()] = name
+    if not schema:
+        raise HTTPException(status_code=503, detail=f"Tabela Silver indisponível: {silver_table}")
+    # ChargePeriodStart is the same real date used by the forecast-accuracy
+    # daily drill; prefer it over billing-period end or derived month fields.
     date_col = next((schema[name] for name in (
-        "date", "chargedate", "chargeperiodstart", "billingperiodstart",
+        "chargeperiodstart", "chargedate", "date", "billingperiodstart",
         "usage_date", "usagedate", "chargeperiodend", "billingperiodend",
     ) if name in schema), None)
     if not date_col:
         return {"table": body.table, "available": False, "day_column": None, "rows": [], "row_count": 0}
-    value_col = schema.get("realizado")
+    value_col = schema.get("realizado") or schema.get("billedcost")
     if not value_col:
         return {"table": body.table, "available": False, "day_column": date_col, "rows": [], "row_count": 0}
     period_col = schema.get("_billing_period")
@@ -689,14 +713,14 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     sql = (
         f"SELECT CAST({day_expr} AS VARCHAR) AS day{group_select}, "
         f"SUM(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0)) AS realizado "
-        f"FROM iceberg.{GOLD}.{body.table} WHERE ({where}) AND {day_expr} IS NOT NULL "
+        f"FROM iceberg.silver.{silver_table} WHERE ({where}) AND {day_expr} IS NOT NULL "
         f"{group_by_sql} ORDER BY 1 LIMIT 10000"
     )
     try:
         result = await execute(sql, timeout_s=180)
     except Exception as exc:  # noqa: BLE001
         _raise_gold_query_error(body.table, exc)
-    return {"table": body.table, "available": True, "day_column": date_col, "rows": result, "row_count": len(result)}
+    return {"table": body.table, "source": f"silver.{silver_table}", "available": True, "day_column": date_col, "rows": result, "row_count": len(result)}
 
 
 @router.get("/info")

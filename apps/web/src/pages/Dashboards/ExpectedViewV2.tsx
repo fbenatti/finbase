@@ -79,7 +79,6 @@ export default function ExpectedViewV2({
   includeSharedCost: externalSharedCost,
   groupByOptions = [],
   chartHasType = false,
-  chartHasDailyDate = false,
   chartFilters = [],
   chartFilterGroups = [],
 }: {
@@ -97,7 +96,6 @@ export default function ExpectedViewV2({
   includeSharedCost?: boolean;
   groupByOptions?: string[];
   chartHasType?: boolean;
-  chartHasDailyDate?: boolean;
   chartFilters?: GoldQueryFilter[];
   chartFilterGroups?: GoldQueryFilter[][];
 } = {}) {
@@ -1211,8 +1209,8 @@ export default function ExpectedViewV2({
                       <Select label="Granularidade" value={chartGranularity} onChange={(event) => setChartGranularity(event.target.value as ChartGranularity)}>
                         <MenuItem value="accumulated">Acumulado</MenuItem>
                         <MenuItem value="monthly">Mensal</MenuItem>
-                        <MenuItem value="daily" disabled={rangeDays > 45 || !chartHasDailyDate}>
-                          {chartHasDailyDate ? "Diário · até 45 dias" : "Diário · sem data na Gold"}
+                        <MenuItem value="daily" disabled={rangeDays > 45}>
+                          Diário · até 45 dias
                         </MenuItem>
                       </Select>
                     </FormControl>
@@ -1220,7 +1218,7 @@ export default function ExpectedViewV2({
                 </Stack>
                 {chartQueryError && <Alert severity="error" sx={{ mt: 1 }}>{chartQueryError}</Alert>}
                 {chartGranularity === "daily" && dailyGold?.available === false
-                  ? <Alert severity="info" sx={{ mt: 1 }}>A tabela Gold deste dashboard só tem competência mensal; não há coluna com a data real do consumo para montar o gráfico diário. É necessário incluir essa data na tabela Gold a partir da fonte de origem.</Alert>
+                  ? <Alert severity="info" sx={{ mt: 1 }}>A fonte Silver não disponibiliza uma data real de consumo para este recorte. Verifique a carga FOCUS de ChargePeriodStart.</Alert>
                   : chartQueryLoading
                     ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Carregando série no Trino…</Typography></Stack>
                     : chartGranularity === "daily" && !dailyGold?.rows.length
