@@ -142,19 +142,21 @@ def test_publish_gold_cube_records_manifest_before_create():
     assert pos_registro < pos_create
 
 
-def test_blocking_manifest_refuses_inside_event_loop():
-    """Caminho síncrono dentro de loop assíncrono é defeito, não motivo de skip."""
+def test_blocking_manifest_works_inside_event_loop(monkeypatch):
+    """O registro síncrono usa psycopg2 e não compartilha o pool asyncpg."""
     import asyncio
 
     entrada = gov.ManifestEntry(
         cube_code="finops_cost_monthly", physical_table="finops_cost_monthly"
     )
+    recorded = []
+    monkeypatch.setattr(gov, "record_manifest_sync", lambda entry: recorded.append(entry))
 
     async def _tenta():
-        with pytest.raises(gov.ManifestUnavailableError):
-            gov.record_manifest_blocking(entrada)
+        gov.record_manifest_blocking(entrada)
 
     asyncio.run(_tenta())
+    assert recorded == [entrada]
 
 
 # --- A: cobertura publicada dirige C3 e API -----------------------------------
@@ -574,4 +576,3 @@ def test_period_end_date_handles_leap_and_december():
     assert _period_end_date("202612") == date(2026, 12, 31)
     assert _period_end_date("202513") is None
     assert _period_end_date("") is None
-

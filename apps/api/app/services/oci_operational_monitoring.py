@@ -10,6 +10,7 @@ import pandas as pd
 
 from app.models.source_connection import SourceConnection
 from app.services import iceberg_service as iceberg
+from app.services import lakehouse_layers as layers
 from app.services.oci_extractor import OciExtractor
 
 TABLE = "dest_oci_operational_metrics"
@@ -147,6 +148,43 @@ def gold_frame_from_bronze(bronze: pd.DataFrame, *, connection: SourceConnection
     return frame
 
 
+def reprocess_silver_from_bronze(connection: SourceConnection) -> dict[str, Any]:
+    """Republish one OCI connection from its Bronze history into the shared Silver."""
+    source = f"{connection.code}_operational"
+    bronze = iceberg.read_bronze(source)
+    if bronze is None or bronze.empty:
+        raise RuntimeError(f"Bronze operacional OCI vazia para {connection.code}; Silver preservada")
+    combined = gold_frame_from_bronze(
+        bronze, connection=connection, period=datetime.now(timezone.utc).strftime("%Y%m")
+    )
+    if combined.empty:
+        raise RuntimeError(f"Bronze operacional OCI sem linhas válidas para {connection.code}; Silver preservada")
+    token_rows = int(combined["metric_name"].isin(("InputTokenCount", "OutputTokenCount")).sum())
+    staged = iceberg.write_destination_staged(
+        TABLE, combined,
+        column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"},
+        namespace=layers.detail_layer(),
+    )
+    try:
+        silver_rows = iceberg.replace_staged_connection(
+            TABLE, staged, connection_id=int(connection.id),
+            namespace=layers.detail_layer(), known_row_count=len(combined),
+        )
+    except Exception:
+        iceberg.cleanup_staged_table(staged, namespace=layers.detail_layer())
+        raise
+    from app.services.gold_governance import record_frame_publication_blocking
+
+    record_frame_publication_blocking(
+        cube_code=TABLE,
+        physical_table=TABLE,
+        rows_written=int(silver_rows or 0),
+        source_tables=[f"bronze.raw_{source.replace('-', '_').replace('.', '_')}"],
+        namespace=layers.detail_layer(),
+    )
+    return {"bronze_rows": len(bronze), "silver_rows": silver_rows, "token_rows": token_rows}
+
+
 def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = True) -> dict[str, Any]:
     """Collect inventory and metric series, retaining partial results on IAM gaps."""
     import oci
@@ -221,42 +259,19 @@ def collect(connection: SourceConnection, *, hours: int = 72, persist: bool = Tr
             pass
 
     records = inventory + metrics
-    persisted = {"bronze_rows": 0, "silver_rows": 0}
-    if persist and records:
-        frame = pd.DataFrame(records); period = now.strftime("%Y%m")
-        persisted["bronze_rows"] = iceberg.write_bronze(f"{connection.code}_operational", frame, period, blob_path=f"oci-operational://{connection.code}/{now:%Y%m%d%H}")
-        bronze = iceberg.read_bronze(f"{connection.code}_operational")
-        if bronze is None or bronze.empty:
-            persisted["silver_error"] = "Bronze operacional OCI não retornou linhas; Silver anterior preservada"
-            logger.warning("OCI operational Silver publication skipped for %s: Bronze is empty", connection.code)
-            return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}
-        combined = gold_frame_from_bronze(bronze, connection=connection, period=period)
-        if "collected_at" not in combined.columns:
-            combined["collected_at"] = collected_at
-        staged = None
+    persisted = {"bronze_rows": 0, "silver_rows": 0, "token_rows": 0}
+    if persist:
+        if records:
+            frame = pd.DataFrame(records); period = now.strftime("%Y%m")
+            persisted["bronze_rows"] = iceberg.write_bronze(
+                f"{connection.code}_operational", frame, period,
+                blob_path=f"oci-operational://{connection.code}/{now:%Y%m%d%H}",
+            )
         try:
-            staged = iceberg.write_destination_staged(
-                TABLE, combined,
-                column_types={"metric_value": "DOUBLE", "unit_count": "DOUBLE", "unit": "DOUBLE"},
-                namespace=layers.detail_layer(),
-            )
-            persisted["silver_rows"] = iceberg.swap_staged_table(
-                TABLE, staged, namespace=layers.detail_layer(), known_row_count=len(combined),
-            )
-            # Publicação por fatia a partir de frame em memória: registra no
-            # mesmo manifesto para que a tabela Silver não fique sem rastro.
-            from app.services.gold_governance import record_frame_publication_blocking
-
-            record_frame_publication_blocking(
-                cube_code=TABLE,
-                physical_table=TABLE,
-                rows_written=int(persisted["silver_rows"] or 0),
-                source_tables=[f"bronze.raw_{connection.code}_operational"],
-                namespace=layers.detail_layer(),
-            )
+            rebuilt = reprocess_silver_from_bronze(connection)
+            persisted["silver_rows"] = rebuilt["silver_rows"]
+            persisted["token_rows"] = rebuilt["token_rows"]
         except Exception as exc:
             persisted["silver_error"] = f"{type(exc).__name__}: {exc}"
             logger.error("OCI operational Silver publication failed for %s", connection.code, exc_info=True)
-            if staged:
-                iceberg.cleanup_staged_table(staged, namespace=layers.detail_layer())
     return {"available": True, "inventory": inventory, "metrics": metrics, "errors": errors, "persisted": persisted, "window": {"start": start.isoformat(), "end": now.isoformat()}, "compartments": compartments, "regions": configured_regions(connection)}

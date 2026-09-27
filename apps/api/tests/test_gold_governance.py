@@ -449,7 +449,6 @@ async def test_publish_rejects_mixed_currency(monkeypatch):
 _IN_MEMORY_PUBLISHERS = {
     # Frame agregado por fatia, para evitar o scan que ele existe para não fazer.
     "gold_builder.py",
-    "oci_operational_monitoring.py",
     # Cobertura de competências: a classificação é produzida em Python, então as
     # linhas vêm do classificador e não de um SELECT. Dezenas de linhas.
     "period_coverage.py",
@@ -568,10 +567,10 @@ def test_record_frame_publication_records_success(monkeypatch):
 def test_record_frame_publication_blocking_registers_without_loop(monkeypatch):
     registros = []
 
-    async def fake_record(entry):
+    def fake_record(entry):
         registros.append(entry)
 
-    monkeypatch.setattr(gov, "record_manifest", fake_record)
+    monkeypatch.setattr(gov, "record_manifest_sync", fake_record)
     monkeypatch.setattr(gov, "current_snapshot_id", lambda ns, t: None)
     entrada = gov.record_frame_publication_blocking(
         cube_code="dest_dm_cost_focus",

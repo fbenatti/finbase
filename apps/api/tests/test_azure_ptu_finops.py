@@ -137,10 +137,9 @@ def test_monitor_interval_uses_pt1h_for_historical_window():
 
 
 def test_license_pool_default_target_type():
-    from app.routers.ai_cost_origin import LinkCreate
+    from app.models.ai_cost import AiCostLink
 
-    body = LinkCreate(name="Copilot pool", provider="GitHub", product_name="Copilot")
-    assert body.target_type == "license_pool"
+    assert AiCostLink.target_type.default.arg == "license_pool"
 
 
 def test_apply_filter_excludes_ptu_pool_links():

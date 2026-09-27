@@ -1303,6 +1303,40 @@ def _align_staged_batch_to_target(batch, target) -> pa.Table:
     )
 
 
+_PUBLISH_APPEND_MAX_ROWS = int(os.getenv("OPENFINOPS_PUBLISH_APPEND_MAX_ROWS", "2000000"))
+
+
+def _append_staged_batches(tx, batches, target, max_rows: int = _PUBLISH_APPEND_MAX_ROWS) -> int:
+    """Append staged batches in as few ``tx.append`` calls as possible.
+
+    Every ``tx.append`` is a separate Iceberg snapshot with its own manifest,
+    and each new snapshot rewrites a manifest list referencing all previous
+    manifests.  Appending batch by batch made publish time grow quadratically
+    with table history.
+    """
+    appends = 0
+    pending: list[pa.Table] = []
+    pending_rows = 0
+
+    def flush() -> None:
+        nonlocal appends, pending, pending_rows
+        if pending:
+            tx.append(pa.concat_tables(pending))
+            appends += 1
+        pending = []
+        pending_rows = 0
+
+    for batch in batches:
+        if not batch.num_rows:
+            continue
+        pending.append(_align_staged_batch_to_target(batch, target))
+        pending_rows += batch.num_rows
+        if pending_rows >= max_rows:
+            flush()
+    flush()
+    return appends
+
+
 def _merge_staged_into_canonical_table(
     physical_name: str,
     temp_safe_name: str,
@@ -1340,9 +1374,7 @@ def _merge_staged_into_canonical_table(
 
     tx = target.transaction()
     tx.delete(delete_filter)
-    for batch in staged.scan().to_arrow_batch_reader():
-        if batch.num_rows:
-            tx.append(_align_staged_batch_to_target(batch, target))
+    _append_staged_batches(tx, staged.scan().to_arrow_batch_reader(), target)
     tx.commit_transaction()
     _force_delete_table(temp_tid, temp_safe_name)
 
@@ -1382,6 +1414,26 @@ def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = 
         temp_safe_name,
         namespace=namespace,
         delete_filter=AlwaysTrue(),
+        known_row_count=known_row_count,
+    )
+
+
+def replace_staged_connection(
+    physical_name: str,
+    temp_safe_name: str,
+    *,
+    connection_id: int,
+    namespace: str = layers.SILVER,
+    known_row_count: int | None = None,
+) -> int:
+    """Replace one connection's rows while retaining the other source connections."""
+    from pyiceberg.expressions import EqualTo
+
+    return _merge_staged_into_canonical_table(
+        physical_name,
+        temp_safe_name,
+        namespace=namespace,
+        delete_filter=EqualTo("source_connection_id", int(connection_id)),
         known_row_count=known_row_count,
     )
 
@@ -1681,10 +1733,8 @@ def publish_staged_partition(
             tx.delete(overwrite_filter)
             # ``add_files`` only accepts external Parquet without Iceberg field IDs.
             # Staging is produced by PyIceberg and therefore contains those IDs; write
-            # each bounded Arrow batch natively into this transaction instead.  This
-            # keeps publication atomic without materializing a whole month in memory.
-            for batch in batches:
-                tx.append(_align_staged_batch_to_target(batch, target))
+            # the staged rows natively into this transaction instead.
+            _append_staged_batches(tx, batches, target)
             tx.commit_transaction()
             break
         except Exception as exc:

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from app.services.trino_service import execute as trino_execute
-from app.services.gold_materialization import GOLD
+from app.services.gold_materialization import GOLD, _quote_ident
 
 GOLD_TABLE = f"iceberg.{GOLD}.dest_dm_cost_projeto_datamesh"
 BUCKETS = ("Databricks", "Dados associados", "Infraestrutura")
@@ -114,10 +114,36 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
 
 
 async def load_datamesh_dashboard(*, cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
+    description = await trino_execute(
+        f"DESCRIBE {GOLD_TABLE}", timeout_s=30, cancel_event=cancel_event
+    )
+    columns = {
+        str(row.get("Column") or row.get("column_name") or row.get("column") or "").lower():
+        str(row.get("Column") or row.get("column_name") or row.get("column") or "")
+        for row in description or []
+    }
+
+    def optional_column(alias: str, *names: str) -> str:
+        physical = [columns[name] for name in names if name in columns]
+        if not physical:
+            return f"CAST(NULL AS VARCHAR) AS {alias}"
+        if len(physical) == 1:
+            return f"{_quote_ident(physical[0])} AS {alias}"
+        values = ", ".join(
+            f"NULLIF(TRIM(CAST({_quote_ident(name)} AS VARCHAR)), '')" for name in physical
+        )
+        return f"COALESCE({values}) AS {alias}"
+
     rows = await trino_execute(f"""
-        SELECT _billing_period AS period, tipo, cloud_origem,
-               organograma AS organograma_nivel_6,
-               centro_custo, subaccountname, regionname, servicename, servicesubcategory, skumeter,
+        SELECT _billing_period AS period, tipo,
+               {optional_column("cloud_origem", "cloud_origem")},
+               {optional_column("organograma_nivel_6", "organograma_nivel_6", "departamento_nivel_6", "organograma")},
+               {optional_column("centro_custo", "centro_custo")},
+               {optional_column("subaccountname", "subaccountname")},
+               {optional_column("regionname", "regionname")},
+               {optional_column("servicename", "servicename")},
+               {optional_column("servicesubcategory", "servicesubcategory")},
+               {optional_column("skumeter", "skumeter")},
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realized
         FROM {GOLD_TABLE}
         GROUP BY 1,2,3,4,5,6,7,8,9,10

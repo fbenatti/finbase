@@ -101,6 +101,21 @@ def report_path(connection, report_type: str) -> str | None:
     return padrao
 
 
+def focus_download_prefixes(blob_prefixes: Any) -> list[str]:
+    """Caminhos que o extrator de custo pode baixar para a Bronze da conexão.
+
+    Price sheet, amortizado e qualquer outro tipo ficam fora: cada um tem a
+    própria tabela. Baixá-los aqui gravava o arquivo na Bronze de custo
+    (`raw_azure_4p` / `raw_azure_ti`) e o manifesto da conexão de custo.
+    """
+    configured = normalize_prefixes(blob_prefixes)
+    return [
+        path
+        for report_type, path in configured.items()
+        if (REPORT_TYPES.get(report_type) or {}).get("is_focus_base")
+    ]
+
+
 def enabled_report_types(connection) -> list[str]:
     """Tipos declarados pela conexão — só estes devem ser coletados."""
     return sorted(normalize_prefixes(getattr(connection, "blob_prefixes", None)))

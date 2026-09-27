@@ -261,6 +261,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [engagementLoading, setEngagementLoading] = useState(false);
+  const [engagementError, setEngagementError] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [sortBy, setSortBy] = useState<keyof EngagementUser>("total_interactions");
@@ -299,6 +300,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
   useEffect(() => {
     async function fetchEngagementUsers() {
       setEngagementLoading(true);
+      setEngagementError("");
       try {
         const payload = { period: period, engagement_filter: selectedFilter, search: searchQuery, limit: 5000, offset: 0 };
         const res = await getAICopilotEngagementUsers(payload);
@@ -306,7 +308,11 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
         if (res.counts) setEngagementCounts(res.counts);
         if (res.credit_period) setCreditPeriod(res.credit_period);
         if (res.pool_benchmark) setPoolBenchmark(res.pool_benchmark);
-      } catch (err) { console.error(err); } finally { setEngagementLoading(false); }
+      } catch (err) {
+        console.error(err);
+        setEngagementUsers([]);
+        setEngagementError("Falha ao consultar os desenvolvedores e o consumo de IA do período.");
+      } finally { setEngagementLoading(false); }
     }
     fetchEngagementUsers();
   }, [period, selectedFilter, searchQuery]);
@@ -612,6 +618,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
 
             <TextField fullWidth size="small" placeholder="Buscar..." value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setPage(0); }} sx={{ mb: 2 }} />
 
+            {engagementError && <Alert severity="error" sx={{ mb: 2 }}>{engagementError}</Alert>}
             {engagementLoading ? (
               <Box p={5} display="flex" justifyContent="center"><CircularProgress size={24} /></Box>
             ) : (

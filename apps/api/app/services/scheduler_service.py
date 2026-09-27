@@ -303,11 +303,20 @@ def _queue_ptu_collections(*, hours: int, lookback_note: str) -> None:
     from sqlalchemy import insert, select
     from app.database import SyncSession
     from app.models.source_connection import SourceConnection
+    from app.models.azure_connection_source import AzureConnectionSource
     from app.models.etl_task import EtlTask
 
     session = SyncSession()
     try:
-        conns = session.execute(select(SourceConnection).where(SourceConnection.connector_type == "azure_openai_ptu")).scalars().all()
+        conns = session.execute(
+            select(SourceConnection).join(
+                AzureConnectionSource,
+                AzureConnectionSource.connection_id == SourceConnection.id,
+            ).where(
+                AzureConnectionSource.source_key == "openai_ptu",
+                AzureConnectionSource.enabled.is_(True),
+            )
+        ).scalars().all()
         queued = 0
         for conn in conns:
             active = session.execute(
@@ -315,6 +324,7 @@ def _queue_ptu_collections(*, hours: int, lookback_note: str) -> None:
                     EtlTask.connection_id == conn.id,
                     EtlTask.task_type == "extraction",
                     EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                    EtlTask.result_json.op("->>")("source_key") == "openai_ptu",
                 ).limit(1)
             ).scalar_one_or_none()
             if active:
@@ -334,7 +344,7 @@ def _queue_ptu_collections(*, hours: int, lookback_note: str) -> None:
                 rows_destination=0,
                 errors=[],
                 phase=lookback_note,
-                result_json={"lookback_hours": hours},
+                result_json={"source_key": "openai_ptu", "lookback_hours": hours},
             ))
             queued += 1
         session.commit()
@@ -406,8 +416,20 @@ def _oci_operational_hourly_job() -> None:
         conns = session.query(SourceConnection).filter(SourceConnection.connector_type == "oci").all()
         for conn in conns:
             if configured_compartments(conn):
-                result = collect(conn, hours=3, persist=True)
-                logger.info("OCI operational refresh %s: inventory=%d metrics=%d errors=%d", conn.code, len(result.get("inventory", [])), len(result.get("metrics", [])), len(result.get("errors", [])))
+                try:
+                    result = collect(conn, hours=3, persist=True)
+                    persisted = result.get("persisted") or {}
+                    if persisted.get("silver_error"):
+                        logger.error("OCI operational Silver refresh %s failed: %s", conn.code, persisted["silver_error"])
+                    else:
+                        logger.info(
+                            "OCI operational refresh %s: inventory=%d metrics=%d errors=%d silver_rows=%d token_rows=%d",
+                            conn.code, len(result.get("inventory", [])), len(result.get("metrics", [])),
+                            len(result.get("errors", [])), int(persisted.get("silver_rows") or 0),
+                            int(persisted.get("token_rows") or 0),
+                        )
+                except Exception:
+                    logger.exception("OCI operational collection failed for %s", conn.code)
     except Exception as exc:
         logger.warning("OCI operational hourly collection failed: %s", exc, exc_info=True)
     finally:
@@ -654,10 +676,9 @@ async def start_scheduler():
         # Daily saving refresh is intentionally independent of ETL schedules: actions
         # that start today must progress even when a source has no new blob.
         _scheduler.add_job(_refresh_savings_job, "cron", hour=2, minute=15, id="savings_daily", replace_existing=True)
-        # Disabled: Azure PTU hourly lookback 3h (every hour at :10).
-        # _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
+        _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
         _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_gold_daily_job, "cron", hour=4, minute=30, id="azure_ptu_gold_daily", replace_existing=True)
+        _scheduler.add_job(_azure_ptu_gold_daily_job, "cron", minute=50, id="azure_ptu_gold_hourly", replace_existing=True)
         _scheduler.add_job(_ai_usage_gold_daily_job, "cron", hour=5, minute=10, id="ai_usage_gold_daily", replace_existing=True)
         _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
         _scheduler.add_job(_oci_operational_hourly_job, "cron", minute=18, id="oci_operational_hourly", replace_existing=True)

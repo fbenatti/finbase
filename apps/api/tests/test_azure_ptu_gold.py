@@ -15,7 +15,7 @@ async def test_project_tokens_are_read_from_ptu_gold(monkeypatch):
     result = await gold_mart.load_project_token_totals("vivo-mais", ["202608"], None)
 
     assert result["202608"]["total_tokens"] == 1000
-    assert gold_mart.PTU_SILVER_TABLE in captured[0]
+    assert gold_mart.GOLD_SQL in captured[0]
     assert "lower(CAST(project_hint AS VARCHAR)) = 'vivo-mais'" in captured[0]
 
 
@@ -37,7 +37,7 @@ async def test_project_tokens_can_load_all_available_periods(monkeypatch):
 @pytest.mark.asyncio
 async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
     captured = []
-    gold_mart._Gold_COLUMNS = {
+    gold_mart._GOLD_COLUMNS = {
         "metric_day", "connection_id", "account_resource_id", "deployment_name",
         "model_name", "model_version", "region", "sku_name", "project_hint",
         "provisioned_ptus", "input_tokens_sum", "output_tokens_sum", "total_tokens_sum",
@@ -82,3 +82,26 @@ async def test_project_tokens_last_30d_uses_rolling_window(monkeypatch):
     assert result["total_tokens"] == 1000
     assert "current_date - INTERVAL '30' DAY" in captured[0]
     assert "project_hint AS VARCHAR)) = 'aura-brain'" in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_daily_refresh_reads_hourly_source(monkeypatch):
+    described = []
+    published = []
+
+    async def describe(table):
+        described.append(table)
+        return {"metric_hour", "project_hint", "input_tokens_sum", "output_tokens_sum", "total_tokens_sum"}
+
+    async def publish(**kwargs):
+        published.append(kwargs)
+        return type("Outcome", (), {"rows": 2})()
+
+    monkeypatch.setattr(gold_mart, "_columns", describe)
+    monkeypatch.setattr(gold_mart, "publish_gold_cube", publish)
+    result = await gold_mart.refresh_azure_ptu_gold(days=7)
+
+    assert result["rows"] == 2
+    assert described == [gold_mart.PTU_HOURLY_TABLE]
+    assert f"FROM {gold_mart.PTU_HOURLY_TABLE}" in published[0]["select_sql"]
+    assert f"FROM {gold_mart.GOLD_SQL}" not in published[0]["select_sql"]

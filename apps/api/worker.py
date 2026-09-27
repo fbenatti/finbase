@@ -2075,8 +2075,13 @@ def _terminate_consumer(proc: multiprocessing.Process, *, grace_seconds: float =
         proc.join(timeout=grace_seconds)
 
 
+_CONSUMER_CPU_SAMPLES: dict[int, tuple[float, float]] = {}
+
+
 def _watch_stalled_consumers(processes: dict[int, multiprocessing.Process]) -> None:
     """Kill only the child that owns a stale task, then recover that task row."""
+    from app.services.worker_runtime import note_cpu_sample, process_cpu_seconds
+
     timeout_seconds = max(60, int(os.getenv("WORKER_TASK_STALL_TIMEOUT_SECONDS", "900")))
     for proc in list(processes.values()):
         if not proc.is_alive() or proc.pid is None:
@@ -2090,6 +2095,18 @@ def _watch_stalled_consumers(processes: dict[int, multiprocessing.Process]) -> N
                 stale_after_seconds=timeout_seconds,
             )
             task_id = task.id if task is not None else None
+            if task is not None and note_cpu_sample(
+                _CONSUMER_CPU_SAMPLES,
+                proc.pid,
+                process_cpu_seconds(proc.pid),
+                now=time.monotonic(),
+                idle_after_seconds=timeout_seconds,
+            ):
+                task.last_progress_at = datetime.now(timezone.utc)
+                session.commit()
+                task_id = None
+            else:
+                session.rollback()
         except Exception:
             logger.exception("Could not check progress for worker pid %s", proc.pid)
             session.close()

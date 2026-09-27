@@ -39,12 +39,14 @@ _ANALYTIC_WRITER_TASK_TYPES = {
 
 
 def parallel_reprocess_slices_enabled() -> bool:
-    """When >= 2, reprocess/reclassify tasks with a slice key skip the global writer lock.
+    """When >= 2, reprocess tasks of different slices skip the single writer lock.
 
-    The per-slice advisory lock (destination + connection + month/day) still prevents
-    two workers from publishing the same source and billing period at once.
+    ``dest_modelo_focus`` is one Iceberg table. Two commits at once make the
+    loser rewrite the whole month (``branch main has changed``). Keep this off
+    unless that publish path retries metadata only. The per-slice lock still
+    stops two workers from publishing the same source and month.
     """
-    return max(1, int(os.getenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "2"))) >= 2
+    return max(1, int(os.getenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "1"))) >= 2
 
 
 def _reprocess_task_has_slice_lock(task: EtlTask) -> bool:

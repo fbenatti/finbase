@@ -1,9 +1,8 @@
-"""Gold leve para os dashboards operacionais de Azure OpenAI PTU.
+"""Gold diária para os dashboards operacionais de Azure OpenAI PTU.
 
-A Gold ``dest_azure_ptu_metrics`` preserva a observação horária e continua
-sendo a fonte do heatmap. Os demais widgets leem esta materialização diária,
-reduzida por deployment/projeto, para não varrer o histórico horário em cada
-abertura da tela.
+A tabela horária ``dest_azure_ptu_metrics`` alimenta esta materialização diária,
+reduzida por deployment/projeto. A escrita horária ainda usa o namespace Gold;
+essa migração para Silver deve acontecer com o produtor e o cubo diário juntos.
 """
 from __future__ import annotations
 
@@ -20,9 +19,10 @@ logger = logging.getLogger(__name__)
 
 GOLD = layers.GOLD
 GOLD_TABLE = "dest_dm_azure_ptu_daily"
-# Uma definição só. A PTU canônica vive na Silver; leituras de cubo usam a Gold.
+# Tabela de saída consultada pelos dashboards.
 GOLD_SQL = f"iceberg.{GOLD}.{GOLD_TABLE}"
-PTU_SILVER_TABLE = "iceberg.silver.ptu_capacity_series"
+# A coleta horária ainda publica nesta tabela; o cubo diário é derivado dela.
+PTU_HOURLY_TABLE = f"iceberg.{GOLD}.dest_azure_ptu_metrics"
 DASHBOARD_TRINO_TIMEOUT_S = 25
 
 _GOLD_COLUMNS: set[str] | None = None
@@ -136,7 +136,7 @@ async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
     # API de leitura nem dos testes unitários do dashboard.
     from app.services import iceberg_service as iceberg
 
-    columns = await _columns(GOLD_SQL)
+    columns = await _columns(PTU_HOURLY_TABLE)
     if not columns:
         raise RuntimeError("Gold Azure PTU indisponível ou sem colunas")
     end = datetime.now(timezone.utc) - timedelta(minutes=10)
@@ -158,7 +158,7 @@ async def refresh_azure_ptu_gold(*, days: int = 400) -> dict[str, Any]:
         MAX(CAST(project_hint AS VARCHAR)) AS project_hint,
         MAX(TRY_CAST(provisioned_ptus AS DOUBLE)) AS provisioned_ptus,
         {_daily_select(columns)}
-      FROM {GOLD_SQL}
+      FROM {PTU_HOURLY_TABLE}
       WHERE {where}
       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
     """
@@ -267,7 +267,7 @@ async def load_project_token_totals(
                COALESCE(SUM(TRY_CAST(input_tokens_sum AS DOUBLE)), 0) AS input_tokens,
                COALESCE(SUM(TRY_CAST(output_tokens_sum AS DOUBLE)), 0) AS output_tokens,
                COALESCE(SUM(TRY_CAST(total_tokens_sum AS DOUBLE)), 0) AS total_tokens
-        FROM {PTU_SILVER_TABLE}
+        FROM {GOLD_SQL}
         WHERE lower(CAST(project_hint AS VARCHAR)) = '{project}'{period_filter}
         GROUP BY 1
         """,

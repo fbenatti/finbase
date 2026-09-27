@@ -1306,7 +1306,7 @@ def expire_stale_running_manifests_sync(*, timeout_hours: float = 2.0) -> int:
                         SELECT m.id FROM gold_manifest m
                         WHERE m.status = :running
                           AND m.finished_at IS NULL
-                          AND m.started_at < now() - make_interval(hours => :h)
+                          AND m.started_at < now() - make_interval(secs => CAST(:seconds AS DOUBLE PRECISION))
                           AND NOT EXISTS (
                               SELECT 1 FROM etl_task t
                               WHERE t.id = m.run_id
@@ -1318,7 +1318,7 @@ def expire_stale_running_manifests_sync(*, timeout_hours: float = 2.0) -> int:
                 {
                     "abandoned": ABANDONED,
                     "running": RUNNING,
-                    "h": timeout_hours,
+                    "seconds": timeout_hours * 3600,
                     "motivo": f"RUNNING órfão: sem término há mais de {timeout_hours:.0f}h",
                 },
             )

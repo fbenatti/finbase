@@ -358,6 +358,50 @@ class GithubTokenExtractor:
                 return exp.get("id"), (exp.get("status") or "").lower()
         return None, None
 
+    def _latest_completed_billing_report(self, period: str) -> tuple[pd.DataFrame, str]:
+        """Use the newest cumulative monthly export when today's report is delayed."""
+        start_date = f"{period[:4]}-{period[4:6]}-01"
+        with httpx.Client(timeout=60) as client:
+            response = client.get(self._billing_reports_url, headers=self._headers)
+            response.raise_for_status()
+            reports = sorted(
+                (
+                    item for item in response.json().get("usage_report_exports", [])
+                    if item.get("report_type") == "ai_credit"
+                    and item.get("start_date") == start_date
+                    and item.get("status", "").lower() == "completed"
+                ),
+                key=lambda item: str(item.get("end_date") or ""),
+                reverse=True,
+            )
+            for report in reports:
+                report_id = report.get("id")
+                if not report_id:
+                    continue
+                detail = client.get(f"{self._billing_reports_url}/{report_id}", headers=self._headers)
+                if detail.status_code != 200:
+                    continue
+                item = detail.json()
+                urls = item.get("download_urls") or []
+                url = urls[0] if urls else item.get("download_url")
+                if not url:
+                    continue
+                downloaded = client.get(url, follow_redirects=True, timeout=120)
+                if downloaded.status_code != 200:
+                    continue
+                content = downloaded.content
+                if content.startswith(b"\x1f\x8b"):
+                    import gzip
+                    content = gzip.decompress(content)
+                frame = self._normalize_billing_csv(pd.read_csv(io.BytesIO(content), dtype=str))
+                if not frame.empty:
+                    logger.warning(
+                        "[GithubToken] Usando último relatório financeiro completo de %s até %s",
+                        period, report.get("end_date"),
+                    )
+                    return frame, str(report_id)
+        raise ValueError(f"Nenhum relatório AI Credits completo e baixável para {period}")
+
     def _fetch_billing_report_for_period(self, period: str) -> tuple[pd.DataFrame, str]:
         """AI-credit export: per-user, per-model financial usage and tokens."""
         year = int(period[:4])
@@ -523,7 +567,16 @@ class GithubTokenExtractor:
             if metrics_df.empty:
                 raise
             logger.warning("[GithubToken] Billing report indisponível para %s: %s", period, exc)
-            billing_df = pd.DataFrame()
+            try:
+                billing_df, _report_id = self._latest_completed_billing_report(period)
+            except Exception as fallback_exc:
+                logger.warning("[GithubToken] Sem relatório financeiro anterior para %s: %s", period, fallback_exc)
+                billing_df = pd.DataFrame()
+        if billing_df.empty and not metrics_df.empty:
+            try:
+                billing_df, _report_id = self._latest_completed_billing_report(period)
+            except Exception as fallback_exc:
+                logger.warning("[GithubToken] Sem AI Credits para %s: %s", period, fallback_exc)
         if metrics_df.empty:
             logger.warning("[GithubToken] Copilot metrics vazio para %s; usando billing report CSV", period)
             return billing_df

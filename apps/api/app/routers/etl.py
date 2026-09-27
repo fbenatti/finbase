@@ -1418,6 +1418,7 @@ def _reprocess_destination_sync(
                 row.total_blobs = status.get("total_blobs", row.total_blobs)
                 row.processed_blobs = status.get("processed_blobs", row.processed_blobs)
                 row.rows_destination = status.get("rows_destination", row.rows_destination)
+                row.last_progress_at = func.now()
                 current = status.get("current_blob", row.current_blob)
                 if isinstance(current, str):
                     row.current_blob = current[:500]
@@ -1527,6 +1528,13 @@ def _reprocess_destination_sync(
                 candidates = [c for c in candidates if c[2].startswith("arg/inventory/")]
             elif phys_name.lower() == "dest_cloud_orphan_resources":
                 candidates = [c for c in candidates if c[2].startswith("arg/orphans/")]
+            elif phys_name.lower() == "dest_modelo_focus" and conn:
+                from app.services.cost_sources import bronze_blob_eligible_for_focus
+
+                candidates = [
+                    c for c in candidates
+                    if bronze_blob_eligible_for_focus(conn, c[2])
+                ]
             # The SQL manifest is only an index. After a crash it may contain
             # fewer rows than the immutable Bronze table. Reconcile it with
             # physical provenance before selecting Azure's latest run.
@@ -1534,6 +1542,13 @@ def _reprocess_destination_sync(
             if billing_periods:
                 for period in billing_periods:
                     physical.extend(iceberg.list_bronze_slices(conn.code if conn else str(cid), str(period)))
+            if phys_name.lower() == "dest_modelo_focus" and conn:
+                from app.services.cost_sources import bronze_blob_eligible_for_focus
+
+                physical = [
+                    item for item in physical
+                    if bronze_blob_eligible_for_focus(conn, str(item.get("blob_path") or ""))
+                ]
             if physical:
                 manifest_paths = {str(row[2]) for row in candidates}
                 physical_paths = {str(item["blob_path"]) for item in physical}
@@ -2106,6 +2121,27 @@ def _reprocess_destination_sync(
             status["current_blob"] = f"publicando lotes na Gold (swap por partição)..."
             _sync_db()
             _append_reprocess_log(task_id, "Validação concluída; iniciando publicação na Gold")
+            # The Iceberg commit does not emit batch progress. Without a
+            # heartbeat the 15-minute stall watchdog kills a healthy publish.
+            import threading
+            stop_publish_heartbeat = threading.Event()
+
+            def _publish_heartbeat() -> None:
+                while not stop_publish_heartbeat.wait(30):
+                    try:
+                        beat = SyncSession()
+                        beat.execute(text("""
+                            UPDATE etl_task
+                               SET last_progress_at = now()
+                             WHERE id = :task_id AND status = 'RUNNING'
+                        """), {"task_id": task_id})
+                        beat.commit()
+                        beat.close()
+                    except Exception:
+                        pass
+
+            heartbeat = threading.Thread(target=_publish_heartbeat, daemon=True)
+            heartbeat.start()
 
             # A queue task represents exactly one destination/source/month.
             # Publishing a whole staged destination forced a full Arrow/Pandas
@@ -2150,6 +2186,8 @@ def _reprocess_destination_sync(
             if temp_name:
                 iceberg.cleanup_staged_table(temp_name)
             raise stage_err
+        finally:
+            stop_publish_heartbeat.set()
 
         # ── Gold agregado (só MODELO FOCUS): publica a pré-agregação mensal
         # gerada dos frames em memória. Se falhar, reconstrói da Gold (fallback)
@@ -2256,8 +2294,13 @@ def _audit_reprocess_group_sync(
 
     session = SyncSession()
     try:
+        from app.services.cost_sources import (
+            bronze_blob_eligible_for_focus,
+            destination_requires_cost_source,
+        )
+
         stmt = (
-            select(IngestedBlob, SourceConnection.code, SourceConnection.connector_type)
+            select(IngestedBlob, SourceConnection)
             .join(SourceConnection, SourceConnection.id == IngestedBlob.connection_id)
             .where(IngestedBlob.connection_id.in_(connection_ids))
             .order_by(IngestedBlob.billing_period, IngestedBlob.connection_id, IngestedBlob.blob_path)
@@ -2265,8 +2308,16 @@ def _audit_reprocess_group_sync(
         if billing_periods:
             stmt = stmt.where(IngestedBlob.billing_period.in_(billing_periods))
         rows = session.execute(stmt).all()
+        if destination_requires_cost_source(destination_table_id):
+            rows = [
+                (blob, conn)
+                for blob, conn in rows
+                if bronze_blob_eligible_for_focus(conn, blob.blob_path)
+            ]
         audits: list[dict[str, Any]] = []
-        for index, (blob, code, connector_type) in enumerate(rows, start=1):
+        for index, (blob, conn) in enumerate(rows, start=1):
+            code = conn.code
+            connector_type = conn.connector_type
             audit = iceberg.audit_bronze_blob(
                 code,
                 blob_path=blob.blob_path,

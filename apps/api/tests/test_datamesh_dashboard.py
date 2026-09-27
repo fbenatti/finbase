@@ -1,4 +1,6 @@
-from app.services.datamesh_dashboard import build_dashboard, classify_cost
+import pytest
+
+from app.services.datamesh_dashboard import build_dashboard, classify_cost, load_datamesh_dashboard
 
 
 def row(**values):
@@ -20,3 +22,26 @@ def test_forecast_precedence_rateio_and_project_fallback():
     # Databricks: realizado=50 + forecast=200 = 250 (antes exibia apenas 200).
     assert result["kpis"]["databricks"] == 250
     assert any(project["project"] == "Não informado" for project in result["projects"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("physical_column", ["organograma_nivel_6", "departamento_nivel_6", "organograma"])
+async def test_query_uses_available_level_six_column(monkeypatch, physical_column):
+    statements = []
+
+    async def execute(sql, **_kwargs):
+        statements.append(sql)
+        if sql.lstrip().startswith("DESCRIBE"):
+            return [{"Column": name} for name in (
+                "_billing_period", "tipo", "realizado", physical_column,
+                "servicename", "servicesubcategory", "skumeter",
+            )]
+        return [row()]
+
+    monkeypatch.setattr("app.services.datamesh_dashboard.trino_execute", execute)
+    result = await load_datamesh_dashboard()
+
+    assert result["projects"][0]["project"] == "Projeto A"
+    assert f'"{physical_column}" AS organograma_nivel_6' in statements[1]
+    assert "CAST(NULL AS VARCHAR) AS centro_custo" in statements[1]
+    assert f"{physical_column} AS organograma_nivel_6" not in statements[1]

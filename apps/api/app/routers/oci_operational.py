@@ -39,7 +39,9 @@ async def collect_now(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     async def run() -> None:
         try:
             result = await asyncio.to_thread(collect, conn, hours=body.hours, persist=body.persist)
-            COLLECTION_STATUS[body.connection_id] = {**COLLECTION_STATUS[body.connection_id], "status": "completed", "finished_at": datetime.now(timezone.utc).isoformat(), "result": {"inventory": len(result.get("inventory", [])), "metrics": len(result.get("metrics", [])), "errors": len(result.get("errors", [])), "error_samples": result.get("errors", [])[:25], "persisted": result.get("persisted", {})}}
+            persisted = result.get("persisted") or {}
+            status = "failed" if persisted.get("silver_error") else "completed"
+            COLLECTION_STATUS[body.connection_id] = {**COLLECTION_STATUS[body.connection_id], "status": status, "finished_at": datetime.now(timezone.utc).isoformat(), "result": {"inventory": len(result.get("inventory", [])), "metrics": len(result.get("metrics", [])), "errors": len(result.get("errors", [])), "error_samples": result.get("errors", [])[:25], "persisted": persisted}}
         except Exception as exc:
             COLLECTION_STATUS[body.connection_id] = {**COLLECTION_STATUS[body.connection_id], "status": "failed", "finished_at": datetime.now(timezone.utc).isoformat(), "error": f"{type(exc).__name__}: {str(exc)[:500]}"}
 

@@ -79,11 +79,10 @@ class AzureExtractor:
         config = connection.config_json
         # `blob_prefixes` aceita as duas formas: o mapa `{tipo: caminho}` (novo) e
         # a lista de strings (antiga). O extrator só precisa dos caminhos.
-        from app.services.azure_report_types import normalize_prefixes
+        from app.services.azure_report_types import focus_download_prefixes
 
-        self.blob_prefixes = list(
-            normalize_prefixes(connection.blob_prefixes or config.get("blob_prefixes"))
-            .values()
+        self.blob_prefixes = focus_download_prefixes(
+            connection.blob_prefixes or config.get("blob_prefixes")
         )
 
     def _get_blob_service_client(self):

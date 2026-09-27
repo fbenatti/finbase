@@ -3558,7 +3558,7 @@ export interface AnalysisTablePartitionResult {
 }
 
 export async function getAnalysisTablePartitions(layer: string, table: string): Promise<AnalysisTablePartitionResult> {
-  const { data } = await api.get(`/analysis/tables/${layer}/${table}/partitions`, { timeout: 20000 });
+  const { data } = await api.get(`/analysis/tables/${layer}/${table}/partitions`, { timeout: 90000 });
   return data;
 }
 

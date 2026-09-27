@@ -67,6 +67,41 @@ def destination_requires_cost_source(destination_id: int | None) -> bool:
     return destination_id == FOCUS_DESTINATION_ID
 
 
+def bronze_blob_eligible_for_focus(connection: Any, blob_path: str) -> bool:
+    """Whether a Bronze blob path may feed the FOCUS destination (actual cost only).
+
+    Azure connections may declare several report types (price sheet, amortized).
+    Those exports use other Bronze tables or catalog sources and must not block
+    or pollute FOCUS reprocess/audit.
+    """
+    path = str(blob_path or "").strip()
+    if not path:
+        return False
+    connector = str(getattr(connection, "connector_type", None) or "")
+    if connector != "azure_blob":
+        return True
+    lower = path.lower()
+    if lower.startswith("automation/") or lower.startswith("arg/"):
+        return False
+    if "pricesheet" in lower or "price-sheet" in lower:
+        return False
+    if "amortized" in lower and "actual-cost" not in lower:
+        return False
+
+    from app.services.azure_report_types import REPORT_TYPES, normalize_prefixes
+
+    configured = normalize_prefixes(getattr(connection, "blob_prefixes", None))
+    focus_prefixes = [
+        prefix
+        for rtype, prefix in configured.items()
+        if (REPORT_TYPES.get(rtype) or {}).get("is_focus_base")
+    ]
+    if focus_prefixes:
+        return any(path.startswith(prefix) for prefix in focus_prefixes)
+    # Legacy list form: only paths that look like actual-cost exports.
+    return "actual-cost" in lower
+
+
 def mapping_rejection_reason(connection: Any, destination_id: int | None) -> str | None:
     """Motivo pelo qual a conexão não pode mapear para o destino, ou ``None``.
 

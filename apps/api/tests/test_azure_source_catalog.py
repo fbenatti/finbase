@@ -136,7 +136,7 @@ def test_monitor_source_is_catalogued_as_implemented_telemetry():
     assert entry["implementation_status"] == "implemented"
     assert entry["connector_type"] == "azure_monitor_vm_metrics"
     assert is_telemetry("monitor_vm_metrics") is True
-    assert entry["default_window_days"] == 15
+    assert entry["default_window_days"] == 1
 
 
 def test_cost_exports_is_not_telemetry():

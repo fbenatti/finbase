@@ -201,6 +201,23 @@ async def _connection_labels(db: AsyncSession) -> dict[int, str]:
     return labels
 
 
+def _partition_meta_cache_key(layer: str, table_name: str) -> str:
+    return f"{layer}:{table_name}"
+
+
+def _partitions_from_inspect_frame(frame: pd.DataFrame, labels: dict[int, str]) -> list[dict]:
+    partitions: list[dict] = []
+    for row in frame.to_dict(orient="records"):
+        partitions.append(_partition_payload(
+            row.get("partition"),
+            record_count=int(row.get("record_count") or 0),
+            file_count=int(row.get("file_count") or 0),
+            labels=labels,
+        ))
+    partitions.sort(key=lambda item: (str(item.get("period") or ""), item.get("source_connection_id") or 0))
+    return partitions
+
+
 def _partition_payload(partition: object, *, record_count: int, file_count: int, labels: dict[int, str]) -> dict:
     described = _describe_iceberg_partition(partition)
     conn_id = described["source_connection_id"]
@@ -390,6 +407,12 @@ _SCHEMA_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _SCHEMA_CACHE_TTL_S = 90.0
 _SCHEMA_LOCK = asyncio.Lock()
 _SCHEMA_INFLIGHT: dict[str, asyncio.Task[tuple[str, dict[str, str]]]] = {}
+
+# Partition trees in Analysis only need Iceberg metadata (manifest stats), not
+# Postgres operational tables. Cache responses to avoid hammering Trino on
+# every expand of large tables such as dest_modelo_focus.
+_PARTITION_META_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_PARTITION_META_CACHE_TTL_S = float(os.getenv("ANALYSIS_PARTITION_CACHE_TTL_S", "120"))
 
 
 def _schema_cache_key(namespace: str, safe_name: str) -> str:
@@ -2507,32 +2530,56 @@ async def get_table_partitions(layer: str, table_name: str, db: AsyncSession = D
     """Return partition metadata for one catalog table (loaded on demand)."""
     if layer not in {"bronze", "silver", "gold"} or not re.fullmatch(r"[a-zA-Z0-9_]+", table_name):
         raise HTTPException(status_code=422, detail="Camada ou nome de tabela inválido.")
+    cache_key = _partition_meta_cache_key(layer, table_name)
+    cached = _PARTITION_META_CACHE.get(cache_key)
+    if cached and (time.monotonic() - cached[0]) < _PARTITION_META_CACHE_TTL_S:
+        return cached[1]
     prune_stale_catalog_entries(layer)
     if table_name not in set(list_tables(layer)):
         raise HTTPException(status_code=404, detail="Tabela não encontrada no catálogo.")
     qualified = f'iceberg.{layer}."{table_name}$partitions"'
     catalog_table = None
+    labels = await _connection_labels(db)
     try:
         catalog_table = get_catalog().load_table((layer, table_name))
         if not catalog_table.spec().fields:
             # The logical monthly period for these slices is encoded in the
             # physical name; asking Trino for $partitions only adds a failing
             # round trip and made the UI appear to hang.
-            frame = catalog_table.inspect.partitions().to_pandas()
-            return {
+            frame = await asyncio.to_thread(lambda: catalog_table.inspect.partitions().to_pandas())
+            payload = {
                 "layer": layer, "table_name": table_name, "partitioned": False,
                 "partitions": [], "record_count": int(frame["record_count"].sum()) if "record_count" in frame else 0,
                 "file_count": int(frame["file_count"].sum()) if "file_count" in frame else 0,
                 "source": "pyiceberg",
             }
+            _PARTITION_META_CACHE[cache_key] = (time.monotonic(), payload)
+            return payload
+        try:
+            frame = await asyncio.to_thread(lambda: catalog_table.inspect.partitions().to_pandas())
+            payload = {
+                "layer": layer,
+                "table_name": table_name,
+                "partitioned": True,
+                "partitions": _partitions_from_inspect_frame(frame, labels),
+                "source": "pyiceberg",
+            }
+            _PARTITION_META_CACHE[cache_key] = (time.monotonic(), payload)
+            return payload
+        except Exception as inspect_error:
+            logger.debug(
+                "PyIceberg partition inspect failed for %s.%s, trying Trino: %s",
+                layer,
+                table_name,
+                inspect_error,
+            )
     except Exception as metadata_error:
         logger.debug("Could not inspect Iceberg spec for %s.%s before Trino: %s", layer, table_name, metadata_error)
     try:
         rows = await trino_execute(
-            f"SELECT partition, record_count, file_count FROM {qualified} ORDER BY partition",
-            timeout_s=12, max_retries=1,
+            f"SELECT partition, record_count, file_count FROM {qualified}",
+            timeout_s=30, max_retries=1,
         )
-        labels = await _connection_labels(db)
         partitions = []
         for row in rows:
             partitions.append(_partition_payload(
@@ -2541,34 +2588,40 @@ async def get_table_partitions(layer: str, table_name: str, db: AsyncSession = D
                 file_count=int(row.get("file_count") or 0),
                 labels=labels,
             ))
-        return {"layer": layer, "table_name": table_name, "partitioned": True,
-                "partitions": partitions, "source": "trino"}
+        partitions.sort(key=lambda item: (str(item.get("period") or ""), item.get("source_connection_id") or 0))
+        payload = {
+            "layer": layer,
+            "table_name": table_name,
+            "partitioned": True,
+            "partitions": partitions,
+            "source": "trino",
+        }
+        _PARTITION_META_CACHE[cache_key] = (time.monotonic(), payload)
+        return payload
     except Exception as trino_error:
         logger.debug("Trino partition metadata unavailable for %s.%s: %s", layer, table_name, trino_error)
         try:
             table = catalog_table or get_catalog().load_table((layer, table_name))
-            frame = table.inspect.partitions().to_pandas()
+            frame = await asyncio.to_thread(lambda: table.inspect.partitions().to_pandas())
             if not table.spec().fields:
-                # Some materialized slices encode month/scope in their
-                # physical table name and are not Iceberg-partitioned tables.
-                return {
+                payload = {
                     "layer": layer, "table_name": table_name, "partitioned": False,
                     "partitions": [], "record_count": int(frame["record_count"].sum()) if "record_count" in frame else 0,
                     "file_count": int(frame["file_count"].sum()) if "file_count" in frame else 0,
                     "source": "pyiceberg",
                 }
+                _PARTITION_META_CACHE[cache_key] = (time.monotonic(), payload)
+                return payload
             logger.warning("Using PyIceberg partition fallback for %s.%s: %s", layer, table_name, trino_error)
-            labels = await _connection_labels(db)
-            partitions = []
-            for row in frame.to_dict(orient="records"):
-                partitions.append(_partition_payload(
-                    row.get("partition"),
-                    record_count=int(row.get("record_count") or 0),
-                    file_count=int(row.get("file_count") or 0),
-                    labels=labels,
-                ))
-            return {"layer": layer, "table_name": table_name, "partitioned": True,
-                    "partitions": partitions, "source": "pyiceberg"}
+            payload = {
+                "layer": layer,
+                "table_name": table_name,
+                "partitioned": True,
+                "partitions": _partitions_from_inspect_frame(frame, labels),
+                "source": "pyiceberg",
+            }
+            _PARTITION_META_CACHE[cache_key] = (time.monotonic(), payload)
+            return payload
         except Exception as fallback_error:
             logger.warning(
                 "Partition metadata unavailable for %s.%s; pruning catalog entry: %s",

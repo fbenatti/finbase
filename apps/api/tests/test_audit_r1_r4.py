@@ -407,7 +407,7 @@ def test_abandoned_is_a_terminal_status():
 def test_expire_query_targets_running_without_finish(monkeypatch):
     import inspect
 
-    fonte = inspect.getsource(gov.expire_stale_running_manifests)
+    fonte = inspect.getsource(gov.expire_stale_running_manifests_sync)
     assert "ABANDONED" in fonte
     assert "finished_at IS NULL" in fonte
     assert "make_interval" in fonte
@@ -432,32 +432,20 @@ async def test_begin_finish_updates_same_row(monkeypatch):
             self._linha = linha
         def first(self):
             return self._linha
-        rowcount = 1
 
-    class _Session:
-        async def commit(self):
-            return None
-        async def execute(self, sql, *a, **k):
-            binds = (a[0] if a else k) or {}
-            executados.append(
-                ("insert" if "INSERT INTO gold_manifest" in str(sql) else "update", binds)
-            )
-            if "INSERT" in str(sql):
-                return _Resultado((777,))
-            return _Resultado()
+    class _Connection:
+        def execute(self, sql, binds):
+            executados.append(("insert" if "INSERT INTO gold_manifest" in str(sql) else "update", binds))
+            return _Resultado((777,)) if "INSERT" in str(sql) else _Resultado()
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
+    class _Transaction:
+        def __enter__(self):
+            return _Connection()
+        def __exit__(self, *args):
             return False
 
-    import app.services.gold_governance as gov_mod
-
-    monkeypatch.setattr(gov_mod, "async_session", lambda: _Session(), raising=False)
     import app.database as database
-
-    monkeypatch.setattr(database, "async_session", lambda: _Session())
+    monkeypatch.setattr(database.sync_engine, "begin", lambda: _Transaction())
     entrada = gov.ManifestEntry(cube_code="finops_cost_monthly", physical_table="finops_cost_monthly")
     await gov.record_manifest(entrada)
     assert entrada.manifest_id == 777
@@ -659,7 +647,7 @@ def test_expire_query_has_the_three_conditions():
     """R3.3: sem término, timeout e sem task em execução."""
     import inspect
 
-    fonte = inspect.getsource(gov.expire_stale_running_manifests)
+    fonte = inspect.getsource(gov.expire_stale_running_manifests_sync)
     assert "finished_at IS NULL" in fonte
     assert "make_interval" in fonte
     assert "NOT EXISTS" in fonte

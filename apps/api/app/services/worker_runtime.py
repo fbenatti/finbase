@@ -38,6 +38,50 @@ def consumer_record_path(pid: int) -> Path:
     return runtime_dir() / f"consumer-{pid}.json"
 
 
+def note_cpu_sample(
+    samples: dict[int, tuple[float, float]],
+    pid: int,
+    cpu_seconds: float | None,
+    *,
+    now: float,
+    idle_after_seconds: float,
+) -> bool:
+    """True while the process is alive and has used CPU inside the idle window.
+
+    The first sample counts as working. A later sample with the same CPU total
+    stays working until ``idle_after_seconds`` pass without any increase.
+    ``None`` means the process is gone.
+    """
+    if cpu_seconds is None:
+        samples.pop(pid, None)
+        return False
+    previous = samples.get(pid)
+    if previous is None or cpu_seconds > previous[0] + 1e-6:
+        samples[pid] = (cpu_seconds, now)
+        return True
+    _, changed_at = previous
+    return (now - changed_at) < idle_after_seconds
+
+
+def process_cpu_seconds(pid: int) -> float | None:
+    """Cumulative CPU of the process and its children, or None if it is gone."""
+    try:
+        process = psutil.Process(pid)
+        totals = [process.cpu_times()]
+        try:
+            children = process.children(recursive=True)
+        except (psutil.AccessDenied, PermissionError):
+            children = []
+        for child in children:
+            try:
+                totals.append(child.cpu_times())
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return sum(item.user + item.system for item in totals)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
+
+
 def process_matches(pid: int, created_at: float) -> bool:
     """Guard against PID reuse before signaling a registered subprocess."""
     try:

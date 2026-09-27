@@ -287,6 +287,17 @@ def _hold_test_file_lock(path, ready):
             time.sleep(1)
 
 
+def test_cpu_sample_keeps_a_busy_process_and_drops_a_flat_one():
+    from app.services.worker_runtime import note_cpu_sample
+
+    samples: dict[int, tuple[float, float]] = {}
+    assert note_cpu_sample(samples, 1, 1.0, now=100.0, idle_after_seconds=900) is True
+    assert note_cpu_sample(samples, 1, 1.2, now=200.0, idle_after_seconds=900) is True
+    assert note_cpu_sample(samples, 1, 1.2, now=500.0, idle_after_seconds=900) is True
+    assert note_cpu_sample(samples, 1, 1.2, now=1200.0, idle_after_seconds=900) is False
+    assert note_cpu_sample(samples, 1, None, now=1300.0, idle_after_seconds=900) is False
+
+
 def test_watchdog_stops_lock_holder_before_requeue(monkeypatch, tmp_path):
     import worker
 
@@ -311,6 +322,10 @@ def test_watchdog_stops_lock_holder_before_requeue(monkeypatch, tmp_path):
         session.add(task)
         session.commit()
 
+        from app.services.worker_runtime import process_cpu_seconds
+
+        cpu = process_cpu_seconds(process.pid)
+        worker._CONSUMER_CPU_SAMPLES[process.pid] = (cpu or 0.0, time.monotonic() - 1000)
         worker._watch_stalled_consumers({0: process})
         session.expire_all()
         assert not process.is_alive()

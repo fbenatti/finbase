@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import time
 import logging
+from datetime import datetime, timezone
+
 import psutil
 
 from app.database import SyncSession
@@ -13,7 +15,15 @@ from app.services.etl_task_claim import (
     reconcile_stale_running_tasks,
     terminate_stale_advisory_lock_holders,
 )
-from app.services.worker_runtime import any_worker_healthy, process_matches, registered_consumers
+from app.services.worker_runtime import (
+    any_worker_healthy,
+    note_cpu_sample,
+    process_cpu_seconds,
+    process_matches,
+    registered_consumers,
+)
+
+_CPU_SAMPLES: dict[int, tuple[float, float]] = {}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("openfinops.supervisor")
@@ -29,10 +39,29 @@ def recover_registered_consumers() -> int:
         parent_alive = process_matches(int(record["parent_pid"]), float(record["parent_created_at"]))
         stalled = False
         if alive and parent_alive:
+            working = note_cpu_sample(
+                _CPU_SAMPLES,
+                pid,
+                process_cpu_seconds(pid),
+                now=time.monotonic(),
+                idle_after_seconds=timeout,
+            )
             session = SyncSession()
             try:
-                stalled = find_stalled_worker_task(session, pid, stale_after_seconds=timeout) is not None
-                session.rollback()
+                stalled_task = find_stalled_worker_task(session, pid, stale_after_seconds=timeout)
+                if stalled_task is not None and working:
+                    # The database timestamp can sit still during an Iceberg
+                    # publish. CPU movement means the child is not stuck.
+                    stalled_task.last_progress_at = datetime.now(timezone.utc)
+                    session.commit()
+                    logger.info(
+                        "Worker child %s is still using CPU; refreshed progress for task %s",
+                        pid,
+                        stalled_task.id,
+                    )
+                else:
+                    session.rollback()
+                stalled = stalled_task is not None and not working
             finally:
                 session.close()
         if alive and (not parent_alive or stalled):

@@ -110,15 +110,22 @@ def test_container_performance_queries_one_day_at_a_time(monkeypatch):
 def test_analysis_partition_endpoint_validates_catalog_and_classifies_period(monkeypatch):
     from app.routers import analysis
 
+    async def no_labels(_db):
+        return {}
+    monkeypatch.setattr(analysis, "_connection_labels", no_labels)
+    analysis._PARTITION_META_CACHE.clear()
     monkeypatch.setattr(analysis, "list_tables", lambda layer: ["raw_azure_4p_monitor_vm"] if layer == "bronze" else [])
     async def fake_execute(sql, **kwargs):
         assert '"raw_azure_4p_monitor_vm$partitions"' in sql
-        assert kwargs == {"timeout_s": 12, "max_retries": 1}
+        assert kwargs == {"timeout_s": 30, "max_retries": 1}
         return [{"partition": {"_billing_period": "20260924"}, "record_count": 123, "file_count": 2}]
     monkeypatch.setattr(analysis, "trino_execute", fake_execute)
     monkeypatch.setattr(analysis, "get_catalog", lambda: (_ for _ in ()).throw(RuntimeError("catalog unavailable in test")))
     result = asyncio.run(analysis.get_table_partitions("bronze", "raw_azure_4p_monitor_vm"))
-    assert result["partitions"] == [{"period": "20260924", "period_kind": "dia UTC de métrica", "record_count": 123, "file_count": 2}]
+    assert len(result["partitions"]) == 1
+    assert {key: result["partitions"][0][key] for key in ("period", "period_kind", "record_count", "file_count")} == {
+        "period": "20260924", "period_kind": "dia UTC de métrica", "record_count": 123, "file_count": 2,
+    }
 
     with pytest.raises(Exception):
         asyncio.run(analysis.get_table_partitions("bronze", 'x"; DROP TABLE foo --'))
@@ -177,6 +184,10 @@ def test_force_delete_staging_preserves_a_location_referenced_by_canonical_table
 def test_unpartitioned_slice_returns_table_counts_and_period_stays_in_name(monkeypatch):
     from app.routers import analysis
 
+    async def no_labels(_db):
+        return {}
+    monkeypatch.setattr(analysis, "_connection_labels", no_labels)
+    analysis._PARTITION_META_CACHE.clear()
     class Inspection:
         def to_pandas(self):
             return pd.DataFrame([{"record_count": 43, "file_count": 1}])

@@ -1291,7 +1291,7 @@ async def copilot_engagement_users(
                 lower(COALESCE(CAST("UserLogin" AS VARCHAR), '')) AS user_login,
                 COALESCE(CAST("UserName" AS VARCHAR), '') AS user_name,
                 lower(COALESCE(CAST("LicenseSkuName" AS VARCHAR), '')) AS license_sku,
-                COALESCE(CAST("Departamento_Nivel_2" AS VARCHAR), CAST("organograma" AS VARCHAR), 'Não Informado') AS dept,
+                COALESCE(CAST("organograma_nivel_2" AS VARCHAR), CAST("organograma" AS VARCHAR), 'Não Informado') AS dept,
                 COALESCE(TRY_CAST("DaysSinceLastActivity" AS INTEGER), -1) AS days_inactive,
                 CAST("LastActivityAt" AS VARCHAR) AS last_activity
             FROM {LIC_TABLE}

@@ -14,6 +14,7 @@ import pytest
 
 from app.services.cost_sources import (
     FOCUS_DESTINATION_ID,
+    bronze_blob_eligible_for_focus,
     is_cost_source,
     is_explicitly_non_cost,
     mapping_rejection_reason,
@@ -22,6 +23,15 @@ from app.services.cost_sources import (
 
 def conn(code: str, **config):
     return SimpleNamespace(code=code, config_json=config)
+
+
+def azure_conn(**blob_prefixes):
+    return SimpleNamespace(
+        code="azure-4p",
+        connector_type="azure_blob",
+        blob_prefixes=blob_prefixes,
+        config_json={},
+    )
 
 
 # --- classificação ---------------------------------------------------------
@@ -76,6 +86,32 @@ def test_every_operational_source_is_blocked_for_focus(code, config):
 
 def test_cost_source_is_allowed_for_focus():
     assert mapping_rejection_reason(conn("azure-ti", source_key="cost_exports"), FOCUS_DESTINATION_ID) is None
+
+
+def test_cost_extractor_ignores_non_focus_prefixes():
+    from app.services.azure_report_types import focus_download_prefixes
+
+    prefixes = focus_download_prefixes({
+        "actual_cost": "reports/Report4P-actual-cost/",
+        "price_sheet": "reports/report_-pricesheet/",
+        "amortized_cost": "reports/Report4P-amortized-cost/",
+    })
+    assert prefixes == ["reports/Report4P-actual-cost/"]
+
+
+def test_price_sheet_blob_is_not_focus_eligible():
+    c = azure_conn(
+        actual_cost="reports/Report4P-actual-cost/",
+        price_sheet="reports/report_-pricesheet/",
+    )
+    assert bronze_blob_eligible_for_focus(
+        c,
+        "reports/Report4P-actual-cost/20260901-20260930/run/part_0.csv",
+    )
+    assert not bronze_blob_eligible_for_focus(
+        c,
+        "reports/report_-pricesheet/20260901-20260930/run/part_0.csv",
+    )
 
 
 def test_unmarked_legacy_connection_is_not_blocked():
