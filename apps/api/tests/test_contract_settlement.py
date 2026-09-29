@@ -43,6 +43,13 @@ def test_zero_consumption_has_no_line_allocation():
     assert allocate_pool("1000", [0, 0]) == [Decimal("0.00"), Decimal("0.00")]
 
 
+def test_zero_consumption_creates_credit_without_realized():
+    result = settle_pool("1000", "0")
+    assert result.realized == Decimal("0.00")
+    assert result.credit_generated == Decimal("1000.00")
+    assert result.closing_credit == Decimal("1000.00")
+
+
 def test_negative_commitment_is_rejected():
     with pytest.raises(ValueError, match="commitment"):
         settle_pool(-1, 0)

@@ -51,7 +51,9 @@ def settle_pool(
         overage = money(0)
         used = money(0)
         uncovered = money(0)
-        realized = budget
+        # No consumption means no project-level realized amount.  The budget
+        # delta remains in the contractual ledger as credit only.
+        realized = money(0) if consumed == 0 else budget
         closing = opening + generated
     else:
         generated = money(0)
