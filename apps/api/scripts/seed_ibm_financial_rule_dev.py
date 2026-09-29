@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.rules import BusinessRule
 from app.models.financial_contract import FinancialContract
 from app.models.destination import DestinationTable  # noqa: F401
+from app.models.source_connection import SourceConnection  # noqa: F401
 
 def main() -> None:
     if os.getenv("ENV", "development").lower() not in {"dev", "development", "local", "test"}:
