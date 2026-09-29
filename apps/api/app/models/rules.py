@@ -100,6 +100,10 @@ class BusinessRule(Base):
     config_json = Column(JSON, nullable=False)
     conditions = Column(JSON, nullable=True)
     expression = Column(String(1000), nullable=True)
+    # Financial rules first calculate consumption_realizado. This marker
+    # decides whether the result is direct or settled against a contract pool.
+    financial_effect = Column(String(30), nullable=False, default="NONE")
+    financial_contract_id = Column(Integer, ForeignKey("financial_contract.id"), nullable=True, index=True)
     priority = Column(Integer, nullable=False, default=0)
     valid_from = Column(String(6), nullable=True)
     valid_until = Column(String(6), nullable=True)

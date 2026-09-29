@@ -121,6 +121,7 @@ async def lifespan(app: FastAPI):
         from app.models.source_connection import SourceConnection  # noqa: F401
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
         from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
+        from app.models.financial_contract import FinancialContract, FinancialContractConnection, FinancialContractBudgetScope, ContractSettlementRun, ContractSettlementMonth  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping  # noqa: F401
@@ -823,6 +824,9 @@ async def lifespan(app: FastAPI):
         """)
         for statement in (
             "ALTER TABLE business_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
+            "ALTER TABLE business_rule ADD COLUMN IF NOT EXISTS financial_effect VARCHAR(30) NOT NULL DEFAULT 'NONE'",
+            "ALTER TABLE business_rule ADD COLUMN IF NOT EXISTS financial_contract_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_business_rule_financial_contract ON business_rule (financial_contract_id)",
             "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",
             "CREATE INDEX IF NOT EXISTS ix_classification_rule_cloud_scope ON classification_rule (cloud_scope)",

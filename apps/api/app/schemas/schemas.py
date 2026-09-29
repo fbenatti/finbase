@@ -229,6 +229,8 @@ class BusinessRuleCreate(BaseModel):
     valid_from: str | None = None
     valid_until: str | None = None
     cloud_scope: str | None = None
+    financial_effect: str = "NONE"
+    financial_contract_id: int | None = None
     active: bool = True
 
 
@@ -246,6 +248,8 @@ class BusinessRuleUpdate(BaseModel):
     valid_from: str | None = None
     valid_until: str | None = None
     cloud_scope: str | None = None
+    financial_effect: str | None = None
+    financial_contract_id: int | None = None
     active: bool | None = None
 
 
@@ -264,6 +268,8 @@ class BusinessRuleOut(BaseModel):
     valid_from: str | None
     valid_until: str | None
     cloud_scope: str | None = None
+    financial_effect: str = "NONE"
+    financial_contract_id: int | None = None
     active: bool
     created_at: datetime
     updated_at: datetime

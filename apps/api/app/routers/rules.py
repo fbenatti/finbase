@@ -15,6 +15,7 @@ from app.models.rules import (
     EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, Department,
     OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget,
 )
+from app.models.financial_contract import FinancialContract
 from app.services.classification_field_values import refresh_destination_values
 from app.models.planning import PlanningEntry
 from app.models.destination import DestinationColumn, DestinationTable, SourceDestinationMapping
@@ -38,6 +39,21 @@ router = APIRouter(tags=["rules"])
 _refresh_tasks: set[asyncio.Task] = set()
 
 MAX_DEPARTMENT_LEVELS = 7
+FINANCIAL_EFFECTS = {"NONE", "DIRECT_REALIZED", "BUDGET_COMMITMENT"}
+
+
+async def _validate_financial_effect(data, db: AsyncSession) -> None:
+    effect = str(getattr(data, "financial_effect", "NONE") or "NONE").upper()
+    contract_id = getattr(data, "financial_contract_id", None)
+    if effect not in FINANCIAL_EFFECTS:
+        raise HTTPException(422, "financial_effect inválido")
+    if effect == "BUDGET_COMMITMENT":
+        if not contract_id:
+            raise HTTPException(422, "Regra de compromisso exige financial_contract_id")
+        if not await db.get(FinancialContract, contract_id):
+            raise HTTPException(422, "Contrato financeiro não encontrado")
+    elif contract_id:
+        raise HTTPException(422, "financial_contract_id só pode ser usado em BUDGET_COMMITMENT")
 
 
 def _department_path(department_id: int, departments: dict[int, Department]) -> list[str]:
@@ -227,6 +243,7 @@ async def list_business_rules(
 
 @router.post("/business-rules/", response_model=BusinessRuleOut, status_code=201)
 async def create_business_rule(data: BusinessRuleCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    await _validate_financial_effect(data, db)
     rule = BusinessRule(**data.model_dump())
     db.add(rule)
     await db.flush()
@@ -275,6 +292,12 @@ async def update_business_rule(rule_id: int, data: BusinessRuleUpdate, request: 
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Business rule not found")
+    merged_effect = data.financial_effect if data.financial_effect is not None else rule.financial_effect
+    merged_contract = data.financial_contract_id if data.financial_contract_id is not None else rule.financial_contract_id
+    class _FinancialInput:
+        financial_effect = merged_effect
+        financial_contract_id = merged_contract
+    await _validate_financial_effect(_FinancialInput(), db)
     before_snapshot = to_snapshot(rule)
     update_data = data.model_dump(exclude_unset=True)
     for k, v in update_data.items():
