@@ -2480,12 +2480,25 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     rows += len(frame)
                     _progress(f"Reclassificando {conn.code}/{period}", total + rows, expected_total)
                 if staged is None:
-                    # Reclassification is allowed to receive source/month
-                    # pairs whose Silver slice no longer exists (for example,
-                    # a schedule spanning future months or a source without
-                    # consumption in that period).  This is a successful
-                    # no-op, not a processing failure.
-                    message = f"Sem linhas Silver para {conn.code}/{period}; nada a reclassificar"
+                    bronze_rows = int(session.scalar(
+                        select(func.coalesce(func.sum(IngestedBlob.row_count), 0)).where(
+                            IngestedBlob.connection_id == cid,
+                            IngestedBlob.billing_period == str(period),
+                        )
+                    ) or 0)
+                    if bronze_rows > 0:
+                        return {
+                            "success": False,
+                            "error": (
+                                f"Bronze possui {bronze_rows:,} linhas para {conn.code}/{period}, "
+                                "mas não existe partição Silver publicada"
+                            ),
+                            "rows_written": total,
+                            "failure_kind": "silver_partition_missing",
+                        }
+                    # No Bronze rows is a valid no-op; it should never be
+                    # presented as a Silver failure.
+                    message = f"Sem linhas Bronze para {conn.code}/{period}; nada a enviar ao Silver"
                     _progress(message, total, expected_total)
                     return {
                         "success": True,
@@ -2674,6 +2687,9 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             IngestedBlob.billing_period,
             IngestedBlob.blob_path,
         ).where(IngestedBlob.connection_id.in_(body.connection_ids))
+        # Empty Bronze downloads remain catalogued for auditability but must
+        # never create a Silver reprocess job.
+        blob_stmt = blob_stmt.where(IngestedBlob.row_count > 0)
         if body.billing_periods:
             blob_stmt = blob_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
         seen_daily: set[tuple[int, str]] = set()
@@ -2701,7 +2717,8 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         enqueue_label = "fonte+dia"
     else:
         available_stmt = select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
-            IngestedBlob.connection_id.in_(body.connection_ids)
+            IngestedBlob.connection_id.in_(body.connection_ids),
+            IngestedBlob.row_count > 0,
         )
         if body.billing_periods:
             available_stmt = available_stmt.where(IngestedBlob.billing_period.in_(body.billing_periods))
