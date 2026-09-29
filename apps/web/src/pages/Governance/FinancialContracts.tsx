@@ -34,7 +34,7 @@ export default function FinancialContracts() {
       await createFinancialContract({
         code: form.code, name: form.name, currency: form.currency,
         valid_from: form.valid_from, valid_until: form.valid_until,
-        synthetic_department_id: Number(form.synthetic_department_id),
+        synthetic_department_id: form.synthetic_department_id ? Number(form.synthetic_department_id) : null,
         connection_ids: form.connection_ids,
         budget_scopes: form.scopes.map((key) => {
           const [cloud_scope, budget_id] = key.split("::");
@@ -70,9 +70,9 @@ export default function FinancialContracts() {
         <Box sx={{ display: "flex", gap: 1 }}><TextField fullWidth label="Válido de" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} /><TextField fullWidth label="Válido até" value={form.valid_until} onChange={(e) => setForm({ ...form, valid_until: e.target.value })} /></Box>
         <FormControl><InputLabel>Conexões</InputLabel><Select multiple value={form.connection_ids} input={<OutlinedInput label="Conexões" />} onChange={(e) => setForm({ ...form, connection_ids: e.target.value as number[] })} renderValue={(selected) => (selected as number[]).map((id) => connections.find((c) => c.id === id)?.name || id).join(", ")}>{connections.map((connection) => <MenuItem key={connection.id} value={connection.id}><Checkbox checked={form.connection_ids.includes(connection.id)} /><ListItemText primary={connection.name} /></MenuItem>)}</Select></FormControl>
         <FormControl><InputLabel>IDs Orçamento</InputLabel><Select multiple value={form.scopes} input={<OutlinedInput label="IDs Orçamento" />} onChange={(e) => setForm({ ...form, scopes: e.target.value as string[] })} renderValue={(selected) => (selected as string[]).join(", ")}>{scopes.map((scope) => { const key = `${scope.cloud_scope}::${scope.budget_id}`; return <MenuItem key={key} value={key}><Checkbox checked={form.scopes.includes(key)} /><ListItemText primary={`${scope.cloud_scope}/${scope.budget_id}`} secondary={`${scope.project_count || 0} projetos no organograma`} /></MenuItem>; })}</Select></FormControl>
-        <FormControl><InputLabel>Departamento sintético</InputLabel><Select value={form.synthetic_department_id} label="Departamento sintético" onChange={(e) => setForm({ ...form, synthetic_department_id: String(e.target.value) })}>{departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}</Select></FormControl>
+        <FormControl><InputLabel>Departamento sintético (opcional)</InputLabel><Select value={form.synthetic_department_id} label="Departamento sintético (opcional)" onChange={(e) => setForm({ ...form, synthetic_department_id: String(e.target.value) })}><MenuItem value="">Nenhum — não criar realizado sem consumo</MenuItem>{departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}</Select></FormControl>
       </DialogContent>
-      <DialogActions><Button onClick={() => setOpen(false)}>Cancelar</Button><Button variant="contained" onClick={save} disabled={!form.code || !form.name || !form.synthetic_department_id || !form.connection_ids.length || !form.scopes.length}>Salvar</Button></DialogActions>
+      <DialogActions><Button onClick={() => setOpen(false)}>Cancelar</Button><Button variant="contained" onClick={save} disabled={!form.code || !form.name || !form.connection_ids.length || !form.scopes.length}>Salvar</Button></DialogActions>
     </Dialog>
   </Box>;
 }
