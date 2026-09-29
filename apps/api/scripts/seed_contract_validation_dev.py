@@ -79,9 +79,10 @@ def main() -> None:
                 continue
             version = PlanningVersion(financial_type_id=financial_type.id, year=year, version=1, is_current=True, source="SIMULACAO_CONTRATO_IBM_DEV", title="SIMULAÇÃO — contrato IBM EXTERNO-IBM", description="Validação DEV: R$1.000.000 por mês dividido igualmente entre os projetos que herdam o ID.", event_type="OUTRO", effective_date=date(year, 1, 1), scope_id_orcamento="EXTERNO-IBM", scope_cloud="ibm")
             session.add(version); session.flush()
-            for project in ibm_projects:
+            for index, project in enumerate(ibm_projects):
+                project_value = per_project if index < len(ibm_projects) - 1 else Decimal("1000000") - per_project * Decimal(max(len(ibm_projects) - 1, 0))
                 for month in range(1, 13):
-                    session.add(PlanningEntry(planning_version_id=version.id, entity_type="department", department_id=project.id, department_levels=department_path(project, departments), month=month, value=float(per_project)))
+                    session.add(PlanningEntry(planning_version_id=version.id, entity_type="department", department_id=project.id, department_levels=department_path(project, departments), month=month, value=float(project_value)))
         session.commit()
         print(f"IBM: {len(ibm_projects)} projetos; R$1.000.000/mês; GCP: escopo ID2532-GCP sem nova carga")
 
