@@ -45,13 +45,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.to_year < args.from_year:
         raise SystemExit("to-year deve ser maior ou igual a from-year")
-    url = os.environ.get("DATABASE_URL_SYNC", "postgresql://finops:finops@localhost:5434/finops")
+    url = os.environ.get("DATABASE_URL_SYNC", "postgresql://finops:finops@localhost:5433/finops")
     with Session(create_engine(url)) as session:
         departments = {row.id: row for row in session.scalars(select(Department).where(Department.active.is_(True))).all()}
         ibm_projects = [d for d in departments.values() if inherited_scope(d, departments) == ("EXTERNO-IBM", "ibm")]
         if not ibm_projects:
             raise SystemExit("Nenhum projeto ativo herda EXTERNO-IBM/ibm")
-        connections = session.scalars(select(SourceConnection).where(SourceConnection.active.is_(True))).all()
+        connections = session.scalars(select(SourceConnection)).all()
         ibm = next((c for c in connections if "ibm" in f"{c.code} {c.name} {c.connector_type}".lower()), None)
         gcp = next((c for c in connections if "gcp" in f"{c.code} {c.name} {c.connector_type}".lower()), None)
         if not ibm or not gcp:
