@@ -18,6 +18,7 @@ from app.models.financial_contract import FinancialContract, FinancialContractBu
 from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
 from app.models.source_connection import SourceConnection
+from app.models.destination import DestinationTable  # noqa: F401 - register FK target
 def inherited_scope(department, by_id):
     chain = []
     current = department
