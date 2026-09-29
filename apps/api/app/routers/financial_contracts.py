@@ -131,6 +131,31 @@ async def list_contracts(db: AsyncSession = Depends(get_db)):
     return [_contract_out(row) for row in rows]
 
 
+@router.get("/overview")
+async def contracts_overview(db: AsyncSession = Depends(get_db)):
+    """Return the latest auditable pool metrics for each contract."""
+    contracts = (await db.execute(select(FinancialContract).order_by(FinancialContract.name))).scalars().all()
+    result = []
+    for contract in contracts:
+        latest = (await db.execute(
+            select(ContractSettlementMonth)
+            .where(ContractSettlementMonth.contract_id == contract.id)
+            .order_by(ContractSettlementMonth.period.desc(), ContractSettlementMonth.id.desc())
+        )).scalars().all()
+        result.append({
+            "contract_id": contract.id,
+            "code": contract.code,
+            "name": contract.name,
+            "active": contract.active,
+            "last_period": latest[0].period if latest else None,
+            "credit_balance": sum((Decimal(row.closing_credit or 0) for row in latest), Decimal("0")),
+            "uncovered_overage": sum((Decimal(row.uncovered_overage or 0) for row in latest), Decimal("0")),
+            "realized": sum((Decimal(row.realized or 0) for row in latest), Decimal("0")),
+            "pool_count": len(latest),
+        })
+    return result
+
+
 @router.get("/options/budget-scopes")
 async def budget_scope_options(db: AsyncSession = Depends(get_db)):
     departments = list((await db.execute(select(Department).where(Department.active == True))).scalars().all())  # noqa: E712
