@@ -9,7 +9,7 @@ import { Add } from "@mui/icons-material";
 import {
   createFinancialContract, FinancialContract, FinancialContractScope,
   getConnections, getDepartments, getFinancialContractScopes, getFinancialContracts,
-  getFinancialContractSettlements,
+  getFinancialContractSettlements, updateFinancialContract,
   getFinancialContractsOverview,
 } from "../../services/api";
 
@@ -21,6 +21,7 @@ export default function FinancialContracts() {
   const [connections, setConnections] = useState<{ id: number; name: string; code: string }[]>([]);
   const [departments, setDepartments] = useState<{ id: number; name: string; id_orcamento?: string | null }[]>([]);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
   const [selectedContract, setSelectedContract] = useState<number | null>(null);
@@ -42,7 +43,7 @@ export default function FinancialContracts() {
 
   const save = async () => {
     try {
-      await createFinancialContract({
+      const payload = {
         code: form.code, name: form.name, currency: form.currency,
         valid_from: form.valid_from, valid_until: form.valid_until,
         synthetic_department_id: form.synthetic_department_id ? Number(form.synthetic_department_id) : null,
@@ -52,8 +53,10 @@ export default function FinancialContracts() {
           return { cloud_scope, budget_id };
         }),
         active: true,
-      });
-      setOpen(false); setForm(blank); load();
+      };
+      if (editingId == null) await createFinancialContract(payload);
+      else await updateFinancialContract(editingId, payload);
+      setOpen(false); setEditingId(null); setForm(blank); load();
     } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar o contrato"); }
   };
 
@@ -61,7 +64,7 @@ export default function FinancialContracts() {
     {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
     <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
       <Box color="text.secondary">Contratos que optam pelo compromisso orçamentário por ID Orçamento.</Box>
-      <Button variant="contained" startIcon={<Add />} onClick={() => setOpen(true)}>Novo contrato</Button>
+      <Button variant="contained" startIcon={<Add />} onClick={() => { setEditingId(null); setForm(blank); setOpen(true); }}>Novo contrato</Button>
     </Box>
     {overview.length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 1.5, mb: 2 }}>{overview.map((item) => <Box key={String(item.contract_id)} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}><Typography variant="caption" color="text.secondary">{String(item.name)}</Typography><Typography variant="h6">Saldo: {String(item.credit_balance || "0")}</Typography><Typography variant="body2">Realizado: {String(item.realized || "0")}</Typography><Typography variant="body2">Overage: {String(item.uncovered_overage || "0")}</Typography></Box>)}</Box>}
     <Table size="small">
@@ -71,7 +74,7 @@ export default function FinancialContracts() {
         <TableCell>{contract.valid_from} — {contract.valid_until}</TableCell>
         <TableCell>{contract.connection_ids.length}</TableCell>
         <TableCell>{contract.budget_scopes.map((scope) => <Chip key={`${scope.cloud_scope}-${scope.budget_id}`} size="small" sx={{ mr: .5 }} label={`${scope.cloud_scope}/${scope.budget_id}`} />)}</TableCell>
-        <TableCell><Chip size="small" color={contract.active ? "success" : "default"} label={contract.active ? "Ativo" : "Inativo"} /><Button size="small" sx={{ ml: 1 }} onClick={() => setSelectedContract(contract.id)}>Movimentações</Button></TableCell>
+        <TableCell><Chip size="small" color={contract.active ? "success" : "default"} label={contract.active ? "Ativo" : "Inativo"} /><Button size="small" sx={{ ml: 1 }} onClick={() => setSelectedContract(contract.id)}>Movimentações</Button><Button size="small" onClick={() => { setEditingId(contract.id); setForm({ code: contract.code, name: contract.name, valid_from: contract.valid_from, valid_until: contract.valid_until, currency: contract.currency, synthetic_department_id: contract.synthetic_department_id ? String(contract.synthetic_department_id) : "", connection_ids: contract.connection_ids, scopes: contract.budget_scopes.map((item) => `${item.cloud_scope}::${item.budget_id}`) }); setOpen(true); }}>Editar</Button></TableCell>
       </TableRow>)}</TableBody>
     </Table>
     {selectedContract != null && <Box sx={{ mt: 3 }}>
@@ -81,7 +84,7 @@ export default function FinancialContracts() {
       {!settlements.length && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhuma liquidação publicada para este contrato.</Typography>}
     </Box>}
     <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
-      <DialogTitle>Novo contrato financeiro</DialogTitle>
+      <DialogTitle>{editingId == null ? "Novo contrato financeiro" : "Editar contrato financeiro"}</DialogTitle>
       <DialogContent sx={{ display: "grid", gap: 2, pt: "16px !important" }}>
         <TextField label="Código" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
         <TextField label="Nome" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
