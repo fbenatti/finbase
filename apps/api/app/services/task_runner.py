@@ -558,6 +558,16 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
         for _col in written_cols:
             affected = affected | _changed_nonnull(df, _col, before_snapshot.get(_col))
         _record_financial_rule(df, affected, rule)
+        if affected.any() and financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"}:
+            # Keep the winning settlement metadata on the row itself.  This
+            # is intentionally assigned only to rows changed by this rule so
+            # a lower-priority rule cannot silently replace the contract.
+            if "financial_effect" not in df.columns:
+                df["financial_effect"] = None
+            if "financial_contract_id" not in df.columns:
+                df["financial_contract_id"] = None
+            df.loc[affected, "financial_effect"] = financial_effect
+            df.loc[affected, "financial_contract_id"] = getattr(rule, "financial_contract_id", None)
 
 
 def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[ClassificationRule], session: Session | None = None,
