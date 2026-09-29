@@ -108,6 +108,12 @@ async def _validate_contract_scope(body: FinancialContractIn, db: AsyncSession, 
     for existing in (await db.execute(query)).scalars().all():
         if not {item.connection_id for item in existing.connections or []}.intersection(body.connection_ids):
             continue
+        requested_scopes = {(item.cloud_scope.strip().lower(), item.budget_id.strip()) for item in body.budget_scopes}
+        existing_scopes = {(item.cloud_scope.strip().lower(), item.budget_id.strip()) for item in existing.budget_scopes or []}
+        if not requested_scopes.intersection(existing_scopes):
+            # The same connection may legitimately participate in separate
+            # commitment pools; credits are isolated by cloud + budget ID.
+            continue
         if existing.valid_until >= body.valid_from and body.valid_until >= existing.valid_from:
             raise HTTPException(409, f"Conexão já vinculada ao contrato ativo {existing.code} na vigência informada")
 
