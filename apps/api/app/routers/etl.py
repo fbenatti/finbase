@@ -1598,6 +1598,7 @@ def _reprocess_destination_sync(
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
                        'consumo_realizado', 'ajuste_contratual',
+                       'financial_effect', 'financial_contract_id',
                        'VL_CUSTO_FINAL_BRL'}
         # These columns are part of the Gold technical contract even when a
         # batch generates no synthetic rows.  Without a stable contract the
@@ -1620,6 +1621,10 @@ def _reprocess_destination_sync(
             # (financial). Fica na Gold como texto JSON (mesmo padrao de
             # custom_fields), mas registrado como JSONB no catalogo.
             "business_rule": "JSONB",
+            "financial_effect": "TEXT",
+            "financial_contract_id": "BIGINT",
+            "consumo_realizado": "DOUBLE",
+            "ajuste_contratual": "DOUBLE",
         }
         internal_cols_all = list(internal_col_types)
         dest_col_types.update(internal_col_types)
