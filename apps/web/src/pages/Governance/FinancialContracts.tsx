@@ -3,6 +3,7 @@ import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, FormControl, InputLabel, ListItemText, MenuItem, OutlinedInput,
   Select, Table, TableBody, TableCell, TableHead, TableRow, TextField,
+  FormHelperText,
 } from "@mui/material";
 import { Add } from "@mui/icons-material";
 import {
@@ -70,7 +71,7 @@ export default function FinancialContracts() {
         <Box sx={{ display: "flex", gap: 1 }}><TextField fullWidth label="Válido de" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} /><TextField fullWidth label="Válido até" value={form.valid_until} onChange={(e) => setForm({ ...form, valid_until: e.target.value })} /></Box>
         <FormControl><InputLabel>Conexões</InputLabel><Select multiple value={form.connection_ids} input={<OutlinedInput label="Conexões" />} onChange={(e) => setForm({ ...form, connection_ids: e.target.value as number[] })} renderValue={(selected) => (selected as number[]).map((id) => connections.find((c) => c.id === id)?.name || id).join(", ")}>{connections.map((connection) => <MenuItem key={connection.id} value={connection.id}><Checkbox checked={form.connection_ids.includes(connection.id)} /><ListItemText primary={connection.name} /></MenuItem>)}</Select></FormControl>
         <FormControl><InputLabel>IDs Orçamento</InputLabel><Select multiple value={form.scopes} input={<OutlinedInput label="IDs Orçamento" />} onChange={(e) => setForm({ ...form, scopes: e.target.value as string[] })} renderValue={(selected) => (selected as string[]).join(", ")}>{scopes.map((scope) => { const key = `${scope.cloud_scope}::${scope.budget_id}`; return <MenuItem key={key} value={key}><Checkbox checked={form.scopes.includes(key)} /><ListItemText primary={`${scope.cloud_scope}/${scope.budget_id}`} secondary={`${scope.project_count || 0} projetos no organograma`} /></MenuItem>; })}</Select></FormControl>
-        <FormControl><InputLabel>Departamento sintético (opcional)</InputLabel><Select value={form.synthetic_department_id} label="Departamento sintético (opcional)" onChange={(e) => setForm({ ...form, synthetic_department_id: String(e.target.value) })}><MenuItem value="">Nenhum — não criar realizado sem consumo</MenuItem>{departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}</Select></FormControl>
+        <FormControl><InputLabel>Departamento sintético (opcional)</InputLabel><Select value={form.synthetic_department_id} label="Departamento sintético (opcional)" onChange={(e) => setForm({ ...form, synthetic_department_id: String(e.target.value) })}><MenuItem value="">Nenhum — não criar realizado sem consumo</MenuItem>{departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}</Select><FormHelperText>Usado apenas para lançar o compromisso quando o pool tiver orçamento, mas nenhum consumo positivo. Não representa um projeto real e não deve ser informado quando o realizado deve seguir somente a Nota Fiscal.</FormHelperText></FormControl>
       </DialogContent>
       <DialogActions><Button onClick={() => setOpen(false)}>Cancelar</Button><Button variant="contained" onClick={save} disabled={!form.code || !form.name || !form.connection_ids.length || !form.scopes.length}>Salvar</Button></DialogActions>
     </Dialog>
