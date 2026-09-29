@@ -18,10 +18,10 @@ def main() -> None:
             raise SystemExit("Contrato DEV-IBM-EXTERNO não encontrado")
         rule = db.scalar(select(BusinessRule).where(BusinessRule.name == "DEV IBM — consumo para compromisso"))
         if not rule:
-            rule = BusinessRule(name="DEV IBM — consumo para compromisso", description="Fixture DEV: preserva BilledCost como consumo e liquida pelo pool EXTERNO-IBM.", target_column="consumo_realizado", rule_type="EXPRESSION", config_json={}, expression="BilledCost", financial_effect="BUDGET_COMMITMENT", financial_contract_id=contract.id, destination_table_id=1, priority=1, cloud_scope="ibm", active=True)
+            rule = BusinessRule(name="DEV IBM — Créditos Watson/Orchestrate + Support", description="BilledCost * 0.79036 + (BilledCost * 0.10) * 0.29505; resultado é realizado_cloud antes do compromisso orçamentário.", target_column="realizado_cloud", rule_type="EXPRESSION", config_json={}, expression="BilledCost * 0.79036 + (BilledCost * 0.10) * 0.29505", financial_effect="BUDGET_COMMITMENT", financial_contract_id=contract.id, destination_table_id=1, priority=1, cloud_scope="ibm", active=True)
             db.add(rule)
         else:
-            rule.financial_contract_id = contract.id; rule.financial_effect = "BUDGET_COMMITMENT"; rule.target_column = "consumo_realizado"; rule.cloud_scope = "ibm"; rule.active = True
+            rule.financial_contract_id = contract.id; rule.financial_effect = "BUDGET_COMMITMENT"; rule.target_column = "realizado_cloud"; rule.expression = "BilledCost * 0.79036 + (BilledCost * 0.10) * 0.29505"; rule.description = "BilledCost * 0.79036 + (BilledCost * 0.10) * 0.29505; resultado é realizado_cloud antes do compromisso orçamentário."; rule.cloud_scope = "ibm"; rule.active = True
         db.commit(); print(f"Regra IBM pronta: id={rule.id}, contrato={contract.code}")
 
 if __name__ == "__main__": main()
