@@ -29,6 +29,15 @@ def inherited_scope(department: Department, by_id: dict[int, Department]) -> tup
     return budget_id, cloud
 
 
+def department_path(department: Department, by_id: dict[int, Department]) -> list[str]:
+    path = []
+    current = department
+    while current:
+        path.append(current.name)
+        current = by_id.get(current.parent_id) if current.parent_id else None
+    return list(reversed(path))
+
+
 def main() -> None:
     if os.getenv("ENV", "development").lower() not in {"dev", "development", "local", "test"}:
         raise SystemExit("Recusado: a simulação de compromisso só pode rodar em DEV/local/test")
@@ -87,7 +96,7 @@ def main() -> None:
                 planning_version_id=version.id,
                 entity_type="department",
                 department_id=department.id,
-                department_levels=[department.name],
+                department_levels=department_path(department, departments),
                 month=args.month,
                 value=value,
             ))
