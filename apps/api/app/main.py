@@ -828,6 +828,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE business_rule ADD COLUMN IF NOT EXISTS financial_contract_id INTEGER",
             "CREATE INDEX IF NOT EXISTS ix_business_rule_financial_contract ON business_rule (financial_contract_id)",
             "ALTER TABLE financial_contract ALTER COLUMN synthetic_department_id DROP NOT NULL",
+            "ALTER TABLE contract_settlement_month ADD COLUMN IF NOT EXISTS credit_overage_delta NUMERIC(20,6) NOT NULL DEFAULT 0",
             "UPDATE business_rule SET financial_effect = 'DIRECT_REALIZED', target_column = 'consumo_realizado' WHERE financial_effect = 'NONE' AND lower(target_column) = 'realizado'",
             "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",

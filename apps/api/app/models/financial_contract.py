@@ -86,6 +86,9 @@ class ContractSettlementMonth(Base):
     gross_overage = Column(Numeric(20, 6), nullable=False, default=0)
     credit_used = Column(Numeric(20, 6), nullable=False, default=0)
     uncovered_overage = Column(Numeric(20, 6), nullable=False, default=0)
+    # Signed pool delta: positive means generated credit, negative means
+    # uncovered overage. Detailed columns above remain auditable.
+    credit_overage_delta = Column(Numeric(20, 6), nullable=False, default=0)
     expired_credit = Column(Numeric(20, 6), nullable=False, default=0)
     closing_credit = Column(Numeric(20, 6), nullable=False, default=0)
     realized = Column(Numeric(20, 6), nullable=False, default=0)

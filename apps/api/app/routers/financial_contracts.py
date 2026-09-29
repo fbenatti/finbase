@@ -259,6 +259,7 @@ async def recalculate_settlements(contract_id: int, pools: list[SettlementPoolIn
                 opening_credit=result.opening_credit, credit_generated=result.credit_generated,
                 gross_overage=result.gross_overage, credit_used=result.credit_used,
                 uncovered_overage=result.uncovered_overage, expired_credit=expired,
+                credit_overage_delta=result.credit_generated - result.uncovered_overage,
                 closing_credit=closing, realized=result.realized, allocation_factor=factor,
                 status="SUCCESS",
             ))
