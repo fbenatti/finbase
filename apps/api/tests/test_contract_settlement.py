@@ -46,3 +46,36 @@ def test_zero_consumption_has_no_line_allocation():
 def test_negative_commitment_is_rejected():
     with pytest.raises(ValueError, match="commitment"):
         settle_pool(-1, 0)
+
+
+def test_required_budget_pool_scenario_a100_b900_consumption_a500_b400():
+    """The individual project limits must not participate in settlement."""
+    budget_by_project = {"A": Decimal("100"), "B": Decimal("900")}
+    consumption_by_project = {"A": Decimal("500"), "B": Decimal("400")}
+
+    pool = settle_pool(
+        sum(budget_by_project.values()),
+        sum(consumption_by_project.values()),
+    )
+    allocations = allocate_pool(pool.realized, list(consumption_by_project.values()))
+
+    assert pool.commitment == Decimal("1000.00")
+    assert pool.consumption == Decimal("900.00")
+    assert pool.credit_generated == Decimal("100.00")
+    assert pool.gross_overage == Decimal("0.00")
+    assert pool.realized == Decimal("1000.00")
+    assert allocations == [Decimal("555.56"), Decimal("444.44")]
+    assert sum(allocations, Decimal("0")) == pool.realized
+
+
+def test_credits_are_isolated_by_budget_pool_and_cloud():
+    pool_a_oci = settle_pool("1000", "900")
+    pool_b_oci = settle_pool("1000", "1100", opening_credit="0")
+    pool_a_ibm = settle_pool("1000", "1100", opening_credit="0")
+
+    # The 100 credit from OCI/A is never supplied to OCI/B or IBM/A.
+    assert pool_a_oci.closing_credit == Decimal("100.00")
+    assert pool_b_oci.credit_used == Decimal("0.00")
+    assert pool_b_oci.uncovered_overage == Decimal("100.00")
+    assert pool_a_ibm.credit_used == Decimal("0.00")
+    assert pool_a_ibm.uncovered_overage == Decimal("100.00")
