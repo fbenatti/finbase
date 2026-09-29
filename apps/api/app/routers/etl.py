@@ -1796,7 +1796,16 @@ def _reprocess_destination_sync(
         # Colunas BIGINT que devem sempre ser Int64 (nullable), nunca float64.
         # Pandas converte int+None para float64 por padrão, o que quebra o
         # schema Iceberg (long -> double). Forçamos Int64 explicitamente.
-        _BIGINT_COLS = {"clone_rule_id", "clone_rule_version", "source_connection_id"}
+        _BIGINT_COLS = {
+            "clone_rule_id",
+            "clone_rule_version",
+            "source_connection_id",
+            # Contract identifiers are nullable for direct-realized sources,
+            # but must remain BIGINT whenever a financial rule assigns one.
+            # Without the nullable integer dtype, pandas promotes batches
+            # containing NULLs to float64 and Iceberg rejects long -> double.
+            "financial_contract_id",
+        }
 
         def _prepare_for_stage(frame: pd.DataFrame) -> pd.DataFrame:
             prepared = frame.drop(columns=["diretoria", "projeto_nome"], errors="ignore").copy()
