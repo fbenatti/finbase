@@ -151,3 +151,48 @@ def test_df_to_arrow_keeps_all_null_boolean_as_boolean():
     )
     assert pa.types.is_boolean(table.schema.field("is_synthetic").type)
     assert pa.types.is_string(table.schema.field("tipo").type)
+
+
+def test_df_to_arrow_uses_existing_iceberg_schema_as_type_contract():
+    import pyarrow as pa
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import BooleanType, DoubleType, LongType, NestedField, StringType
+    from app.services.iceberg_service import _df_to_arrow
+
+    target_schema = Schema(
+        NestedField(1, "financial_contract_id", LongType(), required=False),
+        NestedField(2, "realizado", DoubleType(), required=False),
+        NestedField(3, "active", BooleanType(), required=False),
+        NestedField(4, "description", StringType(), required=False),
+    )
+    table = _df_to_arrow(
+        pd.DataFrame({
+            "financial_contract_id": [1.0, None],
+            "realizado": [10, None],
+            "active": [True, None],
+            "description": [None, None],
+        }),
+        target_schema=target_schema,
+    )
+
+    assert pa.types.is_int64(table.schema.field("financial_contract_id").type)
+    assert pa.types.is_float64(table.schema.field("realizado").type)
+    assert pa.types.is_boolean(table.schema.field("active").type)
+    assert pa.types.is_large_string(table.schema.field("description").type)
+    assert table.column("financial_contract_id").to_pylist() == [1, None]
+
+
+def test_df_to_arrow_rejects_fractional_value_for_iceberg_identifier():
+    import pytest
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField
+    from app.services.iceberg_service import _df_to_arrow
+
+    target_schema = Schema(
+        NestedField(1, "financial_contract_id", LongType(), required=False),
+    )
+    with pytest.raises(ValueError, match="financial_contract_id.*double -> int64"):
+        _df_to_arrow(
+            pd.DataFrame({"financial_contract_id": [1.5]}),
+            target_schema=target_schema,
+        )

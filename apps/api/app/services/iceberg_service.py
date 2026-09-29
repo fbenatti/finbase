@@ -379,6 +379,38 @@ def _df_to_arrow(
         cols = [arrow_table.column(j).cast(new_schema.field(j).type) for j in range(len(new_fields))]
         arrow_table = pa_lib.table(dict(zip([f.name for f in new_fields], cols)))
 
+    # Existing Iceberg tables are the authoritative type contract.  Pandas
+    # inference is intentionally ignored for columns already present in that
+    # contract: nullable integers, booleans, dates and all-null batches must
+    # retain the target type on every write path (reprocess, reclassification,
+    # forecast, shared cost, and manual loads).
+    if target_schema is not None:
+        target_arrow_schema = target_schema.as_arrow()
+        target_fields = {field.name: field for field in target_arrow_schema}
+        aligned_columns = []
+        aligned_fields = []
+        for idx, source_field in enumerate(arrow_table.schema):
+            target_field = target_fields.get(source_field.name)
+            column = arrow_table.column(idx)
+            if target_field is not None and column.type != target_field.type:
+                try:
+                    column = column.cast(target_field.type, safe=True)
+                except (pa_lib.ArrowInvalid, pa_lib.ArrowNotImplementedError, pa_lib.ArrowTypeError) as exc:
+                    raise ValueError(
+                        f"Coluna {source_field.name!r} incompatível com o schema Iceberg: "
+                        f"{column.type} -> {target_field.type}: {exc}"
+                    ) from exc
+            aligned_columns.append(column)
+            aligned_fields.append(
+                pa_lib.field(
+                    source_field.name,
+                    target_field.type if target_field is not None else column.type,
+                    nullable=target_field.nullable if target_field is not None else source_field.nullable,
+                    metadata=source_field.metadata,
+                )
+            )
+        arrow_table = pa_lib.Table.from_arrays(aligned_columns, schema=pa_lib.schema(aligned_fields))
+
     # Ensure every field has a deterministic PARQUET:field_id metadata mapped by name
     final_fields = []
     for idx in range(len(arrow_table.schema)):
@@ -922,8 +954,19 @@ def write_silver(
     df["_billing_period"] = billing_period
     df["_processed_at"] = pd.Timestamp.utcnow().isoformat()
 
-    arrow_table = _df_to_arrow(df, column_types=column_types)
     cat = _get_catalog()
+    target_schema = None
+    try:
+        target_schema = cat.load_table(table_name).schema()
+    except Exception:
+        # First publication has no canonical Iceberg schema yet; declared
+        # destination types remain the authority for table creation.
+        pass
+    arrow_table = _df_to_arrow(
+        df,
+        column_types=column_types,
+        target_schema=target_schema,
+    )
     rows = len(df)
 
     try:
@@ -1260,8 +1303,19 @@ def write_destination_staged(
     if partition_col not in df.columns:
         df[partition_col] = "unknown"
 
-    arrow_table = _df_to_arrow(df, column_types=column_types)
     cat = _get_catalog()
+    target_schema = None
+    try:
+        target_schema = cat.load_table(_table_id(namespace, safe_name)).schema()
+    except Exception:
+        # No canonical destination yet: create the first staged schema from
+        # explicit destination types plus the incoming frame.
+        pass
+    arrow_table = _df_to_arrow(
+        df,
+        column_types=column_types,
+        target_schema=target_schema,
+    )
 
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     iceberg_schema = pyarrow_to_schema(arrow_table.schema)
@@ -1854,12 +1908,16 @@ def append_to_staged(
     if partition_col not in df.columns:
         df[partition_col] = "unknown"
 
-    arrow_table = _df_to_arrow(df, column_types=column_types)
     cat = _get_catalog()
     tid = _table_id(namespace, temp_safe_name)
 
     try:
         tbl = cat.load_table(tid)
+        arrow_table = _df_to_arrow(
+            df,
+            column_types=column_types,
+            target_schema=tbl.schema(),
+        )
         tbl.append(arrow_table)
         logger.info("Appended %d rows to staged gold.%s", len(df), temp_safe_name)
     except Exception as e:
@@ -1897,8 +1955,17 @@ def write_destination(
     if partition_col not in df.columns:
         df[partition_col] = "unknown"
 
-    arrow_table = _df_to_arrow(df, column_types=column_types)
     cat = _get_catalog()
+    target_schema = None
+    try:
+        target_schema = cat.load_table(tid).schema()
+    except Exception:
+        pass
+    arrow_table = _df_to_arrow(
+        df,
+        column_types=column_types,
+        target_schema=target_schema,
+    )
     rows = len(df)
 
     from pyiceberg.io.pyarrow import pyarrow_to_schema
