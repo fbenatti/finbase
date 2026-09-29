@@ -1283,6 +1283,8 @@ def _process_blob_for_reprocess(
                 # direct realized value available for clouds without a
                 # contractual settlement; the contract materializer may
                 # replace it later for BUDGET_COMMITMENT rows.
+                if "realizado_cloud" in target.columns:
+                    target["consumo_realizado"] = pd.to_numeric(target["realizado_cloud"], errors="coerce")
                 if "consumo_realizado" in target.columns:
                     target["realizado"] = pd.to_numeric(target["consumo_realizado"], errors="coerce")
                     target["ajuste_contratual"] = 0.0
@@ -1601,7 +1603,7 @@ def _reprocess_destination_sync(
                        'organograma_nivel_7',
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
-                       'consumo_realizado', 'ajuste_contratual',
+                       'realizado_cloud', 'consumo_realizado', 'ajuste_contratual',
                        'financial_effect', 'financial_contract_id',
                        'VL_CUSTO_FINAL_BRL'}
         # These columns are part of the Gold technical contract even when a
@@ -1628,6 +1630,7 @@ def _reprocess_destination_sync(
             "financial_effect": "TEXT",
             "financial_contract_id": "BIGINT",
             "consumo_realizado": "DOUBLE",
+            "realizado_cloud": "DOUBLE",
             "ajuste_contratual": "DOUBLE",
         }
         internal_cols_all = list(internal_col_types)

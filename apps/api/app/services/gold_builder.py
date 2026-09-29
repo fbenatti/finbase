@@ -61,6 +61,7 @@ GOLD_MEASURES: dict[str, str] = {
     "quantity": "ConsumedQuantity",
     "realizado": "realizado",
     "consumo_realizado": "consumo_realizado",
+    "realizado_cloud": "realizado_cloud",
     "ajuste_contratual": "ajuste_contratual",
     "billedcost": "BilledCost",
 }
@@ -81,6 +82,7 @@ GOLD_COLUMN_TYPES: dict[str, str] = {
     "quantity": "DOUBLE",
     "realizado": "DOUBLE",
     "consumo_realizado": "DOUBLE",
+    "realizado_cloud": "DOUBLE",
     "ajuste_contratual": "DOUBLE",
     "billedcost": "DOUBLE",
 }
