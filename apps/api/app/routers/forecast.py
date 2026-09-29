@@ -734,14 +734,24 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
     # Do not create an execution that is guaranteed to fail a few seconds
     # later. The old heartbeat-only check considered the worker healthy while
     # the Trino coordinator was down, producing zero-row failed Forecasts.
-    try:
-        safe_name = destination.physical_name.replace('"', '""')
-        await trino_execute(f'SELECT 1 FROM iceberg.silver."{safe_name}" LIMIT 1', timeout_s=15)
-        await fetch_metadata(destination.physical_name, "silver")
-    except Exception as exc:
-        raise HTTPException(503, f"Trino ou a Gold FOCUS estão indisponíveis: {exc}")
+    # Destinations may live in silver (legacy) or gold (materialized Gold
+    # tables).  Resolve the namespace from the catalog instead of forcing
+    # silver, otherwise valid Gold configurations are rejected with 503.
+    source_namespace = None
+    errors = []
+    safe_name = destination.physical_name.replace('"', '""')
+    for candidate in ("gold", "silver"):
+        try:
+            await trino_execute(f'SELECT 1 FROM iceberg.{candidate}."{safe_name}" LIMIT 1', timeout_s=15)
+            await fetch_metadata(destination.physical_name, candidate)
+            source_namespace = candidate
+            break
+        except Exception as exc:
+            errors.append(f"{candidate}: {exc}")
+    if source_namespace is None:
+        raise HTTPException(503, "Trino ou a Gold FOCUS estão indisponíveis: " + " | ".join(errors))
     snapshot = _config_snapshot(config, destination)
-    source_name, source_namespace = destination.physical_name, "silver"
+    source_name = destination.physical_name
     snapshot.update(destination_physical_name=source_name, source_namespace=source_namespace)
     if simulated_date is not None:
         snapshot["simulated_as_of"] = simulated_date.isoformat()
@@ -1200,6 +1210,7 @@ async def _accuracy_months_items(
     db: AsyncSession,
     department: str | None = None,
     mode: str = "showback",
+    include_metrics: bool = True,
 ) -> list[dict[str, Any]]:
     """Latest simulated snapshot per month with only two Trino queries, cached
     briefly so dashboard reloads are instant (data changes only when a new
@@ -1219,19 +1230,35 @@ async def _accuracy_months_items(
         config_id or 0,
         str(department or ""),
         mode,
+        include_metrics,
         tuple((run.id, run.result_table, run.cutoff_date) for run, _ in pairs),
     )
     cached = _accuracy_months_cache.get(key)
     if cached is not None and datetime.utcnow().timestamp() - cached[0] < _ACCURACY_CACHE_TTL:
         return cached[1]
-    fmap, amap = await _accuracy_batch_totals(pairs, department=department, mode=mode)
+    fmap: dict[tuple[int, str], tuple[float, int]] = {}
+    amap: dict[str, float] = {}
+    if include_metrics:
+        fmap, amap = await _accuracy_batch_totals(pairs, department=department, mode=mode)
     today = date.today().strftime("%Y%m")
     items = []
     for run, target in pairs:
         as_of = date.fromisoformat(str((run.config_snapshot or {}).get("simulated_as_of")))
-        forecast_value, rows_forecast = fmap.get((run.id, target), (0.0, 0))
-        metrics = _accuracy_metrics(forecast_value, amap.get(target))
-        metrics["rows_forecast"] = rows_forecast
+        if include_metrics:
+            forecast_value, rows_forecast = fmap.get((run.id, target), (0.0, 0))
+            metrics = _accuracy_metrics(forecast_value, amap.get(target))
+            metrics["rows_forecast"] = rows_forecast
+        else:
+            metrics = {
+                "forecast_value": 0.0,
+                "actual_value": 0.0,
+                "variance": 0.0,
+                "variance_pct": None,
+                "wape": None,
+                "accuracy": None,
+                "bias": None,
+                "rows_forecast": 0,
+            }
         items.append({
             "run_id": run.id,
             "config_id": run.forecast_config_id,
@@ -1252,12 +1279,19 @@ async def accuracy_months(
     config_id: int | None = None,
     department: str | None = None,
     mode: str = "showback",
+    include_metrics: bool = True,
     db: AsyncSession = Depends(get_db),
 ):
     """Meses simulados: o snapshot mais recente por mês, com apenas duas queries Trino.
     ``department`` (caminho "N1 > N2 > ...") e ``mode`` (showback/chargeback/all) filtram
     os totais — mesma semântica do filtro de diretor da Visão Esperada."""
-    return await _accuracy_months_items(config_id, db, department=department, mode=mode)
+    return await _accuracy_months_items(
+        config_id,
+        db,
+        department=department,
+        mode=mode,
+        include_metrics=include_metrics,
+    )
 
 
 @router.get("/accuracy/summary")

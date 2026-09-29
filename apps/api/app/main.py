@@ -6,8 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.models.metric_daily_collection import MetricDailyCollection  # noqa: F401
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, rightsizing, finops_center
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, oci_operational, ideas, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -229,6 +228,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'collection'",
             "ALTER TABLE scheduled_task ALTER COLUMN connection_id DROP NOT NULL",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS recent_weight DOUBLE PRECISION NOT NULL DEFAULT 0.7",
+            "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS minimum_daily_points INTEGER NOT NULL DEFAULT 7",
+            "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS minimum_monthly_points INTEGER NOT NULL DEFAULT 3",
             "ALTER TABLE forecast_ack ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'Informação'",
             "ALTER TABLE forecast_ack ADD COLUMN IF NOT EXISTS ordem INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE source_connection ADD COLUMN IF NOT EXISTS last_test_status VARCHAR(30)",
@@ -333,7 +335,6 @@ async def lifespan(app: FastAPI):
             """UPDATE source_connection
                SET blob_prefixes = json_build_object(
                      CASE
-                       WHEN blob_prefixes::text ILIKE '%pricesheet%' THEN 'price_sheet'
                        WHEN blob_prefixes::text ILIKE '%amortized%' THEN 'amortized_cost'
                        WHEN blob_prefixes::text ILIKE '%focus%' THEN 'focus'
                        ELSE 'actual_cost'
@@ -347,19 +348,6 @@ async def lifespan(app: FastAPI):
             # compartilham a conexão e várias miram a mesma coluna canônica.
             "ALTER TABLE etl_mapping ADD COLUMN IF NOT EXISTS source_key VARCHAR(60)",
             "CREATE INDEX IF NOT EXISTS ix_etl_mapping_source_key ON etl_mapping (source_key)",
-            # Revisão humana: tabela própria porque a decisão é append-only no
-            # Iceberg e o snapshot dela não pode ser reescrito.
-            """CREATE TABLE IF NOT EXISTS rightsizing_review (
-                 id SERIAL PRIMARY KEY,
-                 evidence_hash VARCHAR(64) NOT NULL,
-                 review_status VARCHAR(20) NOT NULL,
-                 previous_status VARCHAR(20),
-                 reviewer VARCHAR(160),
-                 note TEXT,
-                 reviewed_at TIMESTAMPTZ DEFAULT now(),
-                 created_at TIMESTAMPTZ DEFAULT now()
-               )""",
-            "CREATE INDEX IF NOT EXISTS ix_rightsizing_review_hash ON rightsizing_review (evidence_hash)",
             # Decisão assistida pelo Jev: o plano exige modelo, versão e motivo
             # auditados, e que o assistido nunca altere o fato.
             """CREATE TABLE IF NOT EXISTS assisted_decision_audit (
@@ -848,29 +836,6 @@ async def lifespan(app: FastAPI):
         ):
             await _execute_migration(conn, statement)
 
-        # Registro dos cubos `finops_*` na governança declarativa. Idempotente: cria
-        # o que falta e atualiza descrição/tabela/materializador do que existe, sem
-        # mexer em `active`, que é decisão do operador. Sem isto, os cubos C1-C3 e a
-        # cobertura existem e publicam manifesto, mas ficam fora da fila `gold_rule`.
-        try:
-            from app.services.finops_gold_rules import seed_finops_gold_rules
-
-            def _seed_finops(sync_conn) -> dict:
-                from sqlalchemy.orm import Session
-
-                with Session(bind=sync_conn) as sync_session:
-                    resultado = seed_finops_gold_rules(sync_session)
-                    sync_session.commit()
-                    return resultado
-
-            resultado = await conn.run_sync(_seed_finops)
-            logger.info(
-                "Gold rules finops_*: %d criadas, %d atualizadas",
-                len(resultado.get("created") or []),
-                len(resultado.get("updated") or []),
-            )
-        except Exception as exc:  # noqa: BLE001 — não pode impedir o start da API
-            logger.warning("Falha ao registrar gold_rule dos cubos finops_*: %s", exc)
         # The Projects feature was removed (UI, API and metadata).  Drop the
         # legacy table and its columns.  Classification rules keep their
         # department target; the project_id column is dropped with its values.
@@ -995,10 +960,8 @@ app.include_router(scheduled_shutdown.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(azure_sources.router)
 app.include_router(integrations.router)
-app.include_router(rightsizing.router)
 app.include_router(oci_operational.router)
 app.include_router(ideas.router)
-app.include_router(finops_center.router)
 
 
 @app.get("/health")

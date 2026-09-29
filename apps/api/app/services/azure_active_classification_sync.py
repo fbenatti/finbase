@@ -148,8 +148,8 @@ async def sync_active_azure_classifications(
     projects_path: Path | None = None,
     directories_path: Path | None = None,
 ) -> SyncReport:
-    """Return an audit report, optionally persisting its departments and rules."""
-    root = Path(__file__).resolve().parents[4]
+    resolved = Path(__file__).resolve()
+    root = next((p for p in resolved.parents if (p / "projetos_download.csv").exists()), Path("/app") if Path("/app").is_dir() else resolved.parents[min(len(resolved.parents) - 1, 4)])
     projects_path = projects_path or root / "projetos_download.csv"
     directories_path = directories_path or root / "diretorias_download.csv"
     candidates = _candidates(_csv_rows(projects_path))

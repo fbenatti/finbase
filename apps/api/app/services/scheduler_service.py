@@ -81,90 +81,6 @@ def _queue_extraction_sync(connection_id: int, session, *, phase: str | None = N
     return task_id
 
 
-def _reconcile_metric_days(session, connection, selection, *, schedule_id: int, schedule_name: str) -> list[int]:
-    """Reconcile the last seven closed UTC days, verifying both Iceberg layers."""
-    from datetime import date, timedelta
-    from sqlalchemy import select
-    from app.models.metric_daily_collection import MetricDailyCollection
-    from app.models.etl_task import EtlTask
-    from app.services.azure_source_registry import source_code
-    from app.services.trino_service import execute
-
-    silver_table = {
-        "monitor_vm_metrics": "resource_metric_series",
-        "container_insights": "container_metric_series",
-    }[selection.source_key]
-    owner = selection.source_key
-    bronze = "raw_" + source_code(connection.code, selection.source_key).replace("-", "_").replace(".", "_")
-    if not re.fullmatch(r"[a-zA-Z0-9_]+", bronze):
-        logger.error("Unsafe metric Bronze catalog name for connection %s", connection.id)
-        return []
-    days = [(datetime.now(timezone.utc).date() - timedelta(days=offset)) for offset in range(7, 0, -1)]
-    first_day, last_day = days[0].strftime("%Y%m%d"), days[-1].strftime("%Y%m%d")
-    # If the catalog cannot be checked, do not infer missing data and enqueue a
-    # potentially destructive rewrite. The next scheduler run retries this read.
-    try:
-        bronze_rows = asyncio.run(execute(
-            f"SELECT _billing_period AS day, count(*) AS n FROM iceberg.bronze.{bronze} "
-            f"WHERE _billing_period BETWEEN '{first_day}' AND '{last_day}' GROUP BY 1"
-        ))
-        silver_rows = asyncio.run(execute(
-            f"SELECT _billing_period AS day, count(*) AS n FROM iceberg.silver.{silver_table} "
-            f"WHERE _source_connection_id = {int(connection.id)} AND _silver_owner = '{owner}' "
-            f"AND _billing_period BETWEEN '{first_day}' AND '{last_day}' GROUP BY 1"
-        ))
-    except Exception:
-        logger.exception("Metric reconciliation read failed for connection=%s source=%s", connection.id, owner)
-        return []
-    bronze_counts = {str(row["day"]): int(row["n"]) for row in bronze_rows}
-    silver_counts = {str(row["day"]): int(row["n"]) for row in silver_rows}
-    queued: list[int] = []
-    for day in days:
-        day_key = day.strftime("%Y%m%d")
-        state = session.execute(select(MetricDailyCollection).where(
-            MetricDailyCollection.connection_id == connection.id,
-            MetricDailyCollection.source_key == owner,
-            MetricDailyCollection.day_utc == day_key,
-        ).with_for_update()).scalar_one_or_none()
-        b_count, s_count = bronze_counts.get(day_key), silver_counts.get(day_key)
-        if state is None:
-            state = MetricDailyCollection(connection_id=connection.id, source_key=owner, day_utc=day_key,
-                                          status="DISCOVERED", bronze_rows=b_count, silver_rows=s_count)
-            session.add(state)
-            session.flush()
-        if b_count is not None and s_count is not None and b_count == s_count:
-            state.status = "COMPLETED_WITH_DATA" if b_count else "COMPLETED_EMPTY"
-            state.bronze_rows, state.silver_rows = b_count, s_count
-            state.reason = "Partição existente confirmada em Bronze e Silver."
-            continue
-        if state.status in {"COMPLETED_EMPTY", "SOURCE_UNAVAILABLE"}:
-            # Zero rows and a confirmed expired/unavailable source are durable
-            # outcomes; neither should trigger an automatic retry loop.
-            continue
-        if state.status in {"QUEUED", "RUNNING"}:
-            active = session.get(EtlTask, state.task_id) if state.task_id else None
-            if active and active.status in {"QUEUED", "RUNNING"}:
-                continue
-        end = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(days=1)
-        task_id = _queue_extraction_sync(
-            connection.id, session,
-            phase=f"Reconciliação diária: {owner} · {day_key}",
-            result_json={"schedule_id": schedule_id, "schedule_name": schedule_name,
-                         "source_key": owner, "source_code": source_code(connection.code, owner),
-                         "window_days": 1, "collection_until": end.isoformat(),
-                         "metric_window": True, "metric_day": day_key,
-                         **({"subscription_ids": [x.strip() for x in selection.subscription_ids.split(",") if x.strip()]}
-                            if selection.subscription_ids else {}),
-                         **({"metrics": [x.strip() for x in selection.metrics.split(",") if x.strip()]}
-                            if selection.metrics else {})},
-        )
-        state.status, state.task_id = "QUEUED", task_id
-        state.bronze_rows, state.silver_rows = b_count, s_count
-        state.reason = "Reconciliado: faltava confirmar ambas as camadas."
-        queued.append(task_id)
-    return queued
-
-
 def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
     """Queue ETL extraction for one or more connections (called from APScheduler).
 
@@ -192,7 +108,7 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
                     billing_periods=[], selected_blobs=[], errors=[],
                     result_json={
                         "schedule_id": schedule_id,
-                        "retention_days": int((sched.config_json or {}).get("retention_days", 30)),
+                        "retention_days": int((sched.config_json or {}).get("retention_days", 7)),
                         "backup_layers": (sched.config_json or {}).get("backup_layers") or ["bronze"],
                     },
                 )
@@ -237,21 +153,6 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
                 )
                 queued.append(task_id)
 
-            if connection.cloud_scope != "azure":
-                continue
-            from app.models.azure_connection_source import AzureConnectionSource
-            telemetry = session.execute(
-                select(AzureConnectionSource).where(
-                    AzureConnectionSource.connection_id == connection_id,
-                    AzureConnectionSource.enabled.is_(True),
-                    AzureConnectionSource.source_key.in_(("monitor_vm_metrics", "container_insights")),
-                )
-            ).scalars().all()
-            for selection in telemetry:
-                queued.extend(_reconcile_metric_days(
-                    session, connection, selection,
-                    schedule_id=schedule_id, schedule_name=schedule_name,
-                ))
         session.commit()
         logger.info("Scheduled ETL [%s] queued tasks %s", schedule_name, queued)
         return queued
@@ -673,20 +574,7 @@ async def start_scheduler():
         # replica are reconciled from PostgreSQL by this singleton scheduler.
         _scheduler.add_job(_sync_schedules_job, "interval", seconds=15,
                            id="schedule_sync", replace_existing=True)
-        # Daily saving refresh is intentionally independent of ETL schedules: actions
-        # that start today must progress even when a source has no new blob.
-        _scheduler.add_job(_refresh_savings_job, "cron", hour=2, minute=15, id="savings_daily", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_hourly_job, "cron", minute=10, id="azure_ptu_hourly", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_daily_job, "cron", hour=3, minute=20, id="azure_ptu_daily", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_gold_daily_job, "cron", minute=50, id="azure_ptu_gold_hourly", replace_existing=True)
-        _scheduler.add_job(_ai_usage_gold_daily_job, "cron", hour=5, minute=10, id="ai_usage_gold_daily", replace_existing=True)
-        _scheduler.add_job(_azure_ptu_eventhub_job, "interval", minutes=2, id="azure_ptu_eventhub", replace_existing=True)
-        _scheduler.add_job(_oci_operational_hourly_job, "cron", minute=18, id="oci_operational_hourly", replace_existing=True)
-        _scheduler.add_job(_azure_reservations_daily_job, "cron", hour=3, minute=45, id="azure_reservations_daily", replace_existing=True)
-        _scheduler.add_job(_iceberg_orphan_cleanup_job, "cron", hour=3, minute=0, id="iceberg_orphan_cleanup", replace_existing=True)
-        _scheduler.add_job(_azure_metric_retention_job, CronTrigger(hour=4, minute=45, timezone="America/Sao_Paulo"),
-                           id="azure_metric_retention_90d", replace_existing=True)
-        logger.info("Scheduler started with %d active schedules", count)
+        logger.info("Scheduler started with %d active schedules (rotinas fixas desativadas)", count)
     except Exception as e:
         logger.error("Failed to start scheduler: %s", e)
     finally:
@@ -756,23 +644,6 @@ def _refresh_savings_job() -> None:
         refresh_actions(session)
     except Exception as exc:
         logger.error("Daily saving refresh failed: %s", exc)
-    finally:
-        session.close()
-
-
-def _azure_metric_retention_job() -> None:
-    """Apply daily metric retention after writing activity, with an auditable preview."""
-    from app.services.metric_retention import preview_metric_retention, apply_metric_retention
-    session = _get_sync_session()
-    try:
-        preview = preview_metric_retention(session)
-        logger.info("Azure metric 90-day retention preview: %s", preview)
-        result = apply_metric_retention(session)
-        logger.info("Azure metric 90-day retention completed: cutoff=%s tables=%d",
-                    result["cutoff_day"], len(result["tables"]))
-    except Exception:
-        session.rollback()
-        logger.exception("Azure metric retention failed")
     finally:
         session.close()
 

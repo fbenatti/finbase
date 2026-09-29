@@ -42,6 +42,11 @@ import AccuracyWidget from "./BudgetAccuracyWidget";
 import ConsumptionDrillDialog from "../GoldDashboard/ConsumptionDrillDialog";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
+const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
+  ? `R$ ${(value / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MM`
+  : Math.abs(value) >= 1_000
+    ? `R$ ${(value / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} K`
+    : `R$ ${money.format(value)}`;
 const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative";
 const flattenDepartments = (
   nodes: Department[],
@@ -111,7 +116,7 @@ export default function ExpectedView({
   const [showBudget, setShowBudget] = useState(true);
   const [drillOpen, setDrillOpen] = useState(false);
   const [drillPeriod, setDrillPeriod] = useState<string | undefined>();
-  const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast">(
+  const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast" | "ambos">(
     "realizado",
   );
   useEffect(() => {
@@ -268,6 +273,7 @@ export default function ExpectedView({
   );
   const forecast = filteredRows.reduce((sum, row) => sum + expectedOf(row), 0);
   const variance = budget - forecast;
+  const forecastOnly = forecast - actual;
   const actualEnd = filteredRows.reduce(
     (last, row, index) => (row.actual_value == null ? last : index),
     -1,
@@ -703,11 +709,11 @@ export default function ExpectedView({
           {label}
         </Typography>
         <Typography variant="h5" fontWeight={700}>
-          {money.format(value)}
+          {compactMoney(value)}
         </Typography>
         <Typography variant="caption">
           {caption ??
-            (onOpen ? "Clique para ver o detalhe do consumo" : "Current Year")}
+            (onOpen ? "Clique para ver o detalhe do consumo" : "Ano corrente")}
         </Typography>
       </CardContent>
     </Card>
@@ -762,7 +768,9 @@ export default function ExpectedView({
     navigate(`/analysis?${query.toString()}`);
   };
   // Clique no gráfico: abre o diálogo de decomposição (estado próprio, sem
-  // alterar filtros da página). O mês clicado restringe só o diálogo.
+  // alterar filtros da página). No gráfico acumulado, o ponto representa o
+  // ano e a decomposição usa todas as competências desse ano. No mensal, só
+  // a competência clicada restringe o diálogo.
   const onMainChartClick = (event: any) => {
     const x = event?.points?.[0]?.x;
     let period: string | undefined;
@@ -778,8 +786,14 @@ export default function ExpectedView({
         event?.points?.[0]?.fullData?.name ||
         "",
     ).toLowerCase();
-    setDrillTipo(traceName.includes("forecast") ? "forecast" : "realizado");
-    setDrillPeriod(period);
+    setDrillTipo(
+      cumulative
+        ? "ambos"
+        : traceName.includes("forecast")
+          ? "forecast"
+          : "realizado",
+    );
+    setDrillPeriod(cumulative && period ? period.slice(0, 4) : period);
     setDrillOpen(true);
   };
   const openDriver = (name: string) => {
@@ -816,7 +830,8 @@ export default function ExpectedView({
           (driver) =>
             Math.abs(Number(driver.actual_value || 0)) +
               Math.abs(Number(driver.shared_value || 0)) +
-              Math.abs(Number(driver.forecast_value || 0)) >
+              Math.abs(Number(driver.forecast_value || 0)) +
+              Math.abs(Number(driver.budget_value || 0)) >
             0.005,
         )
         .sort(
@@ -847,12 +862,17 @@ export default function ExpectedView({
         Number(driver.actual_value || 0) +
         (sharedOn ? Number(driver.shared_value || 0) : 0),
     );
-    const forecast = pivotDrivers.map((driver) =>
-      Number(driver.forecast_value || 0),
+    // The API's forecast_value is the projected total (realized + remaining
+    // forecast). In this table the Forecast row must show only the incremental
+    // forecast, while Total projetado reconstructs the projected total.
+    const forecast = pivotDrivers.map(
+      (driver, index) => Number(driver.forecast_value || 0) - realized[index],
     );
     const budget = pivotDrivers.map((driver) =>
       Number(driver.budget_value || 0),
     );
+    const projected = realized.map((value, index) => value + forecast[index]);
+    const delta = projected.map((value, index) => value - budget[index]);
     const toRow = (id: string, medida: string, values: number[]) =>
       Object.fromEntries([
         ["id", id],
@@ -861,11 +881,16 @@ export default function ExpectedView({
           driver.name,
           values[index] || 0,
         ]),
+        ["__total", values.reduce((sum, value) => sum + value, 0)],
       ]);
     return [
       toRow("realizado", "Realizado", realized),
       toRow("forecast", "Forecast", forecast),
+      toRow("projetado", "Total projetado (Realizado + Forecast)", projected),
       ...(showBudget ? [toRow("orcamento", "Orçamento", budget)] : []),
+      ...(showBudget
+        ? [toRow("delta", "Delta vs Orçamento (Projetado − Orçamento)", delta)]
+        : []),
     ];
   }, [pivotDrivers, showBudget, sharedOn]);
   const pivotColumns: GridColDef[] = useMemo(
@@ -877,6 +902,16 @@ export default function ExpectedView({
         sortable: false,
         pinned: "left",
         disableColumnMenu: true,
+      },
+      {
+        field: "__total",
+        headerName: "Total",
+        type: "number" as const,
+        width: 175,
+        sortable: false,
+        disableColumnMenu: true,
+        pinned: "right",
+        valueFormatter: (value: unknown) => money.format(Number(value || 0)),
       },
       ...pivotDrivers.map((driver) => ({
         field: driver.name,
@@ -894,7 +929,7 @@ export default function ExpectedView({
     [pivotDrivers, offenderSet],
   );
   const onPivotCellClick = (params: { field: string }) => {
-    if (params.field === "medida") return;
+    if (params.field === "medida" || params.field === "__total") return;
     openDriver(params.field);
   };
   const renderOrganizationNode = (
@@ -1084,14 +1119,15 @@ export default function ExpectedView({
         <>
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
             {card("Realizado", actual, "#F2A900", openActualDetails)}
-            {card("Orçamento", budget, "#64748B")}
+            {card("Forecast", forecastOnly, "#7C3AED", undefined, "Projeção adicional ao realizado")}
             {card(
-              "Total projetado",
+              "Realizado + Forecast",
               forecast,
               "#16A34A",
               undefined,
-              "Realizado + Forecast",
+              "Total projetado",
             )}
+            {card("Orçamento", budget, "#64748B")}
             {card("Variação", variance, variance >= 0 ? "#16A34A" : "#EF4444")}
           </Stack>
           <Grid container spacing={2}>
@@ -1207,6 +1243,9 @@ export default function ExpectedView({
                   Clique em uma coluna para abrir o nivel abaixo -{" "}
                   {pathParts.join(" > ") || "Consumo Cloud"}
                 </Typography>
+                <Typography variant="caption" display="block" color="text.secondary">
+                  Total projetado = Realizado + Forecast · Delta vs Orçamento = Total projetado − Orçamento (positivo indica valor acima do orçamento)
+                </Typography>
               </Box>
               <Stack direction="row" gap={1} alignItems="center">
                 <Button
@@ -1273,13 +1312,17 @@ export default function ExpectedView({
                   onPivotCellClick(params as { field: string })
                 }
                 getCellClassName={(params) =>
-                  params.field !== "medida" && offenderSet.has(params.field)
+                  params.field === "__total" || params.row.id === "projetado" || params.row.id === "delta"
+                    ? "summary-cell"
+                    : params.field !== "medida" && offenderSet.has(params.field)
                     ? "offender-cell"
                     : ""
                 }
                 sx={{
                   "& .offender-header": { bgcolor: "#FEF3C7", fontWeight: 700 },
                   "& .offender-cell": { bgcolor: "#FFF7E6" },
+                  "& .summary-cell": { fontWeight: 800 },
+                  "& .MuiDataGrid-cell[data-field='medida']": { fontWeight: 700 },
                 }}
               />
             )}

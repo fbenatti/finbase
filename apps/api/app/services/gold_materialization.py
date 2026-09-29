@@ -293,6 +293,11 @@ _ANALYTIC_DIMENSIONS = (
     "centro_custo",
     "regionname",
     "chargecategory",
+    # FOCUS marketplace/provider dimensions are part of the detailed Silver
+    # schema and must remain available in the executive Gold cube as well.
+    "marketplaceproductname",
+    "marketplacebillingmodel",
+    "serviceprovidername",
     "source_connection_id",
 )
 

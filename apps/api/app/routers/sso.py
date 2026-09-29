@@ -204,6 +204,12 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
     if not state_cookie or not expected_state or not secrets.compare_digest(state_cookie, expected_state):
         raise HTTPException(status_code=401, detail="State inválido")
 
+    error = request.query_params.get("error")
+    if error:
+        error_desc = request.query_params.get("error_description") or error
+        logger.warning("OIDC error do provedor %s: %s (%s)", prov.name, error, error_desc)
+        raise HTTPException(status_code=400, detail=f"Erro de autenticação Entra ID: {error_desc}")
+
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Código de autorização ausente")

@@ -72,13 +72,17 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
   const currentMonth = months[months.length - 1] || "";
   const previousMonth = months[months.length - 2] || "";
   const scopedRank = monthlyRows.filter((row) => String(fieldValue(row, "_billing_period")) === currentMonth).reduce<Record<string, number>>((result, row) => {
-    const name = String(fieldValue(row, lens) ?? "Não informado"); result[name] = (result[name] || 0) + Number(fieldValue(row, "realizado") || 0); return result;
+    const name = String(fieldValue(row, lens) ?? "Não informado");
+    // Cost Concentration measures cost magnitude. Use the same absolute-value
+    // basis for every category and for the denominator, so the displayed Top 5
+    // percentage is exactly the sum of the five category shares.
+    result[name] = (result[name] || 0) + Math.abs(Number(fieldValue(row, "realizado") || 0)); return result;
   }, {});
   const total = Object.values(scopedRank).reduce((sum, value) => sum + value, 0);
   const ranking = Object.entries(scopedRank).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   const topFiveShare = total ? ranking.slice(0, 5).reduce((sum, item) => sum + item.value, 0) / total * 100 : 0;
   const priorByName = monthlyRows.filter((row) => String(fieldValue(row, "_billing_period")) === previousMonth).reduce<Record<string, number>>((result, row) => {
-    const name = String(fieldValue(row, lens) ?? "Não informado"); result[name] = (result[name] || 0) + Number(fieldValue(row, "realizado") || 0); return result;
+    const name = String(fieldValue(row, lens) ?? "Não informado"); result[name] = (result[name] || 0) + Math.abs(Number(fieldValue(row, "realizado") || 0)); return result;
   }, {});
   const annualRows = rows(annualHeat);
   const heatMonths = Array.from({ length: 12 }, (_, index) => `${heatYear}${String(index + 1).padStart(2, "0")}`);
@@ -89,7 +93,7 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
   const heatValues = (name: string, month: string) => Number(annualRows.find((row) => String(fieldValue(row, lens) ?? "Não informado") === name && String(fieldValue(row, "_billing_period")) === month)?.realizado || 0);
 
   return <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "20px", borderColor: "#e2e7f0", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}>
-    <Typography variant="overline" sx={{ color: "#6416dc", letterSpacing: ".08em" }} fontWeight={800}>03 · COST CONCENTRATION</Typography>
+    <Typography variant="overline" sx={{ color: "#6416dc", letterSpacing: ".08em" }} fontWeight={800}>COST CONCENTRATION</Typography>
     <Stack direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} justifyContent="space-between" gap={2}>
       <Box flex={1} minWidth={0}>
         <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Onde o dinheiro está concentrado?</Typography>

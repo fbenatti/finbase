@@ -400,36 +400,10 @@ async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_d
                 "subscriptions": len(subs),
                 "resources": sum(int(s.get("resource_count") or 0) for s in subs),
             }
-        elif connector == "azure_aks_inventory":
-            from app.services.azure_aks_service import discover_scope as discover_aks
-            subs = await discover_aks(config)
-            capability = {
-                "subscriptions": len(subs),
-                "clusters": sum(int(x.get("clusters") or 0) for x in subs),
-            }
-        elif connector == "azure_vm_inventory":
-            from app.services.azure_vm_inventory_service import discover_scope as discover_vms
-            subs = await discover_vms(config)
-            capability = {
-                "subscriptions": len(subs),
-                "vms": sum(int(s.get("vm_count") or 0) for s in subs),
-            }
         elif connector == "azure_automation_jobs":
             from app.services.azure_automation_service import discover_accounts
             accounts = await discover_accounts(config)
             capability = {"automation_accounts": len(accounts)}
-        elif connector == "azure_monitor_vm_metrics":
-            from app.services.azure_monitor_vm_service import discover_scope as discover_monitor
-            scope = await discover_monitor(config)
-            capability = {
-                "vms": scope["vms"],
-                "subscriptions": len(scope["subscriptions"]),
-                "regions": scope["regions"],
-                "metrics_api_ok": scope["metrics_api_ok"],
-                "metrics_api_error": scope["metrics_api_error"],
-                "metrics_available": scope["metrics_available"],
-                "metrics_guest_unsupported": scope["metrics_guest_unsupported"],
-            }
         elif connector == "azure_openai_ptu":
             from app.services.azure_ptu_service import discover as discover_ptu
             found = await discover_ptu(config)

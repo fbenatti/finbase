@@ -12,7 +12,6 @@ Formato em `SourceConnection.blob_prefixes` (JSON), tipo → caminho::
       "actual_cost":   "reports/Report4P-actual-cost/",
       "amortized_cost": "reports/Report4P-amortized-cost/",
       "focus":         "reports/Report4P-focus/",
-      "price_sheet":   "reports/report_-pricesheet/"
     }
 
 A forma antiga (lista de strings) continua aceita e é lida como `actual_cost`,
@@ -32,7 +31,6 @@ logger = logging.getLogger(__name__)
 REPORT_TYPE_ACTUAL = "actual_cost"
 REPORT_TYPE_AMORTIZED = "amortized_cost"
 REPORT_TYPE_FOCUS = "focus"
-REPORT_TYPE_PRICE_SHEET = "price_sheet"
 
 REPORT_TYPES: dict[str, dict[str, Any]] = {
     REPORT_TYPE_ACTUAL: {
@@ -57,13 +55,7 @@ REPORT_TYPES: dict[str, dict[str, Any]] = {
         "source_key": None,
         "is_focus_base": False,
     },
-    REPORT_TYPE_PRICE_SHEET: {
-        "display_name": "Price Sheet contratual (MCA)",
-        "description": "Tabela de preço contratado por medidor e região.",
-        "default_path": "reports/report_-pricesheet/",
-        "source_key": "customer_price",
-        "is_focus_base": False,
-    },
+
 }
 
 
@@ -104,7 +96,7 @@ def report_path(connection, report_type: str) -> str | None:
 def focus_download_prefixes(blob_prefixes: Any) -> list[str]:
     """Caminhos que o extrator de custo pode baixar para a Bronze da conexão.
 
-    Price sheet, amortizado e qualquer outro tipo ficam fora: cada um tem a
+    Amortizado e qualquer outro tipo ficam fora: cada um tem a
     própria tabela. Baixá-los aqui gravava o arquivo na Bronze de custo
     (`raw_azure_4p` / `raw_azure_ti`) e o manifesto da conexão de custo.
     """

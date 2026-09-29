@@ -1186,8 +1186,7 @@ export default function Connections() {
                   helperText={
                     "O tipo decide qual coletor usa o caminho — não é chumbado no código.\n"
                     + "Ex.:\nactual_cost: reports/Report4P-actual-cost/\n"
-                    + "amortized_cost: reports/Report4P-amortized-cost/\n"
-                    + "price_sheet: reports/report_-pricesheet/"
+                    + "amortized_cost: reports/Report4P-amortized-cost/"
                   } />
               </>
             )}

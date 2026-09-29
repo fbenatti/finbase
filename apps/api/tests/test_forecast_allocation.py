@@ -152,3 +152,42 @@ async def test_cloud_fetch_batches_shards_without_removing_dimensions(monkeypatc
     assert "account-63" in aggregation_filters[0]
     assert "account-64" in aggregation_filters[1]
     assert "IS NULL" in aggregation_filters[1]
+
+
+@pytest.mark.asyncio
+async def test_cloud_fetch_anchors_history_on_each_cloud_cutoff(monkeypatch):
+    calls = []
+
+    async def fake_fetch_period_records(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "app.services.forecast_service._fetch_period_records",
+        fake_fetch_period_records,
+    )
+
+    await _fetch_period_records_by_cloud(
+        source="iceberg.gold.focus",
+        type_filter="tipo = 'realizado'",
+        period="_billing_period",
+        history_start=date(2026, 7, 26),
+        effective_cutoff=date(2026, 8, 30),
+        dims=["cloud_origem"],
+        measure="realizado",
+        date_expr="CAST(_billing_period AS DATE)",
+        mode="daily",
+        charge_end_col=None,
+        period_col="_billing_period",
+        connection_filter=None,
+        exclusion_filter=None,
+        cloud_col="cloud_origem",
+        clouds={"azure-marketplace": date(2026, 7, 30)},
+        minimum_monthly_points=1,
+    )
+
+    # The 35-day lookback is preserved, but follows Marketplace's July cutoff
+    # rather than Azure TI's newer August cutoff.
+    cloud_call = calls[0]
+    assert cloud_call["history_start"] == date(2026, 6, 25)
+    assert cloud_call["effective_cutoff"] == date(2026, 7, 30)

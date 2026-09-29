@@ -11,6 +11,7 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
+  IconButton,
   InputLabel,
   MenuItem,
   Paper,
@@ -29,10 +30,11 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { Add } from "@mui/icons-material";
+import { Add, ArrowDownward, ArrowUpward, EditNote, Remove } from "@mui/icons-material";
 import Plot from "@/components/Plot";
 import {
   BudgetAccuracyDetail,
+  BudgetAccuracyAck,
   BudgetAccuracyLine,
   BudgetAccuracyResponse,
   createBudgetAccuracyAck,
@@ -93,12 +95,16 @@ function BudgetRows({
   expanded,
   onToggle,
   onOpen,
+  onRecognize,
+  acksByDepartment,
 }: {
   rows: BudgetAccuracyLine[];
   direction: Direction;
   expanded: boolean;
   onToggle: () => void;
   onOpen: (line: BudgetAccuracyLine) => void;
+  onRecognize: (line: BudgetAccuracyLine) => void;
+  acksByDepartment: Map<number, BudgetAccuracyAck>;
 }) {
   const ordered = useMemo(() => {
     const sorted = [...rows].sort((a, b) =>
@@ -135,7 +141,9 @@ function BudgetRows({
               <TableCell align="right">Orçamento aprovado</TableCell>
               <TableCell align="right">Realizado</TableCell>
               <TableCell align="right">Desvio</TableCell>
-              <TableCell>Status</TableCell>
+              <TableCell align="right">Desvio (%)</TableCell>
+              <TableCell align="center">Status</TableCell>
+              <TableCell>Motivo de desvio</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -151,6 +159,14 @@ function BudgetRows({
                 : direction === "underestimated"
                   ? line.variance > 0
                   : line.variance < 0;
+              const ack = acksByDepartment.get(line.department_id);
+              const statusLabel = noActual
+                ? "Sem realizado"
+                : valid
+                  ? direction === "underestimated"
+                    ? "Acima do orçamento"
+                    : "Abaixo do orçamento"
+                  : "Sem consumo";
               return (
                 <TableRow key={line.department_id} hover>
                   <TableCell>
@@ -191,35 +207,33 @@ function BudgetRows({
                     {money.format(line.variance)}
                   </TableCell>
                   <TableCell align="right">{percent(line.variance_pct)}</TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      color={
-                        noActual
-                          ? "default"
-                          : valid
-                            ? direction === "underestimated"
-                              ? "error"
-                              : "success"
-                            : "default"
-                      }
-                      label={
-                        noActual
-                          ? "Sem realizado"
-                          : valid
-                            ? direction === "underestimated"
-                              ? "Acima do orçamento"
-                              : "Abaixo do orçamento"
-                            : "Sem consumo"
-                      }
-                    />
+                  <TableCell align="center">
+                    <Tooltip title={statusLabel}>
+                      <Box component="span" sx={{ display: "inline-flex", color: noActual ? "text.disabled" : line.variance > 0 ? "#DC2626" : line.variance < 0 ? "#16A34A" : "text.disabled" }}>
+                        {noActual || line.variance === 0 ? <Remove fontSize="small" /> : line.variance > 0 ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />}
+                      </Box>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 220 }}>
+                    {ack ? (
+                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                        <Chip size="small" color="info" variant="outlined" label={ack.category} />
+                        <Typography variant="body2">{ack.reason}</Typography>
+                      </Stack>
+                    ) : (
+                      <Tooltip title="Reconhecer desvio">
+                        <IconButton size="small" onClick={() => onRecognize(line)} aria-label="Reconhecer desvio" sx={{ color: "#5B00CB" }}>
+                          <EditNote fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </TableCell>
                 </TableRow>
               );
             })}
             {!ordered.length && (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={8} align="center">
                   Nenhum projeto encontrado.
                 </TableCell>
               </TableRow>
@@ -256,6 +270,7 @@ function BudgetPanel({ department }: { department?: string }) {
   const [period, setPeriod] = useState<"monthly" | "annual">("monthly");
   const [month, setMonth] = useState(referenceMonth.getMonth() + 1);
   const [data, setData] = useState<BudgetAccuracyResponse | null>(null);
+  const [acks, setAcks] = useState<BudgetAccuracyAck[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [underExpanded, setUnderExpanded] = useState(false);
@@ -301,6 +316,24 @@ function BudgetPanel({ department }: { department?: string }) {
     };
   }, [year, period, month, department, departments]);
 
+  useEffect(() => {
+    if (!data?.target_month) {
+      setAcks([]);
+      return;
+    }
+    let cancelled = false;
+    getBudgetAccuracyAcks(data.target_month)
+      .then((result) => {
+        if (!cancelled) setAcks(result.items);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.target_month]);
+
   const rows = data?.lines || [];
   const underRows = rows.filter(
     (line) => line.status !== "sem_realizado" && line.variance > 0,
@@ -308,10 +341,18 @@ function BudgetPanel({ department }: { department?: string }) {
   const overRows = rows.filter(
     (line) => line.status !== "sem_realizado" && line.variance < 0,
   );
-  const totals = data?.totals;
-  const openDetail = async (line: BudgetAccuracyLine) => {
+  const acksByDepartment = useMemo(() => {
+    const mapped = new Map<number, BudgetAccuracyAck>();
+    acks.forEach((ack) => {
+      if (ack.department_id != null && !mapped.has(ack.department_id)) {
+        mapped.set(ack.department_id, ack);
+      }
+    });
+    return mapped;
+  }, [acks]);
+  const openDetail = async (line: BudgetAccuracyLine, initialTab = 0) => {
     setDetailLine(line);
-    setDetailTab(0);
+    setDetailTab(initialTab);
     setShowOtherSubcategories(false);
     setDetailLoading(true);
     try {
@@ -335,7 +376,7 @@ function BudgetPanel({ department }: { department?: string }) {
     setSavingAck(true);
     try {
       await createBudgetAccuracyAck({
-        target_month: `${year}${String(month).padStart(2, "0")}`,
+        target_month: data?.target_month || `${year}${String(month).padStart(2, "0")}`,
         planning_version_id: data?.version?.id,
         department_id: detailLine.department_id,
         department: detailLine.department_levels.join(" > "),
@@ -344,6 +385,10 @@ function BudgetPanel({ department }: { department?: string }) {
         category: ackCategory,
         reason: ackReason.trim(),
       });
+      if (data?.target_month) {
+        const result = await getBudgetAccuracyAcks(data.target_month);
+        setAcks(result.items);
+      }
       setAckReason("");
       setDetailTab(0);
     } catch (reason) {
@@ -362,9 +407,6 @@ function BudgetPanel({ department }: { department?: string }) {
       >
         <Box>
           <Typography variant="h6">Acurácia de orçamento</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Valor realizado comparado ao orçamento aprovado do projeto.
-          </Typography>
         </Box>
         <Stack direction="row" gap={1}>
           <FormControl size="small" sx={{ minWidth: 100 }}>
@@ -419,29 +461,14 @@ function BudgetPanel({ department }: { department?: string }) {
         </Box>
       ) : (
         <>
-          {totals && (
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              gap={1}
-              sx={{ mb: 1 }}
-            >
-              <Chip label={`Orçamento: ${money.format(totals.budget_value)}`} />
-              <Chip
-                label={`${period === "annual" ? "Realizado + Forecast" : "Realizado"}: ${money.format(totals.comparison_value ?? totals.actual_value)}`}
-                color="primary"
-              />
-              <Chip
-                label={`Desvio: ${money.format(totals.variance)}`}
-                color={totals.variance < 0 ? "error" : "success"}
-              />
-            </Stack>
-          )}
           <BudgetRows
             rows={underRows}
             direction="underestimated"
             expanded={underExpanded}
             onToggle={() => setUnderExpanded((value) => !value)}
             onOpen={(line) => void openDetail(line)}
+            onRecognize={(line) => void openDetail(line, 1)}
+            acksByDepartment={acksByDepartment}
           />
           <BudgetRows
             rows={overRows}
@@ -449,6 +476,8 @@ function BudgetPanel({ department }: { department?: string }) {
             expanded={overExpanded}
             onToggle={() => setOverExpanded((value) => !value)}
             onOpen={(line) => void openDetail(line)}
+            onRecognize={(line) => void openDetail(line, 1)}
+            acksByDepartment={acksByDepartment}
           />
           <Dialog
             open={Boolean(detail) || detailLoading}
@@ -741,13 +770,13 @@ export default function AccuracyWidget({
         onChange={(_, value) => setTab(value)}
         sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
       >
-        <Tab label="Acurácia de orçamento" />
         <Tab label="Acurácia de Forecast" />
+        <Tab label="Acurácia de orçamento" />
       </Tabs>
       {tab === 0 ? (
-        <BudgetPanel department={department} />
-      ) : (
         <AcksWidget department={department} />
+      ) : (
+        <BudgetPanel department={department} />
       )}
     </Paper>
   );

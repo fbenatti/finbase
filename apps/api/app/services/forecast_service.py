@@ -881,31 +881,43 @@ async def _fetch_period_records_by_cloud(
     # historical SubAccountName of a cloud produced three more aggregation
     # queries, even when it had no data in the forecast window.
     period_col = kwargs.get("period_col")
-    history_start = kwargs["history_start"]
-    effective_cutoff = kwargs["effective_cutoff"]
+    global_history_start = kwargs["history_start"]
+    global_effective_cutoff = kwargs["effective_cutoff"]
+    # Preserve the configured lookback duration, but anchor it at each
+    # cloud's own cutoff.  Otherwise an origin whose billing data closes
+    # earlier can be fetched only after its cutoff and have every fact removed
+    # later by the per-series cutoff (e.g. Azure Marketplace monthly invoices).
+    history_span = global_effective_cutoff - global_history_start
     mode = kwargs.get("mode")
-    if period_col:
-        periods = _billing_period_values(
-            history_start,
-            effective_cutoff,
-            int(kwargs.get("minimum_monthly_points") or 1),
-        )
-        period_values = ", ".join(_lit(value) for value in periods)
-        shard_scope = f" AND CAST({_q(period_col)} AS VARCHAR) IN ({period_values})"
-        # Monthly IBM invoices are allocated by their charge interval, so a
-        # date predicate would incorrectly drop the invoice stamped on day 1.
-        # Daily sources retain the precise 35-day boundary.
-        if mode != "interval":
-            shard_scope += (
-                f" AND {kwargs['date_expr']} BETWEEN DATE {_lit(history_start.isoformat())}"
-                f" AND DATE {_lit(effective_cutoff.isoformat())}"
-            )
-    else:
-        shard_scope = (
-            f" AND {kwargs['date_expr']} BETWEEN DATE {_lit(history_start.isoformat())}"
-            f" AND DATE {_lit(effective_cutoff.isoformat())}"
-        )
     for cloud in cloud_names:
+        cloud_effective_cutoff = clouds[cloud]
+        cloud_history_start = cloud_effective_cutoff - history_span
+        cloud_kwargs = {
+            **kwargs,
+            "history_start": cloud_history_start,
+            "effective_cutoff": cloud_effective_cutoff,
+        }
+        if period_col:
+            periods = _billing_period_values(
+                cloud_history_start,
+                cloud_effective_cutoff,
+                int(kwargs.get("minimum_monthly_points") or 1),
+            )
+            period_values = ", ".join(_lit(value) for value in periods)
+            shard_scope = f" AND CAST({_q(period_col)} AS VARCHAR) IN ({period_values})"
+            # Monthly IBM invoices are allocated by their charge interval, so a
+            # date predicate would incorrectly drop the invoice stamped on day 1.
+            # Daily sources retain the precise 35-day boundary.
+            if mode != "interval":
+                shard_scope += (
+                    f" AND {kwargs['date_expr']} BETWEEN DATE {_lit(cloud_history_start.isoformat())}"
+                    f" AND DATE {_lit(cloud_effective_cutoff.isoformat())}"
+                )
+        else:
+            shard_scope = (
+                f" AND {kwargs['date_expr']} BETWEEN DATE {_lit(cloud_history_start.isoformat())}"
+                f" AND DATE {_lit(cloud_effective_cutoff.isoformat())}"
+            )
         cloud_filter = _and_filters(connection_filter, f"{cloud_expr} = {_lit(cloud)}")
         shard_values: list[str | None] = [None]
         if shard_col:
@@ -940,7 +952,7 @@ async def _fetch_period_records_by_cloud(
                 )
             records.extend(await _fetch_period_records(
                 connection_filter=shard_filter,
-                **kwargs,
+                **cloud_kwargs,
             ))
     # Preserve records with absent or unforeseen origins rather than silently
     # dropping them when the cutoff discovery did not return a cloud key.

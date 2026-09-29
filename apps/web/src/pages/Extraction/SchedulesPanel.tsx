@@ -104,11 +104,13 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   const openNew = () => {
     setEditing(null);
     setForm({ ...EMPTY_FORM });
+    getBackupSizeEstimates().then(setBackupSizes).catch(() => setBackupSizes(null));
     setDialogOpen(true);
   };
 
   const openEdit = (s: ScheduledTask) => {
     setEditing(s);
+    getBackupSizeEstimates().then(setBackupSizes).catch(() => setBackupSizes(null));
     const cfg = s.config_json || {};
     const primary = s.connection_id ?? 0;
     const ids = Array.isArray(s.connection_ids) && s.connection_ids.length ? s.connection_ids : (primary ? [primary] : []);

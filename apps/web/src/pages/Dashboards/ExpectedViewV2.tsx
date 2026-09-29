@@ -49,7 +49,9 @@ const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set
 const monthLong = (period: string) => `${monthNames[Number(period.slice(4, 6)) - 1] || period} ${period.slice(0, 4)}`;
 const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
   ? `R$ ${(value / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MM`
-  : `R$ ${money.format(value)}`;
+  : Math.abs(value) >= 1_000
+    ? `R$ ${(value / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} K`
+    : `R$ ${money.format(value)}`;
 type ChartGranularity = "accumulated" | "monthly" | "daily";
 const FILTER_PALETTE = ["#6416dc", "#9c4dff", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d", "#53627d", "#00a8cc", "#a33bd1", "#6f9b20"];
 const flattenDepartments = (
@@ -874,7 +876,7 @@ export default function ExpectedViewV2({
         </Typography>
         <Typography variant="caption">
           {caption ??
-            (onOpen ? "Clique para ver o detalhe do consumo" : "Current Year")}
+            (onOpen ? "Clique para ver o detalhe do consumo" : "Ano corrente")}
         </Typography>
       </CardContent>
     </Card>
@@ -1019,6 +1021,21 @@ export default function ExpectedViewV2({
       transform: "translate(14px, 11px) scale(1)",
     },
   };
+  const trendSeries = (field: "actual_value" | "forecast_value") => {
+    const points = filteredRows.map((row) => ({
+      period: monthLong(row.period),
+      // D-2/current open month: the forecast point represents the full
+      // projected month, so it must continue from the partial realized value
+      // instead of dropping to the remaining forecast amount.
+      value: field === "forecast_value" && isCurrentMonth(row) && row.actual_value != null
+        ? Number(row.actual_value || 0) + Number(row.forecast_value || 0)
+        : Number(row[field] || 0),
+    }));
+    const firstDataPoint = points.findIndex((point) => point.value !== 0);
+    return firstDataPoint < 0 ? [] : points.slice(firstDataPoint);
+  };
+  const trendActual = trendSeries("actual_value");
+  const trendForecast = trendSeries("forecast_value");
   const body = (
     <>
       <Breadcrumbs
@@ -1249,11 +1266,11 @@ export default function ExpectedViewV2({
               <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
                 <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
                 <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Tendência mensal · Forecast × Realizado</Typography>
-                <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; competências futuras sem dados permanecem ausentes.</Typography>
+                <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; a série começa no primeiro valor disponível, sem preencher meses iniciais com zero.</Typography>
                 <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
-                  { x: filteredRows.filter((row) => row.actual_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.actual_value != null).map((row) => Number(row.actual_value || 0)), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
-                  { x: filteredRows.filter((row) => row.forecast_value != null).map((row) => monthLong(row.period)), y: filteredRows.filter((row) => row.forecast_value != null).map((row) => Number(row.forecast_value || 0)), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
-                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 45 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, xaxis: { gridcolor: "#fff" }, legend: { orientation: "h" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
+                  { x: trendActual.map((point) => point.period), y: trendActual.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
+                  { x: trendForecast.map((point) => point.period), y: trendForecast.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
+                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 75 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, xaxis: { gridcolor: "#fff", tickangle: -35 }, legend: { orientation: "h", x: 0, y: -0.28, yanchor: "top" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
               </Paper>
             </Grid>
           </Grid>

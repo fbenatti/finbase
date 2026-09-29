@@ -87,12 +87,18 @@ class AzureExtractor:
 
     def _get_blob_service_client(self):
         config = self.connection.config_json
+        storage_account = config["storage_account"]
+        storage_ip = config.get("storage_ip")
+
+        from app.core.network_override import register_storage_ip
+        register_storage_ip(storage_account, storage_ip)
+
         credential = ClientSecretCredential(
             tenant_id=config["tenant_id"],
             client_id=config["client_id"],
             client_secret=config["client_secret"],
         )
-        account_url = f"https://{config['storage_account']}.blob.core.windows.net"
+        account_url = f"https://{storage_account}.blob.core.windows.net"
         return BlobServiceClient(
             account_url=account_url, credential=credential,
             connection_timeout=60,

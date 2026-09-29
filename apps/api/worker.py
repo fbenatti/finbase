@@ -5,19 +5,8 @@
 # A lista vem do catálogo em vez de ser escrita à mão: manter as duas em sincronia
 # é justamente o tipo de divergência que já causou erro silencioso.
 _DEDICATED_COLLECTORS: frozenset[str] = frozenset({
-    "azure_customer_price",
-    "azure_retail_price",
-    "azure_compute_skus",
-    "azure_aks_inventory",
-    "azure_vm_inventory",
-    "azure_monitor_vm_metrics",
     "azure_resource_graph",
     "azure_automation_jobs",
-    "azure_compute_quota",
-    "azure_region_policy",
-    "azure_aks_cost_allocation",
-    "azure_container_insights",
-    "azure_aks_namespace_allocation",
 })
 
 #!/usr/bin/env python3
@@ -51,8 +40,6 @@ from app.database import SyncSession
 from app.models.etl_task import EtlTask
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
 from app.models.source_connection import SourceConnection
-from app.models.metric_daily_collection import MetricDailyCollection
-from app.services.metric_daily_state import metric_failure_status
 from app.models.ingested_blob import IngestedBlob
 from app.models.rules import BusinessRule, ClassificationRule, Department
 from app.models.skipped_blob import SkippedBlob
@@ -87,26 +74,17 @@ POLL_INTERVAL = 2  # seconds between polls when idle
 logger = logging.getLogger("openfinops.worker")
 
 
-def _save_metric_day_state(session, task_meta: dict, status: str, bronze_rows: int | None = None,
-                           silver_rows: int | None = None, reason: str | None = None) -> None:
-    day = str(task_meta.get("metric_day") or "")
-    source = str(task_meta.get("source_key") or "")
-    connection_id = task_meta.get("connection_id")
-    if not day or not source or not connection_id:
-        return
-    state = session.execute(select(MetricDailyCollection).where(
-        MetricDailyCollection.connection_id == int(connection_id),
-        MetricDailyCollection.source_key == source,
-        MetricDailyCollection.day_utc == day,
-    )).scalar_one_or_none()
-    if state:
-        state.status = status
-        state.bronze_rows = bronze_rows
-        state.silver_rows = silver_rows
-        state.reason = reason
-
-
-running = True
+async def _resolve_forecast_source_metadata(table_name: str):
+    """Load forecast source metadata from the namespace containing the table."""
+    from app.services.forecast_service import fetch_metadata
+    errors = []
+    for namespace in ("gold", "silver"):
+        try:
+            metadata = await fetch_metadata(table_name, namespace)
+            return namespace, metadata
+        except Exception as exc:
+            errors.append(f"{namespace}: {exc}")
+    raise RuntimeError("Tabela de forecast indisponível: " + " | ".join(errors))
 
 
 def _resolve_collection_reprocess_periods(
@@ -310,6 +288,9 @@ def _is_etl_task_cancelled(task_id: int) -> bool:
         session.close()
 
 
+running = True
+
+
 def shutdown(sig, frame):
     global running
     running = False
@@ -473,7 +454,7 @@ def consumer_main(worker_id: int):
                             if _is_etl_task_cancelled(task_id):
                                 raise BackupCancelledError("Backup cancelado pelo usuário")
                             result = create_full_backup(
-                                retention_days=int((task.result_json or {}).get("retention_days", 30)),
+                                retention_days=int((task.result_json or {}).get("retention_days", 7)),
                                 backup_layers=(task.result_json or {}).get("backup_layers") or ["bronze"],
                                 should_abort=lambda: _is_etl_task_cancelled(task_id),
                                 on_progress=_report_backup_progress,
@@ -482,12 +463,13 @@ def consumer_main(worker_id: int):
                         row = terminal.get(EtlTask, task_id)
                         if row:
                             row.status = "COMPLETED"
-                            row.phase = "Backup full concluído"
+                            row.phase = "Backup full concluído e sincronizado no Blob" if result.get("blob_archive") else "Backup full concluído"
                             row.total_blobs = 1
                             row.processed_blobs = 1
                             row.downloaded_bytes_total = Path(result["archive"]).stat().st_size
                             row.total_download_bytes = 0
-                            row.current_blob = "Arquivo full validado e checksum gerado"
+                            blob_target = result.get("blob_archive")
+                            row.current_blob = f"Local + Blob: {blob_target}" if blob_target else "Arquivo full validado e checksum gerado"
                             row.result_json = {**(row.result_json or {}), **result}
                             row.finished_at = datetime.now(timezone.utc)
                             terminal.commit()
@@ -557,7 +539,7 @@ def consumer_main(worker_id: int):
                         run.started_at = datetime.now(timezone.utc)
                         s.commit()
                         from app.database import run_async_isolated
-                        metadata = run_async_isolated(fetch_metadata(dest.physical_name, "silver"))
+                        source_namespace, metadata = run_async_isolated(_resolve_forecast_source_metadata(dest.physical_name))
                         errors = validate_config(config, metadata)
                         if errors:
                             raise RuntimeError("; ".join(errors))
@@ -566,7 +548,7 @@ def consumer_main(worker_id: int):
                             task_row.phase = "Agregando histórico no Trino"
                         s.commit()
                         config.destination_physical_name = dest.physical_name
-                        config.source_namespace = "silver"
+                        config.source_namespace = source_namespace
                         config.gold_metadata = metadata
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
                         simulated_as_of = None
@@ -707,19 +689,19 @@ def consumer_main(worker_id: int):
                             ForecastBusinessRule.active == True,
                         ).all()
                         from app.database import run_async_isolated
-                        metadata = run_async_isolated(fetch_metadata(dest.physical_name, "silver"))
+                        source_namespace, metadata = run_async_isolated(_resolve_forecast_source_metadata(dest.physical_name))
                         errors = validate_config(config, metadata)
                         if errors:
                             raise RuntimeError("; ".join(errors))
                         config.destination_physical_name = dest.physical_name
-                        config.source_namespace = "silver"
+                        config.source_namespace = source_namespace
                         config.gold_metadata = metadata
                         config.has_type_column = any(c["name"] == config.type_column for c in metadata["columns"])
                         snapshot = {
                             "config_id": config.id, "config_version": config.version,
                             "destination_table_id": dest.id,
                             "destination_physical_name": dest.physical_name,
-                            "source_namespace": "silver",
+                            "source_namespace": source_namespace,
                             "measure_column": config.measure_column, "date_column": config.date_column,
                             "period_column": config.period_column, "type_column": config.type_column,
                             "dimensions": list(config.dimensions or []), "currency_column": config.currency_column,
@@ -1435,458 +1417,6 @@ def consumer_main(worker_id: int):
                                     _t.billing_periods = _result.get("billing_periods") or []
                                     _t.result_json = _result
                                     _t.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_monitor_vm_metrics":
-                                # Azure Monitor — série de métricas de plataforma
-                                # das VMs. Bronze exclusiva da fonte; janela padrão
-                                # de 1 dia fechado, configurável até 90 para backfill.
-                                from app.services.azure_monitor_vm_service import (
-                                    run_monitor_vm_collection,
-                                )
-                                _mon_cfg = dict(_ptu_conn.config_json or {})
-                                _mon_days = int(_task_window_days or _mon_cfg.get("window_days") or 1)
-                                try:
-                                    _mon_result = run_monitor_vm_collection(
-                                        _ptu_session,
-                                        _ptu_conn.id,
-                                        window_days=_mon_days,
-                                        until=_task_collection_until,
-                                        subscription_ids=_task_result.get("subscription_ids"),
-                                        metrics=_task_result.get("metrics"),
-                                        task_id=task_id,
-                                        source_code=source_code,
-                                    )
-                                except Exception as _mon_exc:
-                                    import traceback as _tb_mon
-                                    _tb_mon.print_exc()
-                                    _t_mon_fail = _ptu_session.get(EtlTask, task_id)
-                                    if _t_mon_fail:
-                                        _t_mon_fail.status = "FAILED"
-                                        _t_mon_fail.phase = (
-                                            f"Azure Monitor VM coleta falhou: {str(_mon_exc)[:400]}"
-                                        )
-                                        _t_mon_fail.errors = [str(_mon_exc)[:1000]]
-                                        _t_mon_fail.finished_at = datetime.now(timezone.utc)
-                                        _save_metric_day_state(_ptu_session, _metric_state_meta, metric_failure_status(_mon_exc), reason=str(_mon_exc)[:1000])
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                # Bronze → Silver: a série entra na tabela canônica
-                                # `silver.resource_metric_series`, que é a mesma para
-                                # qualquer cloud com métricas equivalentes.
-                                try:
-                                    # Normalização por modelo: a fonte declara o
-                                    # mapeamento, o motor grava a Silver canônica.
-                                    from app.services.silver_normalizer import materialise
-                                    from app.services.azure_source_registry import (
-                                        environment_slug as _env_of,
-                                    )
-                                    _silver = materialise(
-                                        _ptu_session,
-                                        source_key=_task_source_key or "monitor_vm_metrics",
-                                        # O ambiente vem do resolvedor do registry
-                                        # (explícito → cloud_name → code); montar o
-                                        # nome da Bronze à mão já divergiu uma vez.
-                                        environment=_env_of(_ptu_conn) or None,
-                                        periods=_mon_result.get("periods") or [],
-                                    )
-                                    _mon_result["silver_rows"] = _silver.get("rows_silver", 0)
-                                    _mon_result["silver_table"] = _silver.get("silver_table")
-                                    _mon_result["silver_model"] = _silver.get("model")
-                                except Exception as _sv_exc:
-                                    import traceback as _tb_sv
-                                    _tb_sv.print_exc()
-                                    _mon_result["silver_error"] = str(_sv_exc)[:300]
-                                _t_mon = _ptu_session.get(EtlTask, task_id)
-                                if _t_mon:
-                                    _silver_failed = bool(_mon_result.get("silver_error"))
-                                    _t_mon.status = "FAILED" if _silver_failed else "COMPLETED"
-                                    _t_mon.phase = ("Azure Monitor VM: Bronze gravada, Silver falhou: "
-                                                    + _mon_result["silver_error"][:140]) if _silver_failed else (
-                                        f"Azure Monitor VM: {_mon_result.get('bronze_rows', 0)} linhas "
-                                        f"({_mon_result.get('series_rows', 0)} série / "
-                                        f"{_mon_result.get('gap_rows', 0)} ausência) em "
-                                        f"{_mon_result.get('vms', 0)} VM(s), "
-                                        f"janela {_mon_result.get('window_days', _mon_days)}d · "
-                                        f"{_mon_result.get('requests', 0)} requisição(ões) · "
-                                        f"{_mon_result.get('duration_seconds', 0)}s"
-                                    )
-                                    _t_mon.rows_raw = _mon_result.get("bronze_rows", 0)
-                                    _t_mon.billing_periods = _mon_result.get("periods") or []
-                                    _t_mon.result_json = _mon_result
-                                    if _task_result.get("metric_day"):
-                                        _save_metric_day_state(
-                                            _ptu_session, _metric_state_meta,
-                                            "FAILED" if _silver_failed else ("COMPLETED_WITH_DATA" if (_mon_result.get("bronze_rows", 0) or _mon_result.get("silver_rows", 0)) else "COMPLETED_EMPTY"),
-                                            int(_mon_result.get("bronze_rows", 0)),
-                                            int(_mon_result.get("silver_rows", 0)),
-                                            _mon_result.get("silver_error") or _mon_result.get("message"),
-                                        )
-                                    if _silver_failed:
-                                        _t_mon.errors = [_mon_result["silver_error"]]
-                                    _t_mon.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "FAILED" if _mon_result.get("silver_error") else "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_vm_inventory":
-                                # Identidade de VM/VMSS via Resource Graph: base do
-                                # custo por VM (a chave é o resource_id).
-                                from app.services.azure_vm_inventory_service import (
-                                    run_vm_inventory_collection,
-                                )
-                                try:
-                                    _vm_result = run_vm_inventory_collection(
-                                        _ptu_session,
-                                        _ptu_conn.id,
-                                        task_id=task_id,
-                                        source_code=source_code,
-                                    )
-                                except Exception as _vm_exc:
-                                    import traceback as _tb_vm
-                                    _tb_vm.print_exc()
-                                    _t_vm_fail = _ptu_session.get(EtlTask, task_id)
-                                    if _t_vm_fail:
-                                        _t_vm_fail.status = "FAILED"
-                                        _t_vm_fail.phase = (
-                                            f"Inventário de VM falhou: {str(_vm_exc)[:400]}"
-                                        )
-                                        _t_vm_fail.errors = [str(_vm_exc)[:1000]]
-                                        _t_vm_fail.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_vm = _ptu_session.get(EtlTask, task_id)
-                                if _t_vm:
-                                    _t_vm.status = "COMPLETED"
-                                    _t_vm.phase = (
-                                        f"Inventário de VM: {_vm_result.get('rows_bronze', 0)} linha(s) "
-                                        f"em {_vm_result.get('bronze_table', '')}"
-                                    )
-                                    _t_vm.rows_raw = _vm_result.get("rows_bronze", 0)
-                                    _t_vm.billing_periods = [_vm_result.get("period")] if _vm_result.get("period") else []
-                                    _t_vm.result_json = _vm_result
-                                    _t_vm.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_aks_namespace_allocation":
-                                # P4: topologia por namespace via Managed Prometheus.
-                                from app.services.azure_aks_namespace_service import (
-                                    run_aks_namespace_collection,
-                                )
-                                try:
-                                    _ans = run_aks_namespace_collection(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                    )
-                                except Exception as _ans_exc:
-                                    import traceback as _tb_ans
-                                    _tb_ans.print_exc()
-                                    _t_ans = _ptu_session.get(EtlTask, task_id)
-                                    if _t_ans:
-                                        _t_ans.status = "FAILED"
-                                        _t_ans.phase = f"AKS namespace falhou: {str(_ans_exc)[:380]}"
-                                        _t_ans.errors = [str(_ans_exc)[:1000]]
-                                        _t_ans.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_ans_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_ans_ok:
-                                    _t_ans_ok.status = "COMPLETED"
-                                    _t_ans_ok.phase = (
-                                        f"AKS namespace: {_ans.get('namespaces', 0)} namespace(s) em "
-                                        f"{_ans.get('clusters', 0)} cluster(s) · {_ans.get('status')}"
-                                    )
-                                    _t_ans_ok.rows_raw = _ans.get("rows_bronze", 0)
-                                    _t_ans_ok.billing_periods = [_ans.get("period")] if _ans.get("period") else []
-                                    _t_ans_ok.result_json = _ans
-                                    _t_ans_ok.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type in (
-                                "azure_aks_cost_allocation", "azure_container_insights"
-                            ):
-                                _eh_alocacao = _ptu_conn.connector_type == "azure_aks_cost_allocation"
-                                if _eh_alocacao:
-                                    from app.services.azure_aks_cost_service import (
-                                        run_aks_cost_allocation_collection as _coletor_akc,
-                                    )
-                                    _rot = "Alocação de custo AKS"
-                                else:
-                                    from app.services.azure_container_insights_service import (
-                                        run_container_insights_collection as _coletor_akc,
-                                    )
-                                    _rot = "Container Insights"
-                                try:
-                                    _akc = _coletor_akc(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                        **({"window_days": _task_window_days} if _task_window_days else {}),
-                                        **({"until": _task_collection_until} if _task_collection_until else {}),
-                                    )
-                                    if not _eh_alocacao and _akc.get("periods"):
-                                        from app.services.silver_normalizer import materialise
-                                        from app.services.azure_source_registry import environment_slug
-                                        _silver = materialise(
-                                            _ptu_session, source_key="container_insights",
-                                            environment=environment_slug(_ptu_conn) or None,
-                                            periods=_akc["periods"],
-                                        )
-                                        _akc["silver_rows"] = _silver.get("rows_silver", 0)
-                                except Exception as _akc_exc:
-                                    import traceback as _tb_akc
-                                    _tb_akc.print_exc()
-                                    _t_akc = _ptu_session.get(EtlTask, task_id)
-                                    if _t_akc:
-                                        _t_akc.status = "FAILED"
-                                        _t_akc.phase = f"{_rot} falhou: {str(_akc_exc)[:380]}"
-                                        _t_akc.errors = [str(_akc_exc)[:1000]]
-                                        _t_akc.finished_at = datetime.now(timezone.utc)
-                                        if _task_result.get("metric_day"):
-                                            _save_metric_day_state(_ptu_session, _metric_state_meta, metric_failure_status(_akc_exc), reason=str(_akc_exc)[:1000])
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_akc_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_akc_ok:
-                                    _t_akc_ok.status = "COMPLETED"
-                                    _t_akc_ok.phase = (
-                                        f"{_rot}: {_akc.get('rows_bronze', 0)} linha(s) · "
-                                        f"estado {_akc.get('status')}"
-                                    )
-                                    _t_akc_ok.rows_raw = _akc.get("rows_bronze", 0)
-                                    _t_akc_ok.billing_periods = (
-                                        _akc.get("periods") or
-                                        ([_akc.get("period")] if _akc.get("period") else [])
-                                    )
-                                    _t_akc_ok.result_json = _akc
-                                    _t_akc_ok.finished_at = datetime.now(timezone.utc)
-                                    if not _eh_alocacao and _task_result.get("metric_day"):
-                                        _no_ci_workspaces = not (_akc.get("periods") or []) and not _akc.get("rows_bronze", 0)
-                                        _save_metric_day_state(
-                                            _ptu_session, _metric_state_meta,
-                                            "SOURCE_UNAVAILABLE" if _no_ci_workspaces else ("COMPLETED_WITH_DATA" if (_akc.get("rows_bronze", 0) or _akc.get("silver_rows", 0)) else "COMPLETED_EMPTY"),
-                                            int(_akc.get("rows_bronze", 0)), int(_akc.get("silver_rows", 0)),
-                                            "Nenhum cluster/workspace Container Insights disponível na conexão." if _no_ci_workspaces else _akc.get("status_reason"),
-                                        )
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type in (
-                                "azure_compute_quota", "azure_region_policy"
-                            ):
-                                # Quota e policy: restrições de elegibilidade.
-                                from app.services.azure_quota_policy_service import (
-                                    run_compute_quota_collection,
-                                    run_region_policy_collection,
-                                )
-                                _coletor = (
-                                    run_compute_quota_collection
-                                    if _ptu_conn.connector_type == "azure_compute_quota"
-                                    else run_region_policy_collection
-                                )
-                                _rotulo = (
-                                    "Quota de compute"
-                                    if _ptu_conn.connector_type == "azure_compute_quota"
-                                    else "Policy de região"
-                                )
-                                try:
-                                    _qp = _coletor(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                    )
-                                except Exception as _qp_exc:
-                                    import traceback as _tb_qp
-                                    _tb_qp.print_exc()
-                                    _t_qp = _ptu_session.get(EtlTask, task_id)
-                                    if _t_qp:
-                                        _t_qp.status = "FAILED"
-                                        _t_qp.phase = f"{_rotulo} falhou: {str(_qp_exc)[:380]}"
-                                        _t_qp.errors = [str(_qp_exc)[:1000]]
-                                        _t_qp.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_qp_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_qp_ok:
-                                    _t_qp_ok.status = "COMPLETED"
-                                    _t_qp_ok.phase = (
-                                        f"{_rotulo}: {_qp.get('rows_bronze', 0)} linha(s) · "
-                                        f"{_qp.get('subscriptions', 0)} assinatura(s)"
-                                    )
-                                    _t_qp_ok.rows_raw = _qp.get("rows_bronze", 0)
-                                    _t_qp_ok.billing_periods = [_qp.get("period")] if _qp.get("period") else []
-                                    _t_qp_ok.result_json = _qp
-                                    _t_qp_ok.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _source_connector in _DEDICATED_COLLECTORS:
-                                # Price Sheet contratual (MCA) do Blob de export.
-                                from app.services.azure_customer_price_service import (
-                                    run_customer_price_collection,
-                                )
-                                try:
-                                    _ps = run_customer_price_collection(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                    )
-                                except Exception as _ps_exc:
-                                    import traceback as _tb_ps
-                                    _tb_ps.print_exc()
-                                    _t_ps = _ptu_session.get(EtlTask, task_id)
-                                    if _t_ps:
-                                        _t_ps.status = "FAILED"
-                                        _t_ps.phase = f"Price Sheet falhou: {str(_ps_exc)[:400]}"
-                                        _t_ps.errors = [str(_ps_exc)[:1000]]
-                                        _t_ps.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_ps_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_ps_ok:
-                                    _t_ps_ok.status = "COMPLETED"
-                                    _t_ps_ok.phase = (
-                                        f"Price Sheet contratual: {_ps.get('rows_bronze', 0)} linha(s) · "
-                                        f"{_ps.get('period')} · {_ps.get('files', 0)} arquivo(s)"
-                                    )
-                                    _t_ps_ok.rows_raw = _ps.get("rows_bronze", 0)
-                                    _t_ps_ok.billing_periods = [_ps.get("period")] if _ps.get("period") else []
-                                    _t_ps_ok.result_json = _ps
-                                    _t_ps_ok.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_compute_skus":
-                                # Catálogo de SKUs: elegibilidade por região.
-                                from app.services.azure_compute_sku_service import (
-                                    run_compute_sku_collection,
-                                )
-                                try:
-                                    _sku = run_compute_sku_collection(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                    )
-                                except Exception as _sku_exc:
-                                    import traceback as _tb_sku
-                                    _tb_sku.print_exc()
-                                    _t_sku = _ptu_session.get(EtlTask, task_id)
-                                    if _t_sku:
-                                        _t_sku.status = "FAILED"
-                                        _t_sku.phase = f"Catálogo de SKUs falhou: {str(_sku_exc)[:400]}"
-                                        _t_sku.errors = [str(_sku_exc)[:1000]]
-                                        _t_sku.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_sku_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_sku_ok:
-                                    _t_sku_ok.status = "COMPLETED"
-                                    _t_sku_ok.phase = (
-                                        f"SKUs de compute: {_sku.get('rows_bronze', 0)} linha(s) · "
-                                        f"{_sku.get('subscriptions', 0)} assinatura(s) · "
-                                        f"{_sku.get('available_rows', 0)} disponíveis"
-                                    )
-                                    _t_sku_ok.rows_raw = _sku.get("rows_bronze", 0)
-                                    _t_sku_ok.billing_periods = [_sku.get("period")] if _sku.get("period") else []
-                                    _t_sku_ok.result_json = _sku
-                                    _t_sku_ok.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_retail_price":
-                                # Catálogo de preço público (API sem autenticação).
-                                from app.services.azure_retail_price_service import (
-                                    run_retail_price_collection,
-                                )
-                                try:
-                                    _preco = run_retail_price_collection(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                    )
-                                except Exception as _pr_exc:
-                                    import traceback as _tb_pr
-                                    _tb_pr.print_exc()
-                                    _t_pr = _ptu_session.get(EtlTask, task_id)
-                                    if _t_pr:
-                                        _t_pr.status = "FAILED"
-                                        _t_pr.phase = f"Preço público falhou: {str(_pr_exc)[:400]}"
-                                        _t_pr.errors = [str(_pr_exc)[:1000]]
-                                        _t_pr.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_pr_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_pr_ok:
-                                    _t_pr_ok.status = "COMPLETED"
-                                    _t_pr_ok.phase = (
-                                        f"Preço público: {_preco.get('rows_bronze', 0)} item(ns) · "
-                                        f"{_preco.get('meters', 0)} medidor(es) · "
-                                        f"{_preco.get('services', 0)} serviço(s)"
-                                    )
-                                    _t_pr_ok.rows_raw = _preco.get("rows_bronze", 0)
-                                    _t_pr_ok.billing_periods = [_preco.get("period")] if _preco.get("period") else []
-                                    _t_pr_ok.result_json = _preco
-                                    _t_pr_ok.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_aks_inventory":
-                                # AKS: clusters e node pools via Resource Graph.
-                                from app.services.azure_aks_service import (
-                                    run_aks_inventory_collection,
-                                )
-                                try:
-                                    _aks = run_aks_inventory_collection(
-                                        _ptu_session, _ptu_conn.id,
-                                        task_id=task_id, source_code=source_code,
-                                    )
-                                except Exception as _aks_exc:
-                                    import traceback as _tb_aks
-                                    _tb_aks.print_exc()
-                                    _t_aks = _ptu_session.get(EtlTask, task_id)
-                                    if _t_aks:
-                                        _t_aks.status = "FAILED"
-                                        _t_aks.phase = f"Inventário AKS falhou: {str(_aks_exc)[:400]}"
-                                        _t_aks.errors = [str(_aks_exc)[:1000]]
-                                        _t_aks.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t_aks_ok = _ptu_session.get(EtlTask, task_id)
-                                if _t_aks_ok:
-                                    _t_aks_ok.status = "COMPLETED"
-                                    _t_aks_ok.phase = (
-                                        f"Inventário AKS: {_aks.get('clusters', 0)} cluster(s) / "
-                                        f"{_aks.get('pools', 0)} node pool(s), "
-                                        f"{_aks.get('rows_bronze', 0)} linha(s) na Bronze"
-                                    )
-                                    _t_aks_ok.rows_raw = _aks.get("rows_bronze", 0)
-                                    _t_aks_ok.billing_periods = [_aks.get("period")] if _aks.get("period") else []
-                                    _t_aks_ok.result_json = _aks
-                                    _t_aks_ok.finished_at = datetime.now(timezone.utc)
                                     _ptu_session.commit()
                                 _inmemory_tasks[task_id]["status"] = "COMPLETED"
                                 _inmemory_tasks.pop(task_id, None)

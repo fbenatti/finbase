@@ -7,6 +7,8 @@ import { Department, ForecastAck, GoldInfo, GoldQueryFilter, formatApiError, get
 import { DepartmentTreeMultiPicker, flattenDepartments } from "../../components/DepartmentTreePicker";
 
 const TABLE = "dest_dm_cost_visao_completa";
+const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
+const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
 type DimFilter = { column: string; values: string[] };
 const FRIENDLY: Record<string, string> = { cloud_origem: "Cloud", organograma_nivel_1: "Segmento", organograma_nivel_2: "Modelo", organograma_nivel_3: "VP", organograma_nivel_4: "Diretoria", organograma_nivel_5: "Projeto", organograma_nivel_6: "SubProjeto", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" };
 const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -28,7 +30,9 @@ export default function GoldDashboardV2() {
   const [filterMenuAnchor, setFilterMenuAnchor] = useState<HTMLElement | null>(null);
   const [selectedNodes, setSelectedNodes] = useState<Array<Department & { path: string }>>([]);
   const selectedNodePaths = useMemo(() => selectedNodes.map((node) => node.path), [selectedNodes]);
-  const [directorView, setDirectorView] = useState(false);
+  const [directorView, setDirectorView] = useState(
+    () => window.localStorage.getItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY) === "1",
+  );
   const [filters, setFilters] = useState<DimFilter[]>([]);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -44,8 +48,17 @@ export default function GoldDashboardV2() {
       if (active) {
         setInfo(gold);
         setOrg(departments);
-        const root = flattenDepartments(departments).find((node) => node.path === "Consumo Cloud");
-        if (root) setSelectedNodes([root]);
+        const nodes = flattenDepartments(departments);
+        const savedId = Number(window.localStorage.getItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY));
+        const saved = Number.isInteger(savedId) && savedId > 0
+          ? nodes.find((node) => node.id === savedId && node.active)
+          : undefined;
+        const root = nodes.find((node) => node.path === "Consumo Cloud");
+        if (saved) setSelectedNodes([saved]);
+        else {
+          if (savedId) window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+          if (root) setSelectedNodes([root]);
+        }
       }
     }).catch((reason) => { if (active) setError(formatApiError(reason, "Falha ao carregar o contexto do dashboard")); });
     return () => { active = false; };
@@ -63,6 +76,8 @@ export default function GoldDashboardV2() {
   const chooseNodes = (ids: number[]) => {
     const values = ids.map((id) => flat.find((node) => node.id === id)).filter((node): node is Department & { path: string } => Boolean(node));
     setSelectedNodes(values);
+    if (values.length === 1) window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(values[0].id));
+    else window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
   };
   const setDimensionValues = (column: string, values: string[]) => setFilters((current) => {
     const remaining = current.filter((filter) => filter.column !== column);
@@ -86,7 +101,10 @@ export default function GoldDashboardV2() {
     setMonthFrom(ranges[preset][0]); setMonthTo(ranges[preset][1]); setDateAnchor(null);
   };
   const clear = () => {
-    setMonthFrom(`${year}-01`); setMonthTo(`${year}-12`); setSelectedNodes([]); setFilters([]); setDirectorView(false); setSharedCost(false);
+    const root = flat.find((node) => node.path === "Consumo Cloud");
+    setMonthFrom(`${year}-01`); setMonthTo(`${year}-12`); setSelectedNodes(root ? [root] : []); setFilters([]); setDirectorView(false); setSharedCost(false);
+    window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+    window.localStorage.setItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY, "0");
   };
   // `/gold/info` exposes both the curated dimension list and the complete
   // physical schema. Some older Gold tables omit dimensions, so use the
@@ -115,8 +133,10 @@ export default function GoldDashboardV2() {
   const chartFilters = scopeFilters;
   const organizationGroups = useMemo<GoldQueryFilter[][]>(() => selectedNodes.map((node) => {
     const path = node.path.split(" > ");
-    if (path[0] === "Consumo Cloud") path.shift();
-    if (!path.length) return [];
+    // O caminho da árvore já começa no valor físico de organograma_nivel_1
+    // ("Consumo Cloud"). Removê-lo deslocava todos os níveis: Showback era
+    // enviado como nivel_1, Azure como nivel_2 etc., zerando agrupamentos e
+    // Cost Concentration assim que um nó abaixo da raiz era selecionado.
     if (directorView && path.length >= 4) [path[2], path[3]] = [path[3], path[2]];
     const levels = directorView ? [1, 2, 4, 3, 5, 6] : [1, 2, 3, 4, 5, 6];
     return path.slice(0, 6).map((value, index) => ({ column: `organograma_nivel_${levels[index] || index + 1}`, operator: "IN" as const, values: [value] }));
@@ -131,7 +151,7 @@ export default function GoldDashboardV2() {
   return <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
     <Box sx={{ px: 3, pt: 3, pb: 2, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-        <Box><Typography variant="h4">FinOps Intelligence v2</Typography><Typography color="text.secondary">Visão Executiva · clone isolado da experiência atual</Typography></Box>
+        <Box><Typography variant="h4">FinOps Intelligence v2 <Chip label="BETA" size="small" color="warning" sx={{ verticalAlign: "middle", ml: .75, fontWeight: 900 }} /></Typography><Typography color="text.secondary">Visão Executiva · versão beta</Typography></Box>
         <Button startIcon={<Refresh />} onClick={() => setRefresh((value) => value + 1)}>Atualizar</Button>
       </Stack>
     </Box>
@@ -144,7 +164,7 @@ export default function GoldDashboardV2() {
             <Button fullWidth variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(monthFrom); setDraftTo(monthTo); setDateAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, px: 1.5, borderRadius: "12px", justifyContent: "flex-start", textTransform: "none", color: "#111b4e", borderColor: "#dce2ee", bgcolor: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{labelMonth(monthFrom)} – {labelMonth(monthTo)}</Button>
           </Box>
           <Box sx={{ minWidth: { xs: "100%", md: 320 }, flex: "1 1 360px" }}><DepartmentTreeMultiPicker departments={org} values={selectedNodes.map((node) => node.id)} onChange={chooseNodes} label="Organograma · selecione níveis" placeholder="Navegue e marque níveis" /></Box>
-          <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={directorView} onChange={(_, checked) => setDirectorView(checked)} />} label="Visão Diretoria" />
+          <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={directorView} onChange={(_, checked) => { setDirectorView(checked); window.localStorage.setItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY, checked ? "1" : "0"); }} />} label="Visão Diretoria" />
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Incluir rateio" />
           <Button startIcon={<FilterAltOff />} onClick={clear}>Limpar</Button>
         </Stack>

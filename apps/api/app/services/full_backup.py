@@ -33,8 +33,12 @@ def normalize_backup_layers(layers: list[str] | None) -> list[str]:
 def backup_layer_size_estimates(warehouse: Path | None = None) -> dict[str, int]:
     """Logical bytes included from each Iceberg layer, before archive compression."""
     if warehouse is None:
-        root = _project_root().resolve()
-        warehouse = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(root / "apps" / "data" / "iceberg"))).expanduser().resolve()
+        raw_wh = os.getenv("ICEBERG_LOCAL_WAREHOUSE")
+        if raw_wh:
+            warehouse = Path(raw_wh).expanduser().resolve()
+        else:
+            root = _project_root().resolve()
+            warehouse = (root / "apps" / "data" / "iceberg").resolve()
     estimates: dict[str, int] = {}
     for layer in BACKUP_LAYERS:
         total = 0
@@ -122,7 +126,17 @@ def _run_subprocess_abortable(
         raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    override = os.getenv("OPENFINOPS_PROJECT_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
+    resolved = Path(__file__).resolve()
+    for parent in resolved.parents:
+        if (parent / "apps" / "api").exists() or (parent / "docker-compose.yml").exists():
+            return parent
+    if Path("/app").is_dir():
+        return Path("/app")
+    parents = resolved.parents
+    return parents[min(len(parents) - 1, 4)]
 
 
 def _database_parts() -> tuple[str, str, str, str, str]:
@@ -221,22 +235,138 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _load_dotenv_if_needed() -> dict[str, str]:
+    """Helper to inspect project dotenv files if variables are missing in environment."""
+    values: dict[str, str] = {}
+    try:
+        from dotenv import dotenv_values
+        root = _project_root().resolve()
+        for env_name in (".env-4p", ".env-databriks", ".env.production", ".env"):
+            p = root / env_name
+            if p.is_file():
+                for k, v in dotenv_values(p).items():
+                    if v is not None and k not in values:
+                        values[k] = str(v)
+    except Exception:
+        pass
+    return values
+
+
+def _blob_backup_config(storage_ip: str | None = None) -> dict[str, str]:
+    dotenv_vals = _load_dotenv_if_needed()
+
+    def _val(key: str, fallback: str) -> str:
+        return os.getenv(key) or dotenv_vals.get(key) or fallback
+
+    tenant_id = _val("DEFAULT_TENANT_ID", "0fce1554-ffcc-4e69-aa8d-9334eb2d8fd7")
+    client_id = _val("DEFAULT_CLIENT_ID", "b497374e-e461-4043-ac57-406ce004c87d")
+    client_secret = _val("DEFAULT_CLIENT_SECRET", "lsj8Q~42HyMeNhcX0vtmLx1VWuwr5vRgIiF4XbOA")
+    storage_account = _val("DEFAULT_STORAGE_ACCOUNT", "proazurecostsmanagement")
+    container_name = _val("DEFAULT_CONTAINER_NAME", "4pfinops")
+    upload_prefix = _val("DEFAULT_UPLOAD_CONTAINER", "reports/DadosProcessados/").strip("/")
+    target_ip = storage_ip or _val("AZURE_STORAGE_IP_PROAZURECOSTSMANAGEMENT", "20.60.37.33")
+
+    return {
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "storage_account": storage_account,
+        "container_name": container_name,
+        "upload_prefix": upload_prefix,
+        "storage_ip": target_ip,
+    }
+
+
+def _get_blob_service_client_for_backup(storage_ip: str | None = None):
+    cfg = _blob_backup_config(storage_ip)
+    from app.core.network_override import register_storage_ip
+    register_storage_ip(cfg["storage_account"], cfg["storage_ip"])
+
+    from azure.identity import ClientSecretCredential
+    from azure.storage.blob import BlobServiceClient
+
+    cred = ClientSecretCredential(
+        tenant_id=cfg["tenant_id"],
+        client_id=cfg["client_id"],
+        client_secret=cfg["client_secret"],
+    )
+    storage_host = f"{cfg['storage_account']}.blob.core.windows.net"
+    service = BlobServiceClient(
+        account_url=f"https://{storage_host}",
+        credential=cred,
+        connection_timeout=60,
+        read_timeout=300,
+    )
+    return service, cfg["container_name"], cfg["upload_prefix"]
+
+
+def upload_backup_to_blob(archive: Path, storage_ip: str | None = None) -> dict[str, str]:
+    """Upload completed backup archive and its sha256 checksum to Azure Blob Storage."""
+    service, container_name, prefix = _get_blob_service_client_for_backup(storage_ip)
+    container_client = service.get_container_client(container_name)
+
+    target_name = f"{prefix}/{archive.name}" if prefix else archive.name
+    sidecar = archive.with_suffix(archive.suffix + ".sha256")
+    sidecar_target = f"{prefix}/{sidecar.name}" if prefix else sidecar.name
+
+    # Upload do arquivo compactado
+    blob_client = container_client.get_blob_client(target_name)
+    with archive.open("rb") as stream:
+        blob_client.upload_blob(stream, overwrite=True, max_concurrency=2, timeout=900)
+
+    # Upload do checksum sha256
+    if sidecar.exists():
+        sidecar_client = container_client.get_blob_client(sidecar_target)
+        with sidecar.open("rb") as stream:
+            sidecar_client.upload_blob(stream, overwrite=True, max_concurrency=1, timeout=120)
+
+    return {
+        "blob_container": container_name,
+        "blob_archive": target_name,
+        "blob_checksum": sidecar_target,
+    }
+
+
+def prune_blob_backups(retention_days: int = 7, storage_ip: str | None = None) -> int:
+    """Delete backups older than retention_days (max 7 days) from Azure Blob Storage."""
+    service, container_name, prefix = _get_blob_service_client_for_backup(storage_ip)
+    container_client = service.get_container_client(container_name)
+
+    blob_prefix = f"{prefix}/openfinops-full-" if prefix else "openfinops-full-"
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(retention_days)))
+    removed = 0
+
+    for blob in container_client.list_blobs(name_starts_with=blob_prefix):
+        if blob.last_modified and blob.last_modified < cutoff:
+            try:
+                container_client.delete_blob(blob.name)
+                removed += 1
+            except Exception:
+                pass
+
+    return removed
+
+
 def create_full_backup(
     *,
-    retention_days: int = 30,
+    retention_days: int = 7,
     output_dir: str | None = None,
     should_abort: BackupAbort | None = None,
     on_progress: BackupProgress | None = None,
     backup_layers: list[str] | None = None,
+    upload_to_blob: bool = True,
+    storage_ip: str | None = None,
 ) -> dict:
     """Create one compressed archive containing DB, Iceberg and the project.
 
     backup directory itself is excluded to avoid recursively archiving prior
-    backups and the archive currently being written.
+    backups and the archive currently being written. Retains at most retention_days
+    both locally and on the Azure Blob.
     """
     root = _project_root().resolve()
     backup_layers = normalize_backup_layers(backup_layers)
-    destination = Path(output_dir or os.getenv("OPENFINOPS_BACKUP_DIR", str(root / "backups" / "scheduled"))).expanduser().resolve()
+    default_dir = "/backups/scheduled" if Path("/backups/scheduled").is_dir() else str(root / "backups" / "scheduled")
+    destination = Path(output_dir or os.getenv("OPENFINOPS_BACKUP_DIR", default_dir)).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     archive = destination / f"openfinops-full-{stamp}.tar.gz"
@@ -245,7 +375,8 @@ def create_full_backup(
 
     with tempfile.TemporaryDirectory(prefix="openfinops-full-backup-") as temp_name:
         staging = Path(temp_name)
-        warehouse = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(root / "apps" / "data" / "iceberg"))).expanduser().resolve()
+        raw_wh = os.getenv("ICEBERG_LOCAL_WAREHOUSE")
+        warehouse = Path(raw_wh).expanduser().resolve() if raw_wh else (root / "apps" / "data" / "iceberg").resolve()
         db_dir = staging / "postgres"
         db_dir.mkdir()
         host, port, user, password, database = _database_parts()
@@ -321,15 +452,34 @@ def create_full_backup(
         if "openfinops/BACKUP_MANIFEST.json" not in tar.getnames():
             raise RuntimeError("Manifesto ausente no backup compactado")
 
+    # Retenção Local: máximo de 7 dias (remove .tar.gz e .sha256)
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(retention_days)))
     removed = 0
     for old in destination.glob("openfinops-full-*.tar.gz"):
         if old == archive:
             continue
         if datetime.fromtimestamp(old.stat().st_mtime, timezone.utc) < cutoff:
-            old.unlink()
+            old.unlink(missing_ok=True)
             sidecar = old.with_suffix(old.suffix + ".sha256")
             if sidecar.exists():
-                sidecar.unlink()
+                sidecar.unlink(missing_ok=True)
             removed += 1
-    return {"archive": str(archive), "sha256": _sha256(archive), "retention_removed": removed}
+
+    result = {
+        "archive": str(archive),
+        "sha256": _sha256(archive),
+        "retention_removed": removed,
+        "retention_days": retention_days,
+    }
+
+    # Upload automático no Blob Storage e retenção de 7 dias no Blob
+    if upload_to_blob:
+        try:
+            blob_info = upload_backup_to_blob(archive, storage_ip=storage_ip)
+            blob_removed = prune_blob_backups(retention_days=retention_days, storage_ip=storage_ip)
+            result.update(blob_info)
+            result["blob_retention_removed"] = blob_removed
+        except Exception as e:
+            result["blob_upload_error"] = str(e)
+
+    return result

@@ -502,8 +502,13 @@ async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[s
     next_version = max((v.version for v in current), default=0)
     all_versions = (await db.execute(select(func.max(PlanningVersion.version)).where(PlanningVersion.financial_type_id == fin_type.id, PlanningVersion.year == year))).scalar_one()
     version = int(all_versions or 0) + 1
-    for old in current:
-        old.is_current = False
+    # Orçamento é um livro de lançamentos obrigatório: cada importação é uma
+    # carga complementar (inclusive quando negativa, para cortes) e deve
+    # continuar vigente para compor o saldo. Os demais tipos preservam o
+    # comportamento de snapshot, no qual uma publicação substitui a anterior.
+    if fin_type.code != "orcamento":
+        for old in current:
+            old.is_current = False
     snapshot = PlanningVersion(financial_type_id=fin_type.id, year=year, version=version, is_current=True, source=source, source_filename=filename, restored_from_id=restored_from, classification_version_id=None, title=title, description=description, event_type=event_type, effective_date=effective_date, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud, defense_request_id=defense_request_id)
     db.add(snapshot)
     await db.flush()
@@ -761,11 +766,24 @@ async def _timeline(fin_type: FinancialType, year: int, db: AsyncSession) -> lis
     versions = (await db.execute(select(PlanningVersion).where(PlanningVersion.financial_type_id == fin_type.id, PlanningVersion.year == year).order_by(PlanningVersion.effective_date, PlanningVersion.created_at, PlanningVersion.version))).scalars().all()
     result: list[dict[str, Any]] = []
     previous_total: float | None = None
+    cumulative_total = 0.0
     for version in versions:
         total = float((await db.execute(select(func.coalesce(func.sum(PlanningEntry.value), 0)).where(PlanningEntry.planning_version_id == version.id))).scalar_one())
-        delta = None if previous_total is None else total - previous_total
-        result.append({**_out(version), "title": version.title or f"Versão legada v{version.version}", "description": version.description or "Snapshot sem narrativa cadastrada.", "event_type": version.event_type or "OUTRO", "effective_date": version.effective_date or version.created_at.date(), "annual_total": total, "delta": delta, "delta_pct": None if previous_total in (None, 0) else delta / previous_total * 100})
-        previous_total = total
+        if fin_type.code == "orcamento":
+            # Budget imports are additive ledger entries, not replacement
+            # snapshots. Show the accumulated balance and the amount of this
+            # specific load as the delta (negative loads are cuts).
+            delta = total
+            cumulative_total += total
+            annual_total = cumulative_total
+            delta_pct = None if previous_total in (None, 0) else delta / previous_total * 100
+            previous_total = annual_total
+        else:
+            delta = None if previous_total is None else total - previous_total
+            annual_total = total
+            delta_pct = None if previous_total in (None, 0) else delta / previous_total * 100
+            previous_total = total
+        result.append({**_out(version), "title": version.title or f"Versão legada v{version.version}", "description": version.description or "Snapshot sem narrativa cadastrada.", "event_type": version.event_type or "OUTRO", "effective_date": version.effective_date or version.created_at.date(), "annual_total": annual_total, "delta": delta, "delta_pct": delta_pct})
     return result
 
 
@@ -859,6 +877,7 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
         cards.append({"code": code, "name": fin_type.name, "current": current, "annual_total": sum(monthly), "monthly": monthly})
         series[code] = monthly
         previous_total: float | None = None
+        cumulative_event_total = 0.0
         for event in scoped_timeline:
             event_cloud = str(event.get("scope_cloud") or "").lower()
             event_budget_id = str(event.get("scope_id_orcamento") or "")
@@ -868,8 +887,14 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
                 continue
             if event_budget_id and scoped_department_ids is not None and event_budget_id not in scoped_budget_ids:
                 continue
-            event_total = await scoped_total(event["id"])
-            event_delta = None if previous_total is None else event_total - previous_total
+            event_amount = await scoped_total(event["id"])
+            if code == "orcamento":
+                cumulative_event_total += event_amount
+                event_total = cumulative_event_total
+                event_delta = event_amount
+            else:
+                event_total = event_amount
+                event_delta = None if previous_total is None else event_total - previous_total
             # Eventos de inclusão, aporte ou corte só são relevantes para um
             # nó quando mudam seu orçamento. Isso esconde a inclusão de Aura
             # Pessoas ao navegar por uma diretoria sem esse projeto.
@@ -1613,7 +1638,9 @@ async def planning_grid(type_code: str, year: int, version_id: int | None = None
     grouped: dict[tuple[str, int, int | None], dict[str, Any]] = {}
     for entry in entries:
         key = (entry.entity_type, entry.department_id, None)
-        grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] = entry.value
+        # Multiple current budget loads are additive; compose them instead of
+        # letting the last version overwrite the previous value in the grid.
+        grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] += float(entry.value or 0)
     scoped_rows = await _scope_rows(list(grouped.values()), scope_id_orcamento, scope_cloud, db, allow or None)
     payload["version"] = _out(version)
     payload["rows"] = scoped_rows
@@ -1654,6 +1681,31 @@ async def save_planning(type_code: str, year: int, body: PlanningSaveIn, db: Asy
         allow = set(individual.keys())
     prepared = await _scope_rows(prepared, scope_id_orcamento, scope_cloud, db, allow or None)
     if not prepared: raise HTTPException(422, "A grade não possui departamentos no escopo selecionado")
+    if type_code == "orcamento":
+        # The grid submits the current accumulated state. Since budget imports
+        # are additive, an edit must publish only the difference from the
+        # current ledger; otherwise the entire grid would be added again.
+        current_version_ids = list((await db.execute(
+            select(PlanningVersion.id).where(
+                PlanningVersion.financial_type_id == fin_type.id,
+                PlanningVersion.year == year,
+                PlanningVersion.is_current == True,
+            )
+        )).scalars().all())
+        current_values: dict[int, list[float]] = {}
+        if current_version_ids:
+            current_entries = (await db.execute(
+                select(PlanningEntry).where(
+                    PlanningEntry.planning_version_id.in_(current_version_ids),
+                    PlanningEntry.entity_type == "department",
+                )
+            )).scalars().all()
+            for entry in current_entries:
+                values = current_values.setdefault(entry.department_id, [0.0] * 12)
+                values[entry.month - 1] += float(entry.value or 0)
+        for row in prepared:
+            previous = current_values.get(row["department_id"], [0.0] * 12)
+            row["values"] = [float(value) - previous[index] for index, value in enumerate(row["values"])]
     snapshot = await _publish_version(fin_type, year, prepared, "EDICAO_GRID", db, title=body.title, description=body.description, event_type=body.event_type, effective_date=body.effective_date, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud, defense_request_id=defense_request.id if defense_request else None)
     if defense_request is not None:
         defense_request.defense_version_id = snapshot.id

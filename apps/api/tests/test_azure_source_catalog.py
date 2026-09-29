@@ -93,9 +93,10 @@ def test_source_key_prefers_explicit_metadata():
 
 
 def test_source_key_falls_back_to_connector_type():
-    assert source_key_for(conn(connector_type="azure_monitor_vm_metrics")) == "monitor_vm_metrics"
+    assert source_key_for(conn(connector_type="azure_blob")) == "cost_exports"
     assert source_key_for(conn(connector_type="azure_resource_graph")) == "resource_graph"
     assert source_key_for(conn(connector_type="azure_automation_jobs")) == "automation_jobs"
+    assert source_key_for(conn(connector_type="azure_openai_ptu")) == "openai_ptu"
 
 
 def test_azure_blob_is_a_cost_source_by_connector_type():
@@ -130,13 +131,9 @@ def test_only_cost_exports_is_a_cost_source_in_the_catalog():
     assert cost == {"cost_exports"}
 
 
-def test_monitor_source_is_catalogued_as_implemented_telemetry():
-    entry = catalog_entry("monitor_vm_metrics")
-    assert entry is not None
-    assert entry["implementation_status"] == "implemented"
-    assert entry["connector_type"] == "azure_monitor_vm_metrics"
-    assert is_telemetry("monitor_vm_metrics") is True
-    assert entry["default_window_days"] == 1
+def test_catalog_has_only_official_four_sources():
+    keys = {entry["source_key"] for entry in AZURE_SOURCE_CATALOG}
+    assert keys == {"cost_exports", "resource_graph", "automation_jobs", "openai_ptu"}
 
 
 def test_cost_exports_is_not_telemetry():
@@ -149,7 +146,7 @@ def test_catalog_entry_returns_none_for_unknown():
 
 def test_sanitized_bronze_matches_the_pipeline_convention():
     """`_bronze_table_id` troca hífen e ponto por underscore."""
-    assert sanitized_bronze(conn(code="azure-4p-monitor-vm")) == "raw_azure_4p_monitor_vm"
+    assert sanitized_bronze(conn(code="azure-4p-resource-graph")) == "raw_azure_4p_resource_graph"
     assert sanitized_bronze(conn(code="azure.resource.graph")) == "raw_azure_resource_graph"
 
 

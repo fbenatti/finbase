@@ -168,7 +168,9 @@ export default function Planning({
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [edit, setEdit] = useState<DisplayRow | null>(null),
-    [editValues, setEditValues] = useState<number[]>([]),
+    // Keep the transient "-" while a negative value is being typed. Parsing
+    // immediately with Number("-") produces NaN and makes the input lose it.
+    [editValues, setEditValues] = useState<Array<number | string>>([]),
     [addYearOpen, setAddYearOpen] = useState(false),
     [newYear, setNewYear] = useState(String(currentYear)),
     [publishAction, setPublishAction] = useState<PublishAction>(null),
@@ -394,9 +396,10 @@ export default function Planning({
   };
   const applyEdit = () => {
     if (!edit) return;
-    const values = editValues.map((value) =>
-      Number.isFinite(value) ? value : 0,
-    );
+    const values = editValues.map((value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    });
     setRows((previous) => {
       const updated: PlanningRow = {
         entity_type: "department",
@@ -1064,7 +1067,7 @@ export default function Planning({
         <DialogContent dividers sx={{ py: 2.5 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1.5, mb: 2.5, borderRadius: 2, bgcolor: "#f8fafc", border: "1px solid", borderColor: "divider" }}>
             <Box><Typography variant="caption" color="text.secondary">Centro de custo</Typography><Typography variant="body2" fontWeight={700}>{edit?.centro_custo || "Não informado"}</Typography></Box>
-            <Box textAlign="right"><Typography variant="caption" color="text.secondary">Total anual editado</Typography><Typography variant="h6" color="primary.main" fontWeight={800}>{money(editValues.reduce((total, value) => total + Number(value || 0), 0))}</Typography></Box>
+            <Box textAlign="right"><Typography variant="caption" color="text.secondary">Total anual editado</Typography><Typography variant="h6" color="primary.main" fontWeight={800}>{money(editValues.reduce<number>((total, value) => total + Number(value || 0), 0))}</Typography></Box>
           </Box>
           <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.25 }}>Distribuição mensal · {year}</Typography>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: 1.25 }}>
@@ -1077,7 +1080,11 @@ export default function Planning({
                 onChange={(e) =>
                   setEditValues((values) =>
                     values.map((value, index) =>
-                      index === i ? Number(e.target.value) : value,
+                      index === i
+                        ? (e.target.value === "" || e.target.value === "-"
+                          ? e.target.value
+                          : Number(e.target.value))
+                        : value,
                     ),
                   )
                 }

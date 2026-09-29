@@ -42,7 +42,6 @@ import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForPath } from "../auth/moduleMap";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
-import TrendingDownIcon from "@mui/icons-material/TrendingDown";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
@@ -70,7 +69,6 @@ const menuGroups = [
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
-      { path: "/rightsizing", label: "Rightsizing", icon: <TrendingDownIcon /> },
       { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
       { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
@@ -83,10 +81,8 @@ const menuGroups = [
     background: "#f0fdfa",
     items: [
       { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
-      { path: "/finops-center", label: "FinOps Simples", icon: <BarChartIcon /> },
       { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
-      { path: "/gold-dashboard-v2", label: "FinOps Intelligence v2", icon: <BarChartIcon /> },
-      { path: "/saving-actions", label: "Saving Actions", icon: <TrendingDownIcon /> },
+      { path: "/gold-dashboard-v2", label: "FinOps Intelligence v2 (BETA)", icon: <BarChartIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
     ],
   },
@@ -167,7 +163,7 @@ export default function Layout() {
             {expanded ? <ChevronLeftIcon /> : <MenuIcon />}
           </IconButton>
           <Typography variant="h6" noWrap sx={{ fontWeight: 600 }}>
-            FinOps Platform
+            FinOps Intelligence Platform
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
           <Typography variant="body2" sx={{ mr: 1, opacity: 0.9 }}>{user?.username}</Typography>

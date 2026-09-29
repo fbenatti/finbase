@@ -187,33 +187,6 @@ _INVENTORY_COMMON: dict[str, str] = {
 }
 
 SOURCE_MAPPINGS: dict[str, SourceMapping] = {
-    "monitor_vm_metrics": SourceMapping(
-        source_key="monitor_vm_metrics",
-        model_name="resource_metric_series",
-        bronze_table="raw_azure_{env}_monitor_vm",
-        columns=_SERIES_COMMON,
-        constants={"cloud_provider": "azure"},
-        measure_priority=("value_average", "value_total", "value_maximum", "value_minimum"),
-        notes="Séries de plataforma de VMs e VMSS (Azure Monitor batch).",
-    ),
-    "vm_inventory": SourceMapping(
-        source_key="vm_inventory",
-        model_name="resource_inventory",
-        bronze_table="raw_azure_{env}_vm_inventory",
-        columns=_INVENTORY_COMMON,
-        constants={"cloud_provider": "azure"},
-        # `sku` (Resource Graph) e `vm_size` (coletor de VM) são o mesmo dado
-        # com nomes diferentes; a derivada evita que o nulo de um bloqueie o
-        # outro, o que aconteceria com duas entradas no mapa de colunas.
-        derived={
-            "resource_sku": "coalesce-null:sku+vm_size",
-            # A coleta Resource Graph grava discos como `disk_size_gb`; outras
-            # fontes usam `sku_capacity`. Sem este alias, discos AKS/PVC entram
-            # no inventário sem tamanho e não podem ser comparados por tier.
-            "sku_capacity": "coalesce-null:sku_capacity+disk_size_gb",
-        },
-        notes="VMs e VMSS via Resource Graph.",
-    ),
     # Custo (FOCUS/export do Cost Management). As medidas foram confirmadas
     # contra a origem: `costinbillingcurrency` é o custo efetivo (já com
     # reserva/desconto) e `paygcostinbillingcurrency` é o preço de lista — nos
@@ -266,97 +239,6 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         measure_priority=("effective_cost", "list_cost"),
         notes="FOCUS do Cost Management: custo e uso por recurso.",
     ),
-    "aks_inventory": SourceMapping(
-        source_key="aks_inventory",
-        model_name="resource_inventory",
-        bronze_table="raw_azure_{env}_aks_inventory",
-        columns={
-            "resource_id": "resource_id",
-            "resource_name": "resource_name",
-            "resource_type": "resource_type",
-            "subscription_id": "sub_account_id",
-            "resource_group": "resource_group_id",
-            "location": "region_id",
-            "power_state": "resource_state",
-            "provisioning_state": "provisioning_state",
-            "zones": "availability_zones",
-            "tags_json": "tags_json",
-            "snapshot_date": "valid_from",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure"},
-        # O SKU do cluster é o tamanho do node pool — é o que permite estimar o
-        # custo dos nós antes de ter o custo por pool.
-        derived={"resource_sku": "coalesce:pool_vm_size+sku"},
-        notes="Clusters AKS × node pools via Resource Graph.",
-    ),
-    "retail_price": SourceMapping(
-        source_key="retail_price",
-        model_name="price_catalog",
-        bronze_table="raw_azure_{env}_retail_price",
-        columns={
-            "meterId": "meter_id",
-            "skuId": "sku_id",
-            "serviceName": "service_name",
-            "serviceFamily": "service_family",
-            "productName": "product_name",
-            "meterName": "meter_name",
-            "armRegionName": "arm_region",
-            "location": "region_id",
-            "armSkuName": "arm_sku_name",
-            "unitOfMeasure": "unit_of_measure",
-            "type": "price_type",
-            "reservationTerm": "reservation_term",
-            "currencyCode": "currency",
-            "retailPrice": "unit_price",
-            "tierMinimumUnits": "tier_minimum_units",
-            "effectiveStartDate": "effective_start_date",
-            "valid_from": "valid_from",
-            "isPrimaryMeterRegion": "is_primary_meter",
-            "_billing_period": "_billing_period",
-        },
-        constants={
-            "cloud_provider": "azure",
-            # O catálogo público só produz preço de referência. Marcar a fonte
-            # aqui é o que impede somar retail com contratual mais adiante.
-            "price_source": "PUBLIC_RETAIL",
-            "price_confidence": "LOW",
-        },
-        notes="Preço público por medidor e região (prices.azure.com).",
-    ),
-    "customer_price": SourceMapping(
-        source_key="customer_price",
-        model_name="price_catalog",
-        bronze_table="raw_azure_{env}_customer_price",
-        columns={
-            "MeterId": "meter_id",
-            "SkuId": "sku_id",
-            "Product": "product_name",
-            "ServiceFamily": "service_family",
-            "MeterName": "meter_name",
-            "MeterCategory": "service_name",
-            "MeterRegion": "region_id",
-            "UnitOfMeasure": "unit_of_measure",
-            "PriceType": "price_type",
-            "Term": "term",
-            "BillingAccountId": "billing_account_id",
-            "Currency": "currency",
-            "UnitPrice": "unit_price",
-            "BasePrice": "base_price",
-            "MarketPrice": "market_price",
-            "TierMinimumUnits": "tier_minimum_units",
-            "EffectiveStartDate": "effective_start_date",
-            "_billing_period": "_billing_period",
-        },
-        constants={
-            "cloud_provider": "azure",
-            # Contratado do MCA: é o preço preferencial do contrato de preço.
-            "price_source": "CONTRACTED",
-            "price_confidence": "HIGH",
-        },
-        derived={"valid_from": "mes:EffectiveStartDate"},
-        notes="Price Sheet contratual (MCA) do export do Cost Management.",
-    ),
     "openai_ptu": SourceMapping(
         source_key="openai_ptu",
         model_name="ptu_capacity_series",
@@ -397,138 +279,6 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
         derived={"resource_id": "minusculo:account_resource_id"},
         notes="Capacidade PTU provisionada e utilização, por hora.",
     ),
-    "aks_namespace_allocation": SourceMapping(
-        source_key="aks_namespace_allocation",
-        model_name="resource_allocation",
-        bronze_table="raw_azure_{env}_aks_namespace_allocation",
-        columns={
-            "cluster_name": "parent_resource_id",
-            "allocation_level": "allocation_level",
-            "allocation_key": "allocation_key",
-            "allocation_weight": "allocation_weight",
-            "weight_basis": "weight_basis",
-            "namespace": "namespace",
-            "allocation_status": "allocation_status",
-            "status_reason": "status_reason",
-            "snapshot_date": "snapshot_date",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure", "weight_validated": "SIM"},
-        notes="Alocacao de custo por namespace via Managed Prometheus.",
-    ),
-    "compute_quota": SourceMapping(
-        source_key="compute_quota",
-        model_name="resource_quota",
-        bronze_table="raw_azure_{env}_quota",
-        columns={
-            "subscription_id": "sub_account_id",
-            "region_id": "region_id",
-            "quota_name": "quota_name",
-            "localized_name": "quota_display_name",
-            "current_value": "current_value",
-            "limit": "limit_value",
-            "unit": "unit",
-            "snapshot_date": "snapshot_date",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure"},
-        # O que decide elegibilidade é o que sobra, não o limite.
-        derived={"available_value": "menos:limit+current_value"},
-        notes="Quota de compute por assinatura e região.",
-    ),
-    "region_policy": SourceMapping(
-        source_key="region_policy",
-        model_name="region_policy",
-        bronze_table="raw_azure_{env}_policy",
-        columns={
-            "subscription_id": "sub_account_id",
-            "assignment_id": "assignment_id",
-            "assignment_name": "assignment_name",
-            "display_name": "display_name",
-            "policy_definition_id": "policy_definition_id",
-            "scope": "scope",
-            "enforcement_mode": "enforcement_mode",
-            "parameters_json": "parameters_json",
-            "allowed_values": "allowed_values",
-            "snapshot_date": "snapshot_date",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure"},
-        notes="Política que veta SKU e região.",
-    ),
-    "aks_cost_allocation": SourceMapping(
-        source_key="aks_cost_allocation",
-        model_name="resource_allocation",
-        bronze_table="raw_azure_{env}_aks_cost_allocation",
-        columns={
-            "cluster_resource_id": "parent_resource_id",
-            "allocation_level": "allocation_level",
-            "allocation_key": "allocation_key",
-            "allocation_weight": "allocation_weight",
-            "weight_basis": "weight_basis",
-            "node_count": "node_count",
-            "node_sku": "node_sku",
-            "pool_mode": "pool_mode",
-            "namespace": "namespace",
-            "allocation_status": "allocation_status",
-            "status_reason": "status_reason",
-            "weight_validated": "weight_validated",
-            "snapshot_date": "snapshot_date",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure"},
-        notes="Ponte de alocação com pesos que somam 1.",
-    ),
-    "container_insights": SourceMapping(
-        source_key="container_insights",
-        model_name="container_metric_series",
-        bronze_table="raw_azure_{env}_container_insights",
-        columns={
-            "cluster_id": "cluster_resource_id",
-            "cluster_name": "cluster_name",
-            "record_kind": "record_kind",
-            "computer": "computer",
-            "namespace": "namespace",
-            "pod_status": "pod_status",
-            "pods": "pods",
-            "containers": "containers",
-            "nodes": "nodes",
-            "metric_name": "metric_name",
-            "metric_average": "metric_average",
-            "samples": "samples",
-            "coverage_status": "coverage_status",
-            "coverage_reason": "coverage_reason",
-            "workspace_id": "workspace_id",
-            "snapshot_date": "snapshot_date",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure"},
-        notes="Inventário e desempenho de containers, com cobertura explícita.",
-    ),
-    "compute_skus": SourceMapping(
-        source_key="compute_skus",
-        model_name="compute_sku_catalog",
-        bronze_table="raw_azure_{env}_compute_skus",
-        columns={
-            "subscription_id": "sub_account_id",
-            "region_id": "region_id",
-            "sku_name": "sku_name",
-            "sku_tier": "sku_tier",
-            "sku_family": "sku_family",
-            "vcpus": "vcpus",
-            "memory_gb": "memory_gb",
-            "max_data_disks": "max_data_disks",
-            "premium_io": "premium_io",
-            "accelerated_networking": "accelerated_networking",
-            "is_available": "is_available",
-            "restrictions_json": "restrictions_json",
-            "restriction_reason": "restriction_reason",
-            "valid_from": "valid_from",
-            "_billing_period": "_billing_period",
-        },
-        constants={"cloud_provider": "azure"},
-        notes="SKUs de VM por região, com restrições (Microsoft.Compute/skus).",
-    ),
     "resource_graph": SourceMapping(
         source_key="resource_graph",
         model_name="resource_inventory",
@@ -549,9 +299,7 @@ SOURCE_MAPPINGS: dict[str, SourceMapping] = {
 }
 
 # Tipos de recurso por fonte, quando o modelo precisa e a Bronze não traz.
-RESOURCE_TYPE_BY_SOURCE: dict[str, str] = {
-    "vm_inventory": "microsoft.compute/virtualmachines",
-}
+RESOURCE_TYPE_BY_SOURCE: dict[str, str] = {}
 
 
 def load_mapping_from_db(session, source_key: str) -> SourceMapping | None:

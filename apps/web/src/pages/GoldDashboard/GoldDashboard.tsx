@@ -191,6 +191,9 @@ const COMPACT_NUM = new Intl.NumberFormat("pt-BR", { notation: "compact", maximu
 
 function money(v: unknown, currency: "BRL" | "USD" = "BRL"): string {
   const n = Number(v ?? 0);
+  const symbol = currency === "BRL" ? "R$" : "US$";
+  if (Math.abs(n) >= 1_000_000) return `${symbol} ${(n / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MM`;
+  if (Math.abs(n) >= 1_000) return `${symbol} ${(n / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} K`;
   return currency === "BRL" ? COMPACT_BRL.format(n) : COMPACT_USD.format(n);
 }
 function moneyFull(v: unknown, currency: "BRL" | "USD" = "BRL"): string {
@@ -371,46 +374,6 @@ function LoadingBlock({ loading, error, children }: { loading: boolean; error?: 
   if (loading) return <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}><CircularProgress size={26} /></Box>;
   if (error) return <Alert severity="error">{error}</Alert>;
   return <>{children}</>;
-}
-
-function ExecutiveMatrix({ table, filters, filterKey, ackMonth }: { table: string; filters: Filters; filterKey: string; ackMonth?: string }) {
-  const defs = useMemo<QueryDef[]>(() => [{ id: "matrix", rows: ["organograma_nivel_4", "organograma_nivel_5", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]), row_limit: 10000 }], [filterKey]);
-  const { results, loading, error } = useTabQueries(table, defs, "executive-matrix-" + filterKey);
-  const rows = rowsOf(results.matrix);
-  const months = [...new Set(rows.map(r => String(r._billing_period || "")))].filter(Boolean).sort();
-  const selected = filters.months.length ? months.filter(m => filters.months.includes(m)) : months;
-  const ackIndex = ackMonth ? selected.indexOf(ackMonth) : -1;
-  const periodSelected = ackIndex > 0 ? selected.slice(0, ackIndex + 1) : selected;
-  const latest = periodSelected[periodSelected.length - 1]; const previous = periodSelected[periodSelected.length - 2];
-  const points = useMemo(() => {
-    if (!latest || !previous) return [];
-    const map = new Map<string, { cur: number; prev: number }>();
-    rows.forEach(r => { const key = `${esc(r.organograma_nivel_4)} · ${esc(r.organograma_nivel_5)}`; const item = map.get(key) || { cur: 0, prev: 0 }; if (String(r._billing_period) === latest) item.cur += Number(r.realizado || 0); if (String(r._billing_period) === previous) item.prev += Number(r.realizado || 0); map.set(key, item); });
-    return [...map].map(([key, v]) => ({ key, cost: Math.abs(v.cur), growth: v.prev ? ((v.cur - v.prev) / Math.abs(v.prev)) * 100 : 0, cur: v.cur })).sort((a, b) => b.cost - a.cost).slice(0, 30);
-  }, [rows, latest, previous]);
-  const costs = points.map(p => p.cost).sort((a, b) => a - b); const growths = points.map(p => p.growth).sort((a, b) => a - b); const mc = costs[Math.floor(costs.length / 2)] || 0; const mg = growths[Math.floor(growths.length / 2)] || 0;
-  const color = (p: { cost: number; growth: number }) => p.cost >= mc && p.growth >= mg ? RED : p.cost < mc && p.growth >= mg ? YELLOW : p.cost >= mc ? BLUE : MUT;
-  const maxCost = Math.max(1, ...points.map(p => p.cost)); const minGrowth = Math.min(-1, ...points.map(p => p.growth)); const maxGrowth = Math.max(1, ...points.map(p => p.growth));
-  const W = 900, H = 430, P = 58;
-  const sx = (v: number) => P + (v / maxCost) * (W - 2 * P);
-  const sy = (v: number) => H - P - ((v - minGrowth) / (maxGrowth - minGrowth || 1)) * (H - 2 * P);
-  return <Box sx={{ mt: 2 }}><LoadingBlock loading={loading} error={error}><SectionPanel title="Prioritization Matrix" subtitle={`Mesmo widget da Decisão · Diretoria × Projeto · ${monthLabel(latest)} vs ${monthLabel(previous)} · respeita filtros globais`}>
-    {points.length < 2 ? <Typography variant="body2" color="text.secondary">São necessárias duas competências de realizado para a matriz.</Typography> : <Box sx={{ border: "1px solid #e2e8f0", borderRadius: 2.5, bgcolor: "#fff", overflow: "hidden" }}>
-      <Box sx={{ px: 1.5, pt: 1.2, color: MUT, fontSize: 11, fontWeight: 800 }}>Eixo X: custo realizado · Eixo Y: crescimento contra a competência anterior</Box>
-      <Box sx={{ width: "100%", overflowX: "auto" }}><svg viewBox={`0 0 ${W} ${H + 24}`} style={{ width: "100%", minWidth: 620, display: "block" }} role="img" aria-label="Matriz de priorização por custo e crescimento">
-        <rect x={P} y={P} width={W - 2 * P} height={H - 2 * P} rx="16" fill="#fff" stroke="#e2e8f0" />
-        <line x1={sx(mc)} y1={P} x2={sx(mc)} y2={H - P} stroke="#94a3b8" strokeDasharray="6 6" />
-        <line x1={P} y1={sy(mg)} x2={W - P} y2={sy(mg)} stroke="#94a3b8" strokeDasharray="6 6" />
-        <text x={W - P - 8} y={P + 22} textAnchor="end" fontSize="12" fontWeight="900" fill="#991b1b">ALTO CUSTO / ALTO CRESCIMENTO</text>
-        <text x={P + 8} y={P + 22} fontSize="12" fontWeight="900" fill="#b45309">BAIXO CUSTO / ALTO CRESCIMENTO</text>
-        <text x={W - P - 8} y={H - P - 10} textAnchor="end" fontSize="12" fontWeight="900" fill="#475569">ALTO CUSTO / BAIXO CRESCIMENTO</text>
-        <text x={P + 8} y={H - P - 10} fontSize="12" fontWeight="900" fill="#64748b">BAIXA PRIORIDADE</text>
-        {points.map((p, i) => <g key={p.key}><circle cx={sx(p.cost)} cy={sy(p.growth)} r={p.cost >= mc && p.growth >= mg ? 8 : 6} fill={color(p)} opacity=".84"><title>{`${p.key} · ${money(p.cost)} · ${pct(p.growth)}`}</title></circle>{i < 8 && <text x={sx(p.cost) + 9} y={sy(p.growth) - 7} fontSize="10" fontWeight="800" fill="#334155">{p.key.slice(0, 22)}</text>}</g>)}
-        <text x={W / 2} y={H + 14} textAnchor="middle" fontSize="11" fontWeight="800" fill="#64748b">Custo realizado ({monthLabel(latest)})</text>
-      </svg></Box>
-      <Typography variant="caption" sx={{ display: "block", px: 1.5, pb: 1.2, color: MUT, fontWeight: 700 }}>Linhas de corte = medianas do recorte atual. Vermelho: prioridade crítica · âmbar: risco emergente · azul: alto custo/baixo crescimento · cinza: baixa prioridade.</Typography>
-    </Box>}
-  </SectionPanel></LoadingBlock></Box>;
 }
 
 function DataQuality({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
@@ -660,17 +623,9 @@ export default function GoldDashboard() {
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
         <Tab value="visao-executiva" label="Visão Executiva" />
-        <Tab value="geral" label="Visão Geral" />
-        <Tab value="evolucao" label="Evolução" />
-        <Tab value="organizacao" label="Organização" />
-        <Tab value="servicos" label="Serviços & Regiões" />
-        <Tab value="investigacao" label="Investigação" />
-        <Tab value="decisao" label="Decisão" />
-        <Tab value="drilldown" label="Drilldown" />
-        <Tab value="data-quality" label="Data Quality" />
       </Tabs>
 
-      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} footer={<ExecutiveMatrix table={table} filters={filters} filterKey={filterKey} />} />}
+      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} />}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}
@@ -1268,7 +1223,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // ═══════════════════════════════════════════════════════════════════
 // Aba 7 — Decisão (Decision Intelligence)
 // Widgets portados do cockpit de referência (ABRIR_FINOPS.html):
-// Executive Pulse, Risk Index, Prioritization Matrix, Waterfall executivo,
+// Executive Pulse, Risk Index, Waterfall executivo,
 // Financial Variance Bridge, Attention, Cost Drivers, Anomaly, Forecast Bias,
 // v42 (Run Rate/Reliability/Opportunity), Governance/Data Quality,
 // Comparator e Decomposição hierárquica encadeada.
@@ -1763,44 +1718,6 @@ function Decisao({ table, filters, filterKey, setFilters }: {
               );
             }) : <Typography variant="body2" color="text.secondary">Nenhum alerta material no escopo filtrado.</Typography>}
           </Stack>
-        </SectionPanel>
-
-        {/* 04 · Prioritization Matrix */}
-        <SectionPanel title="Prioritization Matrix" subtitle={`Quadrante Custo × Crescimento por ${dimLabel} (última competência vs anterior) — medianas como corte de priorização relativa`}>
-          {matrix.pts.length < 2 ? <Typography variant="body2" color="text.secondary">São necessárias duas competências de Realizado para a matriz.</Typography> : (
-            <Chart
-              data={[{
-                type: "scatter", mode: "markers+text",
-                x: matrix.pts.map(p => p.cost),
-                y: matrix.pts.map(p => p.growth),
-                text: matrix.pts.slice(0, 8).map(p => p.key),
-                textposition: "top center",
-                textfont: { size: 10 },
-                marker: { size: matrix.pts.map(p => (p.cost >= matrix.mc && p.growth >= matrix.mg ? 9 : 7)), color: matrix.pts.map(p => qColor(p.cost, p.growth)), opacity: 0.85 },
-                customdata: matrix.pts.map(p => `${p.key}<br>${moneyFull(p.cur)} · ${pct(p.growth)} MoM`),
-                hovertemplate: "%{customdata}<extra></extra>",
-              }]}
-              layout={{
-                height: 430, margin: { l: 58, r: 24, t: 30, b: 46 },
-                xaxis: { title: { text: "Custo realizado (última competência)" }, gridcolor: "#eef0f6" },
-                yaxis: { title: { text: "Crescimento MoM (%)" }, gridcolor: "#eef0f6" },
-                showlegend: false,
-                shapes: [
-                  { type: "line", xref: "x", x0: matrix.mc, x1: matrix.mc, yref: "paper", y0: 0, y1: 1, line: { color: "#94a3b8", dash: "dot" } },
-                  { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: matrix.mg, y1: matrix.mg, line: { color: "#94a3b8", dash: "dot" } },
-                ],
-                annotations: [
-                  { xref: "paper", yref: "paper", x: 0.99, y: 0.99, xanchor: "right", yanchor: "top", text: "ALTO CUSTO / ALTO CRESCIMENTO", font: { size: 10, color: "#991b1b" }, showarrow: false },
-                  { xref: "paper", yref: "paper", x: 0.01, y: 0.99, xanchor: "left", yanchor: "top", text: "BAIXO CUSTO / ALTO CRESCIMENTO", font: { size: 10, color: "#b45309" }, showarrow: false },
-                  { xref: "paper", yref: "paper", x: 0.99, y: 0.01, xanchor: "right", yanchor: "bottom", text: "ALTO CUSTO / BAIXO CRESCIMENTO", font: { size: 10, color: "#475569" }, showarrow: false },
-                  { xref: "paper", yref: "paper", x: 0.01, y: 0.01, xanchor: "left", yanchor: "bottom", text: "BAIXA PRIORIDADE", font: { size: 10, color: "#64748b" }, showarrow: false },
-                ],
-              }}
-              config={{ displayModeBar: false }} style={{ width: "100%" }} />
-          )}
-          <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 0.5 }}>
-            Vermelho = crítico (alto custo e crescimento), âmbar = risco emergente, azul = alto custo/baixo crescimento, cinza = baixa prioridade. Mediana como corte relativo, não threshold absoluto.
-          </Typography>
         </SectionPanel>
 
         {/* 05 · Waterfall executivo de variação */}
