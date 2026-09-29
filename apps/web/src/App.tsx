@@ -77,6 +77,7 @@ function App() {
         <Route path="clone-rules" element={<Navigate to="/governance?tab=clone-rules" replace />} />
         <Route path="mappings" element={<Mappings />} />
         <Route path="governance" element={<Governance />} />
+        <Route path="financial-contracts" element={<Navigate to="/governance?tab=financial-contracts" replace />} />
         <Route path="rules" element={<Navigate to="/governance?tab=rules" replace />} />
         <Route path="classifications" element={<Navigate to="/governance?tab=classification" replace />} />
         <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />
