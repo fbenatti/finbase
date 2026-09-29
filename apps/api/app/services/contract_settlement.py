@@ -100,3 +100,29 @@ def allocate_pool(realized_pool: Decimal | int | float | str, consumptions: Iter
         )
         allocations[largest] = money(allocations[largest] + remainder)
     return allocations
+
+
+def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, str], Decimal], opening_credit_by_pool: dict[tuple[str, str, str], Decimal] | None = None) -> list[dict]:
+    """Apply one settlement result to already transformed rows.
+
+    This pure helper is the seam used by Silver/Gold orchestration: rows are
+    grouped by contract, cloud, budget ID and period, then the pool result is
+    allocated back without provider-specific branches.
+    """
+    opening_credit_by_pool = opening_credit_by_pool or {}
+    groups: dict[tuple[str, str, str], list[int]] = {}
+    for index, row in enumerate(rows):
+        if str(row.get("financial_effect") or "").upper() != "BUDGET_COMMITMENT":
+            continue
+        key = (str(row.get("financial_contract_id")), str(row.get("cloud_origem") or "").lower(), str(row.get("id_orcamento") or ""))
+        groups.setdefault(key, []).append(index)
+    output = [dict(row) for row in rows]
+    for key, indexes in groups.items():
+        commitment = commitment_by_pool.get(key, Decimal("0"))
+        consumption = [money(output[i].get("consumo_realizado")) for i in indexes]
+        result = settle_pool(commitment, sum(consumption, Decimal("0")), opening_credit_by_pool.get(key, Decimal("0")))
+        allocations = allocate_pool(result.realized, consumption)
+        for index, value in zip(indexes, allocations):
+            output[index]["realizado"] = float(value)
+            output[index]["ajuste_contratual"] = float(value - money(output[index].get("consumo_realizado")))
+    return output

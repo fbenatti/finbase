@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.contract_settlement import allocate_pool, settle_pool
+from app.services.contract_settlement import allocate_pool, settle_pool, settle_rows
 
 
 def test_credit_generated_when_pool_is_under_consumed():
@@ -86,3 +86,15 @@ def test_credits_are_isolated_by_budget_pool_and_cloud():
     assert pool_b_oci.uncovered_overage == Decimal("100.00")
     assert pool_a_ibm.credit_used == Decimal("0.00")
     assert pool_a_ibm.uncovered_overage == Decimal("100.00")
+
+
+def test_settle_rows_writes_realized_and_contractual_adjustment():
+    rows = [
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1, "cloud_origem": "ibm", "id_orcamento": "EXTERNO-IBM", "consumo_realizado": 500},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1, "cloud_origem": "ibm", "id_orcamento": "EXTERNO-IBM", "consumo_realizado": 400},
+        {"financial_effect": "DIRECT_REALIZED", "consumo_realizado": 25, "realizado": 25},
+    ]
+    result = settle_rows(rows, commitment_by_pool={("1", "ibm", "EXTERNO-IBM"): Decimal("1000")})
+    assert [result[0]["realizado"], result[1]["realizado"]] == [555.56, 444.44]
+    assert result[0]["ajuste_contratual"] == 55.56
+    assert result[2]["realizado"] == 25
