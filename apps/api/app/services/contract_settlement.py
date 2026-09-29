@@ -119,10 +119,12 @@ def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, st
     output = [dict(row) for row in rows]
     for key, indexes in groups.items():
         commitment = commitment_by_pool.get(key, Decimal("0"))
-        consumption = [money(output[i].get("consumo_realizado")) for i in indexes]
+        consumption = [money(output[i].get("realizado_cloud", output[i].get("consumo_realizado"))) for i in indexes]
         result = settle_pool(commitment, sum(consumption, Decimal("0")), opening_credit_by_pool.get(key, Decimal("0")))
         allocations = allocate_pool(result.realized, consumption)
         for index, value in zip(indexes, allocations):
             output[index]["realizado"] = float(value)
-            output[index]["ajuste_contratual"] = float(value - money(output[index].get("consumo_realizado")))
+            cloud_value = money(output[index].get("realizado_cloud", output[index].get("consumo_realizado")))
+            output[index]["consumo_realizado"] = float(cloud_value)
+            output[index]["ajuste_contratual"] = float(value - cloud_value)
     return output
