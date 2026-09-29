@@ -1289,6 +1289,7 @@ export async function getReprocessHistory(
     limit?: number;
     offset?: number;
     search?: string;
+    sort?: { field: string; direction: "asc" | "desc" };
     sort_field?: string;
     sort_direction?: "asc" | "desc";
     filters?: Array<{
@@ -1304,10 +1305,13 @@ export async function getReprocessHistory(
     }>;
   } = {},
 ): Promise<{ items: ReprocessStatus[]; total: number }> {
+  const { sort, filters, ...rest } = params;
   const { data } = await api.get("/etl/reprocess-history", {
     params: {
-      ...params,
-      filters: params.filters ? JSON.stringify(params.filters) : undefined,
+      ...rest,
+      sort_field: sort?.field,
+      sort_direction: sort?.direction,
+      filters: filters ? JSON.stringify(filters) : undefined,
     },
   });
   return data;

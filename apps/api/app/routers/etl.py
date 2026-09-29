@@ -2952,7 +2952,13 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
                 continue
             conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)
         sort = fields.get(sort_field, EtlTask.started_at)
-        ordering = sort.desc() if sort_direction == "desc" else sort.asc()
+        # PostgreSQL places NULLs first on DESC by default. Active/queued
+        # tasks can have no timestamps yet, so keep them after dated runs.
+        ordering = (
+            sort.desc().nullslast()
+            if sort_direction == "desc"
+            else sort.asc().nullslast()
+        )
         total = session.execute(select(func.count()).select_from(EtlTask).where(*conditions)).scalar_one()
         rows = session.execute(select(EtlTask).where(*conditions).order_by(ordering, EtlTask.id.desc()).offset(offset).limit(limit)).scalars().all()
         items = [{
