@@ -1286,6 +1286,7 @@ def _process_blob_for_reprocess(
                 if "realizado_cloud" in target.columns:
                     target["consumo_realizado"] = pd.to_numeric(target["realizado_cloud"], errors="coerce")
                 if "consumo_realizado" in target.columns:
+                    target["realizado_cloud"] = pd.to_numeric(target["consumo_realizado"], errors="coerce")
                     target["realizado"] = pd.to_numeric(target["consumo_realizado"], errors="coerce")
                     target["ajuste_contratual"] = 0.0
 
