@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,7 +15,9 @@ from app.models.financial_contract import (
     FinancialContract,
     FinancialContractBudgetScope,
     FinancialContractConnection,
+    ContractSettlementRun,
 )
+from app.services.contract_settlement import settle_pool
 from app.models.rules import Department
 from app.models.source_connection import SourceConnection
 
@@ -40,6 +43,15 @@ class FinancialContractIn(BaseModel):
     connection_ids: list[int] = Field(default_factory=list)
     budget_scopes: list[BudgetScopeIn] = Field(default_factory=list)
     active: bool = True
+
+
+class SettlementPoolIn(BaseModel):
+    period: str = Field(pattern=r"^\d{6}$")
+    cloud_scope: str
+    budget_id: str
+    commitment: Decimal = 0
+    billed_cost: Decimal = 0
+    consumption: Decimal = 0
 
 
 def _contract_out(contract: FinancialContract) -> dict[str, Any]:
@@ -172,3 +184,61 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
     await _load(contract_id, db)
     rows = (await db.execute(select(ContractSettlementMonth).where(ContractSettlementMonth.contract_id == contract_id).order_by(ContractSettlementMonth.period, ContractSettlementMonth.cloud_scope, ContractSettlementMonth.budget_id))).scalars().all()
     return [{column.name: getattr(row, column.name) for column in row.__table__.columns} for row in rows]
+
+
+@router.post("/{contract_id}/settlements/recalculate")
+async def recalculate_settlements(contract_id: int, pools: list[SettlementPoolIn], db: AsyncSession = Depends(get_db)):
+    """Persist a deterministic settlement run from reprocessor aggregates.
+
+    The ETL/Gold orchestration supplies one aggregate per period and budget
+    pool. Keeping this endpoint provider-neutral makes OCI/IBM configuration
+    data-driven and allows a later worker to stream aggregates without
+    reimplementing credit arithmetic.
+    """
+    contract = await _load(contract_id, db)
+    if not pools:
+        raise HTTPException(422, "Informe ao menos um pool mensal")
+    allowed = {(item.cloud_scope.lower(), item.budget_id.strip()) for item in contract.budget_scopes or []}
+    if any((item.cloud_scope.lower(), item.budget_id.strip()) not in allowed for item in pools):
+        raise HTTPException(422, "Pool fora do escopo do contrato")
+    ordered = sorted(pools, key=lambda item: (item.cloud_scope.lower(), item.budget_id, item.period))
+    run = ContractSettlementRun(
+        contract_id=contract.id,
+        period_from=ordered[0].period,
+        period_until=ordered[-1].period,
+        source="API_RECALCULATE",
+        status="RUNNING",
+    )
+    db.add(run)
+    await db.flush()
+    opening: dict[tuple[str, str], Decimal] = {}
+    try:
+        for item in ordered:
+            key = (item.cloud_scope.lower(), item.budget_id.strip())
+            result = settle_pool(item.commitment, item.consumption, opening.get(key, Decimal("0")))
+            closing = result.closing_credit
+            expired = Decimal("0")
+            if item.period == contract.valid_until:
+                expired = closing
+                closing = Decimal("0")
+            factor = (result.realized / result.consumption) if result.consumption > 0 else Decimal("0")
+            db.add(ContractSettlementMonth(
+                run_id=run.id, contract_id=contract.id, cloud_scope=key[0], budget_id=key[1], period=item.period,
+                commitment=result.commitment, billed_cost=item.billed_cost, consumption=result.consumption,
+                opening_credit=result.opening_credit, credit_generated=result.credit_generated,
+                gross_overage=result.gross_overage, credit_used=result.credit_used,
+                uncovered_overage=result.uncovered_overage, expired_credit=expired,
+                closing_credit=closing, realized=result.realized, allocation_factor=factor,
+                status="SUCCESS",
+            ))
+            opening[key] = closing
+        run.status = "SUCCESS"
+        from datetime import datetime, timezone
+        run.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception as exc:
+        run.status = "FAILED"
+        run.error = str(exc)
+        await db.commit()
+        raise HTTPException(422, f"Liquidação rejeitada: {exc}") from exc
+    return {"run_id": run.id, "status": run.status, "period_from": run.period_from, "period_until": run.period_until}
