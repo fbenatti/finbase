@@ -114,18 +114,19 @@ def aggregate_frame(frame: pd.DataFrame) -> pd.DataFrame | None:
             measures[name] = pd.Series(0.0, index=frame.index)
 
     group = frame[dim_cols].copy()
-    group["__q"] = measures["quantity"]
-    group["__r"] = measures["realizado"]
-    group["__b"] = measures["billedcost"]
-    grouped = group.groupby(dim_cols, dropna=False)[["__q", "__r", "__b"]].sum(min_count=1)
+    measure_aliases = {}
+    for name, series in measures.items():
+        alias = f"__{name}"
+        group[alias] = series
+        measure_aliases[name] = alias
+    grouped = group.groupby(dim_cols, dropna=False)[list(measure_aliases.values())].sum(min_count=1)
     grouped = grouped.reset_index()
 
     out = pd.DataFrame({d: None for d in GOLD_DIMENSIONS}, index=range(len(grouped)))
     for d in present_dims:
         out[d] = grouped[lookup[d]].values
-    out["quantity"] = grouped["__q"].fillna(0.0).values
-    out["realizado"] = grouped["__r"].fillna(0.0).values
-    out["billedcost"] = grouped["__b"].fillna(0.0).values
+    for name, alias in measure_aliases.items():
+        out[name] = grouped[alias].fillna(0.0).values
     # source_connection_id deve permanecer BIGINT (nunca float64 com NaN).
     out["source_connection_id"] = pd.to_numeric(
         out["source_connection_id"], errors="coerce"
