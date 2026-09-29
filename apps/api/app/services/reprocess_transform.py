@@ -23,6 +23,8 @@ def serialize_business_rule(rule: Any) -> dict[str, Any]:
         "valid_from": rule.valid_from,
         "valid_until": rule.valid_until,
         "cloud_scope": rule.cloud_scope,
+        "financial_effect": getattr(rule, "financial_effect", "NONE"),
+        "financial_contract_id": getattr(rule, "financial_contract_id", None),
         "active": rule.active,
     }
 
