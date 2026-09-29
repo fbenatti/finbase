@@ -1296,6 +1296,8 @@ def _process_blob_for_reprocess(
                         dept_map=dept_cache,
                         hierarchy_cache=hierarchy_cache,
                     )
+                    from app.services.task_runner import fill_inherited_org_fields
+                    fill_inherited_org_fields(target, dept_cache)
 
                 _handle_transformed_target(target, len(chunk), clone_count)
 

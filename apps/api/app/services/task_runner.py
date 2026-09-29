@@ -570,6 +570,31 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
             df.loc[affected, "financial_contract_id"] = getattr(rule, "financial_contract_id", None)
 
 
+def fill_inherited_org_fields(df: pd.DataFrame, dept_map: dict | None = None) -> None:
+    """Fill inherited budget/cost-center fields for already identified leaves."""
+    if df.empty or not dept_map or "organograma" not in df.columns:
+        return
+    by_name = {str(getattr(item, "name", "")).strip().casefold(): item for item in dept_map.values()}
+    by_id = {int(getattr(item, "id")): item for item in dept_map.values() if getattr(item, "id", None) is not None}
+    for index, value in df["organograma"].items():
+        leaf = by_name.get(str(value or "").strip().casefold())
+        if not leaf:
+            continue
+        chain = []
+        current = leaf
+        while current:
+            chain.append(current)
+            parent_id = getattr(current, "parent_id", None)
+            current = by_id.get(int(parent_id)) if parent_id is not None else None
+        for field in ("id_orcamento", "centro_custo", "ambiente"):
+            if field not in df.columns:
+                df[field] = None
+            if pd.isna(df.at[index, field]) or str(df.at[index, field]).strip() in {"", "nan", "None"}:
+                inherited = next((getattr(item, field, None) for item in chain if getattr(item, field, None)), None)
+                if inherited is not None:
+                    df.at[index, field] = str(inherited)
+
+
 def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[ClassificationRule], session: Session | None = None,
                                dept_map: dict | None = None,
                                hierarchy_cache: dict | None = None) -> None:

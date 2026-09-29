@@ -131,7 +131,7 @@ def transform_reprocess_chunk(payload: dict[str, Any]) -> list[dict[str, Any]]:
     import pandas as pd
 
     from app.services.mapping_transforms import apply_mappings
-    from app.services.task_runner import _apply_business_rule_sync, _apply_classifications_sync
+    from app.services.task_runner import _apply_business_rule_sync, _apply_classifications_sync, fill_inherited_org_fields
 
     chunk = pd.DataFrame(payload["records"])
     df_chunk = chunk.drop(
@@ -187,6 +187,7 @@ def transform_reprocess_chunk(payload: dict[str, Any]) -> list[dict[str, Any]]:
             dept_map=dept_cache,
             hierarchy_cache=hierarchy_cache,
         )
+        fill_inherited_org_fields(target, dept_cache)
 
     if target.empty:
         return []
