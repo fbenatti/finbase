@@ -1328,6 +1328,7 @@ def _reprocess_destination_sync(
 ) -> dict:
     """Read normalized data blob-by-blob via raw JSON → pandas → Iceberg. Granular progress."""
     import pandas as pd, json
+    from decimal import Decimal
     from app.database import SyncSession
     from app.models.source_connection import SourceConnection
     from app.models.ingested_blob import IngestedBlob
@@ -1338,6 +1339,9 @@ def _reprocess_destination_sync(
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
     from app.services import gold_builder
+    from app.services.contract_settlement import settle_rows
+    from app.models.financial_contract import FinancialContract
+    from app.models.planning import PlanningEntry, PlanningVersion, FinancialType
     from app.services.destination_slice import (
         resolve_destination_slice_config,
         snapshot_date_from_blob_path,
@@ -1839,6 +1843,7 @@ def _reprocess_destination_sync(
 
         temp_name: str | None = None
         staged_rows = 0
+        contractual_frames: list[pd.DataFrame] = []
 
         def _stage_frame(frame: pd.DataFrame) -> None:
             """Append one completed blob to the temporary Iceberg table."""
@@ -1966,7 +1971,13 @@ def _reprocess_destination_sync(
                 def _write_batch(frame, source_rows):
                     nonlocal total_rows_processed
                     nonlocal blob_input_rows, blob_output_rows
-                    _stage_frame(frame)
+                    contractual = frame.get("financial_effect", pd.Series(index=frame.index)).astype(str).str.upper().eq("BUDGET_COMMITMENT")
+                    if contractual.any():
+                        if (~contractual).any():
+                            _stage_frame(frame.loc[~contractual].copy())
+                        contractual_frames.append(frame.loc[contractual].copy())
+                    else:
+                        _stage_frame(frame)
                     blob_input_rows += source_rows
                     blob_output_rows += len(frame)
                     total_rows_processed += len(frame)
@@ -2071,6 +2082,25 @@ def _reprocess_destination_sync(
             if temp_name:
                 iceberg.cleanup_staged_table(temp_name, namespace="silver")
             return {"success": False, "error": msg, "rows_written": 0}
+
+        # Contractual rows must be settled after all batches of the month are
+        # available; settling each batch independently would duplicate the
+        # commitment and consume credits incorrectly.
+        if contractual_frames:
+            contractual = pd.concat(contractual_frames, ignore_index=True)
+            commitment_by_pool = {}
+            budget_type = session.scalar(select(FinancialType).where(FinancialType.code == "orcamento"))
+            if budget_type:
+                for contract_id, cloud, budget_id in contractual[["financial_contract_id", "cloud_origem", "id_orcamento"]].drop_duplicates().itertuples(index=False, name=None):
+                    period = str(billing_periods[0]) if billing_periods else str(contractual.get("_billing_period", pd.Series([""])).iloc[0])
+                    year, month = int(period[:4]), int(period[4:])
+                    versions = session.scalars(select(PlanningVersion).where(PlanningVersion.financial_type_id == budget_type.id, PlanningVersion.year == year, PlanningVersion.scope_id_orcamento == str(budget_id), PlanningVersion.scope_cloud == str(cloud).lower(), PlanningVersion.is_current.is_(True))).all()
+                    value = Decimal("0")
+                    for version in versions:
+                        value += Decimal(str(session.scalar(select(func.coalesce(func.sum(PlanningEntry.value), 0)).where(PlanningEntry.planning_version_id == version.id, PlanningEntry.month == month)) or 0))
+                    commitment_by_pool[(str(int(contract_id)), str(cloud).lower(), str(budget_id))] = value
+            settled = settle_rows(contractual.to_dict(orient="records"), commitment_by_pool=commitment_by_pool)
+            _stage_frame(pd.DataFrame(settled))
 
         # Price gaps do not invalidate a reprocess; they remain auditable.
         for engine in clone_engines.values():
