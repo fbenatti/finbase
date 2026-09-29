@@ -98,3 +98,13 @@ def test_settle_rows_writes_realized_and_contractual_adjustment():
     assert [result[0]["realizado"], result[1]["realizado"]] == [555.56, 444.44]
     assert result[0]["ajuste_contratual"] == 55.56
     assert result[2]["realizado"] == 25
+
+
+def test_pool_budget_is_scaled_by_cloud_consumption_weight():
+    rows = [
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1, "cloud_origem": "ibm", "id_orcamento": "EXTERNO-IBM", "realizado_cloud": 600000},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1, "cloud_origem": "ibm", "id_orcamento": "EXTERNO-IBM", "realizado_cloud": 400000},
+    ]
+    result = settle_rows(rows, commitment_by_pool={("1", "ibm", "EXTERNO-IBM"): Decimal("2000000")})
+    assert result[0]["realizado"] == 1200000.0
+    assert result[1]["realizado"] == 800000.0
