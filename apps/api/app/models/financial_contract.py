@@ -20,7 +20,9 @@ class FinancialContract(Base):
     valid_until = Column(String(6), nullable=False)
     allocation_method = Column(String(40), nullable=False, default="POSITIVE_CONSUMPTION_SHARE")
     credit_expiry_policy = Column(String(30), nullable=False, default="CONTRACT_END")
-    synthetic_department_id = Column(Integer, ForeignKey("department.id"), nullable=False, index=True)
+    # Optional: zero-consumption months keep only the pool ledger (credit),
+    # without inventing a realized line in the organizational hierarchy.
+    synthetic_department_id = Column(Integer, ForeignKey("department.id"), nullable=True, index=True)
     active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

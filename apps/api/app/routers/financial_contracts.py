@@ -39,7 +39,7 @@ class FinancialContractIn(BaseModel):
     valid_from: str = Field(pattern=r"^\d{6}$")
     valid_until: str = Field(pattern=r"^\d{6}$")
     allocation_method: str = "POSITIVE_CONSUMPTION_SHARE"
-    synthetic_department_id: int
+    synthetic_department_id: int | None = None
     connection_ids: list[int] = Field(default_factory=list)
     budget_scopes: list[BudgetScopeIn] = Field(default_factory=list)
     active: bool = True
@@ -92,7 +92,7 @@ async def _validate_contract_scope(body: FinancialContractIn, db: AsyncSession, 
         raise HTTPException(422, "valid_from deve ser menor ou igual a valid_until")
     if not body.connection_ids or not body.budget_scopes:
         raise HTTPException(422, "Informe conexões e pelo menos um ID Orçamento")
-    if await db.get(Department, body.synthetic_department_id) is None:
+    if body.synthetic_department_id is not None and await db.get(Department, body.synthetic_department_id) is None:
         raise HTTPException(422, "Departamento sintético não encontrado")
     connection_count = await db.scalar(select(func.count(SourceConnection.id)).where(SourceConnection.id.in_(body.connection_ids)))
     if int(connection_count or 0) != len(set(body.connection_ids)):
