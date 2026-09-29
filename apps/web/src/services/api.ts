@@ -1411,6 +1411,11 @@ export async function getFinancialContracts(): Promise<FinancialContract[]> {
   return data;
 }
 
+export async function getFinancialContractsOverview(): Promise<Record<string, unknown>[]> {
+  const { data } = await api.get("/financial-contracts/overview");
+  return data;
+}
+
 export async function getFinancialContractScopes(): Promise<FinancialContractScope[]> {
   const { data } = await api.get("/financial-contracts/options/budget-scopes");
   return data;

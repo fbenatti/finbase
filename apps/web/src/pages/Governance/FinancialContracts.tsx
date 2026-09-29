@@ -10,6 +10,7 @@ import {
   createFinancialContract, FinancialContract, FinancialContractScope,
   getConnections, getDepartments, getFinancialContractScopes, getFinancialContracts,
   getFinancialContractSettlements,
+  getFinancialContractsOverview,
 } from "../../services/api";
 
 const blank = { code: "", name: "", valid_from: "202601", valid_until: "202612", currency: "BRL", synthetic_department_id: "", connection_ids: [] as number[], scopes: [] as string[] };
@@ -24,8 +25,9 @@ export default function FinancialContracts() {
   const [error, setError] = useState("");
   const [selectedContract, setSelectedContract] = useState<number | null>(null);
   const [settlements, setSettlements] = useState<Record<string, unknown>[]>([]);
+  const [overview, setOverview] = useState<Record<string, unknown>[]>([]);
 
-  const load = () => getFinancialContracts().then(setContracts).catch((e) => setError(String(e)));
+  const load = () => { getFinancialContracts().then(setContracts).catch((e) => setError(String(e))); getFinancialContractsOverview().then(setOverview).catch(() => {}); };
   useEffect(() => {
     load();
     getFinancialContractScopes().then(setScopes).catch(() => {});
@@ -61,6 +63,7 @@ export default function FinancialContracts() {
       <Box color="text.secondary">Contratos que optam pelo compromisso orçamentário por ID Orçamento.</Box>
       <Button variant="contained" startIcon={<Add />} onClick={() => setOpen(true)}>Novo contrato</Button>
     </Box>
+    {overview.length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 1.5, mb: 2 }}>{overview.map((item) => <Box key={String(item.contract_id)} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}><Typography variant="caption" color="text.secondary">{String(item.name)}</Typography><Typography variant="h6">Saldo: {String(item.credit_balance || "0")}</Typography><Typography variant="body2">Realizado: {String(item.realized || "0")}</Typography><Typography variant="body2">Overage: {String(item.uncovered_overage || "0")}</Typography></Box>)}</Box>}
     <Table size="small">
       <TableHead><TableRow><TableCell>Contrato</TableCell><TableCell>Vigência</TableCell><TableCell>Conexões</TableCell><TableCell>IDs Orçamento</TableCell><TableCell>Status</TableCell></TableRow></TableHead>
       <TableBody>{contracts.map((contract) => <TableRow key={contract.id}>
