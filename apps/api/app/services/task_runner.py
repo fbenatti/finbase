@@ -566,8 +566,12 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
                 df["financial_effect"] = None
             if "financial_contract_id" not in df.columns:
                 df["financial_contract_id"] = None
-            df.loc[affected, "financial_effect"] = financial_effect
-            df.loc[affected, "financial_contract_id"] = getattr(rule, "financial_contract_id", None)
+            current_effect = df["financial_effect"].astype("string").str.upper()
+            assign_mode = affected & (current_effect.isna() | current_effect.isin(["", "NONE", "NAN"]))
+            df.loc[assign_mode, "financial_effect"] = financial_effect
+            current_contract = pd.to_numeric(df["financial_contract_id"], errors="coerce")
+            assign_contract = affected & current_contract.isna()
+            df.loc[assign_contract, "financial_contract_id"] = getattr(rule, "financial_contract_id", None)
 
 
 def fill_inherited_org_fields(df: pd.DataFrame, dept_map: dict | None = None) -> None:
