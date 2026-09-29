@@ -2480,7 +2480,20 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     rows += len(frame)
                     _progress(f"Reclassificando {conn.code}/{period}", total + rows, expected_total)
                 if staged is None:
-                    return {"success": False, "error": f"Nenhuma linha Gold para {conn.code}/{period}", "rows_written": total}
+                    # Reclassification is allowed to receive source/month
+                    # pairs whose Silver slice no longer exists (for example,
+                    # a schedule spanning future months or a source without
+                    # consumption in that period).  This is a successful
+                    # no-op, not a processing failure.
+                    message = f"Sem linhas Silver para {conn.code}/{period}; nada a reclassificar"
+                    _progress(message, total, expected_total)
+                    return {
+                        "success": True,
+                        "rows_written": total,
+                        "table": dest.name,
+                        "skipped": True,
+                        "message": message,
+                    }
                 iceberg.publish_staged_partition(
                     dest.physical_name,
                     staged,
