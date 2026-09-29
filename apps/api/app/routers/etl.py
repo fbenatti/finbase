@@ -1279,6 +1279,14 @@ def _process_blob_for_reprocess(
                 for r in brules:
                     _apply_business_rule_sync(target, r, str(billing_period))
 
+                # ``consumo_realizado`` is the provider/rule result.  Keep a
+                # direct realized value available for clouds without a
+                # contractual settlement; the contract materializer may
+                # replace it later for BUDGET_COMMITMENT rows.
+                if "consumo_realizado" in target.columns:
+                    target["realizado"] = pd.to_numeric(target["consumo_realizado"], errors="coerce")
+                    target["ajuste_contratual"] = 0.0
+
                 # Phase 3: Classifications operate on the mapped destination.
                 if crules:
                     _apply_classifications_sync(
@@ -1589,6 +1597,7 @@ def _reprocess_destination_sync(
                        'organograma_nivel_7',
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
+                       'consumo_realizado', 'ajuste_contratual',
                        'VL_CUSTO_FINAL_BRL'}
         # These columns are part of the Gold technical contract even when a
         # batch generates no synthetic rows.  Without a stable contract the

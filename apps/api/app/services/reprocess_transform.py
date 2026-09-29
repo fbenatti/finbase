@@ -171,6 +171,10 @@ def transform_reprocess_chunk(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for rule in brules:
         _apply_business_rule_sync(target, rule, billing_period)
 
+    if "consumo_realizado" in target.columns:
+        target["realizado"] = pd.to_numeric(target["consumo_realizado"], errors="coerce")
+        target["ajuste_contratual"] = 0.0
+
     if crules:
         _apply_classifications_sync(
             target,

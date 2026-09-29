@@ -381,6 +381,8 @@ def _business_rule_meta(rule: BusinessRule) -> dict:
         "scope": rule.cloud_scope,
         "conditions": rule.conditions or [],
         "priority": rule.priority,
+        "financial_effect": getattr(rule, "financial_effect", "NONE") or "NONE",
+        "financial_contract_id": getattr(rule, "financial_contract_id", None),
     }
 
 
@@ -437,6 +439,12 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
     # changing the persisted schema.
     by_lower = {str(column).lower(): column for column in df.columns}
     target_column = by_lower.get(str(rule.target_column or "").lower(), rule.target_column)
+    financial_effect = str(getattr(rule, "financial_effect", "NONE") or "NONE").upper()
+    # Financial rules now calculate the technical consumption first. Existing
+    # configurations that still point at ``realizado`` are transparently
+    # redirected once they opt into a financial effect.
+    if financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"} and str(target_column or "").lower() == "realizado":
+        target_column = by_lower.get("consumo_realizado", "consumo_realizado")
     cfg = rule.config_json or {}
     scope_mask = build_scope_mask(
         df,
@@ -447,7 +455,9 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
     if rule.rule_type == "CONDITIONAL" and rule.conditions:
         _written: list[str] = []
         for original in rule.conditions:
-            _field = original.get("then_field", target_column) if isinstance(original, dict) else target_column
+                _field = original.get("then_field", target_column) if isinstance(original, dict) else target_column
+                if financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"} and str(_field or "").lower() == "realizado":
+                    _field = "consumo_realizado"
             _resolved = by_lower.get(str(_field or "").lower(), _field)
             if _resolved:
                 _written.append(_resolved)
@@ -471,7 +481,10 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
             condition["op"] = condition.get("op", condition.get("operator", "=="))
             if condition["op"] == "=":
                 condition["op"] = "=="
-            condition["then_field"] = by_lower.get(str(condition.get("then_field", target_column)).lower(), target_column)
+            then_field = condition.get("then_field", target_column)
+            if financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"} and str(then_field or "").lower() == "realizado":
+                then_field = "consumo_realizado"
+            condition["then_field"] = by_lower.get(str(then_field).lower(), then_field)
             then_value = condition.get("then_value")
             if isinstance(then_value, str):
                 for logical, physical in sorted(by_lower.items(), key=lambda item: len(item[0]), reverse=True):
