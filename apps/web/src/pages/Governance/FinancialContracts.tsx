@@ -3,12 +3,13 @@ import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, FormControl, InputLabel, ListItemText, MenuItem, OutlinedInput,
   Select, Table, TableBody, TableCell, TableHead, TableRow, TextField,
-  FormHelperText,
+  FormHelperText, Typography,
 } from "@mui/material";
 import { Add } from "@mui/icons-material";
 import {
   createFinancialContract, FinancialContract, FinancialContractScope,
   getConnections, getDepartments, getFinancialContractScopes, getFinancialContracts,
+  getFinancialContractSettlements,
 } from "../../services/api";
 
 const blank = { code: "", name: "", valid_from: "202601", valid_until: "202612", currency: "BRL", synthetic_department_id: "", connection_ids: [] as number[], scopes: [] as string[] };
@@ -21,6 +22,8 @@ export default function FinancialContracts() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
+  const [selectedContract, setSelectedContract] = useState<number | null>(null);
+  const [settlements, setSettlements] = useState<Record<string, unknown>[]>([]);
 
   const load = () => getFinancialContracts().then(setContracts).catch((e) => setError(String(e)));
   useEffect(() => {
@@ -29,6 +32,11 @@ export default function FinancialContracts() {
     getConnections().then((rows) => setConnections(rows as typeof connections)).catch(() => {});
     getDepartments(true).then((rows) => setDepartments(rows as typeof departments)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (selectedContract == null) { setSettlements([]); return; }
+    getFinancialContractSettlements(selectedContract).then(setSettlements).catch((e) => setError(String(e)));
+  }, [selectedContract]);
 
   const save = async () => {
     try {
@@ -60,9 +68,15 @@ export default function FinancialContracts() {
         <TableCell>{contract.valid_from} — {contract.valid_until}</TableCell>
         <TableCell>{contract.connection_ids.length}</TableCell>
         <TableCell>{contract.budget_scopes.map((scope) => <Chip key={`${scope.cloud_scope}-${scope.budget_id}`} size="small" sx={{ mr: .5 }} label={`${scope.cloud_scope}/${scope.budget_id}`} />)}</TableCell>
-        <TableCell><Chip size="small" color={contract.active ? "success" : "default"} label={contract.active ? "Ativo" : "Inativo"} /></TableCell>
+        <TableCell><Chip size="small" color={contract.active ? "success" : "default"} label={contract.active ? "Ativo" : "Inativo"} /><Button size="small" sx={{ ml: 1 }} onClick={() => setSelectedContract(contract.id)}>Movimentações</Button></TableCell>
       </TableRow>)}</TableBody>
     </Table>
+    {selectedContract != null && <Box sx={{ mt: 3 }}>
+      <Typography variant="h6">Movimentações da liquidação</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Valores do razão por contrato, cloud, ID Orçamento e competência. O realizado só aparece quando existe consumo positivo ou overage descoberto.</Typography>
+      <Table size="small"><TableHead><TableRow>{["Competência", "Cloud / ID", "Compromisso", "Consumo", "Crédito gerado", "Overage descoberto", "Saldo final", "Realizado"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{settlements.map((row, index) => <TableRow key={`${row.period}-${row.budget_id}-${index}`}><TableCell>{String(row.period || "—")}</TableCell><TableCell>{String(row.cloud_scope || "—")} / {String(row.budget_id || "—")}</TableCell><TableCell>{String(row.commitment || "0")}</TableCell><TableCell>{String(row.consumption || "0")}</TableCell><TableCell>{String(row.credit_generated || "0")}</TableCell><TableCell>{String(row.uncovered_overage || "0")}</TableCell><TableCell>{String(row.closing_credit || "0")}</TableCell><TableCell>{String(row.realized || "0")}</TableCell></TableRow>)}</TableBody></Table>
+      {!settlements.length && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhuma liquidação publicada para este contrato.</Typography>}
+    </Box>}
     <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
       <DialogTitle>Novo contrato financeiro</DialogTitle>
       <DialogContent sx={{ display: "grid", gap: 2, pt: "16px !important" }}>
