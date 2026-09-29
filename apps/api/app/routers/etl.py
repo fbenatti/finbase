@@ -2088,6 +2088,11 @@ def _reprocess_destination_sync(
         # commitment and consume credits incorrectly.
         if contractual_frames:
             contractual = pd.concat(contractual_frames, ignore_index=True)
+            # Settlement scopes use the canonical connection cloud (ibm,
+            # oci, ...), not the human-readable connection code stored in
+            # ``cloud_origem``.
+            if connection_ids and connection_ids[0] in conn_map:
+                contractual["cloud_origem"] = str(conn_map[connection_ids[0]].cloud_scope or contractual["cloud_origem"].iloc[0]).lower()
             commitment_by_pool = {}
             budget_type = session.scalar(select(FinancialType).where(FinancialType.code == "orcamento"))
             if budget_type:
