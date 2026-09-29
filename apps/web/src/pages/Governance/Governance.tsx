@@ -5,9 +5,11 @@ import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
 import CloneRules from "../CloneRules/CloneRules";
 import Gold from "../GoldMarts/GoldMarts";
+import FinancialContracts from "./FinancialContracts";
 
 const TABS = [
   { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
+  { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Camada Gold de Custo", perms: [{ module: "gold", scope: null }] },
@@ -65,6 +67,11 @@ export default function Governance() {
         {tab === "rules" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Rules embedded />
+          </Paper>
+        )}
+        {tab === "financial-contracts" && (
+          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+            <FinancialContracts />
           </Paper>
         )}
         {tab === "classification" && (

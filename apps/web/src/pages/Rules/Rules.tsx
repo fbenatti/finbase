@@ -8,7 +8,7 @@ import {
 import { Add, Edit, Delete } from "@mui/icons-material";
 import {
   getBusinessRules, createBusinessRule, updateBusinessRule, deleteBusinessRule, BusinessRule,
-  getDestinationTables, getDestinationSchema, DestinationTable,
+  getDestinationTables, getDestinationSchema, DestinationTable, getFinancialContracts, FinancialContract,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
@@ -77,6 +77,8 @@ const emptyForm = {
   cloud_scope: "global",
   scope_filter: emptyScopeFilter(),
   priority: 0, valid_from: "", valid_until: "", active: true,
+  financial_effect: "NONE" as "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT",
+  financial_contract_id: null as number | null,
 };
 
 const findKnownColumn = (columns: string[], token: string): string => {
@@ -192,10 +194,12 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
   const [form, setForm] = useState(emptyForm);
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [numericColumns, setNumericColumns] = useState<string[]>([]);
+  const [contracts, setContracts] = useState<FinancialContract[]>([]);
   const scopeColumnOptions = [...INTERNAL_SCOPE_COLUMNS, ...sourceColumns.filter((c) => !INTERNAL_SCOPE_COLUMNS.includes(c))];
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
+    getFinancialContracts().then(setContracts).catch(() => {});
   }, []);
 
   const load = async () => {
@@ -282,6 +286,8 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       },
       valid_from: r.valid_from || "", valid_until: r.valid_until || "",
       active: r.active,
+      financial_effect: r.financial_effect || "NONE",
+      financial_contract_id: r.financial_contract_id || null,
     });
     setDialogOpen(true);
   };
@@ -320,6 +326,8 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       valid_from: form.valid_from || null,
       valid_until: form.valid_until || null,
       active: form.active,
+      financial_effect: form.financial_effect,
+      financial_contract_id: form.financial_effect === "BUDGET_COMMITMENT" ? form.financial_contract_id : null,
     };
 
     if (ruleType === "EXPRESSION") {
@@ -475,6 +483,12 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               ),
             },
             {
+              key: "financial_effect", label: "Modo", width: 125,
+              render: (r: BusinessRule) => (
+                <Chip size="small" label={r.financial_effect === "BUDGET_COMMITMENT" ? "Compromisso" : r.financial_effect === "DIRECT_REALIZED" ? "Direto" : "Nenhum"} color={r.financial_effect === "BUDGET_COMMITMENT" ? "warning" : r.financial_effect === "DIRECT_REALIZED" ? "success" : "default"} />
+              ),
+            },
+            {
               key: "priority", label: "Pri", width: 50,
               render: (r: BusinessRule) => r.priority,
             },
@@ -508,6 +522,27 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
 
             <TextField label="Nome" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <TextField label="Descrição (opcional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+
+            <FormControl fullWidth>
+              <InputLabel>Efeito financeiro</InputLabel>
+              <Select
+                value={form.financial_effect}
+                label="Efeito financeiro"
+                onChange={(e) => setForm({ ...form, financial_effect: e.target.value as typeof form.financial_effect, financial_contract_id: e.target.value === "BUDGET_COMMITMENT" ? form.financial_contract_id : null })}
+              >
+                <MenuItem value="NONE">Não participa do realizado</MenuItem>
+                <MenuItem value="DIRECT_REALIZED">Realizado direto — sem compromisso</MenuItem>
+                <MenuItem value="BUDGET_COMMITMENT">Compromisso orçamentário</MenuItem>
+              </Select>
+            </FormControl>
+            {form.financial_effect === "BUDGET_COMMITMENT" && (
+              <FormControl fullWidth required>
+                <InputLabel>Contrato financeiro</InputLabel>
+                <Select value={form.financial_contract_id ?? ""} label="Contrato financeiro" onChange={(e) => setForm({ ...form, financial_contract_id: Number(e.target.value) || null })}>
+                  {contracts.filter((contract) => contract.active).map((contract) => <MenuItem key={contract.id} value={contract.id}>{contract.name} ({contract.code})</MenuItem>)}
+                </Select>
+              </FormControl>
+            )}
 
             <FormControl fullWidth>
               <InputLabel>Cloud (escopo da regra)</InputLabel>
@@ -809,7 +844,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={save} variant="contained" disabled={!form.name || !form.target_column}>
+          <Button onClick={save} variant="contained" disabled={!form.name || !form.target_column || (form.financial_effect === "BUDGET_COMMITMENT" && !form.financial_contract_id)}>
             Salvar
           </Button>
         </DialogActions>

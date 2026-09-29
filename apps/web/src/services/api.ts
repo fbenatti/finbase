@@ -863,6 +863,8 @@ export interface BusinessRule {
   valid_from: string | null;
   valid_until: string | null;
   cloud_scope: string | null;
+  financial_effect: "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT";
+  financial_contract_id: number | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -1377,6 +1379,56 @@ export async function updateBusinessRule(
 
 export async function deleteBusinessRule(id: number): Promise<void> {
   await api.delete(`/business-rules/${id}`);
+}
+
+export interface FinancialContractScope {
+  cloud_scope: string;
+  budget_id: string;
+  project_count?: number;
+}
+
+export interface FinancialContract {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  destination_table_id: number | null;
+  currency: string;
+  valid_from: string;
+  valid_until: string;
+  allocation_method: string;
+  credit_expiry_policy: string;
+  synthetic_department_id: number;
+  active: boolean;
+  connection_ids: number[];
+  budget_scopes: FinancialContractScope[];
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getFinancialContracts(): Promise<FinancialContract[]> {
+  const { data } = await api.get("/financial-contracts");
+  return data;
+}
+
+export async function getFinancialContractScopes(): Promise<FinancialContractScope[]> {
+  const { data } = await api.get("/financial-contracts/options/budget-scopes");
+  return data;
+}
+
+export async function createFinancialContract(body: Partial<FinancialContract>): Promise<FinancialContract> {
+  const { data } = await api.post("/financial-contracts", body);
+  return data;
+}
+
+export async function updateFinancialContract(id: number, body: Partial<FinancialContract>): Promise<FinancialContract> {
+  const { data } = await api.put(`/financial-contracts/${id}`, body);
+  return data;
+}
+
+export async function getFinancialContractSettlements(id: number): Promise<Record<string, unknown>[]> {
+  const { data } = await api.get(`/financial-contracts/${id}/settlements`);
+  return data;
 }
 
 // Classifications
