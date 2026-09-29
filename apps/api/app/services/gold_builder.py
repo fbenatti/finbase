@@ -60,6 +60,8 @@ GOLD_DIMENSIONS: tuple[str, ...] = (
 GOLD_MEASURES: dict[str, str] = {
     "quantity": "ConsumedQuantity",
     "realizado": "realizado",
+    "consumo_realizado": "consumo_realizado",
+    "ajuste_contratual": "ajuste_contratual",
     "billedcost": "BilledCost",
 }
 
@@ -78,6 +80,8 @@ GOLD_COLUMN_TYPES: dict[str, str] = {
     "chargecategory": "TEXT",
     "quantity": "DOUBLE",
     "realizado": "DOUBLE",
+    "consumo_realizado": "DOUBLE",
+    "ajuste_contratual": "DOUBLE",
     "billedcost": "DOUBLE",
 }
 
