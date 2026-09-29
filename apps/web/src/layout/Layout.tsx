@@ -72,6 +72,7 @@ const menuGroups = [
       { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
       { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
+      { path: "/governance?tab=financial-contracts", label: "Contratos financeiros", icon: <AccountBalanceIcon /> },
     ],
   },
   {
