@@ -41,6 +41,7 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
     ],
   },
   { prefix: "/financial-contracts", targets: [{ module: "rules" }] },
+  { prefix: "/financial-contracts-dashboard", targets: [{ module: "rules" }] },
   { prefix: "/rules", targets: [{ module: "rules" }] },
   { prefix: "/classifications", targets: [{ module: "rules" }] },
   { prefix: "/mappings", targets: [{ module: "rules" }] },
