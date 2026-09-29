@@ -1398,7 +1398,7 @@ export interface FinancialContract {
   valid_until: string;
   allocation_method: string;
   credit_expiry_policy: string;
-  synthetic_department_id: number;
+  synthetic_department_id: number | null;
   active: boolean;
   connection_ids: number[];
   budget_scopes: FinancialContractScope[];
