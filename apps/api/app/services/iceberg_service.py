@@ -1104,7 +1104,12 @@ def read_destination_batches(physical_name: str, excluded_periods: set[str] | No
             # como float64 (double). Ao reescrever na staged table (schema=long), o Iceberg
             # rejeita com "Cannot change column type: long -> double".
             # Forçamos Int64 (nullable bigint) aqui para evitar esse conflito.
-            _FORCE_INT64 = {"clone_rule_id", "clone_rule_version", "source_connection_id"}
+            _FORCE_INT64 = {
+                "clone_rule_id",
+                "clone_rule_version",
+                "source_connection_id",
+                "financial_contract_id",
+            }
             for _col in _FORCE_INT64:
                 if _col in batch_df.columns:
                     batch_df[_col] = pd.to_numeric(batch_df[_col], errors="coerce").astype("Int64")
@@ -1154,7 +1159,12 @@ def read_destination_slice_batches(
                 # Legacy Gold files may expose nullable BIGINT columns as
                 # float64 through pandas. The staged Iceberg schema is long;
                 # normalise before append to avoid long -> double failures.
-                for column in ("clone_rule_id", "clone_rule_version", "source_connection_id"):
+                for column in (
+                    "clone_rule_id",
+                    "clone_rule_version",
+                    "source_connection_id",
+                    "financial_contract_id",
+                ):
                     if column in batch_df.columns:
                         batch_df[column] = pd.to_numeric(batch_df[column], errors="coerce").astype("Int64")
                 yield batch_df

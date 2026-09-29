@@ -2369,6 +2369,16 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
     from app.services.cloud_scope import rule_matches_cloud, rule_matches_destination
     from app.services.task_runner import _apply_classifications_sync, _check_cancelled
 
+    # Reclassification reads existing nullable BIGINT fields back through
+    # pandas.  Without explicit hints, batches containing NULL identifiers are
+    # inferred as float64 and Iceberg rejects the staged long -> double change.
+    reclassification_column_types = {
+        "clone_rule_id": "BIGINT",
+        "clone_rule_version": "BIGINT",
+        "source_connection_id": "BIGINT",
+        "financial_contract_id": "BIGINT",
+    }
+
     def _progress(phase: str, processed: int, expected: int) -> None:
         """Persist incremental progress; this task has no blob lifecycle."""
         progress = min(100, int((processed * 100) / expected)) if expected else 0
@@ -2456,11 +2466,17 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                         staged = iceberg.write_destination_staged(
                             dest.physical_name,
                             frame,
+                            column_types=reclassification_column_types,
                             namespace="silver",
                             partition_spec_json=getattr(dest, "partition_spec_json", None),
                         )
                     else:
-                        iceberg.append_to_staged(staged, frame, namespace="silver")
+                        iceberg.append_to_staged(
+                            staged,
+                            frame,
+                            column_types=reclassification_column_types,
+                            namespace="silver",
+                        )
                     rows += len(frame)
                     _progress(f"Reclassificando {conn.code}/{period}", total + rows, expected_total)
                 if staged is None:
