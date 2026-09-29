@@ -138,6 +138,24 @@ function formatElapsed(milliseconds: number): string {
     : `${minutes}m ${String(remainder).padStart(2, "0")}s`;
 }
 
+/**
+ * Keep the operational queue at the top of the notification dialog.  A
+ * running task is the most useful item to see first; among queued tasks the
+ * oldest task is next in line.  Finished notifications remain available
+ * underneath, ordered from newest to oldest.
+ */
+function sortNotifications(items: NotificationItem[]): NotificationItem[] {
+  const rank = (status: string) => (status === "RUNNING" ? 0 : status === "QUEUED" ? 1 : 2);
+  return [...items].sort((a, b) => {
+    const rankDifference = rank(a.status) - rank(b.status);
+    if (rankDifference !== 0) return rankDifference;
+    if (a.status === "QUEUED" && b.status === "QUEUED") {
+      return a.startedAt - b.startedAt || a.id - b.id;
+    }
+    return b.timestamp - a.timestamp || b.id - a.id;
+  });
+}
+
 interface NotificationContextValue {
   items: NotificationItem[];
   unreadCount: number;
@@ -376,6 +394,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   );
 
   const unreadCount = useMemo(() => items.filter((i) => !i.read).length, [items]);
+  const orderedItems = useMemo(() => sortNotifications(items), [items]);
 
   const value = useMemo(
     () => ({
@@ -407,13 +426,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           </Box>
         </DialogTitle>
         <DialogContent dividers>
-          {items.length === 0 && (
+          {orderedItems.length === 0 && (
             <Typography color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
               Nenhuma notificação no momento.
             </Typography>
           )}
           <Stack spacing={1.5}>
-            {items.map((item) => {
+            {orderedItems.map((item) => {
               const isActive = item.status === "QUEUED" || item.status === "RUNNING";
               const color = item.status === "COMPLETED" ? "success" : item.status === "FAILED" || item.status === "CANCELLED" ? "error" : "info";
               return (
@@ -471,7 +490,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             })}
           </Stack>
         </DialogContent>
-        {items.length > 0 && (
+        {orderedItems.length > 0 && (
           <Box sx={{ p: 1.5, display: "flex", justifyContent: "flex-end" }}>
             <Button size="small" variant="outlined" onClick={clearAll} startIcon={<DeleteOutline fontSize="small" />}>
               Limpar notificações
