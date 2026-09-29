@@ -455,9 +455,9 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
     if rule.rule_type == "CONDITIONAL" and rule.conditions:
         _written: list[str] = []
         for original in rule.conditions:
-                _field = original.get("then_field", target_column) if isinstance(original, dict) else target_column
-                if financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"} and str(_field or "").lower() == "realizado":
-                    _field = "consumo_realizado"
+            _field = original.get("then_field", target_column) if isinstance(original, dict) else target_column
+            if financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"} and str(_field or "").lower() == "realizado":
+                _field = "consumo_realizado"
             _resolved = by_lower.get(str(_field or "").lower(), _field)
             if _resolved:
                 _written.append(_resolved)
