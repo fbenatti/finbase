@@ -1138,15 +1138,32 @@ def consumer_main(worker_id: int):
                                             for connection_list, _, _ in group_rows
                                             for connection_id in (connection_list or [])
                                         }) if group else list(terminal_task.connection_ids or [])
+                                        from app.models.financial_contract import (
+                                            FinancialContract,
+                                            FinancialContractConnection,
+                                        )
+                                        has_financial_contract = bool(connection_ids) and terminal_session.scalar(
+                                            _select(FinancialContract.id)
+                                            .join(FinancialContractConnection)
+                                            .where(
+                                                FinancialContractConnection.connection_id.in_(connection_ids),
+                                                FinancialContract.active.is_(True),
+                                            )
+                                            .limit(1)
+                                        ) is not None
                                         try:
-                                            if not group_succeeded:
+                                            if has_financial_contract and not group_succeeded:
                                                 raise RuntimeError(
                                                     "Grupo de reprocessamento contém competência não concluída com sucesso"
                                                 )
-                                            settlement_runs = run_async_isolated(
-                                                recalculate_contracts_for_connections(
-                                                    connection_ids, source="REPROCESS_GROUP"
+                                            settlement_runs = (
+                                                run_async_isolated(
+                                                    recalculate_contracts_for_connections(
+                                                        connection_ids, source="REPROCESS_GROUP"
+                                                    )
                                                 )
+                                                if has_financial_contract and group_succeeded
+                                                else []
                                             )
                                             if settlement_runs:
                                                 payload["contract_settlement_runs"] = settlement_runs
@@ -1164,6 +1181,22 @@ def consumer_main(worker_id: int):
                                                         **(terminal_task.result_json or {}),
                                                         "gold_task_id": gold_task.id,
                                                     }
+                                                    terminal_task.phase = (
+                                                        (terminal_task.phase or "")
+                                                        + f" · Gold enfileirada (task #{gold_task.id})"
+                                                    )[:200]
+                                            elif (
+                                                group_succeeded
+                                                and chain
+                                                and chain.get("enabled")
+                                            ):
+                                                from app.services.gold_materialization import enqueue_rule_materialization
+                                                gold_task = enqueue_rule_materialization(
+                                                    terminal_session,
+                                                    rule_ids=chain.get("rule_ids") or None,
+                                                    source="reprocess",
+                                                )
+                                                if gold_task:
                                                     terminal_task.phase = (
                                                         (terminal_task.phase or "")
                                                         + f" · Gold enfileirada (task #{gold_task.id})"
