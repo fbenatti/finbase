@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Iterable
+from typing import Any, Iterable
 
 
 CENT = Decimal("0.01")
@@ -100,6 +100,62 @@ def allocate_pool(realized_pool: Decimal | int | float | str, consumptions: Iter
         )
         allocations[largest] = money(allocations[largest] + remainder)
     return allocations
+
+
+def organizational_budget_commitments(
+    pool_keys: Iterable[tuple[str, str, str]],
+    departments: dict[int, Any],
+    entries: Iterable[tuple[int | None, Decimal | int | float | str]],
+) -> dict[tuple[str, str, str], Decimal]:
+    """Resolve monthly commitments from the organizational budget ledger.
+
+    Budget imports are additive ledger entries and normally do not repeat the
+    budget ID/cloud on ``planning_version``.  Those dimensions belong to the
+    organization: a child inherits the closest ``id_orcamento`` from its
+    ancestors and the cloud is the third node of the canonical hierarchy
+    (Consumo Cloud > Chargeback/Showback > provider).
+
+    The commitment of one pool is therefore the sum of every monthly planning
+    entry whose department resolves to the same cloud + inherited budget ID.
+    This deliberately includes the parent's own entry and all matching child
+    entries; individual project limits never become independent pools.
+    """
+    keys = list(pool_keys)
+    requested_scopes = {(cloud.strip().lower(), budget_id.strip()) for _, cloud, budget_id in keys}
+    totals = {scope: Decimal("0") for scope in requested_scopes}
+    scope_cache: dict[int, tuple[str, str] | None] = {}
+
+    def department_scope(department_id: int) -> tuple[str, str] | None:
+        if department_id in scope_cache:
+            return scope_cache[department_id]
+        chain: list[Any] = []
+        current = departments.get(department_id)
+        seen: set[int] = set()
+        while current is not None and int(current.id) not in seen:
+            seen.add(int(current.id))
+            chain.append(current)
+            current = departments.get(current.parent_id) if current.parent_id else None
+        chain.reverse()
+        budget_id = next(
+            (str(item.id_orcamento).strip() for item in reversed(chain) if getattr(item, "id_orcamento", None)),
+            "",
+        )
+        cloud = str(chain[2].name).strip().lower() if len(chain) >= 3 else ""
+        resolved = (cloud, budget_id) if cloud and budget_id else None
+        scope_cache[department_id] = resolved
+        return resolved
+
+    for department_id, value in entries:
+        if department_id is None:
+            continue
+        scope = department_scope(int(department_id))
+        if scope in totals:
+            totals[scope] += Decimal(str(value or 0))
+
+    return {
+        key: money(totals.get((key[1].strip().lower(), key[2].strip()), Decimal("0")))
+        for key in keys
+    }
 
 
 def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, str], Decimal], opening_credit_by_pool: dict[tuple[str, str, str], Decimal] | None = None) -> list[dict]:

@@ -1,8 +1,14 @@
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
-from app.services.contract_settlement import allocate_pool, settle_pool, settle_rows
+from app.services.contract_settlement import (
+    allocate_pool,
+    organizational_budget_commitments,
+    settle_pool,
+    settle_rows,
+)
 
 
 def test_credit_generated_when_pool_is_under_consumed():
@@ -108,3 +114,28 @@ def test_pool_budget_is_scaled_by_cloud_consumption_weight():
     result = settle_rows(rows, commitment_by_pool={("1", "ibm", "EXTERNO-IBM"): Decimal("2000000")})
     assert result[0]["realizado"] == 1200000.0
     assert result[1]["realizado"] == 800000.0
+
+
+def test_commitment_comes_from_parent_budget_id_and_includes_parent_and_children():
+    departments = {
+        1: SimpleNamespace(id=1, parent_id=None, name="Consumo Cloud", id_orcamento=None),
+        2: SimpleNamespace(id=2, parent_id=1, name="Chargeback", id_orcamento=None),
+        3: SimpleNamespace(id=3, parent_id=2, name="IBM", id_orcamento="EXTERNO-IBM"),
+        4: SimpleNamespace(id=4, parent_id=3, name="Projeto A", id_orcamento=None),
+        5: SimpleNamespace(id=5, parent_id=3, name="Projeto B", id_orcamento=None),
+        6: SimpleNamespace(id=6, parent_id=2, name="Azure", id_orcamento="EXTERNO-AZURE"),
+        7: SimpleNamespace(id=7, parent_id=6, name="Projeto A", id_orcamento=None),
+    }
+    pool = ("1", "ibm", "EXTERNO-IBM")
+    result = organizational_budget_commitments(
+        [pool],
+        departments,
+        [
+            (3, "50"),   # valor próprio do pai IBM
+            (4, "100"),  # filho herda EXTERNO-IBM
+            (5, "850"),  # outro filho no mesmo pool
+            (7, "999"),  # mesmo nome, mas outra cloud/ID
+        ],
+    )
+
+    assert result == {pool: Decimal("1000.00")}

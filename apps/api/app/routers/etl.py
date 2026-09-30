@@ -1344,7 +1344,7 @@ def _reprocess_destination_sync(
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
     from app.services import gold_builder
-    from app.services.contract_settlement import settle_rows
+    from app.services.contract_settlement import organizational_budget_commitments, settle_rows
     from app.models.financial_contract import FinancialContract
     from app.models.planning import PlanningEntry, PlanningVersion, FinancialType
     from app.services.destination_slice import (
@@ -2111,14 +2111,32 @@ def _reprocess_destination_sync(
             commitment_by_pool = {}
             budget_type = session.scalar(select(FinancialType).where(FinancialType.code == "orcamento"))
             if budget_type:
-                for contract_id, cloud, budget_id in contractual[["financial_contract_id", "cloud_origem", "id_orcamento"]].drop_duplicates().itertuples(index=False, name=None):
-                    period = str(billing_periods[0]) if billing_periods else str(contractual.get("_billing_period", pd.Series([""])).iloc[0])
-                    year, month = int(period[:4]), int(period[4:])
-                    versions = session.scalars(select(PlanningVersion).where(PlanningVersion.financial_type_id == budget_type.id, PlanningVersion.year == year, PlanningVersion.scope_id_orcamento == str(budget_id), PlanningVersion.scope_cloud == str(cloud).lower(), PlanningVersion.is_current.is_(True))).all()
-                    value = Decimal("0")
-                    for version in versions:
-                        value += Decimal(str(session.scalar(select(func.coalesce(func.sum(PlanningEntry.value), 0)).where(PlanningEntry.planning_version_id == version.id, PlanningEntry.month == month)) or 0))
-                    commitment_by_pool[(str(int(contract_id)), str(cloud).lower(), str(budget_id))] = value
+                pool_keys = {
+                    (str(int(contract_id)), str(cloud).lower(), str(budget_id))
+                    for contract_id, cloud, budget_id in contractual[
+                        ["financial_contract_id", "cloud_origem", "id_orcamento"]
+                    ].drop_duplicates().itertuples(index=False, name=None)
+                    if pd.notna(contract_id) and str(budget_id or "").strip()
+                }
+                period = str(billing_periods[0]) if billing_periods else str(
+                    contractual.get("_billing_period", pd.Series([""])).iloc[0]
+                )
+                year, month = int(period[:4]), int(period[4:])
+                budget_entries = session.execute(
+                    select(PlanningEntry.department_id, PlanningEntry.value)
+                    .join(PlanningVersion, PlanningEntry.planning_version_id == PlanningVersion.id)
+                    .where(
+                        PlanningVersion.financial_type_id == budget_type.id,
+                        PlanningVersion.year == year,
+                        PlanningVersion.is_current.is_(True),
+                        PlanningEntry.month == month,
+                    )
+                ).all()
+                commitment_by_pool = organizational_budget_commitments(
+                    pool_keys,
+                    dept_cache,
+                    budget_entries,
+                )
             settled = settle_rows(contractual.to_dict(orient="records"), commitment_by_pool=commitment_by_pool)
             _stage_frame(pd.DataFrame(settled))
 
