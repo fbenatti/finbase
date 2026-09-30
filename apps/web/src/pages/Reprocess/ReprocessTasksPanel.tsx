@@ -19,8 +19,27 @@ function label(task: TaskStatus): string {
   const k = kind(task);
   if (k === "forecast") return "Forecast";
   if (k === "shared_cost") return "Custo compartilhado";
-  if (k === "reprocess") return `Reprocessar dados: ${task.table || "?"}`;
+  if (k === "reprocess") {
+    const sources = task.connections?.map((source) => source.cloud_name || source.name || source.code) || [];
+    const periods = task.billing_periods?.map(formatBillingPeriod) || [];
+    return `Reprocessar dados · ${sources.length ? [...new Set(sources)].join(", ") : "origem não informada"} · ${periods.length ? [...new Set(periods)].join(", ") : "período não informado"}`;
+  }
   return `Extração${task.table ? `: ${task.table}` : ""}`;
+}
+
+function formatBillingPeriod(period: string): string {
+  const match = /^(\d{4})(\d{2})$/.exec(String(period));
+  if (!match) return String(period);
+  const month = Number(match[2]);
+  const labels = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  return month >= 1 && month <= 12 ? `${labels[month - 1]}/${match[1]}` : String(period);
+}
+
+function scope(task: TaskStatus): string {
+  if (kind(task) !== "reprocess") return "";
+  const sources = task.connections?.map((source) => `${source.cloud_name || source.name} (${source.code})`) || [];
+  const periods = task.billing_periods?.map(formatBillingPeriod) || [];
+  return `Origem: ${sources.length ? [...new Set(sources)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${task.destination_table_name || task.table || "não informado"} (Silver)`;
 }
 
 export default function ReprocessTasksPanel() {
@@ -77,6 +96,11 @@ export default function ReprocessTasksPanel() {
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
               <Box>
                 <Typography variant="body2" fontWeight={600}>{label(task)}</Typography>
+                {scope(task) && (
+                  <Typography variant="caption" color="text.primary" display="block">
+                    {scope(task)}
+                  </Typography>
+                )}
                 <Typography variant="caption" color="text.secondary">
                   {task.phase || task.status}
                   {task.current_blob ? ` · ${task.current_blob}` : ""}
