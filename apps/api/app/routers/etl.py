@@ -1348,6 +1348,7 @@ def _reprocess_destination_sync(
         assign_contract_budget_ids,
         organizational_budget_commitments,
         organizational_budget_owners,
+        normalize_cloud_scope,
         settle_rows,
     )
     from app.models.financial_contract import FinancialContract, FinancialContractBudgetScope
@@ -2127,7 +2128,7 @@ def _reprocess_destination_sync(
                     ).where(FinancialContractBudgetScope.contract_id.in_(contract_ids))
                 ).all():
                     configured_scopes.setdefault(
-                        (str(contract_id), str(cloud).strip().lower()), set()
+                        (str(contract_id), normalize_cloud_scope(cloud)), set()
                     ).add(str(budget_id).strip())
             contractual = pd.DataFrame(
                 assign_contract_budget_ids(

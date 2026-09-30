@@ -14,6 +14,12 @@ from typing import Any, Iterable
 CENT = Decimal("0.01")
 
 
+def normalize_cloud_scope(value: Any) -> str:
+    """Canonical provider scope used by contracts, rules and the hierarchy."""
+    scope = str(value or "").strip().lower()
+    return {"oracle": "oci", "oracle cloud": "oci"}.get(scope, scope)
+
+
 def money(value: Decimal | int | float | str | None) -> Decimal:
     return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
 
@@ -121,7 +127,7 @@ def organizational_budget_commitments(
     entries; individual project limits never become independent pools.
     """
     keys = list(pool_keys)
-    requested_scopes = {(cloud.strip().lower(), budget_id.strip()) for _, cloud, budget_id in keys}
+    requested_scopes = {(normalize_cloud_scope(cloud), budget_id.strip()) for _, cloud, budget_id in keys}
     totals = {scope: Decimal("0") for scope in requested_scopes}
     scope_cache: dict[int, tuple[str, str] | None] = {}
 
@@ -141,7 +147,7 @@ def organizational_budget_commitments(
             "",
         )
         cloud = str(chain[2].name).strip().lower() if len(chain) >= 3 else ""
-        resolved = (cloud, budget_id) if cloud and budget_id else None
+        resolved = (normalize_cloud_scope(cloud), budget_id) if cloud and budget_id else None
         scope_cache[department_id] = resolved
         return resolved
 
@@ -153,7 +159,7 @@ def organizational_budget_commitments(
             totals[scope] += Decimal(str(value or 0))
 
     return {
-        key: money(totals.get((key[1].strip().lower(), key[2].strip()), Decimal("0")))
+        key: money(totals.get((normalize_cloud_scope(key[1]), key[2].strip()), Decimal("0")))
         for key in keys
     }
 
@@ -202,7 +208,7 @@ def organizational_budget_owners(
     scopes: Iterable[tuple[str, str]],
 ) -> dict[tuple[str, str], int]:
     """Return the unique organizational node that explicitly owns each pool."""
-    requested = {(cloud.strip().lower(), budget_id.strip()) for cloud, budget_id in scopes}
+    requested = {(normalize_cloud_scope(cloud), budget_id.strip()) for cloud, budget_id in scopes}
     candidates: dict[tuple[str, str], list[int]] = {scope: [] for scope in requested}
     for department in departments.values():
         explicit_budget = str(getattr(department, "id_orcamento", None) or "").strip()
@@ -216,7 +222,7 @@ def organizational_budget_owners(
             chain.append(current)
             current = departments.get(current.parent_id) if current.parent_id else None
         chain.reverse()
-        cloud = str(chain[2].name).strip().lower() if len(chain) >= 3 else ""
+        cloud = normalize_cloud_scope(chain[2].name) if len(chain) >= 3 else ""
         scope = (cloud, explicit_budget)
         if scope in candidates:
             candidates[scope].append(int(department.id))

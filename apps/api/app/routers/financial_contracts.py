@@ -17,7 +17,7 @@ from app.models.financial_contract import (
     FinancialContractConnection,
     ContractSettlementRun,
 )
-from app.services.contract_settlement import settle_pool
+from app.services.contract_settlement import normalize_cloud_scope, settle_pool
 from app.models.rules import Department
 from app.models.source_connection import SourceConnection
 
@@ -63,7 +63,7 @@ def _contract_out(contract: FinancialContract) -> dict[str, Any]:
         "credit_expiry_policy": contract.credit_expiry_policy,
         "synthetic_department_id": contract.synthetic_department_id, "active": contract.active,
         "connection_ids": [item.connection_id for item in (contract.connections or [])],
-        "budget_scopes": [{"cloud_scope": item.cloud_scope, "budget_id": item.budget_id} for item in (contract.budget_scopes or [])],
+        "budget_scopes": [{"cloud_scope": normalize_cloud_scope(item.cloud_scope), "budget_id": item.budget_id} for item in (contract.budget_scopes or [])],
         "created_at": contract.created_at, "updated_at": contract.updated_at,
     }
 
@@ -79,7 +79,7 @@ def _department_scopes(departments: list[Department]) -> set[tuple[str, str]]:
             current = by_id.get(current.parent_id) if current.parent_id else None
         chain.reverse()
         budget_id = next((item.id_orcamento for item in reversed(chain) if item.id_orcamento), None)
-        cloud = chain[2].name.lower() if len(chain) >= 3 else None
+        cloud = normalize_cloud_scope(chain[2].name) if len(chain) >= 3 else None
         if budget_id and cloud:
             result.add((cloud, str(budget_id)))
     return result
@@ -100,7 +100,7 @@ async def _validate_contract_scope(body: FinancialContractIn, db: AsyncSession, 
     departments = list((await db.execute(select(Department).where(Department.active == True))).scalars().all())  # noqa: E712
     valid_scopes = _department_scopes(departments)
     for scope in body.budget_scopes:
-        if (scope.cloud_scope.strip().lower(), scope.budget_id.strip()) not in valid_scopes:
+        if (normalize_cloud_scope(scope.cloud_scope), scope.budget_id.strip()) not in valid_scopes:
             raise HTTPException(422, f"ID Orçamento não encontrado no organograma: {scope.cloud_scope}/{scope.budget_id}")
     query = select(FinancialContract).options(selectinload(FinancialContract.connections)).where(FinancialContract.active == True)  # noqa: E712
     if current_id:
@@ -108,8 +108,8 @@ async def _validate_contract_scope(body: FinancialContractIn, db: AsyncSession, 
     for existing in (await db.execute(query)).scalars().all():
         if not {item.connection_id for item in existing.connections or []}.intersection(body.connection_ids):
             continue
-        requested_scopes = {(item.cloud_scope.strip().lower(), item.budget_id.strip()) for item in body.budget_scopes}
-        existing_scopes = {(item.cloud_scope.strip().lower(), item.budget_id.strip()) for item in existing.budget_scopes or []}
+        requested_scopes = {(normalize_cloud_scope(item.cloud_scope), item.budget_id.strip()) for item in body.budget_scopes}
+        existing_scopes = {(normalize_cloud_scope(item.cloud_scope), item.budget_id.strip()) for item in existing.budget_scopes or []}
         if not requested_scopes.intersection(existing_scopes):
             # The same connection may legitimately participate in separate
             # commitment pools; credits are isolated by cloud + budget ID.
@@ -170,7 +170,7 @@ async def budget_scope_options(db: AsyncSession = Depends(get_db)):
             current = by_id.get(current.parent_id) if current.parent_id else None
         chain.reverse()
         budget_id = next((item.id_orcamento for item in reversed(chain) if item.id_orcamento), None)
-        cloud = chain[2].name.lower() if len(chain) >= 3 else None
+        cloud = normalize_cloud_scope(chain[2].name) if len(chain) >= 3 else None
         if budget_id and cloud:
             key = (cloud, str(budget_id)); counts[key] = counts.get(key, 0) + 1
     return [{"cloud_scope": cloud, "budget_id": budget_id, "project_count": count} for (cloud, budget_id), count in sorted(counts.items())]
@@ -189,7 +189,7 @@ async def create_contract(body: FinancialContractIn, db: AsyncSession = Depends(
     for connection_id in sorted(set(body.connection_ids)):
         db.add(FinancialContractConnection(contract_id=contract.id, connection_id=connection_id))
     for scope in body.budget_scopes:
-        db.add(FinancialContractBudgetScope(contract_id=contract.id, cloud_scope=scope.cloud_scope.lower(), budget_id=scope.budget_id.strip()))
+        db.add(FinancialContractBudgetScope(contract_id=contract.id, cloud_scope=normalize_cloud_scope(scope.cloud_scope), budget_id=scope.budget_id.strip()))
     await db.commit()
     return _contract_out(await _load(contract.id, db))
 
@@ -205,7 +205,7 @@ async def update_contract(contract_id: int, body: FinancialContractIn, db: Async
     for connection_id in sorted(set(body.connection_ids)):
         db.add(FinancialContractConnection(contract_id=contract_id, connection_id=connection_id))
     for scope in body.budget_scopes:
-        db.add(FinancialContractBudgetScope(contract_id=contract_id, cloud_scope=scope.cloud_scope.lower(), budget_id=scope.budget_id.strip()))
+        db.add(FinancialContractBudgetScope(contract_id=contract_id, cloud_scope=normalize_cloud_scope(scope.cloud_scope), budget_id=scope.budget_id.strip()))
     await db.commit()
     return _contract_out(await _load(contract_id, db))
 
