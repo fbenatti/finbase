@@ -132,7 +132,7 @@ function reprocessStageLabel(item: NotificationItem): string {
   if (item.processed >= item.total) {
     return /publicando partição na camada silver/i.test(item.phase + " " + item.current)
       ? "Publicando partição na camada Silver..."
-      : "Blobs processados · preparando publicação na camada Silver";
+      : "Bronze processado · preparando publicação na camada Silver";
   }
   return item.phase || item.status;
 }
