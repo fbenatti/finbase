@@ -125,6 +125,18 @@ function isSilverPublication(task: TaskStatus): boolean {
     && /publicando partição na camada silver/i.test(String(task.current_blob || task.phase || ""));
 }
 
+function reprocessStageLabel(item: NotificationItem): string {
+  if (item.kind !== "reprocess" || item.status !== "RUNNING" || item.total <= 0) {
+    return item.phase || item.status;
+  }
+  if (item.processed >= item.total) {
+    return /publicando partição na camada silver/i.test(item.phase + " " + item.current)
+      ? "Publicando partição na camada Silver..."
+      : "Blobs processados · preparando publicação na camada Silver";
+  }
+  return item.phase || item.status;
+}
+
 function progressFor(task: TaskStatus): number {
   if (kindOf(task) === "backup") {
     const total = Number(task.total_download_bytes || 0);
@@ -493,8 +505,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                         </Typography>
                       )}
                       <Typography variant="caption" color="text.secondary">
-                        {item.phase || item.status}
-                        {item.kind !== "backup" && item.current && item.current !== item.phase ? " · " + item.current : ""}
+                        {reprocessStageLabel(item)}
+                        {item.kind !== "backup" && item.kind !== "reprocess" && item.current && item.current !== item.phase ? " · " + item.current : ""}
                       </Typography>
                     </Box>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
