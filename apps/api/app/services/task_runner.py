@@ -701,6 +701,17 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                     scoped.append(candidate_id)
             if len(scoped) == 1:
                 resolved = scoped[0]
+            elif len(scoped) > 1:
+                # Legacy imports can duplicate the same leaf under one
+                # organizational parent.  That is not an ambiguous cloud
+                # scope: choose the stable lowest ID.  Different parents
+                # remain unresolved and require governance correction.
+                parent_ids = {
+                    getattr(dept_map.get(candidate_id), "parent_id", None)
+                    for candidate_id in scoped
+                }
+                if len(parent_ids) == 1:
+                    resolved = sorted(scoped)[0]
         resolved_department_cache[rule.id] = resolved
         return resolved
 

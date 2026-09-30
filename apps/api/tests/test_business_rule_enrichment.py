@@ -254,3 +254,24 @@ def test_oci_scope_resolves_renamed_oracle_level_without_provider_hardcode():
 
     assert frame.loc[0, "organograma_nivel_3"] == "ORACLE"
     assert frame.loc[0, "id_orcamento"] == "ID2534-OCI"
+
+
+def test_duplicate_legacy_departments_same_parent_use_stable_id():
+    def node(id, parent_id, name):
+        return SimpleNamespace(id=id, parent_id=parent_id, name=name, id_orcamento=None, custom_fields=None, centro_custo=None, ambiente=None)
+    root = node(1, None, "Consumo Cloud")
+    azure = node(2, 1, "Azure")
+    branch = node(3, 2, "DIR INFRAESTRUTURA E CLOUD")
+    first = node(4, 3, "Compra RIs")
+    second = node(5, 3, "Compra RIs")
+    rule = _classification_rule(id=101, cloud_scope="azure", department_id=None, match_value="Compra RIs")
+    frame = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml"]})
+
+    _apply_classifications_sync(
+        frame,
+        [rule],
+        dept_map={item.id: item for item in (root, azure, branch, first, second)},
+        hierarchy_cache={},
+    )
+
+    assert frame.loc[0, "organograma_nivel_4"] == "Compra RIs"
