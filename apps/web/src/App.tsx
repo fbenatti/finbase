@@ -9,7 +9,6 @@ import Connections from "./pages/Connections/Connections";
 import Explorer from "./pages/Explorer/Explorer";
 import Mappings from "./pages/Mappings/Mappings";
 import Governance from "./pages/Governance/Governance";
-import FinancialContractsDashboard from "./pages/FinancialContracts/FinancialContractsDashboard";
 import Departments from "./pages/Departments/Departments";
 import Destinations from "./pages/Destinations/Destinations";
 import Extraction from "./pages/Extraction/Extraction";
@@ -78,8 +77,8 @@ function App() {
         <Route path="clone-rules" element={<Navigate to="/governance?tab=clone-rules" replace />} />
         <Route path="mappings" element={<Mappings />} />
         <Route path="governance" element={<Governance />} />
-        <Route path="financial-contracts" element={<FinancialContractsDashboard />} />
-        <Route path="financial-contracts-dashboard" element={<FinancialContractsDashboard />} />
+        <Route path="financial-contracts" element={<Navigate to="/financial-planning?tab=contratos-financeiros" replace />} />
+        <Route path="financial-contracts-dashboard" element={<Navigate to="/financial-planning?tab=contratos-financeiros" replace />} />
         <Route path="rules" element={<Navigate to="/governance?tab=rules" replace />} />
         <Route path="classifications" element={<Navigate to="/governance?tab=classification" replace />} />
         <Route path="extraction" element={<Navigate to="/reprocess?tab=extraction" replace />} />

@@ -4,6 +4,7 @@ import FinancialDashboard from "./FinancialDashboard";
 import BudgetAccuracy from "./BudgetAccuracy";
 import Planning from "./Planning";
 import VisaoContabil, { EMPTY_FILTERS } from "../GoldDashboard/VisaoContabil";
+import FinancialContractsDashboard from "../FinancialContracts/FinancialContractsDashboard";
 
 const TABS = [
   { code: "orcamento", label: "Orçamento", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },
@@ -13,6 +14,7 @@ const TABS = [
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
+  { code: "contratos-financeiros", label: "Contratos Financeiros", title: "Contratos Financeiros", help: "Orçamento, consumo, realizado, créditos e overage por contrato." },
   { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
 ] as const;
 
@@ -45,6 +47,8 @@ export default function FinancialPlanning() {
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
         ) : active.code === "dashboard" ? (
           <FinancialDashboard />
+        ) : active.code === "contratos-financeiros" ? (
+          <FinancialContractsDashboard />
         ) : (
           <Planning type={active.code} title={active.title} help={active.help} budget={"budget" in active && active.budget} />
         )}
