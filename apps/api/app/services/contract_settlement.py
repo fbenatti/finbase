@@ -66,7 +66,10 @@ def settle_pool(
         overage = -delta
         used = min(opening, overage)
         uncovered = overage - used
-        realized = budget + uncovered
+        # The executive ``realizado`` is the contractual budget.  Any
+        # uncovered overage remains explicit in the contractual adjustment;
+        # it must not inflate the realized budget amount.
+        realized = budget
         closing = opening - used
 
     return SettlementResult(
