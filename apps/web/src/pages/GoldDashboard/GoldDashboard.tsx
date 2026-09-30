@@ -253,9 +253,11 @@ type Filters = {
   // Filtros adicionais por coluna (ex.: contexto aplicado pela árvore de decomposição
   // em dimensões que não são níveis de departamento — servicename, servicecategory, ...).
   extra: Record<string, string[]>;
+  consumoFaturado: boolean;
 };
 
-const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, visaoDiretoria: false, extra: {} };
+const EMPTY_FILTERS: Filters = { months: [], clouds: [], dirs: [], depts: [], servicos: [], cats: [], path: [], deptId: null, visaoDiretoria: false, extra: {}, consumoFaturado: true };
+const measureFor = (f: Filters) => f.consumoFaturado ? "realizado" : "realizado_cloud";
 
 function filtersOf(f: Filters, extra: GoldQueryFilter[] = []): GoldQueryFilter[] {
   const out: GoldQueryFilter[] = [...extra];
@@ -296,7 +298,20 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
     ).then(list => {
       if (!alive) return;
       const m: Record<string, GoldQueryResult | null> = {};
-      defs.forEach((d, i) => { m[d.id] = list[i]; });
+      defs.forEach((d, i) => {
+        const result = list[i];
+        // Keep presentation components stable while allowing the selected
+        // financial measure to change underneath them.
+        if (result && d.measures) result.rows = result.rows.map(row => {
+          const next = { ...row };
+          d.measures?.forEach(measure => {
+            if (measure.column !== "realizado" && measure.column !== "realizado_cloud" && measure.column !== "*") next.realizado = next[measure.column];
+            if (measure.column === "realizado_cloud") next.realizado = next.realizado_cloud;
+          });
+          return next;
+        });
+        m[d.id] = result;
+      });
       setResults(m);
     }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a Gold")); })
       .finally(() => { if (alive) setLoading(false); });
@@ -379,7 +394,7 @@ function LoadingBlock({ loading, error, children }: { loading: boolean; error?: 
 function DataQuality({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
   const [service, setService] = useState("");
   const base = filtersOf(filters, [{ column: "tipo", operator: "IN", values: ["realizado"] }]);
-  const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
+  const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
   const { results, loading, error } = useTabQueries(table, defs, "data-quality-" + filterKey + service);
   const services = rowsOf(results.services); const consumers = rowsOf(results.consumers);
   return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Data Quality</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Selecione um serviço para identificar todos os projetos e diretorias consumidores, com o valor realizado no escopo filtrado.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Realizado", "% do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.organograma_nivel_4)}</TableCell><TableCell>{esc(r.organograma_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Sem consumidores no escopo selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
@@ -525,7 +540,7 @@ export default function GoldDashboard() {
     setFilters(f => ({ ...f, months: sorted.slice(0, n) }));
   };
 
-  const filterKey = JSON.stringify([filters, tab, refreshTick]);
+  const filterKey = JSON.stringify([filters, tab, refreshTick, measureFor(filters)]);
   const setFilter = (key: keyof Filters, values: string[]) => setFilters(f => ({ ...f, [key]: values }));
 
   const clearFilters = () => {
@@ -609,6 +624,11 @@ export default function GoldDashboard() {
             )}
             sx={{ ml: 0.5 }}
           />
+          <FormControlLabel
+            sx={{ ml: 0.5 }}
+            control={<Switch size="small" checked={filters.consumoFaturado} onChange={(_, checked) => setFilters(f => ({ ...f, consumoFaturado: checked }))} />}
+            label={<Typography variant="body2" sx={{ fontWeight: filters.consumoFaturado ? 800 : 500 }}>Consumo faturado</Typography>}
+          />
           <Button size="small" startIcon={<FilterAltOff />} onClick={clearFilters}>Limpar</Button>
         </Stack>
         {filters.visaoDiretoria && (
@@ -649,12 +669,12 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
   };
   const defs = useMemo<QueryDef[]>(() => [
-    { id: "totais", measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters) },
-    { id: "mensal", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
-    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "clouds", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "servicos", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-    { id: "categorias", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
+    { id: "totais", measures: [{ column: measureFor(filters), aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters) },
+    { id: "mensal", rows: ["_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
+    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "clouds", rows: ["cloud_origem"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "servicos", rows: ["servicename"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+    { id: "categorias", rows: ["servicecategory"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
   ], [filterKey]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey);
 
@@ -767,8 +787,8 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
     if (filters.visaoDiretoria) setDim(VISAO_DIRETORIA_LEVELS[0]);
   }, [filters.visaoDiretoria]);
   const defs = useMemo<QueryDef[]>(() => [
-    { id: "mensal", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
-    { id: "drivers", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
+    { id: "mensal", rows: ["_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 60 },
+    { id: "drivers", rows: [dim], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
   ], [filterKey, dim]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey + dim);
 
@@ -872,28 +892,28 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
   const defs = useMemo<QueryDef[]>(() => {
     if (filters.visaoDiretoria) {
       return [
-        { id: "n1", rows: ["organograma_nivel_1"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "n2", rows: ["organograma_nivel_2"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "n4", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "n3", rows: ["organograma_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "n5", rows: ["organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "n6", rows: ["organograma_nivel_6"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "dept", rows: ["organograma"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-        { id: "hier", rows: [...VISAO_DIRETORIA_LEVELS], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
-        { id: "gov", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
+        { id: "n1", rows: ["organograma_nivel_1"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n2", rows: ["organograma_nivel_2"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n4", rows: ["organograma_nivel_4"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n3", rows: ["organograma_nivel_3"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "n5", rows: ["organograma_nivel_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "n6", rows: ["organograma_nivel_6"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "dept", rows: ["organograma"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+        { id: "cc", rows: ["centro_custo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "cloud", rows: ["cloud_origem"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+        { id: "hier", rows: [...VISAO_DIRETORIA_LEVELS], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
+        { id: "gov", rows: ["organograma_nivel_4"], measures: [{ column: measureFor(filters), aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
       ];
     }
     return [
-      { id: "n3", rows: ["organograma_nivel_3"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-      { id: "n4", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-      { id: "n5", rows: ["organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-      { id: "dept", rows: ["organograma"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-      { id: "cc", rows: ["centro_custo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-      { id: "cloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-      { id: "hier", rows: ["organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
-      { id: "gov", rows: ["organograma_nivel_4"], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
+      { id: "n3", rows: ["organograma_nivel_3"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "n4", rows: ["organograma_nivel_4"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "n5", rows: ["organograma_nivel_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "dept", rows: ["organograma"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+      { id: "cc", rows: ["centro_custo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "cloud", rows: ["cloud_origem"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+      { id: "hier", rows: ["organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
+      { id: "gov", rows: ["organograma_nivel_4"], measures: [{ column: measureFor(filters), aggregation: "SUM" }, { column: "*", aggregation: "COUNT" }], filters: filtersOf(filters), row_limit: 100 },
     ];
   }, [filterKey, filters.visaoDiretoria]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey);
@@ -986,14 +1006,14 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
     if (filters.visaoDiretoria) setHeatDim(VISAO_DIRETORIA_LEVELS[0]);
   }, [filters.visaoDiretoria]);
   const defs = useMemo<QueryDef[]>(() => [
-    { id: "serv", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "cat", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "sub", rows: ["servicesubcategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "sku", rows: ["skumeter"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "reg", rows: ["regionname"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-    { id: "subacct", rows: ["subaccountname"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
-    { id: "charge", rows: ["chargecategory"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
-    { id: "heat", rows: [heatDim, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 800 },
+    { id: "serv", rows: ["servicename"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "cat", rows: ["servicecategory"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "sub", rows: ["servicesubcategory"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "sku", rows: ["skumeter"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "reg", rows: ["regionname"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
+    { id: "subacct", rows: ["subaccountname"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
+    { id: "charge", rows: ["chargecategory"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 8 },
+    { id: "heat", rows: [heatDim, "_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 800 },
   ], [filterKey, heatDim]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey + heatDim);
 
@@ -1051,10 +1071,10 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
     if (filters.visaoDiretoria) setDim(VISAO_DIRETORIA_LEVELS[0]);
   }, [filters.visaoDiretoria]);
   const defs = useMemo<QueryDef[]>(() => [
-    { id: "serie", rows: [dim, "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 2000 },
-    { id: "cloud", rows: ["cloud_origem", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
-    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4", "_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
-    { id: "pareto", rows: [dim], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 300 },
+    { id: "serie", rows: [dim, "_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 2000 },
+    { id: "cloud", rows: ["cloud_origem", "_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 400 },
+    { id: "dirs", rows: [filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "organograma_nivel_4", "_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 600 },
+    { id: "pareto", rows: [dim], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 300 },
   ], [filterKey, dim, filters.visaoDiretoria]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey + dim);
 
@@ -1341,17 +1361,17 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     const global = filtersOf(filters);
     const realiz = [...global, { column: "tipo", operator: "IN" as const, values: ["realizado"] }];
     const govDefs: QueryDef[] = [
-      ...govDeptLevels.map(g => ({ id: g.id, rows: [g.field], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 })),
-      { id: "govServ", rows: ["servicename"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
-      { id: "govCat", rows: ["servicecategory"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
-      { id: "govSub", rows: ["subaccountname"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
-      { id: "govCloud", rows: ["cloud_origem"], measures: [{ column: "realizado", aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      ...govDeptLevels.map(g => ({ id: g.id, rows: [g.field], measures: [{ column: measureFor(filters), aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 })),
+      { id: "govServ", rows: ["servicename"], measures: [{ column: measureFor(filters), aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      { id: "govCat", rows: ["servicecategory"], measures: [{ column: measureFor(filters), aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      { id: "govSub", rows: ["subaccountname"], measures: [{ column: measureFor(filters), aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
+      { id: "govCloud", rows: ["cloud_origem"], measures: [{ column: measureFor(filters), aggregation: "SUM" as const }], filters: realiz, row_limit: 8000 },
     ];
     return [
-      { id: "pulse", rows: ["_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 400 },
-      { id: "dim", rows: [dim, "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 10000 },
-      { id: "dimCloud", rows: ["cloud_origem", "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 2000 },
-      { id: "dimServ", rows: ["servicename", "_billing_period", "tipo"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: global, row_limit: 10000 },
+      { id: "pulse", rows: ["_billing_period", "tipo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: global, row_limit: 400 },
+      { id: "dim", rows: [dim, "_billing_period", "tipo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: global, row_limit: 10000 },
+      { id: "dimCloud", rows: ["cloud_origem", "_billing_period", "tipo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: global, row_limit: 2000 },
+      { id: "dimServ", rows: ["servicename", "_billing_period", "tipo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: global, row_limit: 10000 },
       ...govDefs,
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2057,8 +2077,8 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
     if (!next) return [];
     const filtersLocal = filtersOf(filters, pathFilters);
     return [
-      { id: "children", rows: [next.field], measures: [{ column: "realizado", aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersLocal, row_limit: 300 },
-      { id: "months", rows: ["_billing_period"], measures: [{ column: "realizado", aggregation: "SUM" }], filters: filtersLocal, row_limit: 60 },
+      { id: "children", rows: [next.field], measures: [{ column: measureFor(filters), aggregation: "SUM" }, { column: "billedcost", aggregation: "SUM" }, { column: "quantity", aggregation: "SUM" }], filters: filtersLocal, row_limit: 300 },
+      { id: "months", rows: ["_billing_period"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersLocal, row_limit: 60 },
     ];
   }, [filterKey, path, next]);
   const { results, loading, error } = useTabQueries(table, defs, filterKey + JSON.stringify(path));

@@ -62,7 +62,7 @@ export default function FinancialContractsDashboard() {
   const periods = useMemo(() => [...new Set(settlements.map((row) => String(row.period ?? "")))].filter(Boolean).sort(), [settlements]);
   useEffect(() => { if (period !== "all" && !periods.includes(period)) setPeriod("all"); }, [period, periods]);
   const selectedRows = useMemo(() => period === "all" ? settlements : settlements.filter((row) => row.period === period), [period, settlements]);
-  const latestPeriod = periods.at(-1) ?? "";
+  const latestPeriod = periods[periods.length - 1] ?? "";
   const latestRows = settlements.filter((row) => row.period === latestPeriod);
   const sum = (rows: Settlement[], key: string) => rows.reduce((total, row) => total + numeric(row, key), 0);
   const monthly = useMemo(() => periods.map((month) => {
