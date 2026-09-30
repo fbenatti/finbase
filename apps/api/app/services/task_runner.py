@@ -48,6 +48,7 @@ from app.services.expression_engine import (
 from app.services import iceberg_service as iceberg
 from app.services.classification_field_values import enrich_from_dataframe
 from app.services.cloud_scope import rule_matches_cloud, rule_matches_destination
+from app.services.contract_settlement import normalize_cloud_scope
 
 logger = logging.getLogger(__name__)
 
@@ -678,13 +679,6 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         if normalized_name:
             departments_by_name.setdefault(normalized_name, []).append(department.id)
 
-    scope_path_names = {
-        "azure": {"azure"},
-        "ibm": {"ibm"},
-        "gcp": {"gcp"},
-        "oci": {"oci", "oracle", "oracle cloud"},
-        "atlas": {"mongodb", "atlas", "azure mongodb"},
-    }
     resolved_department_cache: dict[int, int | None] = {}
 
     def resolve_department_id(rule: ClassificationRule) -> int | None:
@@ -695,12 +689,15 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         candidates = list(departments_by_name.get(_canon(rule.match_value or ""), []))
         resolved: int | None = candidates[0] if len(candidates) == 1 else None
         if len(candidates) > 1:
-            expected_names = scope_path_names.get(_canon(rule.cloud_scope or ""), set())
+            expected_scope = normalize_cloud_scope(rule.cloud_scope)
             scoped: list[int] = []
             for candidate_id in candidates:
                 _leaf, _root, chain = get_hierarchy(candidate_id)
-                path_names = {_canon(getattr(node, "name", "") or "") for node in chain}
-                if expected_names & path_names:
+                path_scopes = {
+                    normalize_cloud_scope(getattr(node, "name", "") or "")
+                    for node in chain
+                }
+                if expected_scope and expected_scope in path_scopes:
                     scoped.append(candidate_id)
             if len(scoped) == 1:
                 resolved = scoped[0]

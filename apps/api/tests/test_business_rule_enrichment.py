@@ -228,3 +228,29 @@ def test_unlinked_classification_resolves_department_by_cloud_path():
     envelope = json.loads(frame.loc[0, "business_rule"])
     assert envelope["classification"]["department_id"] == 5
     assert envelope["classification"]["department_resolved"] is True
+
+
+def test_oci_scope_resolves_renamed_oracle_level_without_provider_hardcode():
+    def node(id, parent_id, name, id_orcamento=None):
+        return SimpleNamespace(id=id, parent_id=parent_id, name=name, id_orcamento=id_orcamento, custom_fields=None, centro_custo=None, ambiente=None)
+    root = node(1, None, "Consumo Cloud")
+    showback = node(2, 1, "Showback")
+    oracle = node(3, 2, "ORACLE", "ID2534-OCI")
+    project = node(4, 3, "Condominio")
+    rule = _classification_rule(
+        id=100,
+        cloud_scope="oci",
+        department_id=None,
+        match_value="Condominio",
+    )
+    frame = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml"]})
+
+    _apply_classifications_sync(
+        frame,
+        [rule],
+        dept_map={node.id: node for node in (root, showback, oracle, project)},
+        hierarchy_cache={},
+    )
+
+    assert frame.loc[0, "organograma_nivel_3"] == "ORACLE"
+    assert frame.loc[0, "id_orcamento"] == "ID2534-OCI"
