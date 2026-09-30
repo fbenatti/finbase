@@ -29,11 +29,11 @@ def test_existing_credit_covers_overage():
     assert result.closing_credit == Decimal("50.00")
 
 
-def test_uncovered_overage_increases_realized():
+def test_uncovered_overage_does_not_increase_realized():
     result = settle_pool("1000", "1300", "100")
     assert result.credit_used == Decimal("100.00")
     assert result.uncovered_overage == Decimal("200.00")
-    assert result.realized == Decimal("1200.00")
+    assert result.realized == Decimal("1000.00")
     assert result.closing_credit == Decimal("0.00")
 
 
@@ -104,7 +104,8 @@ def test_settle_rows_writes_realized_and_contractual_adjustment():
     ]
     result = settle_rows(rows, commitment_by_pool={("1", "ibm", "EXTERNO-IBM"): Decimal("1000")})
     assert [result[0]["realizado"], result[1]["realizado"]] == [555.56, 444.44]
-    assert result[0]["ajuste_contratual"] == 55.56
+    assert result[0]["ajuste_contratual"] == -55.56
+    assert round(sum(row["ajuste_contratual"] for row in result[:2]), 2) == -100.0
     assert result[2]["realizado"] == 25
 
 

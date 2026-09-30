@@ -66,9 +66,9 @@ def settle_pool(
         overage = -delta
         used = min(opening, overage)
         uncovered = overage - used
-        # The executive ``realizado`` is the contractual budget.  Any
-        # uncovered overage remains explicit in the contractual adjustment;
-        # it must not inflate the realized budget amount.
+        # The executive ``realizado`` is always the contractual budget.
+        # Any uncovered overage remains explicit in the contractual
+        # adjustment and must never inflate this amount.
         realized = budget
         closing = opening - used
 
@@ -256,5 +256,9 @@ def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, st
             output[index]["realizado"] = float(value)
             cloud_value = money(output[index].get("realizado_cloud", output[index].get("consumo_realizado")))
             output[index]["consumo_realizado"] = float(cloud_value)
-            output[index]["ajuste_contratual"] = float(value - cloud_value)
+            # Contract adjustment is the signed pool delta: consumption minus
+            # commitment.  At row grain, distribute it as consumption minus
+            # the allocated realized amount so the rows close exactly to the
+            # pool adjustment in cents.
+            output[index]["ajuste_contratual"] = float(cloud_value - value)
     return output
