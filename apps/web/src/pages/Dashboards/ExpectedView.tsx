@@ -1083,7 +1083,7 @@ export default function ExpectedView({
                 onChange={(_, checked) => setIncludeSharedCost(checked)}
               />
             }
-            label="Incluir custo compartilhado"
+            label="Custo compartilhado"
           />
         </Stack>
       </Stack>
