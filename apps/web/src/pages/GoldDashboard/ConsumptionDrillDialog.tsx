@@ -94,7 +94,7 @@ export default function ConsumptionDrillDialog({
       // sua fatia própria. Antes o diálogo sempre fixava realizado, mesmo ao
       // clicar na série de forecast, o que produzia uma árvore zerada.
       selectedTipo === "forecast"
-        ? { column: "tipo", operator: "IN", values: ["forecast"] }
+        ? { column: "tipo", operator: "IN", values: ["forecast", "forecast-manual"] }
         : selectedTipo === "ambos"
           ? { column: "tipo", operator: "NOT_IN", values: ["rateio"] }
           : { column: "tipo", operator: "NOT_IN", values: ["forecast", "rateio"] },

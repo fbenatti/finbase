@@ -172,7 +172,7 @@ async def _forecast_by_period(
                    skumeter,
                    SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS amount
             FROM {GOLD_TABLE}
-            WHERE lower(tipo) = 'forecast'
+            WHERE lower(tipo) IN ('forecast', 'forecast-manual')
               AND _billing_period >= '{current_period}'
               AND _billing_period <= '{end_period}'
             GROUP BY 1, 2, 3, 4

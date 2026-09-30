@@ -1491,7 +1491,7 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         exprs = aligned_projection(schema, origin)
         extra_filters = list(side_filters(schema))
         if origin == "forecast" and "tipo" in schema:
-            extra_filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
+            extra_filters.append(PivotFilter(column="tipo", values=["forecast", "forecast-manual"], operator="IN"))
         filter_sql = _where_clause(extra_filters)
         layer_from = await _layer_from(db, _table_id, safe_name, schema)
         union_parts.append(
