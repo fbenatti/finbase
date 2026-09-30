@@ -895,12 +895,17 @@ async def list_departments_grid(
 
 @router.post("/departments/", response_model=DepartmentOut, status_code=201)
 async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(get_db)):
+    departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
     if data.parent_id is not None:
-        departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
         if data.parent_id not in departments or not departments[data.parent_id].active:
             raise HTTPException(status_code=422, detail="O departamento pai deve existir e estar ativo")
         if len(_department_path(data.parent_id, departments)) >= MAX_DEPARTMENT_LEVELS:
             raise HTTPException(status_code=422, detail="A hierarquia suporta no máximo 7 níveis")
+    if _duplicate_project_department(data.name, data.parent_id, departments):
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um projeto com esse nome nesta cloud. Escolha outro nome ou atualize o projeto existente.",
+        )
     dept = Department(**data.model_dump())
     db.add(dept)
     await db.commit()
@@ -915,6 +920,15 @@ async def update_department(dept_id: int, data: DepartmentUpdate, db: AsyncSessi
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
     update_data = data.model_dump(exclude_unset=True)
+    target_name = update_data.get("name", dept.name) or ""
+    target_parent_id = update_data.get("parent_id", dept.parent_id)
+    if _duplicate_project_department(
+        target_name, target_parent_id, departments, exclude_id=dept.id,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um projeto com esse nome nesta cloud. Escolha outro nome ou atualize o projeto existente.",
+        )
     name_changed = "name" in update_data and (update_data["name"] or "").strip() != (dept.name or "").strip()
     if "parent_id" in update_data and update_data["parent_id"] != dept.parent_id:
         await _move_department(db, dept, update_data.pop("parent_id"), departments)
@@ -1301,6 +1315,14 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
             if child_key in seen_children:
                 continue
             seen_children.add(child_key)
+
+            duplicate = _duplicate_project_department(pn, parent_id, departments)
+            if duplicate and duplicate.parent_id != parent_id:
+                duplicate_path = " > ".join(_department_path(duplicate.id, departments))
+                result.errors.append(
+                    f"Projeto '{pn}' duplicado na cloud {cloud}; import ignorado para '{dn}' (já existe em '{duplicate_path}')"
+                )
+                continue
 
             dept = await _find_dept(pn, parent_id=parent_id)
             if dept:
