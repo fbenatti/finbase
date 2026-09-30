@@ -26,6 +26,12 @@ escopo é resolvido pelo organograma:
 5. O rateio usa somente a participação de cada linha no `realizado_cloud` do
    pool; o orçamento individual de um projeto não limita seu consumo.
 
+Se uma linha contratual não tiver classificação organizacional, mas o contrato
+possuir exatamente um `ID Orçamento` para aquela cloud, o ID é herdado da
+configuração do contrato. Se houver dois ou mais IDs possíveis, a publicação é
+bloqueada: o sistema não cria pool de orçamento zero nem escolhe um ID
+arbitrariamente.
+
 Exemplo: um pool IBM `EXTERNO-IBM` com orçamento mensal de R$ 2 milhões e
 consumo calculado de R$ 600 mil no projeto A e R$ 400 mil no projeto B gera
 pesos de 60% e 40%. O `realizado` será R$ 1,2 milhão e R$ 800 mil,

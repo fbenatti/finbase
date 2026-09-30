@@ -5,6 +5,7 @@ import pytest
 
 from app.services.contract_settlement import (
     allocate_pool,
+    assign_contract_budget_ids,
     organizational_budget_commitments,
     settle_pool,
     settle_rows,
@@ -139,3 +140,31 @@ def test_commitment_comes_from_parent_budget_id_and_includes_parent_and_children
     )
 
     assert result == {pool: Decimal("1000.00")}
+
+
+def test_missing_budget_id_uses_single_scope_configured_on_contract():
+    rows = [{
+        "financial_effect": "BUDGET_COMMITMENT",
+        "financial_contract_id": 1.0,
+        "cloud_origem": "IBM",
+        "id_orcamento": None,
+    }]
+
+    result = assign_contract_budget_ids(rows, {("1", "ibm"): {"EXTERNO-IBM"}})
+
+    assert result[0]["id_orcamento"] == "EXTERNO-IBM"
+
+
+def test_missing_budget_id_rejects_ambiguous_contract_scope():
+    rows = [{
+        "financial_effect": "BUDGET_COMMITMENT",
+        "financial_contract_id": 1,
+        "cloud_origem": "ibm",
+        "id_orcamento": "",
+    }]
+
+    with pytest.raises(ValueError, match="expected one configured scope, found 2"):
+        assign_contract_budget_ids(
+            rows,
+            {("1", "ibm"): {"EXTERNO-IBM", "OUTRO-IBM"}},
+        )

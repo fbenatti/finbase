@@ -158,6 +158,45 @@ def organizational_budget_commitments(
     }
 
 
+def assign_contract_budget_ids(
+    rows: list[dict],
+    configured_scopes: dict[tuple[str, str], set[str]],
+) -> list[dict]:
+    """Fill a missing budget ID only when the contract scope is unambiguous.
+
+    A financial rule can match a provider row even when no organizational
+    classification matched it.  Such a row still belongs to the contract. If
+    that contract/cloud has exactly one configured budget pool, the contract
+    itself supplies the missing ID. Multiple configured pools require an
+    organizational classification and are rejected instead of being silently
+    settled against a zero budget.
+    """
+    output = [dict(row) for row in rows]
+    for row in output:
+        if str(row.get("financial_effect") or "").upper() != "BUDGET_COMMITMENT":
+            continue
+        raw_contract_id = row.get("financial_contract_id")
+        if raw_contract_id in (None, ""):
+            raise ValueError("contractual row has no financial_contract_id")
+        contract_id = str(int(float(raw_contract_id)))
+        cloud = str(row.get("cloud_origem") or "").strip().lower()
+        allowed = configured_scopes.get((contract_id, cloud), set())
+        current = str(row.get("id_orcamento") or "").strip()
+        if current:
+            if allowed and current not in allowed:
+                raise ValueError(
+                    f"budget ID {current} is outside contract {contract_id}/{cloud} scope"
+                )
+            continue
+        if len(allowed) != 1:
+            raise ValueError(
+                f"cannot resolve budget ID for contract {contract_id}/{cloud}: "
+                f"expected one configured scope, found {len(allowed)}"
+            )
+        row["id_orcamento"] = next(iter(allowed))
+    return output
+
+
 def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, str], Decimal], opening_credit_by_pool: dict[tuple[str, str, str], Decimal] | None = None) -> list[dict]:
     """Apply one settlement result to already transformed rows.
 

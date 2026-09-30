@@ -1344,8 +1344,12 @@ def _reprocess_destination_sync(
     from sqlalchemy import select, text, func
     from app.services import iceberg_service as iceberg
     from app.services import gold_builder
-    from app.services.contract_settlement import organizational_budget_commitments, settle_rows
-    from app.models.financial_contract import FinancialContract
+    from app.services.contract_settlement import (
+        assign_contract_budget_ids,
+        organizational_budget_commitments,
+        settle_rows,
+    )
+    from app.models.financial_contract import FinancialContract, FinancialContractBudgetScope
     from app.models.planning import PlanningEntry, PlanningVersion, FinancialType
     from app.services.destination_slice import (
         resolve_destination_slice_config,
@@ -2108,6 +2112,28 @@ def _reprocess_destination_sync(
             # ``cloud_origem``.
             if connection_ids and connection_ids[0] in conn_map:
                 contractual["cloud_origem"] = str(conn_map[connection_ids[0]].cloud_scope or contractual["cloud_origem"].iloc[0]).lower()
+            contract_ids = {
+                int(value)
+                for value in pd.to_numeric(contractual["financial_contract_id"], errors="coerce").dropna().unique()
+            }
+            configured_scopes: dict[tuple[str, str], set[str]] = {}
+            if contract_ids:
+                for contract_id, cloud, budget_id in session.execute(
+                    select(
+                        FinancialContractBudgetScope.contract_id,
+                        FinancialContractBudgetScope.cloud_scope,
+                        FinancialContractBudgetScope.budget_id,
+                    ).where(FinancialContractBudgetScope.contract_id.in_(contract_ids))
+                ).all():
+                    configured_scopes.setdefault(
+                        (str(contract_id), str(cloud).strip().lower()), set()
+                    ).add(str(budget_id).strip())
+            contractual = pd.DataFrame(
+                assign_contract_budget_ids(
+                    contractual.to_dict(orient="records"),
+                    configured_scopes,
+                )
+            )
             commitment_by_pool = {}
             budget_type = session.scalar(select(FinancialType).where(FinancialType.code == "orcamento"))
             if budget_type:
