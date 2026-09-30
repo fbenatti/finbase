@@ -451,6 +451,14 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
         df,
         _resolve_scope_filter(by_lower, cfg.get("scope_filter")),
     )
+    # Financial rules are first-match-wins independently of their target
+    # column. A fallback such as "realizado padrão" must not overwrite the
+    # technical consumption selected by a more specific commitment rule.
+    if financial_effect in {"DIRECT_REALIZED", "BUDGET_COMMITMENT"} and "financial_effect" in df.columns:
+        current_effect = df["financial_effect"].astype("string").str.upper()
+        scope_mask = scope_mask & (
+            current_effect.isna() | current_effect.isin(["", "NONE", "NAN"])
+        )
 
     # ── Auditoria: colunas que esta regra pode escrever (snapshot antes/depois) ──
     if rule.rule_type == "CONDITIONAL" and rule.conditions:

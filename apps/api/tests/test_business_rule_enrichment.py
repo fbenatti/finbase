@@ -275,3 +275,36 @@ def test_duplicate_legacy_departments_same_parent_use_stable_id():
     )
 
     assert frame.loc[0, "organograma_nivel_4"] == "Compra RIs"
+
+
+def test_financial_fallback_cannot_overwrite_commitment_rule():
+    commitment = _financial_rule(
+        id=19,
+        name="Commitment",
+        cloud_scope="oci",
+        target_column="realizado_cloud",
+        rule_type="EXPRESSION",
+        expression="BilledCost * 0.5",
+        financial_effect="BUDGET_COMMITMENT",
+        financial_contract_id=2,
+    )
+    fallback = _financial_rule(
+        id=9,
+        name="Fallback",
+        cloud_scope=None,
+        target_column="consumo_realizado",
+        rule_type="EXPRESSION",
+        expression="BilledCost",
+        financial_effect="DIRECT_REALIZED",
+        financial_contract_id=None,
+        priority=100,
+    )
+    frame = pd.DataFrame({"BilledCost": [100.0]})
+
+    _apply_business_rule_sync(frame, commitment, "202608")
+    _apply_business_rule_sync(frame, fallback, "202608")
+
+    assert frame.loc[0, "realizado_cloud"] == 50.0
+    assert "consumo_realizado" not in frame.columns or pd.isna(frame.loc[0, "consumo_realizado"])
+    assert frame.loc[0, "financial_effect"] == "BUDGET_COMMITMENT"
+    assert '"Fallback"' not in str(frame.loc[0, "business_rule"])
