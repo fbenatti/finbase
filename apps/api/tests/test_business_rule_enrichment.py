@@ -132,6 +132,60 @@ def test_cloud_fallback_classifies_only_rows_left_unmapped():
     assert pd.isna(df.loc[1, "business_rule"])
 
 
+def test_specific_vivo_ia_rule_wins_before_cloud_fallback():
+    specific = _classification_rule(
+        id=98,
+        name="Azure | resourceGroupName~vvia | Vivo IA",
+        source_field="source_resource_group_name",
+        pattern="source_resource_group_name~vvia",
+        pattern_type="multi_condition",
+        match_value="Vivo IA",
+        conditions=[{
+            "field": "source_resource_group_name",
+            "operator": "~",
+            "values": ["vvia"],
+            "logic": "AND",
+        }],
+        priority=350,
+        department_id=3,
+    )
+    fallback = _classification_rule(
+        id=99,
+        name="Fallback organizacional | azure",
+        source_field="cloud_origem",
+        pattern=".*",
+        pattern_type="regex",
+        match_value="SEM PROJETO DEFINIDO",
+        conditions=[{
+            "field": "cloud_origem",
+            "operator": "~",
+            "values": [".*"],
+            "logic": "AND",
+        }],
+        priority=2_147_483_647,
+        department_id=2,
+    )
+    df = pd.DataFrame({
+        "source_resource_group_name": ["rg-adbx-vvia-eng-brsouth-001-dev", "rg-unknown"],
+        "cloud_origem": ["azure-ti", "azure-ti"],
+        "organograma": [None, None],
+    })
+    data_dir = Department(id=1, parent_id=None, name="DIR DADOS E INTELIGENCIA ARTIFICIAL")
+    infra_dir = Department(id=4, parent_id=None, name="DIR INFRAESTRUTURA E CLOUD")
+    sem_projeto = Department(id=2, parent_id=4, name="SEM PROJETO DEFINIDO")
+    vivo_ia = Department(id=3, parent_id=1, name="Vivo IA")
+
+    _apply_classifications_sync(
+        df, [specific, fallback],
+        dept_map={1: data_dir, 2: sem_projeto, 3: vivo_ia, 4: infra_dir},
+    )
+
+    assert df.loc[0, "organograma"] == "Vivo IA"
+    assert df.loc[0, "organograma_nivel_1"] == "DIR DADOS E INTELIGENCIA ARTIFICIAL"
+    assert df.loc[1, "organograma"] == "SEM PROJETO DEFINIDO"
+    assert df.loc[1, "organograma_nivel_1"] == "DIR INFRAESTRUTURA E CLOUD"
+
+
 def test_ptax_rule_records_financial_rule():
     df = pd.DataFrame({"BilledCost": [100.0, 200.0]})
     _apply_business_rule_sync(df, _financial_rule(), "202608")
