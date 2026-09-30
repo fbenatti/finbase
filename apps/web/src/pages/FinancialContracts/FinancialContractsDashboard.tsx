@@ -37,8 +37,11 @@ export default function FinancialContractsDashboard() {
         const normalized = items as Contract[];
         setContracts(normalized);
         setOverview(summaries);
-        const firstSettled = normalized.find((item) => summaries.some((summary) => Number(summary.contract_id) === item.contract_id && summary.status === "SUCCESS"));
-        if (firstSettled) setContractId(String(firstSettled.contract_id));
+        // The overview is intentionally aggregated and may not expose the
+        // run status. Select the first available contract so the dashboard
+        // never opens with an empty contract filter and misleading zeroes.
+        const firstAvailable = normalized[0];
+        if (firstAvailable) setContractId(String(firstAvailable.contract_id));
       })
       .catch((reason) => active && setError(String(reason)))
       .finally(() => active && setLoading(false));
