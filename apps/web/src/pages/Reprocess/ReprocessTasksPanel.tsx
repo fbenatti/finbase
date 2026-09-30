@@ -107,7 +107,7 @@ export default function ReprocessTasksPanel() {
           && task.processed_blobs >= task.total_blobs
           ? publishingSilver
             ? "Publicando partição na camada Silver..."
-            : "Blobs processados · preparando publicação na camada Silver"
+            : "Bronze processado · preparando publicação na camada Silver"
           : task.phase || task.status;
         return (
           <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#f8fafc", borderRadius: 1 }}>
