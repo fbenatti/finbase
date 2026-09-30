@@ -10,7 +10,7 @@ import {
   createFinancialContract, FinancialContract, FinancialContractScope,
   getConnections, getDepartments, getFinancialContractScopes, getFinancialContracts,
   getFinancialContractSettlements, updateFinancialContract,
-  getFinancialContractsOverview,
+  getFinancialContractsOverview, recalculateFinancialContract,
 } from "../../services/api";
 
 const blank = { code: "", name: "", valid_from: "202601", valid_until: "202612", currency: "BRL", synthetic_department_id: "", connection_ids: [] as number[], scopes: [] as string[] };
@@ -27,6 +27,7 @@ export default function FinancialContracts() {
   const [selectedContract, setSelectedContract] = useState<number | null>(null);
   const [settlements, setSettlements] = useState<Record<string, unknown>[]>([]);
   const [overview, setOverview] = useState<Record<string, unknown>[]>([]);
+  const [recalculating, setRecalculating] = useState(false);
 
   const load = () => { getFinancialContracts().then(setContracts).catch((e) => setError(String(e))); getFinancialContractsOverview().then(setOverview).catch(() => {}); };
   useEffect(() => {
@@ -78,7 +79,21 @@ export default function FinancialContracts() {
       </TableRow>)}</TableBody>
     </Table>
     {selectedContract != null && <Box sx={{ mt: 3 }}>
-      <Typography variant="h6">Movimentações da liquidação</Typography>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Typography variant="h6">Movimentações da liquidação</Typography>
+        <Button size="small" variant="outlined" disabled={recalculating || !settlements.length} onClick={async () => {
+          setRecalculating(true); setError("");
+          try {
+            await recalculateFinancialContract(selectedContract, settlements.map((row) => ({
+              period: String(row.period), cloud_scope: String(row.cloud_scope), budget_id: String(row.budget_id),
+              commitment: row.commitment || 0, billed_cost: row.billed_cost || 0, consumption: row.consumption || 0,
+            })));
+            const refreshed = await getFinancialContractSettlements(selectedContract);
+            setSettlements(refreshed); load();
+          } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível recalcular o contrato"); }
+          finally { setRecalculating(false); }
+        }}>{recalculating ? "Recalculando…" : "Recalcular contrato"}</Button>
+      </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Valores do razão por contrato, cloud, ID Orçamento e competência. O realizado só aparece quando existe consumo positivo ou overage descoberto.</Typography>
       <Table size="small"><TableHead><TableRow>{["Competência", "Cloud / ID", "Compromisso", "Consumo", "Delta crédito/overage", "Saldo final", "Realizado"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{settlements.map((row, index) => <TableRow key={`${row.period}-${row.budget_id}-${index}`}><TableCell>{String(row.period || "—")}</TableCell><TableCell>{String(row.cloud_scope || "—")} / {String(row.budget_id || "—")}</TableCell><TableCell>{String(row.commitment || "0")}</TableCell><TableCell>{String(row.consumption || "0")}</TableCell><TableCell sx={{ color: Number(row.credit_overage_delta || 0) >= 0 ? "success.main" : "error.main" }}>{String(row.credit_overage_delta || "0")}</TableCell><TableCell>{String(row.closing_credit || "0")}</TableCell><TableCell>{String(row.realized || "0")}</TableCell></TableRow>)}</TableBody></Table>
       {!settlements.length && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhuma liquidação publicada para este contrato.</Typography>}
