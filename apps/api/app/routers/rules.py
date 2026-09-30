@@ -67,6 +67,54 @@ def _department_path(department_id: int, departments: dict[int, Department]) -> 
     return list(reversed(path))
 
 
+def _department_cloud_scope(department_id: int, departments: dict[int, Department]) -> str | None:
+    """Resolve a project's cloud from its explicit filter or provider branch."""
+    current = departments.get(department_id)
+    seen: set[int] = set()
+    while current and current.id not in seen:
+        seen.add(current.id)
+        scope = (current.cloud_filter or "").strip()
+        if scope:
+            return connection_cloud_scope(scope) or scope.lower()
+        current = departments.get(current.parent_id) if current.parent_id else None
+    path = _department_path(department_id, departments)
+    if len(path) >= 3 and path[1] in {"Showback", "Chargeback"}:
+        return connection_cloud_scope(path[2]) or path[2].lower()
+    return None
+
+
+def _is_project_department(department: Department, departments: dict[int, Department]) -> bool:
+    """Treat explicit project nodes and leaves below a cloud provider as projects."""
+    custom_fields = department.custom_fields if isinstance(department.custom_fields, dict) else {}
+    if str(custom_fields.get("tipo") or "").strip().casefold() == "projeto":
+        return True
+    return bool(department.parent_id and _department_cloud_scope(department.id, departments))
+
+
+def _duplicate_project_department(
+    name: str,
+    parent_id: int | None,
+    departments: dict[int, Department],
+    *,
+    exclude_id: int | None = None,
+) -> Department | None:
+    """Find a same-cloud project name, even when it sits under another director."""
+    candidate_scope = _department_cloud_scope(parent_id, departments) if parent_id else None
+    normalized_name = (name or "").strip().casefold()
+    if not normalized_name or not candidate_scope:
+        return None
+    for existing in departments.values():
+        if existing.id == exclude_id or not existing.active:
+            continue
+        if (existing.name or "").strip().casefold() != normalized_name:
+            continue
+        if not _is_project_department(existing, departments):
+            continue
+        if _department_cloud_scope(existing.id, departments) == candidate_scope:
+            return existing
+    return None
+
+
 def _subtree_ids(root_id: int, departments: dict[int, Department]) -> set[int]:
     children: dict[int, list[int]] = {}
     for department in departments.values():
