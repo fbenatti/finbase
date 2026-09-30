@@ -335,6 +335,12 @@ async def seed(db: AsyncSession):
     if settings.skip_seed:
         return
 
+    # Seeded rules are reconciled on every startup, including existing
+    # installations that already have source connections. These last-priority
+    # rules assign only rows left without an organizational classification.
+    from app.services.classification_fallbacks import ensure_cloud_classification_fallbacks
+    await ensure_cloud_classification_fallbacks(db)
+
     # O PTU deixou de ser conexão própria: é uma **fonte** dentro da conexão do
     # ambiente (`azure_connection_source`), escolhida pelo operador. Recriar
     # `azure-4p-ptu` aqui duplicava as fontes da 4P a cada startup.

@@ -29,6 +29,7 @@ if "oci" not in sys.modules:
     sys.modules["oci.exceptions"] = _oci.exceptions
 
 import pandas as pd
+from app.models.rules import Department
 
 from app.services.task_runner import (
     _apply_business_rule_sync,
@@ -95,6 +96,39 @@ def test_classification_rule_records_matched_rule():
     }
     assert "financial" not in envelope
     # Linha que nao deu match permanece sem classificacao
+    assert pd.isna(df.loc[1, "business_rule"])
+
+
+def test_cloud_fallback_classifies_only_rows_left_unmapped():
+    fallback = _classification_rule(
+        id=99,
+        name="Fallback organizacional | azure",
+        source_field="source_resource_group_name",
+        pattern=".*",
+        pattern_type="regex",
+        match_value="SEM PROJETO DEFINIDO",
+        conditions=[{
+            "field": "source_resource_group_name",
+            "operator": "~",
+            "values": [".*"],
+            "logic": "AND",
+        }],
+        priority=2_147_483_647,
+        department_id=2,
+    )
+    df = pd.DataFrame({
+        "source_resource_group_name": ["rg-unmapped", "rg-already-mapped"],
+        "organograma": [None, "Datamesh"],
+    })
+    infra = Department(id=1, parent_id=None, name="DIR INFRAESTRUTURA E CLOUD")
+    project = Department(id=2, parent_id=1, name="SEM PROJETO DEFINIDO")
+
+    _apply_classifications_sync(df, [fallback], dept_map={1: infra, 2: project})
+
+    assert df.loc[0, "organograma"] == "SEM PROJETO DEFINIDO"
+    assert df.loc[0, "organograma_nivel_1"] == "DIR INFRAESTRUTURA E CLOUD"
+    assert df.loc[0, "organograma_nivel_2"] == "SEM PROJETO DEFINIDO"
+    assert df.loc[1, "organograma"] == "Datamesh"
     assert pd.isna(df.loc[1, "business_rule"])
 
 
