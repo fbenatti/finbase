@@ -121,6 +121,7 @@ export default function ReprocessTasksPanel() {
                 )}
                 <Typography variant="caption" color="text.secondary">
                   {stageLabel}
+                  {running && kind(task) === "reprocess" ? ` · ${pct}%` : ""}
                   {kind(task) !== "reprocess" && task.current_blob && task.current_blob !== task.phase ? ` · ${task.current_blob}` : ""}
                 </Typography>
               </Box>
