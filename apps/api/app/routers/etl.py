@@ -1178,7 +1178,7 @@ def _process_blob_for_reprocess(
             else:
                 chunks.append(target)
             progress_text = (
-                f"blob {billing_period}: {rows_in_blob:,} linhas processadas ({clone_count:,} Returns no batch)"
+                f"Bronze · {billing_period}: {rows_in_blob:,} linhas processadas ({clone_count:,} Returns no batch)"
             )
             status = _inmemory_tasks.get(task_id)
             if status is not None:
