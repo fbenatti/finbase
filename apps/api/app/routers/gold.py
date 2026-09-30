@@ -451,7 +451,16 @@ import re as _re
 from typing import Literal as _Literal
 
 _GOLD_TABLE_RE = _re.compile(r"^dest_dm_[a-z0-9_]+$")
-_GOLD_MEASURE_COLUMNS = frozenset({"quantity", "realizado", "billedcost", "effectivecost", "consumedquantity"})
+_GOLD_MEASURE_COLUMNS = frozenset({
+    "quantity",
+    "realizado",
+    "realizado_cloud",
+    "consumo_realizado",
+    "ajuste_contratual",
+    "billedcost",
+    "effectivecost",
+    "consumedquantity",
+})
 _GOLD_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
 # Aliases lógicos → colunas físicas da Gold (ex.: "quantity" da UI = consumedquantity).
 _GOLD_COLUMN_ALIASES = {"quantity": "consumedquantity"}

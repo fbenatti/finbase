@@ -36,3 +36,18 @@ Exemplo: um pool IBM `EXTERNO-IBM` com orçamento mensal de R$ 2 milhões e
 consumo calculado de R$ 600 mil no projeto A e R$ 400 mil no projeto B gera
 pesos de 60% e 40%. O `realizado` será R$ 1,2 milhão e R$ 800 mil,
 respectivamente.
+
+## Materialização executiva
+
+O cubo `dest_dm_cost_visao_completa` materializa como medidas somáveis:
+
+- `realizado`;
+- `realizado_cloud`;
+- `consumo_realizado`;
+- `ajuste_contratual`;
+- `billedcost`;
+- `consumedquantity`.
+
+Fontes auxiliares que não possuem uma dessas medidas contribuem com zero. Isso
+mantém forecast e orçamento compatíveis com o mesmo cubo sem apagar a memória
+de cálculo das linhas realizadas.
