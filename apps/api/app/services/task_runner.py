@@ -690,10 +690,12 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
 
     # ── Apply rules ──
     for rule in class_rules:
-        # A classification must allocate to an organizational object.  Legacy
-        # unlinked rules are deliberately ignored rather than emitting a
-        # misleading free-text project with no department hierarchy.
-        if not rule.active or not rule.department_id:
+        # Rules imported from legacy governance may not have a department_id.
+        # They still carry a valid target_field/match_value pair and must be
+        # applied; otherwise an entire provider can lose its classification
+        # during a reprocess.  When department_id is absent, the textual
+        # target is materialized and the hierarchy fields remain nullable.
+        if not rule.active:
             continue
         mask = evaluate_rule_conditions(df, rule, canon_cache=canon_cache)
         if mask is None or not mask.any():
