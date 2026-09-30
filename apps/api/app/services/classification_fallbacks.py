@@ -36,6 +36,10 @@ _CLOUD_NAMES = {
     "aws": ("AWS", "Amazon Web Services"),
     "mongodb": ("Atlas-MongoDB", "MongoDB", "Atlas"),
 }
+_LEGACY_FALLBACK_RULE_NAMES = {
+    "gcp": ("GCP TI | Fallback Padrão",),
+    "oci": ("OCI | Fallback",),
+}
 
 
 def _canon(value: str | None) -> str:
@@ -180,6 +184,17 @@ async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
             await db.flush()
             departments.append(project)
             by_parent_name[(directory.id, _canon(project.name))] = project
+
+        # Older source-specific fallbacks run before the last-priority cloud
+        # rule. Keep them active, but point them at the provider's unique leaf
+        # so they cannot reintroduce the shared generic project name.
+        for legacy_name in _LEGACY_FALLBACK_RULE_NAMES.get(scope, ()):
+            legacy_rule = (await db.execute(
+                select(ClassificationRule).where(ClassificationRule.name == legacy_name)
+            )).scalars().first()
+            if legacy_rule is not None:
+                legacy_rule.department_id = project.id
+                legacy_rule.match_value = fallback_project
 
         rule_name = f"Fallback organizacional | {scope}"
         rule = (await db.execute(
