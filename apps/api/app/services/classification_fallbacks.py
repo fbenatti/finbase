@@ -19,8 +19,15 @@ from app.services.cloud_scope import resolve_connection_scope
 
 logger = logging.getLogger(__name__)
 
-FALLBACK_PROJECT = "SEM PROJETO DEFINIDO"
 FALLBACK_DIRECTORY = "DIR INFRAESTRUTURA E CLOUD"
+FALLBACK_PROJECT_BY_SCOPE = {
+    "azure": "SEM PROJETO DEFINIDO - AZURE",
+    "gcp": "SEM PROJETO DEFINIDO - GCP",
+    "oci": "SEM PROJETO DEFINIDO - OCI",
+    "ibm": "SEM PROJETO DEFINIDO - IBM",
+    "aws": "SEM PROJETO DEFINIDO - AWS",
+    "mongodb": "SEM PROJETO DEFINIDO - MONGODB",
+}
 _CLOUD_NAMES = {
     "azure": ("Azure",),
     "gcp": ("GCP",),
@@ -102,10 +109,11 @@ async def _ensure_azure_vivo_ia_rule(
 async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
     """Ensure one idempotent catch-all classification rule per cloud scope.
 
-    Each provider gets a single ``SEM PROJETO DEFINIDO`` leaf below its
+    Each provider gets a uniquely named fallback leaf below its own
     ``DIR INFRAESTRUTURA E CLOUD`` node. Provider roots follow the existing
     Consumo Cloud Showback/Chargeback tree; IBM defaults to Chargeback while
-    other cloud providers default to Showback.
+    other cloud providers default to Showback. Missing directory nodes are
+    created under the provider before the fallback leaf is attached.
     """
     connections = (await db.execute(select(SourceConnection))).scalars().all()
     scopes = sorted({
@@ -164,9 +172,10 @@ async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
             departments.append(directory)
             by_parent_name[(provider.id, _canon(directory.name))] = directory
 
-        project = by_parent_name.get((directory.id, _canon(FALLBACK_PROJECT)))
+        fallback_project = FALLBACK_PROJECT_BY_SCOPE[scope]
+        project = by_parent_name.get((directory.id, _canon(fallback_project)))
         if project is None:
-            project = Department(parent_id=directory.id, name=FALLBACK_PROJECT)
+            project = Department(parent_id=directory.id, name=fallback_project)
             db.add(project)
             await db.flush()
             departments.append(project)
@@ -183,7 +192,7 @@ async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
             "source_field": "cloud_origem",
             "pattern": ".*",
             "pattern_type": "regex",
-            "match_value": FALLBACK_PROJECT,
+            "match_value": fallback_project,
             "target_field": "organograma",
             "conditions": [{
                 "field": "cloud_origem",
