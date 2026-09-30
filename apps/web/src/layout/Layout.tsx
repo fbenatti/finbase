@@ -73,7 +73,6 @@ const menuGroups = [
       { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
       { path: "/financial-contracts", label: "Dashboard contratual", icon: <AccountBalanceIcon /> },
-      { path: "/governance?tab=financial-contracts", label: "Configurar contratos", icon: <RuleIcon /> },
       { path: "/financial-contracts-dashboard", label: "Dashboard contratual", icon: <BarChartIcon /> },
     ],
   },
