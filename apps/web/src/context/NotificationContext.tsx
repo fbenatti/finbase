@@ -506,6 +506,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       )}
                       <Typography variant="caption" color="text.secondary">
                         {reprocessStageLabel(item)}
+                        {isActive && item.kind === "reprocess" ? ` · ${item.progress}%` : ""}
                         {item.kind !== "backup" && item.kind !== "reprocess" && item.current && item.current !== item.phase ? " · " + item.current : ""}
                       </Typography>
                     </Box>
