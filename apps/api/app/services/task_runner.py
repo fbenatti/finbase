@@ -667,6 +667,46 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         hierarchy_cache[dept_id] = result
         return result
 
+    # Imports antigos preservam ``match_value`` e ``cloud_scope``, mas podem
+    # perder a FK department_id quando o organograma é recriado.  Resolver a
+    # FK em memória evita degradar uma classificação válida para texto solto.
+    # Nome duplicado (por exemplo, Condominio em Azure e IBM) é desambiguado
+    # pelo nó de cloud existente no caminho organizacional.
+    departments_by_name: dict[str, list[int]] = {}
+    for department in dept_map.values():
+        normalized_name = _canon(getattr(department, "name", "") or "")
+        if normalized_name:
+            departments_by_name.setdefault(normalized_name, []).append(department.id)
+
+    scope_path_names = {
+        "azure": {"azure"},
+        "ibm": {"ibm"},
+        "gcp": {"gcp"},
+        "oci": {"oci", "oracle", "oracle cloud"},
+        "atlas": {"mongodb", "atlas", "azure mongodb"},
+    }
+    resolved_department_cache: dict[int, int | None] = {}
+
+    def resolve_department_id(rule: ClassificationRule) -> int | None:
+        if rule.department_id:
+            return int(rule.department_id)
+        if rule.id in resolved_department_cache:
+            return resolved_department_cache[rule.id]
+        candidates = list(departments_by_name.get(_canon(rule.match_value or ""), []))
+        resolved: int | None = candidates[0] if len(candidates) == 1 else None
+        if len(candidates) > 1:
+            expected_names = scope_path_names.get(_canon(rule.cloud_scope or ""), set())
+            scoped: list[int] = []
+            for candidate_id in candidates:
+                _leaf, _root, chain = get_hierarchy(candidate_id)
+                path_names = {_canon(getattr(node, "name", "") or "") for node in chain}
+                if expected_names & path_names:
+                    scoped.append(candidate_id)
+            if len(scoped) == 1:
+                resolved = scoped[0]
+        resolved_department_cache[rule.id] = resolved
+        return resolved
+
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
     for col in ['organograma', 'centro_custo', 'id_orcamento', 'ambiente',
                 'custom_fields', 'subscription_rg',
@@ -713,7 +753,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         df.loc[effective_mask, target] = rule.match_value
 
         # Resolve department hierarchy from pre-built cache (zero DB queries!)
-        dept_id = rule.department_id
+        dept_id = resolve_department_id(rule)
 
         if dept_id:
             leaf, root, chain = get_hierarchy(dept_id)
@@ -774,6 +814,8 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
             "scope": rule.cloud_scope,
             "conditions": normalize_rule_conditions(rule),
             "priority": rule.priority,
+            "department_id": dept_id,
+            "department_resolved": bool(dept_id and not rule.department_id),
         }
 
         def _merge_classification(value):

@@ -90,6 +90,8 @@ def test_classification_rule_records_matched_rule():
             "logic": "AND",
         }],
         "priority": 10,
+        "department_id": 1,
+        "department_resolved": False,
     }
     assert "financial" not in envelope
     # Linha que nao deu match permanece sem classificacao
@@ -107,6 +109,8 @@ def test_ptax_rule_records_financial_rule():
         "scope": "azure",
         "conditions": [],
         "priority": 5,
+        "financial_effect": "NONE",
+        "financial_contract_id": None,
     }]
     assert "classification" not in envelope
 
@@ -178,3 +182,49 @@ def test_reprocess_registers_business_rule_internal_type():
     etl_source = Path(__file__).resolve().parents[1] / "app" / "routers" / "etl.py"
     text = etl_source.read_text(encoding="utf-8")
     assert '"business_rule": "JSONB"' in text
+
+
+def test_unlinked_classification_resolves_department_by_cloud_path():
+    root = SimpleNamespace(
+        id=1, parent_id=None, name="Consumo Cloud", centro_custo=None,
+        id_orcamento=None, ambiente=None, custom_fields=None,
+    )
+    azure = SimpleNamespace(
+        id=2, parent_id=1, name="Azure", centro_custo=None,
+        id_orcamento=None, ambiente=None, custom_fields=None,
+    )
+    ibm = SimpleNamespace(
+        id=3, parent_id=1, name="IBM", centro_custo=None,
+        id_orcamento="EXTERNO-IBM", ambiente=None, custom_fields=None,
+    )
+    azure_condominio = SimpleNamespace(
+        id=4, parent_id=2, name="Condominio", centro_custo=None,
+        id_orcamento=None, ambiente=None, custom_fields=None,
+    )
+    ibm_condominio = SimpleNamespace(
+        id=5, parent_id=3, name="Condominio", centro_custo=None,
+        id_orcamento=None, ambiente=None, custom_fields=None,
+    )
+    rule = _classification_rule(
+        id=99,
+        cloud_scope="ibm",
+        department_id=None,
+        match_value="Condominio",
+    )
+    frame = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml"]})
+
+    _apply_classifications_sync(
+        frame,
+        [rule],
+        dept_map={node.id: node for node in (root, azure, ibm, azure_condominio, ibm_condominio)},
+        hierarchy_cache={},
+    )
+
+    assert frame.loc[0, "organograma"] == "Condominio"
+    assert frame.loc[0, "organograma_nivel_1"] == "Consumo Cloud"
+    assert frame.loc[0, "organograma_nivel_2"] == "IBM"
+    assert frame.loc[0, "organograma_nivel_3"] == "Condominio"
+    assert frame.loc[0, "id_orcamento"] == "EXTERNO-IBM"
+    envelope = json.loads(frame.loc[0, "business_rule"])
+    assert envelope["classification"]["department_id"] == 5
+    assert envelope["classification"]["department_resolved"] is True
