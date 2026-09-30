@@ -137,9 +137,14 @@ async def contracts_overview(db: AsyncSession = Depends(get_db)):
     contracts = (await db.execute(select(FinancialContract).order_by(FinancialContract.name))).scalars().all()
     result = []
     for contract in contracts:
+        latest_run = (await db.execute(
+            select(ContractSettlementRun.id)
+            .where(ContractSettlementRun.contract_id == contract.id, ContractSettlementRun.status == "SUCCESS")
+            .order_by(ContractSettlementRun.id.desc()).limit(1)
+        )).scalar_one_or_none()
         latest = (await db.execute(
             select(ContractSettlementMonth)
-            .where(ContractSettlementMonth.contract_id == contract.id)
+            .where(ContractSettlementMonth.contract_id == contract.id, ContractSettlementMonth.run_id == latest_run)
             .order_by(ContractSettlementMonth.period.desc(), ContractSettlementMonth.id.desc())
         )).scalars().all()
         result.append({
@@ -213,7 +218,12 @@ async def update_contract(contract_id: int, body: FinancialContractIn, db: Async
 @router.get("/{contract_id}/settlements")
 async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db)):
     await _load(contract_id, db)
-    rows = (await db.execute(select(ContractSettlementMonth).where(ContractSettlementMonth.contract_id == contract_id).order_by(ContractSettlementMonth.period, ContractSettlementMonth.cloud_scope, ContractSettlementMonth.budget_id))).scalars().all()
+    latest_run = (await db.execute(
+        select(ContractSettlementRun.id)
+        .where(ContractSettlementRun.contract_id == contract_id, ContractSettlementRun.status == "SUCCESS")
+        .order_by(ContractSettlementRun.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    rows = (await db.execute(select(ContractSettlementMonth).where(ContractSettlementMonth.contract_id == contract_id, ContractSettlementMonth.run_id == latest_run).order_by(ContractSettlementMonth.period, ContractSettlementMonth.cloud_scope, ContractSettlementMonth.budget_id))).scalars().all()
     return [{column.name: getattr(row, column.name) for column in row.__table__.columns} for row in rows]
 
 
