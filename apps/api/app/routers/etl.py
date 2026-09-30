@@ -1347,6 +1347,7 @@ def _reprocess_destination_sync(
     from app.services.contract_settlement import (
         assign_contract_budget_ids,
         organizational_budget_commitments,
+        organizational_budget_owners,
         settle_rows,
     )
     from app.models.financial_contract import FinancialContract, FinancialContractBudgetScope
@@ -2134,6 +2135,45 @@ def _reprocess_destination_sync(
                     configured_scopes,
                 )
             )
+            owners = organizational_budget_owners(
+                dept_cache,
+                {
+                    (str(row.cloud_origem).strip().lower(), str(row.id_orcamento).strip())
+                    for row in contractual[["cloud_origem", "id_orcamento"]].drop_duplicates().itertuples(index=False)
+                },
+            )
+            missing_hierarchy = contractual.get(
+                "organograma_nivel_1", pd.Series(index=contractual.index, dtype="object")
+            ).fillna("").astype(str).str.strip().eq("")
+            for index in contractual.index[missing_hierarchy]:
+                scope = (
+                    str(contractual.at[index, "cloud_origem"] or "").strip().lower(),
+                    str(contractual.at[index, "id_orcamento"] or "").strip(),
+                )
+                owner_id = owners.get(scope)
+                if owner_id is None:
+                    raise ValueError(
+                        f"cannot resolve unique organizational owner for contractual pool {scope[0]}/{scope[1]}"
+                    )
+                chain = []
+                current = dept_cache.get(owner_id)
+                seen = set()
+                while current is not None and current.id not in seen:
+                    seen.add(current.id)
+                    chain.append(current)
+                    current = dept_cache.get(current.parent_id) if current.parent_id else None
+                chain.reverse()
+                contractual.at[index, "organograma"] = chain[-1].name
+                for level in range(1, 8):
+                    contractual.at[index, f"organograma_nivel_{level}"] = (
+                        chain[level - 1].name if len(chain) >= level else None
+                    )
+                for field in ("centro_custo", "ambiente"):
+                    inherited = next(
+                        (getattr(node, field) for node in reversed(chain) if getattr(node, field, None)),
+                        None,
+                    )
+                    contractual.at[index, field] = inherited
             commitment_by_pool = {}
             budget_type = session.scalar(select(FinancialType).where(FinancialType.code == "orcamento"))
             if budget_type:

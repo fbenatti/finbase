@@ -32,6 +32,12 @@ configuração do contrato. Se houver dois ou mais IDs possíveis, a publicaçã
 bloqueada: o sistema não cria pool de orçamento zero nem escolhe um ID
 arbitrariamente.
 
+Registros de consumo sem projeto/subconta também não podem desaparecer do
+dashboard executivo. Quando o pool possui um único nó organizacional que
+declara explicitamente aquele `ID Orçamento`, essas linhas são classificadas no
+próprio nó proprietário do pool (por exemplo, `Chargeback > IBM`), sem criar um
+projeto fictício. Ambiguidade de proprietário bloqueia a publicação.
+
 Exemplo: um pool IBM `EXTERNO-IBM` com orçamento mensal de R$ 2 milhões e
 consumo calculado de R$ 600 mil no projeto A e R$ 400 mil no projeto B gera
 pesos de 60% e 40%. O `realizado` será R$ 1,2 milhão e R$ 800 mil,

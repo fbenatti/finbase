@@ -7,6 +7,7 @@ from app.services.contract_settlement import (
     allocate_pool,
     assign_contract_budget_ids,
     organizational_budget_commitments,
+    organizational_budget_owners,
     settle_pool,
     settle_rows,
 )
@@ -168,3 +169,21 @@ def test_missing_budget_id_rejects_ambiguous_contract_scope():
             rows,
             {("1", "ibm"): {"EXTERNO-IBM", "OUTRO-IBM"}},
         )
+
+
+def test_budget_owner_is_resolved_by_explicit_id_and_cloud_path():
+    departments = {
+        1: SimpleNamespace(id=1, parent_id=None, name="Consumo Cloud", id_orcamento=None),
+        2: SimpleNamespace(id=2, parent_id=1, name="Chargeback", id_orcamento=None),
+        3: SimpleNamespace(id=3, parent_id=2, name="IBM", id_orcamento="EXTERNO-IBM"),
+        4: SimpleNamespace(id=4, parent_id=3, name="Projeto", id_orcamento=None),
+        5: SimpleNamespace(id=5, parent_id=2, name="Azure", id_orcamento="EXTERNO-AZURE"),
+    }
+
+    assert organizational_budget_owners(
+        departments,
+        [("ibm", "EXTERNO-IBM"), ("azure", "EXTERNO-AZURE")],
+    ) == {
+        ("ibm", "EXTERNO-IBM"): 3,
+        ("azure", "EXTERNO-AZURE"): 5,
+    }

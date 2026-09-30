@@ -197,6 +197,32 @@ def assign_contract_budget_ids(
     return output
 
 
+def organizational_budget_owners(
+    departments: dict[int, Any],
+    scopes: Iterable[tuple[str, str]],
+) -> dict[tuple[str, str], int]:
+    """Return the unique organizational node that explicitly owns each pool."""
+    requested = {(cloud.strip().lower(), budget_id.strip()) for cloud, budget_id in scopes}
+    candidates: dict[tuple[str, str], list[int]] = {scope: [] for scope in requested}
+    for department in departments.values():
+        explicit_budget = str(getattr(department, "id_orcamento", None) or "").strip()
+        if not explicit_budget:
+            continue
+        chain: list[Any] = []
+        current = department
+        seen: set[int] = set()
+        while current is not None and int(current.id) not in seen:
+            seen.add(int(current.id))
+            chain.append(current)
+            current = departments.get(current.parent_id) if current.parent_id else None
+        chain.reverse()
+        cloud = str(chain[2].name).strip().lower() if len(chain) >= 3 else ""
+        scope = (cloud, explicit_budget)
+        if scope in candidates:
+            candidates[scope].append(int(department.id))
+    return {scope: ids[0] for scope, ids in candidates.items() if len(ids) == 1}
+
+
 def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, str], Decimal], opening_credit_by_pool: dict[tuple[str, str, str], Decimal] | None = None) -> list[dict]:
     """Apply one settlement result to already transformed rows.
 
