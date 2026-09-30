@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import { getFinancialContractSettlements, getFinancialContracts, getFinancialContractsOverview } from "../../services/api";
 
-type Contract = { contract_id: number; code: string; name: string; active: boolean; currency?: string; valid_from?: string; valid_until?: string; last_period?: string; run_id?: number; last_settlement_at?: string; status?: string };
+type Contract = { id: number; code: string; name: string; active: boolean; currency?: string; valid_from?: string; valid_until?: string; last_period?: string; run_id?: number; last_settlement_at?: string; status?: string };
 type Settlement = Record<string, unknown> & { period?: string; cloud_scope?: string; budget_id?: string };
 const amount = (value: unknown) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
 const numeric = (row: Settlement, key: string) => Number(row[key] ?? 0);
@@ -41,7 +41,7 @@ export default function FinancialContractsDashboard() {
         // run status. Select the first available contract so the dashboard
         // never opens with an empty contract filter and misleading zeroes.
         const firstAvailable = normalized[0];
-        if (firstAvailable) setContractId(String(firstAvailable.contract_id));
+        if (firstAvailable) setContractId(String(firstAvailable.id));
       })
       .catch((reason) => active && setError(String(reason)))
       .finally(() => active && setLoading(false));
@@ -71,7 +71,7 @@ export default function FinancialContractsDashboard() {
   }), [periods, settlements]);
   const chartMonths = monthly.slice(-12);
   const chartMax = Math.max(1, ...chartMonths.flatMap((item) => [item.budget, item.consumption]));
-  const currentContract = contracts.find((item) => String(item.contract_id) === contractId);
+  const currentContract = contracts.find((item) => String(item.id) === contractId);
   const currentSummary = overview.find((item) => String(item.contract_id) === contractId);
 
   return <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: "#f5f7fb", minHeight: "calc(100vh - 64px)" }}>
@@ -80,7 +80,7 @@ export default function FinancialContractsDashboard() {
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>Acompanhe orçamento, consumo e liquidação mês a mês.</Typography></Box>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { sm: 380 } }}>
         <FormControl size="small" fullWidth><InputLabel>Contrato</InputLabel><Select value={contractId} label="Contrato" onChange={(event) => { setContractId(event.target.value); setPeriod("all"); }}>
-          {contracts.map((item) => <MenuItem key={item.contract_id} value={String(item.contract_id)}>{item.name} · {item.code}</MenuItem>)}
+          {contracts.map((item) => <MenuItem key={item.id} value={String(item.id)}>{item.name} · {item.code}</MenuItem>)}
         </Select></FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }} disabled={!periods.length}><InputLabel>Competência</InputLabel><Select value={period} label="Competência" onChange={(event) => setPeriod(event.target.value)}>
           <MenuItem value="all">Todas</MenuItem>{periods.map((item) => <MenuItem key={item} value={item}>{periodLabel(item)}</MenuItem>)}
