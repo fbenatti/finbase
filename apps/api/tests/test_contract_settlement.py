@@ -8,6 +8,7 @@ from app.services.contract_settlement import (
     assign_contract_budget_ids,
     organizational_budget_commitments,
     organizational_budget_owners,
+    period_within_contract,
     settle_pool,
     settle_rows,
 )
@@ -71,6 +72,13 @@ def test_provider_realized_cloud_formulas_are_exact():
 
     assert oci_realized_cloud == Decimal("470.00")
     assert ibm_realized_cloud == Decimal("819.86500")
+
+
+def test_contract_validity_excludes_pre_contract_billing_months():
+    assert not period_within_contract("202512", "202601", "202712")
+    assert period_within_contract("202601", "202601", "202712")
+    assert period_within_contract("202712", "202601", "202712")
+    assert not period_within_contract("202801", "202601", "202712")
 
 
 def test_allocation_ignores_project_budget_and_uses_consumption_pool():

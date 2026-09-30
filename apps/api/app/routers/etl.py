@@ -1349,6 +1349,7 @@ def _reprocess_destination_sync(
         organizational_budget_commitments,
         organizational_budget_owners,
         normalize_cloud_scope,
+        period_within_contract,
         settle_rows,
     )
     from app.models.financial_contract import FinancialContract, FinancialContractBudgetScope
@@ -1865,6 +1866,7 @@ def _reprocess_destination_sync(
         temp_name: str | None = None
         staged_rows = 0
         contractual_frames: list[pd.DataFrame] = []
+        contract_validity_cache: dict[int, tuple[str, str]] = {}
 
         def _stage_frame(frame: pd.DataFrame) -> None:
             """Append one completed blob to the temporary Iceberg table."""
@@ -1992,7 +1994,44 @@ def _reprocess_destination_sync(
                 def _write_batch(frame, source_rows):
                     nonlocal total_rows_processed
                     nonlocal blob_input_rows, blob_output_rows
+                    frame = frame.copy()
                     contractual = frame.get("financial_effect", pd.Series(index=frame.index)).astype(str).str.upper().eq("BUDGET_COMMITMENT")
+                    if contractual.any():
+                        contract_ids = {
+                            int(value)
+                            for value in pd.to_numeric(
+                                frame.loc[contractual, "financial_contract_id"], errors="coerce"
+                            ).dropna().unique()
+                        } if "financial_contract_id" in frame.columns else set()
+                        missing_contract_ids = contract_ids - set(contract_validity_cache)
+                        if missing_contract_ids:
+                            from app.models.financial_contract import FinancialContract
+                            contract_validity_cache.update({
+                                int(contract_id): (str(valid_from), str(valid_until))
+                                for contract_id, valid_from, valid_until in session.execute(
+                                    select(
+                                        FinancialContract.id,
+                                        FinancialContract.valid_from,
+                                        FinancialContract.valid_until,
+                                    ).where(FinancialContract.id.in_(missing_contract_ids))
+                                ).all()
+                            })
+                        outside_validity = pd.Series(False, index=frame.index)
+                        if contract_ids and "financial_contract_id" in frame.columns:
+                            row_contract_ids = pd.to_numeric(
+                                frame["financial_contract_id"], errors="coerce"
+                            )
+                            for contract_id in contract_ids:
+                                validity = contract_validity_cache.get(contract_id)
+                                if not validity:
+                                    continue
+                                outside_validity |= row_contract_ids.eq(contract_id) & (
+                                    not period_within_contract(str(bperiod), *validity)
+                                )
+                        if outside_validity.any():
+                            frame.loc[outside_validity, "financial_effect"] = "DIRECT_REALIZED"
+                            frame.loc[outside_validity, "financial_contract_id"] = None
+                            contractual = frame.get("financial_effect", pd.Series(index=frame.index)).astype(str).str.upper().eq("BUDGET_COMMITMENT")
                     if contractual.any():
                         if (~contractual).any():
                             _stage_frame(frame.loc[~contractual].copy())
@@ -2831,6 +2870,16 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                 ).distinct()
             )).scalars().all())
             for contract in affected_contracts:
+                # Reprocessing months before the contract starts cannot
+                # change its opening balance. Fan out only from the first
+                # explicitly selected month inside the contract term.
+                contract_requested_periods = [
+                    str(period) for period in body.billing_periods
+                    if contract.valid_from <= str(period) <= contract.valid_until
+                ]
+                if not contract_requested_periods:
+                    continue
+                contract_requested_start = min(contract_requested_periods)
                 contract_connection_ids = list((await db.execute(
                     select(FinancialContractConnection.connection_id).where(
                         FinancialContractConnection.contract_id == contract.id
@@ -2842,7 +2891,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                     select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
                         IngestedBlob.connection_id.in_(contract_connection_ids),
                         IngestedBlob.row_count > 0,
-                        IngestedBlob.billing_period >= max(requested_start, contract.valid_from),
+                        IngestedBlob.billing_period >= contract_requested_start,
                         IngestedBlob.billing_period <= contract.valid_until,
                     ).distinct()
                 )).all()

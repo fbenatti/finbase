@@ -20,6 +20,14 @@ def normalize_cloud_scope(value: Any) -> str:
     return {"oracle": "oci", "oracle cloud": "oci"}.get(scope, scope)
 
 
+def period_within_contract(period: str, valid_from: str, valid_until: str) -> bool:
+    """Return whether a YYYYMM billing period falls inside contract validity."""
+    values = (str(period), str(valid_from), str(valid_until))
+    if any(len(value) != 6 or not value.isdigit() for value in values):
+        raise ValueError("period and contract validity must use YYYYMM")
+    return values[1] <= values[0] <= values[2]
+
+
 def money(value: Decimal | int | float | str | None) -> Decimal:
     return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
 
