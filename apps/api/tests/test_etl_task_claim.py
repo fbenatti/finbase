@@ -51,6 +51,35 @@ def test_task_resource_lock_keys_queue_group(monkeypatch):
     assert len(set(keys)) == 3
 
 
+def test_reprocess_group_claims_months_in_ascending_task_order():
+    engine, session = _task_session()
+    try:
+        older = EtlTask(
+            id=100, task_type="reprocess", status="QUEUED",
+            destination_table_id=1, connection_ids=[9], billing_periods=["202601"],
+            result_json={"reprocess_group_id": "oci-full", "queue_position": 1},
+        )
+        newer = EtlTask(
+            id=101, task_type="reprocess", status="QUEUED",
+            destination_table_id=1, connection_ids=[9], billing_periods=["202602"],
+            result_json={"reprocess_group_id": "oci-full", "queue_position": 2},
+        )
+        session.add_all([older, newer])
+        session.commit()
+
+        assert claim_next_etl_task(session, worker_pid=10).id == older.id
+        session.commit()
+        # A second worker cannot claim February while January is still active.
+        assert claim_next_etl_task(session, worker_pid=11) is None
+
+        older.status = "COMPLETED"
+        session.commit()
+        assert claim_next_etl_task(session, worker_pid=11).id == newer.id
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_task_resource_lock_keys_reprocess_slice_parallel(monkeypatch):
     monkeypatch.setenv("OPENFINOPS_REPROCESS_SLICE_PARALLEL", "2")
     task = EtlTask(

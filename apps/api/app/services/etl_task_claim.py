@@ -6,7 +6,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 import os
 
-from sqlalchemy import Integer, exists, func, or_, select, text
+from sqlalchemy import Integer, and_, exists, func, or_, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.models.etl_task import EtlTask
@@ -112,19 +112,32 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
 
 
 def _queue_group_busy_clause():
-    """Exclude QUEUED tasks whose queue_group already has a RUNNING sibling."""
-    running = aliased(EtlTask)
-    busy = exists(
+    """Serialize queue groups and preserve month order inside reprocess groups."""
+    queue_running = aliased(EtlTask)
+    queue_group = EtlTask.result_json.op("->>")("queue_group")
+    running_group = queue_running.result_json.op("->>")("queue_group")
+    queue_busy = exists(
         select(1).where(
-            running.status == "RUNNING",
-            running.result_json.op("->>")("queue_group").isnot(None),
-            running.result_json.op("->>")("queue_group")
-            == EtlTask.result_json.op("->>")("queue_group"),
+            queue_running.status == "RUNNING",
+            running_group.isnot(None),
+            running_group == queue_group,
         )
     )
-    return or_(
-        EtlTask.result_json.op("->>")("queue_group").is_(None),
-        ~busy,
+    prior_reprocess = aliased(EtlTask)
+    reprocess_group = EtlTask.result_json.op("->>")("reprocess_group_id")
+    prior_group = prior_reprocess.result_json.op("->>")("reprocess_group_id")
+    has_prior_active_month = exists(
+        select(1).where(
+            prior_reprocess.task_type == "reprocess",
+            prior_reprocess.status.in_(["QUEUED", "RUNNING"]),
+            prior_reprocess.id < EtlTask.id,
+            prior_group == reprocess_group,
+            reprocess_group.isnot(None),
+        )
+    )
+    return and_(
+        or_(queue_group.is_(None), ~queue_busy),
+        or_(reprocess_group.is_(None), ~has_prior_active_month),
     )
 
 
