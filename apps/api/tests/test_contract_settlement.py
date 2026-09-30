@@ -37,6 +37,42 @@ def test_uncovered_overage_does_not_increase_realized():
     assert result.closing_credit == Decimal("0.00")
 
 
+def test_two_months_generate_then_consume_credit_without_inflating_realized():
+    january = settle_pool("1000", "900")
+    february = settle_pool("1000", "1100", january.closing_credit)
+
+    assert january.realized == Decimal("1000.00")
+    assert january.credit_generated == Decimal("100.00")
+    assert january.commitment - january.consumption == january.credit_generated
+    assert february.opening_credit == Decimal("100.00")
+    assert february.realized == Decimal("1000.00")
+    assert february.gross_overage == Decimal("100.00")
+    assert february.credit_used == Decimal("100.00")
+    assert february.uncovered_overage == Decimal("0.00")
+    assert february.closing_credit == Decimal("0.00")
+
+
+def test_contractual_adjustment_is_consumption_minus_budget():
+    under = settle_pool("892532.94", "1953.59")
+    over = settle_pool("1000", "1300")
+
+    assert under.consumption - under.commitment == Decimal("-890579.35")
+    assert over.consumption - over.commitment == Decimal("300.00")
+    assert over.realized == over.commitment
+
+
+def test_provider_realized_cloud_formulas_are_exact():
+    billed = Decimal("1000")
+    oci_realized_cloud = billed * Decimal("0.47")
+    ibm_realized_cloud = (
+        billed * Decimal("0.79036")
+        + billed * Decimal("0.10") * Decimal("0.29505")
+    )
+
+    assert oci_realized_cloud == Decimal("470.00")
+    assert ibm_realized_cloud == Decimal("819.86500")
+
+
 def test_allocation_ignores_project_budget_and_uses_consumption_pool():
     assert allocate_pool("1000", ["500", "400"]) == [Decimal("555.56"), Decimal("444.44")]
 
