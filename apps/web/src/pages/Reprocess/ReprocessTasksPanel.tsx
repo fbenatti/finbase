@@ -103,6 +103,12 @@ export default function ReprocessTasksPanel() {
             : kind(task) === "reprocess" && task.total_blobs > 0
               ? Math.min(90, Math.round(blobProgress * 0.9))
               : blobProgress;
+        const stageLabel = kind(task) === "reprocess" && running && task.total_blobs > 0
+          && task.processed_blobs >= task.total_blobs
+          ? publishingSilver
+            ? "Publicando partição na camada Silver..."
+            : "Blobs processados · preparando publicação na camada Silver"
+          : task.phase || task.status;
         return (
           <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#f8fafc", borderRadius: 1 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
@@ -114,8 +120,8 @@ export default function ReprocessTasksPanel() {
                   </Typography>
                 )}
                 <Typography variant="caption" color="text.secondary">
-                  {task.phase || task.status}
-                  {task.current_blob && task.current_blob !== task.phase ? ` · ${task.current_blob}` : ""}
+                  {stageLabel}
+                  {kind(task) !== "reprocess" && task.current_blob && task.current_blob !== task.phase ? ` · ${task.current_blob}` : ""}
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
