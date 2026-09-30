@@ -89,8 +89,20 @@ export default function ReprocessTasksPanel() {
         Tasks ativas ({tasks.length})
       </Typography>
       {tasks.map(task => {
-        const pct = task.total_blobs > 0 ? Math.round((task.processed_blobs / task.total_blobs) * 100) : 0;
         const running = task.status === "RUNNING";
+        const publishingSilver = kind(task) === "reprocess"
+          && running
+          && /publicando partição na camada silver/i.test(String(task.current_blob || task.phase || ""));
+        const blobProgress = task.total_blobs > 0
+          ? Math.min(100, Math.round((task.processed_blobs / task.total_blobs) * 100))
+          : 0;
+        const pct = publishingSilver
+          ? 95
+          : task.status === "COMPLETED"
+            ? 100
+            : kind(task) === "reprocess" && task.total_blobs > 0
+              ? Math.min(90, Math.round(blobProgress * 0.9))
+              : blobProgress;
         return (
           <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#f8fafc", borderRadius: 1 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
@@ -103,7 +115,7 @@ export default function ReprocessTasksPanel() {
                 )}
                 <Typography variant="caption" color="text.secondary">
                   {task.phase || task.status}
-                  {task.current_blob ? ` · ${task.current_blob}` : ""}
+                  {task.current_blob && task.current_blob !== task.phase ? ` · ${task.current_blob}` : ""}
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
