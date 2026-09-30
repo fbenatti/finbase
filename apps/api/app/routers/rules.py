@@ -21,6 +21,7 @@ from app.models.planning import PlanningEntry
 from app.models.destination import DestinationColumn, DestinationTable, SourceDestinationMapping
 from app.services.classification_engine import map_legacy_field, normalize_rule_conditions
 from app.services.cloud_scope import connection_cloud_scope
+from app.services.shared_cost import cloud_prefix_for
 from app.schemas.schemas import (
     EtlMappingCreate, EtlMappingUpdate, EtlMappingOut,
     BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleOut,
@@ -1211,6 +1212,10 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
     """Import departments and business rules from finopsNew CSV files."""
     result = CsvImportResult(departments_created=0, classification_rules_created=0)
     focus_table_id = await _default_focus_table_id(db)
+    departments_by_id = {
+        department.id: department
+        for department in (await db.execute(select(Department))).scalars().all()
+    }
 
     # Load the current relationship contract once.  A classification rule is
     # evaluated on Gold, never on the original provider header.
@@ -1231,9 +1236,9 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
             stmt = stmt.where(Department.parent_id == None)
         else:
             stmt = stmt.where(Department.parent_id == parent_id)
-        stmt = stmt.limit(1)
         res = await db.execute(stmt)
-        return res.scalars().first()
+        matches = res.scalars().all()
+        return matches[0] if len(matches) == 1 else None
 
     # --- Step 1: Import Departments hierarchy from diretorias_download.csv ---
     # Keep the exact CSV association (Cloud + Projeto -> Department) for the
@@ -1325,6 +1330,18 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 continue
 
             dept = await _find_dept(pn, parent_id=parent_id)
+            if dept is None:
+                same_parent = (await db.execute(
+                    select(Department).where(
+                        Department.name == pn,
+                        Department.parent_id == parent_id,
+                    )
+                )).scalars().all()
+                if len(same_parent) > 1:
+                    result.errors.append(
+                        f"Projeto '{pn}' duplicado sob a diretoria '{dn}'; import ignorado por ambiguidade"
+                    )
+                    continue
             if dept:
                 key = (row.get("Cloud", "").strip(), pn)
                 directory_department_map.setdefault(key, [])
@@ -1393,28 +1410,34 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 csv_candidates = directory_department_map.get((cloud, project_name), [])
                 dept = None
                 if csv_candidates:
-                    # The source directory order is deterministic and is the
-                    # only available tie-breaker when identical rule
-                    # conditions were registered for multiple cost objects.
-                    dept = await db.get(Department, csv_candidates[0])
+                    unique_candidates = sorted(set(csv_candidates))
+                    if len(unique_candidates) == 1:
+                        dept = await db.get(Department, unique_candidates[0])
+                    else:
+                        result.errors.append(
+                            f"Classification '{project_name}' não importada: nome de projeto duplicado na cloud {cloud}"
+                        )
+                        continue
                 if dept is None:
-                    stmt = select(Department).where(Department.name == project_name, Department.parent_id != None)
-                    if cloud:
-                        stmt = stmt.where(Department.cloud_filter == cloud)
-                    stmt = stmt.order_by(Department.id).limit(1)
-                    dr = await db.execute(stmt)
-                    dept = dr.scalars().first()
-                # Some department master-data is intentionally shared across
-                # providers and has no cloud_filter.  Do not leave a rule
-                # unlinked merely because the CSV carries a cloud value.
-                if dept is None and cloud:
-                    dr = await db.execute(
-                        select(Department).where(
-                            Department.name == project_name,
-                            Department.parent_id != None,
-                        ).order_by(Department.id).limit(1)
+                    stmt = select(Department).where(
+                        Department.name == project_name,
+                        Department.parent_id != None,
                     )
-                    dept = dr.scalars().first()
+                    dr = await db.execute(
+                        stmt.order_by(Department.id)
+                    )
+                    candidates = [
+                        candidate for candidate in dr.scalars().all()
+                        if cloud and _department_cloud_scope(candidate.id, departments_by_id)
+                        == connection_cloud_scope(cloud)
+                    ]
+                    if len(candidates) == 1:
+                        dept = candidates[0]
+                    elif len(candidates) > 1:
+                        result.errors.append(
+                            f"Classification '{project_name}' não importada: nome ambíguo na cloud {cloud}"
+                        )
+                        continue
                 # Atlas rules occasionally identify a more specific object
                 # than the directory CSV.  When that CSV has one and only
                 # one owning Diretoria for the provider, create the missing
