@@ -3997,6 +3997,7 @@ export async function getExpectedView(
   directorView = false,
   goldTable = "dest_dm_cost_visao_completa",
   scope?: { monthFrom?: string; monthTo?: string; departmentIds?: number[]; dimensionFilters?: Record<string, string[]> },
+  measureColumn = "realizado",
 ): Promise<ExpectedViewResult> {
   const key =
     director +
@@ -4008,6 +4009,7 @@ export async function getExpectedView(
     (includeSharedCost ? 1 : 0) +
     "|" +
     (directorView ? 1 : 0) +
+    "|" + measureColumn +
     "|" +
     goldTable + "|" + JSON.stringify(scope || {});
   const cached = expectedViewCache.get(key);
@@ -4028,6 +4030,7 @@ export async function getExpectedView(
           department_id: departmentId,
           include_shared_cost: includeSharedCost,
           director_view: directorView,
+          measure_column: measureColumn,
           gold_table: goldTable,
           ...(scope ? {
             month_from: scope.monthFrom,

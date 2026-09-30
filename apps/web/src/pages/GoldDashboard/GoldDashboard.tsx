@@ -624,11 +624,6 @@ export default function GoldDashboard() {
             )}
             sx={{ ml: 0.5 }}
           />
-          <FormControlLabel
-            sx={{ ml: 0.5 }}
-            control={<Switch size="small" checked={filters.consumoFaturado} onChange={(_, checked) => setFilters(f => ({ ...f, consumoFaturado: checked }))} />}
-            label={<Typography variant="body2" sx={{ fontWeight: filters.consumoFaturado ? 800 : 500 }}>Consumo faturado</Typography>}
-          />
           <Button size="small" startIcon={<FilterAltOff />} onClick={clearFilters}>Limpar</Button>
         </Stack>
         {filters.visaoDiretoria && (
@@ -645,7 +640,7 @@ export default function GoldDashboard() {
         <Tab value="visao-executiva" label="Visão Executiva" />
       </Tabs>
 
-      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} />}
+      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} />}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}

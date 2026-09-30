@@ -67,6 +67,8 @@ export default function ExpectedView({
   directorView = false,
   table,
   footer,
+  measureColumn = "realizado",
+  onMeasureColumnChange,
 }: {
   embedded?: boolean;
   director?: string;
@@ -74,6 +76,8 @@ export default function ExpectedView({
   directorView?: boolean;
   table?: string;
   footer?: ReactElement;
+  measureColumn?: "realizado" | "realizado_cloud";
+  onMeasureColumnChange?: (value: "realizado" | "realizado_cloud") => void;
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -185,6 +189,8 @@ export default function ExpectedView({
         includeSharedCost,
         directorView,
         table,
+        undefined,
+        measureColumn,
       )
         .then((result) => {
           setRows(result.rows);
@@ -1085,6 +1091,7 @@ export default function ExpectedView({
             }
             label="Custo compartilhado"
           />
+          {onMeasureColumnChange && <FormControlLabel control={<Switch checked={measureColumn === "realizado"} onChange={(_, checked) => onMeasureColumnChange(checked ? "realizado" : "realizado_cloud")} />} label="Consumo faturado" />}
         </Stack>
       </Stack>
 

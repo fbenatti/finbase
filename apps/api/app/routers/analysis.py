@@ -372,6 +372,7 @@ class ExpectedViewRequest(BaseModel):
     director_view: bool = False
     year: int = 2026
     include_shared_cost: bool = False
+    measure_column: str = "realizado"
     # Nome físico da Gold pré-agregada que alimenta a Visão Esperada.
     # Default: a regra visao-completa (dest_dm_cost_visao_completa).
     gold_table: str = "dest_dm_cost_visao_completa"
@@ -2072,8 +2073,9 @@ async def _expected_view_core(
     actual_schema = forecast_schema = gold_schema
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = actual_columns
-    required_actual = {"_billing_period", "realizado", "organograma_nivel_1"}
-    required_forecast = {"period", "realizado", "tipo", "organograma_nivel_1", "rateio_medida"}
+    measure_column = body.measure_column if body.measure_column in {"realizado", "realizado_cloud"} else "realizado"
+    required_actual = {"_billing_period", measure_column, "organograma_nivel_1"}
+    required_forecast = {"period", measure_column, "tipo", "organograma_nivel_1", "rateio_medida"}
     missing_actual = sorted(required_actual - set(actual_columns))
     missing_forecast = sorted(required_forecast - set(forecast_columns))
     if missing_actual or missing_forecast:
@@ -2094,9 +2096,9 @@ async def _expected_view_core(
     # ``realizado`` is the executive financial measure.  ``EffectiveCost`` is
     # a provider net-cost field and includes credit/return adjustments, which
     # can make a director's displayed realized spend negative.
-    actual_value = _quote_ident(actual_columns["realizado"])
+    actual_value = _quote_ident(actual_columns[measure_column])
     forecast_period = _quote_ident(forecast_columns.get("period") or forecast_columns["_billing_period"])
-    forecast_value = _quote_ident(forecast_columns["realizado"])
+    forecast_value = _quote_ident(forecast_columns[measure_column])
     forecast_type = _quote_ident(forecast_columns["tipo"])
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
     department_map = {department.id: department for department in departments}
