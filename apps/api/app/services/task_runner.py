@@ -3248,8 +3248,8 @@ def get_task_status(task_id: int) -> dict | None:
             from app.models.etl_task import EtlTask
             db = SyncSession()
             row = db.get(EtlTask, task_id)
-            db.close()
             if row:
+                metadata = _task_notification_metadata(db, row)
                 status["status"] = row.status
                 status["started_at"] = row.started_at.isoformat() if row.started_at else None
                 status["total_blobs"] = row.total_blobs
@@ -3266,10 +3266,12 @@ def get_task_status(task_id: int) -> dict | None:
                 status["active_downloads"] = row.active_downloads
                 status["download_blobs"] = row.download_blobs or []
                 status["errors"] = row.errors or []
+                status.update(metadata)
                 if row.connection_id:
                     conn = db.get(SourceConnection, row.connection_id)
                     if conn:
                         status["connector_type"] = conn.connector_type
+            db.close()
         except Exception:
             pass
         return status
@@ -3283,13 +3285,12 @@ def get_task_status(task_id: int) -> dict | None:
         from app.models.etl_task import EtlTask
         db = SyncSession()
         row = db.get(EtlTask, task_id)
-        db.close()
         if row:
             connector_type = None
             if row.connection_id:
                 conn = db.get(SourceConnection, row.connection_id)
                 connector_type = conn.connector_type if conn else None
-            return {
+            result = {
                 "id": row.id,
                 "connection_id": row.connection_id,
                 "connector_type": connector_type,
@@ -3313,9 +3314,40 @@ def get_task_status(task_id: int) -> dict | None:
                 "phase": row.phase or "",
                 "errors": row.errors or [],
             }
+            result.update(_task_notification_metadata(db, row))
+            db.close()
+            return result
+        db.close()
     except Exception:
         pass
     return None
+
+
+def _task_notification_metadata(db, task: EtlTask) -> dict:
+    """Human-readable source, period, and destination for task notifications."""
+    connection_ids = list(task.connection_ids or [])
+    if not connection_ids and task.connection_id:
+        connection_ids = [task.connection_id]
+    sources = []
+    for connection_id in connection_ids:
+        connection = db.get(SourceConnection, connection_id)
+        if connection:
+            sources.append({
+                "id": connection.id,
+                "code": connection.code,
+                "name": connection.name,
+                "cloud_name": connection.cloud_name,
+                "cloud_scope": connection.cloud_scope,
+            })
+    destination = db.get(DestinationTable, task.destination_table_id) if task.destination_table_id else None
+    result_json = task.result_json or {}
+    return {
+        "connection_ids": connection_ids,
+        "connections": sources,
+        "billing_periods": list(task.billing_periods or []),
+        "destination_table_name": destination.name if destination else None,
+        "table": result_json.get("table") or (destination.name if destination else None),
+    }
 
 
 def get_running_tasks() -> list[dict]:
@@ -3379,7 +3411,7 @@ def get_running_tasks() -> list[dict]:
                 "download_blobs": dt.download_blobs or [],
                 "phase": dt.phase,
                 "started_at": dt.started_at.isoformat() if dt.started_at else None,
-                "table": (dt.result_json or {}).get("table", ""),
+                **_task_notification_metadata(db, dt),
                 "error": "",
             }
             if dt.id not in existing_ids:
