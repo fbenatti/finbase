@@ -119,11 +119,18 @@ function isOperationalSource(task: TaskStatus): boolean {
   return /azure ptu/i.test(phase) || /azure monitor/i.test(phase);
 }
 
+function isSilverPublication(task: TaskStatus): boolean {
+  return kindOf(task) === "reprocess"
+    && task.status === "RUNNING"
+    && /publicando partição na camada silver/i.test(String(task.current_blob || task.phase || ""));
+}
+
 function progressFor(task: TaskStatus): number {
   if (kindOf(task) === "backup") {
     const total = Number(task.total_download_bytes || 0);
     return total > 0 ? Math.min(99, Math.round((Number(task.downloaded_bytes_total || 0) / total) * 100)) : 0;
   }
+  if (isSilverPublication(task)) return 95;
   if (isOperationalSource(task)) {
     if ((task.total_blobs || 0) > 0) {
       return Math.round(((task.processed_blobs || 0) / task.total_blobs) * 100);
@@ -131,7 +138,8 @@ function progressFor(task: TaskStatus): number {
     return task.status === "COMPLETED" ? 100 : 0;
   }
   if ((task.total_blobs || 0) > 0) {
-    return Math.round(((task.processed_blobs || 0) / task.total_blobs) * 100);
+    const blobProgress = Math.min(100, (task.processed_blobs || 0) / task.total_blobs * 100);
+    return task.status === "COMPLETED" ? 100 : Math.min(90, Math.round(blobProgress * 0.9));
   }
   return 0;
 }
@@ -486,7 +494,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       )}
                       <Typography variant="caption" color="text.secondary">
                         {item.phase || item.status}
-                        {item.kind !== "backup" && item.current ? " · " + item.current : ""}
+                        {item.kind !== "backup" && item.current && item.current !== item.phase ? " · " + item.current : ""}
                       </Typography>
                     </Box>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
