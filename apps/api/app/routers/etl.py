@@ -2213,9 +2213,9 @@ def _reprocess_destination_sync(
                 session.add(ClonePricePendencies(**pending))
         session.commit()
         try:
-            status["current_blob"] = f"publicando lotes na Gold (swap por partição)..."
+            status["current_blob"] = "Publicando partição na camada Silver..."
             _sync_db()
-            _append_reprocess_log(task_id, "Validação concluída; iniciando publicação na Gold")
+            _append_reprocess_log(task_id, "Validação concluída; iniciando publicação na camada Silver")
             # The Iceberg commit does not emit batch progress. Without a
             # heartbeat the 15-minute stall watchdog kills a healthy publish.
             import threading
