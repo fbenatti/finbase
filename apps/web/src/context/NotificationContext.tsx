@@ -43,6 +43,7 @@ export interface NotificationItem {
   rows: number;
   phase: string;
   current: string;
+  scope: string;
   bytesWritten: number;
   totalBytes: number;
   startedAt: number;
@@ -72,11 +73,44 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   if (String(task.task_type || task.type || "") === "ai_cost_relationship_reprocess") {
     return "Relacionamentos de custo IA #" + task.id;
   }
-  if (k === "reprocess") return "Reprocessar dados: " + (task.table || "?");
+  if (k === "reprocess") {
+    const sources = task.connections?.length
+      ? task.connections.map((source) => source.cloud_name || source.name || source.code)
+      : (task.connection_ids || (task.connection_id ? [task.connection_id] : []))
+          .map((id) => connections.find((connection) => connection.id === id)?.cloud_name
+            || connections.find((connection) => connection.id === id)?.name
+            || `conexão ${id}`);
+    const periods = (task.billing_periods || []).map(formatBillingPeriod);
+    const sourceLabel = sources.length ? [...new Set(sources)].join(", ") : "origem não informada";
+    const periodLabel = periods.length ? [...new Set(periods)].join(", ") : "período não informado";
+    return `Reprocessar dados · ${sourceLabel} · ${periodLabel}`;
+  }
   const conn = connections.find((c) => c.id === task.connection_id);
   return conn
     ? "Extração: " + conn.name + " (" + conn.code + ")"
     : "Extração #" + String(task.connection_id || "?");
+}
+
+function formatBillingPeriod(period: string): string {
+  const match = /^(\d{4})(\d{2})$/.exec(String(period));
+  if (!match) return String(period);
+  const month = Number(match[2]);
+  const labels = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  return month >= 1 && month <= 12 ? `${labels[month - 1]}/${match[1]}` : String(period);
+}
+
+function scopeFor(task: TaskStatus, connections: SourceConnection[]): string {
+  if (kindOf(task) !== "reprocess") return "";
+  const sourceNames = task.connections?.length
+    ? task.connections.map((source) => `${source.cloud_name || source.name} (${source.code})`)
+    : (task.connection_ids || (task.connection_id ? [task.connection_id] : []))
+        .map((id) => {
+          const source = connections.find((connection) => connection.id === id);
+          return source ? `${source.cloud_name || source.name} (${source.code})` : `conexão ${id}`;
+        });
+  const periods = (task.billing_periods || []).map(formatBillingPeriod);
+  const destination = task.destination_table_name || task.table || "destino não informado";
+  return `Origem: ${sourceNames.length ? [...new Set(sourceNames)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${destination} (Silver)`;
 }
 
 function isOperationalSource(task: TaskStatus): boolean {
@@ -203,6 +237,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       rows: task.rows_destination || 0,
       phase: task.phase || "",
       current: task.current_blob || "",
+      scope: scopeFor(task, connections),
       bytesWritten: Number(task.downloaded_bytes_total || 0),
       totalBytes: Number(task.total_download_bytes || 0),
       startedAt: task.started_at ? new Date(task.started_at).getTime() : Date.now(),
@@ -241,6 +276,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             rows: task.rows_destination || 0,
             phase: task.phase || "",
             current: task.current_blob || "",
+            scope: scopeFor(task, connections),
             bytesWritten: Number(task.downloaded_bytes_total || 0),
             totalBytes: Number(task.total_download_bytes || 0),
             startedAt: task.started_at ? new Date(task.started_at).getTime() : existing.startedAt,
@@ -323,6 +359,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                     rows: task.rows_destination || 0,
                     phase: task.phase || "",
                     current: task.current_blob || "",
+                    scope: scopeFor(task, connections),
                     bytesWritten: Number(task.downloaded_bytes_total || 0),
                     totalBytes: Number(task.total_download_bytes || 0),
                     startedAt: task.started_at ? new Date(task.started_at).getTime() : i.startedAt,
@@ -442,6 +479,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       <Typography variant="body2" fontWeight={600} noWrap>
                         {item.title}
                       </Typography>
+                      {item.scope && (
+                        <Typography variant="caption" color="text.primary" sx={{ display: "block" }}>
+                          {item.scope}
+                        </Typography>
+                      )}
                       <Typography variant="caption" color="text.secondary">
                         {item.phase || item.status}
                         {item.kind !== "backup" && item.current ? " · " + item.current : ""}
