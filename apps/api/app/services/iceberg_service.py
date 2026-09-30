@@ -387,28 +387,52 @@ def _df_to_arrow(
     if target_schema is not None:
         target_arrow_schema = target_schema.as_arrow()
         target_fields = {field.name: field for field in target_arrow_schema}
+        source_columns = {
+            field.name: arrow_table.column(idx)
+            for idx, field in enumerate(arrow_table.schema)
+        }
         aligned_columns = []
         aligned_fields = []
-        for idx, source_field in enumerate(arrow_table.schema):
-            target_field = target_fields.get(source_field.name)
-            column = arrow_table.column(idx)
-            if target_field is not None and column.type != target_field.type:
+        # Iceberg field IDs are positional when ``pyarrow_to_schema`` builds a
+        # new staging table.  Merely casting by name is therefore insufficient:
+        # a DataFrame containing the same columns in another order creates a
+        # staging schema whose IDs point to different names and the very first
+        # append fails with ``Mismatch in fields``.  Rebuild the Arrow table in
+        # the canonical Iceberg order and materialize absent optional columns
+        # as typed NULLs.  Truly new columns remain after the canonical
+        # contract so callers that explicitly evolve a schema can still see
+        # them instead of losing data silently.
+        for target_field in target_arrow_schema:
+            column = source_columns.get(target_field.name)
+            if column is None:
+                if not target_field.nullable:
+                    raise ValueError(
+                        f"Coluna obrigatória {target_field.name!r} ausente para o schema Iceberg"
+                    )
+                column = pa_lib.nulls(len(arrow_table), type=target_field.type)
+            elif column.type != target_field.type:
                 try:
                     column = column.cast(target_field.type, safe=True)
                 except (pa_lib.ArrowInvalid, pa_lib.ArrowNotImplementedError, pa_lib.ArrowTypeError) as exc:
                     raise ValueError(
-                        f"Coluna {source_field.name!r} incompatível com o schema Iceberg: "
+                        f"Coluna {target_field.name!r} incompatível com o schema Iceberg: "
                         f"{column.type} -> {target_field.type}: {exc}"
                     ) from exc
             aligned_columns.append(column)
             aligned_fields.append(
                 pa_lib.field(
-                    source_field.name,
-                    target_field.type if target_field is not None else column.type,
-                    nullable=target_field.nullable if target_field is not None else source_field.nullable,
-                    metadata=source_field.metadata,
+                    target_field.name,
+                    target_field.type,
+                    nullable=target_field.nullable,
+                    metadata=target_field.metadata,
                 )
             )
+
+        for source_field in arrow_table.schema:
+            if source_field.name in target_fields:
+                continue
+            aligned_columns.append(source_columns[source_field.name])
+            aligned_fields.append(source_field)
         arrow_table = pa_lib.Table.from_arrays(aligned_columns, schema=pa_lib.schema(aligned_fields))
 
     # Ensure every field has a deterministic PARQUET:field_id metadata mapped by name

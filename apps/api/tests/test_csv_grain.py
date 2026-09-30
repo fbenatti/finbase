@@ -196,3 +196,28 @@ def test_df_to_arrow_rejects_fractional_value_for_iceberg_identifier():
             pd.DataFrame({"financial_contract_id": [1.5]}),
             target_schema=target_schema,
         )
+
+
+def test_df_to_arrow_aligns_columns_to_existing_iceberg_field_order():
+    import pyarrow as pa
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import DoubleType, LongType, NestedField, StringType
+    from app.services.iceberg_service import _df_to_arrow
+
+    target_schema = Schema(
+        NestedField(1, "name", StringType(), required=False),
+        NestedField(2, "financial_contract_id", LongType(), required=False),
+        NestedField(3, "realizado", DoubleType(), required=False),
+    )
+    table = _df_to_arrow(
+        pd.DataFrame({
+            "realizado": [10],
+            "name": ["IBM"],
+        }),
+        target_schema=target_schema,
+    )
+
+    assert table.column_names == ["name", "financial_contract_id", "realizado"]
+    assert table.column("financial_contract_id").to_pylist() == [None]
+    assert pa.types.is_int64(table.schema.field("financial_contract_id").type)
+    assert pa.types.is_float64(table.schema.field("realizado").type)
