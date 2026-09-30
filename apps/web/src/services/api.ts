@@ -1076,6 +1076,15 @@ export interface TaskStatus {
   connector_type?: string;
   destination_table_id?: number;
   connection_ids?: number[];
+  connections?: Array<{
+    id: number;
+    code: string;
+    name: string;
+    cloud_name: string | null;
+    cloud_scope: string | null;
+  }>;
+  billing_periods?: string[];
+  destination_table_name?: string | null;
   status: string;
   total_blobs: number;
   processed_blobs: number;
