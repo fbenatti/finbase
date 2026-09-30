@@ -24,6 +24,7 @@ export default function FinancialContracts() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
+  const [settlementMessage, setSettlementMessage] = useState("");
   const [selectedContract, setSelectedContract] = useState<number | null>(null);
   const [settlements, setSettlements] = useState<Record<string, unknown>[]>([]);
   const [overview, setOverview] = useState<Record<string, unknown>[]>([]);
@@ -81,21 +82,20 @@ export default function FinancialContracts() {
     {selectedContract != null && <Box sx={{ mt: 3 }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <Typography variant="h6">Movimentações da liquidação</Typography>
-        <Button size="small" variant="outlined" disabled={recalculating || !settlements.length} onClick={async () => {
-          setRecalculating(true); setError("");
+        <Button size="small" variant="outlined" disabled={recalculating} onClick={async () => {
+          setRecalculating(true); setError(""); setSettlementMessage("");
           try {
-            await recalculateFinancialContract(selectedContract, settlements.map((row) => ({
-              period: String(row.period), cloud_scope: String(row.cloud_scope), budget_id: String(row.budget_id),
-              commitment: row.commitment || 0, billed_cost: row.billed_cost || 0, consumption: row.consumption || 0,
-            })));
+            const result = await recalculateFinancialContract(selectedContract, { recalculate_all: true });
             const refreshed = await getFinancialContractSettlements(selectedContract);
             setSettlements(refreshed); load();
+            setSettlementMessage(`Run ${String(result.run_id)} publicado para ${String(result.period_from)}–${String(result.period_until)}${result.idempotent_reuse ? " (sem alterações nos dados)" : ""}.`);
           } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível recalcular o contrato"); }
           finally { setRecalculating(false); }
         }}>{recalculating ? "Recalculando…" : "Recalcular contrato"}</Button>
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Valores do razão por contrato, cloud, ID Orçamento e competência. O realizado só aparece quando existe consumo positivo ou overage descoberto.</Typography>
-      <Table size="small"><TableHead><TableRow>{["Competência", "Cloud / ID", "Compromisso", "Consumo", "Delta crédito/overage", "Saldo final", "Realizado"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{settlements.map((row, index) => <TableRow key={`${row.period}-${row.budget_id}-${index}`}><TableCell>{String(row.period || "—")}</TableCell><TableCell>{String(row.cloud_scope || "—")} / {String(row.budget_id || "—")}</TableCell><TableCell>{String(row.commitment || "0")}</TableCell><TableCell>{String(row.consumption || "0")}</TableCell><TableCell sx={{ color: Number(row.credit_overage_delta || 0) >= 0 ? "success.main" : "error.main" }}>{String(row.credit_overage_delta || "0")}</TableCell><TableCell>{String(row.closing_credit || "0")}</TableCell><TableCell>{String(row.realized || "0")}</TableCell></TableRow>)}</TableBody></Table>
+      {settlementMessage && <Alert severity="success" sx={{ my: 1 }}>{settlementMessage}</Alert>}
+      <Table size="small"><TableHead><TableRow>{["Competência", "Cloud / ID", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito gerado", "Crédito usado", "Overage descoberto", "Saldo final", "Run / origem / data", "Versões orçamento"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{settlements.map((row, index) => <TableRow key={`${row.period}-${row.budget_id}-${index}`}><TableCell>{String(row.period || "—")}</TableCell><TableCell>{String(row.cloud_scope || "—")} / {String(row.budget_id || "—")}</TableCell><TableCell>{String(row.commitment || "0")}</TableCell><TableCell>{String(row.consumption || "0")}</TableCell><TableCell>{String(row.realized || "0")}</TableCell><TableCell>{String(row.contractual_adjustment || "0")}</TableCell><TableCell>{String(row.credit_generated || "0")}</TableCell><TableCell>{String(row.credit_used || "0")}</TableCell><TableCell>{String(row.uncovered_overage || "0")}</TableCell><TableCell>{String(row.closing_credit || "0")}</TableCell><TableCell>{`${String(row.run_id || "—")} / ${String(row.run_source || "—")} / ${String(row.run_finished_at || "—")}`}</TableCell><TableCell>{Array.isArray(row.budget_version_ids) ? row.budget_version_ids.map(String).join(", ") : "—"}</TableCell></TableRow>)}</TableBody></Table>
       {!settlements.length && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhuma liquidação publicada para este contrato.</Typography>}
     </Box>}
     <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">

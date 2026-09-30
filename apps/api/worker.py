@@ -1087,42 +1087,113 @@ def consumer_main(worker_id: int):
                                         scheduled_forecasts = _queue_scheduled_forecasts(task_id, terminal_task.result_json or {}, terminal_session)
                                         if scheduled_forecasts:
                                             terminal_task.phase = ((terminal_task.phase or "") + f" · Forecast(s) na fila: {len(scheduled_forecasts)}")[:200]
-                                    chain = terminal_task.result_json.get("chain_gold_cubes")
-                                    if chain and isinstance(chain, dict) and chain.get("enabled"):
-                                        group = (
-                                            terminal_task.result_json.get("reprocess_group_id")
-                                            or terminal_task.result_json.get("queue_group")
-                                        )
-                                        position = terminal_task.result_json.get("queue_position")
-                                        total = terminal_task.result_json.get("queue_total")
-                                        is_last_group_task = (
-                                            position is not None and total is not None and position == total
-                                        )
-                                        if not is_last_group_task and group:
-                                            from sqlalchemy import select as _select
-                                            group_rows = terminal_session.execute(
-                                                _select(EtlTask.id, EtlTask.result_json).where(
-                                                    EtlTask.task_type == "reprocess",
-                                                    EtlTask.status.in_(["QUEUED", "RUNNING"]),
-                                                )
-                                            ).all()
-                                            remaining = [
-                                                rid for rid, rj in group_rows
-                                                if (rj or {}).get("reprocess_group_id") == group
-                                                or (rj or {}).get("queue_group") == group
-                                            ]
-                                            is_last_group_task = not remaining
-                                        if is_last_group_task:
-                                            from app.services.gold_materialization import enqueue_rule_materialization
-                                            rule_ids = chain.get("rule_ids") or None
-                                            gold_task = enqueue_rule_materialization(
-                                                terminal_session, rule_ids=rule_ids, source="reprocess"
+                                    payload = terminal_task.result_json or {}
+                                    group = payload.get("reprocess_group_id") or payload.get("queue_group")
+                                    position = payload.get("queue_position")
+                                    total = payload.get("queue_total")
+                                    is_last_group_task = (
+                                        position is not None and total is not None and position == total
+                                    )
+                                    chain = payload.get("chain_gold_cubes")
+                                    if not is_last_group_task and group and chain and chain.get("enabled"):
+                                        from sqlalchemy import select as _select
+                                        group_rows = terminal_session.execute(
+                                            _select(EtlTask.id, EtlTask.result_json).where(
+                                                EtlTask.task_type == "reprocess",
+                                                EtlTask.status.in_(["QUEUED", "RUNNING"]),
                                             )
-                                            if gold_task:
+                                        ).all()
+                                        remaining = [
+                                            rid for rid, rj in group_rows
+                                            if rid != task_id and (
+                                                (rj or {}).get("reprocess_group_id") == group
+                                                or (rj or {}).get("queue_group") == group
+                                            )
+                                        ]
+                                        is_last_group_task = not remaining
+
+                                    if succeeded and is_last_group_task:
+                                        from sqlalchemy import select as _select
+                                        from app.database import run_async_isolated
+                                        from app.services.contract_settlement_materializer import (
+                                            recalculate_contracts_for_connections,
+                                        )
+                                        group_tasks = terminal_session.execute(
+                                            _select(EtlTask.connection_ids, EtlTask.result_json, EtlTask.status).where(
+                                                EtlTask.task_type == "reprocess",
+                                            )
+                                        ).all()
+                                        group_rows = [
+                                            (connection_ids, task_json, status)
+                                            for connection_ids, task_json, status in group_tasks
+                                            if (task_json or {}).get("reprocess_group_id") == group
+                                            or (task_json or {}).get("queue_group") == group
+                                        ] if group else []
+                                        group_succeeded = (
+                                            all(status == "COMPLETED" for _, _, status in group_rows)
+                                            if group else True
+                                        )
+                                        connection_ids = sorted({
+                                            int(connection_id)
+                                            for connection_list, _, _ in group_rows
+                                            for connection_id in (connection_list or [])
+                                        }) if group else list(terminal_task.connection_ids or [])
+                                        try:
+                                            if not group_succeeded:
+                                                raise RuntimeError(
+                                                    "Grupo de reprocessamento contém competência não concluída com sucesso"
+                                                )
+                                            settlement_runs = run_async_isolated(
+                                                recalculate_contracts_for_connections(
+                                                    connection_ids, source="REPROCESS_GROUP"
+                                                )
+                                            )
+                                            if settlement_runs:
+                                                payload["contract_settlement_runs"] = settlement_runs
+                                                terminal_task.result_json = payload
                                                 terminal_task.phase = (
                                                     (terminal_task.phase or "")
-                                                    + f" · Gold enfileirada (task #{gold_task.id})"
+                                                    + " · Liquidação contratual publicada"
+                                                )[:200]
+                                                from app.services.gold_materialization import enqueue_rule_materialization
+                                                gold_task = enqueue_rule_materialization(
+                                                    terminal_session, source="contract_settlement"
                                                 )
+                                                if gold_task:
+                                                    terminal_task.result_json = {
+                                                        **(terminal_task.result_json or {}),
+                                                        "gold_task_id": gold_task.id,
+                                                    }
+                                                    terminal_task.phase = (
+                                                        (terminal_task.phase or "")
+                                                        + f" · Gold enfileirada (task #{gold_task.id})"
+                                                    )[:200]
+                                        except Exception as settlement_error:
+                                            succeeded = False
+                                            terminal_task.status = "FAILED"
+                                            terminal_task.errors = [
+                                                f"Liquidação contratual falhou: {settlement_error}"[:2000]
+                                            ]
+                                            terminal_task.phase = (
+                                                f"Silver publicada; liquidação contratual falhou: {settlement_error}"
+                                            )[:200]
+                                            terminal_task.result_json = {
+                                                **(terminal_task.result_json or {}),
+                                                "contract_settlement_error": str(settlement_error)[:2000],
+                                                "failure_kind": "contract_settlement_error",
+                                            }
+                                    elif succeeded and is_last_group_task and chain and chain.get("enabled"):
+                                        from app.services.gold_materialization import enqueue_rule_materialization
+                                        gold_task = enqueue_rule_materialization(
+                                            terminal_session,
+                                            rule_ids=chain.get("rule_ids") or None,
+                                            source="reprocess",
+                                        )
+                                        if gold_task:
+                                            terminal_task.phase = (
+                                                (terminal_task.phase or "")
+                                                + f" · Gold enfileirada (task #{gold_task.id})"
+                                            )[:200]
                                 terminal_task.finished_at = datetime.now(timezone.utc)
                                 terminal_session.commit()
                         finally:

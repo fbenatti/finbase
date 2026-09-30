@@ -2812,6 +2812,51 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             for connection_id, period in (await db.execute(available_stmt)).all()
             if connection_id is not None and period
         }
+        # A financial reprocess invalidates downstream contractual balances.
+        # Rebuild every later Bronze month in the same ordered queue group so
+        # credits, overage, Silver and the eventual Gold all share one input
+        # horizon. This is deliberately limited to contracts attached to the
+        # selected source(s); ordinary reprocesses keep their requested range.
+        if body.billing_periods and body.destination_table_id:
+            from app.models.financial_contract import (
+                FinancialContract,
+                FinancialContractConnection,
+            )
+            requested_start = min(str(period) for period in body.billing_periods)
+            affected_contracts = list((await db.execute(
+                select(FinancialContract).join(FinancialContractConnection).where(
+                    FinancialContract.active.is_(True),
+                    FinancialContractConnection.connection_id.in_(body.connection_ids),
+                    FinancialContract.valid_until >= requested_start,
+                ).distinct()
+            )).scalars().all())
+            for contract in affected_contracts:
+                contract_connection_ids = list((await db.execute(
+                    select(FinancialContractConnection.connection_id).where(
+                        FinancialContractConnection.contract_id == contract.id
+                    )
+                )).scalars().all())
+                if not contract_connection_ids:
+                    continue
+                contract_period_rows = (await db.execute(
+                    select(IngestedBlob.connection_id, IngestedBlob.billing_period).where(
+                        IngestedBlob.connection_id.in_(contract_connection_ids),
+                        IngestedBlob.row_count > 0,
+                        IngestedBlob.billing_period >= max(requested_start, contract.valid_from),
+                        IngestedBlob.billing_period <= contract.valid_until,
+                    ).distinct()
+                )).all()
+                available.update(
+                    (int(connection_id), str(period))
+                    for connection_id, period in contract_period_rows
+                    if connection_id is not None and period
+                )
+                missing_conn_ids = set(contract_connection_ids) - set(conn_by_id)
+                if missing_conn_ids:
+                    extra_connections = (await db.execute(
+                        select(SourceConnection).where(SourceConnection.id.in_(missing_conn_ids))
+                    )).scalars().all()
+                    conn_by_id.update({connection.id: connection for connection in extra_connections})
         rejected_pairs = {
             (connection_id, period)
             for connection_id, period in available
@@ -2827,7 +2872,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         ordered_jobs = [
             (connection_id, period, None)
             for period in sorted({period for _, period in available})
-            for connection_id in body.connection_ids
+            for connection_id in sorted({cid for cid, _ in available})
             if (connection_id, period) in available
         ]
         empty_detail = (
@@ -2843,7 +2888,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     audit_result = await db.execute(
         insert(EtlTask).values(
             task_type="bronze_audit", status="QUEUED", destination_table_id=body.destination_table_id,
-            connection_ids=list(body.connection_ids),
+            connection_ids=sorted({connection_id for connection_id, _ in available}),
             billing_periods=sorted({period for _, period, _ in ordered_jobs}),
             result_json={"reprocess_group_id": reprocess_group_id, "audit_scope": "reprocess_group"},
             total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,

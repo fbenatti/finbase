@@ -1449,8 +1449,11 @@ export async function getFinancialContractSettlements(id: number): Promise<Recor
   return data;
 }
 
-export async function recalculateFinancialContract(id: number, pools: Record<string, unknown>[]) {
-  const { data } = await api.post(`/financial-contracts/${id}/settlements/recalculate`, pools);
+export async function recalculateFinancialContract(
+  id: number,
+  body: { period_from?: string; period_until?: string; recalculate_all?: boolean },
+) {
+  const { data } = await api.post(`/financial-contracts/${id}/settlements/recalculate`, body);
   return data;
 }
 

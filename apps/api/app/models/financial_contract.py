@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, DateTime, Boolean, ForeignKey, Numeric,
-    Text, UniqueConstraint, Index, func,
+    Text, JSON, UniqueConstraint, Index, func,
 )
 from sqlalchemy.orm import relationship
 
@@ -60,6 +60,7 @@ class ContractSettlementRun(Base):
     status = Column(String(20), nullable=False, default="RUNNING", index=True)
     source = Column(String(40), nullable=False, default="REPROCESS")
     input_fingerprint = Column(String(128), nullable=True)
+    budget_version_ids = Column(JSON, nullable=False, default=list)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -92,6 +93,7 @@ class ContractSettlementMonth(Base):
     expired_credit = Column(Numeric(20, 6), nullable=False, default=0)
     closing_credit = Column(Numeric(20, 6), nullable=False, default=0)
     realized = Column(Numeric(20, 6), nullable=False, default=0)
+    contractual_adjustment = Column(Numeric(20, 6), nullable=False, default=0)
     allocation_factor = Column(Numeric(20, 12), nullable=False, default=0)
     status = Column(String(20), nullable=False, default="SUCCESS")
     message = Column(Text, nullable=True)
