@@ -221,3 +221,15 @@ def test_df_to_arrow_aligns_columns_to_existing_iceberg_field_order():
     assert table.column("financial_contract_id").to_pylist() == [None]
     assert pa.types.is_int64(table.schema.field("financial_contract_id").type)
     assert pa.types.is_float64(table.schema.field("realizado").type)
+    assert table.schema.field("name").metadata[b"PARQUET:field_id"] == b"1"
+    assert table.schema.field("financial_contract_id").metadata[b"PARQUET:field_id"] == b"2"
+    assert table.schema.field("realizado").metadata[b"PARQUET:field_id"] == b"3"
+
+
+def test_df_to_arrow_rejects_duplicate_input_columns_before_iceberg_write():
+    import pytest
+    from app.services.iceberg_service import _df_to_arrow
+
+    frame = pd.DataFrame([[1, 2]], columns=["BilledCost", "BilledCost"])
+    with pytest.raises(ValueError, match="colunas duplicadas: BilledCost"):
+        _df_to_arrow(frame)

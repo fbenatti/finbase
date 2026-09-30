@@ -280,6 +280,12 @@ def _df_to_arrow(
     import numpy as np
 
     df = df.copy()
+    duplicate_columns = [str(name) for name in df.columns[df.columns.duplicated()].tolist()]
+    if duplicate_columns:
+        raise ValueError(
+            "Schema de entrada inválido: colunas duplicadas: "
+            + ", ".join(sorted(set(duplicate_columns)))
+        )
 
     # ── Phase 1: Coerce columns to expected types ──
     # Map SQL/DB data_type names to canonical categories
@@ -454,6 +460,34 @@ def _df_to_arrow(
         final_fields.append(pa_lib.field(f.name, f.type, nullable=f.nullable, metadata=meta))
     new_schema = pa_lib.schema(final_fields)
     arrow_table = arrow_table.cast(new_schema)
+
+    if target_schema is not None:
+        # This is the last gate before any Iceberg mutation.  It turns subtle
+        # order/type/field-id drift into a deterministic preflight error and
+        # guarantees that every existing-table write path receives the same
+        # validation, independent of provider, month or ingestion mechanism.
+        target_arrow_schema = target_schema.as_arrow()
+        target_names = [field.name for field in target_arrow_schema]
+        actual_prefix = arrow_table.column_names[:len(target_names)]
+        if actual_prefix != target_names:
+            raise ValueError(
+                "Schema Iceberg desalinhado após normalização: "
+                f"esperado {target_names}, recebido {actual_prefix}"
+            )
+        for target_field in target_arrow_schema:
+            actual_field = arrow_table.schema.field(target_field.name)
+            if actual_field.type != target_field.type:
+                raise ValueError(
+                    f"Coluna {target_field.name!r} não passou na pré-validação Iceberg: "
+                    f"{actual_field.type} != {target_field.type}"
+                )
+            expected_id = str(target_schema.find_field(target_field.name).field_id).encode()
+            actual_id = (actual_field.metadata or {}).get(b"PARQUET:field_id")
+            if actual_id != expected_id:
+                raise ValueError(
+                    f"Coluna {target_field.name!r} com field ID inválido: "
+                    f"{actual_id!r} != {expected_id!r}"
+                )
 
     return arrow_table
 
