@@ -103,12 +103,12 @@ def test_cloud_fallback_classifies_only_rows_left_unmapped():
     fallback = _classification_rule(
         id=99,
         name="Fallback organizacional | azure",
-        source_field="source_resource_group_name",
+        source_field="cloud_origem",
         pattern=".*",
         pattern_type="regex",
         match_value="SEM PROJETO DEFINIDO",
         conditions=[{
-            "field": "source_resource_group_name",
+            "field": "cloud_origem",
             "operator": "~",
             "values": [".*"],
             "logic": "AND",
@@ -117,7 +117,7 @@ def test_cloud_fallback_classifies_only_rows_left_unmapped():
         department_id=2,
     )
     df = pd.DataFrame({
-        "source_resource_group_name": ["rg-unmapped", "rg-already-mapped"],
+        "cloud_origem": ["azure-ti", "azure-ti"],
         "organograma": [None, "Datamesh"],
     })
     infra = Department(id=1, parent_id=None, name="DIR INFRAESTRUTURA E CLOUD")
