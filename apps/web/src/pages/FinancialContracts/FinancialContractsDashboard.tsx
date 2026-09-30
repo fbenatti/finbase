@@ -1,22 +1,142 @@
-import { useEffect, useState } from "react";
-import { Alert, Box, Card, CardContent, Grid, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
-import { getFinancialContractsOverview } from "../../services/api";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Alert, Box, Card, CardContent, CircularProgress, FormControl, Grid, InputLabel,
+  MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
+  TableRow, Typography,
+} from "@mui/material";
+import { getFinancialContractSettlements, getFinancialContracts, getFinancialContractsOverview } from "../../services/api";
 
-type Overview = Record<string, unknown>;
-const num = (value: unknown) => Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+type Contract = { contract_id: number; code: string; name: string; active: boolean; currency?: string; valid_from?: string; valid_until?: string; last_period?: string; run_id?: number; last_settlement_at?: string; status?: string };
+type Settlement = Record<string, unknown> & { period?: string; cloud_scope?: string; budget_id?: string };
+const amount = (value: unknown) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
+const numeric = (row: Settlement, key: string) => Number(row[key] ?? 0);
+const periodLabel = (period: string) => period.length === 6 ? `${period.slice(4)}/${period.slice(0, 4)}` : period;
+
+function Metric({ label, value, detail, accent }: { label: string; value: string; detail?: string; accent: string }) {
+  return <Card variant="outlined" sx={{ height: "100%", borderRadius: 3, borderTop: `3px solid ${accent}` }}><CardContent>
+    <Typography color="text.secondary" variant="body2">{label}</Typography>
+    <Typography variant="h5" fontWeight={700} sx={{ mt: 1 }}>{value}</Typography>
+    {detail && <Typography variant="caption" color="text.secondary">{detail}</Typography>}
+  </CardContent></Card>;
+}
 
 export default function FinancialContractsDashboard() {
-  const [rows, setRows] = useState<Overview[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [overview, setOverview] = useState<Record<string, unknown>[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [contractId, setContractId] = useState("");
+  const [period, setPeriod] = useState("all");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  useEffect(() => { getFinancialContractsOverview().then(setRows).catch((e) => setError(String(e))); }, []);
-  const total = (key: string) => rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
-  return <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: "#f8fafc", minHeight: "calc(100vh - 64px)" }}>
-    <Typography variant="h4">Controle financeiro contratual</Typography>
-    <Typography color="text.secondary" sx={{ mb: 3 }}>Acompanhamento de realizado, créditos e overage por contrato, cloud e ID Orçamento.</Typography>
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getFinancialContracts(), getFinancialContractsOverview()])
+      .then(([items, summaries]) => {
+        if (!active) return;
+        const normalized = items as Contract[];
+        setContracts(normalized);
+        setOverview(summaries);
+        const firstSettled = normalized.find((item) => summaries.some((summary) => Number(summary.contract_id) === item.contract_id && summary.status === "SUCCESS"));
+        if (firstSettled) setContractId(String(firstSettled.contract_id));
+      })
+      .catch((reason) => active && setError(String(reason)))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!contractId) { setSettlements([]); return () => { active = false; }; }
+    setLoading(true);
+    getFinancialContractSettlements(Number(contractId))
+      .then((items) => active && setSettlements(items as Settlement[]))
+      .catch((reason) => active && setError(String(reason)))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [contractId]);
+
+  const periods = useMemo(() => [...new Set(settlements.map((row) => String(row.period ?? "")))].filter(Boolean).sort(), [settlements]);
+  useEffect(() => { if (period !== "all" && !periods.includes(period)) setPeriod("all"); }, [period, periods]);
+  const selectedRows = useMemo(() => period === "all" ? settlements : settlements.filter((row) => row.period === period), [period, settlements]);
+  const latestPeriod = periods.at(-1) ?? "";
+  const latestRows = settlements.filter((row) => row.period === latestPeriod);
+  const sum = (rows: Settlement[], key: string) => rows.reduce((total, row) => total + numeric(row, key), 0);
+  const monthly = useMemo(() => periods.map((month) => {
+    const rows = settlements.filter((row) => row.period === month);
+    return { month, budget: sum(rows, "commitment"), consumption: sum(rows, "consumption"), realized: sum(rows, "realized"), adjustment: sum(rows, "contractual_adjustment"), credit: sum(rows, "closing_credit"), overage: sum(rows, "uncovered_overage") };
+  }), [periods, settlements]);
+  const chartMonths = monthly.slice(-12);
+  const chartMax = Math.max(1, ...chartMonths.flatMap((item) => [item.budget, item.consumption]));
+  const currentContract = contracts.find((item) => String(item.contract_id) === contractId);
+  const currentSummary = overview.find((item) => String(item.contract_id) === contractId);
+
+  return <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: "#f5f7fb", minHeight: "calc(100vh - 64px)" }}>
+    <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={2} sx={{ mb: 3 }}>
+      <Box><Typography variant="h4" fontWeight={750}>Visão financeira dos contratos</Typography>
+        <Typography color="text.secondary" sx={{ mt: 0.5 }}>Acompanhe orçamento, consumo e liquidação mês a mês.</Typography></Box>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { sm: 380 } }}>
+        <FormControl size="small" fullWidth><InputLabel>Contrato</InputLabel><Select value={contractId} label="Contrato" onChange={(event) => { setContractId(event.target.value); setPeriod("all"); }}>
+          {contracts.map((item) => <MenuItem key={item.contract_id} value={String(item.contract_id)}>{item.name} · {item.code}</MenuItem>)}
+        </Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }} disabled={!periods.length}><InputLabel>Competência</InputLabel><Select value={period} label="Competência" onChange={(event) => setPeriod(event.target.value)}>
+          <MenuItem value="all">Todas</MenuItem>{periods.map((item) => <MenuItem key={item} value={item}>{periodLabel(item)}</MenuItem>)}
+        </Select></FormControl>
+      </Stack>
+    </Stack>
+
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
+    {currentContract && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+      <Typography variant="body2" fontWeight={600}>{currentContract.active ? "Contrato ativo" : "Contrato inativo"}</Typography>
+      <Typography variant="body2" color="text.secondary">· Vigência {currentContract.valid_from ? new Date(`${currentContract.valid_from}T00:00:00`).toLocaleDateString("pt-BR") : "—"}{currentContract.valid_until ? ` – ${new Date(`${currentContract.valid_until}T00:00:00`).toLocaleDateString("pt-BR")}` : " em diante"}</Typography>
+      <Typography variant="body2" color="text.secondary">· Run {String(currentSummary?.run_id ?? "—")} · {currentSummary?.last_settlement_at ? new Date(String(currentSummary.last_settlement_at)).toLocaleString("pt-BR") : "sem liquidação"}</Typography>
+    </Stack>}
+
     <Grid container spacing={2} sx={{ mb: 3 }}>
-      {[['Contratos', rows.length], ['Créditos disponíveis', num(total("credit_balance"))], ['Overage descoberto', num(total("uncovered_overage"))], ['Realizado', num(total("realized"))]].map(([label, value]) => <Grid item xs={12} sm={6} md={3} key={String(label)}><Card><CardContent><Typography color="text.secondary" variant="body2">{label}</Typography><Typography variant="h5" sx={{ mt: 1 }}>{value}</Typography></CardContent></Card></Grid>)}
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Orçamento do período" value={amount(sum(selectedRows, "commitment"))} detail={period === "all" ? "Soma das competências exibidas" : periodLabel(period)} accent="#2563eb" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Consumo realizado" value={amount(sum(selectedRows, "consumption"))} detail="Consumo apurado na Silver" accent="#0891b2" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Realizado contratual" value={amount(sum(selectedRows, "realized"))} detail="Valor reconhecido no pool" accent="#7c3aed" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Saldo de crédito" value={amount(sum(latestRows, "closing_credit"))} detail={`Saldo final · ${latestPeriod ? periodLabel(latestPeriod) : "sem dados"}`} accent="#059669" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Ajuste contratual" value={amount(sum(selectedRows, "contractual_adjustment"))} detail="Consumo menos orçamento" accent="#d97706" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Crédito gerado" value={amount(sum(selectedRows, "credit_generated"))} detail="Competências selecionadas" accent="#16a34a" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Crédito consumido" value={amount(sum(selectedRows, "credit_used"))} detail="Compensação de overage" accent="#4f46e5" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Overage descoberto" value={amount(sum(selectedRows, "uncovered_overage"))} detail="Após uso dos créditos" accent="#dc2626" /></Grid>
     </Grid>
-    <Card><CardContent><Typography variant="h6" sx={{ mb: 1 }}>Resumo por contrato</Typography><Table size="small"><TableHead><TableRow><TableCell>Contrato</TableCell><TableCell>Status</TableCell><TableCell>Competência</TableCell><TableCell>Pools</TableCell><TableCell>Crédito</TableCell><TableCell>Overage</TableCell><TableCell>Realizado</TableCell></TableRow></TableHead><TableBody>{rows.map((row) => <TableRow key={String(row.contract_id)}><TableCell><strong>{String(row.name)}</strong><br /><small>{String(row.code)}</small></TableCell><TableCell>{row.active ? "Ativo" : "Inativo"}</TableCell><TableCell>{String(row.last_period || "—")}</TableCell><TableCell>{String(row.pool_count || 0)}</TableCell><TableCell>{num(row.credit_balance)}</TableCell><TableCell>{num(row.uncovered_overage)}</TableCell><TableCell>{num(row.realized)}</TableCell></TableRow>)}</TableBody></Table>{!rows.length && <Typography color="text.secondary" sx={{ py: 3 }}>Nenhuma liquidação contratual publicada.</Typography>}</CardContent></Card>
+
+    <Grid container spacing={2}>
+      <Grid item xs={12} lg={5}><Card variant="outlined" sx={{ height: "100%", borderRadius: 3 }}><CardContent>
+        <Typography variant="h6" fontWeight={700}>Orçamento × consumo</Typography><Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Últimas 12 competências · valores em {currentContract?.currency ?? "BRL"}</Typography>
+        {!chartMonths.length ? <Typography color="text.secondary" sx={{ py: 4 }}>Sem dados mensais para exibir.</Typography> : <Stack spacing={1.2}>
+          {chartMonths.map((item) => <Box key={item.month} sx={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: 1, alignItems: "center" }}>
+            <Typography variant="caption" color="text.secondary">{periodLabel(item.month)}</Typography><Stack spacing={0.5}>
+              <Box title={`Orçamento ${amount(item.budget)}`} sx={{ height: 9, width: `${Math.max(1, item.budget / chartMax * 100)}%`, bgcolor: "#93c5fd", borderRadius: 5 }} />
+              <Box title={`Consumo ${amount(item.consumption)}`} sx={{ height: 9, width: `${Math.max(1, item.consumption / chartMax * 100)}%`, bgcolor: item.consumption > item.budget ? "#f87171" : "#2dd4bf", borderRadius: 5 }} />
+            </Stack>
+          </Box>)}
+          <Stack direction="row" spacing={2} sx={{ pt: 1 }}><Typography variant="caption">🔹 Orçamento</Typography><Typography variant="caption">🟢 Consumo dentro do orçamento</Typography><Typography variant="caption">🔴 Consumo acima</Typography></Stack>
+        </Stack>}
+      </CardContent></Card></Grid>
+      <Grid item xs={12} lg={7}><Card variant="outlined" sx={{ height: "100%", borderRadius: 3 }}><CardContent>
+        <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>Fechamento mensal</Typography>
+        <TableContainer sx={{ maxHeight: 390 }}><Table size="small" stickyHeader><TableHead><TableRow>
+          {["Competência", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito final", "Overage"].map((label) => <TableCell key={label} align={label === "Competência" ? "left" : "right"} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}
+        </TableRow></TableHead><TableBody>{monthly.filter((item) => period === "all" || item.month === period).map((item) => <TableRow key={item.month} hover>
+          <TableCell sx={{ fontWeight: 600 }}>{periodLabel(item.month)}</TableCell><TableCell align="right">{amount(item.budget)}</TableCell><TableCell align="right">{amount(item.consumption)}</TableCell><TableCell align="right">{amount(item.realized)}</TableCell>
+          <TableCell align="right" sx={{ color: item.adjustment > 0 ? "error.main" : "success.main" }}>{amount(item.adjustment)}</TableCell><TableCell align="right">{amount(item.credit)}</TableCell><TableCell align="right" sx={{ color: item.overage ? "error.main" : "text.secondary" }}>{amount(item.overage)}</TableCell>
+        </TableRow>)}</TableBody></Table></TableContainer>
+        {!monthly.length && !loading && <Typography color="text.secondary" sx={{ py: 3 }}>Nenhuma liquidação mensal publicada para este contrato.</Typography>}
+      </CardContent></Card></Grid>
+
+      <Grid item xs={12}><Card variant="outlined" sx={{ borderRadius: 3 }}><CardContent>
+        <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" sx={{ mb: 1 }}><Box><Typography variant="h6" fontWeight={700}>Detalhamento por pool</Typography><Typography variant="body2" color="text.secondary">Competência, cloud e ID Orçamento · run vigente</Typography></Box><Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>Versões de orçamento incluídas em cada linha</Typography></Stack>
+        <TableContainer sx={{ maxHeight: 460 }}><Table size="small" stickyHeader><TableHead><TableRow>
+          {["Competência", "Cloud", "ID Orçamento", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito +", "Crédito −", "Overage", "Saldo", "Run / origem", "Versão orçamento"].map((label) => <TableCell key={label} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}
+        </TableRow></TableHead><TableBody>{selectedRows.map((row, index) => <TableRow key={`${row.period}-${row.cloud_scope}-${row.budget_id}-${index}`} hover>
+          <TableCell>{periodLabel(String(row.period ?? "—"))}</TableCell><TableCell>{String(row.cloud_scope ?? "—")}</TableCell><TableCell>{String(row.budget_id ?? "—")}</TableCell><TableCell>{amount(row.commitment)}</TableCell><TableCell>{amount(row.consumption)}</TableCell><TableCell>{amount(row.realized)}</TableCell><TableCell>{amount(row.contractual_adjustment)}</TableCell><TableCell>{amount(row.credit_generated)}</TableCell><TableCell>{amount(row.credit_used)}</TableCell><TableCell>{amount(row.uncovered_overage)}</TableCell><TableCell>{amount(row.closing_credit)}</TableCell><TableCell>{String(row.run_id ?? "—")} · {String(row.run_source ?? "—")}</TableCell><TableCell>{Array.isArray(row.budget_version_ids) ? row.budget_version_ids.map(String).join(", ") : "—"}</TableCell>
+        </TableRow>)}</TableBody></Table></TableContainer>
+        {!selectedRows.length && !loading && <Typography color="text.secondary" sx={{ py: 3 }}>Nenhum pool para os filtros selecionados.</Typography>}
+      </CardContent></Card></Grid>
+    </Grid>
   </Box>;
 }
