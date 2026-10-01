@@ -97,7 +97,7 @@ def _merge_ledger_rows(existing: list[dict[str, Any]], incoming: list[dict[str, 
 @router.get("/contract-story")
 async def get_contract_story_ledger(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require("planning", "view")),
+    _user: User = Depends(require("planning", "read")),
 ):
     ledger = await db.get(ContractStoryLedger, 1)
     return ledger.payload if ledger else None
@@ -107,7 +107,7 @@ async def get_contract_story_ledger(
 async def save_contract_story_ledger(
     body: ContractStoryLedgerIn,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require("planning", "edit")),
+    user: User = Depends(require("planning", "update")),
 ):
     ledger = await db.get(ContractStoryLedger, 1)
     payload = {
