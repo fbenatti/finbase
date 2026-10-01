@@ -228,13 +228,24 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
     )).scalar_one_or_none()
     run = await db.get(ContractSettlementRun, latest_run) if latest_run else None
     rows = (await db.execute(select(ContractSettlementMonth).where(ContractSettlementMonth.contract_id == contract_id, ContractSettlementMonth.run_id == latest_run).order_by(ContractSettlementMonth.period, ContractSettlementMonth.cloud_scope, ContractSettlementMonth.budget_id))).scalars().all()
-    return [{
-        **{column.name: getattr(row, column.name) for column in row.__table__.columns},
-        "run_source": run.source if run else None,
-        "run_created_at": run.created_at if run else None,
-        "run_finished_at": run.finished_at if run else None,
-        "budget_version_ids": run.budget_version_ids if run else [],
-    } for row in rows]
+    result = []
+    for row in rows:
+        item = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+        # The dashboard uses a signed adjustment where generated credit is
+        # positive and uncovered overage is negative. Derive this from the
+        # auditable ledger components instead of the legacy stored adjustment,
+        # whose sign may differ in older settlement runs.
+        item["contractual_adjustment"] = (
+            Decimal(row.credit_generated or 0) - Decimal(row.uncovered_overage or 0)
+        )
+        item.update({
+            "run_source": run.source if run else None,
+            "run_created_at": run.created_at if run else None,
+            "run_finished_at": run.finished_at if run else None,
+            "budget_version_ids": run.budget_version_ids if run else [],
+        })
+        result.append(item)
+    return result
 
 
 @router.post("/{contract_id}/settlements/recalculate")
