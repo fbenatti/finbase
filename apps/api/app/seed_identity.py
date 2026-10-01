@@ -17,6 +17,7 @@ from app.models.identity import (
 
 FINOPS_MODULE = "finops"
 IDEAS_MODULE = "ideas"
+PLANNING_MODULE = "planning"
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ async def seed_identity(db: AsyncSession) -> None:
     # sistema. Um módulo novo em ALL_MODULES não entra nas roles já existentes —
     # sem este backfill, todo mundo perde acesso ao módulo novo e o sintoma é um
     # 403 que parece defeito de RBAC.
-    for modulo_backfill in (IDEAS_MODULE, FINOPS_MODULE):
+    for modulo_backfill in (IDEAS_MODULE, FINOPS_MODULE, PLANNING_MODULE):
         for role_name, actions in (
             ("Administrador", ("read", "create", "update", "delete")),
             ("Leitor Global", ("read",)),
