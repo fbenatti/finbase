@@ -113,7 +113,10 @@ export default function ContractStoryDashboard() {
       }
       if (active) setLedgerLoaded(true);
     }).catch(() => {
-      if (active) setLedgerLoaded(true);
+      if (active) {
+        setMessage("Não foi possível carregar o histórico compartilhado. Entre novamente no sistema para sincronizar os dados.");
+        setLedgerLoaded(false);
+      }
     });
     return () => { active = false; };
   }, []);
@@ -124,9 +127,10 @@ export default function ContractStoryDashboard() {
     void saveContractStoryLedger(ledger).then((saved: Ledger) => {
       const canonical = { ...seed, ...saved };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(canonical));
+      setMessage("");
       setLedger(current => JSON.stringify(current) === JSON.stringify(canonical) ? current : canonical);
     }).catch(() => {
-      setMessage("Não foi possível sincronizar com o servidor. Os dados continuam salvos neste navegador.");
+      setMessage("Não foi possível sincronizar com o servidor. Os dados continuam salvos neste navegador; entre novamente no sistema para tentar outra vez.");
     });
   }, [ledger, ledgerLoaded]);
 
