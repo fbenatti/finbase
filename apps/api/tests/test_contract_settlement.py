@@ -2,6 +2,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+import pandas as pd
 
 from app.services.contract_settlement import (
     allocate_pool,
@@ -11,6 +12,10 @@ from app.services.contract_settlement import (
     period_within_contract,
     settle_pool,
     settle_rows,
+)
+from app.services.contract_settlement_frame import (
+    assign_contract_budget_ids_frame,
+    settle_rows_frame,
 )
 
 
@@ -282,3 +287,56 @@ def test_budget_owner_is_resolved_by_explicit_id_and_cloud_path():
         ("ibm", "EXTERNO-IBM"): 3,
         ("azure", "EXTERNO-AZURE"): 5,
     }
+
+
+def test_dataframe_settlement_matches_reference_with_mixed_pools_and_rounding():
+    rows = [
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 2,
+         "cloud_origem": "oci", "id_orcamento": "ID2534-OCI", "realizado_cloud": 1.0},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 2,
+         "cloud_origem": "oci", "id_orcamento": "ID2534-OCI", "realizado_cloud": 1.0},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 2,
+         "cloud_origem": "oci", "id_orcamento": "ID2534-OCI", "realizado_cloud": 1.0},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 2,
+         "cloud_origem": "oci", "id_orcamento": "OUTRO", "realizado_cloud": 150.005},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 2,
+         "cloud_origem": "oci", "id_orcamento": "OUTRO", "realizado_cloud": 200.0},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 3,
+         "cloud_origem": "ibm", "id_orcamento": "EXTERNO-IBM", "realizado_cloud": 50.0},
+        {"financial_effect": "DIRECT_REALIZED", "financial_contract_id": None,
+         "cloud_origem": "azure", "id_orcamento": None, "realizado_cloud": 35.0,
+         "realizado": 35.0},
+    ]
+    commitments = {
+        ("2", "oci", "ID2534-OCI"): Decimal("100.00"),
+        ("2", "oci", "OUTRO"): Decimal("250.00"),
+        ("3", "ibm", "EXTERNO-IBM"): Decimal("100.00"),
+    }
+    expected = settle_rows(rows, commitment_by_pool=commitments)
+
+    actual = settle_rows_frame(pd.DataFrame(rows), commitment_by_pool=commitments)
+    records = actual.to_dict(orient="records")
+
+    for index, row in enumerate(expected):
+        for column in ("realizado", "consumo_realizado", "ajuste_contratual"):
+            if column in row:
+                assert Decimal(str(records[index][column])).quantize(Decimal("0.01")) == Decimal(
+                    str(row[column])
+                ).quantize(Decimal("0.01"))
+    assert sum((Decimal(str(records[i]["realizado"])) for i in range(3)), Decimal(0)) == Decimal("100.00")
+    assert [records[i]["realizado"] for i in (0, 1, 2)] == [33.34, 33.33, 33.33]
+    assert records[6]["realizado"] == 35.0
+
+
+def test_dataframe_budget_id_fallback_fills_only_missing_unambiguous_scope():
+    frame = pd.DataFrame([
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1.0,
+         "cloud_origem": "IBM", "id_orcamento": None},
+        {"financial_effect": "DIRECT_REALIZED", "financial_contract_id": None,
+         "cloud_origem": "azure", "id_orcamento": None},
+    ])
+
+    result = assign_contract_budget_ids_frame(frame, {("1", "ibm"): {"EXTERNO-IBM"}})
+
+    assert result.loc[0, "id_orcamento"] == "EXTERNO-IBM"
+    assert pd.isna(result.loc[1, "id_orcamento"])
