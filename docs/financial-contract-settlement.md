@@ -9,8 +9,25 @@
   liquidação contratual.
 - `realizado`: saída financeira final. Em contratos de compromisso, recebe o
   orçamento mensal do pool rateado pelo peso positivo de `realizado_cloud`.
-- `ajuste_contratual`: `realizado - realizado_cloud`. Valor positivo representa
-  crédito gerado; valor negativo representa consumo de crédito/overage coberto.
+- `ajuste_contratual`: crédito gerado menos overage bruto. Valor positivo
+  representa crédito; valor negativo representa overage.
+
+## Saldos acumulados durante a vigência
+
+Cada pool (contrato + cloud + ID Orçamento) carrega crédito e overage entre
+competências. O crédito gerado no mês é somado ao crédito de abertura; o
+overage bruto do mês é somado ao overage de abertura. Em seguida, os dois
+saldos se compensam. O fechamento registra ambos os saldos, com overage
+negativo para manter uma única convenção visual. O reprocessamento refaz a
+sequência cronológica desde a primeira competência disponível.
+
+Na competência final da vigência, o overage remanescente é registrado como
+`settled_overage` (valor negativo) e o saldo de fechamento de overage zera.
+Assim o dashboard mostra tanto o valor liquidado quanto o saldo após o
+pagamento. Os campos `opening_overage`, `closing_overage` e
+`settled_overage` registram abertura, saldo e liquidação; os campos existentes
+`gross_overage`, `credit_used`, `credit_generated` e `closing_credit` preservam
+os movimentos e o saldo de crédito.
 
 ## Resolução do orçamento
 
