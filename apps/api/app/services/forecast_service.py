@@ -24,16 +24,7 @@ _SHARD_BATCH_SIZE = 64
 
 
 def _series_key(key_values: dict[str, Any], key_cols: list[str]) -> tuple[tuple[str, Any], ...]:
-    normalized: list[tuple[str, Any]] = []
-    for column in key_cols:
-        value = key_values.get(column)
-        try:
-            if pd.isna(value):
-                value = None
-        except (TypeError, ValueError):
-            pass
-        normalized.append((column, value))
-    return tuple(normalized)
+    return tuple((col, key_values.get(col)) for col in key_cols)
 
 
 async def _contract_budget_commitments(
