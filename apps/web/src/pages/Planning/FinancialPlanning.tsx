@@ -16,15 +16,31 @@ const TABS = [
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
-  { code: "contratos-financeiros", label: "Contratos Financeiros", title: "Contratos Financeiros", help: "Orçamento, consumo, realizado, créditos e overage por contrato." },
-  { code: "dashboard", label: "Orçamento", title: "Orçamento", help: "Histórico consolidado do planejamento financeiro." },
+  { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
   { code: "contract", label: "Contrato", title: "Contrato", help: "História e evolução dos compromissos contratuais." },
 ] as const;
 
 export default function FinancialPlanning() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const requested = searchParams.get("tab") || "orcamento";
+  const legacyCommitmentTab = searchParams.get("tab") === "contratos-financeiros";
+  const requested = legacyCommitmentTab ? "dashboard" : searchParams.get("tab") || "orcamento";
   const active = TABS.find(tab => tab.code === requested) || TABS[0];
+  const dashboardSubtab = legacyCommitmentTab || searchParams.get("dashboard") === "contrato-com-compromisso" ? "contrato-com-compromisso" : "orcamento";
+
+  const changeTab = (_event: React.SyntheticEvent, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", value);
+    next.delete("dashboard");
+    setSearchParams(next, { replace: true });
+  };
+
+  const changeDashboardSubtab = (_event: React.SyntheticEvent, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "dashboard");
+    if (value === "contrato-com-compromisso") next.set("dashboard", value);
+    else next.delete("dashboard");
+    setSearchParams(next, { replace: true });
+  };
 
   return (
     <Box sx={{ mx: -3, mt: -3 }}>
@@ -35,7 +51,7 @@ export default function FinancialPlanning() {
         </Typography>
         <Tabs
           value={active.code}
-          onChange={(_event, value: string) => setSearchParams({ tab: value }, { replace: true })}
+          onChange={changeTab}
           variant="scrollable"
           scrollButtons="auto"
           aria-label="Módulos do planejamento financeiro"
@@ -49,9 +65,13 @@ export default function FinancialPlanning() {
         ) : active.code === "visao-contabil" ? (
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
         ) : active.code === "dashboard" ? (
-          <FinancialDashboard />
-        ) : active.code === "contratos-financeiros" ? (
-          <FinancialContractsDashboard />
+          <>
+            <Tabs value={dashboardSubtab} onChange={changeDashboardSubtab} aria-label="Dashboards executivos" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
+              <Tab value="orcamento" label="Orçamento" />
+              <Tab value="contrato-com-compromisso" label="Contrato com compromisso" />
+            </Tabs>
+            {dashboardSubtab === "contrato-com-compromisso" ? <FinancialContractsDashboard /> : <FinancialDashboard />}
+          </>
         ) : active.code === "contract" ? (
           <ContractStoryDashboard />
         ) : (
