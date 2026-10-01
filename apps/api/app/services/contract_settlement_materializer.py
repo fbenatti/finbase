@@ -243,6 +243,9 @@ async def _recalculate_contract(
     opening_credit: dict[tuple[str, str], Decimal] = {
         scope: Decimal("0.00") for scope in scopes
     }
+    opening_overage: dict[tuple[str, str], Decimal] = {
+        scope: Decimal("0.00") for scope in scopes
+    }
     for period in periods:
         for cloud, budget_id in scopes:
             pool = (cloud, budget_id)
@@ -250,8 +253,15 @@ async def _recalculate_contract(
             values = inputs.get(key, {})
             commitment = commitments.get(key, Decimal("0.00"))
             consumption = values.get("consumption", Decimal("0.00"))
-            result = settle_pool(commitment, consumption, opening_credit[pool])
-            adjustment = money(consumption - commitment)
+            is_contract_end = period == contract.valid_until
+            result = settle_pool(
+                commitment,
+                consumption,
+                opening_credit[pool],
+                opening_overage[pool],
+                contract_end=is_contract_end,
+            )
+            adjustment = money(result.credit_generated - result.gross_overage)
 
             # The ledger must agree with the row-level Silver publication.
             # Refuse to publish a successful run over a stale or partially
@@ -287,7 +297,10 @@ async def _recalculate_contract(
                 gross_overage=result.gross_overage,
                 credit_used=result.credit_used,
                 uncovered_overage=result.uncovered_overage,
-                credit_overage_delta=result.credit_generated - result.uncovered_overage,
+                opening_overage=-result.opening_overage,
+                closing_overage=-result.closing_overage,
+                settled_overage=-result.settled_overage,
+                credit_overage_delta=adjustment,
                 expired_credit=expired,
                 closing_credit=closing,
                 realized=result.realized,
@@ -296,6 +309,7 @@ async def _recalculate_contract(
                 status="SUCCESS",
             ))
             opening_credit[pool] = closing
+            opening_overage[pool] = result.closing_overage
 
     run.status = "SUCCESS"
     run.finished_at = datetime.now(timezone.utc)
