@@ -312,10 +312,10 @@ export default function ExpectedViewV2({
   // overlap, so the forecast must be stacked on top of the realized bar —
   // otherwise the current month shows only the partial spend and the
   // remaining projection disappears from the chart, cards and cumulative.
-  const now = new Date();
-  const currentMonthKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const isCurrentMonth = (row: ExpectedViewRow) =>
-    row.period === currentMonthKey;
+  // O mês aberto segue o cutoff D-2 do forecast, não o calendário local.
+  // No início de outubro, setembro ainda pode carregar projeção dos dias restantes.
+  const isForecastAnchor = (row: ExpectedViewRow) =>
+    row.actual_value != null && row.forecast_value != null;
   const sharedOn = includeSharedCost;
   const sharedOf = (row: ExpectedViewRow) => Number(row.shared_value || 0);
   const receivedOf = (row: ExpectedViewRow) => Number(row.shared_received || 0);
@@ -336,7 +336,7 @@ export default function ExpectedViewV2({
   const expectedOf = (row: ExpectedViewRow) =>
     row.actual_value != null
       ? Number(row.actual_value || 0) +
-        (isCurrentMonth(row) ? Number(row.forecast_value || 0) : 0) +
+        (isForecastAnchor(row) ? Number(row.forecast_value || 0) : 0) +
         forecastManualOf(row) +
         (sharedOn ? sharedOf(row) : 0)
       : Number(row.forecast_value ?? 0) +
@@ -360,11 +360,12 @@ export default function ExpectedViewV2({
   // mês FECHADO (julho) e o Forecast assume a partir do mês corrente tratando
   // o mês inteiro como forecast — a transição vira um passo mensal normal,
   // sem ponto duplicado nem quebra.
-  const currentOpen =
-    actualEnd >= 0 &&
-    isCurrentMonth(filteredRows[actualEnd]) &&
-    Number(filteredRows[actualEnd].forecast_value || 0) > 0;
-  const realizedEnd = currentOpen ? actualEnd - 1 : actualEnd;
+  const forecastAnchorIndex = filteredRows.reduce(
+    (last, row, index) => (isForecastAnchor(row) ? index : last),
+    -1,
+  );
+  const currentOpen = forecastAnchorIndex >= 0;
+  const realizedEnd = currentOpen ? forecastAnchorIndex - 1 : actualEnd;
   const consumptionCumulative = filteredRows.map((_, index) =>
     index <= realizedEnd
       ? filteredRows
@@ -410,7 +411,7 @@ export default function ExpectedViewV2({
   // carries the remaining-days forecast, stacked on top of its partial
   // realized. Closed months have no meaningful forecast (zeroed by the engine).
   const forecastBars = filteredRows.map((row) =>
-    row.actual_value == null || isCurrentMonth(row)
+    row.actual_value == null || isForecastAnchor(row)
       ? Math.max(
           0,
           Number(row.forecast_value || 0) + (sharedOn ? givenOf(row) : 0),
@@ -449,7 +450,7 @@ export default function ExpectedViewV2({
         return (
           sum +
           consumptionOf(item) +
-          (isCurrentMonth(item) ? Number(item.forecast_value || 0) : 0)
+          (isForecastAnchor(item) ? Number(item.forecast_value || 0) : 0)
         );
       return (
         sum + Number(item.forecast_value || 0) + (sharedOn ? givenOf(item) : 0)
@@ -637,7 +638,7 @@ export default function ExpectedViewV2({
     .reduce((total, row) => total + Number(groupedField(row, "realizado") || 0), 0);
   const forecastEligible = (period: string) => {
     const expectedRow = filteredRows.find((row) => row.period === period);
-    return Boolean(expectedRow && (expectedRow.actual_value == null || isCurrentMonth(expectedRow)));
+    return Boolean(expectedRow && (expectedRow.actual_value == null || isForecastAnchor(expectedRow)));
   };
   const groupTraces: any[] = visibleGroups.flatMap<any>((name, index) => {
     const color = FILTER_PALETTE[index % FILTER_PALETTE.length];
@@ -1027,7 +1028,7 @@ export default function ExpectedViewV2({
       // D-2/current open month: the forecast point represents the full
       // projected month, so it must continue from the partial realized value
       // instead of dropping to the remaining forecast amount.
-      value: field === "forecast_value" && isCurrentMonth(row) && row.actual_value != null
+      value: field === "forecast_value" && isForecastAnchor(row)
         ? Number(row.actual_value || 0) + Number(row.forecast_value || 0)
         : Number(row[field] || 0),
     }));

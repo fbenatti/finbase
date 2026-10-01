@@ -2200,11 +2200,6 @@ async def _expected_view_core(
     year_end = _quote_literal(f"{max(body.year, 1) + 1:04d}01")
     actual_year_clause = "" if all_periods else (f" AND {actual_period} >= {_quote_literal(body.month_from)}" if body.month_from else f" AND {actual_period} >= {year_start}") + (f" AND {actual_period} <= {_quote_literal(body.month_to)}" if body.month_to else f" AND {actual_period} < {year_end}")
     forecast_year_clause = "" if all_periods else (f" AND {forecast_period} >= {_quote_literal(body.month_from)}" if body.month_from else f" AND {forecast_period} >= {year_start}") + (f" AND {forecast_period} <= {_quote_literal(body.month_to)}" if body.month_to else f" AND {forecast_period} < {year_end}")
-    # O mês corrente é aberto: a planning carrega só o forecast do restante
-    # (baseline × dias restantes), aditivo sobre o realizado parcial da Gold.
-    # Por isso ele precisa ser empilhado — mesma semântica da projeção do
-    # ai-copilot (realizado parcial + forecast do restante).
-    current_month_key = datetime.now().strftime("%Y%m")
     tipo_actual = ""
     if "tipo" in actual_columns:
         tipo_col = _quote_ident(actual_columns["tipo"])
@@ -2301,14 +2296,23 @@ async def _expected_view_core(
         value = float(row.get("forecast_value") or 0)
         current = by_period_facts.setdefault(period, {"period": period, "actual_value": None, "forecast_value": 0.0})
         current["forecast_value"] = float(current.get("forecast_value") or 0) + value
-        # Closed months already count as realizado. Keep leftover planning
-        # forecast on the row for the chart, but do not add it to the year
-        # forecast / waterfall — otherwise the donor still shows the full
-        # condomínio forecast after rateio has zeroed the actual.
-        # Exception: the current (open) month carries only the remaining-days
-        # projection (baseline × dias restantes), which is additive on top of
-        # the partial realized — so it must count toward the driver forecast.
-        if current.get("actual_value") is None or period == current_month_key:
+    # A ancora aberta vem do proprio resultado do motor (realizado + forecast
+    # na mesma competência). Ela pode ser setembro mesmo quando hoje já é outubro.
+    open_forecast_period = max(
+        (
+            period for period, fact in by_period_facts.items()
+            if fact.get("actual_value") is not None
+            and fact.get("forecast_value") is not None
+        ),
+        default=None,
+    )
+    # Meses fechados mantêm forecast histórico para consulta, mas só a âncora
+    # aberta e meses futuros entram na projeção dos drivers.
+    for row in forecast_fact_rows:
+        period = str(row.get("period") or "")
+        if period == open_forecast_period or by_period_facts[period].get("actual_value") is None:
+            driver = str(row.get("driver") or "Sem departamento filho")
+            value = float(row.get("forecast_value") or 0)
             forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
     if body.include_shared_cost:
         medida_col = forecast_columns.get("rateio_medida")
@@ -2475,10 +2479,10 @@ async def _expected_view_core(
         # separate stack on top of that base, not mixed into Gold. Manual
         # forecast composes on top of the future forecast as its own layer.
         base = actual if actual is not None else (forecast if forecast is not None else budget)
-        # Current (open) month: the planning forecast is the remaining-days
-        # projection and never overlaps the partial realized — stack it so the
-        # expected total reflects the full-month estimate.
-        if actual is not None and forecast is not None and period == current_month_key:
+        # Open month: the planning forecast is the remaining-days projection
+        # and never overlaps partial realized. Its period is determined by the
+        # forecast cutoff, not the server calendar.
+        if actual is not None and forecast is not None and period == open_forecast_period:
             base = float(base) + float(forecast)
         expected = float(base or 0) + forecast_manual + shared
         cumulative += expected
