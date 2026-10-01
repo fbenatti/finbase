@@ -122,7 +122,7 @@ export default function FinancialContractsDashboard() {
       </CardContent></Card></Grid>
       <Grid item xs={12} lg={7}><Card variant="outlined" sx={{ height: "100%", borderRadius: 3 }}><CardContent>
         <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>Fechamento mensal</Typography>
-        <TableContainer sx={{ maxHeight: 390 }}><Table size="small" stickyHeader><TableHead><TableRow>
+        <TableContainer sx={{ maxHeight: 560 }}><Table size="small" stickyHeader><TableHead><TableRow>
           {["Competência", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito final", "Overage"].map((label) => <TableCell key={label} align={label === "Competência" ? "left" : "right"} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}
         </TableRow></TableHead><TableBody>{monthly.filter((item) => period === "all" || item.month === period).map((item) => <TableRow key={item.month} hover>
           <TableCell sx={{ fontWeight: 600 }}>{periodLabel(item.month)}</TableCell><TableCell align="right">{amount(item.budget)}</TableCell><TableCell align="right">{amount(item.consumption)}</TableCell><TableCell align="right">{amount(item.realized)}</TableCell>
