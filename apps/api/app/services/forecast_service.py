@@ -1553,7 +1553,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     if dual_financial_measures:
         await _apply_dual_financial_measures(
             output,
-            financial_context_columns=financial_context_columns,
+            financial_context_columns=[
+                *financial_context_columns,
+                *([cloud_col] if cloud_col else []),
+            ],
             source=source,
             type_filter=type_filter,
             period_column=period,
