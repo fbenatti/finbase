@@ -1345,12 +1345,14 @@ def _reprocess_destination_sync(
     from app.services import iceberg_service as iceberg
     from app.services import gold_builder
     from app.services.contract_settlement import (
-        assign_contract_budget_ids,
         organizational_budget_commitments,
         organizational_budget_owners,
         normalize_cloud_scope,
         period_within_contract,
-        settle_rows,
+    )
+    from app.services.contract_settlement_frame import (
+        assign_contract_budget_ids_frame,
+        settle_rows_frame,
     )
     from app.models.financial_contract import FinancialContract, FinancialContractBudgetScope
     from app.models.planning import PlanningEntry, PlanningVersion, FinancialType
@@ -2167,12 +2169,7 @@ def _reprocess_destination_sync(
                     configured_scopes.setdefault(
                         (str(contract_id), normalize_cloud_scope(cloud)), set()
                     ).add(str(budget_id).strip())
-            contractual = pd.DataFrame(
-                assign_contract_budget_ids(
-                    contractual.to_dict(orient="records"),
-                    configured_scopes,
-                )
-            )
+            assign_contract_budget_ids_frame(contractual, configured_scopes)
             owners = organizational_budget_owners(
                 dept_cache,
                 {
@@ -2241,8 +2238,8 @@ def _reprocess_destination_sync(
                     dept_cache,
                     budget_entries,
                 )
-            settled = settle_rows(contractual.to_dict(orient="records"), commitment_by_pool=commitment_by_pool)
-            _stage_frame(pd.DataFrame(settled))
+            settled = settle_rows_frame(contractual, commitment_by_pool=commitment_by_pool)
+            _stage_frame(settled)
 
         # Price gaps do not invalidate a reprocess; they remain auditable.
         for engine in clone_engines.values():
