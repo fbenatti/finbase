@@ -56,33 +56,35 @@ def settle_pool(
     *,
     contract_end: bool = False,
 ) -> SettlementResult:
-    """Settle one monthly pool, carrying both credit and overage balances."""
+    """Settle one monthly pool, carrying unused credit into later months.
+
+    Uncovered overage is measured for the month and never carried forward to
+    consume credits generated in a later month. ``opening_overage`` remains in
+    the signature for callers reading legacy ledger rows, but it does not
+    participate in the current settlement rules.
+    """
     budget = money(commitment)
     consumed = money(consumption)
     opening = money(opening_credit)
-    outstanding = money(opening_overage)
+    legacy_opening_overage = money(opening_overage)
     if budget < 0:
         raise ValueError("commitment cannot be negative")
     if opening < 0:
         raise ValueError("opening credit cannot be negative")
-    if outstanding < 0:
+    if legacy_opening_overage < 0:
         raise ValueError("opening overage cannot be negative")
 
     delta = budget - consumed
     generated = max(delta, Decimal(0))
     overage = max(-delta, Decimal(0))
 
-    # Credit and overage are pool balances, not isolated monthly values.
-    # Newly generated credit offsets any carried or newly generated overage.
-    available_credit = opening + generated
-    pending_overage = outstanding + overage
-    used = min(available_credit, pending_overage)
-    closing = available_credit - used
-    closing_overage = pending_overage - used
-    uncovered = closing_overage
+    # Only credit is carried between months. A month with uncovered overage
+    # cannot be retroactively offset by credits generated in a later month.
+    used = min(opening, overage)
+    closing = opening + generated - used
+    uncovered = overage - used
     settled = uncovered if contract_end else money(0)
-    if contract_end:
-        closing_overage = money(0)
+    closing_overage = money(0)
 
     # No consumption means no project-level realized amount. The full budget
     # difference still participates in the contract-level balances above.
@@ -92,14 +94,14 @@ def settle_pool(
         commitment=budget,
         consumption=consumed,
         opening_credit=opening,
-        opening_overage=outstanding,
+        opening_overage=money(0),
         credit_generated=generated,
         gross_overage=money(overage),
         credit_used=money(used),
         uncovered_overage=money(uncovered),
         realized=money(realized),
         closing_credit=money(closing),
-        closing_overage=money(closing_overage),
+        closing_overage=closing_overage,
         settled_overage=money(settled),
     )
 
@@ -269,15 +271,22 @@ def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, st
     for key, indexes in groups.items():
         commitment = commitment_by_pool.get(key, Decimal("0"))
         consumption = [money(output[i].get("realizado_cloud", output[i].get("consumo_realizado"))) for i in indexes]
-        result = settle_pool(commitment, sum(consumption, Decimal("0")), opening_credit_by_pool.get(key, Decimal("0")))
+        consumption_total = sum(consumption, Decimal("0"))
+        result = settle_pool(
+            commitment,
+            consumption_total,
+            opening_credit_by_pool.get(key, Decimal("0")),
+        )
         allocations = allocate_pool(result.realized, consumption)
+        adjustment_total = money(consumption_total - result.commitment)
+        if any(value > 0 for value in consumption):
+            adjustments = allocate_pool(adjustment_total, consumption)
+        else:
+            adjustments = [adjustment_total, *[money(0) for _ in indexes[1:]]]
         for index, value in zip(indexes, allocations):
             output[index]["realizado"] = float(value)
             cloud_value = money(output[index].get("realizado_cloud", output[index].get("consumo_realizado")))
             output[index]["consumo_realizado"] = float(cloud_value)
-            # Positive adjustment represents generated credit; negative
-            # adjustment represents overage. At row grain, distribute the
-            # signed delta as allocated realized minus consumption so rows
-            # close exactly to the pool adjustment in cents.
-            output[index]["ajuste_contratual"] = float(value - cloud_value)
+        for index, adjustment in zip(indexes, adjustments):
+            output[index]["ajuste_contratual"] = float(adjustment)
     return output

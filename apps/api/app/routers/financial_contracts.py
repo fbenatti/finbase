@@ -232,12 +232,11 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
     result = []
     for row in rows:
         item = {column.name: getattr(row, column.name) for column in row.__table__.columns}
-        # The dashboard uses a signed adjustment where generated credit is
-        # positive and uncovered overage is negative. Derive this from the
-        # auditable ledger components instead of the legacy stored adjustment,
-        # whose sign may differ in older settlement runs.
+        # Contract adjustment follows the finance definition in every surface:
+        # actual consumption minus the monthly commitment. Credit and overage
+        # balances remain separate ledger metrics.
         item["contractual_adjustment"] = (
-            Decimal(row.credit_generated or 0) - Decimal(row.gross_overage or 0)
+            Decimal(row.consumption or 0) - Decimal(row.commitment or 0)
         )
         item.update({
             "run_source": run.source if run else None,

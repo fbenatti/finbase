@@ -53,26 +53,29 @@ def test_two_months_generate_then_consume_credit_without_inflating_realized():
     assert february.closing_credit == Decimal("0.00")
 
 
-def test_signed_adjustment_uses_positive_credit_and_negative_overage():
+def test_contractual_adjustment_is_consumption_minus_commitment():
     under = settle_pool("892532.94", "1953.59")
     over = settle_pool("1000", "1300")
 
-    assert under.credit_generated - under.gross_overage == Decimal("890579.35")
-    assert over.credit_generated - over.gross_overage == Decimal("-300.00")
+    assert under.consumption - under.commitment == Decimal("-890579.35")
+    assert over.consumption - over.commitment == Decimal("300.00")
     assert over.realized == over.commitment
 
 
-def test_credit_generated_later_offsets_carried_overage():
+def test_credit_generated_later_does_not_offset_prior_uncovered_overage():
     january = settle_pool("1000", "1300")
     february = settle_pool("1000", "800", opening_overage=january.closing_overage)
-    march = settle_pool("1000", "900", opening_overage=february.closing_overage)
+    march = settle_pool("1000", "900", opening_credit=february.closing_credit)
 
-    assert january.closing_overage == Decimal("300.00")
+    assert january.uncovered_overage == Decimal("300.00")
+    assert january.closing_overage == Decimal("0.00")
     assert february.credit_generated == Decimal("200.00")
-    assert february.credit_used == Decimal("200.00")
-    assert february.closing_overage == Decimal("100.00")
+    assert february.credit_used == Decimal("0.00")
+    assert february.closing_credit == Decimal("200.00")
+    assert february.closing_overage == Decimal("0.00")
     assert march.credit_generated == Decimal("100.00")
-    assert march.closing_overage == Decimal("0.00")
+    assert march.credit_used == Decimal("0.00")
+    assert march.closing_credit == Decimal("300.00")
 
 
 def test_overage_generated_later_uses_carried_credit():
@@ -82,14 +85,15 @@ def test_overage_generated_later_uses_carried_credit():
     assert january.closing_credit == Decimal("100.00")
     assert february.gross_overage == Decimal("300.00")
     assert february.credit_used == Decimal("100.00")
-    assert february.closing_overage == Decimal("200.00")
+    assert february.uncovered_overage == Decimal("200.00")
+    assert february.closing_overage == Decimal("0.00")
 
 
-def test_overage_is_recorded_as_paid_and_balance_zero_at_contract_end():
-    result = settle_pool("1000", "1000", opening_overage="250", contract_end=True)
+def test_contract_end_settles_only_current_month_uncovered_overage():
+    result = settle_pool("1000", "1300", opening_credit="200", contract_end=True)
 
-    assert result.uncovered_overage == Decimal("250.00")
-    assert result.settled_overage == Decimal("250.00")
+    assert result.uncovered_overage == Decimal("100.00")
+    assert result.settled_overage == Decimal("100.00")
     assert result.closing_overage == Decimal("0.00")
 
 
@@ -179,9 +183,24 @@ def test_settle_rows_writes_realized_and_contractual_adjustment():
     ]
     result = settle_rows(rows, commitment_by_pool={("1", "ibm", "EXTERNO-IBM"): Decimal("1000")})
     assert [result[0]["realizado"], result[1]["realizado"]] == [555.56, 444.44]
-    assert result[0]["ajuste_contratual"] == 55.56
-    assert round(sum(row["ajuste_contratual"] for row in result[:2]), 2) == 100.0
+    assert result[0]["ajuste_contratual"] == -55.56
+    assert round(sum(row["ajuste_contratual"] for row in result[:2]), 2) == -100.0
     assert result[2]["realizado"] == 25
+
+
+def test_zero_consumption_adjustment_still_closes_to_pool_delta():
+    rows = [
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1,
+         "cloud_origem": "oci", "id_orcamento": "ID2534-OCI", "consumo_realizado": 0},
+        {"financial_effect": "BUDGET_COMMITMENT", "financial_contract_id": 1,
+         "cloud_origem": "oci", "id_orcamento": "ID2534-OCI", "consumo_realizado": 0},
+    ]
+    result = settle_rows(
+        rows,
+        commitment_by_pool={("1", "oci", "ID2534-OCI"): Decimal("1000")},
+    )
+    assert sum((Decimal(str(row["ajuste_contratual"])) for row in result), Decimal(0)) == Decimal("-1000.00")
+    assert [row["realizado"] for row in result] == [0, 0]
 
 
 def test_pool_budget_is_scaled_by_cloud_consumption_weight():
