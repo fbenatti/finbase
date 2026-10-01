@@ -205,7 +205,12 @@ async def _recalculate_contract(
                 "adjustment": str(values.get("adjustment", Decimal("0.00"))),
             })
     fingerprint = hashlib.sha256(json.dumps(
-        {"contract": contract.id, "versions": version_ids, "pools": fingerprint_payload},
+        {
+            "settlement_logic_version": 2,
+            "contract": contract.id,
+            "versions": version_ids,
+            "pools": fingerprint_payload,
+        },
         sort_keys=True, separators=(",", ":"),
     ).encode()).hexdigest()
 
