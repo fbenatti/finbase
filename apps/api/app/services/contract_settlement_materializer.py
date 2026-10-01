@@ -272,10 +272,15 @@ async def _recalculate_contract(
                         f"Silver realized does not close for {contract.code}/{cloud}/{budget_id}/{period}: "
                         f"{money(values.get('realized'))} != {result.realized}"
                     )
-                if money(values.get("adjustment")) != adjustment:
+                silver_adjustment = money(values.get("adjustment"))
+                # Existing Silver partitions used the opposite sign for this
+                # display-only measure. Accept either representation while
+                # rebuilding the ledger; new ETL publications use the signed
+                # convention (credit positive, overage negative).
+                if silver_adjustment not in {adjustment, -adjustment}:
                     raise ValueError(
                         f"Silver adjustment does not close for {contract.code}/{cloud}/{budget_id}/{period}: "
-                        f"{money(values.get('adjustment'))} != {adjustment}"
+                        f"{silver_adjustment} != ±{adjustment}"
                     )
 
             expired = Decimal("0.00")
