@@ -894,47 +894,75 @@ async def _fetch_cloud_cutoffs(
     type_filter: str,
     date_expr: str,
     cloud_col: str,
+    source_connection_col: str | None,
     period_col: str | None,
     excluded_days: int,
 ) -> dict[str, date]:
-    """Return effective cutoff per ``cloud_origem`` from each cloud's latest collection."""
+    """Return effective cutoffs per cloud, aligned to each source connection.
+
+    Historical rows may contain an old cloud label after a connection was
+    renamed or normalized. Using that label's stale maximum would keep a
+    retired series forecasting alongside its replacement. A connection is
+    ingested as one source, so all its cloud labels share the latest collected
+    date while each series still forecasts only its own available history.
+    """
+    connection_expr = (
+        f"CAST({_q(source_connection_col)} AS VARCHAR)"
+        if source_connection_col else "CAST(NULL AS VARCHAR)"
+    )
     if period_col:
         sql = f"""
             WITH latest_period AS (
                 SELECT
                     CAST({_q(cloud_col)} AS VARCHAR) AS latest_cloud,
+                    {connection_expr} AS latest_connection,
                     MAX(CAST({_q(period_col)} AS VARCHAR)) AS max_period
                 FROM {source}
                 WHERE {type_filter}
-                GROUP BY 1
+                GROUP BY 1, 2
             )
             SELECT
                 CAST(g.{_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                {f'CAST(g.{_q(source_connection_col)} AS VARCHAR)' if source_connection_col else 'CAST(NULL AS VARCHAR)'} AS source_connection_id,
                 MAX({date_expr}) AS collected_through
             FROM {source} g
             INNER JOIN latest_period lp
                 ON CAST(g.{_q(cloud_col)} AS VARCHAR) = lp.latest_cloud
+               AND {f'CAST(g.{_q(source_connection_col)} AS VARCHAR)' if source_connection_col else 'CAST(NULL AS VARCHAR)'} IS NOT DISTINCT FROM lp.latest_connection
                AND CAST(g.{_q(period_col)} AS VARCHAR) = lp.max_period
             WHERE {type_filter}
-            GROUP BY 1
+            GROUP BY 1, 2
         """
     else:
         sql = f"""
             SELECT
                 CAST({_q(cloud_col)} AS VARCHAR) AS cloud_origem,
+                {connection_expr} AS source_connection_id,
                 MAX({date_expr}) AS collected_through
             FROM {source}
             WHERE {type_filter}
-            GROUP BY 1
+            GROUP BY 1, 2
         """
     rows = await trino_execute(sql, timeout_s=120)
-    cutoffs: dict[str, date] = {}
+    resolved: list[tuple[str, str | None, date]] = []
+    connection_cutoffs: dict[str, date] = {}
     for row in rows:
         cloud = str(row.get("cloud_origem") or "").strip()
         collected = pd.to_datetime(row.get("collected_through"), errors="coerce")
         if not cloud or pd.isna(collected):
             continue
-        cutoffs[cloud] = collected.date() - timedelta(days=excluded_days)
+        cutoff = collected.date() - timedelta(days=excluded_days)
+        connection_id = str(row.get("source_connection_id") or "").strip() or None
+        resolved.append((cloud, connection_id, cutoff))
+        if connection_id:
+            connection_cutoffs[connection_id] = max(
+                cutoff, connection_cutoffs.get(connection_id, cutoff),
+            )
+    cutoffs: dict[str, date] = {}
+    for cloud, connection_id, cutoff in resolved:
+        if connection_id:
+            cutoff = max(cutoff, connection_cutoffs[connection_id])
+        cutoffs[cloud] = max(cutoff, cutoffs.get(cloud, cutoff))
     return cutoffs
 
 
@@ -1203,6 +1231,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 type_filter=type_filter,
                 date_expr=date_expr,
                 cloud_col=cloud_col,
+                source_connection_col=id_col,
                 period_col=period,
                 excluded_days=excluded_days,
             )
