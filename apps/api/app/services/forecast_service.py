@@ -346,6 +346,10 @@ def _apply_forecast_business_rules(
         if rule.end_period:
             mask &= output["forecast_month"] <= rule.end_period
 
+        if not mask.any():
+            applied_rules.append(f"{rule.name} (sem séries correspondentes)")
+            continue
+
         behavior = str(getattr(rule, "behavior", "") or "")
         if behavior == "CHARGE_INTERVAL":
             continue
