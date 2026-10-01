@@ -237,6 +237,11 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
         item["contractual_adjustment"] = (
             Decimal(row.credit_generated or 0) - Decimal(row.gross_overage or 0)
         )
+        # Show debt resolved during this period: credits applied against the
+        # carried overage plus any remaining amount settled at contract end.
+        item["overage_resolved"] = (
+            -Decimal(row.credit_used or 0) + Decimal(row.settled_overage or 0)
+        )
         item.update({
             "run_source": run.source if run else None,
             "run_created_at": run.created_at if run else None,
