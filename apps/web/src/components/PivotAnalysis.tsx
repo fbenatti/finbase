@@ -1,11 +1,11 @@
 import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert, Autocomplete, Box, Button, Chip, CircularProgress, Divider, Drawer, FormControl, IconButton, InputLabel,
+  Alert, Autocomplete, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer, FormControl, IconButton, InputLabel,
   MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, Delete, Download, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
+import { Add, Close, ContentCopy, Delete, Download, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
@@ -20,6 +20,7 @@ interface Props {
   initialMeasure?: string;
   initialFilters?: PivotFilter[];
   autoRun?: boolean;
+  onOpenQuery?: (sql: string) => void;
 }
 
 const money = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -103,7 +104,7 @@ function downloadExcel(result: PivotResult) {
   XLSX.writeFile(workbook, `pivot_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export default function PivotAnalysis({ destinations, initialTableId, showSearch = false, initialMeasure, initialFilters = [], autoRun = false }: Props) {
+export default function PivotAnalysis({ destinations, initialTableId, showSearch = false, initialMeasure, initialFilters = [], autoRun = false, onOpenQuery }: Props) {
   const first = initialTableId || destinations.filter(d => d.id > 0)[0]?.id || destinations[0]?.id || 0;
   const [tableId, setTableId] = useState(first);
   const [sourceIds, setSourceIds] = useState<number[]>([first]);
@@ -116,6 +117,9 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [filters, setFilters] = useState<PivotFilter[]>(initialFilters);
   const [didAutoRun, setDidAutoRun] = useState(false);
   const [field, setField] = useState("");
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [queryOpen, setQueryOpen] = useState(false);
+  const [copiedQuery, setCopiedQuery] = useState(false);
   const [result, setResult] = useState<PivotResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -157,10 +161,15 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const dropField = (target: "rows" | "cols" | "filters") => {
     if (!drag) return;
     const source = drag.area;
-    const name = drag.name;
+    const names = drag.name.split("\u001f").filter(Boolean);
+    const name = names[0];
     const targetIndex = dropIndexRef.current;
     dropIndexRef.current = null;
     setDrag(null);
+    if (names.length > 1 || ![...rows, ...cols, ...filters.map(item => item.column)].includes(name)) {
+      addFieldsToArea(names, target);
+      return;
+    }
     if (source === target) {
       if (target === "rows") setRows(reorderStrings(rows, name, targetIndex));
       else if (target === "cols") setCols(reorderStrings(cols, name, targetIndex));
@@ -184,6 +193,56 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     setCols(nextCols);
     setFilters(nextFilters);
   };
+
+  const addFieldsToArea = (names: string[], target: "rows" | "cols" | "filters") => {
+    if (target === "rows") {
+      setRows(current => [...current, ...names.filter(name => !current.includes(name) && !cols.includes(name))]);
+    } else if (target === "cols") {
+      setCols(current => [...current, ...names.filter(name => !current.includes(name) && !rows.includes(name))]);
+    } else {
+      setFilters(current => [...current, ...names.filter(name => !current.some(item => item.column === name)).map(column => ({ column, values: [], operator: "IN" as PivotFilter["operator"] }))]);
+    }
+  };
+
+  const dragAvailableFields = (names: string[], e: DragEvent<HTMLDivElement>) => {
+    setDrag({ area: "rows", name: names.join("\u001f") });
+    e.dataTransfer.effectAllowed = "copy";
+    try { e.dataTransfer.setData("text/plain", names.join("\u001f")); } catch { /* ignore */ }
+  };
+
+  const generatedSql = useMemo(() => {
+    const pivotTarget = sourceIds.length === 1 ? sourceIds[0] : tableId;
+    const destination = destinations.find(item => item.id === pivotTarget) || destinations.find(item => item.id === tableId);
+    const tableName = destination?.physical_name;
+    if (!tableName || !measures.length) return "-- Selecione uma tabela e ao menos uma medida para gerar a query.";
+    const quote = (identifier: string) => `"${identifier.replace(/"/g, '""')}"`;
+    const dims = [...rows, ...cols].filter((name, index, all) => all.indexOf(name) === index && !isOriginDim(name));
+    const dimensionSql = dims.map(quote);
+    const measureSql = measures.map((measure, index) => {
+      const aggregate = measure.aggregation === "COUNT_DISTINCT" ? "COUNT(DISTINCT" : measure.aggregation;
+      const expression = measure.aggregation === "COUNT_DISTINCT" ? `${aggregate} ${quote(measure.column)})` : `${aggregate}(${quote(measure.column)})`;
+      return `${expression} AS ${quote(measure.label || `${measure.aggregation.toLowerCase()}_${measure.column}_${index + 1}`)}`;
+    });
+    const selected = [...dimensionSql, ...measureSql].join(",\n  ");
+    const clauses = filters.flatMap(filter => {
+      const column = quote(filter.column);
+      const values = filter.values || [];
+      if (filter.operator === "IS_NULL") return [`${column} IS NULL`];
+      if (filter.operator === "IS_NOT_NULL") return [`${column} IS NOT NULL`];
+      if (!values.length) return [];
+      const literals = values.map(value => `'${String(value).replace(/'/g, "''")}'`);
+      if (filter.operator === "NOT_IN") return [`${column} NOT IN (${literals.join(", ")})`];
+      if (filter.operator === "CONTAINS" || filter.operator === "NOT_CONTAINS") return [`${column} ${filter.operator === "NOT_CONTAINS" ? "NOT " : ""}LIKE ${literals.map(value => `'%${value.slice(1, -1)}%'`).join(" AND ")}`];
+      return [`${column} IN (${literals.join(", ")})`];
+    });
+    const sourceName = tableName.replace(/-/g, "_").replace(/\./g, "_");
+    const from = `iceberg.gold.${sourceName}`;
+    const groupBy = dimensionSql.length ? `\nGROUP BY ${dimensionSql.join(", ")}` : "";
+    const orderDims = [...rows, ...cols].filter((name, index, all) => all.indexOf(name) === index && !isOriginDim(name)).map(quote);
+    const orderBy = orderDims.length ? `\nORDER BY ${orderDims.join(", ")}` : "";
+    const where = clauses.length ? `\nWHERE ${clauses.join("\n  AND ")}` : "";
+    return `SELECT\n  ${selected}\nFROM ${from}${where}${groupBy}${orderBy}\nLIMIT 500`;
+  }, [sourceIds, tableId, destinations, measures, rows, cols, filters]);
 
   const request = useMemo<PivotRequest>(() => ({ destination_table_id: tableId, rows, columns: cols, measures, filters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols }), [tableId, rows, cols, measures, filters, sortRows, sortCols]);
 
@@ -431,6 +490,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         <Button startIcon={<Add />} onClick={() => addField("rows")} disabled={!field}>Linhas</Button>
         <Button startIcon={<Add />} onClick={() => addField("cols")} disabled={!field}>Colunas</Button>
         <Button startIcon={<Add />} onClick={() => addField("filters")} disabled={!field}>Filtro</Button>
+        <Button variant="outlined" startIcon={<Visibility />} onClick={() => setQueryOpen(true)}>Ver query</Button>
         <Box flexGrow={1} />
         <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando Trino..." : "Atualizar pivot"}</Button>
         <Button variant="outlined" startIcon={<Download />} disabled={!result} onClick={() => result && downloadCsv(result)}>CSV</Button>
@@ -442,8 +502,26 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </Stack>}
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
-        Arraste os campos para reordenar ou movê-los entre Linhas, Colunas e Filtros.
+        Marque campos na lista e arraste um ou vários para Linhas, Colunas ou Filtros. Os campos nas áreas também podem ser reordenados.
       </Typography>
+      <Paper variant="outlined" sx={{ p: 1, mb: 1.5 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap">
+          <Typography variant="caption" fontWeight={700}>CAMPOS DISPONÍVEIS · {fieldOptions.length}</Typography>
+          <Stack direction="row" gap={0.5}>
+            <Button size="small" onClick={() => setSelectedFields(selectedFields.length === fieldOptions.length ? [] : fieldOptions.map(option => option.name))}>{selectedFields.length === fieldOptions.length ? "Limpar seleção" : "Selecionar todos"}</Button>
+            <Button size="small" startIcon={<Add />} disabled={!selectedFields.length} onClick={() => addFieldsToArea(selectedFields, "rows")}>Adicionar seleção em Linhas</Button>
+            <Button size="small" startIcon={<Add />} disabled={!selectedFields.length} onClick={() => addFieldsToArea(selectedFields, "cols")}>Adicionar seleção em Colunas</Button>
+          </Stack>
+        </Stack>
+        <Stack direction="row" gap={0.5} flexWrap="wrap" mt={0.75}>
+          {fieldOptions.filter(option => !field || option.name.toLowerCase().includes(field.toLowerCase())).map(option => {
+            const selected = selectedFields.includes(option.name);
+            return <Chip key={option.name} size="small" label={`${option.name} · ${option.type}`} color={selected ? "primary" : "default"} variant={selected ? "filled" : "outlined"}
+              onClick={() => setSelectedFields(current => selected ? current.filter(name => name !== option.name) : [...current, option.name])}
+              draggable onDragStart={e => dragAvailableFields(selected ? selectedFields : [option.name], e)} onDragEnd={() => setDrag(null)} sx={{ cursor: "grab" }} />;
+          })}
+        </Stack>
+      </Paper>
       <Stack direction="row" gap={1.5} flexWrap="wrap">
         {(["rows", "cols", "filters"] as const).map(area => {
           const items = area === "rows" ? rows : area === "cols" ? cols : filters;
@@ -557,5 +635,17 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         />
       </Box>
     </Drawer>
+    <Dialog open={queryOpen} onClose={() => setQueryOpen(false)} fullWidth maxWidth="md">
+      <DialogTitle>Query SQL do Pivot</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query usa a tabela Gold física selecionada e agrega pelas dimensões e medidas configuradas.</Typography>
+        <TextField fullWidth multiline minRows={8} value={generatedSql} InputProps={{ readOnly: true }} sx={{ "& textarea": { fontFamily: "monospace", fontSize: 13 } }} />
+      </DialogContent>
+      <DialogActions>
+        <Button startIcon={<ContentCopy />} onClick={() => { void navigator.clipboard?.writeText(generatedSql).then(() => { setCopiedQuery(true); window.setTimeout(() => setCopiedQuery(false), 1800); }); }}>{copiedQuery ? "Copiada" : "Copiar query"}</Button>
+        {onOpenQuery && <Button variant="contained" startIcon={<PlayArrow />} onClick={() => { onOpenQuery(generatedSql); setQueryOpen(false); }}>Abrir no Iceberg / Trino</Button>}
+        <Button onClick={() => setQueryOpen(false)}>Fechar</Button>
+      </DialogActions>
+    </Dialog>
   </Box>;
 }

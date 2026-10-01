@@ -1008,6 +1008,14 @@ export default function Analysis() {
               initialFilters={filtersFromSearch(searchParams)}
               autoRun={searchParams.get("tab") === "pivot"}
               showSearch
+              onOpenQuery={query => {
+                setLayer("gold");
+                setSql(query);
+                setResult(null);
+                setExecutedSql("");
+                setError("");
+                setTab("iceberg");
+              }}
             />
           : <EmptyState message="Nenhuma tabela Gold ativa disponível para análise pivot." />
       )}
