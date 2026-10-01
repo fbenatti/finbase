@@ -8,7 +8,7 @@ import FinancialContractsDashboard from "../FinancialContracts/FinancialContract
 import ContractStoryDashboard from "./ContractStoryDashboard";
 
 const TABS = [
-  { code: "orcamento", label: "Orçamento", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },
+  { code: "orcamento", label: "Cadastro Orçamentário", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },
   { code: "acuracia-orcamento", label: "Acurácia de Orçamento", title: "Acurácia de Orçamento", help: "Orçamento vigente contra o realizado por mês." },
   { code: "forecast-manual", label: "Forecast Manual", title: "Forecast Manual", help: "Projeções mensais inseridas manualmente." },
   // Temporariamente oculto na interface; implementação e rota permanecem disponíveis.
@@ -17,7 +17,7 @@ const TABS = [
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
   { code: "contratos-financeiros", label: "Contratos Financeiros", title: "Contratos Financeiros", help: "Orçamento, consumo, realizado, créditos e overage por contrato." },
-  { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
+  { code: "dashboard", label: "Orçamento", title: "Orçamento", help: "Histórico consolidado do planejamento financeiro." },
   { code: "contract", label: "Contrato", title: "Contrato", help: "História e evolução dos compromissos contratuais." },
 ] as const;
 
