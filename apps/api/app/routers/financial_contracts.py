@@ -242,6 +242,12 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
         item["overage_resolved"] = (
             -Decimal(row.credit_used or 0) + Decimal(row.settled_overage or 0)
         )
+        # Persisted balances use the UI/API convention: credit is positive,
+        # overage is negative. Keep this explicit when supporting databases
+        # that still contain positive balances from earlier runs.
+        item["closing_overage"] = -abs(Decimal(row.closing_overage or 0))
+        item["opening_overage"] = -abs(Decimal(row.opening_overage or 0))
+        item["settled_overage"] = -abs(Decimal(row.settled_overage or 0))
         item.update({
             "run_source": run.source if run else None,
             "run_created_at": run.created_at if run else None,
