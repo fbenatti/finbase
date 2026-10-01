@@ -9,6 +9,12 @@ from datetime import datetime, timezone
 import psutil
 
 from app.database import SyncSession
+# Register the foreign-key target tables before the watchdog mutates EtlTask
+# rows. The API imports the full model registry during startup, but this small
+# supervisor process does not; without these imports SQLAlchemy cannot flush
+# recovery updates after a worker/container restart.
+from app.models.destination import DestinationTable  # noqa: F401
+from app.models.source_connection import SourceConnection  # noqa: F401
 from app.services.etl_task_claim import (
     find_stalled_worker_task,
     recover_worker_orphaned_tasks,
