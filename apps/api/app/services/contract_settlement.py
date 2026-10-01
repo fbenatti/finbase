@@ -79,10 +79,10 @@ def settle_pool(
     used = min(available_credit, pending_overage)
     closing = available_credit - used
     closing_overage = pending_overage - used
-    settled = closing_overage if contract_end else money(0)
+    uncovered = closing_overage
+    settled = uncovered if contract_end else money(0)
     if contract_end:
         closing_overage = money(0)
-    uncovered = closing_overage
 
     # No consumption means no project-level realized amount. The full budget
     # difference still participates in the contract-level balances above.
