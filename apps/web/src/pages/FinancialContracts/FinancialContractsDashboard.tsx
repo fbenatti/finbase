@@ -126,7 +126,7 @@ export default function FinancialContractsDashboard() {
           {["Competência", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito final", "Overage"].map((label) => <TableCell key={label} align={label === "Competência" ? "left" : "right"} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}
         </TableRow></TableHead><TableBody>{monthly.filter((item) => period === "all" || item.month === period).map((item) => <TableRow key={item.month} hover>
           <TableCell sx={{ fontWeight: 600 }}>{periodLabel(item.month)}</TableCell><TableCell align="right">{amount(item.budget)}</TableCell><TableCell align="right">{amount(item.consumption)}</TableCell><TableCell align="right">{amount(item.realized)}</TableCell>
-          <TableCell align="right" sx={{ color: item.adjustment > 0 ? "error.main" : "success.main" }}>{amount(item.adjustment)}</TableCell><TableCell align="right">{amount(item.credit)}</TableCell><TableCell align="right" sx={{ color: item.overage ? "error.main" : "text.secondary" }}>{amount(item.overage)}</TableCell>
+          <TableCell align="right" sx={{ color: item.adjustment > 0 ? "success.main" : item.adjustment < 0 ? "error.main" : "text.secondary" }}>{amount(item.adjustment)}</TableCell><TableCell align="right" sx={{ color: item.credit > 0 ? "success.main" : "text.secondary" }}>{amount(item.credit)}</TableCell><TableCell align="right" sx={{ color: item.overage > 0 ? "error.main" : "text.secondary" }}>{amount(item.overage)}</TableCell>
         </TableRow>)}</TableBody></Table></TableContainer>
         {!monthly.length && !loading && <Typography color="text.secondary" sx={{ py: 3 }}>Nenhuma liquidação mensal publicada para este contrato.</Typography>}
       </CardContent></Card></Grid>
