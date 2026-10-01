@@ -2075,7 +2075,11 @@ async def _expected_view_core(
     forecast_columns = actual_columns
     measure_column = body.measure_column if body.measure_column in {"realizado", "realizado_cloud"} else "realizado"
     required_actual = {"_billing_period", measure_column, "organograma_nivel_1"}
-    required_forecast = {"period", measure_column, "tipo", "organograma_nivel_1", "rateio_medida"}
+    # Forecast/rateio rows are modeled in the canonical ``realizado`` field.
+    # ``realizado_cloud`` is an alternate measure only for collected actuals;
+    # selecting it for forecast rows makes those values disappear because the
+    # alternate column is empty on planning records.
+    required_forecast = {"period", "realizado", "tipo", "organograma_nivel_1", "rateio_medida"}
     missing_actual = sorted(required_actual - set(actual_columns))
     missing_forecast = sorted(required_forecast - set(forecast_columns))
     if missing_actual or missing_forecast:
@@ -2098,7 +2102,7 @@ async def _expected_view_core(
     # can make a director's displayed realized spend negative.
     actual_value = _quote_ident(actual_columns[measure_column])
     forecast_period = _quote_ident(forecast_columns.get("period") or forecast_columns["_billing_period"])
-    forecast_value = _quote_ident(forecast_columns[measure_column])
+    forecast_value = _quote_ident(forecast_columns["realizado"])
     forecast_type = _quote_ident(forecast_columns["tipo"])
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
     department_map = {department.id: department for department in departments}
