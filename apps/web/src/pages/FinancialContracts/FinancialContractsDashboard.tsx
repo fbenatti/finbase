@@ -64,10 +64,11 @@ export default function FinancialContractsDashboard() {
   const selectedRows = useMemo(() => period === "all" ? settlements : settlements.filter((row) => row.period === period), [period, settlements]);
   const latestPeriod = periods[periods.length - 1] ?? "";
   const latestRows = settlements.filter((row) => row.period === latestPeriod);
+  const balanceRows = period === "all" ? latestRows : selectedRows;
   const sum = (rows: Settlement[], key: string) => rows.reduce((total, row) => total + numeric(row, key), 0);
   const monthly = useMemo(() => periods.map((month) => {
     const rows = settlements.filter((row) => row.period === month);
-    return { month, budget: sum(rows, "commitment"), consumption: sum(rows, "consumption"), realized: sum(rows, "realized"), adjustment: sum(rows, "contractual_adjustment"), credit: sum(rows, "closing_credit"), overage: sum(rows, "uncovered_overage") };
+    return { month, budget: sum(rows, "commitment"), consumption: sum(rows, "consumption"), realized: sum(rows, "realized"), adjustment: sum(rows, "contractual_adjustment"), credit: sum(rows, "closing_credit"), overage: sum(rows, "closing_overage"), settledOverage: sum(rows, "settled_overage") };
   }), [periods, settlements]);
   const chartMonths = monthly.slice(-12);
   const chartMax = Math.max(1, ...chartMonths.flatMap((item) => [item.budget, item.consumption]));
@@ -101,10 +102,10 @@ export default function FinancialContractsDashboard() {
       <Grid item xs={12} sm={6} lg={3}><Metric label="Consumo realizado" value={amount(sum(selectedRows, "consumption"))} detail="Consumo apurado na Silver" accent="#0891b2" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Realizado contratual" value={amount(sum(selectedRows, "realized"))} detail="Valor reconhecido no pool" accent="#7c3aed" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Saldo de crédito" value={amount(sum(latestRows, "closing_credit"))} detail={`Saldo final · ${latestPeriod ? periodLabel(latestPeriod) : "sem dados"}`} accent="#059669" /></Grid>
-      <Grid item xs={12} sm={6} lg={3}><Metric label="Ajuste contratual" value={amount(sum(selectedRows, "contractual_adjustment"))} detail="Consumo menos orçamento" accent="#d97706" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Ajuste contratual" value={amount(sum(selectedRows, "contractual_adjustment"))} detail="Crédito (+) / overage bruto (−)" accent="#d97706" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Crédito gerado" value={amount(sum(selectedRows, "credit_generated"))} detail="Competências selecionadas" accent="#16a34a" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Crédito consumido" value={amount(sum(selectedRows, "credit_used"))} detail="Compensação de overage" accent="#4f46e5" /></Grid>
-      <Grid item xs={12} sm={6} lg={3}><Metric label="Overage descoberto" value={amount(sum(selectedRows, "uncovered_overage"))} detail="Após uso dos créditos" accent="#dc2626" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Saldo de overage" value={amount(sum(balanceRows, "closing_overage"))} detail={period === "all" ? `Saldo final · ${latestPeriod ? periodLabel(latestPeriod) : "sem dados"}` : `Saldo · ${periodLabel(period)}`} accent="#dc2626" /></Grid>
     </Grid>
 
     <Grid container spacing={2}>
@@ -123,10 +124,10 @@ export default function FinancialContractsDashboard() {
       <Grid item xs={12} lg={7}><Card variant="outlined" sx={{ height: "100%", borderRadius: 3 }}><CardContent>
         <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>Fechamento mensal</Typography>
         <TableContainer sx={{ maxHeight: 560 }}><Table size="small" stickyHeader><TableHead><TableRow>
-          {["Competência", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito final", "Overage"].map((label) => <TableCell key={label} align={label === "Competência" ? "left" : "right"} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}
+          {["Competência", "Orçamento", "Consumo", "Realizado", "Ajuste", "Crédito final", "Overage acumulado", "Overage liquidado"].map((label) => <TableCell key={label} align={label === "Competência" ? "left" : "right"} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{label}</TableCell>)}
         </TableRow></TableHead><TableBody>{monthly.filter((item) => period === "all" || item.month === period).map((item) => <TableRow key={item.month} hover>
           <TableCell sx={{ fontWeight: 600 }}>{periodLabel(item.month)}</TableCell><TableCell align="right">{amount(item.budget)}</TableCell><TableCell align="right">{amount(item.consumption)}</TableCell><TableCell align="right">{amount(item.realized)}</TableCell>
-          <TableCell align="right" sx={{ color: item.adjustment > 0 ? "success.main" : item.adjustment < 0 ? "error.main" : "text.secondary" }}>{amount(item.adjustment)}</TableCell><TableCell align="right" sx={{ color: item.credit > 0 ? "success.main" : "text.secondary" }}>{amount(item.credit)}</TableCell><TableCell align="right" sx={{ color: item.overage > 0 ? "error.main" : "text.secondary" }}>{amount(item.overage)}</TableCell>
+          <TableCell align="right" sx={{ color: item.adjustment > 0 ? "success.main" : item.adjustment < 0 ? "error.main" : "text.secondary" }}>{amount(item.adjustment)}</TableCell><TableCell align="right" sx={{ color: item.credit > 0 ? "success.main" : "text.secondary" }}>{amount(item.credit)}</TableCell><TableCell align="right" sx={{ color: item.overage < 0 ? "error.main" : "text.secondary" }}>{amount(item.overage)}</TableCell><TableCell align="right" sx={{ color: item.settledOverage < 0 ? "error.main" : "text.secondary" }}>{amount(item.settledOverage)}</TableCell>
         </TableRow>)}</TableBody></Table></TableContainer>
         {!monthly.length && !loading && <Typography color="text.secondary" sx={{ py: 3 }}>Nenhuma liquidação mensal publicada para este contrato.</Typography>}
       </CardContent></Card></Grid>
