@@ -359,7 +359,16 @@ async def ensure_provider_forecast_rules(
 async def _dest_metadata(db, table_id):
     dest = await db.get(DestinationTable, table_id)
     if not dest or not dest.active: raise HTTPException(404, "Tabela Gold não encontrada ou inativa")
-    return dest, await fetch_metadata(dest.physical_name)
+    errors = []
+    for namespace in ("gold", "silver"):
+        try:
+            return dest, await fetch_metadata(dest.physical_name, namespace)
+        except Exception as exc:
+            errors.append(f"{namespace}: {exc}")
+    raise HTTPException(
+        503,
+        "Não foi possível carregar o schema da tabela de forecast: " + " | ".join(errors),
+    )
 
 def _apply_destination_suggestions(dest: DestinationTable, metadata: dict[str, Any]) -> dict[str, Any]:
     """Only the FOCUS destination receives a FOCUS-specific suggestion profile."""
