@@ -1914,11 +1914,12 @@ def _reprocess_destination_sync(
         total_rows_processed = 0
         errors: list[str] = []
         processed = 0
-        import psutil
-        memory_limit = int(os.getenv("REPROCESS_MEMORY_LIMIT_MB", "6144")) * 1024 * 1024
+        from app.services.reprocess_memory import memory_pressure_reason
 
-        def _memory_exceeded() -> bool:
-            return psutil.Process(os.getpid()).memory_info().rss >= memory_limit
+        def _assert_memory_available(location: str) -> None:
+            reason = memory_pressure_reason()
+            if reason:
+                raise RuntimeError(f"{reason} antes de {location}; Gold anterior preservada")
 
         from app.services.csv_upload_service import is_current_billing_period, should_skip_gold_realizado
 
@@ -1928,11 +1929,7 @@ def _reprocess_destination_sync(
             if _check_cancelled(task_id):
                 status["status"] = "CANCELLED"
                 return {"success": False, "error": "Cancelado", "rows_written": 0}
-            if _memory_exceeded():
-                raise RuntimeError(
-                    f"Limite de memoria do worker excedido antes do blob {blob_id} "
-                    f"({memory_limit // (1024 * 1024)} MB); Gold anterior preservada"
-                )
+            _assert_memory_available(f"blob {blob_id}")
             try:
                 status["current_blob"] = f"Lendo primeiro batch: blob {blob_id} ({bperiod})"
                 _sync_db()
@@ -1994,6 +1991,7 @@ def _reprocess_destination_sync(
                 def _write_batch(frame, source_rows):
                     nonlocal total_rows_processed
                     nonlocal blob_input_rows, blob_output_rows
+                    _assert_memory_available(f"batch do blob {blob_id}")
                     frame = frame.copy()
                     contractual = frame.get("financial_effect", pd.Series(index=frame.index)).astype(str).str.upper().eq("BUDGET_COMMITMENT")
                     if contractual.any():
