@@ -163,7 +163,7 @@ def settle_rows_frame(
         )
         realized_cents = _decimal_cents(pool.realized)
         realized_allocations = _allocate_cents(realized_cents, weights)
-        adjustment_cents = _decimal_cents(pool.consumption - pool.commitment)
+        adjustment_cents = _decimal_cents(pool.commitment - pool.consumption)
         adjustments = (
             _allocate_cents(adjustment_cents, weights)
             if np.any(weights > 0)

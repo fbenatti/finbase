@@ -56,35 +56,38 @@ def settle_pool(
     *,
     contract_end: bool = False,
 ) -> SettlementResult:
-    """Settle one monthly pool, carrying unused credit into later months.
+    """Settle one monthly pool, carrying both credit and overage balances.
 
-    Uncovered overage is measured for the month and never carried forward to
-    consume credits generated in a later month. ``opening_overage`` remains in
-    the signature for callers reading legacy ledger rows, but it does not
-    participate in the current settlement rules.
+    New credits offset the carried overage first. A remaining overage is
+    settled only at the contract end; otherwise it remains as a negative
+    ledger balance for the next month.
     """
     budget = money(commitment)
     consumed = money(consumption)
     opening = money(opening_credit)
-    legacy_opening_overage = money(opening_overage)
+    outstanding = money(opening_overage)
     if budget < 0:
         raise ValueError("commitment cannot be negative")
     if opening < 0:
         raise ValueError("opening credit cannot be negative")
-    if legacy_opening_overage < 0:
+    if outstanding < 0:
         raise ValueError("opening overage cannot be negative")
 
     delta = budget - consumed
     generated = max(delta, Decimal(0))
     overage = max(-delta, Decimal(0))
 
-    # Only credit is carried between months. A month with uncovered overage
-    # cannot be retroactively offset by credits generated in a later month.
-    used = min(opening, overage)
-    closing = opening + generated - used
-    uncovered = overage - used
-    settled = uncovered if contract_end else money(0)
-    closing_overage = money(0)
+    # Credit and overage are pool balances, not isolated monthly values.
+    # Credits generated this month can reduce overage carried from prior months.
+    available_credit = opening + generated
+    pending_overage = outstanding + overage
+    used = min(available_credit, pending_overage)
+    closing = available_credit - used
+    closing_overage = pending_overage - used
+    settled = closing_overage if contract_end else money(0)
+    uncovered = closing_overage
+    if contract_end:
+        closing_overage = money(0)
 
     # No consumption means no project-level realized amount. The full budget
     # difference still participates in the contract-level balances above.
@@ -94,7 +97,7 @@ def settle_pool(
         commitment=budget,
         consumption=consumed,
         opening_credit=opening,
-        opening_overage=money(0),
+        opening_overage=outstanding,
         credit_generated=generated,
         gross_overage=money(overage),
         credit_used=money(used),
@@ -278,7 +281,7 @@ def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, st
             opening_credit_by_pool.get(key, Decimal("0")),
         )
         allocations = allocate_pool(result.realized, consumption)
-        adjustment_total = money(consumption_total - result.commitment)
+        adjustment_total = money(result.commitment - consumption_total)
         if any(value > 0 for value in consumption):
             adjustments = allocate_pool(adjustment_total, consumption)
         else:

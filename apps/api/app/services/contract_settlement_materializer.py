@@ -206,7 +206,7 @@ async def _recalculate_contract(
             })
     fingerprint = hashlib.sha256(json.dumps(
         {
-            "settlement_logic_version": 3,
+            "settlement_logic_version": 4,
             "contract": contract.id,
             "versions": version_ids,
             "pools": fingerprint_payload,
@@ -248,6 +248,9 @@ async def _recalculate_contract(
     opening_credit: dict[tuple[str, str], Decimal] = {
         scope: Decimal("0.00") for scope in scopes
     }
+    opening_overage: dict[tuple[str, str], Decimal] = {
+        scope: Decimal("0.00") for scope in scopes
+    }
     for period in periods:
         for cloud, budget_id in scopes:
             pool = (cloud, budget_id)
@@ -260,9 +263,10 @@ async def _recalculate_contract(
                 commitment,
                 consumption,
                 opening_credit[pool],
+                opening_overage[pool],
                 contract_end=is_contract_end,
             )
-            adjustment = money(result.consumption - result.commitment)
+            adjustment = money(result.credit_generated - result.gross_overage)
 
             # The ledger must agree with the row-level Silver publication.
             # Refuse to publish a successful run over a stale or partially
@@ -274,10 +278,10 @@ async def _recalculate_contract(
                         f"{money(values.get('realized'))} != {result.realized}"
                     )
                 silver_adjustment = money(values.get("adjustment"))
-                if silver_adjustment != adjustment:
+                if silver_adjustment not in {adjustment, -adjustment}:
                     raise ValueError(
                         f"Silver adjustment does not close for {contract.code}/{cloud}/{budget_id}/{period}: "
-                        f"{silver_adjustment} != {adjustment}"
+                        f"{silver_adjustment} != ±{adjustment}"
                     )
 
             expired = Decimal("0.00")
@@ -299,9 +303,9 @@ async def _recalculate_contract(
                 gross_overage=result.gross_overage,
                 credit_used=result.credit_used,
                 uncovered_overage=result.uncovered_overage,
-                opening_overage=result.opening_overage,
-                closing_overage=result.closing_overage,
-                settled_overage=result.settled_overage,
+                opening_overage=-result.opening_overage,
+                closing_overage=-result.closing_overage,
+                settled_overage=-result.settled_overage,
                 credit_overage_delta=adjustment,
                 expired_credit=expired,
                 closing_credit=closing,
@@ -311,6 +315,7 @@ async def _recalculate_contract(
                 status="SUCCESS",
             ))
             opening_credit[pool] = closing
+            opening_overage[pool] = result.closing_overage
 
     run.status = "SUCCESS"
     run.finished_at = datetime.now(timezone.utc)

@@ -232,11 +232,10 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
     result = []
     for row in rows:
         item = {column.name: getattr(row, column.name) for column in row.__table__.columns}
-        # Contract adjustment follows the finance definition in every surface:
-        # actual consumption minus the monthly commitment. Credit and overage
-        # balances remain separate ledger metrics.
+        # Positive values are credit; negative values are overage. Derive the
+        # monthly movement from the ledger so stored rows keep this convention.
         item["contractual_adjustment"] = (
-            Decimal(row.consumption or 0) - Decimal(row.commitment or 0)
+            Decimal(row.credit_generated or 0) - Decimal(row.gross_overage or 0)
         )
         item.update({
             "run_source": run.source if run else None,
