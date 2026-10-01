@@ -314,8 +314,18 @@ export default function ExpectedViewV2({
   // remaining projection disappears from the chart, cards and cumulative.
   // O mês aberto segue o cutoff D-2 do forecast, não o calendário local.
   // No início de outubro, setembro ainda pode carregar projeção dos dias restantes.
+  // Keep only the latest overlap as the D-2 anchor. Older periods can retain
+  // forecast rows from previous runs and must not be stacked again.
+  const forecastAnchorPeriod = filteredRows.reduce<string | null>(
+    (latest, row) =>
+      row.actual_value != null && row.forecast_value != null &&
+      (latest == null || row.period > latest)
+        ? row.period
+        : latest,
+    null,
+  );
   const isForecastAnchor = (row: ExpectedViewRow) =>
-    row.actual_value != null && row.forecast_value != null;
+    forecastAnchorPeriod != null && row.period === forecastAnchorPeriod;
   const sharedOn = includeSharedCost;
   const sharedOf = (row: ExpectedViewRow) => Number(row.shared_value || 0);
   const receivedOf = (row: ExpectedViewRow) => Number(row.shared_received || 0);
@@ -381,12 +391,14 @@ export default function ExpectedViewV2({
       : null,
   );
   const forecastCumulative = filteredRows.map((_, index) => {
-    if (index < actualEnd) return null;
+    if (index < forecastAnchorIndex) return null;
     return filteredRows
       .slice(0, index + 1)
       .reduce((sum, item) => sum + expectedOf(item), 0);
   });
-  const forecastStart = actualEnd >= 0 ? actualEnd : 0;
+  const forecastStart = forecastAnchorIndex >= 0
+    ? forecastAnchorIndex
+    : actualEnd >= 0 ? actualEnd : 0;
   // Ponte: a linha de Forecast parte do ÚLTIMO PONTO do Realizado (último mês
   // fechado) para não deixar buraco entre a amarela e a verde no eixo x; o mês
   // corrente entra no acumulado como forecast (realizado parcial + restante).
@@ -444,7 +456,7 @@ export default function ExpectedViewV2({
   const sharedLine = { color: "#EA580C", width: 3 };
   const sharedFill = "rgba(234,88,12,.28)";
   const forecastBaseCumulative = filteredRows.map((_, index) => {
-    if (index < actualEnd) return null;
+    if (index < forecastStart) return null;
     return filteredRows.slice(0, index + 1).reduce((sum, item) => {
       if (item.actual_value != null)
         return (
