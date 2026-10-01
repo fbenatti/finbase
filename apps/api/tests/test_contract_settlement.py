@@ -67,20 +67,24 @@ def test_contractual_adjustment_is_consumption_minus_commitment():
     assert over.realized == over.commitment
 
 
-def test_credit_generated_later_does_not_offset_prior_uncovered_overage():
+def test_later_credit_offsets_carried_overage_before_becoming_credit():
     january = settle_pool("1000", "1300")
     february = settle_pool("1000", "800", opening_overage=january.closing_overage)
-    march = settle_pool("1000", "900", opening_credit=february.closing_credit)
+    march = settle_pool(
+        "1000", "900", opening_credit=february.closing_credit,
+        opening_overage=february.closing_overage,
+    )
 
     assert january.uncovered_overage == Decimal("300.00")
-    assert january.closing_overage == Decimal("0.00")
+    assert january.closing_overage == Decimal("300.00")
     assert february.credit_generated == Decimal("200.00")
-    assert february.credit_used == Decimal("0.00")
-    assert february.closing_credit == Decimal("200.00")
-    assert february.closing_overage == Decimal("0.00")
+    assert february.credit_used == Decimal("200.00")
+    assert february.closing_credit == Decimal("0.00")
+    assert february.closing_overage == Decimal("100.00")
     assert march.credit_generated == Decimal("100.00")
-    assert march.credit_used == Decimal("0.00")
-    assert march.closing_credit == Decimal("300.00")
+    assert march.credit_used == Decimal("100.00")
+    assert march.closing_credit == Decimal("0.00")
+    assert march.closing_overage == Decimal("0.00")
 
 
 def test_overage_generated_later_uses_carried_credit():
@@ -91,7 +95,7 @@ def test_overage_generated_later_uses_carried_credit():
     assert february.gross_overage == Decimal("300.00")
     assert february.credit_used == Decimal("100.00")
     assert february.uncovered_overage == Decimal("200.00")
-    assert february.closing_overage == Decimal("0.00")
+    assert february.closing_overage == Decimal("200.00")
 
 
 def test_contract_end_settles_only_current_month_uncovered_overage():

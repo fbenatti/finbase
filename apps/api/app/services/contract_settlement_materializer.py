@@ -206,7 +206,10 @@ async def _recalculate_contract(
             })
     fingerprint = hashlib.sha256(json.dumps(
         {
-            "settlement_logic_version": 4,
+            # Increment whenever ledger semantics change. Without this field
+            # change an unchanged input fingerprint can reuse a run created by
+            # a previous implementation and leave stale balances visible.
+            "settlement_logic_version": 5,
             "contract": contract.id,
             "versions": version_ids,
             "pools": fingerprint_payload,
