@@ -222,6 +222,8 @@ export default function ExpectedView({
     reloadNonce,
     includeSharedCost,
     directorView,
+    measureColumn,
+    table,
   ]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows =
