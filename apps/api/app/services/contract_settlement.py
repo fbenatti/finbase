@@ -275,9 +275,9 @@ def settle_rows(rows: list[dict], *, commitment_by_pool: dict[tuple[str, str, st
             output[index]["realizado"] = float(value)
             cloud_value = money(output[index].get("realizado_cloud", output[index].get("consumo_realizado")))
             output[index]["consumo_realizado"] = float(cloud_value)
-            # Contract adjustment is the signed pool delta: consumption minus
-            # commitment.  At row grain, distribute it as consumption minus
-            # the allocated realized amount so the rows close exactly to the
-            # pool adjustment in cents.
-            output[index]["ajuste_contratual"] = float(cloud_value - value)
+            # Positive adjustment represents generated credit; negative
+            # adjustment represents overage. At row grain, distribute the
+            # signed delta as allocated realized minus consumption so rows
+            # close exactly to the pool adjustment in cents.
+            output[index]["ajuste_contratual"] = float(value - cloud_value)
     return output
