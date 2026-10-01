@@ -17,32 +17,34 @@ const TABS = [
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
   { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
-  { code: "contrato", label: "Contrato", title: "Contrato", help: "História do contrato e evolução dos compromissos." },
 ] as const;
 
 export default function FinancialPlanning() {
   const [searchParams, setSearchParams] = useSearchParams();
   const legacyCommitmentTab = searchParams.get("tab") === "contratos-financeiros"
     || searchParams.get("dashboard") === "visao-financeira-contratos"
-    || searchParams.get("dashboard") === "contrato-com-compromisso";
-  const legacyStoryTab = searchParams.get("tab") === "contract";
-  const requested = legacyCommitmentTab || legacyStoryTab ? "contrato" : searchParams.get("tab") || "orcamento";
+    || searchParams.get("dashboard") === "contrato-com-compromisso"
+    || (["contract", "contrato"].includes(searchParams.get("tab") || "") && searchParams.get("contract") === "compromisso");
+  const legacyStoryTab = ["contract", "contrato"].includes(searchParams.get("tab") || "") && !legacyCommitmentTab;
+  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : searchParams.get("tab") || "orcamento";
   const active = TABS.find(tab => tab.code === requested) || TABS[0];
-  const contractSubtab = legacyCommitmentTab || searchParams.get("contract") === "compromisso" ? "compromisso" : "historia";
+  const executiveSubtab = legacyCommitmentTab ? "compromisso" : legacyStoryTab ? "historia-contrato" : searchParams.get("executive") || "orcamento";
 
   const changeTab = (_event: React.SyntheticEvent, value: string) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", value);
     next.delete("dashboard");
     next.delete("contract");
+    next.delete("executive");
     setSearchParams(next, { replace: true });
   };
 
-  const changeContractSubtab = (_event: React.SyntheticEvent, value: string) => {
+  const changeExecutiveSubtab = (_event: React.SyntheticEvent, value: string) => {
     const next = new URLSearchParams(searchParams);
-    next.set("tab", "contrato");
-    if (value === "compromisso") next.set("contract", value);
-    else next.delete("contract");
+    next.set("tab", "dashboard");
+    next.set("executive", value);
+    next.delete("dashboard");
+    next.delete("contract");
     setSearchParams(next, { replace: true });
   };
 
@@ -69,14 +71,13 @@ export default function FinancialPlanning() {
         ) : active.code === "visao-contabil" ? (
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
         ) : active.code === "dashboard" ? (
-          <FinancialDashboard />
-        ) : active.code === "contrato" ? (
           <>
-            <Tabs value={contractSubtab} onChange={changeContractSubtab} aria-label="Visões de contrato" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
-              <Tab value="historia" label="História do contrato" />
+            <Tabs value={executiveSubtab} onChange={changeExecutiveSubtab} aria-label="Visões do Dashboard Executivo" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
+              <Tab value="orcamento" label="Orçamento" />
+              <Tab value="historia-contrato" label="História do Contrato" />
               <Tab value="compromisso" label="Compromisso" />
             </Tabs>
-            {contractSubtab === "compromisso" ? <FinancialContractsDashboard /> : <ContractStoryDashboard />}
+            {executiveSubtab === "historia-contrato" ? <ContractStoryDashboard /> : executiveSubtab === "compromisso" ? <FinancialContractsDashboard /> : <FinancialDashboard />}
           </>
         ) : (
           <Planning type={active.code} title={active.title} help={active.help} budget={"budget" in active && active.budget} />
