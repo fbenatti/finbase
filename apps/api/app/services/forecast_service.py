@@ -244,9 +244,15 @@ def _replicated_month_value(
     growth_rate: float,
     lumpy: bool = False,
 ) -> float | None:
+    offset = _month_offset(current_month_key, forecast_month)
+    if behavior in {"RECURRING_MONTHLY", "RECURRING_UNTIL_END"} and forecast_month == current_month_key:
+        # A monthly lump already represents the full current-month invoice.
+        # Suppress it even when this series has no positive closed-month
+        # history; requiring that history first lets a newly started recurring
+        # subscription be forecast a second time in the month it was billed.
+        return 0.0 if lumpy else None
     if last_closed_month_total <= 0:
         return None
-    offset = _month_offset(current_month_key, forecast_month)
     if behavior == "REPEAT_NEXT_MONTH":
         if offset != 1:
             return None
@@ -258,8 +264,6 @@ def _replicated_month_value(
         # Uso diário (não lumpy — Azure/GCP/OCI) mantém o restante calculado
         # pelo motor (baseline × dias_restantes): estimativa_do_mês =
         # realizado parcial + forecast_restante.
-        if forecast_month == current_month_key:
-            return 0.0 if lumpy else None
         if offset <= 0:
             return None
         return last_closed_month_total * ((1.0 + growth_rate) ** offset)
