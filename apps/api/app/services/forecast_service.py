@@ -243,6 +243,20 @@ def _month_offset(base_yyyymm: str, target_yyyymm: str) -> int:
     return (target_year - base_year) * 12 + (target_month - base_month)
 
 
+def _forecast_history_start(
+    effective_cutoff: date,
+    max_window: int,
+    *,
+    needs_closed_month_anchor: bool,
+) -> date:
+    """Keep daily model windows short while including the full monthly anchor."""
+    daily_start = effective_cutoff - timedelta(days=max_window + 7)
+    if not needs_closed_month_anchor:
+        return daily_start
+    previous_month_start = (effective_cutoff.replace(day=1) - timedelta(days=1)).replace(day=1)
+    return min(daily_start, previous_month_start)
+
+
 def _replicated_month_value(
     *,
     behavior: str,
@@ -1274,19 +1288,28 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 raise ValueError("Não foi possível identificar a última data válida na Gold")
             collected_through = collected_timestamp.date()
             effective_cutoff = collected_through - timedelta(days=excluded_days)
-    # The daily forecast uses its longest configured window plus the seven-day
-    # AUTO_BACKTEST validation set.  A monthly history is only needed for
-    # invoice-style connections (currently IBM) that allocate a full invoice
-    # by its charge interval; it must never expand the daily-cloud window.
+    # The daily model uses its configured trailing windows. Recurring monthly
+    # business rules also need the complete prior closed month as an anchor.
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
     minimum_monthly = max(1, int(getattr(config, "minimum_monthly_points", 3) or 3))
     interval_history_start = effective_cutoff.replace(day=1)
     for _ in range(minimum_monthly - 1):
         interval_history_start = (interval_history_start - timedelta(days=1)).replace(day=1)
-    daily_history_start = effective_cutoff - timedelta(days=max_window + 7)
+    needs_closed_month_anchor = any(
+        getattr(rule, "active", True)
+        and str(getattr(rule, "behavior", "") or "")
+        in {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END"}
+        for rule in (business_rules or [])
+    )
+    daily_history_start = _forecast_history_start(
+        effective_cutoff,
+        max_window,
+        needs_closed_month_anchor=needs_closed_month_anchor,
+    )
     logger.info(
-        "[forecast] daily_history_start=%s (window=%dd) interval_history_start=%s (months=%d)",
-        daily_history_start, max_window + 7, interval_history_start, minimum_monthly,
+        "[forecast] daily_history_start=%s (model_window=%dd, monthly_anchor=%s) interval_history_start=%s (months=%d)",
+        daily_history_start, max_window + 7, needs_closed_month_anchor,
+        interval_history_start, minimum_monthly,
     )
     metadata_columns = {
         str(column.get("name") or "").lower()

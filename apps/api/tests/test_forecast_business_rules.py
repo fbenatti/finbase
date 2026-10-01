@@ -7,6 +7,7 @@ from app.services.forecast_service import (
     _apply_forecast_business_rules,
     _build_series_context,
     _cloud_effective_cutoff,
+    _forecast_history_start,
     _replicated_month_value,
     _series_key,
     _source_exclusion_filter,
@@ -84,6 +85,17 @@ def test_recurring_monthly_uses_last_nonzero_closed_month():
     assert rule.name in applied
     assert output.loc[output["forecast_month"] == "202608", "forecast_value"].iloc[0] == 3100.0
     assert output.loc[output["forecast_month"] == "202609", "forecast_value"].iloc[0] == 3100.0
+
+
+def test_recurring_forecast_loads_the_entire_previous_month_anchor():
+    cutoff = date(2026, 9, 23)
+    assert _forecast_history_start(
+        cutoff, 28, needs_closed_month_anchor=True,
+    ) == date(2026, 8, 1)
+    # Without a recurring rule, preserve the existing short daily lookback.
+    assert _forecast_history_start(
+        cutoff, 28, needs_closed_month_anchor=False,
+    ) == date(2026, 8, 19)
 
 
 def test_cloud_effective_cutoff_uses_per_origin_anchor():
