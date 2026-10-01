@@ -236,7 +236,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       return [`${column} IN (${literals.join(", ")})`];
     });
     const sourceName = tableName.replace(/-/g, "_").replace(/\./g, "_");
-    const from = `iceberg.gold.${sourceName}`;
+    const from = `iceberg.silver.${sourceName}`;
     const groupBy = dimensionSql.length ? `\nGROUP BY ${dimensionSql.join(", ")}` : "";
     const orderDims = [...rows, ...cols].filter((name, index, all) => all.indexOf(name) === index && !isOriginDim(name)).map(quote);
     const orderBy = orderDims.length ? `\nORDER BY ${orderDims.join(", ")}` : "";
@@ -481,7 +481,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           size="small"
           options={fieldOptions}
           value={fieldOptions.find(c => c.name === field) || null}
-          onChange={(_, value) => setField(value?.name || "")}
+          onChange={(_, value) => {
+            const name = value?.name || "";
+            setField(name);
+            if (name) setSelectedFields(current => current.includes(name) ? current : [...current, name]);
+          }}
           getOptionLabel={option => `${option.name} · ${option.type}`}
           isOptionEqualToValue={(option, value) => option.name === value.name}
           sx={{ minWidth: 300, flex: 1 }}
@@ -506,15 +510,15 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </Typography>
       <Paper variant="outlined" sx={{ p: 1, mb: 1.5 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap">
-          <Typography variant="caption" fontWeight={700}>CAMPOS DISPONÍVEIS · {fieldOptions.length}</Typography>
+          <Typography variant="caption" fontWeight={700}>CAMPOS DISPONÍVEIS · {selectedFields.length}</Typography>
           <Stack direction="row" gap={0.5}>
-            <Button size="small" onClick={() => setSelectedFields(selectedFields.length === fieldOptions.length ? [] : fieldOptions.map(option => option.name))}>{selectedFields.length === fieldOptions.length ? "Limpar seleção" : "Selecionar todos"}</Button>
-            <Button size="small" startIcon={<Add />} disabled={!selectedFields.length} onClick={() => addFieldsToArea(selectedFields, "rows")}>Adicionar seleção em Linhas</Button>
-            <Button size="small" startIcon={<Add />} disabled={!selectedFields.length} onClick={() => addFieldsToArea(selectedFields, "cols")}>Adicionar seleção em Colunas</Button>
+            {selectedFields.length > 0 && <Button size="small" onClick={() => setSelectedFields([])}>Limpar seleção</Button>}
+            <Button size="small" startIcon={<Add />} disabled={!selectedFields.length} onClick={() => addFieldsToArea(selectedFields, "rows")}>Linhas</Button>
+            <Button size="small" startIcon={<Add />} disabled={!selectedFields.length} onClick={() => addFieldsToArea(selectedFields, "cols")}>Colunas</Button>
           </Stack>
         </Stack>
         <Stack direction="row" gap={0.5} flexWrap="wrap" mt={0.75}>
-          {fieldOptions.filter(option => !field || option.name.toLowerCase().includes(field.toLowerCase())).map(option => {
+          {fieldOptions.filter(option => selectedFields.includes(option.name)).map(option => {
             const selected = selectedFields.includes(option.name);
             return <Chip key={option.name} size="small" label={`${option.name} · ${option.type}`} color={selected ? "primary" : "default"} variant={selected ? "filled" : "outlined"}
               onClick={() => setSelectedFields(current => selected ? current.filter(name => name !== option.name) : [...current, option.name])}
@@ -638,11 +642,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     <Dialog open={queryOpen} onClose={() => setQueryOpen(false)} fullWidth maxWidth="md">
       <DialogTitle>Query SQL do Pivot</DialogTitle>
       <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query usa a tabela Gold física selecionada e agrega pelas dimensões e medidas configuradas.</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query consulta a tabela de detalhe na camada Silver, usada pelo Pivot, e agrega pelas dimensões e medidas configuradas.</Typography>
         <TextField fullWidth multiline minRows={8} value={generatedSql} InputProps={{ readOnly: true }} sx={{ "& textarea": { fontFamily: "monospace", fontSize: 13 } }} />
       </DialogContent>
       <DialogActions>
-        <Button startIcon={<ContentCopy />} onClick={() => { void navigator.clipboard?.writeText(generatedSql).then(() => { setCopiedQuery(true); window.setTimeout(() => setCopiedQuery(false), 1800); }); }}>{copiedQuery ? "Copiada" : "Copiar query"}</Button>
+        <Button startIcon={<ContentCopy />} onClick={() => { void navigator.clipboard?.writeText(generatedSql).then(() => { setCopiedQuery(true); setQueryOpen(false); }); }}>{copiedQuery ? "Copiada" : "Copiar query"}</Button>
         {onOpenQuery && <Button variant="contained" startIcon={<PlayArrow />} onClick={() => { onOpenQuery(generatedSql); setQueryOpen(false); }}>Abrir no Iceberg / Trino</Button>}
         <Button onClick={() => setQueryOpen(false)}>Fechar</Button>
       </DialogActions>

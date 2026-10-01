@@ -137,10 +137,14 @@ export default function Analysis() {
   useEffect(() => {
     getAnalysisHealth().then(setHealth).catch(() => {});
     getAnalysisTables().then(setTables).catch(() => {});
-    getAnalysisSources().then(setSources).catch(() => {});
     getAnalysisDestinations().then(setDestinations).catch(() => {});
     getAnalysisStagingTables().then(setStagingTables).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (tab !== "fontes" || sources.length) return;
+    getAnalysisSources().then(setSources).catch(() => {});
+  }, [tab, sources.length]);
 
   const refreshLakehouse = async () => {
     try {
