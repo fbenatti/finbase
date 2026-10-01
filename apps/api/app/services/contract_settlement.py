@@ -37,59 +37,70 @@ class SettlementResult:
     commitment: Decimal
     consumption: Decimal
     opening_credit: Decimal
+    opening_overage: Decimal
     credit_generated: Decimal
     gross_overage: Decimal
     credit_used: Decimal
     uncovered_overage: Decimal
     realized: Decimal
     closing_credit: Decimal
+    closing_overage: Decimal
+    settled_overage: Decimal
 
 
 def settle_pool(
     commitment: Decimal | int | float | str,
     consumption: Decimal | int | float | str,
     opening_credit: Decimal | int | float | str = 0,
+    opening_overage: Decimal | int | float | str = 0,
+    *,
+    contract_end: bool = False,
 ) -> SettlementResult:
-    """Settle one monthly pool using cent-accurate arithmetic."""
+    """Settle one monthly pool, carrying both credit and overage balances."""
     budget = money(commitment)
     consumed = money(consumption)
     opening = money(opening_credit)
+    outstanding = money(opening_overage)
     if budget < 0:
         raise ValueError("commitment cannot be negative")
     if opening < 0:
         raise ValueError("opening credit cannot be negative")
+    if outstanding < 0:
+        raise ValueError("opening overage cannot be negative")
 
     delta = budget - consumed
-    if delta > 0:
-        generated = delta
-        overage = money(0)
-        used = money(0)
-        uncovered = money(0)
-        # No consumption means no project-level realized amount.  The budget
-        # delta remains in the contractual ledger as credit only.
-        realized = money(0) if consumed == 0 else budget
-        closing = opening + generated
-    else:
-        generated = money(0)
-        overage = -delta
-        used = min(opening, overage)
-        uncovered = overage - used
-        # The executive ``realizado`` is always the contractual budget.
-        # Any uncovered overage remains explicit in the contractual
-        # adjustment and must never inflate this amount.
-        realized = budget
-        closing = opening - used
+    generated = max(delta, Decimal(0))
+    overage = max(-delta, Decimal(0))
+
+    # Credit and overage are pool balances, not isolated monthly values.
+    # Newly generated credit offsets any carried or newly generated overage.
+    available_credit = opening + generated
+    pending_overage = outstanding + overage
+    used = min(available_credit, pending_overage)
+    closing = available_credit - used
+    closing_overage = pending_overage - used
+    settled = closing_overage if contract_end else money(0)
+    if contract_end:
+        closing_overage = money(0)
+    uncovered = closing_overage
+
+    # No consumption means no project-level realized amount. The full budget
+    # difference still participates in the contract-level balances above.
+    realized = money(0) if consumed == 0 and delta > 0 else budget
 
     return SettlementResult(
         commitment=budget,
         consumption=consumed,
         opening_credit=opening,
+        opening_overage=outstanding,
         credit_generated=generated,
         gross_overage=money(overage),
         credit_used=money(used),
         uncovered_overage=money(uncovered),
         realized=money(realized),
         closing_credit=money(closing),
+        closing_overage=money(closing_overage),
+        settled_overage=money(settled),
     )
 
 
