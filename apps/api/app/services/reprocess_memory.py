@@ -32,26 +32,54 @@ def _read_int(path: Path) -> int | None:
         return None
 
 
-def memory_snapshot(cgroup_root: str | Path = "/sys/fs/cgroup") -> MemorySnapshot:
+def _cgroup_candidates(root: Path, controller: str, membership_file: str | Path) -> list[Path]:
+    """Resolve root and nested cgroup paths without assuming Docker layout."""
+    bases = [root / controller, root] if controller else [root]
+    candidates = list(bases)
+    try:
+        for line in Path(membership_file).read_text().splitlines():
+            _, controllers, member_path = line.split(":", 2)
+            if controller:
+                if controller not in controllers.split(","):
+                    continue
+            elif controllers:
+                continue
+            relative = member_path.lstrip("/")
+            if relative:
+                candidates.extend(base / relative for base in bases)
+                # Some container runtimes expose a unified mount with the
+                # controller directory already included in the membership.
+                candidates.append(root / relative)
+    except (OSError, ValueError):
+        pass
+    return list(dict.fromkeys(candidates))
+
+
+def memory_snapshot(
+    cgroup_root: str | Path = "/sys/fs/cgroup",
+    *,
+    membership_file: str | Path = "/proc/self/cgroup",
+) -> MemorySnapshot:
     """Return usable memory from cgroup v2/v1, falling back to host memory."""
     root = Path(cgroup_root)
     # cgroup v2 (Docker and modern Linux).
-    limit = _read_int(root / "memory.max")
-    current = _read_int(root / "memory.current")
-    if limit and current is not None and limit < (1 << 60):
-        stat: dict[str, int] = {}
-        try:
-            for line in (root / "memory.stat").read_text().splitlines():
-                key, value = line.split(maxsplit=1)
-                stat[key] = int(value)
-        except (OSError, ValueError):
-            pass
-        reclaimable = stat.get("inactive_file", 0)
-        return MemorySnapshot(limit, max(0, limit - current + reclaimable), "cgroup-v2")
+    for base in _cgroup_candidates(root, "", membership_file):
+        limit = _read_int(base / "memory.max")
+        current = _read_int(base / "memory.current")
+        if limit and current is not None and limit < (1 << 60):
+            stat: dict[str, int] = {}
+            try:
+                for line in (base / "memory.stat").read_text().splitlines():
+                    key, value = line.split(maxsplit=1)
+                    stat[key] = int(value)
+            except (OSError, ValueError):
+                pass
+            reclaimable = stat.get("inactive_file", 0)
+            return MemorySnapshot(limit, max(0, limit - current + reclaimable), "cgroup-v2")
 
     # cgroup v1. The root mount is common; nested cgroup mounts can be supplied
     # through the standard paths discovered in /proc/self/cgroup.
-    for base in (root / "memory", root):
+    for base in _cgroup_candidates(root, "memory", membership_file):
         limit = _read_int(base / "memory.limit_in_bytes")
         current = _read_int(base / "memory.usage_in_bytes")
         if limit and current is not None and limit < (1 << 60):

@@ -41,3 +41,16 @@ def test_cgroup_v1_uses_effective_headroom_after_reclaimable_cache(tmp_path):
     snap = memory_snapshot(tmp_path)
     assert snap.source == "cgroup-v1"
     assert snap.available_bytes == 3 << 30
+
+
+def test_nested_cgroup_v1_path_uses_container_quota(tmp_path):
+    memory = tmp_path / "memory" / "docker" / "container-id"
+    memory.mkdir(parents=True)
+    (memory / "memory.limit_in_bytes").write_text(str(4 << 30))
+    (memory / "memory.usage_in_bytes").write_text(str(3 << 30))
+    membership = tmp_path / "proc-cgroup"
+    membership.write_text("8:memory:/docker/container-id\n")
+    snap = memory_snapshot(tmp_path, membership_file=membership)
+    assert snap.source == "cgroup-v1"
+    assert snap.total_bytes == 4 << 30
+    assert snap.available_bytes == 1 << 30
