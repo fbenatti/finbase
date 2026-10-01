@@ -17,32 +17,32 @@ const TABS = [
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
   { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
+  { code: "contrato", label: "Contrato", title: "Contrato", help: "História do contrato e evolução dos compromissos." },
 ] as const;
 
 export default function FinancialPlanning() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const legacyCommitmentTab = searchParams.get("tab") === "contratos-financeiros";
+  const legacyCommitmentTab = searchParams.get("tab") === "contratos-financeiros"
+    || searchParams.get("dashboard") === "visao-financeira-contratos"
+    || searchParams.get("dashboard") === "contrato-com-compromisso";
   const legacyStoryTab = searchParams.get("tab") === "contract";
-  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : searchParams.get("tab") || "orcamento";
+  const requested = legacyCommitmentTab || legacyStoryTab ? "contrato" : searchParams.get("tab") || "orcamento";
   const active = TABS.find(tab => tab.code === requested) || TABS[0];
-  const dashboardSubtab = legacyCommitmentTab || searchParams.get("dashboard") === "visao-financeira-contratos"
-    ? "visao-financeira-contratos"
-    : legacyStoryTab || searchParams.get("dashboard") === "contrato"
-      ? "contrato"
-      : "orcamento";
+  const contractSubtab = legacyCommitmentTab || searchParams.get("contract") === "compromisso" ? "compromisso" : "historia";
 
   const changeTab = (_event: React.SyntheticEvent, value: string) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", value);
     next.delete("dashboard");
+    next.delete("contract");
     setSearchParams(next, { replace: true });
   };
 
-  const changeDashboardSubtab = (_event: React.SyntheticEvent, value: string) => {
+  const changeContractSubtab = (_event: React.SyntheticEvent, value: string) => {
     const next = new URLSearchParams(searchParams);
-    next.set("tab", "dashboard");
-    if (value !== "orcamento") next.set("dashboard", value);
-    else next.delete("dashboard");
+    next.set("tab", "contrato");
+    if (value === "compromisso") next.set("contract", value);
+    else next.delete("contract");
     setSearchParams(next, { replace: true });
   };
 
@@ -69,13 +69,14 @@ export default function FinancialPlanning() {
         ) : active.code === "visao-contabil" ? (
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
         ) : active.code === "dashboard" ? (
+          <FinancialDashboard />
+        ) : active.code === "contrato" ? (
           <>
-            <Tabs value={dashboardSubtab} onChange={changeDashboardSubtab} aria-label="Dashboards executivos" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
-              <Tab value="orcamento" label="Orçamento" />
-              <Tab value="visao-financeira-contratos" label="Visão financeira dos contratos" />
-              <Tab value="contrato" label="Contrato" />
+            <Tabs value={contractSubtab} onChange={changeContractSubtab} aria-label="Visões de contrato" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
+              <Tab value="historia" label="História do contrato" />
+              <Tab value="compromisso" label="Compromisso" />
             </Tabs>
-            {dashboardSubtab === "visao-financeira-contratos" ? <FinancialContractsDashboard /> : dashboardSubtab === "contrato" ? <ContractStoryDashboard /> : <FinancialDashboard />}
+            {contractSubtab === "compromisso" ? <FinancialContractsDashboard /> : <ContractStoryDashboard />}
           </>
         ) : (
           <Planning type={active.code} title={active.title} help={active.help} budget={"budget" in active && active.budget} />
