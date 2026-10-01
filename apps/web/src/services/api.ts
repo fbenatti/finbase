@@ -5,6 +5,20 @@ export const api = axios.create({
   timeout: 120000,
 });
 
+export async function getContractStoryLedger() {
+  const { data } = await api.get("/planning/contract-story");
+  return data;
+}
+
+export async function saveContractStoryLedger(ledger: {
+  contracts: Array<Record<string, unknown>>;
+  months: Record<string, Array<Record<string, unknown>>>;
+  milestones: Record<string, Array<Record<string, unknown>>>;
+}) {
+  const { data } = await api.put("/planning/contract-story", ledger);
+  return data;
+}
+
 export async function getAzurePtuOverview(
   params: Record<string, unknown> = {},
   signal?: AbortSignal,

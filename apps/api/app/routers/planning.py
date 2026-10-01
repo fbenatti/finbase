@@ -19,6 +19,7 @@ from app.database import get_db
 from app.models.destination import DestinationTable
 from app.models.identity import User
 from app.models.planning import BudgetDefenseRequest, FinancialType, PlanningEntry, PlanningVersion
+from app.models.contract_story import ContractStoryLedger
 from app.models.budget_accuracy import BudgetAccuracyAck
 from app.models.rules import Department
 from app.services.trino_service import execute as trino_execute
@@ -79,6 +80,67 @@ class BudgetPublishIn(BaseModel):
     title: str
     description: str
     effective_date: date
+
+
+class ContractStoryLedgerIn(BaseModel):
+    contracts: list[dict[str, Any]] = Field(default_factory=list)
+    months: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    milestones: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
+
+def _merge_ledger_rows(existing: list[dict[str, Any]], incoming: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    merged = {str(row[key]): row for row in existing if row.get(key) is not None}
+    merged.update({str(row[key]): row for row in incoming if row.get(key) is not None})
+    return list(merged.values())
+
+
+@router.get("/contract-story")
+async def get_contract_story_ledger(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require("planning", "view")),
+):
+    ledger = await db.get(ContractStoryLedger, 1)
+    return ledger.payload if ledger else None
+
+
+@router.put("/contract-story")
+async def save_contract_story_ledger(
+    body: ContractStoryLedgerIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("planning", "edit")),
+):
+    ledger = await db.get(ContractStoryLedger, 1)
+    payload = {
+        "contracts": body.contracts,
+        "months": body.months,
+        "milestones": body.milestones,
+    }
+    if ledger:
+        current = ledger.payload or {}
+        payload["contracts"] = _merge_ledger_rows(current.get("contracts", []), body.contracts, "id")
+        payload["months"] = {
+            contract_id: _merge_ledger_rows(
+                current.get("months", {}).get(contract_id, []),
+                body.months.get(contract_id, []),
+                "month",
+            )
+            for contract_id in set(current.get("months", {})) | set(body.months)
+        }
+        payload["milestones"] = {
+            contract_id: _merge_ledger_rows(
+                current.get("milestones", {}).get(contract_id, []),
+                body.milestones.get(contract_id, []),
+                "id",
+            )
+            for contract_id in set(current.get("milestones", {})) | set(body.milestones)
+        }
+    else:
+        ledger = ContractStoryLedger(id=1)
+        db.add(ledger)
+    ledger.payload = payload
+    ledger.updated_by = user.id
+    await db.commit()
+    return ledger.payload
 
 
 class DefenseProjectIn(BaseModel):

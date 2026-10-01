@@ -5,6 +5,7 @@ import {
   Select, Stack, TextField, Typography,
 } from "@mui/material";
 import { Add, ArticleOutlined, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
+import { getContractStoryLedger, saveContractStoryLedger } from "../../services/api";
 
 type Contract = { id: string; name: string; provider: string; agreementType: string; country: string; start: string; end: string; target: number; currency: string; summary: string };
 type Monthly = { id: string; month: string; commitment: number; consumption: number; eligible?: number; note: string };
@@ -74,6 +75,7 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
 
 export default function ContractStoryDashboard() {
   const [ledger, setLedger] = useState<Ledger>(readLedger);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(seedId);
   const [dialog, setDialog] = useState<"contract" | "monthly" | "milestone" | null>(null);
   const [creatingContract, setCreatingContract] = useState(false);
@@ -90,7 +92,43 @@ export default function ContractStoryDashboard() {
   const orderedEntries = useMemo(() => [...entries].sort((a, b) => a.month.localeCompare(b.month)), [entries]);
   const orderedMilestones = useMemo(() => [...milestones].sort((a, b) => a.date.localeCompare(b.date)), [milestones]);
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(ledger)); }, [ledger]);
+  useEffect(() => {
+    let active = true;
+    void getContractStoryLedger().then(async (saved: Ledger | null) => {
+      if (!active) return;
+      if (saved) {
+        setLedger({ ...seed, ...saved });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...seed, ...saved }));
+      } else {
+        const local = readLedger();
+        const hasLocalData = Object.values(local.months).some(rows => rows.length > 0)
+          || Object.values(local.milestones).some(rows => rows.length > 2)
+          || local.contracts.length > seed.contracts.length;
+        if (hasLocalData) {
+          const migrated = await saveContractStoryLedger(local);
+          if (!active) return;
+          setLedger({ ...seed, ...migrated });
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...seed, ...migrated }));
+        }
+      }
+      if (active) setLedgerLoaded(true);
+    }).catch(() => {
+      if (active) setLedgerLoaded(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!ledgerLoaded) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(ledger));
+    void saveContractStoryLedger(ledger).then((saved: Ledger) => {
+      const canonical = { ...seed, ...saved };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(canonical));
+      setLedger(current => JSON.stringify(current) === JSON.stringify(canonical) ? current : canonical);
+    }).catch(() => {
+      setMessage("Não foi possível sincronizar com o servidor. Os dados continuam salvos neste navegador.");
+    });
+  }, [ledger, ledgerLoaded]);
 
   const saveContract = (event: ChangeEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
