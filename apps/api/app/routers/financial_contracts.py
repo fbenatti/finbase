@@ -157,7 +157,8 @@ async def contracts_overview(db: AsyncSession = Depends(get_db)):
             "last_settlement_at": run.finished_at if run else None,
             "status": run.status if run else "NOT_SETTLED",
             "credit_balance": sum((Decimal(row.closing_credit or 0) for row in current_balance_rows), Decimal("0")),
-            "uncovered_overage": sum((Decimal(row.uncovered_overage or 0) for row in latest), Decimal("0")),
+            "overage_balance": sum((Decimal(row.closing_overage or 0) for row in current_balance_rows), Decimal("0")),
+            "uncovered_overage": sum((Decimal(row.closing_overage or 0) for row in current_balance_rows), Decimal("0")),
             "realized": sum((Decimal(row.realized or 0) for row in latest), Decimal("0")),
             "pool_count": len(latest),
         })
@@ -236,7 +237,7 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
         # auditable ledger components instead of the legacy stored adjustment,
         # whose sign may differ in older settlement runs.
         item["contractual_adjustment"] = (
-            Decimal(row.credit_generated or 0) - Decimal(row.uncovered_overage or 0)
+            Decimal(row.credit_generated or 0) - Decimal(row.gross_overage or 0)
         )
         item.update({
             "run_source": run.source if run else None,
