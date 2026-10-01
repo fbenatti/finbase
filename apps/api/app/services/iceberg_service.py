@@ -2508,13 +2508,18 @@ def planning_table_name(physical_name: str) -> str:
     return physical_name.replace("-", "_").replace(".", "_") + "_planning"
 
 
-def _publish_planning_dataframe(safe_name: str, df: pd.DataFrame, value_column: str) -> str:
+def _publish_planning_dataframe(
+    safe_name: str, df: pd.DataFrame, value_column: str | list[str],
+) -> str:
     # Planejamento é detalhe (série mensal por dimensão), não cubo: vive na
     # camada de detalhe. A resolução vem de lakehouse_layers para que o escritor
     # e o merge de rateio nunca divirjam (ver merge_planning_rateio).
     namespace = layers.detail_layer()
     _ensure_namespace(namespace)
-    arrow_table = _df_to_arrow(df, column_types={value_column: "DOUBLE"})
+    value_columns = [value_column] if isinstance(value_column, str) else value_column
+    arrow_table = _df_to_arrow(
+        df, column_types={column: "DOUBLE" for column in value_columns if column in df.columns},
+    )
     tid = (namespace, safe_name)
     cat = _get_catalog()
     try:
@@ -2543,7 +2548,16 @@ def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: 
     keep = [c for c in df.columns if c not in {"selected_method", "fallback_level", "history_points", "backtest_wape"}]
     planning = df[keep].copy()
     measure_name = value_column or "value"
-    planning = planning.rename(columns={"forecast_month": "period", "forecast_value": measure_name})
+    planning = planning.rename(columns={"forecast_month": "period"})
+    dual_measures = {"realizado", "realizado_cloud"}.issubset(planning.columns)
+    if dual_measures:
+        # Contract-aware forecasts publish both dashboard measures side by
+        # side; the generic forecast_value stays only in the immutable run.
+        planning = planning.drop(columns=["forecast_value"], errors="ignore")
+        return _publish_planning_dataframe(
+            safe_name, planning, ["realizado", "realizado_cloud"],
+        )
+    planning = planning.rename(columns={"forecast_value": measure_name})
     return _publish_planning_dataframe(safe_name, planning, measure_name)
 
 

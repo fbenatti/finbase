@@ -27,6 +27,112 @@ def _series_key(key_values: dict[str, Any], key_cols: list[str]) -> tuple[tuple[
     return tuple((col, key_values.get(col)) for col in key_cols)
 
 
+async def _contract_budget_commitments(
+    contract_ids: set[int], periods: list[str],
+) -> dict[tuple[str, str, str, str], float]:
+    """Load current monthly budgets for forecasted contract pools.
+
+    Keys are (period, contract_id, cloud_scope, budget_id), matching the
+    contract settlement ledger. This keeps the forecast generic across all
+    configured contracts and their current budget versions.
+    """
+    if not contract_ids or not periods:
+        return {}
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import async_session
+    from app.models.financial_contract import FinancialContract
+    from app.services.contract_settlement import normalize_cloud_scope
+    from app.services.contract_settlement_materializer import _budgets_by_period
+
+    commitments: dict[tuple[str, str, str, str], float] = {}
+    async with async_session() as db:
+        contracts = (await db.execute(
+            select(FinancialContract)
+            .options(selectinload(FinancialContract.budget_scopes))
+            .where(FinancialContract.id.in_(contract_ids), FinancialContract.active.is_(True))
+        )).scalars().all()
+        for contract in contracts:
+            contract_periods = [
+                period for period in periods
+                if contract.valid_from <= period <= contract.valid_until
+            ]
+            monthly, _ = await _budgets_by_period(db, contract, contract_periods)
+            for (period, cloud_scope, budget_id), value in monthly.items():
+                key = (
+                    str(period), str(contract.id),
+                    normalize_cloud_scope(cloud_scope), str(budget_id).strip(),
+                )
+                commitments[key] = float(value)
+    return commitments
+
+
+async def _apply_dual_financial_measures(
+    output: pd.DataFrame,
+    *,
+    financial_context_columns: list[str],
+) -> None:
+    """Publish consumption forecast in both measures, budget-allocating commitments.
+
+    DIRECT_REALIZED follows the cloud-consumption forecast in both columns.
+    BUDGET_COMMITMENT keeps that forecast in realizado_cloud and allocates the
+    current monthly budget to its forecast series in realizado, like settlement.
+    """
+    output["realizado_cloud"] = pd.to_numeric(output["forecast_value"], errors="coerce").fillna(0.0)
+    output["realizado"] = output["realizado_cloud"]
+    if "financial_effect" not in output or "BUDGET_COMMITMENT" not in set(
+        output["financial_effect"].astype("string").str.upper().dropna()
+    ):
+        return
+    required = {"financial_contract_id", "cloud_origem", "id_orcamento"}
+    missing = sorted(required - set(financial_context_columns))
+    if missing:
+        raise ValueError(
+            "Forecast BUDGET_COMMITMENT requer colunas de contrato na Gold: "
+            + ", ".join(missing)
+        )
+
+    from app.services.contract_settlement import allocate_pool, normalize_cloud_scope
+
+    budget_rows = output[
+        output["financial_effect"].astype("string").str.upper().eq("BUDGET_COMMITMENT")
+    ]
+    contract_ids: set[int] = set()
+    for raw_id in budget_rows["financial_contract_id"].dropna().unique():
+        try:
+            contract_ids.add(int(float(raw_id)))
+        except (TypeError, ValueError):
+            raise ValueError(f"financial_contract_id inválido no forecast: {raw_id}")
+    periods = sorted({str(value) for value in budget_rows["forecast_month"].dropna()})
+    commitments = await _contract_budget_commitments(contract_ids, periods)
+    pool_columns = [
+        "forecast_month", "financial_contract_id", "cloud_origem", "id_orcamento",
+    ]
+    pool_indexes: dict[tuple[str, str, str, str], list[int]] = {}
+    for index, row in budget_rows.iterrows():
+        if any(pd.isna(row.get(column)) for column in pool_columns):
+            raise ValueError(
+                "Linha BUDGET_COMMITMENT sem mês, contrato, cloud ou ID orçamento "
+                "não pode receber forecast de orçamento"
+            )
+        try:
+            contract_id = str(int(float(row["financial_contract_id"])))
+        except (TypeError, ValueError):
+            raise ValueError(f"financial_contract_id inválido no forecast: {row['financial_contract_id']}")
+        key = (
+            str(row["forecast_month"]), contract_id,
+            normalize_cloud_scope(row["cloud_origem"]), str(row["id_orcamento"]).strip(),
+        )
+        pool_indexes.setdefault(key, []).append(index)
+
+    for key, indexes in pool_indexes.items():
+        commitment = commitments.get(key, 0.0)
+        weights = output.loc[indexes, "realizado_cloud"].tolist()
+        allocations = allocate_pool(commitment, weights)
+        output.loc[indexes, "realizado"] = [float(value) for value in allocations]
+
+
 def _build_series_context(daily: pd.Series, effective_cutoff: date) -> dict[str, Any]:
     """Summarize realized history per month for business-rule replication."""
     monthly = daily.groupby(daily.index.to_period("M")).sum()
@@ -1088,9 +1194,31 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         "[forecast] daily_history_start=%s (window=%dd) interval_history_start=%s (months=%d)",
         daily_history_start, max_window + 7, interval_history_start, minimum_monthly,
     )
+    metadata_columns = {
+        str(column.get("name") or "").lower()
+        for column in metadata.get("columns", [])
+    }
+    # Forecast both dashboard measures from the same consumption history.
+    # Contract context is added only when the source has it, so this remains
+    # compatible with non-contract and legacy forecast tables.
+    dual_financial_measures = (
+        measure == "realizado"
+        and "realizado_cloud" in metadata_columns
+        and "financial_effect" in metadata_columns
+    )
+    model_measure = "realizado_cloud" if dual_financial_measures else measure
     query_dims = list(dims)
     for extra_col in (cloud_col, id_col):
         if extra_col and extra_col not in query_dims:
+            query_dims.append(extra_col)
+    financial_context_columns = [
+        name for name in (
+            "financial_effect", "financial_contract_id", "id_orcamento",
+        )
+        if name in metadata_columns
+    ] if dual_financial_measures else []
+    for extra_col in financial_context_columns:
+        if extra_col not in query_dims:
             query_dims.append(extra_col)
     interval_rule_names = [
         str(rule.get("_from_business_rule"))
@@ -1105,7 +1233,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
         records = await _fetch_period_records_by_cloud(
             source=source, type_filter=type_filter, period=period, history_start=interval_history_start,
-            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="interval", charge_end_col=charge_end_col, period_col=period,
             connection_filter=None, exclusion_filter=None,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
@@ -1119,7 +1247,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         daily_filter = _connection_rule_filter(allocation_rules, cloud_col, id_col, negate=True)
         daily_records = await _fetch_period_records_by_cloud(
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
-            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=daily_filter, exclusion_filter=None,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
@@ -1133,7 +1261,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             charge_end_col = _rule_charge_end_column(allocation_rules[0], config)
             interval_records = await _fetch_period_records_by_cloud(
                 source=source, type_filter=type_filter, period=period, history_start=interval_history_start,
-                effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+                effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
                 mode="interval", charge_end_col=charge_end_col, period_col=period,
                 connection_filter=interval_filter, exclusion_filter=None,
                 cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
@@ -1146,7 +1274,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     else:
         daily_records = await _fetch_period_records_by_cloud(
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
-            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=None, exclusion_filter=None,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
@@ -1158,7 +1286,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     if source_exclusion:
         excluded_records = await _fetch_period_records(
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
-            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=None, exclusion_filter=source_exclusion, only_exclusions=True,
             minimum_monthly_points=1,
@@ -1173,7 +1301,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     if mean_30d_source_filter:
         overage_records = await _fetch_period_records(
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
-            effective_cutoff=effective_cutoff, dims=query_dims, measure=measure, date_expr=date_expr,
+            effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             connection_filter=None, exclusion_filter=mean_30d_source_filter,
             only_exclusions=True, exclusion_sign=1,
@@ -1194,7 +1322,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     frame = frame.dropna(subset=["forecast_day"])
     if frame.empty:
         raise ValueError("Nenhuma data válida foi encontrada na Gold")
-    key_cols = list(dims)
+    key_cols = list(query_dims)
     if per_connection:
         for col in (cloud_col, id_col):
             if col and col not in key_cols:
@@ -1370,6 +1498,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         elif adjustment.adjustment_type == "ADD_VALUE": output.loc[mask, "forecast_value"] += float(adjustment.fixed_value or 0)
         elif adjustment.adjustment_type == "SUBTRACT_VALUE": output.loc[mask, "forecast_value"] -= float(adjustment.fixed_value or 0)
         elif adjustment.adjustment_type == "ZERO": output.loc[mask, "forecast_value"] = 0.0
+    if dual_financial_measures:
+        await _apply_dual_financial_measures(
+            output,
+            financial_context_columns=financial_context_columns,
+        )
     # Component is an execution-only key. Planning/forecast tables retain the
     # configured dimensions and sum the base + special components naturally.
     output = output.drop(columns=[component_col], errors="ignore")
