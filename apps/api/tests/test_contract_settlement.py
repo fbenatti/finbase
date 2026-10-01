@@ -53,13 +53,44 @@ def test_two_months_generate_then_consume_credit_without_inflating_realized():
     assert february.closing_credit == Decimal("0.00")
 
 
-def test_contractual_adjustment_is_consumption_minus_budget():
+def test_signed_adjustment_uses_positive_credit_and_negative_overage():
     under = settle_pool("892532.94", "1953.59")
     over = settle_pool("1000", "1300")
 
-    assert under.consumption - under.commitment == Decimal("-890579.35")
-    assert over.consumption - over.commitment == Decimal("300.00")
+    assert under.credit_generated - under.gross_overage == Decimal("890579.35")
+    assert over.credit_generated - over.gross_overage == Decimal("-300.00")
     assert over.realized == over.commitment
+
+
+def test_credit_generated_later_offsets_carried_overage():
+    january = settle_pool("1000", "1300")
+    february = settle_pool("1000", "800", opening_overage=january.closing_overage)
+    march = settle_pool("1000", "900", opening_overage=february.closing_overage)
+
+    assert january.closing_overage == Decimal("300.00")
+    assert february.credit_generated == Decimal("200.00")
+    assert february.credit_used == Decimal("200.00")
+    assert february.closing_overage == Decimal("100.00")
+    assert march.credit_generated == Decimal("100.00")
+    assert march.closing_overage == Decimal("0.00")
+
+
+def test_overage_generated_later_uses_carried_credit():
+    january = settle_pool("1000", "900")
+    february = settle_pool("1000", "1300", opening_credit=january.closing_credit)
+
+    assert january.closing_credit == Decimal("100.00")
+    assert february.gross_overage == Decimal("300.00")
+    assert february.credit_used == Decimal("100.00")
+    assert february.closing_overage == Decimal("200.00")
+
+
+def test_overage_is_recorded_as_paid_and_balance_zero_at_contract_end():
+    result = settle_pool("1000", "1000", opening_overage="250", contract_end=True)
+
+    assert result.uncovered_overage == Decimal("250.00")
+    assert result.settled_overage == Decimal("250.00")
+    assert result.closing_overage == Decimal("0.00")
 
 
 def test_provider_realized_cloud_formulas_are_exact():
@@ -148,8 +179,8 @@ def test_settle_rows_writes_realized_and_contractual_adjustment():
     ]
     result = settle_rows(rows, commitment_by_pool={("1", "ibm", "EXTERNO-IBM"): Decimal("1000")})
     assert [result[0]["realizado"], result[1]["realizado"]] == [555.56, 444.44]
-    assert result[0]["ajuste_contratual"] == -55.56
-    assert round(sum(row["ajuste_contratual"] for row in result[:2]), 2) == -100.0
+    assert result[0]["ajuste_contratual"] == 55.56
+    assert round(sum(row["ajuste_contratual"] for row in result[:2]), 2) == 100.0
     assert result[2]["realizado"] == 25
 
 
