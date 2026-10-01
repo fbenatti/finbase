@@ -68,10 +68,50 @@ async def _contract_budget_commitments(
     return commitments
 
 
+async def _actual_contract_realized(
+    *,
+    source: str,
+    type_filter: str,
+    period_column: str,
+    periods: list[str],
+) -> dict[tuple[str, str, str, str], float]:
+    """Read already-realized commitment by month/pool to avoid double-counting."""
+    if not periods:
+        return {}
+    from app.services.contract_settlement import normalize_cloud_scope
+
+    quoted_periods = ", ".join(_lit(period) for period in periods)
+    sql = f"""
+        SELECT CAST({_q(period_column)} AS VARCHAR) AS period,
+               CAST({_q('financial_contract_id')} AS VARCHAR) AS contract_id,
+               lower(trim(CAST({_q('cloud_origem')} AS VARCHAR))) AS cloud_scope,
+               trim(CAST({_q('id_orcamento')} AS VARCHAR)) AS budget_id,
+               SUM(COALESCE(TRY_CAST({_q('realizado')} AS DOUBLE), 0)) AS realized
+          FROM {source}
+         WHERE {type_filter}
+           AND upper(CAST({_q('financial_effect')} AS VARCHAR)) = 'BUDGET_COMMITMENT'
+           AND CAST({_q(period_column)} AS VARCHAR) IN ({quoted_periods})
+         GROUP BY 1, 2, 3, 4
+    """
+    rows = await trino_execute(sql, timeout_s=120)
+    return {
+        (
+            str(row.get("period") or ""),
+            str(int(float(row.get("contract_id") or 0))),
+            normalize_cloud_scope(row.get("cloud_scope")),
+            str(row.get("budget_id") or "").strip(),
+        ): float(row.get("realized") or 0)
+        for row in rows
+    }
+
+
 async def _apply_dual_financial_measures(
     output: pd.DataFrame,
     *,
     financial_context_columns: list[str],
+    source: str,
+    type_filter: str,
+    period_column: str,
 ) -> None:
     """Publish consumption forecast in both measures, budget-allocating commitments.
 
@@ -106,6 +146,12 @@ async def _apply_dual_financial_measures(
             raise ValueError(f"financial_contract_id inválido no forecast: {raw_id}")
     periods = sorted({str(value) for value in budget_rows["forecast_month"].dropna()})
     commitments = await _contract_budget_commitments(contract_ids, periods)
+    actual_realized = await _actual_contract_realized(
+        source=source,
+        type_filter=type_filter,
+        period_column=period_column,
+        periods=periods,
+    )
     pool_columns = [
         "forecast_month", "financial_contract_id", "cloud_origem", "id_orcamento",
     ]
@@ -127,7 +173,13 @@ async def _apply_dual_financial_measures(
         pool_indexes.setdefault(key, []).append(index)
 
     for key, indexes in pool_indexes.items():
-        commitment = commitments.get(key, 0.0)
+        # Planning values are additive to actuals in the open month. Settlement
+        # writes the full monthly commitment into realizado when consumption
+        # exists, so only the unrecognized remainder belongs in the forecast.
+        commitment = max(
+            0.0,
+            commitments.get(key, 0.0) - actual_realized.get(key, 0.0),
+        )
         weights = output.loc[indexes, "realizado_cloud"].tolist()
         allocations = allocate_pool(commitment, weights)
         output.loc[indexes, "realizado"] = [float(value) for value in allocations]
@@ -1502,6 +1554,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         await _apply_dual_financial_measures(
             output,
             financial_context_columns=financial_context_columns,
+            source=source,
+            type_filter=type_filter,
+            period_column=period,
         )
     # Component is an execution-only key. Planning/forecast tables retain the
     # configured dimensions and sum the base + special components naturally.
