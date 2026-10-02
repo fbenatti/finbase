@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from app.routers.azure_mca_commitment import (
     _configured_accounts,
     _normalize_account_id,
+    _profile_display_name,
     _profile_name_map,
     _query_payload,
     _query_windows,
@@ -60,3 +61,5 @@ def test_profile_display_names_are_indexed_case_insensitively():
         {"name": "missing-name", "properties": {}},
     ]
     assert _profile_name_map(profiles) == {"hpdd-dxdz-bg7-pgb": "Telefonica Brasil"}
+    assert _profile_display_name({"properties": {"displayName": "Historico MCA"}}) == "Historico MCA"
+    assert _profile_display_name({"properties": {}}) is None
