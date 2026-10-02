@@ -165,7 +165,7 @@ const emptyForm = {
   automation_backfill_days: 93,
   arg_subscription_ids: "",
   arg_orphan_rules: "",
-  mca_auth_mode: "bearer" as "bearer" | "service_principal",
+  mca_auth_mode: "bearer" as "bearer" | "service_principal" | "azure_cli",
   mca_bearer_token: "",
 };
 
@@ -715,7 +715,9 @@ export default function Connections() {
           auth_mode: form.mca_auth_mode,
           ...(form.mca_auth_mode === "bearer"
             ? { bearer_token: form.mca_bearer_token || undefined }
-            : { tenant_id: form.tenant_id, client_id: form.client_id, client_secret: form.client_secret || undefined }),
+            : form.mca_auth_mode === "service_principal"
+              ? { tenant_id: form.tenant_id, client_id: form.client_id, client_secret: form.client_secret || undefined }
+              : { tenant_id: form.tenant_id || "9b03d892-fe8c-4e05-80f1-32e928a16ba2" }),
         });
         setDialogOpen(false);
         void load();
@@ -1094,20 +1096,27 @@ export default function Connections() {
                 <FormControl fullWidth>
                   <InputLabel>Método de autenticação</InputLabel>
                   <Select value={form.mca_auth_mode} label="Método de autenticação"
-                    onChange={(e) => setForm({ ...form, mca_auth_mode: e.target.value as "bearer" | "service_principal" })}>
+                    onChange={(e) => setForm({ ...form, mca_auth_mode: e.target.value as "bearer" | "service_principal" | "azure_cli" })}>
                     <MenuItem value="bearer">Bearer token temporário</MenuItem>
                     <MenuItem value="service_principal">Service Principal</MenuItem>
+                    <MenuItem value="azure_cli">Azure CLI com renovação automática</MenuItem>
                   </Select>
                 </FormControl>
                 {form.mca_auth_mode === "bearer" ? (
                   <TextField label="Bearer token" type="password" multiline minRows={2} value={form.mca_bearer_token}
                     onChange={(e) => setForm({ ...form, mca_bearer_token: e.target.value })}
                     helperText="Cole o token de acesso ao Azure Resource Manager." />
-                ) : (
+                ) : form.mca_auth_mode === "service_principal" ? (
                   <>
                     <TextField label="Tenant ID" value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                     <TextField label="Client ID" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
                     <TextField label="Client Secret" type="password" value={form.client_secret} onChange={(e) => setForm({ ...form, client_secret: e.target.value })} />
+                  </>
+                ) : (
+                  <>
+                    <TextField label="Tenant ID" value={form.tenant_id || "9b03d892-fe8c-4e05-80f1-32e928a16ba2"}
+                      onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+                    <Alert severity="info">Usa a sessão Azure CLI deste servidor e renova o access token automaticamente. Faça login com az login no mesmo usuário que executa a API.</Alert>
                   </>
                 )}
                 <Typography variant="body2" color="text.secondary">Fonte contratos-mca · Bronze raw_contratos_mca-&#123;billingProfileId&#125; · extração inicial desde 2025-04.</Typography>

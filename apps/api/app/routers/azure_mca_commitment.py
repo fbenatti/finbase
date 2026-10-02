@@ -249,7 +249,11 @@ async def status(db: AsyncSession = Depends(get_db)):
         db.add(source)
     cfg, secret = dict(integration.config_json or {}), dict(integration.secret_json or {})
     await db.commit()
-    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": cfg.get("auth_mode", "bearer"), "credential_configured": bool(secret.get("bearer_token_enc") if cfg.get("auth_mode", "bearer") == "bearer" else secret.get("client_secret_enc")), "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
+    auth_mode = cfg.get("auth_mode", "bearer")
+    credential_configured = auth_mode == "azure_cli" or bool(
+        secret.get("bearer_token_enc") if auth_mode == "bearer" else secret.get("client_secret_enc")
+    )
+    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": auth_mode, "credential_configured": credential_configured, "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
 
 
 @router.put("/credentials")
