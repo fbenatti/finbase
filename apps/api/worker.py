@@ -1229,31 +1229,6 @@ def consumer_main(worker_id: int):
                                                     (terminal_task.phase or "")
                                                     + " · Liquidação contratual publicada"
                                                 )[:200]
-                                                from app.services.gold_materialization import enqueue_rule_materialization
-                                                from app.models.gold_mart_rule import GoldMartRule
-                                                financial_gold_rule_id = terminal_session.scalar(
-                                                    _select(GoldMartRule.id).where(
-                                                        GoldMartRule.code == "visao-completa",
-                                                        GoldMartRule.active.is_(True),
-                                                    )
-                                                )
-                                                gold_task = (
-                                                    enqueue_rule_materialization(
-                                                        terminal_session,
-                                                        rule_ids=[financial_gold_rule_id],
-                                                        source="contract_settlement",
-                                                    )
-                                                    if financial_gold_rule_id else None
-                                                )
-                                                if gold_task:
-                                                    terminal_task.result_json = {
-                                                        **(terminal_task.result_json or {}),
-                                                        "gold_task_id": gold_task.id,
-                                                    }
-                                                    terminal_task.phase = (
-                                                        (terminal_task.phase or "")
-                                                        + f" · Gold enfileirada (task #{gold_task.id})"
-                                                    )[:200]
                                             elif (
                                                 group_succeeded
                                                 and chain
