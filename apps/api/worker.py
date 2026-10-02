@@ -211,6 +211,31 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
     from app.models.forecast import ForecastConfig, ForecastRun
     from sqlalchemy import select
     queued: list[int] = []
+    schedule_id = task_json.get("schedule_id")
+    if schedule_id:
+        # A collection schedule creates one reprocess task per changed
+        # source/month.  Only the final one may release the single full
+        # forecast; otherwise each completed slice can enqueue another run.
+        sibling_tasks = session.query(EtlTask).filter(
+            EtlTask.task_type == "reprocess",
+            EtlTask.status.in_(["QUEUED", "RUNNING"]),
+        ).all()
+        if any(
+            isinstance(row.result_json, dict)
+            and row.result_json.get("schedule_id") == schedule_id
+            for row in sibling_tasks
+        ):
+            return []
+        existing_forecasts = session.query(EtlTask).filter(
+            EtlTask.task_type == "forecast",
+            EtlTask.result_json["scheduled_pipeline"].as_boolean() == True,  # noqa: E712
+        ).all()
+        if any(
+            isinstance(row.result_json, dict)
+            and row.result_json.get("schedule_id") == schedule_id
+            for row in existing_forecasts
+        ):
+            return []
     for config_id in config_ids:
         prior = session.execute(select(EtlTask.result_json).where(EtlTask.task_type == "forecast")).scalars().all()
         if any(isinstance(item, dict) and item.get("scheduled_reprocess_task_id") == source_task_id and item.get("forecast_config_id") == config_id for item in prior):
@@ -234,6 +259,7 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
         forecast_task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id,
                                 errors=[], result_json={"forecast_run_id": run.id,
                                 "forecast_config_id": config_id, "scheduled_reprocess_task_id": source_task_id,
+                                "schedule_id": schedule_id,
                                 "scheduled_pipeline": True, "shared_cost": task_json.get("shared_cost", False),
                                 "accuracy": task_json.get("accuracy", False),
                                 "accuracy_months": pipeline_periods,
