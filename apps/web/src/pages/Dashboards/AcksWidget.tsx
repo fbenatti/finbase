@@ -5,27 +5,32 @@ import {
   TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
 import { Add, ArrowDownward, ArrowUpward, EditNote, Remove } from "@mui/icons-material";
-import { ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvioSubcat, createForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, getForecastAccuracyMonths, getForecastAcks } from "../../services/api";
+import { ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvioSubcat, createForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, getForecastAccuracyMonths, getForecastAcks, getForecastConfigs } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const pct = (value: number | null | undefined) => value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const prettyMonth = (month: string) => `${MONTH_NAMES[Number(month.slice(4, 6)) - 1]}/${month.slice(2, 4)}`;
 
-function previousMonth(): string {
+function referenceMonth(cutoffDays: number): Date {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1; // 1-12
-  const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
-  return `${prev.y}${String(prev.m).padStart(2, "0")}`;
+  const offset = now.getDate() <= cutoffDays ? cutoffDays : 1;
+  return new Date(now.getFullYear(), now.getMonth() - offset, 1);
 }
 
-function lastMonths(count: number): string[] {
+function monthKey(date: Date): string {
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function previousMonth(cutoffDays: number): string {
+  return monthKey(referenceMonth(cutoffDays));
+}
+
+function lastMonths(count: number, cutoffDays: number): string[] {
   const out: string[] = [];
-  const now = new Date();
+  const anchor = referenceMonth(cutoffDays);
   for (let i = 0; i < count; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`);
+    out.push(monthKey(new Date(anchor.getFullYear(), anchor.getMonth() - i, 1)));
   }
   return out;
 }
@@ -97,7 +102,8 @@ function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle, onSu
 }
 
 export default function AcksWidget({ department, hideManualHighlights = false }: { department?: string; hideManualHighlights?: boolean }) {
-  const [month, setMonth] = useState(previousMonth());
+  const [cutoffDays, setCutoffDays] = useState(2);
+  const [month, setMonth] = useState(previousMonth(2));
   const [acks, setAcks] = useState<ForecastAck[]>([]);
   const [positive, setPositive] = useState<ForecastDesvioItem[]>([]);
   const [negative, setNegative] = useState<ForecastDesvioItem[]>([]);
@@ -115,7 +121,20 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
   const [ackReason, setAckReason] = useState("");
   const [savingAck, setSavingAck] = useState(false);
   const [seriesDialog, setSeriesDialog] = useState<{ subcategory: string; data: ForecastAccuracyDeltaSeries | null; loading: boolean; error: string } | null>(null);
-  const options = lastMonths(13);
+  const options = lastMonths(13, cutoffDays);
+
+  useEffect(() => {
+    getForecastConfigs()
+      .then((configs) => {
+        const active = configs.find((config) => config.active);
+        if (active) {
+          const days = Math.max(0, Number(active.cutoff_days ?? 2));
+          setCutoffDays(days);
+          setMonth(previousMonth(days));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,14 +248,14 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
         <Box>
           <Typography variant="h6">Motivos de desvio (Ack)</Typography>
           <Typography variant="body2" color="text.secondary">
-            Desvios reconhecidos no forecast — padrão: mês anterior ao atual
+            Desvios reconhecidos no forecast — padrão: último mês no cutoff do forecast
             {department ? ` · filtrado por: ${department}` : ""}.
           </Typography>
         </Box>
         <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel id="acks-month-label">Mês</InputLabel>
           <Select labelId="acks-month-label" label="Mês" value={month} onChange={e => setMonth(e.target.value)}>
-            {options.map(m => <MenuItem key={m} value={m}>{prettyMonth(m)}{m === previousMonth() ? " (anterior)" : ""}</MenuItem>)}
+            {options.map(m => <MenuItem key={m} value={m}>{prettyMonth(m)}{m === previousMonth(cutoffDays) ? " (referência)" : ""}</MenuItem>)}
           </Select>
         </FormControl>
       </Stack>
