@@ -140,8 +140,6 @@ def _resolve_collection_reprocess_periods(
                 ).distinct()
             ).scalars().all())
     periods = sorted({str(p) for p in touched if p and len(str(p)) >= 6})
-    if not periods:
-        periods = [datetime.now(timezone.utc).strftime("%Y%m")]
     return periods
 
 
