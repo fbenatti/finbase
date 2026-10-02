@@ -10,6 +10,11 @@ export async function getContractStoryLedger() {
   return data;
 }
 
+export async function getContractStoryBronzeConsumption() {
+  const { data } = await api.get("/planning/contract-story/bronze-consumption");
+  return data;
+}
+
 export async function saveContractStoryLedger(ledger: {
   contracts: Array<Record<string, unknown>>;
   months: Record<string, Array<Record<string, unknown>>>;
