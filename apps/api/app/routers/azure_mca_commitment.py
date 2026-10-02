@@ -166,15 +166,17 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
     data = response.json() if response.content else {}
     location = response.headers.get("Location") or data.get("manifestUrl") or data.get("location")
     retry = max(1, int(response.headers.get("Retry-After", "5")))
-    for _ in range(120):
+    for _ in range(30):
         status = str(data.get("status") or data.get("properties", {}).get("status") or "").lower()
         if data.get("manifest") or status in {"completed", "succeeded", "success"}:
             break
+        if status in {"failed", "error", "canceled", "cancelled"}:
+            raise RuntimeError(f"Cost Details status={status} para invoice {invoice_id}")
         if response.status_code == 200 and not location:
             break
         if not location:
             raise RuntimeError(f"Resposta assíncrona sem Location para invoice {invoice_id}")
-        await asyncio.sleep(min(retry, 20))
+        await asyncio.sleep(min(retry, 10))
         response = await client.get(location, headers=headers, timeout=90)
         if response.status_code == 200:
             data = response.json()
