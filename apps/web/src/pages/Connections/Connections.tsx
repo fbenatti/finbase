@@ -1196,6 +1196,15 @@ export default function Connections() {
                   </>
                 )}
                 <Typography variant="body2" color="text.secondary">Fonte contratos-mca · Cost Management Query agrupada por invoice · Bronze raw_azure_commitment_br · desde 2025-04.</Typography>
+                <Divider />
+                <Alert severity="info">Salve a credencial primeiro. A validação e a extração abaixo usam o token já salvo, consultam os Billing Accounts configurados e nunca mostram o segredo.</Alert>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <TextField label="Extrair desde" type="month" value={form.mca_start_period} onChange={(e) => setForm({ ...form, mca_start_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
+                  <TextField label="Extrair até" type="month" value={form.mca_end_period} onChange={(e) => setForm({ ...form, mca_end_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
+                </Stack>
+                <Button variant="outlined" startIcon={testingForm ? <CircularProgress size={16} /> : <Storage />} onClick={() => void extractMcaData()} disabled={testingForm || !form.mca_billing_account_ids.trim()}>
+                  {testingForm ? "Consultando Azure…" : "Extrair invoices para Bronze"}
+                </Button>
               </>
             )}
 
@@ -1569,7 +1578,7 @@ export default function Connections() {
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button onClick={() => void testFormConnection()} disabled={testingForm}>
-            {testingForm ? "Testando…" : "Testar conexão"}
+            {testingForm ? "Testando…" : form.connector_type === "azure_mca_invoice" ? "Validar token e profiles" : "Testar conexão"}
           </Button>
           <Button onClick={() => void save()} variant="contained" disabled={testingForm}>Salvar</Button>
         </DialogActions>
