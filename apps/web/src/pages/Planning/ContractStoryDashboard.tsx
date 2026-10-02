@@ -2,7 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, Divider, FormControl, IconButton, InputLabel, Menu, MenuItem, Paper,
-  Select, Stack, TextField, Typography,
+  Select, Stack, Tab, Tabs, TextField, Typography,
 } from "@mui/material";
 import { Add, ArticleOutlined, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
 import { getContractStoryLedger, saveContractStoryLedger } from "../../services/api";
@@ -168,8 +168,9 @@ export default function ContractStoryDashboard() {
   return <Box sx={{ mx: -3, mt: -3, p: { xs: 2, md: 3 }, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={2} sx={{ mb: 2 }}>
       <Box><Typography variant="h4" fontWeight={800}>História do contrato</Typography><Typography color="text.secondary">Acordos, decisões e consumo em uma jornada única.</Typography></Box>
-      <Stack direction="row" gap={1} alignItems="center"><FormControl size="small" sx={{ minWidth: 240 }}><InputLabel>Contrato</InputLabel><Select value={contract.id} label="Contrato" onChange={event => setSelectedId(event.target.value)}>{ledger.contracts.map(item => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</Select></FormControl><Button variant="contained" startIcon={<Add />} onClick={event => setMenuAnchor(event.currentTarget)}>Novo registro</Button><Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}><MenuItem onClick={() => { setCreatingContract(true); setMenuAnchor(null); setDialog("contract"); }}>Cadastrar contrato</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("monthly"); }}>Registrar mês de consumo</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("milestone"); }}>Adicionar marco à história</MenuItem><Divider /><MenuItem onClick={() => { setMenuAnchor(null); fileRef.current?.click(); }}><FileUploadOutlined fontSize="small" sx={{ mr: 1 }} />Importar consumo via CSV</MenuItem></Menu><input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={event => void importCsv(event)} /></Stack>
+      <Stack direction="row" gap={1} alignItems="center"><Button variant="contained" startIcon={<Add />} onClick={event => setMenuAnchor(event.currentTarget)}>Novo registro</Button><Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}><MenuItem onClick={() => { setCreatingContract(true); setMenuAnchor(null); setDialog("contract"); }}>Cadastrar contrato</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("monthly"); }}>Registrar mês de consumo</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("milestone"); }}>Adicionar marco à história</MenuItem><Divider /><MenuItem onClick={() => { setMenuAnchor(null); fileRef.current?.click(); }}><FileUploadOutlined fontSize="small" sx={{ mr: 1 }} />Importar consumo via CSV</MenuItem></Menu><input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={event => void importCsv(event)} /></Stack>
     </Stack>
+    <Tabs value={contract.id} onChange={(_, value) => setSelectedId(value)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2 }} aria-label="Contratos">{ledger.contracts.map(item => <Tab key={item.id} value={item.id} label={item.name} />)}</Tabs>
     {message && <Alert severity="success" onClose={() => setMessage("")} sx={{ mb: 2 }}>{message}</Alert>}
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, background: "linear-gradient(120deg, #fff 0%, #f0fdfa 100%)" }}>
       <Stack direction={{ xs: "column", md: "row" }} gap={3} justifyContent="space-between" alignItems={{ md: "center" }}>

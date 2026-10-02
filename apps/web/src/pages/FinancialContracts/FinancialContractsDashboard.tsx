@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Card, CardContent, CircularProgress, FormControl, Grid, InputLabel,
-  MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
+  MenuItem, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Typography,
 } from "@mui/material";
 import { getFinancialContractSettlements, getFinancialContracts, getFinancialContractsOverview } from "../../services/api";
@@ -80,14 +80,13 @@ export default function FinancialContractsDashboard() {
       <Box><Typography variant="h4" fontWeight={750}>Visão financeira dos contratos</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>Acompanhe orçamento, consumo e liquidação mês a mês.</Typography></Box>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { sm: 380 } }}>
-        <FormControl size="small" fullWidth><InputLabel>Contrato</InputLabel><Select value={contractId} label="Contrato" onChange={(event) => { setContractId(event.target.value); setPeriod("all"); }}>
-          {contracts.map((item) => <MenuItem key={item.id} value={String(item.id)}>{item.name} · {item.code}</MenuItem>)}
-        </Select></FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }} disabled={!periods.length}><InputLabel>Competência</InputLabel><Select value={period} label="Competência" onChange={(event) => setPeriod(event.target.value)}>
           <MenuItem value="all">Todas</MenuItem>{periods.map((item) => <MenuItem key={item} value={item}>{periodLabel(item)}</MenuItem>)}
         </Select></FormControl>
       </Stack>
     </Stack>
+
+    <Tabs value={contractId} onChange={(_, value) => { setContractId(value); setPeriod("all"); }} variant="scrollable" scrollButtons="auto" sx={{ mb: 3 }} aria-label="Contratos">{contracts.map((item) => <Tab key={item.id} value={String(item.id)} label={`${item.name} · ${item.code}`} />)}</Tabs>
 
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
