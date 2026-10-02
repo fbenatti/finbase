@@ -400,12 +400,13 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
         rows = [row for row in rows if str(row["billingProfileId"]).casefold() in wanted]
     if rows:
         profile_pairs = sorted({(row["billingAccountId"], row["billingProfileId"]) for row in rows})
-        for account_id, profile_id in profile_pairs:
-            key = (account_id, profile_id.casefold())
-            if key not in profile_names:
-                display_name = await _profile_detail_name(client, await _headers(db), account_id, profile_id)
-                if display_name:
-                    profile_names[key] = display_name
+        async with httpx.AsyncClient() as profile_client:
+            for account_id, profile_id in profile_pairs:
+                key = (account_id, profile_id.casefold())
+                if key not in profile_names:
+                    display_name = await _profile_detail_name(profile_client, await _headers(db), account_id, profile_id)
+                    if display_name:
+                        profile_names[key] = display_name
         missing_names = sorted({
             (row["billingAccountId"], row["billingProfileId"])
             for row in rows
