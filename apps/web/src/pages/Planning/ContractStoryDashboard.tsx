@@ -285,8 +285,21 @@ export default function ContractStoryDashboard() {
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const margin = 5;
-      const ratio = Math.min((pageWidth - margin * 2) / canvas.width, (pageHeight - margin * 2) / canvas.height);
-      pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, canvas.width * ratio, canvas.height * ratio);
+      const availableWidth = pageWidth - margin * 2;
+      const availableHeight = pageHeight - margin * 2;
+      const scale = availableWidth / canvas.width;
+      const sliceHeight = Math.max(1, Math.floor(availableHeight / scale));
+      for (let sourceY = 0; sourceY < canvas.height; sourceY += sliceHeight) {
+        const currentHeight = Math.min(sliceHeight, canvas.height - sourceY);
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = currentHeight;
+        const context = pageCanvas.getContext("2d");
+        if (!context) throw new Error("Não foi possível preparar a página do PDF.");
+        context.drawImage(canvas, 0, sourceY, canvas.width, currentHeight, 0, 0, canvas.width, currentHeight);
+        if (sourceY > 0) pdf.addPage();
+        pdf.addImage(pageCanvas.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, availableWidth, currentHeight * scale);
+      }
       pdf.save(`historia-contrato-${contract.id}.pdf`);
     } finally {
       setExporting(false);
