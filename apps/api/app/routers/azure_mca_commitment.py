@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 import pandas as pd
@@ -91,6 +92,7 @@ async def _headers(db: AsyncSession) -> dict[str, str]:
 async def _get_values(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
     while url:
+        url = urljoin(ARM, url)
         response = await client.get(url, headers=headers, timeout=90)
         if response.status_code >= 400:
             # Azure response body can contain account data; surface a compact status only.
