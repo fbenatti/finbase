@@ -2309,6 +2309,24 @@ def _reprocess_destination_sync(
                     partition_spec_json=partition_spec_json,
                     expected_row_count=staged_rows,
                 )
+
+            # Marketplace MongoDB is published from USD source rows, but its
+            # financial effect must be allocated from the matching Azure pool
+            # in BRL after the normal Silver publication succeeds.
+            if (
+                int(connection_ids[0]) == 5
+                and phys_name == "dest_modelo_focus"
+                and len(billing_periods) == 1
+            ):
+                from app.services.marketplace_allocation_reprocess import (
+                    apply_mongodb_marketplace_allocation,
+                )
+                allocation = apply_mongodb_marketplace_allocation(str(billing_periods[0]))
+                _append_reprocess_log(
+                    task_id,
+                    "Rateio Marketplace MongoDB aplicado: "
+                    f"{allocation['allocated_brl']:.2f} BRL em {allocation['rows']:,} linhas",
+                )
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
             _sync_db()
