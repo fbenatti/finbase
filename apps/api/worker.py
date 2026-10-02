@@ -99,7 +99,11 @@ def _resolve_collection_reprocess_periods(
     from sqlalchemy import select
 
     period_mode = cfg.get("period_mode", "ingestion")
-    if period_mode == "all":
+    # A daily collection is incremental by contract.  Older schedules were
+    # persisted with ``period_mode=all`` before the delta pipeline existed;
+    # do not let that legacy value fan out a full historical reprocess.  A
+    # full rebuild must be an explicit operator choice.
+    if period_mode == "all" and cfg.get("full_reprocess") is True:
         return sorted({
             str(x) for x in session.execute(
                 select(IngestedBlob.billing_period).where(
@@ -252,7 +256,8 @@ def _queue_scheduled_accuracy(forecast_task_id: int, task_json: dict, session) -
     session.add(EtlTask(task_type="forecast_accuracy", status="QUEUED", destination_table_id=int(config_id),
                        total_blobs=len(months), errors=[], phase=f"Acurácia agendada: {len(months)} período(s)",
                        result_json={"config_id": int(config_id), "months": months,
-                                    "scheduled_pipeline": True, "source_forecast_task_id": forecast_task_id}))
+                                    "scheduled_pipeline": True, "source_forecast_task_id": forecast_task_id,
+                                    "gold_rule_ids": list(task_json.get("gold_rule_ids") or [])}))
 
 
 def _format_task_error(exc: Exception) -> str:
@@ -612,7 +617,11 @@ def consumer_main(worker_id: int):
                         # Gold pré-agregada precisa ser materializada de novo; a
                         # fila do worker executa em ordem de id (sequência real).
                         gold_rule_ids = [int(x) for x in (task_json.get("gold_rule_ids") or []) if x]
-                        run_scheduled_gold = (not task_json.get("scheduled_pipeline")) or bool(gold_rule_ids)
+                        # Scheduled pipelines publish Gold only after forecast
+                        # and (when enabled) accuracy complete.  Manual
+                        # forecasts retain the historical immediate Gold
+                        # behavior.
+                        run_scheduled_gold = not task_json.get("scheduled_pipeline")
                         try:
                             if not run_scheduled_gold:
                                 raise LookupError("Gold desabilitada no schedule")
@@ -778,6 +787,19 @@ def consumer_main(worker_id: int):
                                 task_row.errors = failures
                             task_row.finished_at = datetime.now(timezone.utc)
                             s.commit()
+                        # The scheduled pipeline deliberately materializes
+                        # Gold after accuracy, so forecast never races or
+                        # implicitly triggers the final cube publication.
+                        if task_row and task_row.status == "COMPLETED" and task_json.get("scheduled_pipeline"):
+                            from app.services.gold_materialization import enqueue_rule_materialization
+                            gold_task = enqueue_rule_materialization(
+                                s,
+                                rule_ids=[int(x) for x in (task_json.get("gold_rule_ids") or []) if x],
+                                source="scheduled_pipeline",
+                            )
+                            if gold_task:
+                                task_row.phase = f"{task_row.phase} · Gold na fila (task #{gold_task.id})"[:200]
+                                s.commit()
                         s.close()
                     except Exception as exc:
                         import traceback
