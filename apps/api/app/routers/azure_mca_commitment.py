@@ -103,11 +103,13 @@ def _merge_missing_invoice_rows(existing: pd.DataFrame, incoming: pd.DataFrame) 
             old[column] = None
         if column not in fresh:
             fresh[column] = None
+    key_columns = ["billingAccountId", "billingProfileId", "billingMonth", "invoiceId"]
     old = old[list(dict.fromkeys([*old.columns, *fresh.columns]))]
     fresh = fresh[old.columns]
+    old = old.drop_duplicates(subset=key_columns, keep="first")
     old_keys = set(_invoice_row_keys(old))
     fresh = fresh.loc[~_invoice_row_keys(fresh).isin(old_keys)]
-    fresh = fresh.drop_duplicates(subset=["billingAccountId", "billingProfileId", "billingMonth", "invoiceId"], keep="first")
+    fresh = fresh.drop_duplicates(subset=key_columns, keep="first")
     return pd.concat([old, fresh], ignore_index=True), len(fresh)
 
 
