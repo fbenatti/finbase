@@ -43,6 +43,7 @@ import {
   getBudgetAccuracyAcks,
   Department,
   getDepartments,
+  getForecastConfigs,
 } from "../../services/api";
 import AcksWidget from "./AcksWidget";
 
@@ -261,9 +262,10 @@ function BudgetRows({
 
 function BudgetPanel({ department }: { department?: string }) {
   const now = new Date();
+  const [cutoffDays, setCutoffDays] = useState(2);
   const referenceMonth = new Date(
     now.getFullYear(),
-    now.getMonth() - (now.getDate() <= 2 ? 2 : 1),
+    now.getMonth() - (now.getDate() <= cutoffDays ? cutoffDays : 1),
     1,
   );
   const [year, setYear] = useState(referenceMonth.getFullYear());
@@ -284,6 +286,25 @@ function BudgetPanel({ department }: { department?: string }) {
   const [ackCategory, setAckCategory] = useState("Pico sazonal");
   const [ackReason, setAckReason] = useState("");
   const [savingAck, setSavingAck] = useState(false);
+
+  useEffect(() => {
+    getForecastConfigs()
+      .then((configs) => {
+        const active = configs.find((config) => config.active);
+        if (active) setCutoffDays(Math.max(0, Number(active.cutoff_days ?? 2)));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const reference = new Date(
+      now.getFullYear(),
+      now.getMonth() - (now.getDate() <= cutoffDays ? cutoffDays : 1),
+      1,
+    );
+    setYear(reference.getFullYear());
+    setMonth(reference.getMonth() + 1);
+  }, [cutoffDays]);
 
   useEffect(() => {
     getDepartments()
