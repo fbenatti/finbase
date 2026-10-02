@@ -77,7 +77,7 @@ export default function FinancialContractsDashboard() {
 
   return <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: "#f5f7fb", minHeight: "calc(100vh - 64px)" }}>
     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={2} sx={{ mb: 3 }}>
-      <Box><Typography variant="h4" fontWeight={750}>Visão financeira dos contratos</Typography>
+      <Box><Typography variant="h4" fontWeight={750}>Histórico de consumo de compromissos contratuais</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>Acompanhe orçamento, consumo e liquidação mês a mês.</Typography></Box>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { sm: 380 } }}>
         <FormControl size="small" sx={{ minWidth: 150 }} disabled={!periods.length}><InputLabel>Competência</InputLabel><Select value={period} label="Competência" onChange={(event) => setPeriod(event.target.value)}>
@@ -86,7 +86,7 @@ export default function FinancialContractsDashboard() {
       </Stack>
     </Stack>
 
-    <Tabs value={contractId} onChange={(_, value) => { setContractId(value); setPeriod("all"); }} variant="scrollable" scrollButtons="auto" sx={{ mb: 3 }} aria-label="Contratos">{contracts.map((item) => <Tab key={item.id} value={String(item.id)} label={`${item.name} · ${item.code}`} />)}</Tabs>
+    <Tabs value={contractId} onChange={(_, value) => { setContractId(value); setPeriod("all"); }} variant="scrollable" scrollButtons="auto" sx={{ mb: 3 }} aria-label="Contratos">{contracts.map((item) => <Tab key={item.id} value={String(item.id)} label={item.name} />)}</Tabs>
 
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
