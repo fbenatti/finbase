@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Card, CardContent, CircularProgress, FormControl, Grid, InputLabel,
   MenuItem, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, Typography,
+  TableRow, Typography, Button,
 } from "@mui/material";
+import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { getFinancialContractSettlements, getFinancialContracts, getFinancialContractsOverview } from "../../services/api";
 
 type Contract = { id: number; code: string; name: string; active: boolean; currency?: string; valid_from?: string; valid_until?: string; last_period?: string; run_id?: number; last_settlement_at?: string; status?: string };
@@ -34,6 +37,8 @@ export default function FinancialContractsDashboard() {
   const [period, setPeriod] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const exportRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -81,11 +86,37 @@ export default function FinancialContractsDashboard() {
   const currentContract = contracts.find((item) => String(item.id) === contractId);
   const currentSummary = overview.find((item) => String(item.contract_id) === contractId);
 
-  return <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: "#f5f7fb", minHeight: "calc(100vh - 64px)" }}>
+  const exportPdf = async () => {
+    if (!exportRootRef.current || exporting) return;
+    setExporting(true);
+    try {
+      const canvas = await html2canvas(exportRootRef.current, {
+        scale: 1.5,
+        backgroundColor: "#f5f7fb",
+        useCORS: true,
+        onclone: (documentClone) => {
+          documentClone.querySelectorAll<HTMLElement>("[data-pdf-hide]").forEach((element) => { element.style.display = "none"; });
+          documentClone.querySelectorAll<HTMLElement>(".MuiTableContainer-root").forEach((element) => { element.style.maxHeight = "none"; element.style.overflow = "visible"; });
+        },
+      });
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 5;
+      const ratio = Math.min((pageWidth - margin * 2) / canvas.width, (pageHeight - margin * 2) / canvas.height);
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, canvas.width * ratio, canvas.height * ratio);
+      pdf.save(`historico-consumo-compromissos-${contractId || "contratos"}.pdf`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return <Box ref={exportRootRef} sx={{ p: { xs: 2, md: 4 }, bgcolor: "#f5f7fb", minHeight: "calc(100vh - 64px)" }}>
     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={2} sx={{ mb: 3 }}>
       <Box><Typography variant="h4" fontWeight={750}>Histórico de consumo de compromissos contratuais</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>Acompanhe orçamento, consumo e liquidação mês a mês.</Typography></Box>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { sm: 380 } }}>
+        <Button data-pdf-hide variant="contained" startIcon={<PictureAsPdfOutlined />} onClick={() => void exportPdf()} disabled={exporting}>{exporting ? "Gerando PDF..." : "Exportar PDF"}</Button>
         <FormControl size="small" sx={{ minWidth: 150 }} disabled={!periods.length}><InputLabel>Competência</InputLabel><Select value={period} label="Competência" onChange={(event) => setPeriod(event.target.value)}>
           <MenuItem value="all">Todas</MenuItem>{periods.map((item) => <MenuItem key={item} value={item}>{periodLabel(item)}</MenuItem>)}
         </Select></FormControl>
