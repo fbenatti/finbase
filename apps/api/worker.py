@@ -29,7 +29,7 @@ import logging
 import multiprocessing
 import threading
 import psutil
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # Ensure the worker can import app.* modules when run from apps/api/
@@ -150,8 +150,19 @@ def _resolve_collection_reprocess_periods(
     # to a failed/cancelled extraction, because that would publish stale data
     # after an unsuccessful collection.
     if extraction and extraction.status in ("COMPLETED", "COMPLETED_WITH_ERRORS"):
-        cutoff_days = max(0, int(cfg.get("cutoff_days", 2)))
-        operational_cutoff = datetime.now(timezone.utc).date() - timedelta(days=cutoff_days)
+        from app.models.forecast import ForecastConfig
+        forecast_ids = [int(x) for x in (cfg.get("forecast_config_ids") or []) if x]
+        cutoff_days = session.execute(
+            select(ForecastConfig.cutoff_days).where(
+                ForecastConfig.id.in_(forecast_ids),
+                ForecastConfig.active.is_(True),
+            )
+        ).scalars().all() if forecast_ids else []
+        if not cutoff_days:
+            return []
+        operational_cutoff = datetime.now(timezone.utc).date()
+        for days in cutoff_days:
+            operational_cutoff = operational_cutoff.replace() - __import__("datetime").timedelta(days=max(0, int(days)))
         cutoff_period = operational_cutoff.strftime("%Y%m")
         latest = session.execute(
             select(IngestedBlob.billing_period).where(
