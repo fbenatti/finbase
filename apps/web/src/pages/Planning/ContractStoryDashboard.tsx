@@ -63,21 +63,32 @@ function Metric({ title, value, hint, color }: { title: string; value: string; h
 }
 
 function ProfileConsumptionChart({ profiles }: { profiles: BronzeConsumption["profiles"] }) {
+  const total = profiles.reduce((sum, profile) => sum + profile.consumptionUsd, 0);
   const maximum = Math.max(1, ...profiles.map(profile => Math.abs(profile.consumptionUsd)));
   return <Box>
     {!profiles.length ? <Typography variant="body2" color="text.secondary">Ainda não há consumo por profile na Bronze.</Typography> :
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
-        {profiles.map(profile => <Box key={`${profile.billingAccountId}:${profile.billingProfileId}`}>
-          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={1}>
-            <Typography variant="body2" title={`${profile.billingProfileName} · ${profile.billingProfileId}`} sx={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{profile.billingProfileName}</Typography>
-            <Typography variant="caption" fontWeight={700} sx={{ flexShrink: 0 }}>{money(profile.consumptionUsd, "USD")}</Typography>
-          </Stack>
-          <Box sx={{ height: 7, borderRadius: 5, bgcolor: "#e2e8f0", overflow: "hidden", mt: .35 }}>
-            <Box sx={{ width: `${Math.max(1, Math.abs(profile.consumptionUsd) / maximum * 100)}%`, height: "100%", bgcolor: "#0f766e", borderRadius: 5 }} />
-          </Box>
-          <Typography variant="caption" color="text.disabled">{profile.billingProfileId}</Typography>
-        </Box>)}
-      </Box>}
+      <Stack spacing={1.25}>
+        {profiles.map((profile, index) => {
+          const share = total > 0 ? Math.max(0, profile.consumptionUsd / total * 100) : 0;
+          const relative = Math.max(0, Math.abs(profile.consumptionUsd) / maximum * 100);
+          return <Paper key={`${profile.billingAccountId}:${profile.billingProfileId}`} variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: 2, bgcolor: "#fcfdff" }}>
+            <Stack direction="row" alignItems="center" gap={{ xs: 1.25, sm: 2 }}>
+              <Box sx={{ width: 34, height: 34, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: "50%", bgcolor: index === 0 ? "#ccfbf1" : "#f1f5f9", color: index === 0 ? "#0f766e" : "#64748b", fontSize: 13, fontWeight: 800 }}>{String(index + 1).padStart(2, "0")}</Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="subtitle2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{profile.billingProfileName}</Typography>
+                <Typography variant="caption" color="text.secondary">Billing profile · {profile.billingProfileId}</Typography>
+              </Box>
+              <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+                <Typography variant="subtitle2" fontWeight={800}>{money(profile.consumptionUsd, "USD")}</Typography>
+                <Typography variant="caption" color="text.secondary">{share.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% do total</Typography>
+              </Box>
+            </Stack>
+            <Box sx={{ height: 8, borderRadius: 10, bgcolor: "#e2e8f0", overflow: "hidden", mt: 1.5 }}>
+              <Box sx={{ width: `${relative}%`, height: "100%", background: index === 0 ? "linear-gradient(90deg, #0f766e, #2dd4bf)" : "#14b8a6", borderRadius: 10, transition: "width .3s" }} />
+            </Box>
+          </Paper>;
+        })}
+      </Stack>}
   </Box>;
 }
 
