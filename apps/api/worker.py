@@ -29,7 +29,7 @@ import logging
 import multiprocessing
 import threading
 import psutil
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure the worker can import app.* modules when run from apps/api/
@@ -160,9 +160,12 @@ def _resolve_collection_reprocess_periods(
         ).scalars().all() if forecast_ids else []
         if not cutoff_days:
             return []
-        operational_cutoff = datetime.now(timezone.utc).date()
-        for days in cutoff_days:
-            operational_cutoff = operational_cutoff.replace() - __import__("datetime").timedelta(days=max(0, int(days)))
+        # Multiple forecast configs may be attached to one schedule. Use the
+        # most conservative configured cutoff so no forecast receives a month
+        # outside its own D-N window.
+        operational_cutoff = datetime.now(timezone.utc).date() - timedelta(
+            days=max(0, max(int(days) for days in cutoff_days))
+        )
         cutoff_period = operational_cutoff.strftime("%Y%m")
         latest = session.execute(
             select(IngestedBlob.billing_period).where(
