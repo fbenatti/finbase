@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from app.routers.azure_mca_commitment import (
     _configured_accounts,
     _normalize_account_id,
+    _profile_name_map,
     _query_payload,
     _query_windows,
     _requested_months,
@@ -51,3 +52,11 @@ def test_invalid_billing_account_is_rejected():
     with pytest.raises(HTTPException) as error:
         _normalize_account_id("not-an-account")
     assert error.value.status_code == 422
+
+
+def test_profile_display_names_are_indexed_case_insensitively():
+    profiles = [
+        {"name": "HPDD-DXDZ-BG7-PGB", "properties": {"displayName": "Telefonica Brasil"}},
+        {"name": "missing-name", "properties": {}},
+    ]
+    assert _profile_name_map(profiles) == {"hpdd-dxdz-bg7-pgb": "Telefonica Brasil"}
