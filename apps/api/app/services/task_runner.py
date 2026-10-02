@@ -10,7 +10,7 @@ import logging
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Optional
 
@@ -2894,6 +2894,34 @@ def _run_etl_sync(
             worker_fn = _process_gcp_month_sync_worker
 
         # Scan (uses sync SDK — already non-blocking in thread)
+
+        # Scheduled collections must not download the current/open period
+        # merely because the provider exposes it as NEW or CHANGED.  The
+        # operational cutoff belongs to the selected Forecast configuration;
+        # periods beyond it are left in Bronze/provider state and the
+        # downstream scheduler reuses the latest eligible ingested period.
+        schedule_id = (task.result_json or {}).get("schedule_id") if isinstance(task.result_json, dict) else None
+        if schedule_id:
+            from app.models.forecast import ForecastConfig
+            from app.models.scheduled_task import ScheduledTask
+            schedule = session.get(ScheduledTask, int(schedule_id))
+            cfg = schedule.config_json or {} if schedule else {}
+            forecast_ids = [int(x) for x in (cfg.get("forecast_config_ids") or []) if x]
+            cutoff_days = list(session.execute(
+                select(ForecastConfig.cutoff_days).where(
+                    ForecastConfig.id.in_(forecast_ids),
+                    ForecastConfig.active.is_(True),
+                )
+            ).scalars().all()) if forecast_ids else []
+            if cutoff_days:
+                cutoff_period = (
+                    datetime.now(timezone.utc).date()
+                    - timedelta(days=max(int(days) for days in cutoff_days))
+                ).strftime("%Y%m")
+                scan_items = [
+                    item for item in scan_items
+                    if not item.billing_period or str(item.billing_period) <= cutoff_period
+                ]
 
         if selected_blobs:
             selected_set = set(selected_blobs)
