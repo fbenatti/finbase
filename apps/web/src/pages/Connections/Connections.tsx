@@ -11,6 +11,7 @@ import {
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
   formatApiError,
 } from "../../services/api";
+import { api } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
@@ -18,6 +19,7 @@ import AzureSourcesPanel from "./AzureSourcesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 
 const CONNECTOR_TYPES = [
+  { value: "azure_mca_invoice", label: "Azure MCA (Invoices)", scope: "azure" },
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
   { value: "azure_openai_ptu", label: "Azure OpenAI PTU", scope: "azure" },
   { value: "azure_automation_jobs", label: "Azure Automation Jobs", scope: "azure" },
@@ -97,6 +99,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: string; icon: React.ReactNode; color: string; category: ConnectionCategory; tool?: string }[] = [
   // Provedores Cloud
+  { value: "azure_mca_invoice", label: "Azure MCA", description: "Invoices e compromisso global", icon: <Cloud />, color: "#0078D4", category: "provedor" },
   { value: "azure_blob", label: "Azure", description: "Blob Storage", icon: <Cloud />, color: "#0078D4", category: "provedor" },
   { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, color: "#0078D4", category: "ferramenta" },
   { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de Start/Stop de VMs", icon: <Cloud />, color: "#0078D4", category: "ferramenta" },
@@ -162,6 +165,8 @@ const emptyForm = {
   automation_backfill_days: 93,
   arg_subscription_ids: "",
   arg_orphan_rules: "",
+  mca_auth_mode: "bearer" as "bearer" | "service_principal",
+  mca_bearer_token: "",
 };
 
 
