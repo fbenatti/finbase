@@ -74,18 +74,42 @@ function ProfileConsumptionChart({ profiles }: { profiles: BronzeConsumption["pr
 }
 
 function ConsumptionChart({ contract, entries }: { contract: Contract; entries: Monthly[] }) {
-  const periods = monthRange(contract.start, contract.end);
+  const contractPeriods = monthRange(contract.start, contract.end);
   const byMonth = new Map(entries.map(row => [row.month, row]));
-  const monthlyTarget = contract.target / Math.max(periods.length, 1);
+  const cumulativeByMonth = new Map<string, number>();
+  let cumulative = 0;
+  const actualPeriods = contractPeriods.filter(month => byMonth.get(month)?.consumptionPresent !== false && byMonth.has(month));
+  const latestActual = actualPeriods.at(-1);
+  for (const month of contractPeriods) {
+    const row = byMonth.get(month);
+    if (row && row.consumptionPresent !== false) cumulative += row.consumption;
+    cumulativeByMonth.set(month, cumulative);
+  }
+  const latestCumulative = latestActual ? cumulativeByMonth.get(latestActual) || 0 : 0;
+  const elapsedActualPeriods = latestActual ? contractPeriods.indexOf(latestActual) + 1 : 0;
+  const observedMonthlyPace = elapsedActualPeriods > 0 ? latestCumulative / elapsedActualPeriods : 0;
+  let estimatedMonth: string | null = null;
+  if (contract.target > 0 && latestCumulative >= contract.target) {
+    estimatedMonth = contractPeriods.find(month => (cumulativeByMonth.get(month) || 0) >= contract.target) || null;
+  } else if (contract.target > 0 && observedMonthlyPace > 0 && latestActual) {
+    const additionalPeriods = Math.ceil((contract.target - latestCumulative) / observedMonthlyPace);
+    const [year, month] = latestActual.split("-").map(Number);
+    const estimateDate = new Date(Date.UTC(year, month - 1 + additionalPeriods, 1));
+    estimatedMonth = `${estimateDate.getUTCFullYear()}-${String(estimateDate.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  const chartEnd = estimatedMonth && estimatedMonth > contract.end ? estimatedMonth : contract.end;
+  const periods = monthRange(contract.start, chartEnd);
   const points = periods.map((month, index) => {
     const row = byMonth.get(month);
-    const actual = entries.filter(item => item.month <= month).reduce((sum, item) => sum + item.consumption, 0);
-    return { month, x: periods.length <= 1 ? 0 : index / (periods.length - 1) * 100, target: (index + 1) * monthlyTarget, actual, row };
+    const actual = entries.filter(item => item.month <= month && item.consumptionPresent !== false).reduce((sum, item) => sum + item.consumption, 0);
+    const contractIndex = contractPeriods.indexOf(month);
+    const target = contractIndex < 0 || !contractPeriods.length ? contract.target : Math.min(((contractIndex + 1) / contractPeriods.length) * contract.target, contract.target);
+    return { month, x: periods.length <= 1 ? 0 : index / (periods.length - 1) * 100, target, actual, row };
   });
   const max = Math.max(contract.target, ...points.map(point => Math.max(point.target, point.actual)), 1);
   const chartHeight = 200;
   const polyline = (key: "target" | "actual") => points.map(point => `${point.x * 7.2},${chartHeight - point[key] / max * chartHeight}`).join(" ");
-  const latestActual = [...points].reverse().find(point => point.row && point.row.consumptionPresent !== false)?.month;
+  const estimateX = estimatedMonth ? (periods.length <= 1 ? 0 : periods.indexOf(estimatedMonth) / (periods.length - 1) * 720) : null;
   return <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, overflow: "hidden" }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} sx={{ mb: 2 }}><Box><Typography variant="h6" fontWeight={800}>Evolução do compromisso</Typography><Typography variant="body2" color="text.secondary">Consumo Brasil acumulado comparado à trajetória necessária para atingir 100%.</Typography></Box><Chip size="small" icon={<AutoGraph />} label={latestActual ? `Atualizado até ${monthLabel(latestActual)}` : "Aguardando consumo mensal"} variant="outlined" /></Stack>
     {!entries.length ? <Box sx={{ py: 2 }}><Box sx={{ height: 145, borderBottom: 1, borderColor: "divider", borderLeft: 1, position: "relative", background: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(148,163,184,.15) 36px)" }}><Typography sx={{ position: "absolute", left: 12, top: 14 }} color="text.secondary" variant="body2">Ainda não há consumo com valor registrado no período.</Typography><Box sx={{ position: "absolute", bottom: 12, left: 12, right: 12, borderTop: "2px dashed #94a3b8" }} /></Box><Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">Meta · {money(contract.target, contract.currency)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack></Box> : <Box sx={{ overflowX: "auto" }}>
@@ -94,11 +118,12 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
         <svg viewBox="0 0 720 200" preserveAspectRatio="none" width="100%" height="200" aria-label="Consumo acumulado contra objetivo do contrato" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
           <polyline points={polyline("target")} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="7 6" />
           <polyline points={polyline("actual")} fill="none" stroke="#0f766e" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          {estimateX !== null && <g><line x1={estimateX} y1="0" x2={estimateX} y2={chartHeight} stroke="#dc2626" strokeWidth="2.5" strokeDasharray="6 5" /><title>Data estimada para atingir o commitment: {monthLabel(estimatedMonth!)}</title></g>}
           {points.filter(point => point.row).map(point => <circle key={point.month} cx={point.x * 7.2} cy={chartHeight - point.actual / max * chartHeight} r="4" fill="#0f766e"><title>{monthLabel(point.month)}: {money(point.actual, contract.currency)}</title></circle>)}
         </svg>
       </Box>
       <Stack direction="row" justifyContent="space-between" sx={{ ml: 6, mt: -0.5 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack>
-      <Stack direction="row" gap={2} sx={{ mt: 1.5 }}><Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "3px solid #0f766e" }} /><Typography variant="caption">Consumo acumulado</Typography></Stack><Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "2px dashed #94a3b8" }} /><Typography variant="caption">Ritmo linear da meta</Typography></Stack></Stack>
+      <Stack direction="row" gap={2} flexWrap="wrap" sx={{ mt: 1.5 }}><Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "3px solid #0f766e" }} /><Typography variant="caption">Consumo acumulado</Typography></Stack><Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "2px dashed #94a3b8" }} /><Typography variant="caption">Ritmo linear da meta</Typography></Stack>{estimatedMonth ? <Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "2px dashed #dc2626" }} /><Typography variant="caption" color="error.main">Atingimento estimado · {monthLabel(estimatedMonth)}</Typography></Stack> : <Typography variant="caption" color="text.secondary">Sem ritmo positivo registrado para estimar a data de atingimento.</Typography>}</Stack>
     </Box>}
   </Paper>;
 }
