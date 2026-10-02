@@ -106,6 +106,9 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
 export default function ContractStoryDashboard() {
   const [ledger, setLedger] = useState<Ledger>(readLedger);
   const [ledgerLoaded, setLedgerLoaded] = useState(false);
+  const [bronzeConsumption, setBronzeConsumption] = useState<BronzeConsumption | null>(null);
+  const [bronzeLoading, setBronzeLoading] = useState(true);
+  const [bronzeError, setBronzeError] = useState(false);
   const [selectedId, setSelectedId] = useState(seedId);
   const [dialog, setDialog] = useState<"contract" | "monthly" | "milestone" | null>(null);
   const [creatingContract, setCreatingContract] = useState(false);
@@ -115,9 +118,25 @@ export default function ContractStoryDashboard() {
   const fileRef = useRef<HTMLInputElement>(null);
   const exportRootRef = useRef<HTMLDivElement>(null);
   const contract = ledger.contracts.find(item => item.id === selectedId) || ledger.contracts[0];
-  const entries = ledger.months[contract?.id] || [];
+  const ledgerEntries = ledger.months[contract?.id] || [];
+  const entries = useMemo(() => {
+    if (contract?.id !== seedId) return ledgerEntries;
+    const actualByMonth = new Map((bronzeConsumption?.months || []).map(row => [row.month, row]));
+    const manualCommitments = new Map(ledgerEntries.filter(row => row.commitment > 0).map(row => [row.month, row]));
+    const months = new Set([...actualByMonth.keys(), ...manualCommitments.keys()]);
+    return [...months].filter(month => month >= contract.start && month <= contract.end).sort().map(month => {
+      const actual = actualByMonth.get(month);
+      const commitment = manualCommitments.get(month);
+      return {
+        id: `bronze-${month}`, month, commitment: commitment?.commitment || 0,
+        consumption: actual?.consumptionUsd || 0, note: commitment?.note || "",
+        commitmentPresent: Boolean(commitment), consumptionPresent: Boolean(actual),
+      };
+    });
+  }, [bronzeConsumption, contract, ledgerEntries]);
   const milestones = ledger.milestones[contract?.id] || [];
-  const used = entries.reduce((sum, row) => sum + (row.eligible ?? row.consumption), 0);
+  const isBronzeContract = contract?.id === seedId;
+  const used = entries.reduce((sum, row) => sum + (row.consumptionPresent === false ? 0 : row.consumption), 0);
   const pct = contract?.target ? Math.min(used / contract.target * 100, 100) : 0;
   const elapsedPeriods = Math.max(monthRange(contract.start, contract.end).filter(month => month <= new Date().toISOString().slice(0, 7)).length, 1);
   const forecast = used / elapsedPeriods * monthRange(contract.start, contract.end).length;
@@ -154,6 +173,15 @@ export default function ContractStoryDashboard() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void getContractStoryBronzeConsumption().then((result: BronzeConsumption) => {
+      if (active) { setBronzeConsumption(result); setBronzeError(false); }
+    }).catch(() => { if (active) setBronzeError(true); })
+      .finally(() => { if (active) setBronzeLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (!ledgerLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ledger));
     void saveContractStoryLedger(ledger).then((saved: Ledger) => {
@@ -174,8 +202,7 @@ export default function ContractStoryDashboard() {
   };
   const saveMonthly = (event: ChangeEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget); const month = String(form.get("month"));
-    const eligibleInput = String(form.get("eligible") || "");
-    const row: Monthly = { id: crypto.randomUUID(), month, commitment: Number(form.get("commitment") || 0), consumption: Number(form.get("consumption") || 0), eligible: eligibleInput === "" ? undefined : Number(eligibleInput), note: String(form.get("note") || "") };
+    const row: Monthly = { id: crypto.randomUUID(), month, commitment: Number(form.get("commitment") || 0), consumption: Number(form.get("consumption") || 0), note: String(form.get("note") || "") };
     setLedger(current => ({ ...current, months: { ...current.months, [contract.id]: [...(current.months[contract.id] || []).filter(value => value.month !== month), row] } })); setDialog(null); setMessage(`Consumo de ${monthLabel(month)} salvo e evolução recalculada.`);
   };
   const saveMilestone = (event: ChangeEvent<HTMLFormElement>) => {
@@ -188,10 +215,10 @@ export default function ContractStoryDashboard() {
     const text = await file.text(); const lines = text.split(/\r?\n/).filter(Boolean); const rows: Monthly[] = [];
     const headers = (lines.shift() || "").split(/[;,\t]/).map(value => value.trim().toLowerCase());
     const column = (...aliases: string[]) => headers.findIndex(value => aliases.includes(value));
-    const monthCol = column("mes", "mês", "periodo", "período", "month"); const commitmentCol = column("commitment", "compromisso", "meta_mes", "meta do mes"); const consumptionCol = column("consumo", "consumption", "realizado", "consumo_brasil"); const eligibleCol = column("elegivel", "elegível", "elegivel_compromisso", "eligible"); const noteCol = column("observacao", "observação", "nota", "note");
+    const monthCol = column("mes", "mês", "periodo", "período", "month"); const commitmentCol = column("commitment", "compromisso", "meta_mes", "meta do mes"); const consumptionCol = column("consumo", "consumption", "realizado", "consumo_brasil"); const noteCol = column("observacao", "observação", "nota", "note");
     if (monthCol < 0 || consumptionCol < 0) { setMessage("CSV não importado: inclua colunas mês/período e consumo/realizado."); event.target.value = ""; return; }
     const number = (value: string) => Number(value.replace(/[R$\s]/g, "").replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".")) || 0;
-    for (const line of lines) { const cells = line.split(/[;,\t]/).map(value => value.trim().replace(/^"|"$/g, "")); const rawMonth = cells[monthCol] || ""; const month = /^\d{4}-\d{2}/.test(rawMonth) ? rawMonth.slice(0, 7) : /^\d{6}$/.test(rawMonth) ? `${rawMonth.slice(0, 4)}-${rawMonth.slice(4)}` : ""; if (!month) continue; rows.push({ id: crypto.randomUUID(), month, commitment: commitmentCol < 0 ? 0 : number(cells[commitmentCol] || "0"), consumption: number(cells[consumptionCol] || "0"), eligible: eligibleCol < 0 || !cells[eligibleCol] ? undefined : number(cells[eligibleCol]), note: noteCol < 0 ? "Importado via CSV" : cells[noteCol] || "Importado via CSV" }); }
+    for (const line of lines) { const cells = line.split(/[;,\t]/).map(value => value.trim().replace(/^"|"$/g, "")); const rawMonth = cells[monthCol] || ""; const month = /^\d{4}-\d{2}/.test(rawMonth) ? rawMonth.slice(0, 7) : /^\d{6}$/.test(rawMonth) ? `${rawMonth.slice(0, 4)}-${rawMonth.slice(4)}` : ""; if (!month) continue; rows.push({ id: crypto.randomUUID(), month, commitment: commitmentCol < 0 ? 0 : number(cells[commitmentCol] || "0"), consumption: number(cells[consumptionCol] || "0"), note: noteCol < 0 ? "Importado via CSV" : cells[noteCol] || "Importado via CSV" }); }
     if (rows.length) { setLedger(current => ({ ...current, months: { ...current.months, [contract.id]: [...(current.months[contract.id] || []).filter(item => !rows.some(row => row.month === item.month)), ...rows] } })); setMessage(`${rows.length} competência(s) importada(s) e evolução atualizada.`); } else setMessage("Nenhuma competência válida foi encontrada no CSV.");
     event.target.value = "";
   };
