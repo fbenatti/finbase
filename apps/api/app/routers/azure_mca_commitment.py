@@ -275,7 +275,9 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                         "invoiceTotal": props.get("totalAmount"),
                     }.items():
                         df[key] = value
-                    code = f"contratos-mca-{safe_profile}"
+            # Trino folds unquoted identifiers to lowercase; keep Iceberg's
+            # physical table name aligned for alphanumeric profile codes.
+            code = f"contratos-mca-{safe_profile}".lower()
                     blob = f"mca-invoice/{profile_id}/{period}/{invoice_id}"
                     count = iceberg_service.write_bronze(code, df, period, blob)
                     results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": count, "status": "loaded"})
