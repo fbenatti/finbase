@@ -241,7 +241,7 @@ export default function Connections() {
   const [historyConn, setHistoryConn] = useState<SourceConnection | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [testingForm, setTestingForm] = useState(false);
-  const [formTestMessage, setFormTestMessage] = useState<{ severity: "success" | "warning" | "error"; msg: string } | null>(null);
+  const [formTestMessage, setFormTestMessage] = useState<{ severity: "success" | "warning" | "error" | "info"; msg: string } | null>(null);
   const [connectionPendingDeletion, setConnectionPendingDeletion] = useState<SourceConnection | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState("");
