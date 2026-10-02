@@ -1,4 +1,13 @@
-from app.routers.azure_mca_commitment import _query_payload, _query_windows, _requested_months
+import pytest
+from fastapi import HTTPException
+
+from app.routers.azure_mca_commitment import (
+    _configured_accounts,
+    _normalize_account_id,
+    _query_payload,
+    _query_windows,
+    _requested_months,
+)
 
 
 def test_query_windows_split_at_twelve_calendar_months():
@@ -27,3 +36,18 @@ def test_query_payload_groups_invoice_and_uses_pre_tax_usd():
         {"type": "Dimension", "name": "BillingProfileId"},
         {"type": "Dimension", "name": "InvoiceId"},
     ]
+
+
+def test_billing_accounts_are_configured_and_normalized_dynamically():
+    first = "9c326feb-5307-50e2-1fd1-4de7454d10aa:afbd45cf-3f8c-4df7-b57f-8e12efd1659b_2019-05-31"
+    second = "4b0cc15a-47e6-5080-e74c-700f0254380b:e3ebca84-bf14-4ce3-863a-1c50b6ef6a83_2019-05-31"
+
+    assert _normalize_account_id(f"/providers/Microsoft.Billing/billingAccounts/{second}") == second
+    assert _configured_accounts({"billing_account_ids": [first, second, first]}) == [first, second]
+    assert _configured_accounts({"billing_account_id": first}) == [first]
+
+
+def test_invalid_billing_account_is_rejected():
+    with pytest.raises(HTTPException) as error:
+        _normalize_account_id("not-an-account")
+    assert error.value.status_code == 422

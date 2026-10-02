@@ -167,6 +167,7 @@ const emptyForm = {
   arg_orphan_rules: "",
   mca_auth_mode: "bearer" as "bearer" | "service_principal" | "azure_cli",
   mca_bearer_token: "",
+  mca_billing_account_ids: "",
 };
 
 
@@ -332,6 +333,11 @@ export default function Connections() {
     setFormTestMessage(null);
     const scope = CONNECTOR_TYPES.find((type) => type.value === connectorType)?.scope || "";
     setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: scope });
+    if (connectorType === "azure_mca_invoice") {
+      void api.get("/mca-commitment/status").then(({ data }) => {
+        setForm((current) => ({ ...current, mca_billing_account_ids: (data.billing_account_ids || []).join("\n") }));
+      }).catch(() => undefined);
+    }
     setDialogOpen(true);
   };
 
@@ -710,9 +716,10 @@ export default function Connections() {
   const save = async () => {
     try {
       if (form.connector_type === "azure_mca_invoice") {
-        await api.get("/mca-commitment/status");
+        const billingAccountIds = form.mca_billing_account_ids.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
         await api.put("/mca-commitment/credentials", {
           auth_mode: form.mca_auth_mode,
+          billing_account_ids: billingAccountIds,
           ...(form.mca_auth_mode === "bearer"
             ? { bearer_token: form.mca_bearer_token || undefined }
             : form.mca_auth_mode === "service_principal"
@@ -1092,7 +1099,10 @@ export default function Connections() {
 
             {form.connector_type === "azure_mca_invoice" && (
               <>
-                <Alert severity="info">Contratos MCA baixa Cost Details por invoiceId, separados por billingProfileId e partição mensal YYYYMM. A credencial é write-only e não volta para a tela.</Alert>
+                <Alert severity="info">Consulta valores mensais consolidados ligados a invoices. Cada Billing Account fica identificado e é particionado sem sobrescrever os demais. A credencial é write-only.</Alert>
+                <TextField label="Billing Account IDs" multiline minRows={3} value={form.mca_billing_account_ids}
+                  onChange={(e) => setForm({ ...form, mca_billing_account_ids: e.target.value })}
+                  helperText="Um ID por linha. Ex.: accountGuid:tenantGuid_2019-05-31. Os profiles são descobertos dinamicamente em cada conta." />
                 <FormControl fullWidth>
                   <InputLabel>Método de autenticação</InputLabel>
                   <Select value={form.mca_auth_mode} label="Método de autenticação"
