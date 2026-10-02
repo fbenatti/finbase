@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.core.sso_crypto import _decrypt, _encrypt
 from app.models.source_connection import SourceConnection, SystemIntegration
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ async def _get_token(db: AsyncSession) -> str:
     cfg, secret = dict(integration.config_json or {}), dict(integration.secret_json or {})
     mode = cfg.get("auth_mode", "bearer")
     if mode == "bearer":
-        token = str(secret.get("bearer_token") or "").strip()
+        encrypted = secret.get("bearer_token_enc")
+        token = _decrypt(str(encrypted)) if encrypted else ""
         if not token:
             raise HTTPException(400, "Configure o bearer token em /mca-commitment/credentials.")
         return token.removeprefix("Bearer ").strip()
@@ -78,7 +80,7 @@ async def _get_token(db: AsyncSession) -> str:
         credential = ClientSecretCredential(
             tenant_id=str(cfg.get("tenant_id") or ""),
             client_id=str(cfg.get("client_id") or ""),
-            client_secret=str(secret.get("client_secret") or ""),
+            client_secret=_decrypt(str(secret.get("client_secret_enc") or "")) if secret.get("client_secret_enc") else "",
         )
         return credential.get_token("https://management.azure.com/.default").token
     except Exception as exc:  # noqa: BLE001
@@ -234,7 +236,7 @@ async def status(db: AsyncSession = Depends(get_db)):
         db.add(source)
     cfg, secret = dict(integration.config_json or {}), dict(integration.secret_json or {})
     await db.commit()
-    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": cfg.get("auth_mode", "bearer"), "credential_configured": bool(secret.get("bearer_token") if cfg.get("auth_mode", "bearer") == "bearer" else secret.get("client_secret")), "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
+    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": cfg.get("auth_mode", "bearer"), "credential_configured": bool(secret.get("bearer_token_enc") if cfg.get("auth_mode", "bearer") == "bearer" else secret.get("client_secret_enc")), "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
 
 
 @router.put("/credentials")
@@ -244,16 +246,19 @@ async def update_credentials(payload: CredentialUpdate, db: AsyncSession = Depen
     config["auth_mode"] = payload.auth_mode
     if payload.auth_mode == "bearer":
         if payload.bearer_token:
-            secret["bearer_token"] = payload.bearer_token.strip().removeprefix("Bearer ").strip()
-        if not secret.get("bearer_token"):
+            secret["bearer_token_enc"] = _encrypt(payload.bearer_token.strip().removeprefix("Bearer ").strip())
+            secret.pop("bearer_token", None)
+        if not secret.get("bearer_token_enc"):
             raise HTTPException(422, "Informe bearer_token.")
     else:
         config.update({"tenant_id": payload.tenant_id, "client_id": payload.client_id})
         if payload.client_secret:
-            secret["client_secret"] = payload.client_secret
-        if not all(config.get(k) for k in ("tenant_id", "client_id")) or not secret.get("client_secret"):
+            secret["client_secret_enc"] = _encrypt(payload.client_secret)
+            secret.pop("client_secret", None)
+        if not all(config.get(k) for k in ("tenant_id", "client_id")) or not secret.get("client_secret_enc"):
             raise HTTPException(422, "Informe tenant_id, client_id e client_secret para Service Principal.")
         secret.pop("bearer_token", None)
+        secret.pop("bearer_token_enc", None)
     integration.config_json, integration.secret_json = config, secret
     await db.commit()
     return {"auth_mode": payload.auth_mode, "credential_configured": True}
