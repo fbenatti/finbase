@@ -29,7 +29,7 @@ import logging
 import multiprocessing
 import threading
 import psutil
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure the worker can import app.* modules when run from apps/api/
@@ -150,10 +150,14 @@ def _resolve_collection_reprocess_periods(
     # to a failed/cancelled extraction, because that would publish stale data
     # after an unsuccessful collection.
     if extraction and extraction.status in ("COMPLETED", "COMPLETED_WITH_ERRORS"):
+        cutoff_days = max(0, int(cfg.get("cutoff_days", 2)))
+        operational_cutoff = datetime.now(timezone.utc).date() - timedelta(days=cutoff_days)
+        cutoff_period = operational_cutoff.strftime("%Y%m")
         latest = session.execute(
             select(IngestedBlob.billing_period).where(
                 IngestedBlob.connection_id == connection_id,
                 IngestedBlob.billing_period.is_not(None),
+                IngestedBlob.billing_period <= cutoff_period,
             ).order_by(IngestedBlob.billing_period.desc()).limit(1)
         ).scalar_one_or_none()
         if latest:
