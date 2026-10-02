@@ -30,7 +30,7 @@ _INTEGRATION_CODE = "azure_mca_commitment"
 
 
 class CredentialUpdate(BaseModel):
-    auth_mode: str = Field(pattern="^(bearer|service_principal)$")
+    auth_mode: str = Field(pattern="^(bearer|service_principal|azure_cli)$")
     bearer_token: str | None = None
     tenant_id: str | None = None
     client_id: str | None = None
@@ -75,6 +75,27 @@ async def _get_token(db: AsyncSession) -> str:
         if not token:
             raise HTTPException(400, "Configure o bearer token em /mca-commitment/credentials.")
         return token.removeprefix("Bearer ").strip()
+    if mode == "azure_cli":
+        tenant_id = str(cfg.get("tenant_id") or "")
+        if not tenant_id:
+            raise HTTPException(400, "Configure o tenant_id para autenticação Azure CLI.")
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "az", "account", "get-access-token", "--tenant", tenant_id,
+                "--resource", "https://management.core.windows.net/", "--output", "json",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+            if process.returncode != 0:
+                raise RuntimeError("Azure CLI não conseguiu renovar o token.")
+            token = str(__import__("json").loads(stdout).get("accessToken") or "")
+            if not token:
+                raise RuntimeError("Azure CLI não retornou access token.")
+            return token
+        except Exception as exc:  # noqa: BLE001 - never expose CLI output, which may contain credentials
+            logger.warning("Azure MCA CLI token acquisition failed (%s)", type(exc).__name__)
+            raise HTTPException(401, "Sessão Azure CLI indisponível. Execute az login no usuário do servidor da API.") from exc
     try:
         from azure.identity import ClientSecretCredential
         credential = ClientSecretCredential(
@@ -236,7 +257,13 @@ async def update_credentials(payload: CredentialUpdate, db: AsyncSession = Depen
     integration = await _integration(db)
     config, secret = dict(integration.config_json or {}), dict(integration.secret_json or {})
     config["auth_mode"] = payload.auth_mode
-    if payload.auth_mode == "bearer":
+    if payload.auth_mode == "azure_cli":
+        config["tenant_id"] = payload.tenant_id or "9b03d892-fe8c-4e05-80f1-32e928a16ba2"
+        secret.pop("bearer_token_enc", None)
+        secret.pop("client_secret_enc", None)
+        secret.pop("bearer_token", None)
+        secret.pop("client_secret", None)
+    elif payload.auth_mode == "bearer":
         if payload.bearer_token:
             secret["bearer_token_enc"] = _encrypt(payload.bearer_token.strip().removeprefix("Bearer ").strip())
             secret.pop("bearer_token", None)
