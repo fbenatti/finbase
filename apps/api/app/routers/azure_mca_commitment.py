@@ -151,7 +151,16 @@ async def _invoice_is_current(code: str, period: str, invoice_id: str, props: di
 
 async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], profile_id: str, invoice_id: str) -> pd.DataFrame:
     url = f"{ARM}/providers/Microsoft.Billing/billingAccounts/{BILLING_ACCOUNT}/billingProfiles/{profile_id}/providers/Microsoft.CostManagement/generateCostDetailsReport?api-version=2025-03-01"
-    response = await client.post(url, headers=headers, json={"invoiceId": invoice_id, "metric": "ActualCost"}, timeout=90)
+    response = None
+    for attempt in range(6):
+        response = await client.post(url, headers=headers, json={"invoiceId": invoice_id, "metric": "ActualCost"}, timeout=90)
+        if response.status_code not in (429, 503):
+            break
+        retry_after = response.headers.get("Retry-After")
+        delay = int(retry_after) if retry_after and retry_after.isdigit() else min(30 * (attempt + 1), 180)
+        logger.info("Azure Cost Details rate limited; retrying invoice=%s after %ss", invoice_id, delay)
+        await asyncio.sleep(delay)
+    assert response is not None
     if response.status_code not in (200, 202):
         raise RuntimeError(f"Cost Details HTTP {response.status_code} para invoice {invoice_id}")
     data = response.json() if response.content else {}
@@ -172,6 +181,9 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
             status = str(data.get("status") or data.get("properties", {}).get("status") or "").lower()
             if data.get("manifest") or data.get("manifestUrl") or data.get("blobLink") or data.get("downloadUrl") or status in {"completed", "succeeded", "success"}:
                 break
+        elif response.status_code in (429, 503):
+            retry_after = response.headers.get("Retry-After")
+            retry = int(retry_after) if retry_after and retry_after.isdigit() else min(retry * 2, 60)
         elif response.status_code not in (202, 204):
             raise RuntimeError(f"Polling Cost Details HTTP {response.status_code} para invoice {invoice_id}")
         retry = max(1, int(response.headers.get("Retry-After", str(retry))))
