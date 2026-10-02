@@ -1119,7 +1119,7 @@ export default function Connections() {
                     <Alert severity="info">Usa a sessão Azure CLI deste servidor e renova o access token automaticamente. Faça login com az login no mesmo usuário que executa a API.</Alert>
                   </>
                 )}
-                <Typography variant="body2" color="text.secondary">Fonte contratos-mca · Bronze raw_contratos_mca-&#123;billingProfileId&#125; · extração inicial desde 2025-04.</Typography>
+                <Typography variant="body2" color="text.secondary">Fonte contratos-mca · Cost Management Query agrupada por invoice · Bronze raw_azure_commitment_br · desde 2025-04.</Typography>
               </>
             )}
 

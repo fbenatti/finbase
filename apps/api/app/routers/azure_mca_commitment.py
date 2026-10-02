@@ -1,11 +1,10 @@
-"""MCA invoice Cost Details extraction into profile-specific Bronze tables."""
+"""MCA invoice-linked monthly totals into a compact Bronze table."""
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urljoin
 
@@ -26,6 +25,8 @@ router = APIRouter(prefix="/mca-commitment", tags=["azure-mca-commitment"])
 BILLING_ACCOUNT = "9c326feb-5307-50e2-1fd1-4de7454d10aa:afbd45cf-3f8c-4df7-b57f-8e12efd1659b_2019-05-31"
 ARM = "https://management.azure.com"
 API_VERSION = "2020-11-01-privatepreview"
+COST_QUERY_API_VERSION = "2021-10-01"
+COMMITMENT_BRONZE_CODE = "azure_commitment_br"
 _INTEGRATION_CODE = "azure_mca_commitment"
 
 
@@ -55,7 +56,7 @@ async def _integration(db: AsyncSession) -> SystemIntegration:
             code=_INTEGRATION_CODE,
             name="Azure MCA Commitment",
             integration_type="cloud_billing",
-            description="Credencial da extração mensal de invoices MCA.",
+            description="Credencial da consulta mensal consolidada de invoices MCA.",
             enabled=True,
             config_json={"auth_mode": "bearer", "billing_account_id": BILLING_ACCOUNT},
             secret_json={},
@@ -131,105 +132,107 @@ async def _profiles(client: httpx.AsyncClient, headers: dict[str, str]) -> list[
     return await _get_values(client, url, headers)
 
 
-def _period_bounds(start: str, end: str) -> tuple[str, str]:
-    if start > end:
+def _query_windows(start_period: str, end_period: str) -> list[tuple[str, str]]:
+    """Split history into <=12-calendar-month Query API calls."""
+    if start_period > end_period:
         raise HTTPException(422, "start_period deve ser menor ou igual a end_period.")
-    # Invoice lookup uses UTC boundaries inclusive at the start and exclusive after month end.
-    first = f"{start[:4]}-{start[4:]}-01T00:00:00Z"
-    y, m = int(end[:4]), int(end[4:])
-    y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-    after = f"{y:04d}-{m:02d}-01T00:00:00Z"
-    return first, after
+    first = date(int(start_period[:4]), int(start_period[4:]), 1)
+    end = date(int(end_period[:4]), int(end_period[4:]), 1)
+    windows: list[tuple[str, str]] = []
+    cursor = first
+    while cursor <= end:
+        end_index = cursor.year * 12 + cursor.month - 1 + 11
+        last = date(end_index // 12, end_index % 12 + 1, 1)
+        if last > end:
+            last = end
+        windows.append((cursor.strftime("%Y%m"), last.strftime("%Y%m")))
+        next_index = last.year * 12 + last.month
+        cursor = date(next_index // 12, next_index % 12 + 1, 1)
+    return windows
 
 
-async def _invoice_is_current(code: str, period: str, invoice_id: str, props: dict[str, Any]) -> bool:
-    """Skip a previously loaded invoice; void documents are reconsidered."""
-    from app.services.trino_service import execute as trino_execute
-
-    if str(props.get("status") or "").casefold() in {"void", "voided", "cancelled", "canceled"}:
-        return False
-    table = re.sub(r"[^a-z0-9_]", "_", f"raw_{code.lower()}")
-    quote = lambda value: str(value or "").replace("'", "''")
-    try:
-        rows = await trino_execute(
-            f"SELECT COUNT(*) AS n FROM iceberg.bronze.{table} "
-            f"WHERE invoiceId = '{quote(invoice_id)}' AND _billing_period = '{quote(period)}'",
-            timeout_s=25,
-        )
-    except Exception:  # noqa: BLE001 - absent table means first load
-        return False
-    row = rows[0] if rows else {}
-    if int(row.get("n") or 0) == 0:
-        return False
-    return int(row.get("n") or 0) > 0
+def _requested_months(start_period: str, end_period: str) -> list[str]:
+    if start_period > end_period:
+        raise HTTPException(422, "start_period deve ser menor ou igual a end_period.")
+    year, month = int(start_period[:4]), int(start_period[4:])
+    end_year, end_month = int(end_period[:4]), int(end_period[4:])
+    months: list[str] = []
+    while (year, month) <= (end_year, end_month):
+        months.append(f"{year:04d}{month:02d}")
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return months
 
 
-async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], profile_id: str, invoice_id: str) -> pd.DataFrame:
-    url = f"{ARM}/providers/Microsoft.Billing/billingAccounts/{BILLING_ACCOUNT}/billingProfiles/{profile_id}/providers/Microsoft.CostManagement/generateCostDetailsReport?api-version=2025-03-01"
-    response = None
-    for attempt in range(6):
-        response = await client.post(url, headers=headers, json={"invoiceId": invoice_id, "metric": "ActualCost"}, timeout=90)
-        if response.status_code not in (429, 503):
-            break
-        retry_after = response.headers.get("Retry-After")
-        delay = int(retry_after) if retry_after and retry_after.isdigit() else min(30 * (attempt + 1), 180)
-        logger.info("Azure Cost Details rate limited; retrying invoice=%s after %ss", invoice_id, delay)
-        await asyncio.sleep(delay)
-    assert response is not None
-    if response.status_code not in (200, 202):
-        raise RuntimeError(f"Cost Details HTTP {response.status_code} para invoice {invoice_id}")
-    data = response.json() if response.content else {}
-    location = response.headers.get("Location") or data.get("manifestUrl") or data.get("location")
-    retry = max(1, int(response.headers.get("Retry-After", "5")))
-    for _ in range(30):
-        status = str(data.get("status") or data.get("properties", {}).get("status") or "").lower()
-        if data.get("manifest") or status in {"completed", "succeeded", "success"}:
-            break
-        if status in {"failed", "error", "canceled", "cancelled"}:
-            raise RuntimeError(f"Cost Details status={status} para invoice {invoice_id}")
-        if response.status_code == 200 and not location:
-            break
-        if not location:
-            raise RuntimeError(f"Resposta assíncrona sem Location para invoice {invoice_id}")
-        await asyncio.sleep(min(retry, 10))
-        response = await client.get(location, headers=headers, timeout=90)
-        if response.status_code == 200:
-            data = response.json()
-            status = str(data.get("status") or data.get("properties", {}).get("status") or "").lower()
-            if data.get("manifest") or data.get("manifestUrl") or data.get("blobLink") or data.get("downloadUrl") or status in {"completed", "succeeded", "success"}:
+def _query_payload(start_period: str, end_period: str) -> dict[str, Any]:
+    year, month = int(end_period[:4]), int(end_period[4:])
+    next_month = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
+    last_day = next_month - timedelta(days=1)
+    return {
+        "type": "ActualCost",
+        "timeframe": "Custom",
+        "timePeriod": {
+            "from": f"{start_period[:4]}-{start_period[4:]}-01T00:00:00Z",
+            "to": f"{last_day.isoformat()}T23:59:59Z",
+        },
+        "dataset": {
+            "granularity": "Monthly",
+            "aggregation": {
+                "preTaxCostUSD": {"name": "PreTaxCostUSD", "function": "Sum"},
+                "preTaxCost": {"name": "PreTaxCost", "function": "Sum"},
+            },
+            "grouping": [
+                {"type": "Dimension", "name": "BillingProfileId"},
+                {"type": "Dimension", "name": "InvoiceId"},
+            ],
+        },
+    }
+
+
+async def _query_invoice_totals(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    start_period: str,
+    end_period: str,
+) -> list[dict[str, Any]]:
+    """Fetch monthly invoice totals from account scope, following Query nextLink."""
+    url = f"{ARM}/providers/Microsoft.Billing/billingAccounts/{BILLING_ACCOUNT}/providers/Microsoft.CostManagement/query?api-version={COST_QUERY_API_VERSION}"
+    payload = _query_payload(start_period, end_period)
+    results: list[dict[str, Any]] = []
+    for _page in range(100):
+        response = None
+        for attempt in range(6):
+            response = await client.post(url, headers=await _headers(db), json=payload, timeout=120)
+            if response.status_code not in (429, 503):
                 break
-        elif response.status_code in (429, 503):
             retry_after = response.headers.get("Retry-After")
-            retry = int(retry_after) if retry_after and retry_after.isdigit() else min(retry * 2, 60)
-        elif response.status_code not in (202, 204):
-            raise RuntimeError(f"Polling Cost Details HTTP {response.status_code} para invoice {invoice_id}")
-        retry = max(1, int(response.headers.get("Retry-After", str(retry))))
-    else:
-        raise TimeoutError(f"Cost Details não concluiu para invoice {invoice_id}")
-
-    manifest = data.get("manifest") or data.get("properties", {}).get("manifest") or {}
-    manifest_url = data.get("manifestUrl") or data.get("properties", {}).get("manifestUrl")
-    files = data.get("files") or data.get("properties", {}).get("files") or manifest.get("blobs") or manifest.get("files") or []
-    if manifest_url:
-        # Manifest/blob URLs are SAS-authorized; never forward the ARM bearer to storage.
-        manifest_resp = await client.get(manifest_url, timeout=90)
-        manifest_resp.raise_for_status()
-        manifest = manifest_resp.json()
-        files = manifest.get("blobs") or manifest.get("files") or []
-    if not files and (data.get("blobLink") or data.get("downloadUrl")):
-        files = [{"blobLink": data.get("blobLink") or data.get("downloadUrl")}]
-    if not files:
-        raise RuntimeError(f"Cost Details sem arquivos para invoice {invoice_id}")
-    frames = []
-    for entry in files:
-        download_url = entry.get("blobLink") or entry.get("downloadUrl") or entry.get("url")
-        if not download_url:
-            continue
-        # The SAS is sufficient for download. Do not send Azure ARM credentials to Blob Storage.
-        download = await client.get(download_url, timeout=180)
-        download.raise_for_status()
-        frames.append(pd.read_csv(io.BytesIO(download.content), dtype=str))
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            delay = int(retry_after) if retry_after and retry_after.isdigit() else min(15 * (attempt + 1), 60)
+            logger.info("Cost Management Query rate limited; retrying after %ss", delay)
+            await asyncio.sleep(delay)
+        assert response is not None
+        if response.status_code >= 400:
+            raise HTTPException(response.status_code, f"Azure Cost Management Query retornou HTTP {response.status_code}.")
+        properties = response.json().get("properties") or {}
+        columns = [str(column.get("name")) for column in properties.get("columns") or []]
+        for values in properties.get("rows") or []:
+            row = dict(zip(columns, values))
+            invoice_id = str(row.get("InvoiceId") or "").strip()
+            period = _month_from_iso(row.get("BillingMonth"))
+            profile_id = str(row.get("BillingProfileId") or "").strip()
+            if not invoice_id or not period or not profile_id:
+                continue  # Accrued/unbilled rows are outside this invoice reconciliation table.
+            results.append({
+                "billingProfileId": profile_id,
+                "invoiceId": invoice_id,
+                "billingMonth": period,
+                "preTaxCostUSD": row.get("PreTaxCostUSD"),
+                "preTaxCost": row.get("PreTaxCost"),
+                "billingCurrency": row.get("Currency"),
+            })
+        next_link = properties.get("nextLink")
+        if not next_link:
+            return results
+        url = urljoin(ARM, str(next_link))
+    raise HTTPException(502, "Cost Management Query excedeu 100 páginas.")
 
 
 @router.get("/status")
@@ -253,7 +256,7 @@ async def status(db: AsyncSession = Depends(get_db)):
     credential_configured = auth_mode == "azure_cli" or bool(
         secret.get("bearer_token_enc") if auth_mode == "bearer" else secret.get("client_secret_enc")
     )
-    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": auth_mode, "credential_configured": credential_configured, "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
+    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": auth_mode, "credential_configured": credential_configured, "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table": "bronze.raw_azure_commitment_br", "legacy_bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
 
 
 @router.put("/credentials")
@@ -298,70 +301,48 @@ async def list_profiles(db: AsyncSession = Depends(get_db)):
 
 @router.post("/extract")
 async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depends(get_db)):
-    """Fetch invoice Cost Details into profile-specific Bronze tables."""
+    """Load compact billed monthly totals; never downloads row-level Cost Details."""
     from app.services import iceberg_service
-
-    headers = await _headers(db)
-    start, after_end = _period_bounds(payload.start_period, payload.end_period)
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        profiles = await _profiles(client, headers)
-        if payload.billing_profile_ids:
-            wanted = set(payload.billing_profile_ids)
-            profiles = [p for p in profiles if p.get("name") in wanted]
-            found = {str(p.get("name")) for p in profiles}
-            # Billing Profile IDs already present in existing Azure source
-            # connections can be valid invoice scopes even when the private
-            # preview list endpoint omits them.
-            profiles.extend({"name": profile_id, "properties": {}} for profile_id in sorted(wanted - found))
-        results: list[dict[str, Any]] = []
-        for profile in profiles:
-            profile_id = str(profile.get("name") or "")
-            safe_profile = re.sub(r"[^A-Za-z0-9_-]", "_", profile_id)
-            if not profile_id:
-                continue
-            invoice_url = (f"{ARM}/providers/Microsoft.Billing/billingAccounts/{BILLING_ACCOUNT}/billingProfiles/{profile_id}/invoices"
-                           f"?api-version={API_VERSION}&includeVoid=true&periodStartDate={start}&periodEndDate={after_end}&$orderBy=properties/invoiceDate%20desc")
-            invoices = await _get_values(client, invoice_url, headers)
-            for invoice in invoices:
-                props = invoice.get("properties") or {}
-                invoice_id = str(invoice.get("name") or "")
-                period = _month_from_iso(props.get("billingPeriodStartDate") or props.get("periodStartDate") or props.get("invoicePeriodStartDate") or props.get("invoiceDate"))
-                if not invoice_id or not period or not payload.start_period <= period <= payload.end_period:
-                    continue
-                try:
-                    # Trino folds unquoted identifiers to lowercase; keep
-                    # Iceberg's physical name aligned for profile codes.
-                    code = f"contratos-mca-{safe_profile}".lower()
-                    if await _invoice_is_current(code, period, invoice_id, props):
-                        results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": 0, "status": "skipped_current"})
-                        continue
-                    # A full backfill can run longer than one access-token
-                    # lifetime. Ask Azure CLI for a fresh token per invoice;
-                    # CLI reuses/renews its own refresh-token session.
-                    invoice_headers = await _headers(db)
-                    df = await _invoice_details(client, invoice_headers, profile_id, invoice_id)
-                    if df.empty:
-                        results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": 0, "status": "empty"})
-                        continue
-                    df["billingProfileId"] = profile_id
-                    df["invoiceId"] = df.get("invoiceId", pd.Series([invoice_id] * len(df))).fillna(invoice_id)
-                    for key, value in {
-                        "invoiceDate": props.get("invoiceDate"),
-                        "billingPeriodStartDate": props.get("billingPeriodStartDate") or props.get("periodStartDate") or props.get("invoicePeriodStartDate"),
-                        "billingPeriodEndDate": props.get("billingPeriodEndDate") or props.get("periodEndDate") or props.get("invoicePeriodEndDate"),
-                        "invoiceStatus": props.get("status"),
-                        "invoiceDocumentType": props.get("documentType"),
-                        "invoiceCurrency": props.get("billingCurrency"),
-                        "invoiceSubTotal": props.get("subTotal"),
-                        "invoiceTax": props.get("taxAmount"),
-                        "invoiceTotal": props.get("totalAmount"),
-                    }.items():
-                        df[key] = value
-                    blob = f"mca-invoice/{profile_id}/{period}/{invoice_id}"
-                    count = iceberg_service.write_bronze(code, df, period, blob)
-                    results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": count, "status": "loaded"})
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception("MCA invoice extraction failed for profile=%s invoice=%s", profile_id, invoice_id)
-                    results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "status": "error", "error": f"{type(exc).__name__}: {str(exc)[:180]}"})
+    rows: list[dict[str, Any]] = []
+    async with httpx.AsyncClient() as client:
+        for window_start, window_end in _query_windows(payload.start_period, payload.end_period):
+            rows.extend(await _query_invoice_totals(client, db, window_start, window_end))
+    if payload.billing_profile_ids:
+        wanted = {str(value).casefold() for value in payload.billing_profile_ids}
+        rows = [row for row in rows if str(row["billingProfileId"]).casefold() in wanted]
+    if rows:
+        frame = pd.DataFrame(rows)
+        frame["billingAccountId"] = BILLING_ACCOUNT
+        frame["consumedUsd"] = frame["preTaxCostUSD"]
+    else:
+        frame = pd.DataFrame(columns=[
+            "billingProfileId", "invoiceId", "billingMonth", "preTaxCostUSD",
+            "preTaxCost", "billingCurrency", "billingAccountId", "consumedUsd",
+        ])
+    written = 0
+    for period in _requested_months(payload.start_period, payload.end_period):
+        group = frame.loc[frame["billingMonth"] == period] if not frame.empty else frame
+        blob = f"cost-query-invoices/{period}"
+        if group.empty:
+            iceberg_service.delete_bronze_slice(COMMITMENT_BRONZE_CODE, blob_path=blob, billing_period=period)
+            continue
+        written += iceberg_service.write_bronze(
+            COMMITMENT_BRONZE_CODE,
+            group.drop(columns=["billingMonth"]).reset_index(drop=True),
+            period,
+            blob,
+        )
     await db.commit()
-    return {"profiles_seen": len(profiles), "invoices_seen": len(results), "loaded": sum(r["status"] == "loaded" for r in results), "errors": sum(r["status"] == "error" for r in results), "results": results}
+    return {
+        "method": "Cost Management Query (invoice-linked monthly aggregate)",
+        "metric": "PreTaxCostUSD",
+        "billing_currency_metric": "PreTaxCost",
+        "billing_account_id": BILLING_ACCOUNT,
+        "source_code": "contratos-mca",
+        "bronze_table": "bronze.raw_azure_commitment_br",
+        "months_requested": len(_requested_months(payload.start_period, payload.end_period)),
+        "profiles_loaded": len({row["billingProfileId"] for row in rows}),
+        "invoice_profile_month_rows": written,
+        "invoice_ids": len({row["invoiceId"] for row in rows}),
+        "included_unbilled_rows": False,
+    }
