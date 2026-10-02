@@ -7,19 +7,13 @@ import {
 import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import { getFinancialContractSettlements, getFinancialContracts, getFinancialContractsOverview } from "../../services/api";
+import { getFinancialContractSettlements, getFinancialContracts } from "../../services/api";
 
 type Contract = { id: number; code: string; name: string; active: boolean; currency?: string; valid_from?: string; valid_until?: string; last_period?: string; run_id?: number; last_settlement_at?: string; status?: string };
 type Settlement = Record<string, unknown> & { period?: string; cloud_scope?: string; budget_id?: string };
 const amount = (value: unknown) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
 const numeric = (row: Settlement, key: string) => Number(row[key] ?? 0);
 const periodLabel = (period: string) => period.length === 6 ? `${period.slice(4)}/${period.slice(0, 4)}` : period;
-const dateLabel = (value?: string) => {
-  if (!value) return "";
-  const normalized = /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
-  const date = new Date(`${normalized.slice(0, 10)}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR");
-};
 
 function Metric({ label, value, detail, accent }: { label: string; value: string; detail?: string; accent: string }) {
   return <Card variant="outlined" sx={{ height: "100%", borderRadius: 3, borderTop: `3px solid ${accent}` }}><CardContent>
@@ -31,7 +25,6 @@ function Metric({ label, value, detail, accent }: { label: string; value: string
 
 export default function FinancialContractsDashboard() {
   const [contracts, setContracts] = useState<Contract[]>([]);
-  const [overview, setOverview] = useState<Record<string, unknown>[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [contractId, setContractId] = useState("");
   const [period, setPeriod] = useState("all");
@@ -42,12 +35,11 @@ export default function FinancialContractsDashboard() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([getFinancialContracts(), getFinancialContractsOverview()])
-      .then(([items, summaries]) => {
+    getFinancialContracts()
+      .then((items) => {
         if (!active) return;
         const normalized = items as Contract[];
         setContracts(normalized);
-        setOverview(summaries);
         // The overview is intentionally aggregated and may not expose the
         // run status. Select the first available contract so the dashboard
         // never opens with an empty contract filter and misleading zeroes.
@@ -84,7 +76,6 @@ export default function FinancialContractsDashboard() {
   const chartMonths = monthly.slice(-12);
   const chartMax = Math.max(1, ...chartMonths.flatMap((item) => [item.budget, item.consumption]));
   const currentContract = contracts.find((item) => String(item.id) === contractId);
-  const currentSummary = overview.find((item) => String(item.contract_id) === contractId);
 
   const exportPdf = async () => {
     if (!exportRootRef.current || exporting) return;
@@ -127,12 +118,6 @@ export default function FinancialContractsDashboard() {
 
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
-    {currentContract && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-      <Typography variant="body2" fontWeight={600}>{currentContract.active ? "Contrato ativo" : "Contrato inativo"}</Typography>
-      <Typography variant="body2" color="text.secondary">· Vigência {dateLabel(currentContract.valid_from) || "—"}{currentContract.valid_until ? ` – ${dateLabel(currentContract.valid_until)}` : " em diante"}</Typography>
-      <Typography variant="body2" color="text.secondary">· Run {String(currentSummary?.run_id ?? "—")} · {currentSummary?.last_settlement_at ? new Date(String(currentSummary.last_settlement_at)).toLocaleString("pt-BR") : "sem liquidação"}</Typography>
-    </Stack>}
-
     <Grid container spacing={2} sx={{ mb: 3 }}>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Orçamento do período" value={amount(sum(selectedRows, "commitment"))} detail={period === "all" ? "Soma das competências exibidas" : periodLabel(period)} accent="#2563eb" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Consumo realizado" value={amount(sum(selectedRows, "consumption"))} detail="Consumo apurado na Silver" accent="#0891b2" /></Grid>
