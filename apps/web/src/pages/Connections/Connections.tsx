@@ -340,10 +340,11 @@ export default function Connections() {
     setEditing(null);
     setFormTestMessage(null);
     const scope = CONNECTOR_TYPES.find((type) => type.value === connectorType)?.scope || "";
-    setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: scope });
+    const latestPeriod = latestMcaInvoiceMonth();
+    setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: scope, mca_start_period: latestPeriod, mca_end_period: latestPeriod });
     if (connectorType === "azure_mca_invoice") {
-      void api.get("/mca-commitment/status").then(({ data }) => {
-        setForm((current) => ({ ...current, mca_billing_account_ids: (data.billing_account_ids || []).join("\n") }));
+      void getMcaCommitmentStatus().then((data) => {
+        setForm((current) => ({ ...current, mca_auth_mode: data.auth_mode || "bearer", mca_billing_account_ids: (data.billing_account_ids || []).join("\n") }));
       }).catch(() => undefined);
     }
     setDialogOpen(true);
@@ -384,7 +385,25 @@ export default function Connections() {
     setEditing(conn);
     setFormTestMessage(null);
     const cfg = conn.config_json as Record<string, string>;
-    if (conn.connector_type === "azure_blob") {
+    if (conn.connector_type === "azure_mca_invoice") {
+      const latestPeriod = latestMcaInvoiceMonth();
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "Azure MCA Brasil",
+        cloud_scope: conn.cloud_scope || "azure",
+        mca_start_period: latestPeriod,
+        mca_end_period: latestPeriod,
+      });
+      void getMcaCommitmentStatus().then((status) => {
+        setForm((current) => ({
+          ...current,
+          mca_auth_mode: status.auth_mode || "bearer",
+          mca_billing_account_ids: (status.billing_account_ids || []).join("\n"),
+        }));
+      }).catch(() => undefined);
+    } else if (conn.connector_type === "azure_blob") {
       setForm({
         ...emptyForm,
         code: conn.code, name: conn.name,
