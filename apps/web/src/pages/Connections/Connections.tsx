@@ -1074,6 +1074,32 @@ export default function Connections() {
               </Select>
             </FormControl>
 
+            {form.connector_type === "azure_mca_invoice" && (
+              <>
+                <Alert severity="info">Contratos MCA baixa Cost Details por invoiceId, separados por billingProfileId e partição mensal YYYYMM. A credencial é write-only e não volta para a tela.</Alert>
+                <FormControl fullWidth>
+                  <InputLabel>Método de autenticação</InputLabel>
+                  <Select value={form.mca_auth_mode} label="Método de autenticação"
+                    onChange={(e) => setForm({ ...form, mca_auth_mode: e.target.value as "bearer" | "service_principal" })}>
+                    <MenuItem value="bearer">Bearer token temporário</MenuItem>
+                    <MenuItem value="service_principal">Service Principal</MenuItem>
+                  </Select>
+                </FormControl>
+                {form.mca_auth_mode === "bearer" ? (
+                  <TextField label="Bearer token" type="password" multiline minRows={2} value={form.mca_bearer_token}
+                    onChange={(e) => setForm({ ...form, mca_bearer_token: e.target.value })}
+                    helperText="Cole o token de acesso ao Azure Resource Manager." />
+                ) : (
+                  <>
+                    <TextField label="Tenant ID" value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+                    <TextField label="Client ID" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+                    <TextField label="Client Secret" type="password" value={form.client_secret} onChange={(e) => setForm({ ...form, client_secret: e.target.value })} />
+                  </>
+                )}
+                <Typography variant="body2" color="text.secondary">Fonte contratos-mca · Bronze raw_contratos_mca-&#123;billingProfileId&#125; · extração inicial desde 2025-04.</Typography>
+              </>
+            )}
+
             {form.connector_type === "azure_openai_ptu" && (
               <>
                 <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>1. Identidade</Typography>
