@@ -19,6 +19,22 @@ from app.services.cost_sources import COST_EXPORTS_KEY
 #: Ordem e descrição das fontes possíveis. `code_pattern` usa `{env}`.
 AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
     {
+        "source_key": "contracts_mca",
+        "display_name": "Contratos MCA (invoices)",
+        "description": "Cost Details por invoiceId em Billing Profiles MCA, particionado por mês.",
+        "position": 90,
+        "connector_type": "azure_mca_invoice",
+        "code_pattern": "contratos-mca-{billingProfileId}",
+        "bronze_pattern": "raw_contratos_mca_{billingProfileId}",
+        "silver_target": "silver.azure_commitment_br",
+        "gold_target": None,
+        "is_cost_source": False,
+        "api_reference": "Microsoft.CostManagement Generate Cost Details Report (invoiceId)",
+        "required_permission": "Billing profile invoice and Cost Management read access",
+        "azure_scope": "billing_profile",
+        "implementation_status": "implemented",
+    },
+    {
         "source_key": COST_EXPORTS_KEY,
         "display_name": "Cost Management (FOCUS)",
         "description": "Export de custo do Cost Management. É o livro financeiro detalhado.",
@@ -86,6 +102,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
 
 #: `source_key` por `connector_type`, para ligar conexões existentes ao catálogo.
 CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
+    "azure_mca_invoice": "contracts_mca",
     "azure_blob": COST_EXPORTS_KEY,
     "azure_resource_graph": "resource_graph",
     "azure_automation_jobs": "automation_jobs",
@@ -201,6 +218,7 @@ def sanitized_bronze(connection: Any) -> str:
 # (raw_azure_4p, raw_azure_4p_monitor_vm, ...). Uma conexão só passa a escrever
 # várias tabelas por causa deste mapa — antes cada fonte era um `code` próprio.
 SOURCE_CODE_SUFFIX: dict[str, str] = {
+    "contracts_mca": "",
     "cost_exports": "",
     "resource_graph": "resource-graph",
     "automation_jobs": "automation",
