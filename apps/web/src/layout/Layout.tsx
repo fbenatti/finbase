@@ -70,7 +70,7 @@ const menuGroups = [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
-      { path: "/financial-planning", label: "Planejamento Financeiro", icon: <AccountBalanceIcon /> },
+      { path: "/financial-planning", label: "Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
   },

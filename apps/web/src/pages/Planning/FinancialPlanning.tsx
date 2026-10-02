@@ -8,6 +8,7 @@ import FinancialContractsDashboard from "../FinancialContracts/FinancialContract
 import ContractStoryDashboard from "./ContractStoryDashboard";
 
 const TABS = [
+  { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
   { code: "orcamento", label: "Cadastro Orçamentário", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },
   { code: "acuracia-orcamento", label: "Acurácia de Orçamento", title: "Acurácia de Orçamento", help: "Orçamento vigente contra o realizado por mês." },
   { code: "forecast-manual", label: "Forecast Manual", title: "Forecast Manual", help: "Projeções mensais inseridas manualmente." },
@@ -16,7 +17,6 @@ const TABS = [
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
-  { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
 ] as const;
 
 export default function FinancialPlanning() {
@@ -26,7 +26,7 @@ export default function FinancialPlanning() {
     || searchParams.get("dashboard") === "contrato-com-compromisso"
     || (["contract", "contrato"].includes(searchParams.get("tab") || "") && searchParams.get("contract") === "compromisso");
   const legacyStoryTab = ["contract", "contrato"].includes(searchParams.get("tab") || "") && !legacyCommitmentTab;
-  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : searchParams.get("tab") || "orcamento";
+  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : searchParams.get("tab") || "dashboard";
   const active = TABS.find(tab => tab.code === requested) || TABS[0];
   const executiveSubtab = legacyCommitmentTab ? "compromisso" : legacyStoryTab ? "historia-contrato" : searchParams.get("executive") || "orcamento";
 
@@ -51,7 +51,7 @@ export default function FinancialPlanning() {
   return (
     <Box sx={{ mx: -3, mt: -3 }}>
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: 1, borderColor: "divider" }}>
-        <Typography variant="h4">Planejamento Financeiro</Typography>
+        <Typography variant="h4">Financeiro</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
           Cadastros, movimentações e histórico executivo do planejamento financeiro.
         </Typography>
