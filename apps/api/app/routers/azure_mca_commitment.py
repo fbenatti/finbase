@@ -27,6 +27,7 @@ API_VERSION = "2020-11-01-privatepreview"
 COST_QUERY_API_VERSION = "2021-10-01"
 COMMITMENT_BRONZE_CODE = "azure_commitment_br"
 _INTEGRATION_CODE = "azure_mca_commitment"
+_ZERO_COST_EPSILON = 1e-9
 
 
 class CredentialUpdate(BaseModel):
@@ -239,6 +240,13 @@ async def _query_invoice_totals(
             profile_id = str(row.get("BillingProfileId") or "").strip()
             if not invoice_id or not period or not profile_id:
                 continue  # Accrued/unbilled rows are outside this invoice reconciliation table.
+            try:
+                usd_cost = float(row.get("PreTaxCostUSD") or 0)
+                billing_cost = float(row.get("PreTaxCost") or 0)
+            except (TypeError, ValueError):
+                usd_cost = billing_cost = float("nan")
+            if abs(usd_cost) <= _ZERO_COST_EPSILON and abs(billing_cost) <= _ZERO_COST_EPSILON:
+                continue  # Suppress numeric rounding noise that would make a no-consumption profile appear active.
             results.append({
                 "billingAccountId": billing_account_id,
                 "billingProfileId": profile_id,
