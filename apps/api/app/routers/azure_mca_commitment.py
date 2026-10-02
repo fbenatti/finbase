@@ -128,8 +128,10 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
     location = response.headers.get("Location") or data.get("manifestUrl") or data.get("location")
     retry = max(1, int(response.headers.get("Retry-After", "5")))
     for _ in range(120):
+        status = str(data.get("status") or data.get("properties", {}).get("status") or "").lower()
+        if data.get("manifest") or status in {"completed", "succeeded", "success"}:
+            break
         if response.status_code == 200 and not location:
-            data = response.json()
             break
         if not location:
             raise RuntimeError(f"Resposta assíncrona sem Location para invoice {invoice_id}")
@@ -137,10 +139,8 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
         response = await client.get(location, headers=headers, timeout=90)
         if response.status_code == 200:
             data = response.json()
-            if data.get("manifestUrl") or data.get("blobLink") or data.get("downloadUrl"):
-                break
             status = str(data.get("status") or data.get("properties", {}).get("status") or "").lower()
-            if status in {"completed", "succeeded", "success"}:
+            if data.get("manifest") or data.get("manifestUrl") or data.get("blobLink") or data.get("downloadUrl") or status in {"completed", "succeeded", "success"}:
                 break
         elif response.status_code not in (202, 204):
             raise RuntimeError(f"Polling Cost Details HTTP {response.status_code} para invoice {invoice_id}")
@@ -148,8 +148,9 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
     else:
         raise TimeoutError(f"Cost Details não concluiu para invoice {invoice_id}")
 
+    manifest = data.get("manifest") or data.get("properties", {}).get("manifest") or {}
     manifest_url = data.get("manifestUrl") or data.get("properties", {}).get("manifestUrl")
-    files = data.get("files") or data.get("properties", {}).get("files") or []
+    files = data.get("files") or data.get("properties", {}).get("files") or manifest.get("blobs") or manifest.get("files") or []
     if manifest_url:
         manifest_resp = await client.get(manifest_url, timeout=90)
         manifest_resp.raise_for_status()
