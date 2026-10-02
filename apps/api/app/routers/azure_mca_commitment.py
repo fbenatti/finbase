@@ -372,9 +372,9 @@ async def list_profiles(billing_account_id: str | None = None, db: AsyncSession 
     rows = []
     async with httpx.AsyncClient() as client:
         for account_id in accounts:
-            rows.extend(await _profiles(client, headers, account_id))
+            rows.extend((account_id, profile) for profile in await _profiles(client, headers, account_id))
     await db.commit()
-    return {"profiles": [{"billingProfileId": row.get("name"), "displayName": row.get("properties", {}).get("displayName"), "billingAccountId": row.get("properties", {}).get("billingAccountId")} for row in rows]}
+    return {"profiles": [{"billingProfileId": row.get("name"), "displayName": row.get("properties", {}).get("displayName"), "billingAccountId": account_id} for account_id, row in rows]}
 
 
 @router.post("/extract")
