@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from decimal import Decimal
 
 import pandas as pd
 
 from app.services import iceberg_service as iceberg
 from app.services.marketplace_allocation import allocate_marketplace_pool
+
+REPOSITORY_ROOT = __import__("pathlib").Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPOSITORY_ROOT))
+from scripts.trino_query import run as trino_run  # noqa: E402
 
 
 PERIOD = "202608"
@@ -55,30 +60,47 @@ def _append_rule(value: object) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _cloud_pool_brl() -> Decimal:
+    rows = trino_run(
+        """SELECT sum(realizado) pool_brl
+           FROM iceberg.silver.dest_modelo_focus
+          WHERE _billing_period = '202608'
+            AND source_connection_id = 2
+            AND organograma = 'MongoDB'
+            AND marketplaceproductname = '(Private Offer) Telefonica Brasil SA - Sep 2024 - Q-201755'
+            AND skuid = 'DZH318Z0K00S00G3'
+            AND source_resource_group_name = 'rg-mongo-atlas-brsouth-sharedservices'""",
+        timeout_s=120,
+    )
+    value = rows[0].get("pool_brl") if rows else None
+    if value is None:
+        raise RuntimeError("Pool Cloud não encontrado via Trino para 202608")
+    return Decimal(str(value))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true", help="publish the MongoDB Silver slice")
     args = parser.parse_args()
 
     mongo = _read(MONGO_CONNECTION_ID)
-    cloud = _read(CLOUD_CONNECTION_ID)
-    cloud = cloud[
-        (cloud.get("organograma") == "MongoDB")
-        & (cloud.get("marketplaceproductname") == PRODUCT)
-        & (cloud.get("skuid") == SKU)
-        & (cloud.get("source_resource_group_name") == RESOURCE_GROUP)
-    ].copy()
-    if mongo.empty or cloud.empty:
+    if mongo.empty:
         raise RuntimeError("Silver MongoDB ou pool Cloud vazio para 202608")
 
-    usd = pd.to_numeric(mongo["billedcost"], errors="coerce").fillna(0)
-    pool = Decimal(str(pd.to_numeric(cloud["realizado"], errors="coerce").sum()))
+    amount_column = next(
+        (column for column in mongo.columns if str(column).lower() in {"billedcost", "amount"}),
+        None,
+    )
+    if amount_column is None:
+        raise RuntimeError(f"Coluna USD do Marketplace não encontrada: {list(mongo.columns)}")
+    usd = pd.to_numeric(mongo[amount_column], errors="coerce").fillna(0)
+    pool = _cloud_pool_brl()
     allocations = allocate_marketplace_pool(usd.tolist(), pool)
     mongo["realizado_cloud"] = [float(value) for value in allocations]
     mongo["realizado"] = mongo["realizado_cloud"]
     mongo["business_rule"] = mongo.get("business_rule", pd.Series([None] * len(mongo))).map(_append_rule)
 
-    print(f"period={PERIOD} marketplace_rows={len(mongo)} cloud_rows={len(cloud)}")
+    print(f"period={PERIOD} marketplace_rows={len(mongo)} cloud_source=trino")
     print(f"marketplace_usd={usd.sum():.2f}")
     print(f"cloud_pool_brl={pool:.2f}")
     print(f"allocated_brl={mongo['realizado'].sum():.2f}")
