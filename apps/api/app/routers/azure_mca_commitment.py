@@ -24,6 +24,7 @@ router = APIRouter(prefix="/mca-commitment", tags=["azure-mca-commitment"])
 
 ARM = "https://management.azure.com"
 API_VERSION = "2020-11-01-privatepreview"
+PROFILE_DETAIL_API_VERSION = "2022-10-01-privatepreview"
 COST_QUERY_API_VERSION = "2021-10-01"
 COMMITMENT_BRONZE_CODE = "azure_commitment_br"
 _INTEGRATION_CODE = "azure_mca_commitment"
@@ -71,6 +72,12 @@ def _profile_name_map(profiles: list[dict[str, Any]]) -> dict[str, str]:
         if profile_id and display_name:
             names[profile_id.casefold()] = display_name
     return names
+
+
+def _profile_display_name(profile: dict[str, Any]) -> str | None:
+    properties = profile.get("properties") or {}
+    name = str(properties.get("displayName") or "").strip()
+    return name or None
 
 
 def _month_from_iso(value: Any) -> str | None:
@@ -159,6 +166,25 @@ async def _get_values(client: httpx.AsyncClient, url: str, headers: dict[str, st
 async def _profiles(client: httpx.AsyncClient, headers: dict[str, str], billing_account_id: str) -> list[dict[str, Any]]:
     url = f"{ARM}/providers/Microsoft.Billing/billingAccounts/{billing_account_id}/billingProfiles?api-version={API_VERSION}&$top=100&$orderBy=properties/displayName%20asc"
     return await _get_values(client, url, headers)
+
+
+async def _profile_detail_name(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    billing_account_id: str,
+    billing_profile_id: str,
+) -> str | None:
+    url = (
+        f"{ARM}/providers/Microsoft.Billing/billingAccounts/{billing_account_id}"
+        f"/billingProfiles/{billing_profile_id}?api-version={PROFILE_DETAIL_API_VERSION}"
+        "&includeDeletedBillingProfiles=true&defaultShipToAddress=false"
+    )
+    response = await client.get(url, headers=headers, timeout=90)
+    if response.status_code in (404, 410):
+        return None
+    if response.status_code >= 400:
+        raise HTTPException(response.status_code, f"Azure ARM retornou HTTP {response.status_code} ao consultar billing profile.")
+    return _profile_display_name(response.json())
 
 
 def _query_windows(start_period: str, end_period: str) -> list[tuple[str, str]]:
@@ -373,6 +399,13 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
         wanted = {str(value).casefold() for value in payload.billing_profile_ids}
         rows = [row for row in rows if str(row["billingProfileId"]).casefold() in wanted]
     if rows:
+        profile_pairs = sorted({(row["billingAccountId"], row["billingProfileId"]) for row in rows})
+        for account_id, profile_id in profile_pairs:
+            key = (account_id, profile_id.casefold())
+            if key not in profile_names:
+                display_name = await _profile_detail_name(client, await _headers(db), account_id, profile_id)
+                if display_name:
+                    profile_names[key] = display_name
         missing_names = sorted({
             (row["billingAccountId"], row["billingProfileId"])
             for row in rows
