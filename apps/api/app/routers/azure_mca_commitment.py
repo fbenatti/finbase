@@ -233,6 +233,11 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
         if payload.billing_profile_ids:
             wanted = set(payload.billing_profile_ids)
             profiles = [p for p in profiles if p.get("name") in wanted]
+            found = {str(p.get("name")) for p in profiles}
+            # Billing Profile IDs already present in existing Azure source
+            # connections can be valid invoice scopes even when the private
+            # preview list endpoint omits them.
+            profiles.extend({"name": profile_id, "properties": {}} for profile_id in sorted(wanted - found))
         results: list[dict[str, Any]] = []
         for profile in profiles:
             profile_id = str(profile.get("name") or "")
