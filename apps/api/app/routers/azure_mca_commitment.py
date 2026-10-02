@@ -456,6 +456,7 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
         ])
     written = 0
     already_loaded = 0
+    migrated_legacy_slices: set[tuple[str, str]] = set()
     # The original single-account loader used cost-query-invoices/YYYYMM.
     # Preserve and migrate its records alongside the current account slices.
     existing = iceberg_service.read_bronze(COMMITMENT_BRONZE_CODE)
@@ -465,6 +466,7 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             group = frame.loc[(frame["billingMonth"] == period) & (frame["billingAccountId"] == account_id)] if not frame.empty else frame
             blob = f"cost-query-invoices/{account_tag}/{period}"
             prior = pd.DataFrame()
+            migrate_legacy = False
             if not existing.empty and "billingAccountId" in existing.columns:
                 prior = existing.loc[
                     (existing["billingAccountId"].astype(str) == account_id)
@@ -472,6 +474,7 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                 ].copy()
                 if "_blob_path" in prior.columns:
                     legacy_blob = f"cost-query-invoices/{period}"
+                    migrate_legacy = bool((prior["_blob_path"] == legacy_blob).any())
                     prior = prior.loc[prior["_blob_path"].isin([blob, legacy_blob])]
             # The query frame uses billingMonth as an explicit part of the key;
             # Bronze stores the same month in _billing_period.
@@ -487,9 +490,11 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             merged, added = _merge_missing_invoice_rows(prior, current)
             written += added
             already_loaded += max(0, len(group) - added)
-            if added:
+            if added or migrate_legacy:
                 merged = merged.drop(columns=["billingMonth"], errors="ignore").reset_index(drop=True)
                 iceberg_service.write_bronze(COMMITMENT_BRONZE_CODE, merged, period, blob)
+                if migrate_legacy:
+                    migrated_legacy_slices.add((account_id, period))
     # Delete legacy paths only after every account/month was safely carried to
     # the account-specific path. Never remove another account's records.
     if not existing.empty and {"_blob_path", "billingAccountId"}.issubset(existing.columns):
@@ -501,6 +506,10 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             if legacy_accounts.intersection(selected_accounts) and not legacy_accounts.issubset(selected_accounts):
                 raise HTTPException(409, f"O slice legado {period} contém Billing Accounts não selecionados; Bronze não foi alterada.")
             if not legacy.empty and legacy_accounts.issubset(selected_accounts):
+                # Do not remove legacy data unless its whole account slice
+                # was copied to its account-specific destination above.
+                if not all((account_id, period) in migrated_legacy_slices for account_id in legacy_accounts):
+                    continue
                 iceberg_service.delete_bronze_slice(COMMITMENT_BRONZE_CODE, blob_path=legacy_blob, billing_period=period)
     await db.commit()
     return {
