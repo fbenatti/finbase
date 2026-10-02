@@ -37,7 +37,7 @@ class CredentialUpdate(BaseModel):
 
 class ExtractionRequest(BaseModel):
     start_period: str = Field(default="202504", pattern=r"^\d{6}$")
-    end_period: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m"), pattern=r"^\d{6}$")
+    end_period: str = Field(default_factory=lambda: (pd.Timestamp.now(tz="UTC").to_period("M") - 1).strftime("%Y%m"), pattern=r"^\d{6}$")
     billing_profile_ids: list[str] | None = None
 
 
@@ -243,7 +243,7 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             for invoice in invoices:
                 props = invoice.get("properties") or {}
                 invoice_id = str(invoice.get("name") or "")
-                period = _month_from_iso(props.get("billingPeriodStartDate") or props.get("invoiceDate"))
+                period = _month_from_iso(props.get("billingPeriodStartDate") or props.get("periodStartDate") or props.get("invoiceDate"))
                 if not invoice_id or not period or not payload.start_period <= period <= payload.end_period:
                     continue
                 try:
@@ -255,8 +255,8 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                     df["invoiceId"] = df.get("invoiceId", pd.Series([invoice_id] * len(df))).fillna(invoice_id)
                     for key, value in {
                         "invoiceDate": props.get("invoiceDate"),
-                        "billingPeriodStartDate": props.get("billingPeriodStartDate"),
-                        "billingPeriodEndDate": props.get("billingPeriodEndDate"),
+                        "billingPeriodStartDate": props.get("billingPeriodStartDate") or props.get("periodStartDate"),
+                        "billingPeriodEndDate": props.get("billingPeriodEndDate") or props.get("periodEndDate"),
                         "invoiceStatus": props.get("status"),
                         "invoiceDocumentType": props.get("documentType"),
                         "invoiceCurrency": props.get("billingCurrency"),
