@@ -1674,6 +1674,18 @@ def _process_github_token_sync(
             # month atomically: a separate delete + append can leave only IDE
             # metrics when the AI-credit report is delayed or a write fails.
             iceberg.replace_bronze_slice(conn.code, df, billing_period, blob_path)
+            audit = iceberg.audit_bronze_blob(
+                conn.code,
+                blob_path=blob_path,
+                billing_period=billing_period,
+                expected_rows=len(df),
+                batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
+            )
+            if audit.get("status") != "PASSED":
+                raise RuntimeError(
+                    "Bronze pós-escrita inconsistente: "
+                    f"{audit.get('error') or 'auditoria sem detalhes'}"
+                )
         except Exception as exc:
             logger.error("Bronze write failed for GitHub Token (%s): %s", blob_path, exc)
             session.delete(ingested)
