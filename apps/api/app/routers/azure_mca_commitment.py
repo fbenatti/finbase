@@ -253,7 +253,7 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             for invoice in invoices:
                 props = invoice.get("properties") or {}
                 invoice_id = str(invoice.get("name") or "")
-                period = _month_from_iso(props.get("billingPeriodStartDate") or props.get("periodStartDate") or props.get("invoiceDate"))
+                period = _month_from_iso(props.get("billingPeriodStartDate") or props.get("periodStartDate") or props.get("invoicePeriodStartDate") or props.get("invoiceDate"))
                 if not invoice_id or not period or not payload.start_period <= period <= payload.end_period:
                     continue
                 try:
@@ -265,8 +265,8 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                     df["invoiceId"] = df.get("invoiceId", pd.Series([invoice_id] * len(df))).fillna(invoice_id)
                     for key, value in {
                         "invoiceDate": props.get("invoiceDate"),
-                        "billingPeriodStartDate": props.get("billingPeriodStartDate") or props.get("periodStartDate"),
-                        "billingPeriodEndDate": props.get("billingPeriodEndDate") or props.get("periodEndDate"),
+                        "billingPeriodStartDate": props.get("billingPeriodStartDate") or props.get("periodStartDate") or props.get("invoicePeriodStartDate"),
+                        "billingPeriodEndDate": props.get("billingPeriodEndDate") or props.get("periodEndDate") or props.get("invoicePeriodEndDate"),
                         "invoiceStatus": props.get("status"),
                         "invoiceDocumentType": props.get("documentType"),
                         "invoiceCurrency": props.get("billingCurrency"),
