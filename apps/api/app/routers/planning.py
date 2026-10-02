@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import re
@@ -101,6 +102,74 @@ async def get_contract_story_ledger(
 ):
     ledger = await db.get(ContractStoryLedger, 1)
     return ledger.payload if ledger else None
+
+
+def _contract_story_bronze_summary(frame) -> dict[str, Any]:
+    """Aggregate the small invoice-linked Bronze table for the contract story."""
+    required = {"_billing_period", "billingAccountId", "billingProfileId", "billingProfileName", "preTaxCostUSD"}
+    if frame.empty:
+        return {"source": "bronze.raw_azure_commitment_br", "currency": "USD", "totalConsumption": 0, "months": [], "profiles": []}
+    missing = required.difference(frame.columns)
+    if missing:
+        raise HTTPException(503, f"A Bronze de commitment ainda não possui as colunas necessárias: {', '.join(sorted(missing))}.")
+
+    monthly: dict[str, dict[str, Any]] = {}
+    profiles: dict[tuple[str, str], dict[str, Any]] = {}
+    total = 0.0
+    for row in frame.to_dict(orient="records"):
+        period = str(row.get("_billing_period") or "")[:6]
+        if len(period) != 6 or not period.isdigit():
+            continue
+        try:
+            amount = float(row.get("preTaxCostUSD") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount == 0:
+            continue
+        month = f"{period[:4]}-{period[4:]}"
+        monthly_row = monthly.setdefault(month, {"month": month, "consumptionUsd": 0.0, "invoiceRows": 0})
+        monthly_row["consumptionUsd"] += amount
+        monthly_row["invoiceRows"] += 1
+        total += amount
+
+        account_id = str(row.get("billingAccountId") or "")
+        profile_id = str(row.get("billingProfileId") or "")
+        profile_name = str(row.get("billingProfileName") or "").strip()
+        if not profile_id or not profile_name:
+            continue
+        key = (account_id, profile_id)
+        profile = profiles.setdefault(key, {
+            "billingAccountId": account_id,
+            "billingProfileId": profile_id,
+            "billingProfileName": profile_name,
+            "consumptionUsd": 0.0,
+            "invoiceRows": 0,
+        })
+        profile["consumptionUsd"] += amount
+        profile["invoiceRows"] += 1
+
+    return {
+        "source": "bronze.raw_azure_commitment_br",
+        "currency": "USD",
+        "totalConsumption": total,
+        "months": [monthly[key] for key in sorted(monthly)],
+        "profiles": sorted(profiles.values(), key=lambda item: item["consumptionUsd"], reverse=True),
+    }
+
+
+@router.get("/contract-story/bronze-consumption")
+async def get_contract_story_bronze_consumption(
+    _user: User = Depends(require("planning", "read")),
+):
+    from app.services import iceberg_service
+
+    try:
+        frame = await asyncio.to_thread(iceberg_service.read_bronze, "azure_commitment_br")
+        return _contract_story_bronze_summary(frame)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - Bronze availability is surfaced without leaking backend details.
+        raise HTTPException(503, "Não foi possível consultar o consumo Bronze do contrato Azure.") from exc
 
 
 @router.put("/contract-story")
