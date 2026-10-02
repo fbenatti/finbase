@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import json
-import sys
+import asyncio
 from decimal import Decimal
-from pathlib import Path
 
 import pandas as pd
 
 from app.services import iceberg_service as iceberg
 from app.services.marketplace_allocation import allocate_marketplace_pool
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
-from scripts.trino_query import run as trino_run  # noqa: E402
+from app.services.trino_service import execute as trino_execute
 
 MONGO_CONNECTION_ID = 5
 CLOUD_CONNECTION_ID = 2
@@ -50,7 +45,7 @@ def _append_rule(value: object) -> str:
 
 
 def _cloud_pool_brl(period: str) -> Decimal:
-    rows = trino_run(
+    rows = asyncio.run(trino_execute(
         f"""SELECT sum(realizado) pool_brl
               FROM iceberg.silver.dest_modelo_focus
              WHERE _billing_period = '{period}'
@@ -60,7 +55,7 @@ def _cloud_pool_brl(period: str) -> Decimal:
                AND skuid = '{SKU}'
                AND source_resource_group_name = '{RESOURCE_GROUP}'""",
         timeout_s=120,
-    )
+    ))
     value = rows[0].get("pool_brl") if rows else None
     if value is None:
         raise RuntimeError(f"Pool Cloud não encontrado para {period}")
