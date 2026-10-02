@@ -131,6 +131,10 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
             from app.models.source_connection import SourceConnection
             connection = session.get(SourceConnection, connection_id)
             if connection is None:
+                logger.warning(
+                    "Scheduled ETL [%s] skipped missing connection %s",
+                    schedule_name, connection_id,
+                )
                 continue
             active = session.execute(
                 select(EtlTask.id).where(

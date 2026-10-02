@@ -3581,12 +3581,14 @@ async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     connection_ids = list(sched.connection_ids or []) or ([sched.connection_id] if sched.connection_id else [])
-    if sched.schedule_type in {"backup", "reprocess"}:
-        import asyncio
-        task_ids = await asyncio.to_thread(scheduler_service._run_etl_job, connection_ids, sched.id, sched.name)
-        task_ids = task_ids or []
-    else:
-        task_ids = await scheduler_service.run_schedule_now(connection_ids)
+    # Manual execution must use the same scheduler path as cron execution.
+    # The legacy collection helper inserted tasks directly and lost the
+    # schedule metadata required by the incremental follow-up pipeline.
+    import asyncio
+    task_ids = await asyncio.to_thread(
+        scheduler_service._run_etl_job, connection_ids, sched.id, sched.name,
+    )
+    task_ids = task_ids or []
     return {
         "task_ids": task_ids,
         "connection_ids": connection_ids,
