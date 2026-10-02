@@ -15,6 +15,25 @@ export async function getContractStoryBronzeConsumption() {
   return data;
 }
 
+export async function getMcaCommitmentStatus() {
+  const { data } = await api.get("/mca-commitment/status");
+  return data;
+}
+
+export async function getMcaCommitmentProfiles() {
+  const { data } = await api.get("/mca-commitment/profiles", { timeout: 120000 });
+  return data;
+}
+
+export async function extractMcaCommitmentInvoices(payload: {
+  start_period: string;
+  end_period: string;
+  billing_account_ids?: string[];
+}) {
+  const { data } = await api.post("/mca-commitment/extract", payload, { timeout: 600000 });
+  return data;
+}
+
 export async function saveContractStoryLedger(ledger: {
   contracts: Array<Record<string, unknown>>;
   months: Record<string, Array<Record<string, unknown>>>;
