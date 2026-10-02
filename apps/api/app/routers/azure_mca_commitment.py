@@ -171,9 +171,21 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
 @router.get("/status")
 async def status(db: AsyncSession = Depends(get_db)):
     integration = await _integration(db)
+    source = (await db.execute(select(SourceConnection).where(SourceConnection.code == "contratos-mca"))).scalar_one_or_none()
+    if source is None:
+        source = SourceConnection(
+            code="contratos-mca",
+            name="Contratos MCA Brasil",
+            connector_type="azure_mca_invoice",
+            cloud_name="Azure MCA Brasil",
+            cloud_scope="azure",
+            config_json={"source_key": "contracts_mca", "billing_account_id": BILLING_ACCOUNT, "collection_enabled": True},
+            blob_prefixes=[],
+        )
+        db.add(source)
     cfg, secret = dict(integration.config_json or {}), dict(integration.secret_json or {})
     await db.commit()
-    return {"source_code": "contratos-mca", "auth_mode": cfg.get("auth_mode", "bearer"), "credential_configured": bool(secret.get("bearer_token") if cfg.get("auth_mode", "bearer") == "bearer" else secret.get("client_secret")), "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
+    return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": cfg.get("auth_mode", "bearer"), "credential_configured": bool(secret.get("bearer_token") if cfg.get("auth_mode", "bearer") == "bearer" else secret.get("client_secret")), "billing_account_id": cfg.get("billing_account_id", BILLING_ACCOUNT), "bronze_table_pattern": "bronze.raw_contratos_mca_{billingProfileId}"}
 
 
 @router.put("/credentials")
