@@ -4,16 +4,23 @@ import {
   DialogTitle, Divider, FormControl, IconButton, InputLabel, Menu, MenuItem, Paper,
   Select, Stack, Tab, Tabs, TextField, Typography,
 } from "@mui/material";
-import { Add, ArticleOutlined, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
+import { Add, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
 import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import { getContractStoryLedger, saveContractStoryLedger } from "../../services/api";
+import { getContractStoryBronzeConsumption, getContractStoryLedger, saveContractStoryLedger } from "../../services/api";
 
 type Contract = { id: string; name: string; provider: string; agreementType: string; country: string; start: string; end: string; target: number; currency: string; summary: string };
-type Monthly = { id: string; month: string; commitment: number; consumption: number; eligible?: number; note: string };
+type Monthly = { id: string; month: string; commitment: number; consumption: number; note: string; commitmentPresent?: boolean; consumptionPresent?: boolean };
 type Milestone = { id: string; date: string; type: string; title: string; description: string; value: number };
 type Ledger = { contracts: Contract[]; months: Record<string, Monthly[]>; milestones: Record<string, Milestone[]> };
+type BronzeConsumption = {
+  source: string;
+  currency: string;
+  totalConsumption: number;
+  months: Array<{ month: string; consumptionUsd: number; invoiceRows: number }>;
+  profiles: Array<{ billingAccountId: string; billingProfileId: string; billingProfileName: string; consumptionUsd: number; invoiceRows: number }>;
+};
 
 const STORAGE_KEY = "openfinops.contract-story.v1";
 const seedId = "azure-brasil-mca";
@@ -46,22 +53,42 @@ function Metric({ title, value, hint, color }: { title: string; value: string; h
   return <Card variant="outlined" sx={{ flex: "1 1 205px", borderTop: `3px solid ${color}` }}><CardContent sx={{ "&:last-child": { pb: 2 } }}><Typography variant="overline" color="text.secondary">{title}</Typography><Typography variant="h5" fontWeight={800}>{value}</Typography><Typography variant="body2" color="text.secondary">{hint}</Typography></CardContent></Card>;
 }
 
+function ProfileConsumptionChart({ profiles }: { profiles: BronzeConsumption["profiles"] }) {
+  const maximum = Math.max(1, ...profiles.map(profile => Math.abs(profile.consumptionUsd)));
+  return <Box>
+    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>Consumo acumulado por billing profile</Typography>
+    {!profiles.length ? <Typography variant="body2" color="text.secondary">Ainda não há consumo por profile na Bronze.</Typography> :
+      <Stack spacing={1} sx={{ maxHeight: 360, overflowY: "auto", pr: 1 }}>
+        {profiles.map(profile => <Box key={`${profile.billingAccountId}:${profile.billingProfileId}`}>
+          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={1}>
+            <Typography variant="caption" title={`${profile.billingProfileName} · ${profile.billingProfileId}`} noWrap sx={{ minWidth: 0, flex: 1 }}>{profile.billingProfileName}</Typography>
+            <Typography variant="caption" fontWeight={700} sx={{ flexShrink: 0 }}>{money(profile.consumptionUsd, "USD")}</Typography>
+          </Stack>
+          <Box sx={{ height: 7, borderRadius: 5, bgcolor: "#e2e8f0", overflow: "hidden", mt: .35 }}>
+            <Box sx={{ width: `${Math.max(1, Math.abs(profile.consumptionUsd) / maximum * 100)}%`, height: "100%", bgcolor: "#0f766e", borderRadius: 5 }} />
+          </Box>
+          <Typography variant="caption" color="text.disabled">{profile.billingProfileId}</Typography>
+        </Box>)}
+      </Stack>}
+  </Box>;
+}
+
 function ConsumptionChart({ contract, entries }: { contract: Contract; entries: Monthly[] }) {
   const periods = monthRange(contract.start, contract.end);
   const byMonth = new Map(entries.map(row => [row.month, row]));
   const monthlyTarget = contract.target / Math.max(periods.length, 1);
   const points = periods.map((month, index) => {
     const row = byMonth.get(month);
-    const actual = entries.filter(item => item.month <= month).reduce((sum, item) => sum + (item.eligible ?? item.consumption), 0);
+    const actual = entries.filter(item => item.month <= month).reduce((sum, item) => sum + item.consumption, 0);
     return { month, x: periods.length <= 1 ? 0 : index / (periods.length - 1) * 100, target: (index + 1) * monthlyTarget, actual, row };
   });
   const max = Math.max(contract.target, ...points.map(point => Math.max(point.target, point.actual)), 1);
   const chartHeight = 200;
   const polyline = (key: "target" | "actual") => points.map(point => `${point.x * 7.2},${chartHeight - point[key] / max * chartHeight}`).join(" ");
-  const latestActual = [...points].reverse().find(point => point.row)?.month;
+  const latestActual = [...points].reverse().find(point => point.row && point.row.consumptionPresent !== false)?.month;
   return <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, overflow: "hidden" }}>
-    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} sx={{ mb: 2 }}><Box><Typography variant="h6" fontWeight={800}>Evolução do compromisso</Typography><Typography variant="body2" color="text.secondary">Consumo acumulado elegível comparado à trajetória necessária para atingir 100%.</Typography></Box><Chip size="small" icon={<AutoGraph />} label={latestActual ? `Atualizado até ${monthLabel(latestActual)}` : "Aguardando consumo mensal"} variant="outlined" /></Stack>
-    {!entries.length ? <Box sx={{ py: 2 }}><Box sx={{ height: 145, borderBottom: 1, borderColor: "divider", borderLeft: 1, position: "relative", background: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(148,163,184,.15) 36px)" }}><Typography sx={{ position: "absolute", left: 12, top: 14 }} color="text.secondary" variant="body2">Registre o primeiro mês para iniciar a evolução do consumo.</Typography><Box sx={{ position: "absolute", bottom: 12, left: 12, right: 12, borderTop: "2px dashed #94a3b8" }} /></Box><Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">Meta · {money(contract.target, contract.currency)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack></Box> : <Box sx={{ overflowX: "auto" }}>
+    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} sx={{ mb: 2 }}><Box><Typography variant="h6" fontWeight={800}>Evolução do compromisso</Typography><Typography variant="body2" color="text.secondary">Consumo Brasil acumulado comparado à trajetória necessária para atingir 100%.</Typography></Box><Chip size="small" icon={<AutoGraph />} label={latestActual ? `Atualizado até ${monthLabel(latestActual)}` : "Aguardando consumo mensal"} variant="outlined" /></Stack>
+    {!entries.length ? <Box sx={{ py: 2 }}><Box sx={{ height: 145, borderBottom: 1, borderColor: "divider", borderLeft: 1, position: "relative", background: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(148,163,184,.15) 36px)" }}><Typography sx={{ position: "absolute", left: 12, top: 14 }} color="text.secondary" variant="body2">Ainda não há consumo com valor registrado no período.</Typography><Box sx={{ position: "absolute", bottom: 12, left: 12, right: 12, borderTop: "2px dashed #94a3b8" }} /></Box><Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">Meta · {money(contract.target, contract.currency)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack></Box> : <Box sx={{ overflowX: "auto" }}>
       <Box sx={{ minWidth: 560, position: "relative", height: 244, pl: 6, pr: 1, pt: 1 }}>
         {[0, 25, 50, 75, 100].map(pct => <Box key={pct} sx={{ position: "absolute", left: 48, right: 8, top: `${8 + (100 - pct) * 1.78}px`, borderTop: "1px solid", borderColor: "divider" }}><Typography variant="caption" color="text.secondary" sx={{ position: "absolute", right: "100%", mr: 1, top: -10 }}>{pct}%</Typography></Box>)}
         <svg viewBox="0 0 720 200" preserveAspectRatio="none" width="100%" height="200" aria-label="Consumo acumulado contra objetivo do contrato" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
