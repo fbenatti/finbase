@@ -335,7 +335,11 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                     if await _invoice_is_current(code, period, invoice_id, props):
                         results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": 0, "status": "skipped_current"})
                         continue
-                    df = await _invoice_details(client, headers, profile_id, invoice_id)
+                    # A full backfill can run longer than one access-token
+                    # lifetime. Ask Azure CLI for a fresh token per invoice;
+                    # CLI reuses/renews its own refresh-token session.
+                    invoice_headers = await _headers(db)
+                    df = await _invoice_details(client, invoice_headers, profile_id, invoice_id)
                     if df.empty:
                         results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": 0, "status": "empty"})
                         continue
