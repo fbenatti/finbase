@@ -140,7 +140,25 @@ def _resolve_collection_reprocess_periods(
                 ).distinct()
             ).scalars().all())
     periods = sorted({str(p) for p in touched if p and len(str(p)) >= 6})
-    return periods
+    if periods:
+        return periods
+
+    # A daily collection can legitimately download zero files when the source
+    # is already current.  That must not suppress the scheduled downstream
+    # pipeline: reuse the latest Bronze month already available for this
+    # connection instead of downloading it again.  Never apply this fallback
+    # to a failed/cancelled extraction, because that would publish stale data
+    # after an unsuccessful collection.
+    if extraction and extraction.status in ("COMPLETED", "COMPLETED_WITH_ERRORS"):
+        latest = session.execute(
+            select(IngestedBlob.billing_period).where(
+                IngestedBlob.connection_id == connection_id,
+                IngestedBlob.billing_period.is_not(None),
+            ).order_by(IngestedBlob.billing_period.desc()).limit(1)
+        ).scalar_one_or_none()
+        if latest:
+            return [str(latest)]
+    return []
 
 
 def _queue_schedule_destination_tasks(extraction_task_id: int, connection_id: int, metadata: dict | None) -> list[int]:
