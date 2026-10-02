@@ -264,6 +264,7 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
             return []
         existing_forecasts = session.query(EtlTask).filter(
             EtlTask.task_type == "forecast",
+            EtlTask.status.in_(["QUEUED", "RUNNING"]),
             EtlTask.result_json["scheduled_pipeline"].as_boolean() == True,  # noqa: E712
         ).all()
         if any(
