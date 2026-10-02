@@ -77,7 +77,7 @@ const emptyForm = {
   cloud_scope: "global",
   scope_filter: emptyScopeFilter(),
   priority: 0, valid_from: "", valid_until: "", active: true,
-  financial_effect: "NONE" as "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT",
+  financial_effect: "NONE" as "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT" | "MARKETPLACE_ALLOCATION",
   financial_contract_id: null as number | null,
   allocation_method: "",
   marketplace_connection_code: "",
@@ -309,7 +309,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
     const expression = buildExpressionFromForm(form);
 
     const hasConditions = form.conditions.some(isValidCondition);
-    const isMarketplaceAllocation = form.allocation_method === "MARKETPLACE_USD_SHARE";
+    const isMarketplaceAllocation = form.financial_effect === "MARKETPLACE_ALLOCATION";
     const ruleType = isMarketplaceAllocation ? "MARKETPLACE_ALLOCATION" : hasConditions ? "CONDITIONAL" : "EXPRESSION";
 
     const configJson: Record<string, unknown> = {
@@ -319,7 +319,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
     };
     if (isMarketplaceAllocation) {
       Object.assign(configJson, {
-        allocation_method: form.allocation_method,
+        allocation_method: "MARKETPLACE_USD_SHARE",
         marketplace_connection_code: form.marketplace_connection_code,
         cloud_connection_code: form.cloud_connection_code,
         cloud_product_name: form.cloud_product_name,
@@ -509,7 +509,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
             {
               key: "financial_effect", label: "Modo", width: 125,
               render: (r: BusinessRule) => (
-                <Chip size="small" label={r.financial_effect === "BUDGET_COMMITMENT" ? "Compromisso" : r.financial_effect === "DIRECT_REALIZED" ? "Direto" : "Nenhum"} color={r.financial_effect === "BUDGET_COMMITMENT" ? "warning" : r.financial_effect === "DIRECT_REALIZED" ? "success" : "default"} />
+                <Chip size="small" label={r.financial_effect === "BUDGET_COMMITMENT" ? "Compromisso" : r.financial_effect === "DIRECT_REALIZED" ? "Direto" : r.financial_effect === "MARKETPLACE_ALLOCATION" ? "Marketplace" : "Nenhum"} color={r.financial_effect === "BUDGET_COMMITMENT" ? "warning" : r.financial_effect === "DIRECT_REALIZED" ? "success" : r.financial_effect === "MARKETPLACE_ALLOCATION" ? "info" : "default"} />
               ),
             },
             {
@@ -552,11 +552,12 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               <Select
                 value={form.financial_effect}
                 label="Efeito financeiro"
-                onChange={(e) => setForm({ ...form, financial_effect: e.target.value as typeof form.financial_effect, financial_contract_id: e.target.value === "BUDGET_COMMITMENT" ? form.financial_contract_id : null })}
+                onChange={(e) => setForm({ ...form, financial_effect: e.target.value as typeof form.financial_effect, allocation_method: e.target.value === "MARKETPLACE_ALLOCATION" ? "MARKETPLACE_USD_SHARE" : "", financial_contract_id: e.target.value === "BUDGET_COMMITMENT" ? form.financial_contract_id : null })}
               >
                 <MenuItem value="NONE">Não participa do realizado</MenuItem>
                 <MenuItem value="DIRECT_REALIZED">Realizado direto — sem compromisso</MenuItem>
                 <MenuItem value="BUDGET_COMMITMENT">Compromisso orçamentário</MenuItem>
+                <MenuItem value="MARKETPLACE_ALLOCATION">Correlacionamento Marketplace</MenuItem>
               </Select>
             </FormControl>
             {form.financial_effect === "BUDGET_COMMITMENT" && (
@@ -590,8 +591,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
             <Typography variant="caption" color="text.secondary">
               Preencha estes campos para criar uma regra de teste que distribui o realizado Cloud em BRL pela participação USD do Marketplace.
             </Typography>
-            <TextField label="Método" value={form.allocation_method} onChange={(e) => setForm({ ...form, allocation_method: e.target.value })} placeholder="MARKETPLACE_USD_SHARE" helperText="Use MARKETPLACE_USD_SHARE para habilitar o rateio." />
-            {form.allocation_method === "MARKETPLACE_USD_SHARE" && <>
+            {form.financial_effect === "MARKETPLACE_ALLOCATION" && <>
               <TextField label="Conexão Marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="mongodb-atlas-pro" />
               <TextField label="Conexão Cloud" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} placeholder="azure-ti" />
               <TextField label="Produto Cloud" value={form.cloud_product_name} onChange={(e) => setForm({ ...form, cloud_product_name: e.target.value })} placeholder="Private Offer..." />

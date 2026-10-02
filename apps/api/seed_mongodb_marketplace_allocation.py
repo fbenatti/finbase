@@ -45,7 +45,7 @@ def ensure_rule() -> int:
                 priority=15,
                 valid_from="202608",
                 cloud_scope="atlas",
-                financial_effect="DIRECT_REALIZED",
+                financial_effect="MARKETPLACE_ALLOCATION",
                 active=True,
                 destination_table_id=1,
             )
@@ -54,7 +54,7 @@ def ensure_rule() -> int:
             rule.config_json = CONFIG
             rule.target_column = "realizado"
             rule.rule_type = "MARKETPLACE_ALLOCATION"
-            rule.financial_effect = "DIRECT_REALIZED"
+            rule.financial_effect = "MARKETPLACE_ALLOCATION"
             rule.active = True
         session.commit()
         session.refresh(rule)

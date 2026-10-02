@@ -877,7 +877,7 @@ export interface BusinessRule {
   valid_from: string | null;
   valid_until: string | null;
   cloud_scope: string | null;
-  financial_effect: "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT";
+  financial_effect: "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT" | "MARKETPLACE_ALLOCATION";
   financial_contract_id: number | null;
   active: boolean;
   created_at: string;
