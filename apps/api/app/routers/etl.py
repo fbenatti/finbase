@@ -2314,14 +2314,16 @@ def _reprocess_destination_sync(
             # financial effect must be allocated from the matching Azure pool
             # in BRL after the normal Silver publication succeeds.
             if (
-                int(connection_ids[0]) == 5
+                int(connection_ids[0]) in {5, 11}
                 and phys_name == "dest_modelo_focus"
                 and len(billing_periods) == 1
             ):
                 from app.services.marketplace_allocation_reprocess import (
                     apply_mongodb_marketplace_allocation,
                 )
-                allocation = apply_mongodb_marketplace_allocation(str(billing_periods[0]))
+                allocation = apply_mongodb_marketplace_allocation(
+                    str(billing_periods[0]), connection_id=int(connection_ids[0])
+                )
                 _append_reprocess_log(
                     task_id,
                     "Rateio Marketplace MongoDB aplicado: "
