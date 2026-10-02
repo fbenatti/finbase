@@ -709,6 +709,20 @@ export default function Connections() {
 
   const save = async () => {
     try {
+      if (form.connector_type === "azure_mca_invoice") {
+        await api.get("/mca-commitment/status");
+        await api.put("/mca-commitment/credentials", {
+          auth_mode: form.mca_auth_mode,
+          ...(form.mca_auth_mode === "bearer"
+            ? { bearer_token: form.mca_bearer_token || undefined }
+            : { tenant_id: form.tenant_id, client_id: form.client_id, client_secret: form.client_secret || undefined }),
+        });
+        setDialogOpen(false);
+        void load();
+        void loadGrid();
+        setFormTestMessage({ severity: "success", msg: "Fonte MCA configurada." });
+        return;
+      }
       if (form.connector_type === "databricks" && form.databricks_server_hostname.trim().toLowerCase().startsWith("dapi")) {
         setError("O token foi preenchido no campo Server Hostname. Server Hostname é o endereço do workspace (ex: adb-7405612109211710.10.azuredatabricks.net). O token vai em .env-databriks (DATABRICKS_TOKEN) ou no campo Access Token.");
         return;
