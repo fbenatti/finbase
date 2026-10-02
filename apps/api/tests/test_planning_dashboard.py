@@ -2,6 +2,7 @@ import io
 from types import SimpleNamespace
 
 import openpyxl
+import pandas as pd
 import pytest
 from fastapi import HTTPException
 
@@ -9,10 +10,25 @@ from app.models.planning import BudgetDefenseRequest
 from app.routers import planning
 from app.routers.planning import (
     _defense_request_out,
+    _contract_story_bronze_summary,
     _scope_rows,
     _subtree_ids,
     _timeline_event_matches_budget_scope,
 )
+
+
+def test_contract_story_bronze_summary_aggregates_month_and_profile_without_zero_rows():
+    frame = pd.DataFrame([
+        {"_billing_period": "202609", "billingAccountId": "account-a", "billingProfileId": "profile-a", "billingProfileName": "Azure Workloads", "preTaxCostUSD": "120.50"},
+        {"_billing_period": "202609", "billingAccountId": "account-b", "billingProfileId": "profile-b", "billingProfileName": "Azure Marketplace", "preTaxCostUSD": "80.25"},
+        {"_billing_period": "202610", "billingAccountId": "account-b", "billingProfileId": "profile-c", "billingProfileName": "No Charge", "preTaxCostUSD": "0"},
+    ])
+
+    summary = _contract_story_bronze_summary(frame)
+
+    assert summary["totalConsumption"] == pytest.approx(200.75)
+    assert summary["months"] == [{"month": "2026-09", "consumptionUsd": pytest.approx(200.75), "invoiceRows": 2}]
+    assert [row["billingProfileName"] for row in summary["profiles"]] == ["Azure Workloads", "Azure Marketplace"]
 
 
 def test_global_budget_snapshot_is_visible_inside_department_scope():
