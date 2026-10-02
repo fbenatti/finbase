@@ -5,6 +5,9 @@ import {
   Select, Stack, Tab, Tabs, TextField, Typography,
 } from "@mui/material";
 import { Add, ArticleOutlined, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
+import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { getContractStoryLedger, saveContractStoryLedger } from "../../services/api";
 
 type Contract = { id: string; name: string; provider: string; agreementType: string; country: string; start: string; end: string; target: number; currency: string; summary: string };
@@ -81,7 +84,9 @@ export default function ContractStoryDashboard() {
   const [creatingContract, setCreatingContract] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [message, setMessage] = useState("");
+  const [exporting, setExporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const exportRootRef = useRef<HTMLDivElement>(null);
   const contract = ledger.contracts.find(item => item.id === selectedId) || ledger.contracts[0];
   const entries = ledger.months[contract?.id] || [];
   const milestones = ledger.milestones[contract?.id] || [];
@@ -164,11 +169,35 @@ export default function ContractStoryDashboard() {
     event.target.value = "";
   };
 
+  const exportPdf = async () => {
+    if (!exportRootRef.current || exporting) return;
+    setExporting(true);
+    try {
+      const canvas = await html2canvas(exportRootRef.current, {
+        scale: 1.5,
+        backgroundColor: "#f8fafc",
+        useCORS: true,
+        onclone: (documentClone) => {
+          documentClone.querySelectorAll<HTMLElement>("[data-pdf-hide]").forEach((element) => { element.style.display = "none"; });
+        },
+      });
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 5;
+      const ratio = Math.min((pageWidth - margin * 2) / canvas.width, (pageHeight - margin * 2) / canvas.height);
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, canvas.width * ratio, canvas.height * ratio);
+      pdf.save(`historia-contrato-${contract.id}.pdf`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (!contract) return null;
-  return <Box sx={{ mx: -3, mt: -3, p: { xs: 2, md: 3 }, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+  return <Box ref={exportRootRef} sx={{ mx: -3, mt: -3, p: { xs: 2, md: 3 }, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={2} sx={{ mb: 2 }}>
       <Box><Typography variant="h4" fontWeight={800}>História do contrato</Typography><Typography color="text.secondary">Acordos, decisões e consumo em uma jornada única.</Typography></Box>
-      <Stack direction="row" gap={1} alignItems="center"><Button variant="contained" startIcon={<Add />} onClick={event => setMenuAnchor(event.currentTarget)}>Novo registro</Button><Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}><MenuItem onClick={() => { setCreatingContract(true); setMenuAnchor(null); setDialog("contract"); }}>Cadastrar contrato</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("monthly"); }}>Registrar mês de consumo</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("milestone"); }}>Adicionar marco à história</MenuItem><Divider /><MenuItem onClick={() => { setMenuAnchor(null); fileRef.current?.click(); }}><FileUploadOutlined fontSize="small" sx={{ mr: 1 }} />Importar consumo via CSV</MenuItem></Menu><input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={event => void importCsv(event)} /></Stack>
+      <Stack direction="row" gap={1} alignItems="center"><Button data-pdf-hide variant="outlined" startIcon={<PictureAsPdfOutlined />} onClick={() => void exportPdf()} disabled={exporting}>{exporting ? "Gerando PDF..." : "Exportar PDF"}</Button><Button data-pdf-hide variant="contained" startIcon={<Add />} onClick={event => setMenuAnchor(event.currentTarget)}>Novo registro</Button><Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}><MenuItem onClick={() => { setCreatingContract(true); setMenuAnchor(null); setDialog("contract"); }}>Cadastrar contrato</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("monthly"); }}>Registrar mês de consumo</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("milestone"); }}>Adicionar marco à história</MenuItem><Divider /><MenuItem onClick={() => { setMenuAnchor(null); fileRef.current?.click(); }}><FileUploadOutlined fontSize="small" sx={{ mr: 1 }} />Importar consumo via CSV</MenuItem></Menu><input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={event => void importCsv(event)} /></Stack>
     </Stack>
     <Tabs value={contract.id} onChange={(_, value) => setSelectedId(value)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2 }} aria-label="Contratos">{ledger.contracts.map(item => <Tab key={item.id} value={item.id} label={item.name} />)}</Tabs>
     {message && <Alert severity="success" onClose={() => setMessage("")} sx={{ mb: 2 }}>{message}</Alert>}
