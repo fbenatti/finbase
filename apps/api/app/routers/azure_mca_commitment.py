@@ -390,6 +390,21 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             "preTaxCost", "billingCurrency", "billingAccountId", "consumedUsd",
         ])
     written = 0
+    # The original single-account loader used cost-query-invoices/YYYYMM.
+    # Migrate those slices only when every account stored in that legacy blob
+    # is part of this extraction, so reprocessing cannot duplicate or erase a
+    # different billing account.
+    existing = iceberg_service.read_bronze(COMMITMENT_BRONZE_CODE)
+    if not existing.empty and {"_blob_path", "billingAccountId"}.issubset(existing.columns):
+        selected_accounts = set(account_ids)
+        for period in _requested_months(payload.start_period, payload.end_period):
+            legacy_blob = f"cost-query-invoices/{period}"
+            legacy = existing.loc[existing["_blob_path"] == legacy_blob]
+            legacy_accounts = set(legacy["billingAccountId"].dropna().astype(str))
+            if legacy_accounts.intersection(selected_accounts):
+                if not legacy_accounts.issubset(selected_accounts):
+                    raise HTTPException(409, f"O slice legado {period} contém Billing Accounts não selecionados; Bronze não foi alterada.")
+                iceberg_service.delete_bronze_slice(COMMITMENT_BRONZE_CODE, blob_path=legacy_blob, billing_period=period)
     for account_id in account_ids:
         account_tag = re.sub(r"[^A-Za-z0-9-]", "_", account_id)
         for period in _requested_months(payload.start_period, payload.end_period):
