@@ -2820,6 +2820,11 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
         return True
 
     ordered_jobs: list[tuple[int, str, str | None]] = []
+    # Monthly destinations build this set below, while snapshot-date
+    # destinations build their queue directly from the Bronze manifest.
+    # Keep a common scope for the audit task so the latter never references
+    # an uninitialized local variable.
+    available: set[tuple[int, str]] = set()
     if slice_cfg.grain == "snapshot_date":
         blob_stmt = select(
             IngestedBlob.connection_id,
@@ -2849,6 +2854,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             seen_daily.add(key)
             ordered_jobs.append((int(connection_id), str(period), snap))
         ordered_jobs.sort(key=lambda item: (item[2] or "", item[0]))
+        available = {(connection_id, period) for connection_id, period, _ in ordered_jobs}
         empty_detail = (
             "Nenhum blob Bronze diário encontrado para as fontes selecionadas. "
             "Importe a origem primeiro (Extração)."
