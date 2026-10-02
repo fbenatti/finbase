@@ -2906,6 +2906,20 @@ def _run_etl_sync(
             from app.models.scheduled_task import ScheduledTask
             schedule = session.get(ScheduledTask, int(schedule_id))
             cfg = schedule.config_json or {} if schedule else {}
+            today = datetime.now(timezone.utc).date()
+            already_ingested_today = {
+                blob_path for blob_path, ingested_at in session.execute(
+                    select(IngestedBlob.blob_path, IngestedBlob.ingested_at).where(
+                        IngestedBlob.connection_id == conn.id,
+                        IngestedBlob.ingested_at.is_not(None),
+                    )
+                ).all()
+                if ingested_at and ingested_at.date() == today
+            }
+            scan_items = [
+                item for item in scan_items
+                if item.blob_path not in already_ingested_today
+            ]
             forecast_ids = [int(x) for x in (cfg.get("forecast_config_ids") or []) if x]
             cutoff_days = list(session.execute(
                 select(ForecastConfig.cutoff_days).where(
