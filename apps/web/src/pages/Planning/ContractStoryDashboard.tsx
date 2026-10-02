@@ -79,7 +79,7 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
   const cumulativeByMonth = new Map<string, number>();
   let cumulative = 0;
   const actualPeriods = contractPeriods.filter(month => byMonth.get(month)?.consumptionPresent !== false && byMonth.has(month));
-  const latestActual = actualPeriods.at(-1);
+  const latestActual = actualPeriods[actualPeriods.length - 1];
   for (const month of contractPeriods) {
     const row = byMonth.get(month);
     if (row && row.consumptionPresent !== false) cumulative += row.consumption;
