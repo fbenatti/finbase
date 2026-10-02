@@ -24,7 +24,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "description": "Cost Management Query no billing account, agregado por competência, billing profile e invoiceId.",
         "position": 90,
         "connector_type": "azure_mca_invoice",
-        "code_pattern": "contratos-mca-{billingProfileId}",
+        "code_pattern": "contratos-mca",
         "bronze_pattern": "raw_azure_commitment_br",
         "silver_target": "silver.azure_commitment_br",
         "gold_target": None,
