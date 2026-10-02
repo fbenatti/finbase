@@ -11,6 +11,12 @@ type Settlement = Record<string, unknown> & { period?: string; cloud_scope?: str
 const amount = (value: unknown) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
 const numeric = (row: Settlement, key: string) => Number(row[key] ?? 0);
 const periodLabel = (period: string) => period.length === 6 ? `${period.slice(4)}/${period.slice(0, 4)}` : period;
+const dateLabel = (value?: string) => {
+  if (!value) return "";
+  const normalized = /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
+  const date = new Date(`${normalized.slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR");
+};
 
 function Metric({ label, value, detail, accent }: { label: string; value: string; detail?: string; accent: string }) {
   return <Card variant="outlined" sx={{ height: "100%", borderRadius: 3, borderTop: `3px solid ${accent}` }}><CardContent>
@@ -92,7 +98,7 @@ export default function FinancialContractsDashboard() {
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
     {currentContract && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
       <Typography variant="body2" fontWeight={600}>{currentContract.active ? "Contrato ativo" : "Contrato inativo"}</Typography>
-      <Typography variant="body2" color="text.secondary">· Vigência {currentContract.valid_from ? new Date(`${currentContract.valid_from}T00:00:00`).toLocaleDateString("pt-BR") : "—"}{currentContract.valid_until ? ` – ${new Date(`${currentContract.valid_until}T00:00:00`).toLocaleDateString("pt-BR")}` : " em diante"}</Typography>
+      <Typography variant="body2" color="text.secondary">· Vigência {dateLabel(currentContract.valid_from) || "—"}{currentContract.valid_until ? ` – ${dateLabel(currentContract.valid_until)}` : " em diante"}</Typography>
       <Typography variant="body2" color="text.secondary">· Run {String(currentSummary?.run_id ?? "—")} · {currentSummary?.last_settlement_at ? new Date(String(currentSummary.last_settlement_at)).toLocaleString("pt-BR") : "sem liquidação"}</Typography>
     </Stack>}
 
