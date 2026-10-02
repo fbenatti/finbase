@@ -137,7 +137,7 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
         <svg viewBox="0 0 720 200" preserveAspectRatio="none" width="100%" height="200" aria-label="Consumo acumulado contra objetivo do contrato" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
           <polyline points={polyline("target")} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="7 6" />
           <polyline points={polyline("actual")} fill="none" stroke="#0f766e" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-          {estimateX !== null && <g><line x1={estimateX} y1="0" x2={estimateX} y2={chartHeight} stroke="#dc2626" strokeWidth="2.5" strokeDasharray="6 5" /><text x={estimateX + (estimateX > 520 ? -6 : 6)} y="14" textAnchor={estimateX > 520 ? "end" : "start"} fill="#dc2626" fontSize="12" fontWeight="700">Projeção commitment</text><title>Projeção commitment: {monthLabel(estimatedMonth!)}</title></g>}
+          {estimateX !== null && <g><line x1={estimateX} y1="0" x2={estimateX} y2={chartHeight} stroke="#dc2626" strokeWidth="2.5" strokeDasharray="6 5" /><title>Projeção commitment: {monthLabel(estimatedMonth!)}</title></g>}
           {points.filter(point => point.row).map(point => <circle key={point.month} cx={point.x * 7.2} cy={chartHeight - point.actual / max * chartHeight} r="4" fill="#0f766e"><title>{monthLabel(point.month)}: {money(point.actual, contract.currency)}</title></circle>)}
         </svg>
       </Box>
