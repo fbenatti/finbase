@@ -73,9 +73,9 @@ export default function FinancialPlanning() {
         ) : active.code === "dashboard" ? (
           <>
             <Tabs value={executiveSubtab} onChange={changeExecutiveSubtab} aria-label="Visões do Dashboard Executivo" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
-              <Tab value="orcamento" label="Orçamento" />
+              <Tab value="orcamento" label="Histórico do Orçamento" />
               <Tab value="historia-contrato" label="História do Contrato" />
-              <Tab value="compromisso" label="Compromisso" />
+              <Tab value="compromisso" label="Histórico Consumo Compromisso" />
             </Tabs>
             {executiveSubtab === "historia-contrato" ? <ContractStoryDashboard /> : executiveSubtab === "compromisso" ? <FinancialContractsDashboard /> : <FinancialDashboard />}
           </>
