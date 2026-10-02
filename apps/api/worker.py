@@ -641,6 +641,16 @@ def consumer_main(worker_id: int):
                             if task_row:
                                 task_row.phase = f"Forecast publicado · Gold pendente: {gold_exc}"
                                 s.commit()
+                        if task_json.get("scheduled_pipeline") and not task_json.get("accuracy"):
+                            from app.services.gold_materialization import enqueue_rule_materialization
+                            gold_task = enqueue_rule_materialization(
+                                s,
+                                rule_ids=gold_rule_ids,
+                                source="scheduled_pipeline",
+                            )
+                            if gold_task and task_row:
+                                task_row.phase = f"Forecast publicado · Gold na fila (task #{gold_task.id})"[:200]
+                                s.commit()
                         s.close()
                     except Exception as exc:
                         import traceback
@@ -668,6 +678,7 @@ def consumer_main(worker_id: int):
                     # forecast snapshots (simulated_as_of = day 2 of each month)
                     # so the accuracy dashboard reflects the current config.
                     config_id = task.destination_table_id
+                    task_json = dict(task.result_json or {})
                     months = list((task.result_json or {}).get("months") or [])
                     task.status = "RUNNING"
                     task.phase = "Validando configuração"
