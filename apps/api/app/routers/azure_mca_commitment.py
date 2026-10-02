@@ -63,6 +63,16 @@ def _configured_accounts(config: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(_normalize_account_id(str(value)) for value in values))
 
 
+def _profile_name_map(profiles: list[dict[str, Any]]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for profile in profiles:
+        profile_id = str(profile.get("name") or "").strip()
+        display_name = str((profile.get("properties") or {}).get("displayName") or "").strip()
+        if profile_id and display_name:
+            names[profile_id.casefold()] = display_name
+    return names
+
+
 def _month_from_iso(value: Any) -> str | None:
     match = re.match(r"^(\d{4})-(\d{2})", str(value or ""))
     return "".join(match.groups()) if match else None
@@ -351,19 +361,32 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
     if not account_ids or any(value not in configured_accounts for value in account_ids):
         raise HTTPException(422, "Selecione Billing Accounts cadastrados na fonte MCA.")
     rows: list[dict[str, Any]] = []
+    profile_names: dict[tuple[str, str], str] = {}
     async with httpx.AsyncClient() as client:
         for account_id in account_ids:
+            profiles = await _profiles(client, await _headers(db), account_id)
+            for profile_id, display_name in _profile_name_map(profiles).items():
+                profile_names[(account_id, profile_id)] = display_name
             for window_start, window_end in _query_windows(payload.start_period, payload.end_period):
                 rows.extend(await _query_invoice_totals(client, db, window_start, window_end, account_id))
     if payload.billing_profile_ids:
         wanted = {str(value).casefold() for value in payload.billing_profile_ids}
         rows = [row for row in rows if str(row["billingProfileId"]).casefold() in wanted]
     if rows:
+        missing_names = sorted({
+            (row["billingAccountId"], row["billingProfileId"])
+            for row in rows
+            if not profile_names.get((row["billingAccountId"], row["billingProfileId"].casefold()))
+        })
+        if missing_names:
+            raise HTTPException(502, f"A API de billing profiles não retornou displayName para {len(missing_names)} profile(s); Bronze não foi alterada.")
+        for row in rows:
+            row["billingProfileName"] = profile_names[(row["billingAccountId"], row["billingProfileId"].casefold())]
         frame = pd.DataFrame(rows)
         frame["consumedUsd"] = frame["preTaxCostUSD"]
     else:
         frame = pd.DataFrame(columns=[
-            "billingProfileId", "invoiceId", "billingMonth", "preTaxCostUSD",
+            "billingProfileId", "billingProfileName", "invoiceId", "billingMonth", "preTaxCostUSD",
             "preTaxCost", "billingCurrency", "billingAccountId", "consumedUsd",
         ])
     written = 0
