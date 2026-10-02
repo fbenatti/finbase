@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from typing import Literal, Any
 
 logger = logging.getLogger(__name__)
@@ -3571,7 +3571,11 @@ async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/schedules/{schedule_id}/run")
-async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db)):
+async def run_schedule_now(
+    schedule_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     """Manually trigger a scheduled ETL task right now (all connections in scope)."""
     result = await db.execute(
         select(ScheduledTask).where(ScheduledTask.id == schedule_id)
@@ -3584,13 +3588,20 @@ async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db))
     # Manual execution must use the same scheduler path as cron execution.
     # The legacy collection helper inserted tasks directly and lost the
     # schedule metadata required by the incremental follow-up pipeline.
+    # Do not hold the HTTP request open while the synchronous scheduler path
+    # obtains a worker DB connection and queues one extraction per source.
+    # A stale/idle transaction must never make the Play button look frozen.
     import asyncio
-    task_ids = await asyncio.to_thread(
-        scheduler_service._run_etl_job, connection_ids, sched.id, sched.name,
+    background_tasks.add_task(
+        asyncio.to_thread,
+        scheduler_service._run_etl_job,
+        connection_ids,
+        sched.id,
+        sched.name,
     )
-    task_ids = task_ids or []
     return {
-        "task_ids": task_ids,
+        "task_ids": [],
+        "status": "QUEUED",
         "connection_ids": connection_ids,
         "schedule_name": sched.name,
     }
