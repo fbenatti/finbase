@@ -1,8 +1,10 @@
 import pytest
+import pandas as pd
 from fastapi import HTTPException
 
 from app.routers.azure_mca_commitment import (
     _configured_accounts,
+    _merge_missing_invoice_rows,
     _normalize_account_id,
     _profile_display_name,
     _profile_name_map,
@@ -63,3 +65,31 @@ def test_profile_display_names_are_indexed_case_insensitively():
     assert _profile_name_map(profiles) == {"hpdd-dxdz-bg7-pgb": "Telefonica Brasil"}
     assert _profile_display_name({"properties": {"displayName": "Historico MCA"}}) == "Historico MCA"
     assert _profile_display_name({"properties": {}}) is None
+
+
+def test_incremental_merge_preserves_loaded_rows_and_adds_only_missing_invoice_keys():
+    existing = pd.DataFrame([
+        {"billingAccountId": "account-a", "billingProfileId": "profile-1", "billingMonth": "202609", "invoiceId": "invoice-1", "preTaxCostUSD": "100", "billingProfileName": "Previously loaded"},
+    ])
+    incoming = pd.DataFrame([
+        {"billingAccountId": "account-a", "billingProfileId": "profile-1", "billingMonth": "202609", "invoiceId": "invoice-1", "preTaxCostUSD": "999", "billingProfileName": "Fresh API value"},
+        {"billingAccountId": "account-a", "billingProfileId": "profile-1", "billingMonth": "202609", "invoiceId": "invoice-2", "preTaxCostUSD": "25", "billingProfileName": "Fresh API value"},
+    ])
+
+    merged, added = _merge_missing_invoice_rows(existing, incoming)
+
+    assert added == 1
+    assert len(merged) == 2
+    assert merged.loc[merged["invoiceId"] == "invoice-1", "preTaxCostUSD"].iloc[0] == "100"
+    assert set(merged["invoiceId"]) == {"invoice-1", "invoice-2"}
+
+
+def test_incremental_merge_with_no_incoming_rows_keeps_existing_unchanged():
+    existing = pd.DataFrame([
+        {"billingAccountId": "account-a", "billingProfileId": "profile-1", "billingMonth": "202609", "invoiceId": "invoice-1"},
+    ])
+
+    merged, added = _merge_missing_invoice_rows(existing, pd.DataFrame())
+
+    assert added == 0
+    assert merged.equals(existing)

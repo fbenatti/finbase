@@ -80,6 +80,37 @@ def _profile_display_name(profile: dict[str, Any]) -> str | None:
     return name or None
 
 
+def _invoice_row_keys(frame: pd.DataFrame) -> pd.Series:
+    """Stable business key for a billed MCA total, independent of Bronze path."""
+    columns = ["billingAccountId", "billingProfileId", "billingMonth", "invoiceId"]
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Invoice frame is missing key columns: {', '.join(missing)}")
+    return frame[columns].fillna("").astype(str).apply(lambda row: "|".join(value.casefold() for value in row), axis=1)
+
+
+def _merge_missing_invoice_rows(existing: pd.DataFrame, incoming: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Preserve previously loaded values and add only unseen invoice/profile/month rows."""
+    if incoming.empty:
+        return existing.copy(), 0
+    if existing.empty:
+        merged = incoming.copy().drop_duplicates(subset=["billingAccountId", "billingProfileId", "billingMonth", "invoiceId"], keep="first")
+        return merged, len(merged)
+    old = existing.copy()
+    fresh = incoming.copy()
+    for column in set(old.columns).union(fresh.columns):
+        if column not in old:
+            old[column] = None
+        if column not in fresh:
+            fresh[column] = None
+    old = old[list(dict.fromkeys([*old.columns, *fresh.columns]))]
+    fresh = fresh[old.columns]
+    old_keys = set(_invoice_row_keys(old))
+    fresh = fresh.loc[~_invoice_row_keys(fresh).isin(old_keys)]
+    fresh = fresh.drop_duplicates(subset=["billingAccountId", "billingProfileId", "billingMonth", "invoiceId"], keep="first")
+    return pd.concat([old, fresh], ignore_index=True), len(fresh)
+
+
 def _month_from_iso(value: Any) -> str | None:
     match = re.match(r"^(\d{4})-(\d{2})", str(value or ""))
     return "".join(match.groups()) if match else None
@@ -424,35 +455,53 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
             "preTaxCost", "billingCurrency", "billingAccountId", "consumedUsd",
         ])
     written = 0
+    already_loaded = 0
     # The original single-account loader used cost-query-invoices/YYYYMM.
-    # Migrate those slices only when every account stored in that legacy blob
-    # is part of this extraction, so reprocessing cannot duplicate or erase a
-    # different billing account.
+    # Preserve and migrate its records alongside the current account slices.
     existing = iceberg_service.read_bronze(COMMITMENT_BRONZE_CODE)
+    for account_id in account_ids:
+        account_tag = re.sub(r"[^A-Za-z0-9-]", "_", account_id)
+        for period in _requested_months(payload.start_period, payload.end_period):
+            group = frame.loc[(frame["billingMonth"] == period) & (frame["billingAccountId"] == account_id)] if not frame.empty else frame
+            blob = f"cost-query-invoices/{account_tag}/{period}"
+            prior = pd.DataFrame()
+            if not existing.empty and "billingAccountId" in existing.columns:
+                prior = existing.loc[
+                    (existing["billingAccountId"].astype(str) == account_id)
+                    & (existing.get("_billing_period", pd.Series(index=existing.index, dtype=str)).astype(str) == period)
+                ].copy()
+                if "_blob_path" in prior.columns:
+                    legacy_blob = f"cost-query-invoices/{period}"
+                    prior = prior.loc[prior["_blob_path"].isin([blob, legacy_blob])]
+            # The query frame uses billingMonth as an explicit part of the key;
+            # Bronze stores the same month in _billing_period.
+            if not prior.empty:
+                prior["billingMonth"] = period
+                for internal in ("_billing_period", "_blob_path", "_ingested_at"):
+                    if internal in prior.columns:
+                        prior = prior.drop(columns=[internal])
+            current = group.copy()
+            if not current.empty:
+                current = current.drop(columns=["billingMonth"], errors="ignore")
+                current["billingMonth"] = period
+            merged, added = _merge_missing_invoice_rows(prior, current)
+            written += added
+            already_loaded += max(0, len(group) - added)
+            if added:
+                merged = merged.drop(columns=["billingMonth"], errors="ignore").reset_index(drop=True)
+                iceberg_service.write_bronze(COMMITMENT_BRONZE_CODE, merged, period, blob)
+    # Delete legacy paths only after every account/month was safely carried to
+    # the account-specific path. Never remove another account's records.
     if not existing.empty and {"_blob_path", "billingAccountId"}.issubset(existing.columns):
         selected_accounts = set(account_ids)
         for period in _requested_months(payload.start_period, payload.end_period):
             legacy_blob = f"cost-query-invoices/{period}"
             legacy = existing.loc[existing["_blob_path"] == legacy_blob]
             legacy_accounts = set(legacy["billingAccountId"].dropna().astype(str))
-            if legacy_accounts.intersection(selected_accounts):
-                if not legacy_accounts.issubset(selected_accounts):
-                    raise HTTPException(409, f"O slice legado {period} contém Billing Accounts não selecionados; Bronze não foi alterada.")
+            if legacy_accounts.intersection(selected_accounts) and not legacy_accounts.issubset(selected_accounts):
+                raise HTTPException(409, f"O slice legado {period} contém Billing Accounts não selecionados; Bronze não foi alterada.")
+            if not legacy.empty and legacy_accounts.issubset(selected_accounts):
                 iceberg_service.delete_bronze_slice(COMMITMENT_BRONZE_CODE, blob_path=legacy_blob, billing_period=period)
-    for account_id in account_ids:
-        account_tag = re.sub(r"[^A-Za-z0-9-]", "_", account_id)
-        for period in _requested_months(payload.start_period, payload.end_period):
-            group = frame.loc[(frame["billingMonth"] == period) & (frame["billingAccountId"] == account_id)] if not frame.empty else frame
-            blob = f"cost-query-invoices/{account_tag}/{period}"
-            if group.empty:
-                iceberg_service.delete_bronze_slice(COMMITMENT_BRONZE_CODE, blob_path=blob, billing_period=period)
-                continue
-            written += iceberg_service.write_bronze(
-                COMMITMENT_BRONZE_CODE,
-                group.drop(columns=["billingMonth"]).reset_index(drop=True),
-                period,
-                blob,
-            )
     await db.commit()
     return {
         "method": "Cost Management Query (invoice-linked monthly aggregate)",
@@ -464,6 +513,8 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
         "months_requested": len(_requested_months(payload.start_period, payload.end_period)),
         "profiles_loaded": len({row["billingProfileId"] for row in rows}),
         "invoice_profile_month_rows": written,
+        "new_invoice_profile_month_rows": written,
+        "already_loaded_rows": already_loaded,
         "invoice_ids": len({row["invoiceId"] for row in rows}),
         "included_unbilled_rows": False,
     }
