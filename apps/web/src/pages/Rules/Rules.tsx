@@ -79,6 +79,12 @@ const emptyForm = {
   priority: 0, valid_from: "", valid_until: "", active: true,
   financial_effect: "NONE" as "NONE" | "DIRECT_REALIZED" | "BUDGET_COMMITMENT",
   financial_contract_id: null as number | null,
+  allocation_method: "",
+  marketplace_connection_code: "",
+  cloud_connection_code: "",
+  cloud_product_name: "",
+  cloud_sku: "",
+  cloud_resource_group: "",
 };
 
 const findKnownColumn = (columns: string[], token: string): string => {
@@ -288,6 +294,12 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       active: r.active,
       financial_effect: r.financial_effect || "NONE",
       financial_contract_id: r.financial_contract_id || null,
+      allocation_method: String(cfg?.allocation_method || ""),
+      marketplace_connection_code: String(cfg?.marketplace_connection_code || ""),
+      cloud_connection_code: String(cfg?.cloud_connection_code || ""),
+      cloud_product_name: String(cfg?.cloud_product_name || ""),
+      cloud_sku: String(cfg?.cloud_sku || ""),
+      cloud_resource_group: String(cfg?.cloud_resource_group || ""),
     });
     setDialogOpen(true);
   };
@@ -297,13 +309,25 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
     const expression = buildExpressionFromForm(form);
 
     const hasConditions = form.conditions.some(isValidCondition);
-    const ruleType = hasConditions ? "CONDITIONAL" : "EXPRESSION";
+    const isMarketplaceAllocation = form.allocation_method === "MARKETPLACE_USD_SHARE";
+    const ruleType = isMarketplaceAllocation ? "MARKETPLACE_ALLOCATION" : hasConditions ? "CONDITIONAL" : "EXPRESSION";
 
     const configJson: Record<string, unknown> = {
       source_column: form.source_column,
       operation: form.operation,
       rate: parseFloat(form.rate) || 0,
     };
+    if (isMarketplaceAllocation) {
+      Object.assign(configJson, {
+        allocation_method: form.allocation_method,
+        marketplace_connection_code: form.marketplace_connection_code,
+        cloud_connection_code: form.cloud_connection_code,
+        cloud_product_name: form.cloud_product_name,
+        cloud_sku: form.cloud_sku,
+        cloud_resource_group: form.cloud_resource_group,
+        test_period: "202608",
+      });
+    }
     if (form.operation === "col+" || form.operation === "col-") {
       configJson.operand_column = form.operand_column;
       delete configJson.rate;
@@ -332,7 +356,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
 
     if (ruleType === "EXPRESSION") {
       body.expression = expression;
-    } else {
+    } else if (ruleType === "CONDITIONAL") {
       body.conditions = form.conditions
         .filter(isValidCondition)
         .map((c) => ({
@@ -560,6 +584,20 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               Regras com escopo Azure/GCP/etc. só rodam no reprocessamento da nuvem correspondente.
               Use &quot;Todas as nuvens&quot; para o fallback final (<code>realizado = BilledCost</code>).
             </Typography>
+
+            <Divider />
+            <Typography variant="subtitle2">Rateio Marketplace → Cloud</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Preencha estes campos para criar uma regra de teste que distribui o realizado Cloud em BRL pela participação USD do Marketplace.
+            </Typography>
+            <TextField label="Método" value={form.allocation_method} onChange={(e) => setForm({ ...form, allocation_method: e.target.value })} placeholder="MARKETPLACE_USD_SHARE" helperText="Use MARKETPLACE_USD_SHARE para habilitar o rateio." />
+            {form.allocation_method === "MARKETPLACE_USD_SHARE" && <>
+              <TextField label="Conexão Marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="mongodb-atlas-pro" />
+              <TextField label="Conexão Cloud" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} placeholder="azure-ti" />
+              <TextField label="Produto Cloud" value={form.cloud_product_name} onChange={(e) => setForm({ ...form, cloud_product_name: e.target.value })} placeholder="Private Offer..." />
+              <TextField label="SKU Cloud" value={form.cloud_sku} onChange={(e) => setForm({ ...form, cloud_sku: e.target.value })} />
+              <TextField label="Resource Group Cloud" value={form.cloud_resource_group} onChange={(e) => setForm({ ...form, cloud_resource_group: e.target.value })} />
+            </>}
 
             <Divider />
 
