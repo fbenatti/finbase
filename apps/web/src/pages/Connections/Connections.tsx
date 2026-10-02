@@ -778,6 +778,16 @@ export default function Connections() {
     setTestingForm(true);
     setFormTestMessage(null);
     try {
+      if (form.connector_type === "azure_mca_invoice") {
+        const result = await getMcaCommitmentProfiles();
+        const profiles = Array.isArray(result.profiles) ? result.profiles : [];
+        const scopes = new Set(profiles.map((profile: { billingAccountId?: string }) => profile.billingAccountId).filter(Boolean));
+        setFormTestMessage({
+          severity: "success",
+          msg: `Token válido: ${profiles.length} billing profile(s) encontrados em ${scopes.size} Billing Account(s).`,
+        });
+        return;
+      }
       const result = await testConnectionConfig(buildConnectionBody());
       const isOk = result.status === "OK";
       const isPending = result.status === "PENDING";
@@ -788,6 +798,35 @@ export default function Connections() {
     } catch (testError: unknown) {
       const message = testError instanceof Error ? testError.message : "Não foi possível testar a conexão";
       setFormTestMessage({ severity: "error", msg: "Falha ao testar: " + message });
+    } finally {
+      setTestingForm(false);
+    }
+  };
+
+  const extractMcaData = async () => {
+    const startPeriod = form.mca_start_period.replace("-", "");
+    const endPeriod = form.mca_end_period.replace("-", "");
+    const billingAccountIds = form.mca_billing_account_ids.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
+    if (!/^\d{6}$/.test(startPeriod) || !/^\d{6}$/.test(endPeriod) || startPeriod > endPeriod) {
+      setFormTestMessage({ severity: "error", msg: "Informe um período válido: início menor ou igual ao fim." });
+      return;
+    }
+    if (!billingAccountIds.length) {
+      setFormTestMessage({ severity: "error", msg: "Nenhum Billing Account está configurado para a extração." });
+      return;
+    }
+    setTestingForm(true);
+    setFormTestMessage({ severity: "info", msg: `Consultando invoices de ${form.mca_start_period} a ${form.mca_end_period}…` });
+    try {
+      const result = await extractMcaCommitmentInvoices({ start_period: startPeriod, end_period: endPeriod, billing_account_ids: billingAccountIds });
+      setFormTestMessage({
+        severity: "success",
+        msg: `Extração concluída: ${Number(result.invoice_profile_month_rows || 0).toLocaleString("pt-BR")} linha(s), ${Number(result.invoice_ids || 0).toLocaleString("pt-BR")} invoice(s), ${Number(result.profiles_loaded || 0).toLocaleString("pt-BR")} profile(s), ${Number(result.months_requested || 0)} competência(s). Bronze atualizada.`,
+      });
+      void load();
+      void loadGrid();
+    } catch (extractError: unknown) {
+      setFormTestMessage({ severity: "error", msg: extractError instanceof Error ? `Falha na extração MCA: ${extractError.message}` : "Falha na extração MCA." });
     } finally {
       setTestingForm(false);
     }
