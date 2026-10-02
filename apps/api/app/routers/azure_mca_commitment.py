@@ -119,6 +119,36 @@ def _period_bounds(start: str, end: str) -> tuple[str, str]:
     return first, after
 
 
+async def _invoice_is_current(code: str, period: str, invoice_id: str, props: dict[str, Any]) -> bool:
+    """Skip an already loaded invoice unless its bill header changed or it was voided."""
+    from app.services.trino_service import execute as trino_execute
+
+    if str(props.get("status") or "").casefold() in {"void", "voided", "cancelled", "canceled"}:
+        return False
+    table = re.sub(r"[^a-z0-9_]", "_", f"raw_{code.lower()}")
+    quote = lambda value: str(value or "").replace("'", "''")
+    try:
+        rows = await trino_execute(
+            f"SELECT COUNT(*) AS n, MAX(invoiceSubTotal) AS subtotal, MAX(invoiceTax) AS tax, "
+            f"MAX(invoiceTotal) AS total, MAX(invoiceStatus) AS status, "
+            f"MAX(billingPeriodStartDate) AS period_start, MAX(billingPeriodEndDate) AS period_end "
+            f"FROM iceberg.bronze.{table} WHERE invoiceId = '{quote(invoice_id)}' "
+            f"AND _billing_period = '{quote(period)}'",
+            timeout_s=25,
+        )
+    except Exception:  # noqa: BLE001 - absent table means first load
+        return False
+    row = rows[0] if rows else {}
+    if int(row.get("n") or 0) == 0:
+        return False
+    expected = (
+        quote(props.get("subTotal")), quote(props.get("taxAmount")), quote(props.get("totalAmount")),
+        quote(props.get("status")), quote(props.get("invoicePeriodStartDate")), quote(props.get("invoicePeriodEndDate")),
+    )
+    actual = tuple(quote(row.get(key)) for key in ("subtotal", "tax", "total", "status", "period_start", "period_end"))
+    return actual == expected
+
+
 async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], profile_id: str, invoice_id: str) -> pd.DataFrame:
     url = f"{ARM}/providers/Microsoft.Billing/billingAccounts/{BILLING_ACCOUNT}/billingProfiles/{profile_id}/providers/Microsoft.CostManagement/generateCostDetailsReport?api-version=2025-03-01"
     response = await client.post(url, headers=headers, json={"invoiceId": invoice_id, "metric": "ActualCost"}, timeout=90)
@@ -257,6 +287,12 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                 if not invoice_id or not period or not payload.start_period <= period <= payload.end_period:
                     continue
                 try:
+                    # Trino folds unquoted identifiers to lowercase; keep
+                    # Iceberg's physical name aligned for profile codes.
+                    code = f"contratos-mca-{safe_profile}".lower()
+                    if await _invoice_is_current(code, period, invoice_id, props):
+                        results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": 0, "status": "skipped_current"})
+                        continue
                     df = await _invoice_details(client, headers, profile_id, invoice_id)
                     if df.empty:
                         results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": 0, "status": "empty"})
@@ -275,9 +311,6 @@ async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depend
                         "invoiceTotal": props.get("totalAmount"),
                     }.items():
                         df[key] = value
-                    # Trino folds unquoted identifiers to lowercase; keep
-                    # Iceberg's physical name aligned for profile codes.
-                    code = f"contratos-mca-{safe_profile}".lower()
                     blob = f"mca-invoice/{profile_id}/{period}/{invoice_id}"
                     count = iceberg_service.write_bronze(code, df, period, blob)
                     results.append({"billingProfileId": profile_id, "invoiceId": invoice_id, "billingPeriod": period, "rows": count, "status": "loaded"})
