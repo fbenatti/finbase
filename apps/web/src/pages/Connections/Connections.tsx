@@ -9,7 +9,7 @@ import { Add, AutoAwesome, Cloud, Dataset, Download, MenuBook, Psychology, Searc
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
-  formatApiError,
+  formatApiError, extractMcaCommitmentInvoices, getMcaCommitmentProfiles, getMcaCommitmentStatus,
 } from "../../services/api";
 import { api } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
@@ -168,6 +168,14 @@ const emptyForm = {
   mca_auth_mode: "bearer" as "bearer" | "service_principal" | "azure_cli",
   mca_bearer_token: "",
   mca_billing_account_ids: "",
+  mca_start_period: "",
+  mca_end_period: "",
+};
+
+const latestMcaInvoiceMonth = () => {
+  const now = new Date();
+  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
 };
 
 
