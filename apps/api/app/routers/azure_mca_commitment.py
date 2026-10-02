@@ -122,7 +122,7 @@ def _period_bounds(start: str, end: str) -> tuple[str, str]:
 
 
 async def _invoice_is_current(code: str, period: str, invoice_id: str, props: dict[str, Any]) -> bool:
-    """Skip an already loaded invoice unless its bill header changed or it was voided."""
+    """Skip a previously loaded invoice; void documents are reconsidered."""
     from app.services.trino_service import execute as trino_execute
 
     if str(props.get("status") or "").casefold() in {"void", "voided", "cancelled", "canceled"}:
@@ -131,11 +131,8 @@ async def _invoice_is_current(code: str, period: str, invoice_id: str, props: di
     quote = lambda value: str(value or "").replace("'", "''")
     try:
         rows = await trino_execute(
-            f"SELECT COUNT(*) AS n, MAX(invoiceSubTotal) AS subtotal, MAX(invoiceTax) AS tax, "
-            f"MAX(invoiceTotal) AS total, MAX(invoiceStatus) AS status, "
-            f"MAX(billingPeriodStartDate) AS period_start, MAX(billingPeriodEndDate) AS period_end "
-            f"FROM iceberg.bronze.{table} WHERE invoiceId = '{quote(invoice_id)}' "
-            f"AND _billing_period = '{quote(period)}'",
+            f"SELECT COUNT(*) AS n FROM iceberg.bronze.{table} "
+            f"WHERE invoiceId = '{quote(invoice_id)}' AND _billing_period = '{quote(period)}'",
             timeout_s=25,
         )
     except Exception:  # noqa: BLE001 - absent table means first load
@@ -143,12 +140,7 @@ async def _invoice_is_current(code: str, period: str, invoice_id: str, props: di
     row = rows[0] if rows else {}
     if int(row.get("n") or 0) == 0:
         return False
-    expected = (
-        quote(props.get("subTotal")), quote(props.get("taxAmount")), quote(props.get("totalAmount")),
-        quote(props.get("status")), quote(props.get("invoicePeriodStartDate")), quote(props.get("invoicePeriodEndDate")),
-    )
-    actual = tuple(quote(row.get(key)) for key in ("subtotal", "tax", "total", "status", "period_start", "period_end"))
-    return actual == expected
+    return int(row.get("n") or 0) > 0
 
 
 async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], profile_id: str, invoice_id: str) -> pd.DataFrame:
