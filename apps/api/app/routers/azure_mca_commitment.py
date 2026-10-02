@@ -152,6 +152,7 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
     manifest_url = data.get("manifestUrl") or data.get("properties", {}).get("manifestUrl")
     files = data.get("files") or data.get("properties", {}).get("files") or manifest.get("blobs") or manifest.get("files") or []
     if manifest_url:
+        # Manifest/blob URLs are SAS-authorized; never forward the ARM bearer to storage.
         manifest_resp = await client.get(manifest_url, timeout=90)
         manifest_resp.raise_for_status()
         manifest = manifest_resp.json()
@@ -165,6 +166,7 @@ async def _invoice_details(client: httpx.AsyncClient, headers: dict[str, str], p
         download_url = entry.get("blobLink") or entry.get("downloadUrl") or entry.get("url")
         if not download_url:
             continue
+        # The SAS is sufficient for download. Do not send Azure ARM credentials to Blob Storage.
         download = await client.get(download_url, timeout=180)
         download.raise_for_status()
         frames.append(pd.read_csv(io.BytesIO(download.content), dtype=str))
