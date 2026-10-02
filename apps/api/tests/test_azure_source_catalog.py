@@ -131,9 +131,9 @@ def test_only_cost_exports_is_a_cost_source_in_the_catalog():
     assert cost == {"cost_exports"}
 
 
-def test_catalog_has_only_official_four_sources():
+def test_catalog_has_official_sources_and_mca_commitment():
     keys = {entry["source_key"] for entry in AZURE_SOURCE_CATALOG}
-    assert keys == {"cost_exports", "resource_graph", "automation_jobs", "openai_ptu"}
+    assert keys == {"cost_exports", "resource_graph", "automation_jobs", "openai_ptu", "contracts_mca"}
 
 
 def test_cost_exports_is_not_telemetry():
