@@ -11,7 +11,7 @@ import Departments from "../Departments/Departments";
 const TABS = [
   { id: "organization", label: "Organograma", perms: [{ module: "planning", scope: null }] },
   { id: "classification", label: "Classificar projetos", perms: [{ module: "rules", scope: null }] },
-  { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
+  { id: "rules", label: "Ajustes financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Geração de Cubos", perms: [{ module: "gold", scope: null }] },
