@@ -21,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.core.audit import audit
-from app.core.deps import resolve_user_from_request
+from app.core.deps import get_current_user
 from app.models.source_connection import SystemIntegration
+from app.models.identity import User
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,10 @@ async def upsert_integration(
 
 @router.delete("/{code}", status_code=204)
 async def delete_integration(
-    code: str, request: Request, db: AsyncSession = Depends(get_db)
+    code: str,
+    request: Request,
+    audit_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Remove a configuração persistida e o segredo do serviço auxiliar."""
     linha = (
@@ -185,7 +189,6 @@ async def delete_integration(
         "enabled": bool(linha.enabled),
         "has_secret": bool(linha.secret_json),
     }
-    audit_user = await resolve_user_from_request(request, db)
     await audit(
         db, request, audit_user, module="connections", method="DELETE",
         action_label="delete", entity_type="integration", entity_id=linha.id,
