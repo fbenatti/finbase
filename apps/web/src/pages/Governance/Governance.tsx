@@ -8,9 +8,9 @@ import Gold from "../GoldMarts/GoldMarts";
 import FinancialContracts from "./FinancialContracts";
 
 const TABS = [
+  { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
   { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
   { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
-  { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Camada Gold de Custo", perms: [{ module: "gold", scope: null }] },
   { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
