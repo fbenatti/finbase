@@ -64,6 +64,7 @@ def test_chronological_axis_keys_sorts_yyyymm_ascending():
     inner = 'SELECT "origem" AS d0, "_billing_period" AS d1, SUM(1) AS m0 FROM t GROUP BY 1, 2'
     sql = _apply_pivot_axis_limits(inner, ["origem"], ["_billing_period"], 1, 500, 60, " ORDER BY d0, d1")
     assert "row_keys" in sql
+    assert "JOIN row_keys ON ROW(agg.d0) IS NOT DISTINCT FROM ROW(row_keys.d0)" in sql
     assert "period_keys" in sql
     assert "JOIN period_keys ON agg.d1 IS NOT DISTINCT FROM period_keys.d1" in sql
     assert "LIMIT 30000" in sql.split("period_keys")[-1] or sql.strip().endswith("LIMIT 30000")

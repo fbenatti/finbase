@@ -846,10 +846,12 @@ def _apply_pivot_axis_limits(
         # same rows appear because they then competed only with each other.
         rank = f" ORDER BY SUM(ABS(COALESCE({measure0}, 0))) DESC" if measure0 else f" ORDER BY {keys}"
         ctes.append(f"row_keys AS (SELECT {keys} FROM agg GROUP BY {keys}{rank} LIMIT {rlim})")
-        # IS NOT DISTINCT FROM: JOIN ... USING eliminava silenciosamente toda
-        # linha cuja chave contivesse NULL em qualquer dimensão (ex.: fontes
-        # com menos níveis de departamento preenchidos, como MongoDB).
-        cond = " AND ".join(f"agg.{k} IS NOT DISTINCT FROM row_keys.{k}" for k in other_aliases)
+        # Comparing each nullable dimension separately can make Trino's join
+        # planner discard every row when deeper hierarchy levels are NULL.
+        # A row-wise null-safe comparison preserves the composite key.
+        agg_key = ", ".join(f"agg.{key}" for key in other_aliases)
+        selected_key = ", ".join(f"row_keys.{key}" for key in other_aliases)
+        cond = f"ROW({agg_key}) IS NOT DISTINCT FROM ROW({selected_key})"
         joins.append(f"JOIN row_keys ON {cond}")
     if period_aliases:
         keys = ", ".join(period_aliases)
