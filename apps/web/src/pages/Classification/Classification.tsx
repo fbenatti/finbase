@@ -512,7 +512,7 @@ export function ClassificationRulesTab() {
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
         <Box>
-          <Typography variant="h6">Classificar modelo organizacional</Typography>
+          <Typography variant="h6">Classificar projetos</Typography>
           <Typography variant="body2" color="text.secondary">
             Regras que classificam linhas de custo em departamentos da hierarquia.
           </Typography>

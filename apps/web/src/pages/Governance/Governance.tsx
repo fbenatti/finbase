@@ -6,9 +6,11 @@ import { ClassificationRulesTab, TagsTab } from "../Classification/Classificatio
 import CloneRules from "../CloneRules/CloneRules";
 import Gold from "../GoldMarts/GoldMarts";
 import FinancialContracts from "./FinancialContracts";
+import Departments from "../Departments/Departments";
 
 const TABS = [
-  { id: "classification", label: "Classificar modelo organizacional", perms: [{ module: "rules", scope: null }] },
+  { id: "organization", label: "Organograma", perms: [{ module: "planning", scope: null }] },
+  { id: "classification", label: "Classificar projetos", perms: [{ module: "rules", scope: null }] },
   { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }] },
   { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
@@ -64,6 +66,7 @@ export default function Governance() {
             Você não tem permissão de leitura para nenhuma aba desta página. Solicite acesso ao administrador.
           </Typography>
         )}
+        {tab === "organization" && <Departments embedded />}
         {tab === "rules" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Rules embedded />

@@ -9,7 +9,6 @@ import Connections from "./pages/Connections/Connections";
 import Explorer from "./pages/Explorer/Explorer";
 import Mappings from "./pages/Mappings/Mappings";
 import Governance from "./pages/Governance/Governance";
-import Departments from "./pages/Departments/Departments";
 import Destinations from "./pages/Destinations/Destinations";
 import Extraction from "./pages/Extraction/Extraction";
 import ExtractionHistory from "./pages/Extraction/ExtractionHistory";
@@ -62,7 +61,7 @@ function App() {
         <Route index element={<Navigate to="/connections" replace />} />
         <Route path="connections" element={<Connections />} />
         <Route path="explorer/:connectionId" element={<Explorer />} />
-        <Route path="departments" element={<Departments />} />
+        <Route path="departments" element={<Navigate to="/governance?tab=organization" replace />} />
         <Route path="financial-planning" element={<FinancialPlanning />} />
         <Route path="departments/financial" element={<Navigate to="/financial-planning?tab=orcamento" replace />} />
         <Route path="budgets" element={<Navigate to="/financial-planning?tab=orcamento" replace />} />

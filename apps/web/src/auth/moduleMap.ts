@@ -36,6 +36,7 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   {
     prefix: "/governance",
     targets: [
+      { module: "planning" },
       { module: "rules" },
       { module: "azure_tag_policy" },
     ],

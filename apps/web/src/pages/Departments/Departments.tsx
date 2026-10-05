@@ -79,7 +79,7 @@ interface CustomFieldEntry {
   value: string;
 }
 
-export default function Departments() {
+export default function Departments({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [sharedCosts, setSharedCosts] = useState<SharedCostConfig[]>([]);
@@ -521,15 +521,15 @@ export default function Departments() {
   return (
     <Box
       sx={{
-        mx: -3,
-        mt: -3,
+        mx: embedded ? 0 : -3,
+        mt: embedded ? 0 : -3,
         pb: 3,
         minHeight: "calc(100vh - 64px)",
         bgcolor: "#f8fafc",
       }}
     >
       {/* Faixa de contexto branca */}
-      <Box
+      {!embedded && <Box
         sx={{
           px: 3,
           pt: 3,
@@ -544,12 +544,12 @@ export default function Departments() {
             {ORG.modelSubtitle}
           </Typography>
         </Box>
-      </Box>
+      </Box>}
 
       {/* Área de trabalho com campos simples de 40px */}
       <Box
         sx={{
-          p: 3,
+          p: embedded ? 0 : 3,
           "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": {
             height: 40,
           },

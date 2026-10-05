@@ -26,7 +26,6 @@ import {
   PlayArrow as PlayArrowIcon,
   BarChart as BarChartIcon,
   AccountTree as AccountTreeIcon,
-  Business as BusinessIcon,
   TableChart as TableChartIcon,
   Refresh as RefreshIcon,
   ShowChart as ForecastIcon,
@@ -69,7 +68,6 @@ const menuGroups = [
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
-      { path: "/departments", label: "Modelo Organizacional", icon: <BusinessIcon /> },
       { path: "/financial-planning", label: "Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
