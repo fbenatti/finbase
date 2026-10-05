@@ -12,7 +12,7 @@ const TABS = [
   { id: "organization", label: "Organograma", perms: [{ module: "planning", scope: null }] },
   { id: "classification", label: "Classificar projetos", perms: [{ module: "rules", scope: null }] },
   { id: "rules", label: "Ajustes financeiros", perms: [{ module: "rules", scope: null }] },
-  { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
+  { id: "financial-contracts", label: "Compromissos financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Geração de Cubos", perms: [{ module: "gold", scope: null }] },
   { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
