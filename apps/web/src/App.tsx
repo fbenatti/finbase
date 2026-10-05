@@ -73,7 +73,7 @@ function App() {
         <Route path="tables" element={<Tables />} />
         <Route path="destinations" element={<Navigate to="/tables?tab=destinations" replace />} />
         <Route path="relationship" element={<Navigate to="/tables?tab=relationship" replace />} />
-        <Route path="clone-rules" element={<Navigate to="/governance?tab=clone-rules" replace />} />
+        <Route path="clone-rules" element={<Navigate to="/governance?tab=rules&subtab=clone-rules" replace />} />
         <Route path="mappings" element={<Mappings />} />
         <Route path="governance" element={<Governance />} />
         <Route path="financial-contracts" element={<Navigate to="/financial-planning?tab=contratos-financeiros" replace />} />

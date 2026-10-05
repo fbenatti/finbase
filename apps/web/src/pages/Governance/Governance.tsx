@@ -11,14 +11,14 @@ import Departments from "../Departments/Departments";
 const TABS = [
   { id: "organization", label: "Organograma", perms: [{ module: "planning", scope: null }] },
   { id: "classification", label: "Classificar projetos", perms: [{ module: "rules", scope: null }] },
-  { id: "rules", label: "Ajustes financeiros", perms: [{ module: "rules", scope: null }] },
+  { id: "rules", label: "Ajustes financeiros", perms: [{ module: "rules", scope: null }, { module: "reservations", scope: null }] },
   { id: "financial-contracts", label: "Compromissos financeiros", perms: [{ module: "rules", scope: null }] },
-  { id: "clone-rules", label: "Reservas e Savings Plans", perms: [{ module: "reservations", scope: null }] },
   { id: "cost-relationship", label: "Geração de Cubos", perms: [{ module: "gold", scope: null }] },
   { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+type RulesTabId = "adjustments" | "clone-rules";
 
 export default function Governance() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -27,12 +27,21 @@ export default function Governance() {
   if (requested === "desligue" || requested === "orfaos") {
     return <Navigate to={`/savings?tab=${requested}`} replace />;
   }
+  if (requested === "clone-rules") {
+    return <Navigate to="/governance?tab=rules&subtab=clone-rules" replace />;
+  }
   const allowedTabs = TABS.filter((item) => item.perms.some((p) => hasPerm(p.module, "read", p.scope)));
   const fallback = allowedTabs[0]?.id ?? null;
   const tab: TabId | null =
     requested && TABS.some((item) => item.id === requested && allowedTabs.some((a) => a.id === requested))
       ? (requested as TabId)
       : fallback;
+  const allowedRulesTabs = [
+    ...(hasPerm("rules", "read") ? [{ id: "adjustments" as const, label: "Regras de ajustes" }] : []),
+    ...(hasPerm("reservations", "read") ? [{ id: "clone-rules" as const, label: "Reservas e Savings Plans" }] : []),
+  ];
+  const requestedRulesTab = searchParams.get("subtab");
+  const rulesTab: RulesTabId | undefined = allowedRulesTabs.find((item) => item.id === requestedRulesTab)?.id ?? allowedRulesTabs[0]?.id;
 
   const setTab = (value: TabId) => {
     setSearchParams({ tab: value }, { replace: true });
@@ -69,7 +78,11 @@ export default function Governance() {
         {tab === "organization" && <Departments embedded />}
         {tab === "rules" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Rules embedded />
+            <Tabs value={rulesTab} onChange={(_, value: RulesTabId) => setSearchParams({ tab: "rules", subtab: value }, { replace: true })} aria-label="Ajustes financeiros" sx={{ mb: 2 }}>
+              {allowedRulesTabs.map((item) => <Tab key={item.id} value={item.id} label={item.label} />)}
+            </Tabs>
+            {rulesTab === "adjustments" && <Rules embedded />}
+            {rulesTab === "clone-rules" && <CloneRules embedded />}
           </Paper>
         )}
         {tab === "financial-contracts" && (
@@ -80,11 +93,6 @@ export default function Governance() {
         {tab === "classification" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <ClassificationRulesTab />
-          </Paper>
-        )}
-        {tab === "clone-rules" && (
-          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <CloneRules embedded />
           </Paper>
         )}
         {tab === "cost-relationship" && (
