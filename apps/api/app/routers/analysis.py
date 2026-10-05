@@ -840,7 +840,11 @@ def _apply_pivot_axis_limits(
     joins: list[str] = []
     if other_aliases:
         keys = ", ".join(other_aliases)
-        rank = f" ORDER BY SUM(COALESCE({measure0}, 0)) DESC" if measure0 else f" ORDER BY {keys}"
+        # Rank by absolute impact so large credits/refunds (negative values)
+        # are not silently dropped behind low positive spend in an unfiltered
+        # pivot. Filtering to a specific refund dimension previously made the
+        # same rows appear because they then competed only with each other.
+        rank = f" ORDER BY SUM(ABS(COALESCE({measure0}, 0))) DESC" if measure0 else f" ORDER BY {keys}"
         ctes.append(f"row_keys AS (SELECT {keys} FROM agg GROUP BY {keys}{rank} LIMIT {rlim})")
         # IS NOT DISTINCT FROM: JOIN ... USING eliminava silenciosamente toda
         # linha cuja chave contivesse NULL em qualquer dimensão (ex.: fontes

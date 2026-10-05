@@ -108,3 +108,11 @@ def test_cell_filters_remap_period_and_drop_unknown_columns():
 def test_schema_cache_key_is_namespace_qualified():
     assert _schema_cache_key("gold", "dest_modelo_focus") == "gold.dest_modelo_focus"
     assert _schema_cache_key("gold", "dest_dm_cost") == "gold.dest_dm_cost"
+
+
+def test_axis_limit_keeps_large_negative_refunds_in_unfiltered_pivot():
+    inner = 'SELECT "organograma_nivel_6" AS d0, SUM("realizado") AS m0 FROM t GROUP BY 1'
+
+    sql = _apply_pivot_axis_limits(inner, ["organograma_nivel_6"], [], 1, 500, 60, " ORDER BY d0")
+
+    assert "ORDER BY SUM(ABS(COALESCE(m0, 0))) DESC" in sql
