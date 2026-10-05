@@ -26,6 +26,7 @@ from app.models.source_connection import SystemIntegration
 from app.models.identity import User
 
 logger = logging.getLogger(__name__)
+_CATALOG_DELETED_KEY = "__catalog_deleted"
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -97,6 +98,8 @@ async def list_integrations(db: AsyncSession = Depends(get_db)) -> dict[str, Any
     itens: list[dict[str, Any]] = []
     for conhecido in KNOWN_INTEGRATIONS:
         linha = linhas.get(conhecido["code"])
+        if linha and (linha.config_json or {}).get(_CATALOG_DELETED_KEY):
+            continue
         if linha:
             itens.append({**_public(linha), "catalog": conhecido})
         else:
@@ -117,7 +120,7 @@ async def list_integrations(db: AsyncSession = Depends(get_db)) -> dict[str, Any
             })
     # Cadastrados que não estão no catálogo continuam visíveis.
     for codigo, linha in linhas.items():
-        if not _catalogado(codigo):
+        if not _catalogado(codigo) and not (linha.config_json or {}).get(_CATALOG_DELETED_KEY):
             itens.append({**_public(linha), "catalog": None})
     return {"items": itens}
 
@@ -146,6 +149,12 @@ async def upsert_integration(
             secret_json={},
         )
         db.add(linha)
+    elif _catalogado(code) and (linha.config_json or {}).get(_CATALOG_DELETED_KEY):
+        # Salvar explicitamente um item removido do catálogo o restaura com os
+        # valores padrão, sem reviver credenciais antigas.
+        linha.config_json = dict((conhecido or {}).get("default_config") or {})
+        linha.secret_json = {}
+        linha.enabled = bool((conhecido or {}).get("enabled_by_default", False))
 
     if payload.name:
         linha.name = payload.name
@@ -175,12 +184,26 @@ async def delete_integration(
     audit_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Remove a configuração persistida e o segredo do serviço auxiliar."""
+    """Remove o serviço auxiliar ou oculta permanentemente um item do catálogo."""
     linha = (
         await db.execute(select(SystemIntegration).where(SystemIntegration.code == code))
     ).scalars().first()
-    if not linha:
+    conhecido = _catalogado(code)
+    if not linha and not conhecido:
         raise HTTPException(status_code=404, detail=f"Serviço '{code}' não cadastrado")
+
+    if not linha:
+        linha = SystemIntegration(
+            code=code,
+            name=conhecido["name"],
+            integration_type=conhecido["integration_type"],
+            description=conhecido.get("description"),
+            enabled=False,
+            config_json={_CATALOG_DELETED_KEY: True},
+            secret_json={},
+        )
+        db.add(linha)
+        await db.flush()
 
     before = {
         "code": linha.code,
@@ -194,7 +217,15 @@ async def delete_integration(
         action_label="delete", entity_type="integration", entity_id=linha.id,
         entity_label=linha.code, before=before, status_code=204,
     )
-    await db.delete(linha)
+    if conhecido:
+        linha.enabled = False
+        linha.config_json = {_CATALOG_DELETED_KEY: True}
+        linha.secret_json = {}
+        linha.last_test_at = None
+        linha.last_test_status = None
+        linha.last_test_message = None
+    else:
+        await db.delete(linha)
     await db.commit()
     return Response(status_code=204)
 

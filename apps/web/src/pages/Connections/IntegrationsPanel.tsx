@@ -228,18 +228,16 @@ export default function IntegrationsPanel() {
               <TableCell align="right">
                 <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
                   <Button size="small" onClick={() => abrir(item)}>Configurar</Button>
-                  {item.id !== null && (
-                    <Tooltip title="Excluir serviço auxiliar">
-                      <IconButton
-                        size="small"
-                        color="error"
-                        aria-label={`Excluir ${item.name}`}
-                        onClick={() => { setExclusaoErro(null); setExcluindo(item); }}
-                      >
-                        <DeleteOutline fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
+                  <Tooltip title="Excluir serviço auxiliar">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      aria-label={`Excluir ${item.name}`}
+                      onClick={() => { setExclusaoErro(null); setExcluindo(item); }}
+                    >
+                      <DeleteOutline fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </Stack>
               </TableCell>
             </TableRow>
@@ -259,8 +257,8 @@ export default function IntegrationsPanel() {
             <Alert severity="error">{exclusaoErro}</Alert>
           ) : (
             <Typography>
-              A configuração e as credenciais salvas de <strong>{excluindo?.name}</strong> serão removidas.
-              Serviços previstos no catálogo podem continuar aparecendo como não configurados.
+              <strong>{excluindo?.name}</strong> e suas configurações e credenciais serão removidos deste ambiente.
+              O serviço não voltará a aparecer na lista; você poderá restaurá-lo ao configurá-lo novamente.
             </Typography>
           )}
         </DialogContent>
