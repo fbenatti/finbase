@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -170,7 +170,7 @@ async def upsert_integration(
 @router.delete("/{code}", status_code=204)
 async def delete_integration(
     code: str, request: Request, db: AsyncSession = Depends(get_db)
-) -> None:
+) -> Response:
     """Remove a configuração persistida e o segredo do serviço auxiliar."""
     linha = (
         await db.execute(select(SystemIntegration).where(SystemIntegration.code == code))
@@ -193,6 +193,7 @@ async def delete_integration(
     )
     await db.delete(linha)
     await db.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{code}/test")
