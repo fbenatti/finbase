@@ -14,12 +14,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.core.audit import audit
+from app.core.deps import resolve_user_from_request
 from app.models.source_connection import SystemIntegration
 
 logger = logging.getLogger(__name__)
@@ -163,6 +165,34 @@ async def upsert_integration(
     await db.commit()
     await db.refresh(linha)
     return _public(linha)
+
+
+@router.delete("/{code}", status_code=204)
+async def delete_integration(
+    code: str, request: Request, db: AsyncSession = Depends(get_db)
+) -> None:
+    """Remove a configuração persistida e o segredo do serviço auxiliar."""
+    linha = (
+        await db.execute(select(SystemIntegration).where(SystemIntegration.code == code))
+    ).scalars().first()
+    if not linha:
+        raise HTTPException(status_code=404, detail=f"Serviço '{code}' não cadastrado")
+
+    before = {
+        "code": linha.code,
+        "name": linha.name,
+        "integration_type": linha.integration_type,
+        "enabled": bool(linha.enabled),
+        "has_secret": bool(linha.secret_json),
+    }
+    audit_user = await resolve_user_from_request(request, db)
+    await audit(
+        db, request, audit_user, module="connections", method="DELETE",
+        action_label="delete", entity_type="integration", entity_id=linha.id,
+        entity_label=linha.code, before=before, status_code=204,
+    )
+    await db.delete(linha)
+    await db.commit()
 
 
 @router.post("/{code}/test")

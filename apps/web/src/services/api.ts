@@ -5544,6 +5544,10 @@ export async function saveIntegration(
   return data;
 }
 
+export async function deleteIntegration(code: string): Promise<void> {
+  await api.delete(`/integrations/${encodeURIComponent(code)}`);
+}
+
 export async function testIntegration(
   code: string,
 ): Promise<{ code: string; status: string; message: string }> {

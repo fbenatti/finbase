@@ -11,11 +11,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControlLabel, Link, Stack, Switch,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
+  DialogContent, DialogTitle, FormControlLabel, IconButton, Link, Stack, Switch,
+  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
+import DeleteOutline from "@mui/icons-material/DeleteOutline";
 import {
-  IntegrationItem, getIntegrations, saveIntegration, testIntegration,
+  deleteIntegration, IntegrationItem, getIntegrations, saveIntegration, testIntegration,
 } from "../../services/api";
 
 /** Rótulo e ajuda por tipo, para o operador saber o que está configurando. */
@@ -38,6 +39,9 @@ export default function IntegrationsPanel() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState<IntegrationItem | null>(null);
+  const [excluindo, setExcluindo] = useState<IntegrationItem | null>(null);
+  const [exclusaoErro, setExclusaoErro] = useState<string | null>(null);
+  const [excluindoEmAndamento, setExcluindoEmAndamento] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [testando, setTestando] = useState(false);
   const [resultado, setResultado] = useState<string | null>(null);
@@ -131,6 +135,21 @@ export default function IntegrationsPanel() {
     }
   };
 
+  const excluir = async () => {
+    if (!excluindo) return;
+    setExcluindoEmAndamento(true);
+    setExclusaoErro(null);
+    try {
+      await deleteIntegration(excluindo.code);
+      setExcluindo(null);
+      await carregar();
+    } catch {
+      setExclusaoErro(`Não foi possível excluir ${excluindo.name}. Verifique sua permissão e tente novamente.`);
+    } finally {
+      setExcluindoEmAndamento(false);
+    }
+  };
+
   if (loading) {
     return <Box sx={{ p: 3 }}><CircularProgress size={22} /></Box>;
   }
@@ -207,12 +226,53 @@ export default function IntegrationsPanel() {
                 )}
               </TableCell>
               <TableCell align="right">
-                <Button size="small" onClick={() => abrir(item)}>Configurar</Button>
+                <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
+                  <Button size="small" onClick={() => abrir(item)}>Configurar</Button>
+                  {item.id !== null && (
+                    <Tooltip title="Excluir serviço auxiliar">
+                      <IconButton
+                        size="small"
+                        color="error"
+                        aria-label={`Excluir ${item.name}`}
+                        onClick={() => { setExclusaoErro(null); setExcluindo(item); }}
+                      >
+                        <DeleteOutline fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </Stack>
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+
+      <Dialog
+        open={Boolean(excluindo)}
+        onClose={() => { if (!excluindoEmAndamento) { setExcluindo(null); setExclusaoErro(null); } }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Excluir serviço auxiliar?</DialogTitle>
+        <DialogContent>
+          {exclusaoErro ? (
+            <Alert severity="error">{exclusaoErro}</Alert>
+          ) : (
+            <Typography>
+              A configuração e as credenciais salvas de <strong>{excluindo?.name}</strong> serão removidas.
+              Serviços previstos no catálogo podem continuar aparecendo como não configurados.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={excluindoEmAndamento} onClick={() => { setExcluindo(null); setExclusaoErro(null); }}>
+            Cancelar
+          </Button>
+          <Button color="error" variant="contained" disabled={excluindoEmAndamento || Boolean(exclusaoErro)} onClick={() => void excluir()}>
+            {excluindoEmAndamento ? "Excluindo…" : "Excluir serviço"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={!!editando} onClose={() => setEditando(null)} maxWidth="sm" fullWidth>
         <DialogTitle>Configurar {editando?.name}</DialogTitle>

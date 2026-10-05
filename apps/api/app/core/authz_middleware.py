@@ -23,6 +23,7 @@ from app.models.identity import User
 # maior prefixo primeiro; (prefixo, módulo)
 PATH_MODULE: list[tuple[str, str]] = [
     ("/visoes-consumo-ia/provider", "ai_provider_dashboards"),
+    ("/integrations", "connections"),
     ("/etl/periods", "periods"),
     ("/connections", "connections"),
     ("/csv-upload", "csv_upload"),
