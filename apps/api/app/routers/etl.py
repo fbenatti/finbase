@@ -1656,110 +1656,29 @@ def _reprocess_destination_sync(
         if unique_cids:
             try:
                 from app.services.trino_service import execute_sync as _trino_execute_sync
-                _curated_rows = _trino_execute_sync(
-                    "SELECT meter_id, reference_price_usd, unit_of_measure, currency "
-                    "FROM iceberg.bronze.raw_azure_price_reference "
-                    "WHERE coalesce(needs_review, false) = false "
-                    "AND try_cast(reference_price_usd AS DOUBLE) > 0",
-                    timeout_s=30,
-                )
-                for _row in _curated_rows:
-                    _meter = str(_row.get("meter_id") or "").strip().casefold()
-                    if not _meter:
-                        continue
-                    clone_reference_prices[("azure", _meter)] = {
-                        "unit_price": float(_row["reference_price_usd"]),
-                        "unit_of_measure": _row.get("unit_of_measure"),
-                        "currency": _row.get("currency"),
-                    }
+                from app.services.azure_price_fallback import load_azure_price_fallbacks
                 _pricesheet_conn = session.execute(
                     select(SourceConnection).where(SourceConnection.code == "azure-pricesheet")
                 ).scalar_one_or_none()
                 _active_snapshot = ((_pricesheet_conn.config_json or {}).get("active_snapshot_id") if _pricesheet_conn else None)
-                if _active_snapshot:
-                    _snapshot_sql = str(_active_snapshot).replace("'", "''")
-                    _source_periods = {(cid, str(period)) for _, cid, period, _ in all_blobs if period}
-                    for _cid, _period in _source_periods:
-                        _source_conn = session.get(SourceConnection, _cid)
-                        if not _source_conn or not _source_conn.code.casefold().startswith("azure-"):
-                            continue
-                        _raw_table = re.sub(r"[^a-zA-Z0-9_]", "_", _source_conn.code)
-                        if not re.fullmatch(r"[a-zA-Z0-9_]+", _raw_table):
-                            continue
-                        _period_sql = _period.replace("'", "''")
-                        _candidate_rows = _trino_execute_sync(f"""
-                            WITH required AS (
-                                SELECT DISTINCT lower(trim(b.meterid)) AS source_meter,
-                                       lower(trim(b.billingaccountid)) AS source_account,
-                                       lower(trim(b.pricingcurrency)) AS source_currency,
-                                       lower(trim(b.unitofmeasure)) AS source_unit,
-                                       lower(trim(b.productid)) AS source_product,
-                                       lower(trim(b.meterregion)) AS source_region
-                                FROM iceberg.bronze.raw_{_raw_table} b
-                                WHERE b._billing_period = '{_period_sql}'
-                                  AND lower(trim(b.chargetype)) = 'usage'
-                                  AND lower(trim(b.pricingmodel)) IN ('reservation', 'savingsplan')
-                                  AND NOT EXISTS (
-                                      SELECT 1 FROM iceberg.bronze.raw_{_raw_table} od
-                                      WHERE od._billing_period = b._billing_period
-                                        AND lower(trim(od.pricingmodel)) = 'ondemand'
-                                        AND lower(trim(od.meterid)) = lower(trim(b.meterid))
-                                        AND lower(trim(od.billingaccountid)) = lower(trim(b.billingaccountid))
-                                        AND lower(trim(od.pricingcurrency)) = lower(trim(b.pricingcurrency))
-                                        AND lower(trim(od.unitofmeasure)) = lower(trim(b.unitofmeasure))
-                                        AND lower(trim(od.productid)) = lower(trim(b.productid))
-                                        AND lower(trim(od.meterregion)) = lower(trim(b.meterregion))
-                                  )
-                                  AND NOT EXISTS (
-                                      SELECT 1 FROM iceberg.bronze.raw_azure_price_reference r
-                                      WHERE coalesce(r.needs_review, false) = false
-                                        AND try_cast(r.reference_price_usd AS DOUBLE) > 0
-                                        AND lower(trim(r.meter_id)) = lower(trim(b.meterid))
-                                        AND lower(trim(r.currency)) = lower(trim(b.pricingcurrency))
-                                        AND lower(trim(r.unit_of_measure)) = lower(trim(b.unitofmeasure))
-                                  )
-                            )
-                            SELECT DISTINCT b.source_meter, b.source_account, b.source_currency,
-                                   b.source_unit, b.source_product, b.source_region,
-                                   try_cast(p.unitprice AS DOUBLE) AS unit_price,
-                                   p.unitofmeasure AS reference_unit,
-                                   lower(trim(p.productid)) AS reference_product,
-                                   lower(trim(p.meterregion)) AS reference_region
-                            FROM required b
-                            JOIN iceberg.bronze.raw_azure_pricesheet p
-                              ON lower(trim(p.meterid)) = b.source_meter
-                             AND lower(trim(p.billingaccountid)) = b.source_account
-                             AND lower(trim(p.currency)) = b.source_currency
-                            WHERE p.snapshot_id = '{_snapshot_sql}'
-                              AND lower(p.pricetype) = 'consumption'
-                              AND try_cast(p.unitprice AS DOUBLE) > 0
-                              AND (b.source_product = '' OR lower(trim(p.productid)) = b.source_product)
-                              AND (b.source_region = '' OR lower(trim(p.meterregion)) = b.source_region OR p.meterregion IS NULL)
-                        """, timeout_s=120)
-                        _cloud_key = _source_conn.code.casefold()
-                        for _row in _candidate_rows:
-                            _meter = str(_row.get("source_meter") or "")
-                            _account = str(_row.get("source_account") or "")
-                            _currency = str(_row.get("source_currency") or "")
-                            _unit = str(_row.get("source_unit") or "")
-                            _product = str(_row.get("source_product") or "")
-                            _region = str(_row.get("source_region") or "")
-                            _reference_product = str(_row.get("reference_product") or "")
-                            _reference_region = str(_row.get("reference_region") or "")
-                            if _product and _reference_product and _product != _reference_product:
-                                continue
-                            if _region and _reference_region and _region != _reference_region:
-                                continue
-                            if not _meter or not _account or not _row.get("unit_price"):
-                                continue
-                            _key = (_cloud_key, _meter, _account, _currency, _unit, _product, _region)
-                            _price_value = float(_row["unit_price"])
-                            _candidate = {"unit_price": _price_value, "unit_of_measure": _row.get("reference_unit")}
-                            _existing = clone_price_sheet_prices.get(_key)
-                            if _existing and (_existing["unit_price"] != _price_value or _existing.get("unit_of_measure") != _candidate.get("unit_of_measure")):
-                                clone_price_sheet_prices[_key] = {"ambiguous": True}
-                            else:
-                                clone_price_sheet_prices[_key] = _candidate
+                _source_periods = {(cid, str(period)) for _, cid, period, _ in all_blobs if period}
+                for _cid, _period in _source_periods:
+                    _source_conn = session.get(SourceConnection, _cid)
+                    if not _source_conn or not _source_conn.code.casefold().startswith("azure-") or _source_conn.code == "azure-pricesheet":
+                        continue
+                    _curated, _pricesheet, _counts = load_azure_price_fallbacks(
+                        _trino_execute_sync,
+                        connection_code=_source_conn.code,
+                        billing_period=_period,
+                        active_snapshot_id=_active_snapshot,
+                    )
+                    clone_reference_prices.update(_curated)
+                    clone_price_sheet_prices.update(_pricesheet)
+                    logger.info(
+                        "Azure reference fallback prepared for %s/%s: curated=%d, keys_missing_observed=%d, Price Sheet candidates=%d",
+                        _source_conn.code, _period, _counts["curated_prices"],
+                        _counts["missing_reference_keys"], _counts["price_sheet_candidates"],
+                    )
             except Exception as _price_catalog_error:
                 logger.warning("Price Sheet fallback lookup failed; curated references remain loaded: %s", _price_catalog_error)
             logger.info(
