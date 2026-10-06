@@ -1650,25 +1650,66 @@ def _reprocess_destination_sync(
         conn_map: dict[int, SourceConnection] = {}
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
-        clone_reference_prices: dict[tuple[str, str], float] = {}
+        clone_reference_prices: dict[tuple[str, ...], Any] = {}
         unique_cids = set(cid for _, cid, _, _ in all_blobs)
         if unique_cids:
             try:
                 from app.services.trino_service import execute_sync as _trino_execute_sync
-                _reference_rows = _trino_execute_sync(
-                    "SELECT meter_id, reference_price_usd "
-                    "FROM iceberg.bronze.raw_azure_price_reference "
-                    "WHERE coalesce(needs_review, false) = false "
-                    "AND try_cast(reference_price_usd AS DOUBLE) > 0",
-                    timeout_s=30,
-                )
-                clone_reference_prices = {
-                    ("azure", str(row["meter_id"])):
-                    float(row["reference_price_usd"])
-                    for row in _reference_rows if row.get("meter_id") and row.get("reference_price_usd")
-                }
+                _pricesheet_conn = session.execute(
+                    select(SourceConnection).where(SourceConnection.code == "azure-pricesheet")
+                ).scalar_one_or_none()
+                _active_snapshot = ((_pricesheet_conn.config_json or {}).get("active_snapshot_id") if _pricesheet_conn else None)
+                if _active_snapshot:
+                    _snapshot_sql = str(_active_snapshot).replace("'", "''")
+                    _source_periods = {(cid, str(period)) for _, cid, period, _ in all_blobs if period}
+                    for _cid, _period in _source_periods:
+                        _source_conn = session.get(SourceConnection, _cid)
+                        if not _source_conn or _source_conn.cloud_scope != "azure":
+                            continue
+                        _raw_table = re.sub(r"[^a-zA-Z0-9_]", "_", _source_conn.code)
+                        if not re.fullmatch(r"[a-zA-Z0-9_]+", _raw_table):
+                            continue
+                        _period_sql = _period.replace("'", "''")
+                        _candidate_rows = _trino_execute_sync(f"""
+                            SELECT DISTINCT lower(trim(b.meterid)) AS source_meter,
+                                   lower(trim(b.billingaccountid)) AS source_account,
+                                   lower(trim(b.pricingcurrency)) AS source_currency,
+                                   lower(trim(b.unitofmeasure)) AS source_unit,
+                                   lower(trim(b.productid)) AS source_product,
+                                   lower(trim(b.meterregion)) AS source_region,
+                                   p.unit_price, p.unit_of_measure AS reference_unit,
+                                   lower(trim(p.product_id)) AS reference_product,
+                                   lower(trim(p.region_id)) AS reference_region
+                            FROM iceberg.silver.price_catalog p
+                            JOIN iceberg.bronze.raw_{_raw_table} b
+                              ON lower(trim(p.meter_id)) = lower(trim(b.meterid))
+                             AND lower(trim(p.billing_account_id)) = lower(trim(b.billingaccountid))
+                             AND lower(trim(p.currency)) = lower(trim(b.pricingcurrency))
+                            WHERE p.snapshot_id = '{_snapshot_sql}'
+                              AND lower(p.price_type) = 'consumption'
+                              AND try_cast(p.unit_price AS DOUBLE) > 0
+                              AND b._billing_period = '{_period_sql}'
+                        """, timeout_s=120)
+                        _cloud_key = _source_conn.code.casefold()
+                        for _row in _candidate_rows:
+                            _meter = str(_row.get("source_meter") or "")
+                            _account = str(_row.get("source_account") or "")
+                            _currency = str(_row.get("source_currency") or "")
+                            _unit = str(_row.get("source_unit") or "")
+                            _product = str(_row.get("source_product") or "")
+                            _region = str(_row.get("source_region") or "")
+                            if not _meter or not _account or not _row.get("unit_price"):
+                                continue
+                            _key = (_cloud_key, _meter, _account, _currency, _unit, _product, _region)
+                            _price_value = float(_row["unit_price"])
+                            _candidate = {"unit_price": _price_value, "unit_of_measure": _row.get("reference_unit")}
+                            _existing = clone_reference_prices.get(_key)
+                            if _existing and (_existing["unit_price"] != _price_value or _existing.get("unit_of_measure") != _candidate.get("unit_of_measure")):
+                                clone_reference_prices[_key] = {"ambiguous": True}
+                            else:
+                                clone_reference_prices[_key] = _candidate
             except Exception as _price_catalog_error:
-                logger.warning("Clone reference catalog unavailable; using observed prices only: %s", _price_catalog_error)
+                logger.warning("Active Azure Price Sheet unavailable; using observed prices only: %s", _price_catalog_error)
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
                        'organograma_nivel_1', 'organograma_nivel_2',
