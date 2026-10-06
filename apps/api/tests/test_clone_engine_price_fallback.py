@@ -155,3 +155,27 @@ def test_contract_price_fallback_does_not_match_different_account_or_unit():
 
     assert count == 0
     assert engine.pendencies[0]["meter_id"] == "meter-1"
+
+
+def test_bronze_price_sheet_candidate_must_have_equivalent_uom():
+    row = _reservation_row() | {
+        "source_billing_account_id": "account-1",
+        "source_pricing_currency": "USD",
+        "source_unit_of_measure": "10K",
+        "source_product_id": "product-1",
+        "source_region": "region-1",
+    }
+    key = ("azure-ti", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
+
+    exact = CloneEngine([_rule()], 1, reference_prices={
+        key: {"unit_price": 3.25, "unit_of_measure": "10K"},
+    })
+    result, count = exact.apply(pd.DataFrame([row]), "202609")
+    assert count == 1
+    assert result.loc[result["is_synthetic"], "BilledCost"].iloc[0] == -6.5
+
+    incompatible = CloneEngine([_rule()], 1, reference_prices={
+        key: {"unit_price": 3.25, "unit_of_measure": "Hour"},
+    })
+    _, count = incompatible.apply(pd.DataFrame([row]), "202609")
+    assert count == 0
