@@ -123,6 +123,7 @@ class CloneEngine:
             clouds = eligible.get("cloud_origem", pd.Series("", index=eligible.index)).astype(str).str.lower()
             keys = list(zip(clouds, eligible[meter].astype(str)))
             references = pd.Series(keys, index=eligible.index).map(self.prices)
+            references = references.astype(object)
             # Curated Azure prices are a fallback only: a matching On-Demand
             # observation in this billing stream always wins.
             def _cached_reference(key: tuple[str, str]) -> float | None:
