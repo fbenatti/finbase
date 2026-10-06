@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -15,7 +14,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 PRICE_SHEET_PREFIX = "reports/report_-pricesheet/"
-BRONZE_TABLE = "raw_azure_price_reference"
 
 
 def _credentials() -> tuple[ClientSecretCredential, str, str]:
@@ -108,16 +106,31 @@ def persist_reference(row: dict[str, Any]) -> None:
     import pandas as pd
     from app.services import iceberg_service
 
+    from app.services.trino_service import execute_sync
+    from app.services.iceberg_service import _get_catalog
+
+    escaped_meter = str(row["meter_id"]).replace("'", "''")
+    execute_sync(
+        "DELETE FROM iceberg.bronze.raw_azure_price_reference "
+        f"WHERE meter_id = '{escaped_meter}' AND _billing_period = '{row['_billing_period']}'",
+        timeout_s=30,
+    )
     frame = pd.DataFrame([row])
+    frame["_billing_period"] = str(row["_billing_period"])
+    frame["reference_source_month"] = row["source_month"]
     frame["table_reference_price_usd"] = None
     frame["table_reference_month"] = None
     frame["reference_delta_pct"] = None
     frame["billing_currency"] = row.get("currency") or "USD"
     frame["uom"] = row.get("unit_of_measure")
-    iceberg_service.write_bronze(
-        "azure_price_reference", frame, str(row["_billing_period"]),
-        f"price-sheet-targeted/{row['meter_id']}/{row['_billing_period']}",
-    )
+    frame["source_month"] = row["source_month"]
+    frame["reference_price_usd"] = row["reference_price_usd"]
+    frame["needs_review"] = False
+    frame["reference_price_source"] = row["reference_price_source"]
+    frame["contract_discount_pct"] = row["contract_discount_pct"]
+    table = _get_catalog().load_table(("bronze", "raw_azure_price_reference"))
+    arrow = iceberg_service._df_to_arrow(frame, target_schema=table.schema())
+    table.append(arrow)
 
 
 def collect_and_persist(meter_id: str) -> dict[str, Any]:
