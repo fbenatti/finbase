@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
+import pandas as pd
 from azure.identity import ClientSecretCredential
 from azure.storage.blob import BlobServiceClient
 
