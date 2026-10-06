@@ -836,7 +836,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE contract_settlement_month ADD COLUMN IF NOT EXISTS settled_overage NUMERIC(20,6) NOT NULL DEFAULT 0",
             "ALTER TABLE contract_settlement_run ADD COLUMN IF NOT EXISTS budget_version_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "UPDATE business_rule SET financial_effect = 'DIRECT_REALIZED', target_column = 'consumo_realizado' WHERE financial_effect = 'NONE' AND lower(target_column) = 'realizado'",
-            "UPDATE gold_rule SET measure_columns = '[\"realizado\", \"realizado_cloud\", \"consumo_realizado\", \"ajuste_contratual\", \"billedcost\", \"consumedquantity\"]'::jsonb WHERE code = 'visao-completa' AND measure_columns IS DISTINCT FROM '[\"realizado\", \"realizado_cloud\", \"consumo_realizado\", \"ajuste_contratual\", \"billedcost\", \"consumedquantity\"]'::jsonb",
+            "UPDATE gold_rule SET measure_columns = '[\"realizado\", \"realizado_cloud\", \"consumo_realizado\", \"ajuste_contratual\", \"billedcost\", \"consumedquantity\"]'::json WHERE code = 'visao-completa' AND measure_columns::jsonb IS DISTINCT FROM '[\"realizado\", \"realizado_cloud\", \"consumo_realizado\", \"ajuste_contratual\", \"billedcost\", \"consumedquantity\"]'::jsonb",
             "ALTER TABLE classification_rule ADD COLUMN IF NOT EXISTS cloud_scope VARCHAR(50)",
             "CREATE INDEX IF NOT EXISTS ix_business_rule_cloud_scope ON business_rule (cloud_scope)",
             "CREATE INDEX IF NOT EXISTS ix_classification_rule_cloud_scope ON classification_rule (cloud_scope)",
