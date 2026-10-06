@@ -55,10 +55,14 @@ def _apply_changes(row: dict[str, Any], changes: dict[str, Any], *, historical_c
 
 
 class CloneEngine:
-    def __init__(self, rules: list[Any], destination_table_id: int):
+    def __init__(
+        self, rules: list[Any], destination_table_id: int,
+        reference_prices: dict[tuple[str, str], float] | None = None,
+    ):
         self.rules = sorted(rules, key=lambda r: r.priority)
         self.destination_table_id = destination_table_id
         self.prices: dict[tuple[str, str], tuple[str, float]] = {}
+        self.reference_prices = reference_prices or {}
         self.pendencies: list[dict[str, Any]] = []
 
     def _prime_prices(self, frame: pd.DataFrame, rule: Any, period: str) -> None:
@@ -119,6 +123,14 @@ class CloneEngine:
             clouds = eligible.get("cloud_origem", pd.Series("", index=eligible.index)).astype(str).str.lower()
             keys = list(zip(clouds, eligible[meter].astype(str)))
             references = pd.Series(keys, index=eligible.index).map(self.prices)
+            # Curated Azure prices are a fallback only: a matching On-Demand
+            # observation in this billing stream always wins.
+            cached = pd.Series(keys, index=eligible.index).map(self.reference_prices)
+            use_cached = references.isna() & cached.notna()
+            if use_cached.any():
+                references.loc[use_cached] = cached.loc[use_cached].map(
+                    lambda price: ("reference_catalog", float(price))
+                )
             missing = references.isna()
             if missing.any():
                 pending = eligible.loc[missing].copy()
