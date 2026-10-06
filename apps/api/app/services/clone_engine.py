@@ -177,12 +177,15 @@ class CloneEngine:
                     price = self.reference_prices.get(("azure", key[1]))
                 if price is None:
                     return None
-                reference_unit = getattr(price, "unit_of_measure", None)
+                if isinstance(price, dict) and price.get("ambiguous"):
+                    return None
+                reference_unit = price.get("unit_of_measure") if isinstance(price, dict) else getattr(price, "unit_of_measure", None)
                 if reference_unit is not None:
                     factor = price_unit_factor(reference_unit, row.get("source_unit_of_measure"))
                     if factor is None:
                         return None
-                    price = getattr(price, "unit_price", price) * factor
+                    base_price = price.get("unit_price") if isinstance(price, dict) else getattr(price, "unit_price", price)
+                    price = base_price * factor
                 return price
 
             cached = pd.Series(
