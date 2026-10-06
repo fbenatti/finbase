@@ -1664,7 +1664,7 @@ def _reprocess_destination_sync(
                     _source_periods = {(cid, str(period)) for _, cid, period, _ in all_blobs if period}
                     for _cid, _period in _source_periods:
                         _source_conn = session.get(SourceConnection, _cid)
-                        if not _source_conn or _source_conn.cloud_scope != "azure":
+                        if not _source_conn or not _source_conn.code.casefold().startswith("azure-"):
                             continue
                         _raw_table = re.sub(r"[^a-zA-Z0-9_]", "_", _source_conn.code)
                         if not re.fullmatch(r"[a-zA-Z0-9_]+", _raw_table):
