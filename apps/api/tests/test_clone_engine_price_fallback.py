@@ -179,3 +179,28 @@ def test_bronze_price_sheet_candidate_must_have_equivalent_uom():
     })
     _, count = incompatible.apply(pd.DataFrame([row]), "202609")
     assert count == 0
+
+
+def test_curated_reference_list_precedes_price_sheet_fallback():
+    row = _reservation_row() | {
+        "source_billing_account_id": "account-1",
+        "source_pricing_currency": "USD",
+        "source_unit_of_measure": "10K",
+        "source_product_id": "product-1",
+        "source_region": "region-1",
+    }
+    key = ("azure-ti", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
+    engine = CloneEngine(
+        [_rule()], 1,
+        reference_prices={("azure", "meter-1"): {
+            "unit_price": 2.5, "unit_of_measure": "10K", "currency": "USD",
+        }},
+        price_sheet_prices={key: {"unit_price": 3.25, "unit_of_measure": "10K"}},
+    )
+
+    result, count = engine.apply(pd.DataFrame([row]), "202609")
+
+    clone = result.loc[result["is_synthetic"]].iloc[0]
+    assert count == 1
+    assert clone["BilledCost"] == -5.0
+    assert clone["ondemand_reference_period"] == "reference_catalog"
