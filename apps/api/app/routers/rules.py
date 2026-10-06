@@ -1207,6 +1207,31 @@ def _adapt_conditions_to_destination(
     return adapted
 
 
+def _normalize_return_conditions(conditions: list[dict]) -> list[dict]:
+    """Use destination fields to classify synthetic Return rows.
+
+    Clone rows retain ``source_charge_type`` and ``source_reservation_name``
+    from the original purchase.  The clone state itself is represented by
+    ``ChargeCategory=Return`` and the destination commitment field, so legacy
+    Return rules written against source fields would otherwise never match.
+    """
+    normalized: list[dict] = []
+    for condition in conditions:
+        field = str(condition.get("field", "")).strip()
+        values = [str(value).strip() for value in condition.get("values", [])]
+        is_return = field.lower() in {"source_charge_type", "chargetype"} and any(
+            value.lower() == "return" for value in values
+        )
+        if is_return:
+            normalized.append({**condition, "field": "ChargeCategory", "operator": "="})
+            continue
+        if field.lower() == "source_reservation_name":
+            normalized.append({**condition, "field": "CommitmentDiscountName"})
+            continue
+        normalized.append(condition)
+    return normalized
+
+
 @router.post("/departments/import", response_model=CsvImportResult, status_code=201)
 async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get_db)):
     """Import departments and business rules from finopsNew CSV files."""
@@ -1403,6 +1428,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 parsed_conditions,
                 relationship_by_connection.get(connection_id, {}),
             )
+            parsed_conditions = _normalize_return_conditions(parsed_conditions)
 
             # Find department from project_name (a directory row)
             dept_id = None

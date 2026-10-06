@@ -16,6 +16,7 @@ from app.services.classification_engine import (
     map_legacy_field,
     normalize_rule_conditions,
 )
+from app.routers.rules import _normalize_return_conditions
 
 
 def _rule(**kwargs):
@@ -37,6 +38,16 @@ def _rule(**kwargs):
 
 
 class TestNormalizeRuleConditions:
+    def test_return_conditions_use_destination_fields(self):
+        conditions = _normalize_return_conditions([
+            {"field": "source_charge_type", "operator": "=", "values": ["Return"]},
+            {"field": "source_reservation_name", "operator": "~", "values": ["AVS"]},
+        ])
+        assert conditions == [
+            {"field": "ChargeCategory", "operator": "=", "values": ["Return"]},
+            {"field": "CommitmentDiscountName", "operator": "~", "values": ["AVS"]},
+        ]
+
     def test_legacy_op_value_schema(self):
         rule = _rule(conditions=[{"field": "resourceGroupName", "op": "~", "value": "vicky"}])
         normalized = normalize_rule_conditions(rule)

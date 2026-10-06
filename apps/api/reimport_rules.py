@@ -58,7 +58,18 @@ def translate_conditions(conditions, src_to_dest):
             "values": c["values"],
             "logic": c["logic"],
         })
-    return translated
+    normalized = []
+    for condition in translated:
+        field = str(condition["field"]).strip().lower()
+        values = [str(value).strip() for value in condition["values"]]
+        if field in {"source_charge_type", "chargetype"} and any(
+            value.lower() == "return" for value in values
+        ):
+            condition = {**condition, "field": "ChargeCategory", "operator": "="}
+        elif field == "source_reservation_name":
+            condition = {**condition, "field": "CommitmentDiscountName"}
+        normalized.append(condition)
+    return normalized
 
 
 def parse_conditions(cond_str):
