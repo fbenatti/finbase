@@ -1677,17 +1677,18 @@ def _reprocess_destination_sync(
                                    lower(trim(b.unitofmeasure)) AS source_unit,
                                    lower(trim(b.productid)) AS source_product,
                                    lower(trim(b.meterregion)) AS source_region,
-                                   p.unit_price, p.unit_of_measure AS reference_unit,
-                                   lower(trim(p.product_id)) AS reference_product,
-                                   lower(trim(p.region_id)) AS reference_region
-                            FROM iceberg.silver.price_catalog p
+                                   try_cast(p.unitprice AS DOUBLE) AS unit_price,
+                                   p.unitofmeasure AS reference_unit,
+                                   lower(trim(p.productid)) AS reference_product,
+                                   lower(trim(p.meterregion)) AS reference_region
+                            FROM iceberg.bronze.raw_azure_pricesheet p
                             JOIN iceberg.bronze.raw_{_raw_table} b
                               ON lower(trim(p.meter_id)) = lower(trim(b.meterid))
-                             AND lower(trim(p.billing_account_id)) = lower(trim(b.billingaccountid))
+                             AND lower(trim(p.billingaccountid)) = lower(trim(b.billingaccountid))
                              AND lower(trim(p.currency)) = lower(trim(b.pricingcurrency))
                             WHERE p.snapshot_id = '{_snapshot_sql}'
-                              AND lower(p.price_type) = 'consumption'
-                              AND try_cast(p.unit_price AS DOUBLE) > 0
+                              AND lower(p.pricetype) = 'consumption'
+                              AND try_cast(p.unitprice AS DOUBLE) > 0
                               AND b._billing_period = '{_period_sql}'
                         """, timeout_s=120)
                         _cloud_key = _source_conn.code.casefold()
