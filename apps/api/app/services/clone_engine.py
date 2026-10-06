@@ -112,7 +112,7 @@ class CloneEngine:
             "source_billing_account_id", "source_pricing_currency",
             "source_unit_of_measure", "source_product_id", "source_region",
         ]
-        selected = [meter, price, *[name for name in dimension_columns if name in frame]]
+        selected = [meter, price, *(["cloud_origem"] if "cloud_origem" in frame else []), *[name for name in dimension_columns if name in frame]]
         candidates = frame.loc[frame[model].astype(str).str.lower().eq(on_demand), selected].copy()
         if candidates.empty:
             return
