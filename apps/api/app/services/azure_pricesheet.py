@@ -67,7 +67,7 @@ def _declared_rows(document: dict[str, Any]) -> int | None:
     return None
 
 
-def _latest_valid_manifest(container: Any) -> tuple[str, dict[str, Any], list[dict[str, Any]], str]:
+def _latest_valid_manifest(container: Any) -> tuple[str, str, dict[str, Any], list[dict[str, Any]], str]:
     manifests = sorted(
         (blob for blob in container.list_blobs(name_starts_with=PREFIX) if blob.name.lower().endswith("manifest.json")),
         key=lambda item: (item.last_modified or datetime.min.replace(tzinfo=timezone.utc), item.name),
@@ -88,7 +88,7 @@ def _latest_valid_manifest(container: Any) -> tuple[str, dict[str, Any], list[di
             period_match = re.search(r"/(\d{6})\d{2}-\d{6}\d{2}/", item.name)
             period = period_match.group(1) if period_match else datetime.now(timezone.utc).strftime("%Y%m")
             snapshot_id = str(item.etag or item.name).strip('"')
-            return period, data, parts, f"{snapshot_id}:{expected_rows}"
+            return period, item.name, data, parts, f"{snapshot_id}:{expected_rows}"
         except Exception as exc:  # Continue to the newest complete valid snapshot.
             failures.append(f"{item.name}: {exc}")
     raise RuntimeError("Nenhum manifest Price Sheet completo e válido: " + "; ".join(failures[-5:]))
@@ -159,13 +159,9 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
     raw_count = silver_count = 0
     try:
         container = service.get_container_client(container_name)
-        period, manifest, parts, snapshot_tag = _latest_valid_manifest(container)
+        period, manifest_name, manifest, parts, snapshot_tag = _latest_valid_manifest(container)
         expected = _declared_rows(manifest)
-        manifest_blob = max(
-            (blob for blob in container.list_blobs(name_starts_with=PREFIX) if blob.name.lower().endswith("manifest.json")),
-            key=lambda item: item.last_modified or datetime.min.replace(tzinfo=timezone.utc),
-        )
-        snapshot_id = manifest_blob.name + "#" + snapshot_tag.split(":", 1)[0]
+        snapshot_id = manifest_name + "#" + snapshot_tag.split(":", 1)[0]
         sync = SyncSession()
         try:
             conn = sync.get(SourceConnection, connection_id)
@@ -221,7 +217,7 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
         sync = SyncSession()
         try:
             conn = sync.get(SourceConnection, connection_id)
-            conn.config_json = {**(conn.config_json or {}), "active_snapshot_id": snapshot_id, "active_snapshot_period": period, "active_snapshot_rows": expected, "active_snapshot_manifest": manifest_blob.name}
+            conn.config_json = {**(conn.config_json or {}), "active_snapshot_id": snapshot_id, "active_snapshot_period": period, "active_snapshot_rows": expected, "active_snapshot_manifest": manifest_name}
             conn.last_test_status = "OK"
             conn.last_test_message = f"Price Sheet ativo: {expected:,} linhas ({period})"
             conn.last_tested_at = datetime.now(timezone.utc)
