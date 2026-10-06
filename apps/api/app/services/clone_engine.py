@@ -125,7 +125,13 @@ class CloneEngine:
             references = pd.Series(keys, index=eligible.index).map(self.prices)
             # Curated Azure prices are a fallback only: a matching On-Demand
             # observation in this billing stream always wins.
-            cached = pd.Series(keys, index=eligible.index).map(self.reference_prices)
+            def _cached_reference(key: tuple[str, str]) -> float | None:
+                price = self.reference_prices.get(key)
+                if price is None and key[0].startswith("azure"):
+                    price = self.reference_prices.get(("azure", key[1]))
+                return price
+
+            cached = pd.Series(keys, index=eligible.index).map(_cached_reference)
             use_cached = references.isna() & cached.notna()
             if use_cached.any():
                 references.loc[use_cached] = cached.loc[use_cached].map(
