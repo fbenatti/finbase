@@ -1511,7 +1511,8 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     ClassificationRule.match_value == match_value,
                 ).limit(1)
             )
-            if existing_r.scalars().first() is None:
+            existing_rule = existing_r.scalars().first()
+            if existing_rule is None:
                 db.add(ClassificationRule(
                     connection_id=connection_id,
                     destination_table_id=focus_table_id,
@@ -1529,6 +1530,22 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 ))
                 await db.flush()
                 result.classification_rules_created += 1
+            else:
+                # CSV imports are also the repair path for corrected field
+                # semantics. Refresh persisted conditions so old Return rules
+                # do not keep matching the original purchase metadata.
+                existing_rule.connection_id = connection_id
+                existing_rule.destination_table_id = focus_table_id
+                existing_rule.department_id = dept_id
+                existing_rule.source_field = source_field
+                existing_rule.pattern = conditions_raw[:500]
+                existing_rule.pattern_type = "multi_condition"
+                existing_rule.match_value = match_value[:200] if match_value else source_field[:200]
+                existing_rule.target_field = "organograma"
+                existing_rule.conditions = parsed_conditions
+                existing_rule.priority = priority
+                existing_rule.cloud_scope = cloud_scope
+                existing_rule.active = True
 
             # The cloning stage converts reservation purchases into a
             # realized Usage row plus a synthetic Return row.  Preserve the
