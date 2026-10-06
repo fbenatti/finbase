@@ -2918,6 +2918,35 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             for connection_id, period in (await db.execute(available_stmt)).all()
             if connection_id is not None and period
         }
+        # Iceberg Bronze is the source of truth. ``ingested_blob`` is only a
+        # catalog/index and may lag after a crash or historical migration, so
+        # explicitly requested periods absent from that index are discovered
+        # from the physical Bronze table before deciding the request is empty.
+        if body.billing_periods:
+            from app.services import trino_service as _trino
+            for connection_id in body.connection_ids:
+                source = conn_by_id.get(int(connection_id))
+                if not source or not source.code:
+                    continue
+                bronze_name = "raw_" + re.sub(r"[^a-zA-Z0-9_]", "_", source.code)
+                for period in body.billing_periods:
+                    period = str(period)
+                    pair = (int(connection_id), period)
+                    if pair in available or not re.fullmatch(r"\d{6}", period):
+                        continue
+                    try:
+                        physical_rows = await _trino.execute(
+                            f"SELECT count(*) AS row_count FROM iceberg.bronze.{bronze_name} "
+                            f"WHERE _billing_period = '{period}'",
+                            timeout_s=30,
+                        )
+                        if physical_rows and int(physical_rows[0].get("row_count") or 0) > 0:
+                            available.add(pair)
+                    except Exception as exc:
+                        logger.warning(
+                            "Não foi possível verificar Bronze físico para conexão %s/mês %s: %s",
+                            connection_id, period, exc,
+                        )
         # A financial reprocess invalidates downstream contractual balances.
         # Rebuild every later Bronze month in the same ordered queue group so
         # credits, overage, Silver and the eventual Gold all share one input
