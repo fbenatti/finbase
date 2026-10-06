@@ -10,7 +10,6 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-import pandas as pd
 from azure.identity import ClientSecretCredential
 from azure.storage.blob import BlobServiceClient
 
@@ -120,54 +119,14 @@ def _decoded_lines(chunks: Iterator[bytes]) -> Iterator[str]:
         yield pending
 
 
-def _header(row: dict[str, Any], name: str) -> Any:
-    target = name.casefold()
-    return next((value for key, value in row.items() if str(key).strip().casefold() == target), None)
-
-
-def _canonical(row: dict[str, Any], snapshot_id: str, period: str, connection_id: int, connection_code: str, connection_name: str) -> dict[str, Any]:
-    get = lambda name: _header(row, name)
-    date_value = get("EffectiveStartDate") or get("EffectiveStartTime")
-    valid_from = pd.to_datetime(date_value, utc=True, errors="coerce")
-    def number(name: str):
-        value = get(name)
-        try:
-            return float(value) if value not in (None, "") else None
-        except (ValueError, TypeError):
-            return None
-    return {
-        "cloud_provider": "azure", "meter_id": get("MeterId"), "sku_id": get("SkuId"),
-        "service_name": get("ServiceName"), "service_family": get("ServiceFamily"),
-        "product_name": get("ProductName"), "product_id": get("ProductId"),
-        "meter_name": get("MeterName"), "arm_region": get("MeterRegion"),
-        "region_id": get("MeterRegion"), "arm_sku_name": get("SkuName"),
-        "unit_of_measure": get("UnitOfMeasure"), "price_type": get("PriceType"),
-        "term": get("Term"), "billing_account_id": get("BillingAccountId"),
-        "billing_currency": get("BillingCurrency"), "price_source": "CONTRACTED",
-        "price_confidence": "HIGH", "reservation_term": get("ReservationTerm"),
-        "currency": get("Currency") or get("CurrencyCode"),
-        # UnitPrice already contains the negotiated contract price. No further
-        # percentage discount is applied here.
-        "unit_price": number("UnitPrice"), "base_price": number("BasePrice"),
-        "market_price": number("MarketPrice"), "tier_minimum_units": number("TierMinimumUnits"),
-        "effective_start_date": valid_from, "valid_from": valid_from,
-        "is_primary_meter": str(get("IsPrimaryMeter") or ""),
-        "snapshot_id": snapshot_id, "_silver_ingested_at": datetime.now(timezone.utc).isoformat(),
-        "_silver_owner": "azure-pricesheet", "_source_connection_id": connection_id,
-        "_source_connection_code": connection_code, "_source_connection_name": connection_name,
-        "_billing_period": period,
-    }
-
-
 def refresh_snapshot(connection_id: int, connection_code: str, connection_name: str) -> dict[str, Any]:
-    """Stream manifest parts to Bronze and Silver, activating only after validation."""
-    from app.services.iceberg_service import _append_or_create_table, _get_catalog, write_silver
-    from app.services.trino_service import execute_sync
+    """Stream the full Price Sheet snapshot to Bronze and activate after validation."""
+    from app.services.iceberg_service import _append_or_create_table, _get_catalog
     from app.database import SyncSession
     from app.models.source_connection import SourceConnection
 
     service, container_name = _azure_client()
-    raw_count = silver_count = 0
+    raw_count = 0
     try:
         container = service.get_container_client(container_name)
         period, manifest_name, manifest, parts, snapshot_tag = _latest_valid_manifest(container)
@@ -185,14 +144,13 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
         # A failed previous attempt may have left non-active partial rows. They
         # are removed by snapshot key before retry; the active snapshot remains.
         catalog = _get_catalog()
-        for table_id in (("bronze", "raw_azure_pricesheet"), ("silver", "price_catalog")):
+        for table_id in (("bronze", "raw_azure_pricesheet"),):
             if catalog.table_exists(table_id):
                 table = catalog.load_table(table_id)
                 from pyiceberg.expressions import EqualTo
                 table.delete(EqualTo("snapshot_id", snapshot_id))
 
         raw_batch: list[dict[str, Any]] = []
-        silver_batch: list[dict[str, Any]] = []
         for part in parts:
             downloader = container.get_blob_client(part["name"]).download_blob(max_concurrency=2)
             reader = csv.DictReader(_decoded_lines(iter(downloader.chunks())))
@@ -201,27 +159,23 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
                 if not source_row or not any(value not in (None, "") for value in source_row.values()):
                     continue
                 part_rows += 1
-                raw_batch.append({**source_row, "snapshot_id": snapshot_id, "_blob_path": part["name"], "_billing_period": period, "_ingested_at": datetime.now(timezone.utc).isoformat()})
-                silver_batch.append(_canonical(source_row, snapshot_id, period, connection_id, connection_code, connection_name))
+                # Keep every CSV value in Bronze; normalize header casing only
+                # so Trino can query stable field names across report parts.
+                raw_row = {str(key).strip().casefold(): value for key, value in source_row.items() if key is not None}
+                if len(raw_row) != len([key for key in source_row if key is not None]):
+                    raise ValueError(f"Cabeçalho ambíguo após normalização em {part['name']}")
+                raw_batch.append({**raw_row, "snapshot_id": snapshot_id, "_blob_path": part["name"], "_billing_period": period, "_ingested_at": datetime.now(timezone.utc).isoformat()})
                 if len(raw_batch) >= BATCH_ROWS:
                     _append_or_create_table("bronze", "raw_azure_pricesheet", pd.DataFrame(raw_batch), "_billing_period")
                     raw_count += len(raw_batch); raw_batch.clear()
-                if len(silver_batch) >= BATCH_ROWS:
-                    frame = pd.DataFrame(silver_batch)
-                    write_silver(connection_code, frame, period, column_types={"unit_price":"DOUBLE","base_price":"DOUBLE","market_price":"DOUBLE","tier_minimum_units":"DOUBLE","_source_connection_id":"BIGINT"}, table_name_override="price_catalog")
-                    silver_count += len(silver_batch); silver_batch.clear()
             declared_part_rows = next((int(x[k]) for x in _walk(manifest) if any(x.get(k) == part["name"] for k in ("name", "blobName", "fileName", "path", "blob")) for k in ("dataRowCount", "rowCount", "recordCount") if x.get(k) is not None), None)
             if declared_part_rows is not None and part_rows != declared_part_rows:
                 raise ValueError(f"{part['name']}: contagem lida {part_rows} difere do manifest {declared_part_rows}")
         if raw_batch:
             _append_or_create_table("bronze", "raw_azure_pricesheet", pd.DataFrame(raw_batch), "_billing_period")
             raw_count += len(raw_batch)
-        if silver_batch:
-            frame = pd.DataFrame(silver_batch)
-            write_silver(connection_code, frame, period, column_types={"unit_price":"DOUBLE","base_price":"DOUBLE","market_price":"DOUBLE","tier_minimum_units":"DOUBLE","_source_connection_id":"BIGINT"}, table_name_override="price_catalog")
-            silver_count += len(silver_batch)
-        if raw_count != expected or silver_count != expected:
-            raise ValueError(f"Snapshot incompleto: manifest={expected:,}, Bronze={raw_count:,}, Silver={silver_count:,}")
+        if raw_count != expected:
+            raise ValueError(f"Snapshot incompleto: manifest={expected:,}, Bronze={raw_count:,}")
 
         sync = SyncSession()
         try:
@@ -233,6 +187,6 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
             sync.commit()
         finally:
             sync.close()
-        return {"snapshot_id": snapshot_id, "period": period, "rows": expected, "bronze_rows": raw_count, "silver_rows": silver_count, "parts": len(parts)}
+        return {"snapshot_id": snapshot_id, "period": period, "rows": expected, "bronze_rows": raw_count, "silver_rows": 0, "parts": len(parts)}
     finally:
         service.close()
