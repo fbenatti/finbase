@@ -180,6 +180,8 @@ class CloneEngine:
                 if isinstance(price, dict) and price.get("ambiguous"):
                     return None
                 reference_unit = price.get("unit_of_measure") if isinstance(price, dict) else getattr(price, "unit_of_measure", None)
+                if isinstance(price, dict) and not reference_unit:
+                    return None
                 if reference_unit is not None:
                     factor = price_unit_factor(reference_unit, row.get("source_unit_of_measure"))
                     if factor is None:
