@@ -12,6 +12,7 @@ def normalize_price_unit(value: object) -> str:
     text = unicodedata.normalize("NFKC", str(value)).strip().casefold()
     text = re.sub(r"\s+", " ", text)
     text = text.replace("per ", "/")
+    text = re.sub(r"\s*/\s*", "/", text)
     return text
 
 
