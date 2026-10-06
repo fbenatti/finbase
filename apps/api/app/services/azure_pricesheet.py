@@ -67,6 +67,14 @@ def _declared_rows(document: dict[str, Any]) -> int | None:
     return None
 
 
+def _declared_bytes(document: dict[str, Any]) -> int | None:
+    for key in ("byteCount", "totalBytes", "contentLength"):
+        value = document.get(key)
+        if isinstance(value, (int, float)) and value >= 0:
+            return int(value)
+    return None
+
+
 def _latest_valid_manifest(container: Any) -> tuple[str, str, dict[str, Any], list[dict[str, Any]], str]:
     manifests = sorted(
         (blob for blob in container.list_blobs(name_starts_with=PREFIX) if blob.name.lower().endswith("manifest.json")),
@@ -81,6 +89,9 @@ def _latest_valid_manifest(container: Any) -> tuple[str, str, dict[str, Any], li
             expected_rows = _declared_rows(data)
             if not parts or expected_rows is None:
                 raise ValueError("manifest sem lista de CSVs ou contagem total de linhas")
+            expected_bytes = _declared_bytes(data)
+            if expected_bytes is not None and sum(part["size"] for part in parts) != expected_bytes:
+                raise ValueError("soma dos tamanhos das partes diverge do byteCount total")
             for part in parts:
                 properties = container.get_blob_client(part["name"]).get_blob_properties()
                 if int(properties.size) != part["size"]:
@@ -175,12 +186,10 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
         # are removed by snapshot key before retry; the active snapshot remains.
         catalog = _get_catalog()
         for table_id in (("bronze", "raw_azure_pricesheet"), ("silver", "price_catalog")):
-            try:
+            if catalog.table_exists(table_id):
                 table = catalog.load_table(table_id)
                 from pyiceberg.expressions import EqualTo
                 table.delete(EqualTo("snapshot_id", snapshot_id))
-            except Exception:
-                pass
 
         raw_batch: list[dict[str, Any]] = []
         silver_batch: list[dict[str, Any]] = []
