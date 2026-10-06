@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 import pandas as pd
+from app.services.price_units import price_unit_factor
 
 
 def assign_source_record_ids(
@@ -88,12 +89,31 @@ class CloneEngine:
         self.reference_prices = reference_prices or {}
         self.pendencies: list[dict[str, Any]] = []
 
+    @staticmethod
+    def _reference_key(row: Any, meter: Any) -> tuple[str, ...]:
+        """Stable Price Sheet match key; account is the Azure contract scope."""
+        def value(name: str) -> str:
+            raw = row.get(name, "") if hasattr(row, "get") else ""
+            return "" if raw is None or pd.isna(raw) else str(raw).strip().casefold()
+
+        return (
+            value("cloud_origem"), str(row.get(meter, "")).strip().casefold(),
+            value("source_billing_account_id"), value("source_pricing_currency"),
+            value("source_unit_of_measure"), value("source_product_id"),
+            value("source_region"),
+        )
+
     def _prime_prices(self, frame: pd.DataFrame, rule: Any, period: str) -> None:
         roles = rule.roles or {}
         meter, price, model = roles.get("meter_id"), roles.get("unit_price"), roles.get("pricing_model")
         on_demand = str(roles.get("on_demand_value", "OnDemand")).lower()
         if not all(x in frame for x in (meter, price, model)): return
-        candidates = frame.loc[frame[model].astype(str).str.lower().eq(on_demand), [meter, price]].copy()
+        dimension_columns = [
+            "source_billing_account_id", "source_pricing_currency",
+            "source_unit_of_measure", "source_product_id", "source_region",
+        ]
+        selected = [meter, price, *[name for name in dimension_columns if name in frame]]
+        candidates = frame.loc[frame[model].astype(str).str.lower().eq(on_demand), selected].copy()
         if candidates.empty:
             return
         candidates[price] = pd.to_numeric(candidates[price], errors="coerce")
@@ -101,7 +121,7 @@ class CloneEngine:
         if candidates.empty:
             return
         clouds = frame.loc[candidates.index, "cloud_origem"].astype(str).str.lower() if "cloud_origem" in frame else ""
-        candidates["_clone_key"] = list(zip(clouds, candidates[meter].astype(str))) if isinstance(clouds, pd.Series) else [("", value) for value in candidates[meter].astype(str)]
+        candidates["_clone_key"] = [self._reference_key(row, meter) for _, row in candidates.iterrows()]
         # ``last`` preserves the old same-period winner while reducing a
         # potentially millions-of-rows scan to one update per meter.
         for key, value in candidates.groupby("_clone_key", sort=False)[price].last().items():
@@ -144,18 +164,31 @@ class CloneEngine:
             eligible = frame.loc[scope].copy()
             if eligible.empty: continue
             clouds = eligible.get("cloud_origem", pd.Series("", index=eligible.index)).astype(str).str.lower()
-            keys = list(zip(clouds, eligible[meter].astype(str)))
+            keys = [self._reference_key(row, meter) for _, row in eligible.iterrows()]
             references = pd.Series(keys, index=eligible.index).map(self.prices)
             references = references.astype(object)
             # Curated Azure prices are a fallback only: a matching On-Demand
             # observation in this billing stream always wins.
-            def _cached_reference(key: tuple[str, str]) -> float | None:
+            def _cached_reference(key: tuple[str, ...], row: pd.Series) -> float | None:
                 price = self.reference_prices.get(key)
+                # Legacy caches remain readable for existing unit tests and
+                # old snapshots, but new Price Sheet rows use the full key.
                 if price is None and key[0].startswith("azure"):
                     price = self.reference_prices.get(("azure", key[1]))
+                if price is None:
+                    return None
+                reference_unit = getattr(price, "unit_of_measure", None)
+                if reference_unit is not None:
+                    factor = price_unit_factor(reference_unit, row.get("source_unit_of_measure"))
+                    if factor is None:
+                        return None
+                    price = getattr(price, "unit_price", price) * factor
                 return price
 
-            cached = pd.Series(keys, index=eligible.index).map(_cached_reference)
+            cached = pd.Series(
+                [_cached_reference(key, row) for key, (_, row) in zip(keys, eligible.iterrows())],
+                index=eligible.index,
+            )
             use_cached = references.isna() & cached.notna()
             if use_cached.any():
                 references.loc[use_cached] = cached.loc[use_cached].map(
