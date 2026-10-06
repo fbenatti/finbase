@@ -28,6 +28,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "ai_cost_relationship_reprocess",
     "gold_reprocess",
     "reservation_collection",
+    "price_reference_collection",
 )
 
 # These task types write an Iceberg Gold, Silver or planning table. Bronze
