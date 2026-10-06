@@ -2900,7 +2900,7 @@ def _run_etl_sync(
         # operational cutoff belongs to the selected Forecast configuration;
         # periods beyond it are left in Bronze/provider state and the
         # downstream scheduler reuses the latest eligible ingested period.
-        schedule_id = (task.result_json or {}).get("schedule_id") if isinstance(task.result_json, dict) else None
+        schedule_id = (result.result_json or {}).get("schedule_id") if isinstance(result.result_json, dict) else None
         if schedule_id:
             from app.models.forecast import ForecastConfig
             from app.models.scheduled_task import ScheduledTask
