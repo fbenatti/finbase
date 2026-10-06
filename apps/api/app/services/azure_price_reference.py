@@ -115,19 +115,27 @@ def persist_reference(row: dict[str, Any]) -> None:
         f"WHERE meter_id = '{escaped_meter}' AND _billing_period = '{row['_billing_period']}'",
         timeout_s=30,
     )
-    frame = pd.DataFrame([row])
-    frame["_billing_period"] = str(row["_billing_period"])
-    frame["reference_source_month"] = row["source_month"]
-    frame["table_reference_price_usd"] = None
-    frame["table_reference_month"] = None
-    frame["reference_delta_pct"] = None
-    frame["billing_currency"] = row.get("currency") or "USD"
-    frame["uom"] = row.get("unit_of_measure")
-    frame["source_month"] = row["source_month"]
-    frame["reference_price_usd"] = row["reference_price_usd"]
-    frame["needs_review"] = False
-    frame["reference_price_source"] = row["reference_price_source"]
-    frame["contract_discount_pct"] = row["contract_discount_pct"]
+    frame = pd.DataFrame([{
+        "meter_id": row["meter_id"],
+        "description": row.get("description"),
+        "location": row.get("location"),
+        "unit_of_measure": row.get("unit_of_measure"),
+        "price_type": row.get("price_type"),
+        "market_price_usd": row.get("market_price_usd"),
+        "price_sheet_unit_price_usd": row.get("price_sheet_unit_price_usd"),
+        "contract_discount_pct": row.get("contract_discount_pct"),
+        "reference_price_usd": row.get("reference_price_usd"),
+        "reference_price_source": row.get("reference_price_source"),
+        "source_month": row.get("source_month"),
+        "table_reference_price_usd": None,
+        "table_reference_month": None,
+        "reference_delta_pct": None,
+        "needs_review": False,
+        "currency": row.get("currency") or "USD",
+        "billing_currency": row.get("currency") or "USD",
+        "source_blob": row.get("source_blob"),
+        "_billing_period": str(row["_billing_period"]),
+    }])
     table = _get_catalog().load_table(("bronze", "raw_azure_price_reference"))
     arrow = iceberg_service._df_to_arrow(frame, target_schema=table.schema())
     table.append(arrow)
