@@ -1497,7 +1497,7 @@ def consumer_main(worker_id: int):
                             _task = _done.get(EtlTask, task_id)
                             if _task:
                                 _task.status = "COMPLETED"
-                                _task.phase = f"Price Sheet ativo · {_result['rows']:,} linhas"[:200]
+                                _task.phase = f"Price Sheet Bronze ativo · {_result['rows']:,} linhas"[:200]
                                 _task.rows_raw = int(_result.get("bronze_rows", _result["rows"]))
                                 _task.rows_destination = int(_result.get("silver_rows", _result["rows"]))
                                 _task.result_json = {**dict(_task.result_json or {}), **_result}
