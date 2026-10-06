@@ -1475,6 +1475,52 @@ def consumer_main(worker_id: int):
                         finally:
                             s2.close()
 
+                elif task.task_type == "azure_pricesheet_refresh":
+                    print(f"Picked up azure_pricesheet_refresh task {task_id}")
+                    source_id = task.connection_id
+                    session.commit()
+                    session.close()
+                    try:
+                        from app.models.source_connection import SourceConnection as _SourceConnection
+                        _lookup = SyncSession()
+                        try:
+                            _source = _lookup.get(_SourceConnection, source_id)
+                            if _source is None or _source.code != "azure-pricesheet":
+                                raise RuntimeError("SourceConnection azure-pricesheet não encontrada")
+                            _source_code, _source_name = _source.code, _source.name
+                        finally:
+                            _lookup.close()
+                        from app.services.azure_pricesheet import refresh_snapshot
+                        _result = refresh_snapshot(source_id, _source_code, _source_name)
+                        _done = SyncSession()
+                        try:
+                            _task = _done.get(EtlTask, task_id)
+                            if _task:
+                                _task.status = "COMPLETED"
+                                _task.phase = f"Price Sheet ativo · {_result['rows']:,} linhas"[:200]
+                                _task.rows_raw = int(_result.get("bronze_rows", _result["rows"]))
+                                _task.rows_destination = int(_result.get("silver_rows", _result["rows"]))
+                                _task.result_json = {**dict(_task.result_json or {}), **_result}
+                                _task.errors = []
+                                _task.finished_at = datetime.now(timezone.utc)
+                                _done.commit()
+                        finally:
+                            _done.close()
+                    except Exception as exc:
+                        logger.exception("Azure Price Sheet refresh task %s failed", task_id)
+                        _failed = SyncSession()
+                        try:
+                            _task = _failed.get(EtlTask, task_id)
+                            if _task:
+                                _task.status = "FAILED"
+                                _task.phase = f"Erro Price Sheet: {exc}"[:200]
+                                _task.current_blob = str(exc)[:500]
+                                _task.errors = [str(exc)[:1000]]
+                                _task.finished_at = datetime.now(timezone.utc)
+                                _failed.commit()
+                        finally:
+                            _failed.close()
+
                 elif task.task_type == "price_reference_collection":
                     meter_id = str((task.result_json or {}).get("meter_id") or "")
                     print(f"Picked up price_reference_collection task {task_id}: meter={meter_id}")
