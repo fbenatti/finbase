@@ -1761,7 +1761,11 @@ def _reprocess_destination_sync(
                             else:
                                 clone_price_sheet_prices[_key] = _candidate
             except Exception as _price_catalog_error:
-                logger.warning("Active Azure Price Sheet unavailable; using observed prices only: %s", _price_catalog_error)
+                logger.warning("Price Sheet fallback lookup failed; curated references remain loaded: %s", _price_catalog_error)
+            logger.info(
+                "Reference prices prepared: curated=%d, Price Sheet fallback candidates=%d",
+                len(clone_reference_prices), len(clone_price_sheet_prices),
+            )
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
                        'organograma_nivel_1', 'organograma_nivel_2',
@@ -1935,6 +1939,7 @@ def _reprocess_destination_sync(
                 from app.services.clone_engine import CloneEngine
                 clone_engines[cid] = CloneEngine(
                     clone_rules, destination_table_id, reference_prices=clone_reference_prices,
+                    price_sheet_prices=clone_price_sheet_prices,
                 )
 
         # Close main session NOW — all ORM objects are detached but attributes remain accessible
