@@ -1698,6 +1698,12 @@ def _reprocess_destination_sync(
                             _unit = str(_row.get("source_unit") or "")
                             _product = str(_row.get("source_product") or "")
                             _region = str(_row.get("source_region") or "")
+                            _reference_product = str(_row.get("reference_product") or "")
+                            _reference_region = str(_row.get("reference_region") or "")
+                            if _product and _reference_product and _product != _reference_product:
+                                continue
+                            if _region and _reference_region and _region != _reference_region:
+                                continue
                             if not _meter or not _account or not _row.get("unit_price"):
                                 continue
                             _key = (_cloud_key, _meter, _account, _currency, _unit, _product, _region)
