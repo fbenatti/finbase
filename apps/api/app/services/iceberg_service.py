@@ -1659,8 +1659,9 @@ def replace_staged_cube(
     namespace: str = layers.GOLD,
     known_row_count: int | None = None,
     purge_snapshots: bool = True,
+    delete_filter: Any | None = None,
 ) -> int:
-    """Replace completo de cubo Gold (mesma transação da Silver) + purge de snapshots."""
+    """Replace completo ou seletivo de cubo Gold em uma transação Iceberg."""
     if namespace != layers.GOLD:
         raise ValueError("replace_staged_cube só se aplica ao namespace gold")
     from pyiceberg.expressions import AlwaysTrue
@@ -1669,7 +1670,7 @@ def replace_staged_cube(
         physical_name,
         temp_safe_name,
         namespace=namespace,
-        delete_filter=AlwaysTrue(),
+        delete_filter=AlwaysTrue() if delete_filter is None else delete_filter,
         known_row_count=known_row_count,
     )
     if purge_snapshots:

@@ -29,6 +29,29 @@ def test_replace_staged_cube_calls_merge_and_purge(monkeypatch):
     assert calls == ["merge", "purge"]
 
 
+def test_replace_staged_cube_forwards_partition_delete_filter(monkeypatch):
+    from pyiceberg.expressions import EqualTo
+
+    expected_filter = EqualTo("_billing_period", "202610")
+    captured: dict = {}
+    monkeypatch.setattr(
+        iceberg,
+        "_merge_staged_into_canonical_table",
+        lambda *a, **k: captured.update(k) or 5,
+    )
+    monkeypatch.setattr(iceberg, "purge_gold_cube_snapshots", lambda *a, **k: True)
+
+    rows = iceberg.replace_staged_cube(
+        "dest_dm_test",
+        "dest_dm_test_stg_1",
+        known_row_count=5,
+        delete_filter=expected_filter,
+    )
+
+    assert rows == 5
+    assert captured["delete_filter"] is expected_filter
+
+
 def test_replace_staged_cube_snapshot_day_no_purge(monkeypatch):
     captured: dict = {}
 

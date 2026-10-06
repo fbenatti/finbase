@@ -903,7 +903,14 @@ def consumer_main(worker_id: int):
                                 current.phase = f"Materializando {done}/{total}: {name}"
                                 s.commit()
                         rule_ids = list((task_row.result_json or {}).get("rule_ids") or []) if task_row else []
-                        result = run_async_isolated(materialize_gold_cubes(s, run_id=task_id, progress=progress, rule_ids=rule_ids or None))
+                        billing_periods = list((task_row.result_json or {}).get("billing_periods") or []) if task_row else []
+                        result = run_async_isolated(materialize_gold_cubes(
+                            s,
+                            run_id=task_id,
+                            progress=progress,
+                            rule_ids=rule_ids or None,
+                            billing_periods=billing_periods or None,
+                        ))
                         task_row = s.get(EtlTask, task_id)
                         if task_row:
                             failed = list(result.get("failed") or [])

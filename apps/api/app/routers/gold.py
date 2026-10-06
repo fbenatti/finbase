@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -380,6 +381,7 @@ async def preview(body: GoldPreviewRequest):
 
 class GoldReprocessRequest(BaseModel):
     rule_ids: list[int] = Field(default_factory=list)
+    billing_periods: list[str] = Field(default_factory=list)
 
 
 @router.post("/reprocess")
@@ -387,6 +389,13 @@ async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = De
     """Queue one independent task per selected Gold rule."""
     from datetime import datetime, timezone
     from app.models.etl_task import EtlTask
+
+    if any(
+        not re.fullmatch(r"\d{6}", period)
+        or not 1 <= int(period[4:6]) <= 12
+        for period in body.billing_periods
+    ):
+        raise HTTPException(status_code=422, detail="billing_periods deve conter períodos YYYYMM válidos")
 
     rule_ids = body.rule_ids or None
     rules = await _load_rules(db, rule_ids)
@@ -412,12 +421,14 @@ async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = De
 
     now = datetime.now(timezone.utc)
     task = EtlTask(task_type="gold_reprocess", status="QUEUED", errors=[])
-    task.phase = f"Na fila: materializar {len(active)} cubo(s) Gold"
+    period_label = f" ({', '.join(body.billing_periods)})" if body.billing_periods else ""
+    task.phase = f"Na fila: materializar {len(active)} cubo(s) Gold{period_label}"
     task.started_at = now
     task.total_blobs = len(active)
     task.result_json = {
         "event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}],
         "rule_ids": [rule.id for rule in active],
+        "billing_periods": body.billing_periods,
     }
     db.add(task)
     await db.commit()
@@ -428,6 +439,7 @@ async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = De
         "status": "QUEUED",
         "message": f"Materialização Gold enfileirada ({len(active)} regra(s) em uma tarefa)",
         "rules": len(active),
+        "billing_periods": body.billing_periods,
     }
 
 

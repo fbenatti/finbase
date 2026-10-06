@@ -382,7 +382,13 @@ def _side_select(gold: str, schema: dict[str, str], dims: list[str], measure_ali
     return ", ".join(exprs)
 
 
-async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | None = None) -> int:
+async def _materialize_rule(
+    rule: GoldMartRule,
+    *,
+    run_id: int,
+    progress: Any | None = None,
+    billing_periods: list[str] | None = None,
+) -> int:
     """Build the pre-aggregated Gold table for one rule and swap it atomically."""
     table = rule_target_table(rule.code)
 
@@ -401,6 +407,8 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
     # dimensões e medidas desejadas; nós apenas criamos a tabela no namespace
     # gold e fazemos o swap atômico.
     if getattr(rule, "sql_template", None) and str(rule.sql_template).strip():
+        if billing_periods:
+            raise ValueError("Materialização por período não é suportada para regras SQL customizadas")
         snapshot_mode = bool(getattr(rule, "snapshot_mode", False))
         snapshot_col = str(getattr(rule, "snapshot_col", "_snapshot_date") or "_snapshot_date")
         # A regra de saving por desligue depende da auxiliar mensal de VMs
@@ -521,6 +529,17 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
             )
             table_alias = "src" if use_map else None
             where = _source_clause(schema, source, gold_table=gold, table_alias=table_alias)
+            if billing_periods:
+                source_period = period_physical.get(gold)
+                if not source_period:
+                    raise ValueError(f"Fonte Silver sem coluna de período: {gold}")
+                period_ref = f"{table_alias}." if table_alias else ""
+                period_values = ", ".join(_quote_literal(str(value)) for value in billing_periods)
+                period_filter = (
+                    f"CAST({period_ref}{_quote_ident(source_period)} AS VARCHAR) "
+                    f"IN ({period_values})"
+                )
+                where = f"({where}) AND ({period_filter})"
             select_exprs = _side_select(
                 gold, schema, dims, measure_aliases, percent, period_physical,
                 centro_map=centro_map if use_map else None,
@@ -572,8 +591,19 @@ async def _materialize_rule(rule: GoldMartRule, *, run_id: int, progress: Any | 
         await execute(create_sql, timeout_s=1800)
         result = await execute(f"SELECT COUNT(*) AS row_count FROM iceberg.{GOLD}.{staging}", timeout_s=180)
         rows = int((result[0] if result else {}).get("row_count") or 0)
-        if rows:
-            iceberg.replace_staged_cube(table, staging, namespace=GOLD, known_row_count=rows)
+        if rows or billing_periods:
+            delete_filter = None
+            if billing_periods:
+                from pyiceberg.expressions import In
+
+                delete_filter = In("_billing_period", tuple(str(value) for value in billing_periods))
+            iceberg.replace_staged_cube(
+                table,
+                staging,
+                namespace=GOLD,
+                known_row_count=rows,
+                delete_filter=delete_filter,
+            )
         else:
             iceberg.cleanup_staged_table(staging, namespace=GOLD)
         await _record_rule_manifest(rule, rows=rows, sql=full_sql, run_id=run_id)
@@ -609,7 +639,14 @@ async def _record_rule_manifest(
     await record_manifest(entry)
 
 
-async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | None = None, rule_ids: list[int] | None = None) -> dict[str, Any]:
+async def materialize_gold_cubes(
+    session: Any,
+    *,
+    run_id: int,
+    progress: Any | None = None,
+    rule_ids: list[int] | None = None,
+    billing_periods: list[str] | None = None,
+) -> dict[str, Any]:
     from datetime import datetime, timezone
     from sqlalchemy.orm import selectinload
 
@@ -617,6 +654,13 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
     if rule_ids:
         query = query.filter(GoldMartRule.id.in_(rule_ids))
     rules = query.all()
+    if billing_periods and any(
+        getattr(rule, "materializer_key", None)
+        or getattr(rule, "snapshot_mode", False)
+        or (getattr(rule, "sql_template", None) and str(rule.sql_template).strip())
+        for rule in rules
+    ):
+        raise ValueError("Materialização por período exige regras pivot sem SQL customizado")
 
     # ``copilot_user_period`` is derived from the already aggregated Copilot
     # usage Gold.  Rebuilding only ``copilot_usage_daily`` left the dashboard
@@ -769,7 +813,12 @@ async def materialize_gold_cubes(session: Any, *, run_id: int, progress: Any | N
         if progress:
             progress(index - 1, len(rules), f"Materializando {rule.code}")
         try:
-            rows = await _materialize_rule(rule, run_id=run_id, progress=progress)
+            rows = await _materialize_rule(
+                rule,
+                run_id=run_id,
+                progress=progress,
+                billing_periods=billing_periods,
+            )
             rule.materialization_table = rule_target_table(rule.code)
             rule.materialization_rows = rows
             rule.materialization_status = "UPDATED" if rows else "EMPTY"
