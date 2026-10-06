@@ -113,6 +113,9 @@ def load_azure_price_fallbacks(
         return curated, {}, counts
 
     meters = sorted({row["meter"] for row in unresolved})
+    unresolved_by_meter: dict[str, list[dict[str, str]]] = {}
+    for key_row in unresolved:
+        unresolved_by_meter.setdefault(key_row["meter"], []).append(key_row)
     candidates: dict[tuple[str, ...], Any] = {}
     for start in range(0, len(meters), max(1, meter_batch_size)):
         batch = meters[start:start + max(1, meter_batch_size)]
@@ -137,8 +140,8 @@ def load_azure_price_fallbacks(
                 unit_price = float(row.get("unit_price"))
             except (TypeError, ValueError):
                 continue
-            for key_row in unresolved:
-                if meter != key_row["meter"] or account != key_row["account"] or currency != key_row["currency"]:
+            for key_row in unresolved_by_meter.get(meter, ()):
+                if account != key_row["account"] or currency != key_row["currency"]:
                     continue
                 if key_row["product"] and product and product != key_row["product"]:
                     continue
