@@ -40,6 +40,38 @@ DOWNLOAD_CSV_MAX_ROWS = int(os.getenv("OPENFINOPS_DOWNLOAD_CSV_MAX_ROWS", "10000
 DOWNLOAD_XLSX_MAX_ROWS = int(os.getenv("OPENFINOPS_DOWNLOAD_XLSX_MAX_ROWS", "200000"))
 
 
+@router.post("/azure-pricesheet/refresh", status_code=202)
+async def queue_azure_pricesheet_refresh(db: AsyncSession = Depends(get_db)):
+    """Queue a full, manifest-validated Azure Price Sheet snapshot refresh."""
+    from app.models.etl_task import EtlTask
+
+    conn = (await db.execute(select(SourceConnection).where(SourceConnection.code == "azure-pricesheet"))).scalar_one_or_none()
+    if conn is None:
+        conn = SourceConnection(
+            code="azure-pricesheet", name="Azure Price Sheet", connector_type="azure_pricesheet",
+            cloud_name="Azure", cloud_scope="azure", config_json={"scope": "BillingAccountId", "active_snapshot_id": None},
+            blob_prefixes=["reports/report_-pricesheet/"],
+        )
+        db.add(conn)
+        await db.flush()
+    active = (await db.execute(select(EtlTask).where(
+        EtlTask.task_type == "azure_pricesheet_refresh",
+        EtlTask.status.in_(["QUEUED", "RUNNING"]),
+    ).order_by(EtlTask.id.desc()).limit(1))).scalar_one_or_none()
+    if active:
+        return {"task_id": active.id, "status": active.status, "connection_id": conn.id, "message": "Já existe uma atualização de snapshot em andamento."}
+    task = EtlTask(
+        task_type="azure_pricesheet_refresh", status="QUEUED", connection_id=conn.id,
+        connection_ids=[conn.id], billing_periods=[], errors=[],
+        result_json={"requested_by": "api", "scope": "BillingAccountId"},
+        phase="Na fila: atualizar snapshot completo Azure Price Sheet",
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return {"task_id": task.id, "status": task.status, "connection_id": conn.id, "source": conn.code}
+
+
 async def _reconcile_dead_worker_tasks(db: AsyncSession, reason: str) -> int:
     """Close persisted tasks when the worker is definitely no longer alive.
 
