@@ -1651,10 +1651,27 @@ def _reprocess_destination_sync(
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
         clone_reference_prices: dict[tuple[str, ...], Any] = {}
+        clone_price_sheet_prices: dict[tuple[str, ...], Any] = {}
         unique_cids = set(cid for _, cid, _, _ in all_blobs)
         if unique_cids:
             try:
                 from app.services.trino_service import execute_sync as _trino_execute_sync
+                _curated_rows = _trino_execute_sync(
+                    "SELECT meter_id, reference_price_usd, unit_of_measure, currency "
+                    "FROM iceberg.bronze.raw_azure_price_reference "
+                    "WHERE coalesce(needs_review, false) = false "
+                    "AND try_cast(reference_price_usd AS DOUBLE) > 0",
+                    timeout_s=30,
+                )
+                for _row in _curated_rows:
+                    _meter = str(_row.get("meter_id") or "").strip().casefold()
+                    if not _meter:
+                        continue
+                    clone_reference_prices[("azure", _meter)] = {
+                        "unit_price": float(_row["reference_price_usd"]),
+                        "unit_of_measure": _row.get("unit_of_measure"),
+                        "currency": _row.get("currency"),
+                    }
                 _pricesheet_conn = session.execute(
                     select(SourceConnection).where(SourceConnection.code == "azure-pricesheet")
                 ).scalar_one_or_none()
@@ -1671,25 +1688,53 @@ def _reprocess_destination_sync(
                             continue
                         _period_sql = _period.replace("'", "''")
                         _candidate_rows = _trino_execute_sync(f"""
-                            SELECT DISTINCT lower(trim(b.meterid)) AS source_meter,
-                                   lower(trim(b.billingaccountid)) AS source_account,
-                                   lower(trim(b.pricingcurrency)) AS source_currency,
-                                   lower(trim(b.unitofmeasure)) AS source_unit,
-                                   lower(trim(b.productid)) AS source_product,
-                                   lower(trim(b.meterregion)) AS source_region,
+                            WITH required AS (
+                                SELECT DISTINCT lower(trim(b.meterid)) AS source_meter,
+                                       lower(trim(b.billingaccountid)) AS source_account,
+                                       lower(trim(b.pricingcurrency)) AS source_currency,
+                                       lower(trim(b.unitofmeasure)) AS source_unit,
+                                       lower(trim(b.productid)) AS source_product,
+                                       lower(trim(b.meterregion)) AS source_region
+                                FROM iceberg.bronze.raw_{_raw_table} b
+                                WHERE b._billing_period = '{_period_sql}'
+                                  AND lower(trim(b.chargetype)) = 'usage'
+                                  AND lower(trim(b.pricingmodel)) IN ('reservation', 'savingsplan')
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM iceberg.bronze.raw_{_raw_table} od
+                                      WHERE od._billing_period = b._billing_period
+                                        AND lower(trim(od.pricingmodel)) = 'ondemand'
+                                        AND lower(trim(od.meterid)) = lower(trim(b.meterid))
+                                        AND lower(trim(od.billingaccountid)) = lower(trim(b.billingaccountid))
+                                        AND lower(trim(od.pricingcurrency)) = lower(trim(b.pricingcurrency))
+                                        AND lower(trim(od.unitofmeasure)) = lower(trim(b.unitofmeasure))
+                                        AND lower(trim(od.productid)) = lower(trim(b.productid))
+                                        AND lower(trim(od.meterregion)) = lower(trim(b.meterregion))
+                                  )
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM iceberg.bronze.raw_azure_price_reference r
+                                      WHERE coalesce(r.needs_review, false) = false
+                                        AND try_cast(r.reference_price_usd AS DOUBLE) > 0
+                                        AND lower(trim(r.meter_id)) = lower(trim(b.meterid))
+                                        AND lower(trim(r.currency)) = lower(trim(b.pricingcurrency))
+                                        AND lower(trim(r.unit_of_measure)) = lower(trim(b.unitofmeasure))
+                                  )
+                            )
+                            SELECT DISTINCT b.source_meter, b.source_account, b.source_currency,
+                                   b.source_unit, b.source_product, b.source_region,
                                    try_cast(p.unitprice AS DOUBLE) AS unit_price,
                                    p.unitofmeasure AS reference_unit,
                                    lower(trim(p.productid)) AS reference_product,
                                    lower(trim(p.meterregion)) AS reference_region
-                            FROM iceberg.bronze.raw_azure_pricesheet p
-                            JOIN iceberg.bronze.raw_{_raw_table} b
-                              ON lower(trim(p.meterid)) = lower(trim(b.meterid))
-                             AND lower(trim(p.billingaccountid)) = lower(trim(b.billingaccountid))
-                             AND lower(trim(p.currency)) = lower(trim(b.pricingcurrency))
+                            FROM required b
+                            JOIN iceberg.bronze.raw_azure_pricesheet p
+                              ON lower(trim(p.meterid)) = b.source_meter
+                             AND lower(trim(p.billingaccountid)) = b.source_account
+                             AND lower(trim(p.currency)) = b.source_currency
                             WHERE p.snapshot_id = '{_snapshot_sql}'
                               AND lower(p.pricetype) = 'consumption'
                               AND try_cast(p.unitprice AS DOUBLE) > 0
-                              AND b._billing_period = '{_period_sql}'
+                              AND (b.source_product = '' OR lower(trim(p.productid)) = b.source_product)
+                              AND (b.source_region = '' OR lower(trim(p.meterregion)) = b.source_region OR p.meterregion IS NULL)
                         """, timeout_s=120)
                         _cloud_key = _source_conn.code.casefold()
                         for _row in _candidate_rows:
@@ -1710,11 +1755,11 @@ def _reprocess_destination_sync(
                             _key = (_cloud_key, _meter, _account, _currency, _unit, _product, _region)
                             _price_value = float(_row["unit_price"])
                             _candidate = {"unit_price": _price_value, "unit_of_measure": _row.get("reference_unit")}
-                            _existing = clone_reference_prices.get(_key)
+                            _existing = clone_price_sheet_prices.get(_key)
                             if _existing and (_existing["unit_price"] != _price_value or _existing.get("unit_of_measure") != _candidate.get("unit_of_measure")):
-                                clone_reference_prices[_key] = {"ambiguous": True}
+                                clone_price_sheet_prices[_key] = {"ambiguous": True}
                             else:
-                                clone_reference_prices[_key] = _candidate
+                                clone_price_sheet_prices[_key] = _candidate
             except Exception as _price_catalog_error:
                 logger.warning("Active Azure Price Sheet unavailable; using observed prices only: %s", _price_catalog_error)
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
