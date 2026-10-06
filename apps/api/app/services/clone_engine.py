@@ -5,6 +5,29 @@ from typing import Any
 import pandas as pd
 
 
+def assign_source_record_ids(
+    frame: pd.DataFrame,
+    *,
+    connection_id: int,
+    blob_id: int,
+    row_offset: int,
+) -> pd.DataFrame:
+    """Attach a unique source-row key before a batch can be split or cloned.
+
+    Azure exports do not consistently carry a source record ID. A DataFrame
+    index is not a valid fallback: it restarts for each Bronze batch and can
+    associate a synthetic Return with an unrelated Usage row. The source blob
+    manifest ID plus its zero-based row offset is unique within the immutable
+    Bronze input and is copied to the synthetic Return by ``apply``.
+    """
+    result = frame.copy()
+    result["source_record_id"] = [
+        f"{connection_id}:{blob_id}:{row_offset + index}"
+        for index in range(len(result))
+    ]
+    return result
+
+
 def _matches(frame: pd.DataFrame, conditions: list[dict[str, Any]]) -> pd.Series:
     mask = pd.Series(True, index=frame.index)
     for c in conditions or []:
@@ -167,7 +190,10 @@ class CloneEngine:
             originals[billed] = amounts
             if effective in frame: originals[effective] = amounts
             originals["is_synthetic"] = False; originals["tipo"] = "realizado"
-            originals["source_record_id"] = eligible.get("source_record_id", pd.Series(eligible.index, index=eligible.index)).astype(str)
+            # Do not synthesize identity from the pandas index here. The ETL
+            # assigns a blob-scoped row key before this engine runs; retaining
+            # that key lets a Return point to exactly one Usage source row.
+            originals["source_record_id"] = eligible["source_record_id"].astype(str)
             for field in originals.columns:
                 if field not in frame.columns: frame[field] = None
                 frame.loc[originals.index, field] = originals[field]

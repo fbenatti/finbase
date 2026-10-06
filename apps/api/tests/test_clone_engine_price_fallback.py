@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from app.services.clone_engine import CloneEngine
+from app.services.clone_engine import CloneEngine, assign_source_record_ids
 
 
 def _rule():
@@ -82,3 +82,42 @@ def test_observed_same_month_ondemand_price_wins_over_catalog_fallback():
     assert clone["BilledCost"] == -16.0
     assert clone["ondemand_reference_price"] == 8.0
     assert clone["ondemand_reference_period"] == "202609"
+
+
+def test_source_record_ids_are_unique_across_batches_and_blobs():
+    first = assign_source_record_ids(
+        pd.DataFrame({"value": [1, 2]}),
+        connection_id=2,
+        blob_id=3982,
+        row_offset=0,
+    )
+    second = assign_source_record_ids(
+        pd.DataFrame({"value": [3, 4]}),
+        connection_id=2,
+        blob_id=3982,
+        row_offset=2,
+    )
+    another_blob = assign_source_record_ids(
+        pd.DataFrame({"value": [5]}),
+        connection_id=2,
+        blob_id=3983,
+        row_offset=0,
+    )
+
+    ids = [*first.source_record_id, *second.source_record_id, *another_blob.source_record_id]
+    assert len(ids) == len(set(ids)) == 5
+
+
+def test_synthetic_return_keeps_the_exact_source_row_id():
+    row = _reservation_row() | {"source_record_id": "2:3982:173"}
+    engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0})
+
+    result, count = engine.apply(pd.DataFrame([row]), "202609")
+
+    assert count == 1
+    original = result.loc[~result["is_synthetic"]].iloc[0]
+    clone = result.loc[result["is_synthetic"]].iloc[0]
+    assert clone["source_record_id"] == original["source_record_id"]
+    assert clone["clone_source_record_id"] == original["source_record_id"]
+    assert clone["BilledCost"] == -original["BilledCost"]
+    assert clone["EffectiveCost"] == -original["EffectiveCost"]

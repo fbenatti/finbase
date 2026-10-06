@@ -1149,6 +1149,7 @@ def _process_blob_for_reprocess(
 
         chunks: list[pd.DataFrame] = []
         rows_in_blob = 0
+        source_row_offset = 0
         chunk_rows = int(os.getenv("REPROCESS_CLASSIFICATION_CHUNK_ROWS", "50000"))
         cpu_workers = max(1, int(os.getenv("REPROCESS_CPU_WORKERS", "2")))
         use_process_pool = clone_engine is None and cpu_workers > 1
@@ -1225,6 +1226,9 @@ def _process_blob_for_reprocess(
                 if _check_cancelled(task_id):
                     return None
 
+                chunk_row_offset = source_row_offset
+                source_row_offset += len(chunk)
+
                 df_chunk = chunk.drop(columns=[c for c in ["_billing_period", "_blob_path", "_ingested_at"] if c in chunk.columns])
 
                 # Phase 1: Map source columns → destination columns (Silver)
@@ -1234,6 +1238,14 @@ def _process_blob_for_reprocess(
                 target["cloud_origem"] = connection_code
                 target["source_connection_id"] = connection_id
                 target["_billing_period"] = str(billing_period)
+                if clone_engine is not None:
+                    from app.services.clone_engine import assign_source_record_ids
+                    target = assign_source_record_ids(
+                        target,
+                        connection_id=connection_id,
+                        blob_id=blob_id,
+                        row_offset=chunk_row_offset,
+                    )
                 # Gold facts are historical realized data. Keeping this explicit
                 # on every mapped batch prevents downstream Forecast from having
                 # to infer a null type after a future schema evolution.
