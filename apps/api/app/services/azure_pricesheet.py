@@ -146,10 +146,15 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
         # are removed by snapshot key before retry; the active snapshot remains.
         catalog = _get_catalog()
         for table_id in (("bronze", "raw_azure_pricesheet"),):
-            if catalog.table_exists(table_id):
+            try:
                 table = catalog.load_table(table_id)
-                from pyiceberg.expressions import EqualTo
-                table.delete(EqualTo("snapshot_id", snapshot_id))
+            except Exception as exc:
+                from pyiceberg.exceptions import NoSuchTableError
+                if isinstance(exc, NoSuchTableError):
+                    continue
+                raise
+            from pyiceberg.expressions import EqualTo
+            table.delete(EqualTo("snapshot_id", snapshot_id))
 
         raw_batch: list[dict[str, Any]] = []
         for part in parts:
