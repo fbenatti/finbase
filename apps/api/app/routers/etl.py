@@ -1683,7 +1683,7 @@ def _reprocess_destination_sync(
                                    lower(trim(p.meterregion)) AS reference_region
                             FROM iceberg.bronze.raw_azure_pricesheet p
                             JOIN iceberg.bronze.raw_{_raw_table} b
-                              ON lower(trim(p.meter_id)) = lower(trim(b.meterid))
+                              ON lower(trim(p.meterid)) = lower(trim(b.meterid))
                              AND lower(trim(p.billingaccountid)) = lower(trim(b.billingaccountid))
                              AND lower(trim(p.currency)) = lower(trim(b.pricingcurrency))
                             WHERE p.snapshot_id = '{_snapshot_sql}'
