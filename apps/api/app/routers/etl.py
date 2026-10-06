@@ -2277,32 +2277,9 @@ def _reprocess_destination_sync(
         for engine in clone_engines.values():
             for pending in engine.pendencies:
                 session.add(ClonePricePendencies(**pending))
-        missing_meter_ids = {
-            str(pending.get("meter_id") or "")
-            for engine in clone_engines.values() for pending in engine.pendencies
-            if pending.get("meter_id")
-        }
-        if missing_meter_ids:
-            from sqlalchemy import select as _price_select
-            for meter_id in sorted(missing_meter_ids):
-                active = session.execute(
-                    _price_select(EtlTask.id).where(
-                        EtlTask.task_type == "price_reference_collection",
-                        EtlTask.status.in_(["QUEUED", "RUNNING"]),
-                        EtlTask.result_json["meter_id"].as_string() == meter_id,
-                    ).limit(1)
-                ).scalar_one_or_none()
-                if active is None:
-                    session.add(EtlTask(
-                        task_type="price_reference_collection", status="QUEUED",
-                        connection_id=next((
-                            p.get("connection_id") for engine in clone_engines.values()
-                            for p in engine.pendencies if str(p.get("meter_id")) == meter_id
-                        ), None),
-                        connection_ids=[], billing_periods=[], errors=[],
-                        result_json={"meter_id": meter_id, "provider": "azure", "requested_by": "clone_price_pendency"},
-                        phase=f"Na fila: buscar preço de referência para {meter_id}",
-                    ))
+        # Price gaps are retained as auditable pendencies. Price Sheet is a
+        # shared, full snapshot source (BillingAccountId scope), not a meter-
+        # by-meter CSV query; collection is scheduled only as a snapshot task.
         session.commit()
         try:
             status["current_blob"] = "Publicando partição na camada Silver..."
