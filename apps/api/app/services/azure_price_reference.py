@@ -1,0 +1,126 @@
+"""Targeted Azure Price Sheet lookup for missing clone reference prices."""
+from __future__ import annotations
+
+import csv
+import io
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any
+
+from azure.identity import ClientSecretCredential
+from azure.storage.blob import BlobServiceClient
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+PRICE_SHEET_PREFIX = "reports/report_-pricesheet/"
+BRONZE_TABLE = "raw_azure_price_reference"
+
+
+def _credentials() -> tuple[ClientSecretCredential, str, str]:
+    tenant = settings.azure_4p_tenant_id or settings.azure_ti_tenant_id
+    client = settings.azure_4p_client_id or settings.azure_ti_client_id
+    secret = settings.azure_4p_client_secret or settings.azure_ti_client_secret
+    account = settings.azure_4p_storage_account or settings.azure_ti_storage_account
+    container = settings.azure_4p_container if settings.azure_4p_storage_account else settings.azure_ti_container
+    if not all((tenant, client, secret, account, container)):
+        raise RuntimeError("Credenciais Azure para Price Sheet não configuradas")
+    credential = ClientSecretCredential(tenant_id=tenant, client_id=client, client_secret=secret)
+    return credential, account, container
+
+
+def _latest_month(client: Any, container_name: str) -> str:
+    container = client.get_container_client(container_name)
+    months: set[str] = set()
+    for blob in container.list_blobs(name_starts_with=PRICE_SHEET_PREFIX):
+        parts = blob.name.split("/")
+        for part in parts:
+            if len(part) == 17 and part[:8].isdigit() and part[8] == "-" and part[9:].isdigit():
+                months.add(part[:6])
+    if not months:
+        raise RuntimeError("Nenhum Price Sheet mensal encontrado no prefixo configurado")
+    return max(months)
+
+
+def _find_meter_rows(container: Any, month: str, meter_id: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for blob in container.list_blobs(name_starts_with=f"{PRICE_SHEET_PREFIX}{month[:4]}{month[4:]}01-"):
+        name = blob.name.lower()
+        if not name.endswith(".csv"):
+            continue
+        downloader = container.get_blob_client(blob.name)
+        query = f"SELECT * FROM BlobStorage WHERE MeterId = '{meter_id}'"
+        try:
+            result = downloader.query_blob(query, blob_format="CSV", output_format="CSVWithHeaders")
+            payload = result.readall().decode("utf-8-sig")
+            rows.extend(csv.DictReader(io.StringIO(payload)))
+        except Exception:
+            logger.exception("Query Acceleration falhou no Price Sheet blob %s", blob.name)
+            raise
+    return rows
+
+
+def collect_meter_price(meter_id: str) -> dict[str, Any]:
+    """Fetch only matching Price Sheet rows via server-side Query Acceleration."""
+    credential, account, container_name = _credentials()
+    service = BlobServiceClient(
+        account_url=f"https://{account}.blob.core.windows.net", credential=credential,
+        connection_timeout=60, read_timeout=300,
+    )
+    try:
+        container = service.get_container_client(container_name)
+        month = _latest_month(service, container_name)
+        rows = _find_meter_rows(container, month, meter_id)
+        consumption = [row for row in rows if str(row.get("PriceType", "")).lower() == "consumption"]
+        candidates = consumption or rows
+        if not candidates:
+            raise LookupError(f"MeterId {meter_id} não encontrado no Price Sheet {month}")
+        row = candidates[-1]
+        market = float(row.get("MarketPrice") or 0)
+        unit = float(row.get("UnitPrice") or 0)
+        if unit <= 0:
+            raise LookupError(f"MeterId {meter_id} não possui UnitPrice positivo no Price Sheet")
+        return {
+            "meter_id": meter_id,
+            "description": row.get("MeterName") or row.get("ProductName") or "",
+            "location": row.get("MeterRegion") or row.get("Location") or "",
+            "unit_of_measure": row.get("UnitOfMeasure") or "",
+            "price_type": row.get("PriceType") or "",
+            "market_price_usd": market,
+            "price_sheet_unit_price_usd": unit,
+            "contract_discount_pct": ((1 - unit / market) * 100) if market else None,
+            "reference_price_usd": unit,
+            "reference_price_source": "PRICE_SHEET_CONTRACTED_UNITPRICE",
+            "source_month": month,
+            "needs_review": False,
+            "currency": row.get("CurrencyCode") or row.get("Currency") or "USD",
+            "source_blob": f"{PRICE_SHEET_PREFIX}{month}",
+            "_billing_period": month,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    finally:
+        service.close()
+
+
+def persist_reference(row: dict[str, Any]) -> None:
+    """Upsert the targeted price into the small Iceberg Bronze cache."""
+    import pandas as pd
+    from app.services import iceberg_service
+
+    frame = pd.DataFrame([row])
+    frame["table_reference_price_usd"] = None
+    frame["table_reference_month"] = None
+    frame["reference_delta_pct"] = None
+    frame["billing_currency"] = row.get("currency") or "USD"
+    frame["uom"] = row.get("unit_of_measure")
+    iceberg_service.write_bronze(
+        "azure_price_reference", frame, str(row["_billing_period"]),
+        f"price-sheet-targeted/{row['meter_id']}/{row['_billing_period']}",
+    )
+
+
+def collect_and_persist(meter_id: str) -> dict[str, Any]:
+    record = collect_meter_price(meter_id)
+    persist_reference(record)
+    return record
