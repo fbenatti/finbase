@@ -189,12 +189,18 @@ Alguns provedores (ex.: IBM FOCUS) entregam o mês corrente como fatura
 agregada — uma única data de cobrança ou intervalo Start→End cobrindo o mês,
 sem detalhe diário.
 
+Essa proteção é específica para **CSV enviados manualmente**, cuja granularidade
+é detectada no preview e persistida em `manual_csv_metadata`. Não deve ser
+inferida novamente para extrações dos provedores: por exemplo, o snapshot
+Azure TI do mês corrente traz `Date` igual ao primeiro dia do período, embora
+contenha custo realizado acumulado até D-2.
+
 Regras:
 
 ```text
-Mês corrente + granularidade mensal -> Bronze OK; Gold realizado bloqueado; Forecast ignora o período
+CSV manual no mês corrente + granularidade mensal -> Bronze OK; Gold realizado bloqueado; Forecast ignora o período
 Mês fechado + granularidade mensal -> realizado normal na Gold
-CSV diário (Azure/GCP) -> fluxo existente inalterado
+Extrações Azure/GCP do mês corrente -> realizado parcial na Gold e entrada para o forecast residual
 ```
 
 No upload manual, preview e ingest retornam `monthly_grain`, `current_month`

@@ -424,10 +424,18 @@ def should_skip_gold_realizado(
 
     config = connection_config or {}
     manual_meta = (config.get("manual_csv_metadata") or {}).get(billing_period) or {}
+    # Grain inference is intended for manually uploaded invoice CSVs. Applying
+    # its single-date heuristic to provider extracts misclassifies Azure's
+    # month-to-date snapshot (whose Date is the first day of the billing
+    # period) as a monthly invoice and drops valid realized costs from Silver.
+    if not manual_meta:
+        return False, None
     if manual_meta.get("skip_gold_realizado"):
         return True, _CURRENT_MONTH_MONTHLY_WARNING
     if manual_meta.get("monthly_grain") is False:
         return False, None
+    if manual_meta.get("monthly_grain") is True:
+        return True, _CURRENT_MONTH_MONTHLY_WARNING
 
     if df is not None and not df.empty:
         grain = analyze_csv_grain(df, billing_period)

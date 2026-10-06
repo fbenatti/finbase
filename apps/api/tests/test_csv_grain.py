@@ -12,6 +12,7 @@ from app.services.csv_upload_service import (
     resolve_billing_period,
     should_skip_gold_realizado,
 )
+from app.services import csv_upload_service
 from app.services.forecast_service import _expand_charge_interval
 
 
@@ -52,16 +53,29 @@ def test_analyze_csv_grain_closed_month():
     assert grain["warning_message"] is None
 
 
-def test_should_skip_gold_from_metadata():
+def test_should_skip_gold_from_metadata(monkeypatch):
+    monkeypatch.setattr(csv_upload_service, "is_current_billing_period", lambda period: period == "202608")
     config = {
         "manual_csv_metadata": {
             "202608": {"skip_gold_realizado": True, "monthly_grain": True},
         }
     }
     skip, message = should_skip_gold_realizado("202608", connection_config=config)
-    if is_current_billing_period("202608"):
-        assert skip is True
-        assert message
+    assert skip is True
+    assert message
+
+
+def test_provider_month_to_date_snapshot_is_not_skipped_without_manual_csv_metadata(monkeypatch):
+    monkeypatch.setattr(csv_upload_service, "is_current_billing_period", lambda period: period == "202610")
+    # This is the shape of the Azure TI October extract: a single Date of
+    # month-start triggers the generic monthly-grain heuristic, despite being
+    # a current-period cost snapshot that must feed realized and forecast.
+    df = pd.DataFrame({"Date": ["2026-10-01"], "BilledCost": [125.0]})
+    assert detect_monthly_grain(df, "202610") is True
+
+    skip, message = should_skip_gold_realizado("202610", df=df)
+    assert skip is False
+    assert message is None
 
 
 def test_monthly_lump_baseline_from_closed_months():
