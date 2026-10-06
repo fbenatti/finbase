@@ -23,6 +23,17 @@ logger = logging.getLogger(__name__)
 _SHARD_BATCH_SIZE = 64
 
 
+def _realized_cutoff(collected_through: date, *, as_of: date, excluded_days: int) -> date:
+    """Keep known realized data while capping it at the D-N boundary for today.
+
+    Source dates may lag the calendar or be stamped at the start of an open
+    billing period. Subtracting ``excluded_days`` from that stale date again
+    double-applies the lag and can push the cutoff into the previous month.
+    """
+    latest_allowed = as_of - timedelta(days=max(0, int(excluded_days)))
+    return min(collected_through, latest_allowed)
+
+
 def _series_key(key_values: dict[str, Any], key_cols: list[str]) -> tuple[tuple[str, Any], ...]:
     normalized: list[tuple[str, Any]] = []
     for column in key_cols:
@@ -845,7 +856,9 @@ async def _fetch_invoice_cloud_cutoffs(
         collected = pd.to_datetime(row.get("collected_through"), errors="coerce")
         if not cloud or pd.isna(collected):
             continue
-        cutoffs[cloud] = collected.date() - timedelta(days=excluded_days)
+        cutoffs[cloud] = _realized_cutoff(
+            collected.date(), as_of=date.today(), excluded_days=excluded_days,
+        )
     return cutoffs
 
 
@@ -974,7 +987,9 @@ async def _fetch_cloud_cutoffs(
         collected = pd.to_datetime(row.get("collected_through"), errors="coerce")
         if not cloud or pd.isna(collected):
             continue
-        cutoff = collected.date() - timedelta(days=excluded_days)
+        cutoff = _realized_cutoff(
+            collected.date(), as_of=date.today(), excluded_days=excluded_days,
+        )
         connection_id = str(row.get("source_connection_id") or "").strip() or None
         resolved.append((cloud, connection_id, cutoff))
         if connection_id:
@@ -1287,7 +1302,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             if pd.isna(collected_timestamp):
                 raise ValueError("Não foi possível identificar a última data válida na Gold")
             collected_through = collected_timestamp.date()
-            effective_cutoff = collected_through - timedelta(days=excluded_days)
+            effective_cutoff = _realized_cutoff(
+                collected_through, as_of=date.today(), excluded_days=excluded_days,
+            )
     # The daily model uses its configured trailing windows. Recurring monthly
     # business rules also need the complete prior closed month as an anchor.
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])

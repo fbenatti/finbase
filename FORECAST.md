@@ -161,18 +161,20 @@ As dimensões definem a chave da série. Quanto mais granular a configuração, 
 
 ## Cutoff e mês corrente
 
-O cutoff é calculado a partir da maior data válida presente na coluna de consumo
-configurada (`ChargePeriodStart` no FOCUS). A data de execução do job e o campo
-`x_DatasetInstanceLastUpdated` não são usados como data da coleta. Com
-`cutoff_days = 2`, se o último valor recebido é do dia 12:
+O cutoff é o menor entre a maior data válida observada na fonte e o limite
+`hoje - cutoff_days`. Isso mantém o último realizado conhecido quando uma fonte
+está atrasada ou carimba o snapshot no início do mês; não subtrai a defasagem da
+fonte uma segunda vez. O limite de hoje impede usar dados futuros. Com
+`cutoff_days = 2` em 12/10:
 
 ```text
 01 a 10 -> realizado
 11 até o fim do mês -> forecast
 ```
 
-Assim, o dia da última coleta e o dia anterior são desconsiderados do realizado
-e das janelas usadas para calcular a média do forecast.
+Assim, os dados só avançam até 10/10 quando disponíveis; se a fonte só tiver
+dados até 01/10, o cutoff permanece em 01/10 em vez de retroceder para o mês
+anterior. Dados posteriores a 10/10 não entram no realizado nem nas janelas.
 
 O realizado é somado até o cutoff. A média diária selecionada é multiplicada pelos dias restantes:
 
