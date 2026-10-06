@@ -228,7 +228,7 @@ PRICE_CATALOG = SilverModel(
     name="price_catalog",
     table="price_catalog",
     description="Preço unitário por medidor, região e tipo de compromisso.",
-    grain=("cloud_provider", "billing_account_id", "meter_id", "product_id", "sku_id", "region_id", "unit_of_measure", "price_type", "term", "currency", "valid_from"),
+    grain=("cloud_provider", "meter_id", "region_id", "price_type", "currency", "valid_from"),
     primary_measure="unit_price",
     time_field="valid_from",
     fields=(
@@ -249,12 +249,6 @@ PRICE_CATALOG = SilverModel(
            notes="Prazo do compromisso (P1M, P1Y, P3Y); vazio em Consumption."),
         _f("billing_account_id", "varchar", ROLE_DIMENSION,
            notes="Conta de faturamento do contrato (MCA)."),
-        _f("product_id", "varchar", ROLE_DIMENSION,
-           notes="ProductId do Price Sheet; ajuda a desambiguar o medidor no escopo da conta."),
-        _f("billing_currency", "varchar", ROLE_DIMENSION,
-           notes="Moeda de faturamento informada no Price Sheet; distinta da moeda do UnitPrice."),
-        _f("snapshot_id", "varchar", ROLE_IDENTITY,
-           notes="Identificador do snapshot completo publicado de azure-pricesheet."),
         _f("price_source", "varchar", ROLE_IDENTITY, required=True,
            notes="PUBLIC_RETAIL | CONTRACTED | OBSERVED_EFFECTIVE. Preço contratual "
                  "e retail não se misturam: quem consome escolhe a fonte."),
