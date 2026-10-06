@@ -1607,6 +1607,7 @@ def _reprocess_destination_sync(
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
         clone_reference_prices: dict[tuple[str, str], float] = {}
+        unique_cids = set(cid for _, cid, _, _ in all_blobs)
         if unique_cids:
             try:
                 from app.services.trino_service import execute_sync as _trino_execute_sync
@@ -1624,7 +1625,6 @@ def _reprocess_destination_sync(
                 }
             except Exception as _price_catalog_error:
                 logger.warning("Clone reference catalog unavailable; using observed prices only: %s", _price_catalog_error)
-        unique_cids = set(cid for _, cid, _, _ in all_blobs)
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
                        'organograma_nivel_1', 'organograma_nivel_2',
