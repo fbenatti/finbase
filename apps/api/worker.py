@@ -1468,6 +1468,46 @@ def consumer_main(worker_id: int):
                         finally:
                             s2.close()
 
+                elif task.task_type == "price_reference_collection":
+                    meter_id = str((task.result_json or {}).get("meter_id") or "")
+                    print(f"Picked up price_reference_collection task {task_id}: meter={meter_id}")
+                    session.commit()
+                    session.close()
+                    try:
+                        from app.services.azure_price_reference import collect_and_persist
+                        result = collect_and_persist(meter_id)
+                        s2 = SyncSession()
+                        try:
+                            t2 = s2.get(EtlTask, task_id)
+                            if t2:
+                                t2.status = "COMPLETED"
+                                t2.phase = f"Preço de referência carregado · {meter_id}"
+                                t2.rows_raw = 1
+                                t2.rows_destination = 1
+                                t2.result_json = {
+                                    **dict(t2.result_json or {}),
+                                    "source_month": result.get("source_month"),
+                                    "reference_price_usd": result.get("reference_price_usd"),
+                                    "reference_price_source": result.get("reference_price_source"),
+                                }
+                                t2.finished_at = datetime.now(timezone.utc)
+                                s2.commit()
+                        finally:
+                            s2.close()
+                    except Exception as exc:
+                        logger.exception("Price reference collection task %s failed", task_id)
+                        s2 = SyncSession()
+                        try:
+                            t2 = s2.get(EtlTask, task_id)
+                            if t2:
+                                t2.status = "FAILED"
+                                t2.phase = f"Falha na coleta de preço: {exc}"[:200]
+                                t2.current_blob = f"MeterId {meter_id}: {exc}"[:500]
+                                t2.finished_at = datetime.now(timezone.utc)
+                                s2.commit()
+                        finally:
+                            s2.close()
+
                 elif task.task_type == "extraction":
                     conn_id = task.connection_id
                     periods = task.billing_periods or []
