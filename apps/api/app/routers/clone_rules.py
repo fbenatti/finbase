@@ -26,12 +26,12 @@ async def ensure_focus_templates(db: AsyncSession) -> None:
         if "focus" not in f"{dest.name} {dest.physical_name}".lower(): continue
         columns=(await db.execute(select(DestinationColumn).where(DestinationColumn.destination_table_id==dest.id))).scalars().all()
         existing={c.column_name for c in columns}; position=max([c.position for c in columns] or [0])
-        additions={"source_meter_id":"TEXT","source_unit_price":"NUMERIC","source_exchange_rate":"NUMERIC","source_pricing_model":"TEXT","source_charge_type":"TEXT","source_frequency":"TEXT","source_reservation_id":"TEXT","source_reservation_name":"TEXT","source_record_id":"TEXT","clone_source_record_id":"TEXT","is_synthetic":"BOOLEAN","clone_rule_id":"INTEGER","clone_rule_version":"INTEGER","ondemand_reference_price":"NUMERIC","ondemand_reference_period":"TEXT"}
+        additions={"source_meter_id":"TEXT","source_unit_price":"NUMERIC","source_exchange_rate":"NUMERIC","source_pricing_model":"TEXT","source_charge_type":"TEXT","source_frequency":"TEXT","source_reservation_id":"TEXT","source_reservation_name":"TEXT","source_billing_account_id":"TEXT","source_pricing_currency":"TEXT","source_unit_of_measure":"TEXT","source_product_id":"TEXT","source_region":"TEXT","source_record_id":"TEXT","clone_source_record_id":"TEXT","is_synthetic":"BOOLEAN","clone_rule_id":"INTEGER","clone_rule_version":"INTEGER","ondemand_reference_price":"NUMERIC","ondemand_reference_period":"TEXT"}
         for name,typ in additions.items():
             if name not in existing:
                 position+=1; db.add(DestinationColumn(destination_table_id=dest.id,column_name=name,data_type=typ,position=position))
         connections=(await db.execute(select(SourceConnection).where(SourceConnection.code.ilike("azure%")))).scalars().all()
-        raw_map={"meterId":"source_meter_id","unitPrice":"source_unit_price","exchangeRatePricingToBilling":"source_exchange_rate","pricingModel":"source_pricing_model","chargeType":"source_charge_type","frequency":"source_frequency","reservationId":"source_reservation_id","reservationName":"source_reservation_name"}
+        raw_map={"meterId":"source_meter_id","unitPrice":"source_unit_price","exchangeRatePricingToBilling":"source_exchange_rate","pricingModel":"source_pricing_model","chargeType":"source_charge_type","frequency":"source_frequency","reservationId":"source_reservation_id","reservationName":"source_reservation_name","billingAccountId":"source_billing_account_id","pricingCurrency":"source_pricing_currency","unitOfMeasure":"source_unit_of_measure","productId":"source_product_id","meterRegion":"source_region"}
         for conn in connections:
             # These legacy mappings conflate unrelated source semantics and
             # make an On-Demand reconstruction impossible.
