@@ -174,31 +174,26 @@ class CloneEngine:
             def _cached_reference(key: tuple[str, ...], row: pd.Series) -> tuple[str, float] | None:
                 # Priority: observed On-Demand (already in ``self.prices``),
                 # the pre-existing curated reference list, then Price Sheet.
-                price = self.reference_prices.get(key)
-                if price is None and key[0].startswith("azure"):
-                    price = self.reference_prices.get(("azure", key[1]))
-                label = "reference_catalog"
-                if price is None:
-                    price = self.price_sheet_prices.get(key)
-                    label = "price_sheet"
-                if price is None:
-                    return None
-                if isinstance(price, dict) and price.get("ambiguous"):
-                    return None
-                reference_unit = price.get("unit_of_measure") if isinstance(price, dict) else getattr(price, "unit_of_measure", None)
-                if isinstance(price, dict) and not reference_unit:
-                    return None
-                reference_currency = price.get("currency") if isinstance(price, dict) else getattr(price, "currency", None)
-                source_currency = row.get("source_pricing_currency")
-                if reference_currency and source_currency and str(reference_currency).strip().casefold() != str(source_currency).strip().casefold():
-                    return None
-                if reference_unit is not None:
-                    factor = price_unit_factor(reference_unit, row.get("source_unit_of_measure"))
+                curated = self.reference_prices.get(key)
+                if curated is None and key[0].startswith("azure"):
+                    curated = self.reference_prices.get(("azure", key[1]))
+                candidates = (("reference_catalog", curated), ("price_sheet", self.price_sheet_prices.get(key)))
+                for label, price in candidates:
+                    if price is None or (isinstance(price, dict) and price.get("ambiguous")):
+                        continue
+                    reference_unit = price.get("unit_of_measure") if isinstance(price, dict) else getattr(price, "unit_of_measure", None)
+                    if isinstance(price, dict) and not reference_unit:
+                        continue
+                    reference_currency = price.get("currency") if isinstance(price, dict) else getattr(price, "currency", None)
+                    source_currency = row.get("source_pricing_currency")
+                    if reference_currency and source_currency and str(reference_currency).strip().casefold() != str(source_currency).strip().casefold():
+                        continue
+                    factor = price_unit_factor(reference_unit, row.get("source_unit_of_measure")) if reference_unit is not None else 1.0
                     if factor is None:
-                        return None
+                        continue
                     base_price = price.get("unit_price") if isinstance(price, dict) else getattr(price, "unit_price", price)
-                    price = base_price * factor
-                return label, float(price)
+                    return label, float(base_price) * factor
+                return None
 
             cached = pd.Series(
                 [_cached_reference(key, row) for key, (_, row) in zip(keys, eligible.iterrows())],
