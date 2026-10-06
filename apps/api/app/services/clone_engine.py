@@ -82,11 +82,13 @@ class CloneEngine:
     def __init__(
         self, rules: list[Any], destination_table_id: int,
         reference_prices: dict[tuple[str, str], float] | None = None,
+        price_sheet_prices: dict[tuple[str, ...], Any] | None = None,
     ):
         self.rules = sorted(rules, key=lambda r: r.priority)
         self.destination_table_id = destination_table_id
         self.prices: dict[tuple[str, str], tuple[str, float]] = {}
         self.reference_prices = reference_prices or {}
+        self.price_sheet_prices = price_sheet_prices or {}
         self.pendencies: list[dict[str, Any]] = []
 
     @staticmethod
@@ -169,12 +171,16 @@ class CloneEngine:
             references = references.astype(object)
             # Curated Azure prices are a fallback only: a matching On-Demand
             # observation in this billing stream always wins.
-            def _cached_reference(key: tuple[str, ...], row: pd.Series) -> float | None:
+            def _cached_reference(key: tuple[str, ...], row: pd.Series) -> tuple[str, float] | None:
+                # Priority: observed On-Demand (already in ``self.prices``),
+                # the pre-existing curated reference list, then Price Sheet.
                 price = self.reference_prices.get(key)
-                # Legacy caches remain readable for existing unit tests and
-                # old snapshots, but new Price Sheet rows use the full key.
                 if price is None and key[0].startswith("azure"):
                     price = self.reference_prices.get(("azure", key[1]))
+                label = "reference_catalog"
+                if price is None:
+                    price = self.price_sheet_prices.get(key)
+                    label = "price_sheet"
                 if price is None:
                     return None
                 if isinstance(price, dict) and price.get("ambiguous"):
@@ -182,13 +188,17 @@ class CloneEngine:
                 reference_unit = price.get("unit_of_measure") if isinstance(price, dict) else getattr(price, "unit_of_measure", None)
                 if isinstance(price, dict) and not reference_unit:
                     return None
+                reference_currency = price.get("currency") if isinstance(price, dict) else getattr(price, "currency", None)
+                source_currency = row.get("source_pricing_currency")
+                if reference_currency and source_currency and str(reference_currency).strip().casefold() != str(source_currency).strip().casefold():
+                    return None
                 if reference_unit is not None:
                     factor = price_unit_factor(reference_unit, row.get("source_unit_of_measure"))
                     if factor is None:
                         return None
                     base_price = price.get("unit_price") if isinstance(price, dict) else getattr(price, "unit_price", price)
                     price = base_price * factor
-                return price
+                return label, float(price)
 
             cached = pd.Series(
                 [_cached_reference(key, row) for key, (_, row) in zip(keys, eligible.iterrows())],
@@ -196,9 +206,7 @@ class CloneEngine:
             )
             use_cached = references.isna() & cached.notna()
             if use_cached.any():
-                references.loc[use_cached] = cached.loc[use_cached].map(
-                    lambda price: ("reference_catalog", float(price))
-                )
+                references.loc[use_cached] = cached.loc[use_cached]
             missing = references.isna()
             if missing.any():
                 pending = eligible.loc[missing].copy()
