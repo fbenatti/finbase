@@ -1363,10 +1363,11 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     )
                 )).scalars().all()
                 if len(same_parent) > 1:
-                    result.errors.append(
-                        f"Projeto '{pn}' duplicado sob a diretoria '{dn}'; import ignorado por ambiguidade"
-                    )
-                    continue
+                    # Historical imports may already have created identical
+                    # leaves under the same director. Reuse the stable
+                    # canonical row so the rule still gets associated; do not
+                    # create another department or discard the association.
+                    dept = min(same_parent, key=lambda candidate: candidate.id)
             if dept:
                 key = (row.get("Cloud", "").strip(), pn)
                 directory_department_map.setdefault(key, [])
