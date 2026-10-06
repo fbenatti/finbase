@@ -1606,6 +1606,24 @@ def _reprocess_destination_sync(
         conn_map: dict[int, SourceConnection] = {}
         conn_rules: dict[int, tuple] = {}  # cid → (brules, crules, dept_cache, hierarchy_cache)
         clone_engines: dict[int, object] = {}
+        clone_reference_prices: dict[tuple[str, str], float] = {}
+        if unique_cids:
+            try:
+                from app.services.trino_service import execute_sync as _trino_execute_sync
+                _reference_rows = _trino_execute_sync(
+                    "SELECT lower(provider) AS provider, meter_id, reference_price_usd "
+                    "FROM iceberg.bronze.raw_azure_price_reference "
+                    "WHERE coalesce(needs_review, false) = false "
+                    "AND try_cast(reference_price_usd AS DOUBLE) > 0",
+                    timeout_s=30,
+                )
+                clone_reference_prices = {
+                    (str(row.get("provider") or "azure").lower(), str(row["meter_id"])):
+                    float(row["reference_price_usd"])
+                    for row in _reference_rows if row.get("meter_id") and row.get("reference_price_usd")
+                }
+            except Exception as _price_catalog_error:
+                logger.warning("Clone reference catalog unavailable; using observed prices only: %s", _price_catalog_error)
         unique_cids = set(cid for _, cid, _, _ in all_blobs)
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
@@ -1778,7 +1796,9 @@ def _reprocess_destination_sync(
             ).order_by(CloneRule.priority)).scalars().all()
             if clone_rules:
                 from app.services.clone_engine import CloneEngine
-                clone_engines[cid] = CloneEngine(clone_rules, destination_table_id)
+                clone_engines[cid] = CloneEngine(
+                    clone_rules, destination_table_id, reference_prices=clone_reference_prices,
+                )
 
         # Close main session NOW — all ORM objects are detached but attributes remain accessible
         session.close()
