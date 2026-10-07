@@ -105,6 +105,23 @@ class CloneEngine:
             value("source_region"),
         )
 
+    @staticmethod
+    def _reference_keys(frame: pd.DataFrame, meter: Any) -> list[tuple[str, ...]]:
+        """Build reference keys column-wise instead of creating a Series per row."""
+        def values(name: str) -> list[str]:
+            if name not in frame:
+                return [""] * len(frame)
+            return (
+                frame[name].fillna("").astype(str).str.strip().str.casefold().tolist()
+            )
+
+        return list(zip(
+            values("cloud_origem"), values(meter),
+            values("source_billing_account_id"), values("source_pricing_currency"),
+            values("source_unit_of_measure"), values("source_product_id"),
+            values("source_region"),
+        ))
+
     def _prime_prices(self, frame: pd.DataFrame, rule: Any, period: str) -> None:
         roles = rule.roles or {}
         meter, price, model = roles.get("meter_id"), roles.get("unit_price"), roles.get("pricing_model")
@@ -123,7 +140,7 @@ class CloneEngine:
         if candidates.empty:
             return
         clouds = frame.loc[candidates.index, "cloud_origem"].astype(str).str.lower() if "cloud_origem" in frame else ""
-        candidates["_clone_key"] = [self._reference_key(row, meter) for _, row in candidates.iterrows()]
+        candidates["_clone_key"] = self._reference_keys(candidates, meter)
         # ``last`` preserves the old same-period winner while reducing a
         # potentially millions-of-rows scan to one update per meter.
         for key, value in candidates.groupby("_clone_key", sort=False)[price].last().items():
@@ -166,7 +183,7 @@ class CloneEngine:
             eligible = frame.loc[scope].copy()
             if eligible.empty: continue
             clouds = eligible.get("cloud_origem", pd.Series("", index=eligible.index)).astype(str).str.lower()
-            keys = [self._reference_key(row, meter) for _, row in eligible.iterrows()]
+            keys = self._reference_keys(eligible, meter)
             references = pd.Series(keys, index=eligible.index).map(self.prices)
             references = references.astype(object)
             # Curated Azure prices are a fallback only: a matching On-Demand
@@ -195,10 +212,15 @@ class CloneEngine:
                     return label, float(base_price) * factor
                 return None
 
-            cached = pd.Series(
-                [_cached_reference(key, row) for key, (_, row) in zip(keys, eligible.iterrows())],
-                index=eligible.index,
-            )
+            # Most rows resolve from the observed On-Demand map. Do not pay
+            # Python callback / unit-validation cost for those rows; evaluate
+            # curated and Price Sheet fallbacks only for actual gaps.
+            cached = pd.Series(None, index=eligible.index, dtype=object)
+            missing_observed = references.isna()
+            for position in range(len(keys)):
+                row_index = eligible.index[position]
+                if missing_observed.iloc[position]:
+                    cached.at[row_index] = _cached_reference(keys[position], eligible.loc[row_index])
             use_cached = references.isna() & cached.notna()
             if use_cached.any():
                 references.loc[use_cached] = cached.loc[use_cached]
