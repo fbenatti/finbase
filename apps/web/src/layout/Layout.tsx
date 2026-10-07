@@ -57,7 +57,6 @@ const menuGroups = [
       { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
-      { path: "/analysis", label: "Análise dos dados", icon: <BarChartIcon /> },
     ],
   },
   {
@@ -93,6 +92,7 @@ const menuGroups = [
       { path: "/admin", label: "Usuários, grupos e roles", icon: <AdminPanelSettingsIcon /> },
       { path: "/admin/audit", label: "Auditoria", icon: <AdminPanelSettingsIcon /> },
       { path: "/admin/sso", label: "Provedores SSO", icon: <AdminPanelSettingsIcon /> },
+      { path: "/analysis", label: "Análise dos dados", icon: <BarChartIcon /> },
     ],
   },
 ];
