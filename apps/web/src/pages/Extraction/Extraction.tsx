@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, TableCell, Paper, Chip, LinearProgress,
@@ -6,7 +6,7 @@ import {
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   FormControlLabel, Switch, IconButton, Tabs, Tab, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
-import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart } from "@mui/icons-material";
+import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
