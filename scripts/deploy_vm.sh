@@ -19,7 +19,10 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   exit 1
 fi
 
-git fetch origin main
+# Update the tracking ref explicitly. `git fetch origin main` only updates
+# FETCH_HEAD, while the fast-forward below merges origin/main; without this
+# refspec an offline bundle-backed deployment can silently keep the old code.
+git fetch origin main:refs/remotes/origin/main
 git merge --ff-only origin/main
 
 # This file is deliberately local to the VM and ignored by Git. It prevents
