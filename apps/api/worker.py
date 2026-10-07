@@ -954,6 +954,7 @@ def consumer_main(worker_id: int):
                                 task_row.errors = [f.get("error", "") for f in failed] or None
                             task_row.finished_at = datetime.now(timezone.utc)
                             task_row.result_json = {**(task_row.result_json or {}), **result}
+                            sync_etl_task_log(s, task_row)
                         s.commit(); s.close()
                     except Exception as exc:
                         s = SyncSession()
@@ -963,6 +964,8 @@ def consumer_main(worker_id: int):
                             task_row.phase = f"Erro: {_format_task_error(exc)[:160]}"
                             task_row.errors = [str(exc)]
                             task_row.finished_at = datetime.now(timezone.utc)
+                            from app.services.processing_logs import sync_etl_task_log
+                            sync_etl_task_log(s, task_row)
                         s.commit(); s.close()
 
                 elif task.task_type == "bronze_audit":
