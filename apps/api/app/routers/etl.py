@@ -1628,6 +1628,15 @@ def _reprocess_destination_sync(
                 row for row in all_blobs
                 if (snapshot_date_from_blob_path(row[3]) or "") in allowed
             ]
+        # Physical-only Bronze entries were collected before filtering the
+        # requested snapshots. Keep the row-count contract scoped to exactly
+        # the selected blobs, otherwise both daily snapshots are counted for
+        # a one-day publication and the valid partition is rejected.
+        from app.services.reprocess_blob_selection import selected_physical_row_counts
+        selected_blob_ids = {blob_id for blob_id, _, _, _ in all_blobs}
+        physical_expected_rows = selected_physical_row_counts(
+            selected_blob_ids, physical_expected_rows,
+        )
 
         total_blobs = len(all_blobs)
         blob_meta = {

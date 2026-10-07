@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
 
-from app.services.reprocess_blob_selection import blob_modified_is_newer, select_reprocess_blobs
+from app.services.reprocess_blob_selection import (
+    blob_modified_is_newer,
+    select_reprocess_blobs,
+    selected_physical_row_counts,
+)
 
 
 def test_blob_modified_is_newer_handles_none_vs_datetime():
@@ -20,3 +24,9 @@ def test_azure_select_does_not_crash_on_physical_blob_without_modified():
     paths = {path for _, _, path in selected}
     assert paths  # must not raise TypeError on None modified
     assert "reports/run-a/part_0.csv" in paths
+
+
+def test_snapshot_reprocess_counts_only_selected_physical_blobs():
+    assert selected_physical_row_counts(
+        {-1, -3}, {-1: 4, -2: 124, -3: 40, -4: 10},
+    ) == {-1: 4, -3: 40}

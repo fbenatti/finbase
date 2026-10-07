@@ -1,6 +1,18 @@
 """Bronze blob selection helpers for destination reprocess (no router imports)."""
 
 
+def selected_physical_row_counts(
+    selected_blob_ids: set[int],
+    physical_expected_rows: dict[int, int],
+) -> dict[int, int]:
+    """Keep physical Bronze counts scoped to the blobs selected for publish."""
+    return {
+        blob_id: count
+        for blob_id, count in physical_expected_rows.items()
+        if blob_id in selected_blob_ids
+    }
+
+
 def blob_modified_is_newer(candidate: object, current: object) -> bool:
     """Compare ingest timestamps without breaking on physical-only blobs (modified=None)."""
     if candidate is None:
