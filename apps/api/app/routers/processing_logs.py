@@ -75,27 +75,7 @@ async def list_processing_logs(
         filtered.order_by(ProcessingLog.started_at.desc().nullslast(), ProcessingLog.id.desc())
         .offset(offset).limit(limit)
     )).scalars().all()
-    from app.models.destination import DestinationTable
-    from app.models.source_connection import SourceConnection
-    connection_ids = sorted({int(cid) for row in result for cid in (row.source or {}).get("connection_ids", []) if str(cid).isdigit()})
-    destination_ids = sorted({int(row.destination.get("destination_table_id")) for row in result if row.destination and str(row.destination.get("destination_table_id", "")).isdigit()})
-    connections = (await db.execute(select(SourceConnection).where(SourceConnection.id.in_(connection_ids)))).scalars().all() if connection_ids else []
-    destinations = (await db.execute(select(DestinationTable).where(DestinationTable.id.in_(destination_ids)))).scalars().all() if destination_ids else []
-    connection_names = {connection.id: connection.name for connection in connections}
-    destination_names = {destination.id: destination.name for destination in destinations}
-    rows = []
-    for row in result:
-        item = _serialize(row)
-        source = item["source"]
-        source["connection_names"] = [connection_names.get(int(cid), f"Conexão #{cid}") for cid in source.get("connection_ids", [])]
-        destination = item["destination"]
-        destination_id = destination.get("destination_table_id")
-        if destination_id is not None:
-            destination["destination_name"] = destination_names.get(int(destination_id))
-        item["source"] = source
-        item["destination"] = destination
-        rows.append(item)
-    return {"items": rows, "total": total}
+    return {"items": [_serialize(row) for row in result], "total": total}
 
 
 @router.get("/{log_id}")
