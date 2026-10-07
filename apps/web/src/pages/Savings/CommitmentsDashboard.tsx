@@ -5,6 +5,7 @@ import {
   Card,
   CardContent,
   CircularProgress,
+  Button,
   FormControl,
   InputLabel,
   MenuItem,
@@ -57,6 +58,7 @@ export default function CommitmentsDashboard() {
   const [startMonth, setStartMonth] = useState(`${currentMonth.slice(0, 4)}-01`);
   const [endMonth, setEndMonth] = useState(currentMonth);
   const [source, setSource] = useState<"all" | "azure-ti" | "azure-4p">("all");
+  const [showAllProjects, setShowAllProjects] = useState<Record<"RI" | "SavingPlan", boolean>>({ RI: false, SavingPlan: false });
   const [data, setData] = useState<CommitmentsDashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -224,11 +226,17 @@ export default function CommitmentsDashboard() {
         <Stack direction="column" spacing={2}>
           {(["RI", "SavingPlan"] as const).map((type) => {
             const rows = data.projects.filter((row) => row.commitment_type === type);
+            const visibleRows = showAllProjects[type] ? rows : rows.slice(0, 10);
             return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
-              <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento — {type}</Typography>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                <Typography variant="subtitle1" fontWeight={600}>Detalhamento — {type}</Typography>
+                <Button size="small" onClick={() => setShowAllProjects((current) => ({ ...current, [type]: !current[type] }))}>
+                  {showAllProjects[type] ? "Ver Top 10" : "Ver tudo"}
+                </Button>
+              </Stack>
               <Box sx={{ width: "100%" }}>
                 <DataGrid
-                  rows={rows}
+                  rows={visibleRows}
                   columns={projectColumns}
                   getRowId={(row) => `${row.source}:${row.commitment_type}:${row.project}`}
                   autoHeight
