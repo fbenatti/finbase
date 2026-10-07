@@ -743,7 +743,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       ),
     },
     {
-      key: "_edit" as keyof TableRelationship, label: "", width: 50, sortable: false, filterable: false,
+      key: "_edit", label: "", width: 50, sortable: false, filterable: false,
       render: (r) => (
         <Tooltip title="Editar mapeamentos de colunas">
           <IconButton size="small" color="primary"
@@ -758,7 +758,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       ),
     },
     {
-      key: "_delete" as keyof TableRelationship, label: "", width: 50, sortable: false, filterable: false,
+      key: "_delete", label: "", width: 50, sortable: false, filterable: false,
       render: (r) => (
         <IconButton size="small" color="error"
           onClick={() => handleDeleteTableRel(r)}

@@ -156,9 +156,9 @@ export default function SortableTable<T extends object>({
                       key={col.key}
                       sx={{
                         maxWidth: col.width || 250,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                        overflow: col.render ? "visible" : "hidden",
+                        textOverflow: col.render ? "clip" : "ellipsis",
+                        whiteSpace: col.render ? "normal" : "nowrap",
                         fontSize: size === "small" ? "0.8rem" : undefined,
                       }}
                     >
