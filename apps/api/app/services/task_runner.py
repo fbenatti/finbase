@@ -1118,6 +1118,8 @@ def _process_databricks_month_sync_worker(
             item.content_length,
             task_id,
         )
+        from app.services.processing_logs import sync_etl_task_log
+        sync_etl_task_log(session, task)
         session.commit()
         return result
     finally:
