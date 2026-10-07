@@ -1,5 +1,32 @@
 # Reestruturação operacional para PRD
 
+## Performance da tela de logs e cubo operacional
+
+A listagem unificada de execuções deve ser servida por um cubo operacional
+materializado em Gold, com nome `dest_dm_processing_logs`. O cubo contém uma
+linha por execução e dimensões para tipo, status, origem, destino, partições,
+início/fim, contagens e fase. A timeline detalhada, parâmetros e payloads de
+erro/eventos permanecem em `processing_log` no PostgreSQL e são carregados sob
+demanda ao abrir o diálogo. A grade lê apenas o cubo; não varre Silver nem
+materializa dados de origem durante a navegação.
+
+O cubo deve ser atualizado incrementalmente quando o serviço canônico registra
+ou sincroniza um log. A primeira publicação faz backfill do histórico uma vez;
+depois disso cada atualização da execução atualiza sua linha Gold. Para evitar
+varredura de Silver, a fonte do cubo é `processing_log`/`etl_task` via extração
+incremental controlada, com checkpoint por `updated_at` (adicionar esse campo
+se necessário). A materialização usa o serviço de governança Gold e registra
+manifesto/versionamento. A UI lê essa tabela com paginação, filtros e ordenação
+no backend. O diálogo consulta `GET /processing-logs/{id}`.
+
+No release: criar o cubo e sua regra em Governança → Geração de Cubos,
+materializar uma vez em ambiente de validação, comparar contagens contra a
+tabela PostgreSQL e verificar que a lista não emite consultas às tabelas
+Silver. A execução inicial de backfill deve ocorrer fora do request da tela;
+falhas na publicação mantêm a listagem operacional atual como fallback. Para
+PRD, garantir refresh incremental, alerta de atraso e procedimento de
+reconstrução completa antes de retirar o fallback.
+
 Este documento consolida as mudanças do branch atual que precisam ser avaliadas para produção: logs unificados, reprocessamento/clonagem com fallback de preços Azure, regras de classificação, ajustes de forecast e dashboard de compromissos. O branch contém commits anteriores e independentes da solicitação de logs; não os trate como escopo implícito de um único PR. Antes de abrir/mesclar, compare `origin/main...HEAD` e decida explicitamente quais blocos entram no release.
 
 ## 1. Resumo das mudanças
