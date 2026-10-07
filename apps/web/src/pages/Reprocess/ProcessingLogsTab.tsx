@@ -20,6 +20,24 @@ const STATUS_COLOR: Record<string, "success" | "error" | "warning" | "info" | "d
 };
 const dateLabel = (value?: string | null) => value ? format(new Date(value), "dd/MM/yyyy, HH:mm:ss") : "—";
 const text = (value: unknown) => value == null || value === "" ? "—" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+const FIELD_LABELS: Record<string, string> = {
+  at: "Data e hora", backfill_days: "Dias consultados", billing_periods: "Períodos", blobs: "Arquivos processados",
+  bronze_audit: "Auditoria Bronze", bronze_audit_task_id: "ID da auditoria Bronze", connection_codes: "Códigos das conexões",
+  connection_ids: "IDs das conexões", connection_names: "Conexões", destination_table_id: "ID do destino",
+  destination_name: "Tabela de destino", error: "Erro", errors: "Erros", event_log: "Eventos", exception_type: "Tipo do erro",
+  input_rows: "Linhas de entrada", level: "Nível", message: "Mensagem", output_rows: "Linhas processadas",
+  period: "Período", publish_by_partition: "Publicar por partição", queue_group: "Grupo da fila",
+  queue_position: "Posição na fila", queue_total: "Tarefas na fila", replace_existing: "Substituir dados existentes",
+  result: "Resultado", rows_destination: "Linhas gravadas no destino", rows_normalized: "Linhas normalizadas",
+  rows_raw: "Linhas de origem", snapshot_dates: "Datas de referência", table: "Tabela", task_id: "ID da tarefa",
+  billing_period: "Período de cobrança", blob_id: "ID do arquivo", connection_id: "ID da conexão", rule_ids: "IDs das regras",
+};
+const fieldLabel = (key: string) => FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, char => char.toLocaleUpperCase("pt-BR"));
+const displayValue = (value: unknown, key?: string) => {
+  if (typeof value === "boolean") return value ? "Sim" : "Não";
+  if (key === "at" && typeof value === "string") return dateLabel(value);
+  return text(value);
+};
 const sourceLabel = (value: Record<string, unknown>) => {
   if (value.label) return String(value.label);
   const names = value.connection_names as string[] | undefined;
@@ -29,10 +47,36 @@ const sourceLabel = (value: Record<string, unknown>) => {
   return text(value);
 };
 const destinationLabel = (value: Record<string, unknown>) => text(value.label || value.destination_name || value.table || value.tables || value.namespace || value.destination_table_id || value);
-const json = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 
 function Field({ label, value }: { label: string; value: unknown }) {
   return <Box sx={{ minWidth: 180, flex: "1 1 180px" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{text(value)}</Typography></Box>;
+}
+
+function StructuredValue({ value, field }: { value: unknown; field?: string }) {
+  if (value == null || value === "") return <Typography variant="body2" color="text.secondary">—</Typography>;
+  if (Array.isArray(value)) {
+    if (!value.length) return <Typography variant="body2" color="text.secondary">Nenhum item</Typography>;
+    return <Stack component="ul" spacing={0.75} sx={{ m: 0, pl: 2.25 }}>
+      {value.map((item, index) => <Box component="li" key={`${field || "item"}-${index}`} sx={{ pl: 0.25 }}>
+        {item && typeof item === "object" ? <StructuredValue value={item} /> : <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{displayValue(item, field)}</Typography>}
+      </Box>)}
+    </Stack>;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (!entries.length) return <Typography variant="body2" color="text.secondary">Sem dados</Typography>;
+    return <Stack spacing={0.5} sx={{ width: "100%" }}>
+      {entries.map(([key, nested]) => <Box key={key} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(170px, 0.38fr) 1fr" }, gap: 1, py: 0.5, borderBottom: "1px solid", borderColor: "divider", "&:last-child": { borderBottom: 0 } }}>
+        <Typography variant="body2" color="text.secondary" fontWeight={600}>{fieldLabel(key)}</Typography>
+        <StructuredValue value={nested} field={key} />
+      </Box>)}
+    </Stack>;
+  }
+  return <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{displayValue(value, field)}</Typography>;
+}
+
+function StructuredPanel({ value }: { value: unknown }) {
+  return <Box sx={{ p: 1.5, bgcolor: "grey.50", border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}><StructuredValue value={value} /></Box>;
 }
 
 export default function ProcessingLogsTab() {
@@ -76,6 +120,11 @@ export default function ProcessingLogsTab() {
     { field: "started_at", headerName: "Início", minWidth: 165, valueFormatter: value => dateLabel(value as string) },
     { field: "finished_at", headerName: "Fim", minWidth: 165, valueFormatter: value => dateLabel(value as string) },
   ], []);
+  const detailData = detail?.details || {};
+  const events = Array.isArray(detailData.event_log)
+    ? detailData.event_log.filter((event): event is Record<string, unknown> => Boolean(event) && typeof event === "object")
+    : [];
+  const otherDetails = Object.fromEntries(Object.entries(detailData).filter(([key]) => key !== "event_log"));
 
   return <Stack spacing={1.5}>
     {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
@@ -103,13 +152,29 @@ export default function ProcessingLogsTab() {
           {detail.error && <Alert severity="error">{detail.error}</Alert>}
           <Typography variant="subtitle2">Resumo</Typography>
           <Stack direction="row" gap={2} flexWrap="wrap">
-            <Field label="Origem" value={detail.source} /><Field label="Destino" value={detail.destination} /><Field label="Partições / períodos" value={detail.partitions} />
+            <Field label="Origem" value={sourceLabel(detail.source)} /><Field label="Destino" value={destinationLabel(detail.destination)} /><Field label="Partições / períodos" value={detail.partitions} />
             <Field label="Início" value={dateLabel(detail.started_at)} /><Field label="Fim" value={dateLabel(detail.finished_at)} /><Field label="Fase" value={detail.phase} />
           </Stack>
           <Divider /><Typography variant="subtitle2">Contagens</Typography>
-          <Stack direction="row" gap={2} flexWrap="wrap">{Object.entries(detail.counts || {}).map(([key, value]) => <Field key={key} label={key} value={Number(value).toLocaleString("pt-BR")} />)}</Stack>
-          <Divider /><Typography variant="subtitle2">Parâmetros</Typography><Box component="pre" sx={{ m: 0, p: 1.5, bgcolor: "grey.50", borderRadius: 1, overflow: "auto", fontSize: 12 }}>{json(detail.parameters)}</Box>
-          <Divider /><Typography variant="subtitle2">Eventos e detalhes do processamento</Typography><Box component="pre" sx={{ m: 0, p: 1.5, bgcolor: "grey.50", borderRadius: 1, overflow: "auto", maxHeight: 360, fontSize: 12 }}>{json(detail.details)}</Box>
+          <Stack direction="row" gap={2} flexWrap="wrap">{Object.entries(detail.counts || {}).map(([key, value]) => <Field key={key} label={fieldLabel(key)} value={Number(value).toLocaleString("pt-BR")} />)}</Stack>
+          <Divider /><Typography variant="subtitle2">Parâmetros da execução</Typography>
+          <StructuredPanel value={detail.parameters} />
+          <Divider /><Typography variant="subtitle2">Histórico de eventos</Typography>
+          {events.length ? <Stack spacing={1}>
+            {events.map((event, index) => {
+              const level = String(event.level || "INFO").toUpperCase();
+              const color = level === "ERROR" ? "error" : level === "WARNING" || level === "WARN" ? "warning" : "info";
+              return <Box key={`${String(event.at || "event")}-${index}`} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderLeft: 3, borderLeftColor: `${color}.main`, borderRadius: 1.5, bgcolor: "background.paper" }}>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
+                  <Chip size="small" label={level === "INFO" ? "Informação" : level === "ERROR" ? "Erro" : level === "WARNING" || level === "WARN" ? "Atenção" : level} color={color} />
+                  <Typography variant="caption" color="text.secondary">{dateLabel(String(event.at || ""))}</Typography>
+                </Stack>
+                <Typography variant="body2" fontWeight={600}>{displayValue(event.message)}</Typography>
+                {event.details != null && <Box sx={{ mt: 1 }}><StructuredPanel value={event.details} /></Box>}
+              </Box>;
+            })}
+          </Stack> : <Typography variant="body2" color="text.secondary">Nenhum evento adicional foi registrado para esta execução.</Typography>}
+          {Object.keys(otherDetails).length > 0 && <><Divider /><Typography variant="subtitle2">Resultado e informações do processamento</Typography><StructuredPanel value={otherDetails} /></>}
           {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros Bronze desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados Bronze" onClick={() => navigate(`/extraction/history/${detail.etl_task_id}`)} /></Box>}
           {detail.etl_task_id && ["QUEUED", "RUNNING"].includes(detail.status) && <Chip clickable color="error" label="Cancelar execução" onClick={async () => { await cancelEtl(detail.etl_task_id!); await load(); setSelected(null); }} sx={{ alignSelf: "flex-start" }} />}
         </Stack>}
