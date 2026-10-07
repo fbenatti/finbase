@@ -191,6 +191,8 @@ def _source_payload(
         "api_reference": (entry or {}).get("api_reference"),
         "required_permission": (entry or {}).get("required_permission"),
         "implementation_status": (entry or {}).get("implementation_status"),
+        "independent_connection": bool((entry or {}).get("independent_connection")),
+        "collection_mode": (entry or {}).get("collection_mode", "environment"),
         "scope": (entry or {}).get("azure_scope"),
         "position": (entry or {}).get("position", 500),
         "last_test_status": connection.last_test_status,
@@ -226,6 +228,8 @@ async def get_catalog():
                 "api_reference": entry.get("api_reference"),
                 "required_permission": entry.get("required_permission"),
                 "implementation_status": entry.get("implementation_status"),
+                "independent_connection": bool(entry.get("independent_connection")),
+                "collection_mode": entry.get("collection_mode", "environment"),
                 "scope": entry.get("azure_scope"),
                 "default_window_days": entry.get("default_window_days"),
                 "default_metrics": entry.get("default_metrics") or [],
@@ -298,11 +302,14 @@ async def list_azure_sources(
             if connection_id is not None:
                 running[connection_id] = running.get(connection_id, 0) + 1
 
-    pares_bronze = [
-        (c.code, sel.source_key)
-        for c in connections
-        for sel in (by_connection.get(c.id) or [])
-    ]
+    pares_bronze = []
+    for connection in connections:
+        source_keys = [sel.source_key for sel in (by_connection.get(connection.id) or [])]
+        if not source_keys:
+            primary = source_key_for(connection)
+            if primary and catalog_entry(primary):
+                source_keys = [primary]
+        pares_bronze.extend((connection.code, key) for key in source_keys)
     contagens_bronze = await _bronze_row_counts(pares_bronze) if pares_bronze else {}
 
     groups: dict[str, dict] = {}
@@ -317,7 +324,10 @@ async def list_azure_sources(
         if connection_selections:
             # Conexão de ambiente (tem fontes escolhidas): oferece o catálogo
             # inteiro, com o que já está ligado marcado.
-            catalogadas = sorted(AZURE_SOURCE_CATALOG, key=lambda e: e.get("position", 500))
+            catalogadas = sorted(
+                (entry for entry in AZURE_SOURCE_CATALOG if not entry.get("independent_connection")),
+                key=lambda e: e.get("position", 500),
+            )
         else:
             # Conexão que não escolheu nada só responde pela sua própria fonte.
             # Oferecer o catálogo inteiro aqui duplicaria as fontes do ambiente
@@ -470,6 +480,11 @@ async def update_source_selection(
     entry = catalog_entry(source_key)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Fonte '{source_key}' não existe no catálogo")
+    if entry.get("independent_connection"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{entry['display_name']} usa conexão própria e não pode ser ligada dentro de outro ambiente Azure.",
+        )
 
     selection = (await db.execute(
         select(AzureConnectionSource).where(
@@ -571,12 +586,28 @@ async def collect_environment(
     for connection, selection in selected:
         source_key = selection.source_key
         entry = catalog_entry(source_key or "") or {}
+        if not entry:
+            skipped.append({
+                "connection_id": connection.id,
+                "code": connection.code,
+                "source_key": source_key,
+                "reason": "fonte fora do catálogo atual; use o fluxo de coleta da conexão própria",
+            })
+            continue
         if entry.get("implementation_status") == "planned":
             skipped.append({
                 "connection_id": connection.id,
                 "code": connection.code,
                 "source_key": source_key,
                 "reason": "fonte planejada, ainda sem coletor",
+            })
+            continue
+        if entry.get("collection_mode") == "dedicated":
+            skipped.append({
+                "connection_id": connection.id,
+                "code": connection.code,
+                "source_key": source_key,
+                "reason": "fonte possui fluxo de coleta dedicado; use a ação de atualização própria",
             })
             continue
         # Carga manual não tem coleta automática: o dado entra por upload.
