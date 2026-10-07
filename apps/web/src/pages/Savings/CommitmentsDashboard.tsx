@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -14,12 +14,13 @@ import {
   Typography,
 } from "@mui/material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
-import Plot from "@/components/Plot";
 import {
   CommitmentsDashboard as CommitmentsDashboardData,
   CommitmentDashboardRow,
   getCommitmentsDashboard,
 } from "../../services/api";
+
+const Plot = lazy(() => import("@/components/Plot"));
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 const toPeriod = (month: string) => month.replace("-", "");
@@ -127,8 +128,9 @@ export default function CommitmentsDashboard() {
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {loading && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
-      {!loading && data && <>
+      {loading && !data && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
+      {loading && data && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>Atualizando o período…</Typography>}
+      {data && <>
         <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Consolidado do período</Typography>
         <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel} · valores realizados, exceto as séries identificadas como forecast.</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
@@ -156,6 +158,7 @@ export default function CommitmentsDashboard() {
           <MetricCard title="Saving / OnDemand" value={savingplanSavingPct} detail="Percentual da referência" isPercent />
         </Stack>
 
+        <Suspense fallback={<Stack alignItems="center" sx={{ py: 3 }}><CircularProgress size={24} /></Stack>}>
         <Card sx={{ mb: 2 }}><CardContent>
           <Typography variant="subtitle1" fontWeight={600}>Compras mensais</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Compra realizada e forecast são separados visualmente; saving realizado é calculado pela base OnDemand menos a compra.</Typography>
@@ -203,6 +206,8 @@ export default function CommitmentsDashboard() {
             })}
           </Stack>
         </CardContent></Card>
+
+        </Suspense>
 
         <Stack direction={{ xs: "column", xl: "row" }} spacing={2}>
           {(["RI", "SavingPlan"] as const).map((type) => {
