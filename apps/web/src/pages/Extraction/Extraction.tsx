@@ -1,15 +1,13 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, TableCell, Paper, Chip, LinearProgress,
   Alert, Select, MenuItem, FormControl, InputLabel, Checkbox, FormHelperText,
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   FormControlLabel, Switch, IconButton, Tabs, Tab, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
-import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility, History as HistoryIcon } from "@mui/icons-material";
-import OperationalHistoryDataGrid from "../../components/OperationalHistoryDataGrid";
-import { GridColDef } from "@mui/x-data-grid";
-import { DataGrid } from "@mui/x-data-grid";
+import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart } from "@mui/icons-material";
+import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
   resetSourceForReimport,
@@ -17,14 +15,13 @@ import {
   getSkippedBlobs, skipBlob as apiSkipBlob, unskipBlob as apiUnskipBlob,
   clearSkippedBlobs,
   processDestinationTables,
-  getExtractionHistory, ExtractionHistoryItem,
   getAvailablePeriods, AvailablePeriod,
   getSourcePreview, SourcePreview,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
   SCANNABLE_CONNECTOR_TYPES, formatApiError,
 } from "../../services/api";
-import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
+import EmptyState from "../../components/EmptyState";
 import ManualCsvUploadDialog from "../Connections/ManualCsvUploadDialog";
 import SchedulesPanel from "./SchedulesPanel";
 
@@ -44,10 +41,9 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function Extraction({ embedded = false }: { embedded?: boolean }) {
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tabKey = embedded ? "extTab" : "tab";
-  const tab = params.get(tabKey) || "extraction";
+  const tab = embedded ? "extraction" : params.get(tabKey) || "extraction";
   const setTab = (newTab: string) => {
     const next = new URLSearchParams(params);
     next.set(tabKey, newTab);
@@ -72,8 +68,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   const skippedPaths = new Set(skippedBlobs.map(s => s.blob_path));
 
   // ── Extraction History state ──
-  const [historyList, setHistoryList] = useState<ExtractionHistoryItem[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const [uploadConn, setUploadConn] = useState<SourceConnection | null>(null);
 
@@ -84,24 +78,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   const [previewError, setPreviewError] = useState("");
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const loadHistory = useCallback(async () => {
-    try {
-      setLoadingHistory(true);
-      const data = await getExtractionHistory();
-      setHistoryList(data);
-    } catch {
-      /* ignore */
-    } finally {
-      setLoadingHistory(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (tab === "history" || embedded) {
-      void loadHistory();
-    }
-  }, [tab, loadHistory]);
 
   // Connections eligible for extraction/monitoring (cloud scan + manual CSV upload).
   const extractableConnectorTypes = useMemo(
@@ -459,7 +435,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
       {!embedded && <Tabs value={tab} onChange={(_, val) => setTab(val)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
         <Tab label="Extração & Agendamentos" value="extraction" />
-        <Tab label="Histórico de Execuções" value="history" icon={<HistoryIcon sx={{ fontSize: 18 }} />} iconPosition="start" />
       </Tabs>}
 
       {(tab === "extraction" || embedded) && (
@@ -1094,116 +1069,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         </>
       )}
 
-      {(tab === "history" || embedded) && (
-        <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-            <Box>
-              <Typography variant="h6" fontWeight={600}>Histórico de Execuções</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Acompanhe o status e abra os dados reais importados na camada Bronze do Apache Iceberg
-              </Typography>
-            </Box>
-            <Button
-              variant="outlined"
-              startIcon={loadingHistory ? <CircularProgress size={18} /> : <Refresh />}
-              onClick={() => void loadHistory()}
-              disabled={loadingHistory}
-            >
-              Atualizar Histórico
-            </Button>
-          </Stack>
-
-          {loadingHistory && historyList.length === 0 ? (
-            <Stack alignItems="center" py={8}>
-              <CircularProgress />
-              <Typography mt={2} color="text.secondary">Carregando histórico de extrações...</Typography>
-            </Stack>
-          ) : historyList.length === 0 ? (
-            <EmptyState message="Nenhuma execução de extração registrada até o momento." />
-          ) : (
-            <>
-            <OperationalHistoryDataGrid rows={historyList as unknown as Record<string, unknown>[]} columns={[
-              { field: "id", headerName: "ID", width: 80 },
-              { field: "status", headerName: "Status", width: 150, renderCell: ({ value }) => <Chip label={value} size="small" color={STATUS_COLORS[String(value)] || "default"} /> },
-              { field: "connection_name", headerName: "Conexão", flex: 1, minWidth: 180 },
-              { field: "processed_blobs", headerName: "Blobs", width: 120 }, { field: "rows_raw", headerName: "Linhas raw", width: 130 },
-              { field: "started_at", headerName: "Início", type: "dateTime", minWidth: 170, valueGetter: (_, row) => row.started_at ? new Date(String(row.started_at)) : null },
-              { field: "actions", headerName: "Ações", width: 90, sortable: false, filterable: false, renderCell: ({ row }) => <Tooltip title="Abrir dados"><IconButton onClick={() => navigate(`/extraction/history/${row.id}`)}><Visibility fontSize="small" /></IconButton></Tooltip> },
-            ] as GridColDef[]} />
-            <Box sx={{ display: "none" }}>
-            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-              <Table size="small">
-                <TableHead sx={{ bgcolor: "grey.100" }}>
-                  <TableRow>
-                    <TableCell><strong>ID</strong></TableCell>
-                    <TableCell><strong>Status</strong></TableCell>
-                    <TableCell><strong>Conexão</strong></TableCell>
-                    <TableCell><strong>Período(s)</strong></TableCell>
-                    <TableCell align="right"><strong>Blobs</strong></TableCell>
-                    <TableCell align="right"><strong>Linhas Raw</strong></TableCell>
-                    <TableCell><strong>Iniciado em</strong></TableCell>
-                    <TableCell><strong>Finalizado em</strong></TableCell>
-                    <TableCell align="center"><strong>Ações</strong></TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {historyList.map((item) => {
-                    const statusColor = STATUS_COLORS[item.status] || "default";
-                    const isFinished = ["COMPLETED", "COMPLETED_WITH_ERRORS"].includes(item.status);
-                    return (
-                      <TableRow key={item.id} hover>
-                        <TableCell sx={{ fontFamily: "monospace", fontWeight: 700 }}>#{item.id}</TableCell>
-                        <TableCell>
-                          <Chip label={item.status} size="small" color={statusColor} />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={600}>
-                            {item.connection_name || "—"}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {item.connection_code} ({item.connector_type})
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          {item.billing_periods && item.billing_periods.length > 0
-                            ? item.billing_periods.join(", ")
-                            : (item.result_json?.billing_periods as string[])?.join(", ") || "—"}
-                        </TableCell>
-                        <TableCell align="right">
-                          {item.processed_blobs} / {item.total_blobs || "?"}
-                        </TableCell>
-                        <TableCell align="right">
-                          <strong>{(item.rows_raw || 0).toLocaleString()}</strong>
-                        </TableCell>
-                        <TableCell>
-                          {item.started_at ? new Date(item.started_at).toLocaleString("pt-BR") : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {item.finished_at ? new Date(item.finished_at).toLocaleString("pt-BR") : (item.phase || "Em andamento")}
-                        </TableCell>
-                        <TableCell align="center">
-                          <Button
-                            size="small"
-                            variant="contained"
-                            color="primary"
-                            startIcon={<Visibility sx={{ fontSize: 16 }} />}
-                            onClick={() => navigate(`/extraction/history/${item.id}`)}
-                            disabled={!isFinished && (item.rows_raw || 0) === 0}
-                          >
-                            Abrir Dados
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            </Box>
-            </>
-          )}
-        </Box>
-      )}
     </Box>
   );
 }
