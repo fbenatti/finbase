@@ -56,6 +56,7 @@ const menuGroups = [
     items: [
       { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
       { path: "/analysis", label: "Análise dos dados", icon: <BarChartIcon /> },
+      { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
     ],
   },
@@ -78,7 +79,6 @@ const menuGroups = [
     background: "#f5f3ff",
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
-      { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/financial-planning", label: "Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],
