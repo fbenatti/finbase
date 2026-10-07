@@ -1021,6 +1021,8 @@ def _append_reprocess_log(task_id: int, message: str, *, level: str = "INFO", de
             events.append({"at": datetime.now(timezone.utc).isoformat(), "level": level, "message": message, "details": details or {}})
             result["event_log"] = events[-80:]
             task.result_json = result
+            from app.services.processing_logs import sync_etl_task_log
+            sync_etl_task_log(session, task)
             session.commit()
         session.close()
     except Exception:
@@ -1454,6 +1456,8 @@ def _reprocess_destination_sync(
                 }
                 if status.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
                     row.finished_at = func.now()
+                from app.services.processing_logs import sync_etl_task_log
+                sync_etl_task_log(db2, row)
                 db2.commit()
             db2.close()
         except Exception:
