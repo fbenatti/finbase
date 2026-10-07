@@ -106,8 +106,6 @@ export default function CommitmentsDashboard() {
   const forecasts = data?.forecast_monthly || [];
   const selected = data?.period_summary || {};
   const rangeLabel = `${monthLabel(toPeriod(startMonth))} a ${monthLabel(toPeriod(endMonth))}`;
-  const forecastPurchase = forecasts.reduce((sum, row) => sum + Number(row.purchase || 0), 0);
-  const forecastSaving = forecasts.reduce((sum, row) => sum + Number(row.return || 0) - Number(row.purchase || 0), 0);
   const forecastByPeriod = new Map(forecasts.map((row) => [row.period, row]));
   const monthlyByPeriod = new Map(monthly.map((row) => [row.period, row]));
   const chartPeriods = [...new Set([...monthly.map((row) => row.period || ""), ...forecasts.map((row) => row.period || "")])].filter(Boolean).sort();
