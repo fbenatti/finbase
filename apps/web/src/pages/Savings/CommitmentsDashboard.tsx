@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -22,7 +22,6 @@ import {
 } from "../../services/api";
 
 const currentMonth = new Date().toISOString().slice(0, 7);
-const currentYear = currentMonth.slice(0, 4);
 const toPeriod = (month: string) => month.replace("-", "");
 const money = (value: unknown) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
@@ -44,8 +43,8 @@ function MetricCard({ title, value, detail, isPercent = false }: { title: string
 }
 
 export default function CommitmentsDashboard() {
-  const [startMonth, setStartMonth] = useState(`${currentYear}-01`);
-  const [endMonth, setEndMonth] = useState(`${currentYear}-12`);
+  const [startMonth, setStartMonth] = useState(`${currentMonth.slice(0, 4)}-01`);
+  const [endMonth, setEndMonth] = useState(currentMonth);
   const [source, setSource] = useState<"all" | "azure-ti" | "azure-4p">("all");
   const [data, setData] = useState<CommitmentsDashboardData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,35 +72,14 @@ export default function CommitmentsDashboard() {
     return () => { active = false; };
   }, [startMonth, endMonth, source]);
 
-  const projectChart = useMemo(() => {
-    type ProjectTotal = { project: string; baseline: number; purchase: number; saving: number };
-    const grouped: Record<"RI" | "SavingPlan", Map<string, ProjectTotal>> = {
-      RI: new Map(), SavingPlan: new Map(),
-    };
-    for (const row of data?.projects || []) {
-      const project = row.project || "Sem projeto";
-      const type = row.commitment_type === "RI" ? "RI" : "SavingPlan";
-      const bucket = grouped[type].get(project) || { project, baseline: 0, purchase: 0, saving: 0 };
-      bucket.baseline += Number(row.ondemand_baseline || 0);
-      bucket.purchase += Number(row.purchase_allocated || 0);
-      bucket.saving += Number(row.estimated_saving || 0);
-      grouped[type].set(project, bucket);
-    }
-    const rank = (rows: Map<string, ProjectTotal>) => [...rows.values()]
-      .map((row) => ({ ...row, purchasePct: row.baseline ? row.purchase / row.baseline * 100 : 0 }))
-      .sort((a, b) => b.baseline - a.baseline)
-      .slice(0, 8);
-    return { RI: rank(grouped.RI), SavingPlan: rank(grouped.SavingPlan) };
-  }, [data?.projects]);
-
   const projectColumns: GridColDef<CommitmentDashboardRow>[] = [
     { field: "project", headerName: "Projeto", minWidth: 220, flex: 1 },
     { field: "source", headerName: "Origem", width: 120 },
     { field: "ondemand_baseline", headerName: "Base OnDemand", width: 170, valueFormatter: (value) => money(value) },
     { field: "purchase_allocated", headerName: "Compra atribuída", width: 165, valueFormatter: (value) => money(value) },
     { field: "estimated_saving", headerName: "Saving realizado", width: 170, valueFormatter: (value) => money(value) },
-    { field: "purchase_pct_of_ondemand", headerName: "Compra / OnDemand", width: 155, valueFormatter: (value) => percentage(value) },
-    { field: "saving_pct_of_ondemand", headerName: "Saving / OnDemand", width: 155, valueFormatter: (value) => percentage(value) },
+    { field: "purchase_pct_of_ondemand", headerName: "Compra / OnDemand", width: 155, valueGetter: (_value, row) => row.ondemand_baseline ? Number(row.purchase_allocated || 0) / Number(row.ondemand_baseline) * 100 : 0, valueFormatter: (value) => percentage(value) },
+    { field: "saving_pct_of_ondemand", headerName: "Saving / OnDemand", width: 155, valueGetter: (_value, row) => row.ondemand_baseline ? Number(row.estimated_saving || 0) / Number(row.ondemand_baseline) * 100 : 0, valueFormatter: (value) => percentage(value) },
   ];
 
   const monthly = data?.monthly || [];
@@ -114,6 +92,14 @@ export default function CommitmentsDashboard() {
   const chartPeriods = [...new Set([...monthly.map((row) => row.period || ""), ...forecasts.map((row) => row.period || "")])].filter(Boolean).sort();
   const riMonthlyBaseline = Number(selected.ri_ondemand || 0) / monthCount;
   const savingplanMonthlyBaseline = Number(selected.savingplan_ondemand || 0) / monthCount;
+  const riPurchasePct = Number(selected.ri_ondemand || 0) ? Number(selected.ri_purchase || 0) / Number(selected.ri_ondemand) * 100 : 0;
+  const savingplanPurchasePct = Number(selected.savingplan_ondemand || 0) ? Number(selected.savingplan_purchase || 0) / Number(selected.savingplan_ondemand) * 100 : 0;
+  const riSavingPct = Number(selected.ri_ondemand || 0) ? Number(selected.ri_saving || 0) / Number(selected.ri_ondemand) * 100 : 0;
+  const savingplanSavingPct = Number(selected.savingplan_ondemand || 0) ? Number(selected.savingplan_saving || 0) / Number(selected.savingplan_ondemand) * 100 : 0;
+  const totalPurchase = Number(selected.ri_purchase || 0) + Number(selected.savingplan_purchase || 0);
+  const totalBaseline = Number(selected.ri_ondemand || 0) + Number(selected.savingplan_ondemand || 0);
+  const totalSaving = Number(selected.ri_saving || 0) + Number(selected.savingplan_saving || 0);
+  const totalSavingPct = totalBaseline ? totalSaving / totalBaseline * 100 : 0;
   const currencyAxis = { tickprefix: "R$ ", separatethousands: true, automargin: true };
   const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#cbd5e1", gridcolor: "#e2e8f0" }, xaxis: { gridcolor: "#f1f5f9" }, showlegend: false };
 
