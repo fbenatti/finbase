@@ -129,17 +129,31 @@ export default function CommitmentsDashboard() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {loading && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
       {!loading && data && <>
-        <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Período selecionado</Typography>
-        <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel}</Typography>
+        <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Consolidado do período</Typography>
+        <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel} · valores realizados, exceto as séries identificadas como forecast.</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={`Realizado · ${rangeLabel}`} />
-          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={`Realizado · ${rangeLabel}`} />
-          <MetricCard title="Base OnDemand média / mês — RI" value={riMonthlyBaseline} detail={`Média no período · ${rangeLabel}`} />
-          <MetricCard title="Base OnDemand média / mês — SavingPlan" value={savingplanMonthlyBaseline} detail={`Média no período · ${rangeLabel}`} />
-          <MetricCard title="Saving realizado — RI" value={Number(selected.ri_saving || 0)} detail={`Realizado · ${rangeLabel} · sem forecast`} />
-          <MetricCard title="Saving realizado — SavingPlan" value={Number(selected.savingplan_saving || 0)} detail={`Realizado · ${rangeLabel} · sem forecast`} />
-          <MetricCard title="Compra RI / Base OnDemand" value={Number(selected.ri_purchase_pct_of_ondemand || 0)} detail="Compra como proporção da referência OnDemand" isPercent />
-          <MetricCard title="Compra SavingPlan / Base OnDemand" value={Number(selected.savingplan_purchase_pct_of_ondemand || 0)} detail="Compra como proporção da referência OnDemand" isPercent />
+          <MetricCard title="Compra total" value={totalPurchase} detail="RI + SavingPlan" />
+          <MetricCard title="Saving total realizado" value={totalSaving} detail="Base OnDemand menos compra" />
+          <MetricCard title="Saving / base OnDemand" value={totalSavingPct} detail="Percentual consolidado do período" isPercent />
+          <MetricCard title="Base OnDemand média / mês" value={(Number(selected.ri_ondemand || 0) + Number(selected.savingplan_ondemand || 0)) / monthCount} detail="RI + SavingPlan" />
+        </Stack>
+
+        <Typography variant="subtitle1" fontWeight={700} mb={1}>Reserva (RI)</Typography>
+        <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
+          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={rangeLabel} />
+          <MetricCard title="Base OnDemand média / mês" value={riMonthlyBaseline} detail={rangeLabel} />
+          <MetricCard title="Saving RI realizado" value={Number(selected.ri_saving || 0)} detail="Sem forecast" />
+          <MetricCard title="Compra / OnDemand" value={riPurchasePct} detail="Percentual da referência" isPercent />
+          <MetricCard title="Saving / OnDemand" value={riSavingPct} detail="Percentual da referência" isPercent />
+        </Stack>
+
+        <Typography variant="subtitle1" fontWeight={700} mb={1}>SavingPlan</Typography>
+        <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
+          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={rangeLabel} />
+          <MetricCard title="Base OnDemand média / mês" value={savingplanMonthlyBaseline} detail={rangeLabel} />
+          <MetricCard title="Saving SavingPlan realizado" value={Number(selected.savingplan_saving || 0)} detail="Sem forecast" />
+          <MetricCard title="Compra / OnDemand" value={savingplanPurchasePct} detail="Percentual da referência" isPercent />
+          <MetricCard title="Saving / OnDemand" value={savingplanSavingPct} detail="Percentual da referência" isPercent />
         </Stack>
 
         <Card sx={{ mb: 2 }}><CardContent>
