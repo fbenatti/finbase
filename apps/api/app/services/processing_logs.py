@@ -37,6 +37,18 @@ def _task_context(task: EtlTask) -> tuple[dict[str, Any], dict[str, Any], list[A
         for key in ("rule_ids", "config_id", "months", "replace_existing", "total_months")
         if result.get(key) is not None
     }
+    if task.task_type == "forecast":
+        source = source or {"kind": "gold", "snapshot_id": result.get("source_snapshot_id")}
+        destination = destination or {"table": result.get("result_table")}
+    elif task.task_type == "forecast_accuracy":
+        source = source or {"kind": "gold", "destination_table_id": task.destination_table_id}
+        destination = destination or {"namespace": "forecast", "kind": "accuracy_snapshots"}
+    elif task.task_type == "shared_cost":
+        source = source or {"kind": "shared_cost_configuration"}
+        destination = destination or {"table": result.get("planning_table") or result.get("table") or "planning"}
+    elif task.task_type in ("gold_reprocess", "ai_cost_relationship_reprocess"):
+        source = source or {"kind": "silver_and_gold", "rules": result.get("rule_ids")}
+        destination = destination or {"namespace": "iceberg.gold", "tables": result.get("tables") or []}
     return source, destination, list(partitions or []), parameters
 
 
@@ -73,7 +85,8 @@ def sync_etl_task_log(session: Session, task: EtlTask) -> ProcessingLog:
         "errors": errors,
         "result": result,
     }
-    log.started_at = task.started_at
+    if task.started_at is not None:
+        log.started_at = task.started_at
     log.finished_at = task.finished_at
     return log
 
@@ -106,7 +119,8 @@ async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> Proce
     log.phase = task.phase or task.current_blob
     log.error = result.get("error") or (errors[0] if errors else None)
     log.details = {"etl_task_id": task.id, "event_log": result.get("event_log") or [], "errors": errors, "result": result}
-    log.started_at = task.started_at
+    if task.started_at is not None:
+        log.started_at = task.started_at
     log.finished_at = task.finished_at
     return log
 
