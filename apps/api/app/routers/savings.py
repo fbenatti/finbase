@@ -161,6 +161,7 @@ async def commitments_dashboard(
   bucket[f"{prefix}_saving"] = bucket[f"{prefix}_ondemand"] - bucket[f"{prefix}_purchase"]
 
  project_totals: dict[tuple[str, str, str], dict[str, Any]] = {}
+ project_monthly: dict[tuple[str, str, str, str], dict[str, Any]] = {}
  monthly_commitments = {
   (str(row["period"]), str(row.get("source")), str(row.get("commitment_type"))): row
   for row in monthly_rows
@@ -250,7 +251,7 @@ async def commitments_dashboard(
    )
 
  for project in forecast_projects.values():
- project["forecast_saving"] = (
+  project["forecast_saving"] = (
    -float(project.get("forecast_return") or 0)
    - float(project.get("forecast_purchase") or 0)
   )
