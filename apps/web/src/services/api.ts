@@ -2236,6 +2236,16 @@ export interface CommitmentDashboardRow {
   usage?: number;
   purchase?: number;
   return?: number;
+  ri_forecast_purchase?: number;
+  savingplan_forecast_purchase?: number;
+  ri_forecast_return?: number;
+  savingplan_forecast_return?: number;
+  ri_forecast_saving?: number;
+  savingplan_forecast_saving?: number;
+  chargecategory?: string;
+  commitment_type?: string;
+  pricingcategory?: string;
+  forecast_value?: number;
   other?: number;
   total?: number;
 }
@@ -2250,6 +2260,7 @@ export interface CommitmentsDashboard {
   monthly: CommitmentDashboardRow[];
   projects: CommitmentDashboardRow[];
   forecast_monthly: CommitmentDashboardRow[];
+  forecast_breakdown: CommitmentDashboardRow[];
 }
 export async function getCommitmentsDashboard(params: {
   start_period: string;
