@@ -57,7 +57,11 @@ async def queue_azure_pricesheet_refresh(db: AsyncSession = Depends(get_db)):
     if conn is None:
         conn = SourceConnection(
             code="azure-pricesheet", name="Azure Price Sheet", connector_type="azure_pricesheet",
-            cloud_name="Azure", cloud_scope="azure", config_json={"scope": "BillingAccountId", "active_snapshot_id": None},
+            cloud_name="Azure Price Sheet", cloud_scope="azure",
+            config_json={
+                "source_key": "price_sheet", "environment_slug": "azure-pricesheet",
+                "independent_connection": True, "scope": "BillingAccountId", "active_snapshot_id": None,
+            },
             blob_prefixes=["reports/report_-pricesheet/"],
         )
         db.add(conn)
@@ -826,6 +830,26 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
             }
         except Exception as e:
             return {"status": "FAILED", "message": str(e)[:500]}
+
+    if conn.connector_type == "azure_pricesheet":
+        service = None
+        try:
+            from app.services.azure_pricesheet import _azure_client, _latest_valid_manifest
+
+            service, container_name = await asyncio.to_thread(_azure_client, config)
+            container = service.get_container_client(container_name)
+            period, manifest, _document, _parts, snapshot = await asyncio.to_thread(
+                _latest_valid_manifest, container,
+            )
+            return {
+                "status": "OK",
+                "message": f"Price Sheet independente validado: {period}, snapshot {snapshot[:80]} ({manifest})",
+            }
+        except Exception as e:
+            return {"status": "FAILED", "message": f"Azure Price Sheet: {str(e)[:450]}"}
+        finally:
+            if service is not None:
+                service.close()
 
     if conn.connector_type == "gcp_bigquery":
         try:

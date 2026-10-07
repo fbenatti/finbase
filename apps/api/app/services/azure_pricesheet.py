@@ -21,12 +21,20 @@ PREFIX = "reports/report_-pricesheet/"
 BATCH_ROWS = 100_000
 
 
-def _azure_client() -> tuple[BlobServiceClient, str]:
-    tenant = settings.azure_4p_tenant_id or settings.azure_ti_tenant_id
-    client_id = settings.azure_4p_client_id or settings.azure_ti_client_id
-    secret = settings.azure_4p_client_secret or settings.azure_ti_client_secret
-    account = settings.azure_4p_storage_account or settings.azure_ti_storage_account
-    container = settings.azure_4p_container if settings.azure_4p_storage_account else settings.azure_ti_container
+def _azure_client(config: dict[str, Any] | None = None) -> tuple[BlobServiceClient, str]:
+    """Build the Price Sheet client from its own connection configuration.
+
+    The legacy settings fallback keeps existing deployments operational while
+    the independent `azure-pricesheet` connection is configured.
+    """
+    config = config or {}
+    tenant = config.get("tenant_id") or settings.azure_4p_tenant_id or settings.azure_ti_tenant_id
+    client_id = config.get("client_id") or settings.azure_4p_client_id or settings.azure_ti_client_id
+    secret = config.get("client_secret") or settings.azure_4p_client_secret or settings.azure_ti_client_secret
+    account = config.get("storage_account") or settings.azure_4p_storage_account or settings.azure_ti_storage_account
+    container = config.get("container_name") or (
+        settings.azure_4p_container if settings.azure_4p_storage_account else settings.azure_ti_container
+    )
     if not all((tenant, client_id, secret, account, container)):
         raise RuntimeError("Credenciais Azure para azure-pricesheet não estão configuradas")
     credential = ClientSecretCredential(tenant_id=tenant, client_id=client_id, client_secret=secret)
@@ -126,7 +134,13 @@ def refresh_snapshot(connection_id: int, connection_code: str, connection_name: 
     from app.database import SyncSession
     from app.models.source_connection import SourceConnection
 
-    service, container_name = _azure_client()
+    sync = SyncSession()
+    try:
+        connection = sync.get(SourceConnection, connection_id)
+        connection_config = dict(connection.config_json or {}) if connection else {}
+    finally:
+        sync.close()
+    service, container_name = _azure_client(connection_config)
     raw_count = 0
     try:
         container = service.get_container_client(container_name)
