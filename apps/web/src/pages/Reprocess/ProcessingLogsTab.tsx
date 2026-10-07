@@ -26,7 +26,7 @@ const sourceLabel = (value: Record<string, unknown>) => {
   if (ids?.length) return ids.map(id => `Conexão #${id}`).join(", ");
   return text(value);
 };
-const destinationLabel = (value: Record<string, unknown>) => text(value.table || value.tables || value.namespace || value.destination_table_id || value);
+const destinationLabel = (value: Record<string, unknown>) => text(value.destination_name || value.table || value.tables || value.namespace || value.destination_table_id || value);
 const json = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 
 function Field({ label, value }: { label: string; value: unknown }) {

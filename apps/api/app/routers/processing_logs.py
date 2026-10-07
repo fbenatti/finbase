@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import Integer, String, cast, or_, select, func
+from sqlalchemy import String, cast, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -65,26 +65,31 @@ async def list_processing_logs(
             cast(ProcessingLog.source, String).ilike(needle),
             cast(ProcessingLog.destination, String).ilike(needle),
         ))
-    from app.models.source_connection import SourceConnection
-    query = select(ProcessingLog, SourceConnection.name).outerjoin(
-        SourceConnection,
-        SourceConnection.id == cast(ProcessingLog.source["connection_ids"][0].astext, Integer),
-    )
-    if search and search.strip():
-        filters.append(SourceConnection.name.ilike(f"%{search.strip()}%"))
-    filtered = query.where(*filters)
-    total = (await db.execute(select(func.count()).select_from(filtered.subquery()))).scalar_one()
+    filtered = select(ProcessingLog).where(*filters)
+    total = (await db.execute(select(func.count()).select_from(ProcessingLog).where(*filters))).scalar_one()
     result = (await db.execute(
         filtered.order_by(ProcessingLog.started_at.desc().nullslast(), ProcessingLog.id.desc())
         .offset(offset).limit(limit)
-    )).all()
+    )).scalars().all()
+    from app.models.destination import DestinationTable
+    from app.models.source_connection import SourceConnection
+    connection_ids = sorted({int(cid) for row in result for cid in (row.source or {}).get("connection_ids", []) if str(cid).isdigit()})
+    destination_ids = sorted({int(row.destination.get("destination_table_id")) for row in result if row.destination and str(row.destination.get("destination_table_id", "")).isdigit()})
+    connections = (await db.execute(select(SourceConnection).where(SourceConnection.id.in_(connection_ids)))).scalars().all() if connection_ids else []
+    destinations = (await db.execute(select(DestinationTable).where(DestinationTable.id.in_(destination_ids)))).scalars().all() if destination_ids else []
+    connection_names = {connection.id: connection.name for connection in connections}
+    destination_names = {destination.id: destination.name for destination in destinations}
     rows = []
-    for row, source_name in result:
+    for row in result:
         item = _serialize(row)
         source = item["source"]
-        if source_name and source.get("connection_ids"):
-            source["connection_names"] = [source_name]
+        source["connection_names"] = [connection_names.get(int(cid), f"Conexão #{cid}") for cid in source.get("connection_ids", [])]
+        destination = item["destination"]
+        destination_id = destination.get("destination_table_id")
+        if destination_id is not None:
+            destination["destination_name"] = destination_names.get(int(destination_id))
         item["source"] = source
+        item["destination"] = destination
         rows.append(item)
     return {"items": rows, "total": total}
 
