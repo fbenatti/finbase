@@ -6,7 +6,8 @@ import {
 import { Close } from "@mui/icons-material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import { format } from "date-fns";
-import { getProcessingLog, getProcessingLogs, ProcessingLog } from "../../services/api";
+import { useNavigate } from "react-router-dom";
+import { cancelEtl, getProcessingLog, getProcessingLogs, ProcessingLog } from "../../services/api";
 
 const PROCESS_LABELS: Record<string, string> = {
   extraction: "Extração", reprocess: "Reprocessamento de dados", reclassification: "Reclassificação",
@@ -34,6 +35,7 @@ function Field({ label, value }: { label: string; value: unknown }) {
 }
 
 export default function ProcessingLogsTab() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ProcessingLog[]>([]);
   const [total, setTotal] = useState(0);
   const [pagination, setPagination] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
@@ -68,6 +70,7 @@ export default function ProcessingLogsTab() {
     { field: "source", headerName: "Origem", minWidth: 180, flex: 1, valueGetter: (_, row) => sourceLabel(row.source) },
     { field: "destination", headerName: "Destino", minWidth: 180, flex: 1, valueGetter: (_, row) => destinationLabel(row.destination) },
     { field: "partitions", headerName: "Partição", minWidth: 130, valueGetter: (_, row) => text(row.partitions) },
+    { field: "rows_source", headerName: "Linhas origem", width: 125, valueGetter: (_, row) => row.counts?.rows_source ?? 0, valueFormatter: value => Number(value || 0).toLocaleString("pt-BR") },
     { field: "rows", headerName: "Linhas destino", width: 130, valueGetter: (_, row) => row.counts?.rows_destination ?? 0, valueFormatter: value => Number(value || 0).toLocaleString("pt-BR") },
     { field: "started_at", headerName: "Início", minWidth: 165, valueFormatter: value => dateLabel(value as string) },
     { field: "finished_at", headerName: "Fim", minWidth: 165, valueFormatter: value => dateLabel(value as string) },
@@ -106,6 +109,8 @@ export default function ProcessingLogsTab() {
           <Stack direction="row" gap={2} flexWrap="wrap">{Object.entries(detail.counts || {}).map(([key, value]) => <Field key={key} label={key} value={Number(value).toLocaleString("pt-BR")} />)}</Stack>
           <Divider /><Typography variant="subtitle2">Parâmetros</Typography><Box component="pre" sx={{ m: 0, p: 1.5, bgcolor: "grey.50", borderRadius: 1, overflow: "auto", fontSize: 12 }}>{json(detail.parameters)}</Box>
           <Divider /><Typography variant="subtitle2">Eventos e detalhes do processamento</Typography><Box component="pre" sx={{ m: 0, p: 1.5, bgcolor: "grey.50", borderRadius: 1, overflow: "auto", maxHeight: 360, fontSize: 12 }}>{json(detail.details)}</Box>
+          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros Bronze desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados Bronze" onClick={() => navigate(`/extraction/history/${detail.etl_task_id}`)} /></Box>}
+          {detail.etl_task_id && ["QUEUED", "RUNNING"].includes(detail.status) && <Chip clickable color="error" label="Cancelar execução" onClick={async () => { await cancelEtl(detail.etl_task_id!); await load(); setSelected(null); }} sx={{ alignSelf: "flex-start" }} />}
         </Stack>}
       </DialogContent>
     </Dialog>
