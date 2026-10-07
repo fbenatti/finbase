@@ -60,7 +60,7 @@ def sync_etl_task_log(session: Session, task: EtlTask) -> ProcessingLog:
     if task.started_at is None and task.status == "QUEUED":
         task.started_at = datetime.now(timezone.utc)
     if log is None:
-        log = ProcessingLog(etl_task_id=task.id)
+        log = ProcessingLog(etl_task_id=task.id, process_type=_task_type(task))
         session.add(log)
     source, destination, partitions, parameters = _task_context(task)
     _enrich_task_context(session, source, destination)
@@ -102,7 +102,7 @@ async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> Proce
     if task.started_at is None and task.status == "QUEUED":
         task.started_at = datetime.now(timezone.utc)
     if log is None:
-        log = ProcessingLog(etl_task_id=task.id)
+        log = ProcessingLog(etl_task_id=task.id, process_type=_task_type(task))
         session.add(log)
     source, destination, partitions, parameters = _task_context(task)
     await _async_enrich_task_context(session, source, destination)
