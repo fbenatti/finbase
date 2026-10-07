@@ -191,15 +191,16 @@ export default function CommitmentsDashboard() {
         </CardContent></Card>
 
         <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600}>OnDemand x economia por projeto</Typography>
-          <Typography variant="body2" color="text.secondary" mb={2}>Top 8 projetos por base OnDemand no período selecionado. Barras agrupadas, sem percentuais ou forecast neste comparativo.</Typography>
+          <Typography variant="subtitle1" fontWeight={600}>OnDemand x custo com compromisso por projeto</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>Top 8 projetos por base OnDemand no período. A economia é a diferença entre o OnDemand e o custo do compromisso, informada ao passar o cursor.</Typography>
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
             {(["RI", "SavingPlan"] as const).map((type) => {
-              const totals = new Map<string, { project: string; baseline: number; saving: number }>();
+              const totals = new Map<string, { project: string; baseline: number; commitmentCost: number; saving: number }>();
               for (const row of data.projects.filter((item) => item.commitment_type === type)) {
                 const project = row.project || "Sem projeto";
-                const total = totals.get(project) || { project, baseline: 0, saving: 0 };
+                const total = totals.get(project) || { project, baseline: 0, commitmentCost: 0, saving: 0 };
                 total.baseline += Number(row.ondemand_baseline || 0);
+                total.commitmentCost += Number(row.purchase_allocated || 0);
                 total.saving += Number(row.estimated_saving || 0);
                 totals.set(project, total);
               }
@@ -211,7 +212,7 @@ export default function CommitmentsDashboard() {
                 <Typography variant="subtitle2" fontWeight={600}>{type}</Typography>
                 <Plot data={[
                   { x: names, y: topProjects.map((row) => row.baseline), type: "bar", name: "Base OnDemand", marker: { color: type === "RI" ? "#93c5fd" : "#d8b4fe" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Base OnDemand</extra>" },
-                  { x: names, y: topProjects.map((row) => row.saving), type: "bar", name: "Saving realizado", marker: { color: "#15803d" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Saving realizado</extra>" },
+                  { x: names, y: topProjects.map((row) => row.commitmentCost), type: "bar", name: "Custo com compromisso", customdata: topProjects.map((row) => [row.saving]), marker: { color: type === "RI" ? "#1565c0" : "#7b1fa2" }, hovertemplate: "%{x}<br>Custo: R$ %{y:,.2f}<br>Economia (OnDemand − custo): R$ %{customdata[0]:,.2f}<extra>Custo com compromisso</extra>" },
                 ]} layout={{ ...chartLayout, height: 380, margin: { l: 76, r: 20, t: 12, b: 100 }, barmode: "group", showlegend: true, legend: { orientation: "h", y: -0.32 }, xaxis: { ...chartLayout.xaxis, tickangle: -35, automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
               </Box>;
             })}
