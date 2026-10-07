@@ -2210,6 +2210,8 @@ export interface CommitmentDashboardRow {
   savingplan_purchase?: number;
   ri_ondemand?: number;
   savingplan_ondemand?: number;
+  ri_saving?: number;
+  savingplan_saving?: number;
   ondemand_baseline?: number;
   usage_rows?: number;
   usage?: number;
