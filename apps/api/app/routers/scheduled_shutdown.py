@@ -1621,6 +1621,7 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
             sources=list(saving_rule.sources) if saving_rule else None,
             run_id=task.id,
             helper_rule_id=helper_rule.id,
+            saving_rule_id=saving_rule.id if saving_rule else None,
         )
         helper_rule.materialization_table = VM_MONTHLY_GOLD_TABLE
         helper_rule.materialization_rows = int(summary["vm_monthly_history_rows"])
@@ -1628,9 +1629,16 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
         helper_rule.materialized_at = datetime.now(timezone.utc)
         helper_rule.materialization_status = "UPDATED"
         helper_rule.materialization_error = None
+        if saving_rule is not None:
+            saving_rule.materialization_table = f"dest_dm_cost_{SAVING_GOLD_CODE}"
+            saving_rule.materialization_rows = int(summary["published_rows"])
+            saving_rule.materialization_run_id = task.id
+            saving_rule.materialized_at = datetime.now(timezone.utc)
+            saving_rule.materialization_status = "UPDATED"
+            saving_rule.materialization_error = None
         task.status = "COMPLETED"
         task.phase = f"Saving por desligue: {len(summary['periods'])} meses materializados"
-        task.rows_destination = sum(summary["rows"].values())
+        task.rows_destination = int(summary["published_rows"])
         task.result_json = {"event_log": [{"at": datetime.now(timezone.utc).isoformat(), "level": "INFO", "message": "Histórico materializado mês a mês"}], **summary}
         task.finished_at = datetime.now(timezone.utc)
         await db.commit()
