@@ -29,14 +29,14 @@ O startup cria a tabela por `Base.metadata.create_all` e executa backfill idempo
 
 1. **Contrato e base canônica:** implementados.
 2. **Backfill e leitura comum:** implementados para `etl_task` existente e expostos ao frontend.
-3. **Sincronização contínua:** conectada ao ciclo de vida do reprocessamento no worker/API; ainda exige revisão dos fluxos secundários que escrevem em `etl_task` fora desses pontos.
-4. **Registros próprios:** `forecast_run` continua sendo fonte especializada do resultado de forecast. A tarefa ETL vinculada aparece na visão geral; o detalhe do resultado ainda deve navegar/consultar `forecast_run`. Extração está coberta quando representada por `etl_task`.
-5. **Aposentadoria de endpoints antigos:** não realizada. Rotas antigas continuam por compatibilidade e devem ser removidas apenas quando não houver consumidores, idealmente em release posterior.
+3. **Sincronização contínua:** conectada ao enqueue de extração/forecast, claim/recuperação/cancelamento de ETL e atualizações operacionais dos fluxos de reprocessamento no worker/API.
+4. **Registros próprios:** `forecast_run` continua sendo fonte especializada; seus parâmetros/resultado são ligados ao log ETL ou expostos como registro consolidado se não houver vínculo. Acurácia entra como `forecast_accuracy` via `etl_task`. Conteúdo Bronze permanece consultável por link para a visualização de dados da execução.
+5. **Aposentadoria visual:** as abas de dados, extração, forecast, custo compartilhado, Gold e relacionamentos IA deixaram de renderizar históricos separados. As rotas antigas permanecem ativas para compatibilidade; devem ser removidas só após confirmar que não há outros consumidores.
 
 ## Implantação em produção
 
 1. Fazer backup e confirmar espaço/índices para `processing_log`.
-2. Implantar API que cria a tabela e faz o backfill; validar `GET /processing-logs` e amostras de cada tipo.
+2. Implantar API que cria a tabela e faz o backfill incremental; validar `GET /processing-logs` e amostras de cada tipo.
 3. Implantar workers compatíveis para sincronizar atualizações e eventos em execução.
 4. Implantar frontend e validar filtros, paginação e dialog.
 5. Comparar contagens e status entre endpoints antigos e a nova rota por pelo menos um ciclo operacional completo.
