@@ -109,6 +109,22 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
         except Exception:
             pass
 
+        if full_refresh and not logs and not table_exists:
+            await execute(
+                f"CREATE TABLE iceberg.gold.{PROCESSING_LOG_CUBE} AS SELECT "
+                "CAST(NULL AS BIGINT) AS id, CAST(NULL AS BIGINT) AS etl_task_id, "
+                "CAST(NULL AS VARCHAR) AS process_type, CAST(NULL AS VARCHAR) AS status, "
+                "CAST(NULL AS VARCHAR) AS source_label, CAST(NULL AS VARCHAR) AS destination_label, "
+                "CAST(NULL AS VARCHAR) AS partitions_label, CAST(NULL AS BIGINT) AS rows_source, "
+                "CAST(NULL AS BIGINT) AS rows_destination, "
+                "CAST(NULL AS TIMESTAMP(6) WITH TIME ZONE) AS started_at, "
+                "CAST(NULL AS TIMESTAMP(6) WITH TIME ZONE) AS finished_at, "
+                "CAST(NULL AS VARCHAR) AS phase, "
+                "CAST(NULL AS TIMESTAMP(6) WITH TIME ZONE) AS updated_at WHERE 1=0",
+                timeout_s=60,
+            )
+            return {"rows_written": 0, "checkpoint": 0}
+
         payload = []
         for row in logs:
             source = row.source if isinstance(row.source, dict) else {"value": row.source}
@@ -136,9 +152,6 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
                 "phase": row.phase,
                 "updated_at": row.updated_at,
             })
-        if full_refresh and table_exists:
-            await execute(f"DROP TABLE iceberg.gold.{PROCESSING_LOG_CUBE}", timeout_s=60)
-            table_exists = False
         for offset in range(0, len(payload), 100):
             batch = payload[offset:offset + 100]
             await _merge_processing_log_batch(batch, create=not table_exists)

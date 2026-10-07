@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import String, cast, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +15,7 @@ from app.services.trino_service import execute as trino_execute
 from app.services.processing_logs import PROCESSING_LOG_CUBE
 
 router = APIRouter(prefix="/processing-logs", tags=["processing-logs"])
+logger = logging.getLogger(__name__)
 
 
 def _serialize(row: ProcessingLog, *, include_details: bool = False) -> dict[str, Any]:
@@ -152,6 +155,37 @@ async def list_processing_logs(
         .offset(offset).limit(limit)
     )).scalars().all()
     return {"items": [_serialize(row) for row in result], "total": total}
+
+
+@router.get("/cube/status")
+async def processing_log_cube_status():
+    try:
+        rows = await trino_execute(
+            f"SELECT COUNT(*) AS row_count, MAX(updated_at) AS updated_at "
+            f"FROM iceberg.gold.{PROCESSING_LOG_CUBE}",
+            timeout_s=15,
+        )
+        row = rows[0] if rows else {}
+        return {"available": True, "table": PROCESSING_LOG_CUBE,
+                "row_count": int(row.get("row_count") or 0), "updated_at": row.get("updated_at")}
+    except Exception:
+        return {"available": False, "table": PROCESSING_LOG_CUBE, "row_count": 0, "updated_at": None}
+
+
+async def _rebuild_processing_log_cube() -> None:
+    from app.services.processing_logs import publish_processing_log_cube
+
+    try:
+        await publish_processing_log_cube(full_refresh=True)
+    except Exception:
+        logger.exception("Falha ao reconstruir cubo operacional de logs")
+
+
+@router.post("/cube/rebuild", status_code=202)
+async def rebuild_processing_log_cube(background_tasks: BackgroundTasks):
+    background_tasks.add_task(_rebuild_processing_log_cube)
+    return {"status": "QUEUED", "table": PROCESSING_LOG_CUBE,
+            "message": "Reconstrução do cubo operacional enfileirada."}
 
 
 @router.get("/{log_id}")

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { Add, ContentCopy, Delete, Save } from "@mui/icons-material";
-import { GoldCubeRule, GoldCubeRuleSource, GoldTable, GoldColumn, formatApiError, getGoldCubeRules, getGoldTables, getGoldSchema, saveGoldCubeRule, reprocessGoldCubes, getGoldCubeHistory, GoldCubeHistoryItem, deleteGoldCubeRule } from "../../services/api";
+import { GoldCubeRule, GoldCubeRuleSource, GoldTable, GoldColumn, formatApiError, getGoldCubeRules, getGoldTables, getGoldSchema, saveGoldCubeRule, reprocessGoldCubes, getGoldCubeHistory, GoldCubeHistoryItem, deleteGoldCubeRule, getProcessingLogCubeStatus, rebuildProcessingLogCube, ProcessingLogCubeStatus } from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import SqlEditor from "../../components/SqlEditor";
 
@@ -30,6 +30,29 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
   // Schema of the first selected Gold, used for the pivot autocompletes.
   const [schemaCols, setSchemaCols] = useState<GoldColumn[]>([]);
   const [editorMode, setEditorMode] = useState<"pivot" | "sql">("pivot");
+  const [processingLogCube, setProcessingLogCube] = useState<ProcessingLogCubeStatus | null>(null);
+  const [rebuildingProcessingLogCube, setRebuildingProcessingLogCube] = useState(false);
+
+  const loadProcessingLogCube = async () => {
+    try { setProcessingLogCube(await getProcessingLogCubeStatus()); }
+    catch { setProcessingLogCube({ available: false, table: "dest_dm_processing_logs", row_count: 0 }); }
+  };
+
+  const rebuildProcessingLogs = async () => {
+    setRebuildingProcessingLogCube(true);
+    try {
+      const result = await rebuildProcessingLogCube();
+      enqueueSnackbar(result.message, "info");
+      window.setTimeout(() => { void loadProcessingLogCube(); }, 3000);
+    } catch (e) { enqueueSnackbar(formatApiError(e, "Não foi possível reconstruir o cubo de logs"), "error"); }
+    finally { setRebuildingProcessingLogCube(false); }
+  };
+
+  useEffect(() => {
+    void loadProcessingLogCube();
+    const timer = window.setInterval(() => { void loadProcessingLogCube(); }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Schema UNIFICADO de todas as Golds das fontes selecionadas (união de
   // colunas). Antes só o primaryGold (primeira Gold) era consultado, então
@@ -159,6 +182,20 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
   };
 
   return <Box sx={{ p: embedded ? 0 : 3 }}>
+    <Paper variant="outlined" sx={{ p: 2, mb: 2, display: "flex", gap: 2, alignItems: { xs: "flex-start", md: "center" }, flexDirection: { xs: "column", md: "row" } }}>
+      <Box sx={{ flex: 1 }}>
+        <Typography variant="subtitle1" fontWeight={700}>Cubo operacional de logs</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {processingLogCube?.available
+            ? `${processingLogCube.table} · ${processingLogCube.row_count.toLocaleString("pt-BR")} execuções · atualização ${processingLogCube.updated_at ? new Date(processingLogCube.updated_at).toLocaleString("pt-BR") : "em andamento"}`
+            : "Aguardando primeira materialização. A grade de logs usa este cubo Gold; detalhes completos continuam no PostgreSQL."}
+        </Typography>
+      </Box>
+      <Chip size="small" label={processingLogCube?.available ? "Disponível" : "Aguardando"} color={processingLogCube?.available ? "success" : "warning"} />
+      <Button size="small" variant="outlined" disabled={rebuildingProcessingLogCube} onClick={() => void rebuildProcessingLogs()}>
+        {rebuildingProcessingLogCube ? "Enfileirando…" : "Reconstruir cubo"}
+      </Button>
+    </Paper>
     <Typography variant="h4">Cubos de custo (Gold)</Typography>
     <Typography color="text.secondary" mb={2}>Escolha as Golds de origem, defina as dimensões de agrupamento (linhas do pivot) e as medidas a somar (valores). O reprocessamento gera uma tabela pré-agregada dest_dm_cost_&lt;code&gt; — os dashboards consultam apenas essas tabelas materializadas.</Typography>
     <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Gold(s) + filtros → dimensões (GROUP BY) + medidas (SUM) → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a tabela Gold.</Alert>

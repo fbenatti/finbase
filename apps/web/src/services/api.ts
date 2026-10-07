@@ -1355,6 +1355,23 @@ export async function getProcessingLog(id: number): Promise<ProcessingLog> {
   return data;
 }
 
+export interface ProcessingLogCubeStatus {
+  available: boolean;
+  table: string;
+  row_count: number;
+  updated_at?: string | null;
+}
+
+export async function getProcessingLogCubeStatus(): Promise<ProcessingLogCubeStatus> {
+  const { data } = await api.get("/processing-logs/cube/status");
+  return data;
+}
+
+export async function rebuildProcessingLogCube(): Promise<{ status: string; message: string }> {
+  const { data } = await api.post("/processing-logs/cube/rebuild");
+  return data;
+}
+
 export async function getReprocessStatus(
   taskId: number,
 ): Promise<ReprocessStatus> {
