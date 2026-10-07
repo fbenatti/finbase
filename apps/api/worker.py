@@ -651,7 +651,6 @@ def consumer_main(worker_id: int):
                             task_row.rows_destination = result["rows"]
                             task_row.phase = "Forecast publicado"
                             task_row.finished_at = datetime.now(timezone.utc)
-                        from app.services.processing_logs import async_sync_forecast_run_log
                         # This worker uses a synchronous SQLAlchemy session.
                         # Keep the task snapshot in the same transaction; the
                         # forecast-specific run is included in details below.
@@ -659,7 +658,8 @@ def consumer_main(worker_id: int):
                         if task_row:
                             task_row.result_json = {**(task_row.result_json or {}), "result_table": run.result_table, "source_snapshot_id": run.source_snapshot_id}
                             sync_etl_task_log(s, task_row)
-                            task_log = s.query(__import__("app.models.processing_log", fromlist=["ProcessingLog"]).ProcessingLog).filter_by(etl_task_id=task_id).one_or_none()
+                            from app.models.processing_log import ProcessingLog
+                            task_log = s.query(ProcessingLog).filter_by(etl_task_id=task_id).one_or_none()
                             if task_log:
                                 details = dict(task_log.details or {})
                                 details["forecast_run"] = {"id": run.id, "config_snapshot": run.config_snapshot or {}, "result_table": run.result_table, "cutoff_date": run.cutoff_date, "source_snapshot_id": run.source_snapshot_id, "error_metrics": run.error_metrics or {}, "selected_models": run.selected_models or {}}
