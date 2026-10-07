@@ -19,6 +19,7 @@ import {
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
+import { DepartmentTreeMultiPicker, descendantIds } from "../../components/DepartmentTreePicker";
 import PolicyFlow from "./PolicyFlow";
 import { ORG } from "../../constants/orgLabels";
 
@@ -99,6 +100,7 @@ function formFromRule(r: ClassificationRule | null) {
 const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   open,
   editing,
+  cloning,
   selectedDestName,
   destColumns,
   departments,
@@ -109,6 +111,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
 }: {
   open: boolean;
   editing: ClassificationRule | null;
+  cloning: ClassificationRule | null;
   selectedDestName: string | null;
   destColumns: string[];
   departments: Department[];
@@ -120,8 +123,11 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    if (open) setForm(formFromRule(editing));
-  }, [open, editing]);
+    if (open) {
+      const source = editing || cloning;
+      setForm(source ? { ...formFromRule(source), ...(cloning && !editing ? { name: `${source.name} (cópia)` } : {}) } : formFromRule(null));
+    }
+  }, [open, editing, cloning]);
 
   // Autocomplete de valores reais por campo (tabela auxiliar no Postgres, enriquecida no reprocessamento).
   const [valueSearch, setValueSearch] = useState<Record<number, string>>({});
@@ -134,7 +140,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
       setValueOptions({});
       setValueLoading({});
     }
-  }, [open, editing]);
+  }, [open, editing, cloning]);
 
   const conditionKey = form.conditions.map((c) => c.field.trim()).join("|");
   useEffect(() => {
@@ -200,8 +206,8 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
     }
 
     const body: Record<string, unknown> = {
-      connection_id: editing?.connection_id ?? null,
-      destination_table_id: destinationTableId,
+      connection_id: editing?.connection_id ?? cloning?.connection_id ?? null,
+      destination_table_id: editing?.destination_table_id ?? cloning?.destination_table_id ?? destinationTableId,
       department_id: form.department_id,
       name: form.name,
       target_field: "organograma",
@@ -414,7 +420,11 @@ export function ClassificationRulesTab() {
   const abortRef = useRef<AbortController | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
+  const [cloning, setCloning] = useState<ClassificationRule | null>(null);
   const [deletePending, setDeletePending] = useState<ClassificationRule | null>(null);
+  const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [departmentFilter, setDepartmentFilter] = useState<number[]>([]);
   const [destColumns, setDestColumns] = useState<string[]>([]);
 
   useEffect(() => {
@@ -438,6 +448,7 @@ export function ClassificationRulesTab() {
     query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] },
     cloudOverride?: string,
     destOverride?: number | "",
+    departmentOverride: number[] = departmentFilter,
   ) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -450,6 +461,10 @@ export function ClassificationRulesTab() {
         search: search.trim() || undefined,
         destination_table_id: destId,
         cloud,
+        department_ids: departmentOverride.length ? [...new Set(departmentOverride.flatMap(id => {
+          const node = flattenDepartments(departments).find(item => item.id === id);
+          return node ? [...descendantIds(node)] : [id];
+        }))] : undefined,
       }, abortRef.current.signal);
       setRules(data.items);
       setTotal(data.total);
@@ -479,11 +494,20 @@ export function ClassificationRulesTab() {
 
   const openNew = () => {
     setEditing(null);
+    setCloning(null);
     setDialogOpen(true);
   };
 
   const openEdit = (r: ClassificationRule) => {
+    setCloning(null);
     setEditing(r);
+    setDialogOpen(true);
+  };
+
+  const openClone = (rule: ClassificationRule) => {
+    setEditing(null);
+    setCloning(rule);
+    setSelectedDestId(rule.destination_table_id ?? "");
     setDialogOpen(true);
   };
 
@@ -497,6 +521,15 @@ export function ClassificationRulesTab() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao excluir classificação");
     }
+  };
+
+  const removeSelected = async () => {
+    const outcomes = await Promise.allSettled(selectedRuleIds.map(id => deleteClassification(id)));
+    const failed = outcomes.filter(result => result.status === "rejected").length;
+    setBulkDeleteOpen(false);
+    setSelectedRuleIds([]);
+    setSuccess(failed ? `${outcomes.length - failed} regras excluídas; ${failed} falharam.` : `${outcomes.length} regras excluídas.`);
+    void load(queryRef.current);
   };
 
   const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
@@ -537,7 +570,7 @@ export function ClassificationRulesTab() {
       </Stack>
 
       {/* Filtros: Cloud primeiro, depois Tabela Destino */}
-      <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="center">
+      <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="flex-end">
         <FormControl sx={{ minWidth: 220 }} size="small">
           <InputLabel>Cloud</InputLabel>
           <Select
@@ -564,6 +597,20 @@ export function ClassificationRulesTab() {
             ))}
           </Select>
         </FormControl>
+
+        <Box sx={{ minWidth: 300, maxWidth: 460, flex: "1 1 300px" }}>
+          <DepartmentTreeMultiPicker
+            departments={departments}
+            values={departmentFilter}
+            label="Organograma"
+            placeholder="Filtrar pelo organograma"
+            onChange={(values) => {
+              setDepartmentFilter(values);
+              queryRef.current = { ...queryRef.current, offset: 0 };
+              void load(queryRef.current, undefined, undefined, values);
+            }}
+          />
+        </Box>
 
         {selectedDestName && (
           <Chip
@@ -618,14 +665,26 @@ export function ClassificationRulesTab() {
             search={search}
             onQuery={handleQuery}
             onEdit={openEdit}
+            onClone={openClone}
             onDelete={setDeletePending}
+            departments={departments}
+            selectedRuleIds={selectedRuleIds}
+            onSelectionChange={setSelectedRuleIds}
           />
+          {selectedRuleIds.length > 0 && (
+            <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }}>
+              <Button color="error" variant="outlined" startIcon={<Delete />} onClick={() => setBulkDeleteOpen(true)}>
+                Excluir selecionadas ({selectedRuleIds.length})
+              </Button>
+            </Stack>
+          )}
         </>
       )}
 
       <ClassificationRuleDialog
         open={dialogOpen}
         editing={editing}
+        cloning={cloning}
         selectedDestName={selectedDestName ?? null}
         destColumns={destColumns}
         departments={departments}
@@ -648,6 +707,14 @@ export function ClassificationRulesTab() {
           <Button variant="contained" color="error" onClick={() => void remove()}>
             Excluir classificação
           </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={bulkDeleteOpen} onClose={() => setBulkDeleteOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Excluir regras selecionadas?</DialogTitle>
+        <DialogContent><Typography>Serão excluídas {selectedRuleIds.length} regras de classificação. Esta ação não pode ser desfeita.</Typography></DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setBulkDeleteOpen(false)}>Cancelar</Button>
+          <Button variant="contained" color="error" onClick={() => void removeSelected()}>Excluir regras</Button>
         </DialogActions>
       </Dialog>
     </Box>

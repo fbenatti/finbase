@@ -13,6 +13,7 @@ import {
 import {
   Delete,
   Edit,
+  ContentCopy,
   FilterAlt,
 } from "@mui/icons-material";
 import {
@@ -23,7 +24,8 @@ import {
   GridSortModel,
   useGridApiRef,
 } from "@mui/x-data-grid";
-import { ClassificationRule } from "../../services/api";
+import { ClassificationRule, Department } from "../../services/api";
+import { flattenDepartments } from "../../components/DepartmentTreePicker";
 
 export type ClassificationGridFilter = {
   field: string;
@@ -43,7 +45,11 @@ type Props = {
     filters: ClassificationGridFilter[];
   }) => void;
   onEdit: (rule: ClassificationRule) => void;
+  onClone: (rule: ClassificationRule) => void;
   onDelete: (rule: ClassificationRule) => void;
+  departments: Department[];
+  selectedRuleIds: number[];
+  onSelectionChange: (ids: number[]) => void;
 };
 
 const cloudLabel = (scope: string | null | undefined): string => {
@@ -82,7 +88,11 @@ export default function ClassificationDataGrid({
   search,
   onQuery,
   onEdit,
+  onClone,
   onDelete,
+  departments,
+  selectedRuleIds,
+  onSelectionChange,
 }: Props) {
   const apiRef = useGridApiRef();
   const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
@@ -91,6 +101,7 @@ export default function ClassificationDataGrid({
   const [activeFilters, setActiveFilters] = useState<Record<string, ClassificationGridFilter>>({});
   const [context, setContext] = useState<{ mouseX: number; mouseY: number; field: string; value: string } | null>(null);
   const [headerContext, setHeaderContext] = useState<{ mouseX: number; mouseY: number; field: string } | null>(null);
+  const departmentPathById = useMemo(() => new Map(flattenDepartments(departments).map(item => [item.id, item.path])), [departments]);
 
   const filteredHeader = (label: string, field: string) => (
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
@@ -145,14 +156,14 @@ export default function ClassificationDataGrid({
     },
     {
       field: "department_name",
-      headerName: "Departamento",
-      renderHeader: () => filteredHeader("Departamento", "department_name"),
-      minWidth: 200,
-      flex: 1,
+      headerName: "Organograma",
+      renderHeader: () => filteredHeader("Organograma", "department_name"),
+      minWidth: 280,
+      flex: 1.4,
       valueGetter: (_: unknown, row: ClassificationRule) => row.department_name || "—",
       renderCell: ({ row }: { row: ClassificationRule }) => (
-        <Tooltip title={row.department_name || "—"}>
-          <Typography variant="body2" noWrap color="text.secondary">{row.department_name || "—"}</Typography>
+        <Tooltip title={row.department_id ? departmentPathById.get(row.department_id) || row.department_name || "—" : "—"}>
+          <Typography variant="body2" noWrap color="text.secondary">{row.department_id ? departmentPathById.get(row.department_id) || row.department_name || "—" : "—"}</Typography>
         </Tooltip>
       ),
     },
@@ -193,7 +204,7 @@ export default function ClassificationDataGrid({
     {
       field: "actions",
       headerName: "Ações",
-      width: 100,
+      width: 132,
       sortable: false,
       filterable: false,
       align: "center",
@@ -203,13 +214,16 @@ export default function ClassificationDataGrid({
           <Tooltip title="Editar classificação">
             <IconButton size="small" aria-label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }}><Edit fontSize="small" /></IconButton>
           </Tooltip>
+          <Tooltip title="Clonar classificação">
+            <IconButton size="small" aria-label={"Clonar " + row.name} onClick={(event) => { event.stopPropagation(); onClone(row); }}><ContentCopy fontSize="small" /></IconButton>
+          </Tooltip>
           <Tooltip title="Excluir classificação">
             <IconButton size="small" color="error" aria-label={"Excluir " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }}><Delete fontSize="small" /></IconButton>
           </Tooltip>
         </Stack>
       ),
     },
-  ], [activeFilters]);
+  ], [activeFilters, departmentPathById]);
 
   const currentSort = (): { field: string; direction: "asc" | "desc" } | undefined => {
     const item = sortModel[0];
@@ -324,13 +338,13 @@ export default function ClassificationDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["Nome", "Condições", "Departamento", "Cloud", "Prioridade", "Ativa", "Atualizado em"];
+    const header = ["Nome", "Condições", "Organograma", "Cloud", "Prioridade", "Ativa", "Atualizado em"];
     const lines = [
       header.join(";"),
       ...rows.map((row) => [
         row.name,
         formatConditions(row),
-        row.department_name || "",
+        row.department_id ? departmentPathById.get(row.department_id) || row.department_name || "" : "",
         cloudLabel(row.cloud_scope),
         row.priority,
         row.active ? "Sim" : "Não",
@@ -359,6 +373,9 @@ export default function ClassificationDataGrid({
           rowCount={total}
           getRowId={(row) => row.id}
           disableRowSelectionOnClick
+          checkboxSelection
+          rowSelectionModel={selectedRuleIds}
+          onRowSelectionModelChange={(model) => onSelectionChange(model.map(Number))}
           autoHeight
           pagination
           paginationMode="server"

@@ -522,6 +522,7 @@ async def list_classifications_grid(
     filters: str | None = None,
     destination_table_id: int | None = None,
     cloud: str | None = None,
+    department_ids: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Server-side grid over classification rules (pagination, search, sort, AND filters).
@@ -543,6 +544,13 @@ async def list_classifications_grid(
             conditions.append(ClassificationRule.cloud_scope.is_(None))
         else:
             conditions.append(ClassificationRule.cloud_scope == cloud)
+    if department_ids:
+        try:
+            department_id_values = [int(value) for value in department_ids.split(",") if value.strip()]
+        except ValueError as exc:
+            raise HTTPException(422, "IDs de organograma inválidos") from exc
+        if department_id_values:
+            conditions.append(ClassificationRule.department_id.in_(department_id_values))
     # Busca global: qualquer campo textual/numerico da regra, incluindo o
     # JSON de condições. Quando o valor é apagado, não adiciona predicado e a
     # consulta volta naturalmente para todos os registros do escopo.
