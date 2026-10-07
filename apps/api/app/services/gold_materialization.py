@@ -1243,6 +1243,8 @@ async def materialize_saving_history(
     *,
     periods: list[str] | None = None,
     sources: list[GoldMartRuleSource] | None = None,
+    run_id: int | None = None,
+    helper_rule_id: int | None = None,
 ) -> dict[str, Any]:
     """Materializa a Gold de saving por desligue MÊS A MÊS.
 
@@ -1318,13 +1320,19 @@ async def materialize_saving_history(
         table=VM_MONTHLY_GOLD_TABLE,
         select_sql=f"SELECT * FROM iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE}",
         namespace=GOLD,
+        run_id=run_id,
+        rule_id=helper_rule_id,
         partition_column="billing_period",
         empty_is_error=True,
         progress=progress,
     )
     logger.info("VM monthly Gold publicado: %d linhas", helper_result.rows)
 
-    summary: dict[str, Any] = {"periods": [], "rows": {}}
+    summary: dict[str, Any] = {
+        "periods": [],
+        "rows": {},
+        "vm_monthly_history_rows": helper_result.rows,
+    }
     for i, target in enumerate(periods):
         if progress:
             progress(i, len(periods), f"Materializando saving por desligue {target}")
