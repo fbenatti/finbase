@@ -39,6 +39,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      trino:
+        condition: service_healthy
 
   scheduler:
     build:
@@ -67,6 +69,8 @@ services:
       start_period: 20s
     depends_on:
       postgres:
+        condition: service_healthy
+      trino:
         condition: service_healthy
 
   worker:
@@ -161,6 +165,12 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://localhost:8080/v1/info | grep -q '\"starting\":false'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     volumes:
       - ./infra/trino/catalog:/etc/trino/catalog
       - ./infra/trino/config.properties:/etc/trino/config.properties:ro

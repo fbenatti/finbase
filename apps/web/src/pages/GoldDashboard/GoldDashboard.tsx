@@ -429,15 +429,18 @@ export default function GoldDashboard() {
   }));
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
   const [periodPreset, setPeriodPreset] = useState("all");
+  const [executivePeriodFilter, setExecutivePeriodFilter] = useState("current");
   const [error, setError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
   // Árvore do organograma para o filtro global de departamento.
   const [organization, setOrganization] = useState<Department[]>([]);
   const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
+  const [highlightsDepartment, setHighlightsDepartment] = useState("");
   const [consumptionDrill, setConsumptionDrill] = useState<{ open: boolean; tipo: "realizado" | "forecast" | "ambos"; period?: string }>({ open: false, tipo: "realizado" });
   const [highlights, setHighlights] = useState<ForecastAck[]>([]);
   const [highlightsLoading, setHighlightsLoading] = useState(true);
+  const [highlightsError, setHighlightsError] = useState("");
   const [highlightsRefresh, setHighlightsRefresh] = useState(0);
   const displayedOrganization = useMemo(
     () => filters.visaoDiretoria ? swapDirectorTreeLevels(organization) : organization,
@@ -464,7 +467,11 @@ export default function GoldDashboard() {
         : departments;
       const savedDepartment = findDepartment(tree);
       if (savedDepartment) {
-        setFilters(current => ({ ...current, path: savedDepartment.path, deptId: savedDepartment.department.id }));
+        const path = window.localStorage.getItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY) === "1"
+          ? formatDirectorPath(savedDepartment.path).split(" > ").filter(Boolean)
+          : savedDepartment.path;
+        setFilters(current => ({ ...current, path, deptId: savedDepartment.department.id }));
+        setHighlightsDepartment(path.join(" > "));
       } else {
         // Do not keep a stale reference after an organogram change.
         window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
@@ -491,6 +498,7 @@ export default function GoldDashboard() {
           sx={{ pl: 1 + depth * 2, py: 0.25 }}
           onClick={() => {
             const groupedDirector = filters.visaoDiretoria && depth === 2;
+            setHighlightsDepartment(path.join(" > "));
             setFilters(f => ({ ...f, path, deptId: groupedDirector ? null : node.id }));
             if (groupedDirector) window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
             else window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(node.id));
@@ -522,23 +530,31 @@ export default function GoldDashboard() {
   useEffect(() => {
     let active = true;
     setHighlightsLoading(true);
-    const selectedPeriods = [...filters.months].sort();
-    const from = selectedPeriods[0];
-    const to = selectedPeriods[selectedPeriods.length - 1];
-    const periodKey = from && to ? `${from}-${to}` : "all";
-    if (!from || !to) {
-      setHighlights([]);
-      setHighlightsLoading(false);
-      return () => { active = false; };
+    setHighlightsError("");
+    let monthFrom: string;
+    let monthTo: string;
+    if (filters.months.length) {
+      const selected = [...filters.months].sort();
+      monthFrom = selected[0];
+      monthTo = selected[selected.length - 1];
+    } else {
+      const now = new Date();
+      if (executivePeriodFilter === "all") {
+        monthFrom = "190001";
+        monthTo = "299912";
+      } else {
+        const year = executivePeriodFilter === "current" ? now.getFullYear() : Number(executivePeriodFilter);
+        monthFrom = `${year}01`;
+        monthTo = `${year}12`;
+      }
     }
-    const monthFrom = from.slice(0, 4) + from.slice(4, 6);
-    const monthTo = to.slice(0, 4) + to.slice(4, 6);
-    getExecutiveManualAcks(monthFrom, monthTo, filters.path.length ? [filters.path.join(" > ")] : [])
+    const departmentPaths = highlightsDepartment ? [highlightsDepartment] : [];
+    getExecutiveManualAcks(monthFrom, monthTo, departmentPaths)
       .then(result => { if (active) setHighlights(result.items); })
-      .catch(reason => { if (active) setError(formatApiError(reason, "Falha ao carregar Executive Highlights")); })
+      .catch(reason => { if (active) setHighlightsError(formatApiError(reason, "Falha ao carregar Executive Highlights")); })
       .finally(() => { if (active) setHighlightsLoading(false); });
     return () => { active = false; };
-  }, [filters.months, filters.path, refreshTick, highlightsRefresh]);
+  }, [filters.months, filters.path, highlightsDepartment, executivePeriodFilter, monthsAll, refreshTick, highlightsRefresh]);
 
   // ── carrega tabelas disponíveis (namespace gold) ──
   useEffect(() => {
@@ -613,7 +629,7 @@ export default function GoldDashboard() {
             </Select>
           </FormControl>
           <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
-            {displayOrgPath(filters)}
+            {highlightsDepartment || displayOrgPath(filters)}
           </Button>
           <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
@@ -650,7 +666,7 @@ export default function GoldDashboard() {
             )}
             sx={{ ml: 0.5 }}
           />
-          <Button size="small" startIcon={<FilterAltOff />} onClick={clearFilters}>Limpar</Button>
+          <Button size="small" startIcon={<FilterAltOff />} onClick={() => { setHighlightsDepartment(""); clearFilters(); }}>Limpar</Button>
         </Stack>
         {filters.visaoDiretoria && (
           <Chip size="small" color="secondary" label={`Visão Diretoria: ${ORG.directorViewChain}`} sx={{ mt: 1, fontWeight: 800 }} />
@@ -667,8 +683,8 @@ export default function GoldDashboard() {
       </Tabs>
 
       {tab === "visao-executiva" && <>
-        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} />
-        <ExecutiveHighlights items={highlights} loading={highlightsLoading} />
+        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
+      <ExecutiveHighlights items={highlights} loading={highlightsLoading} error={highlightsError} />
       </>}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
@@ -1366,7 +1382,7 @@ function SectionPanel({ title, subtitle, right, children }: {
   );
 }
 
-function ExecutiveHighlights({ items, loading }: { items: ForecastAck[]; loading: boolean }) {
+function ExecutiveHighlights({ items, loading, error }: { items: ForecastAck[]; loading: boolean; error?: string }) {
   const severity = (value?: string): "error" | "warning" | "info" => {
     const normalized = (value || "").toLocaleLowerCase("pt-BR");
     return normalized.includes("crít") || normalized.includes("crit") ? "error" : normalized.includes("perigo") ? "warning" : "info";
@@ -1375,7 +1391,8 @@ function ExecutiveHighlights({ items, loading }: { items: ForecastAck[]; loading
     || severityRank(a.severity) - severityRank(b.severity)
     || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at)));
   return <SectionPanel title="EXECUTIVE HIGHLIGHTS" subtitle="Anotações administrativas ativas no período e no caminho de organograma selecionado.">
-    {loading ? <Typography color="text.secondary">Carregando registros do período…</Typography>
+    {error ? <Alert severity="error">{error}</Alert>
+      : loading ? <Typography color="text.secondary">Carregando registros do período…</Typography>
       : ordered.length ? <Stack spacing={1}>{ordered.map(ack => <Alert key={ack.id} severity={severity(ack.severity)}>
         <b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />
         {ack.department_path.join(" > ")}<br />{ack.reason}

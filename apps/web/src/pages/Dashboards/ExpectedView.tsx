@@ -69,6 +69,7 @@ export default function ExpectedView({
   footer,
   measureColumn = "realizado",
   onMeasureColumnChange,
+  onPeriodFilterChange,
 }: {
   embedded?: boolean;
   director?: string;
@@ -78,6 +79,7 @@ export default function ExpectedView({
   footer?: ReactElement;
   measureColumn?: "realizado" | "realizado_cloud";
   onMeasureColumnChange?: (value: "realizado" | "realizado_cloud") => void;
+  onPeriodFilterChange?: (value: string) => void;
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -1086,7 +1088,11 @@ export default function ExpectedView({
             <Select
               label="Período"
               value={periodFilter}
-              onChange={(e) => setPeriodFilter(String(e.target.value))}
+              onChange={(e) => {
+                const value = String(e.target.value);
+                setPeriodFilter(value);
+                onPeriodFilterChange?.(value);
+              }}
             >
               <MenuItem value="current">Ano atual</MenuItem>
               <MenuItem value="all">Todos os períodos</MenuItem>

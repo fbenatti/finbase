@@ -39,6 +39,7 @@ _RETRYABLE_MARKERS = (
     "timeout",
     "503",
     "502",
+    "429",
     "starting",
     # HTTP 200 with a non-JSON body — the coordinator is mid-restart and
     # answers the statement endpoint with an HTML/empty page. Transient.
@@ -123,7 +124,7 @@ async def execute(
             if attempt + 1 >= attempts:
                 break
             delay = min(10.0, 1.0 * (2 ** attempt))
-            logger.warning("Trino query retry %s/%s after %s: %s", attempt + 1, TRINO_TRANSPORT_RETRIES, type(exc).__name__, exc)
+            logger.warning("Trino query retry %s/%s after %s: %s", attempt + 1, attempts, type(exc).__name__, exc)
             await asyncio.sleep(delay)
     detail = str(last_error).strip() if last_error else ""
     if not detail:
@@ -198,7 +199,7 @@ async def _execute_once(
         resp = await _request_with_cancel(
             client, "POST", submit_url, headers, cancel_event, submit_url, content=sql,
         )
-        if resp.status_code in (502, 503) and "QUEUED" not in resp.text:
+        if resp.status_code in (429, 502, 503) and "QUEUED" not in resp.text:
             raise TrinoError(f"Trino error {resp.status_code}: coordinator ocupado ou reiniciando")
         if resp.status_code == 503 and "QUEUED" in resp.text:
             # Trino queues the query — follow nextUri
