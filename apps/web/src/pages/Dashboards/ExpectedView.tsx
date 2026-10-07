@@ -774,21 +774,10 @@ export default function ExpectedView({
     const found = departmentOptions.find((item) => item.path === path);
     if (found) chooseDepartment(found);
   };
-  const openActualDetails = () => {
-    const year =
-      periodFilter === "all"
-        ? ""
-        : periodFilter === "current"
-          ? String(new Date().getFullYear())
-          : periodFilter;
-    const query = new URLSearchParams({
-      tab: "pivot",
-      measure: "realizado",
-      path: director,
-      tipo: "realizado",
-    });
-    if (year) query.set("year", year);
-    navigate(`/analysis?${query.toString()}`);
+  const openConsumptionDetails = (tipo: "realizado" | "forecast" | "ambos") => {
+    setDrillTipo(tipo);
+    setDrillPeriod(undefined);
+    setDrillOpen(true);
   };
   // Clique no gráfico: abre o diálogo de decomposição (estado próprio, sem
   // alterar filtros da página). No gráfico acumulado, o ponto representa o
@@ -1146,13 +1135,13 @@ export default function ExpectedView({
       ) : (
         <>
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-            {card("Realizado", actual, "#F2A900", openActualDetails)}
-            {card("Forecast", forecastOnly, "#7C3AED", undefined, "Projeção adicional ao realizado")}
+            {card("Realizado", actual, "#F2A900", () => openConsumptionDetails("realizado"))}
+            {card("Forecast", forecastOnly, "#7C3AED", () => openConsumptionDetails("forecast"), "Projeção adicional ao realizado")}
             {card(
               "Realizado + Forecast",
               forecast,
               "#16A34A",
-              undefined,
+              () => openConsumptionDetails("ambos"),
               "Total projetado",
             )}
             {card("Orçamento", budget, "#64748B")}
