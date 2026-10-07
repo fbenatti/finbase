@@ -153,6 +153,14 @@ def test_sanitized_bronze_matches_the_pipeline_convention():
     assert sanitized_bronze(conn(code="azure.resource.graph")) == "raw_azure_resource_graph"
 
 
+def test_resource_graph_reprocess_reads_the_selected_source_bronze():
+    from app.routers.etl import _source_bronze_code
+
+    assert _source_bronze_code("azure-4p", "resource_graph") == "azure-4p-resource-graph"
+    assert _source_bronze_code("azure-ti", "resource_graph") == "azure-ti-resource-graph"
+    assert _source_bronze_code("azure-4p") == "azure-4p"
+
+
 # --- estado da fonte na API ------------------------------------------------
 
 def test_state_is_not_configured_when_source_is_disabled():

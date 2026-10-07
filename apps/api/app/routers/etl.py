@@ -33,6 +33,14 @@ from croniter import croniter
 
 router = APIRouter(prefix="/etl", tags=["etl"])
 
+
+def _source_bronze_code(connection_code: str, source_key: str | None = None) -> str:
+    """Resolve per-source Bronze identity for environment-shared Azure sources."""
+    if source_key == "resource_graph":
+        from app.services.azure_source_registry import source_code as azure_source_code
+        return azure_source_code(connection_code, source_key)
+    return connection_code
+
 # Downloads must never materialize an unbounded Bronze snapshot in the API
 # process.  CSV is streamed in batches; XLSX has a lower cap because the
 # workbook writer necessarily buffers the document in memory.
@@ -1470,6 +1478,16 @@ def _reprocess_destination_sync(
     _sync_db()
     session = SyncSession()
     try:
+        task_record = session.get(EtlTask, task_id)
+        task_metadata = dict(getattr(task_record, "result_json", None) or {})
+        source_key = str(task_metadata.get("source_key") or "")
+
+        def _bronze_code(connection, connection_id: int) -> str:
+            return _source_bronze_code(
+                connection.code if connection is not None else str(connection_id),
+                source_key,
+            )
+
         dest_info = session.get(DestinationTable, destination_table_id)
         if not dest_info:
             status["status"] = "FAILED"; status["error"] = "Tabela destino nao encontrada"
@@ -1565,7 +1583,7 @@ def _reprocess_destination_sync(
             physical = []
             if billing_periods:
                 for period in billing_periods:
-                    physical.extend(iceberg.list_bronze_slices(conn.code if conn else str(cid), str(period)))
+                    physical.extend(iceberg.list_bronze_slices(_bronze_code(conn, cid), str(period)))
             if phys_name.lower() == "dest_modelo_focus" and conn:
                 from app.services.cost_sources import bronze_blob_eligible_for_focus
 
@@ -1628,7 +1646,7 @@ def _reprocess_destination_sync(
         for blob_id, cid, bperiod, blob_path in all_blobs:
             conn = session.get(SourceConnection, cid)
             audit = iceberg.audit_bronze_blob(
-                conn.code if conn else str(cid),
+                _bronze_code(conn, cid),
                 blob_path=blob_path,
                 billing_period=bperiod,
                 expected_rows=expected_rows_by_blob.get(blob_id),
@@ -2047,7 +2065,7 @@ def _reprocess_destination_sync(
                 if is_current_billing_period(bperiod):
                     try:
                         skip_sample = iceberg.read_bronze(
-                            conn.code,
+                            _bronze_code(conn, cid),
                             blob_path=blob_path,
                             billing_period=bperiod,
                             max_rows=min(int(expected_rows_by_blob.get(blob_id) or 5000), 5000),
@@ -2138,7 +2156,7 @@ def _reprocess_destination_sync(
                     _sync_db()
 
                 _process_blob_for_reprocess(
-                    blob_id, cid, conn.code, bperiod,
+                    blob_id, cid, _bronze_code(conn, cid), bperiod,
                     brules, crules, cmapps, dest_col_names,
                     dept_cache, hierarchy_cache,
                     output_cols, task_id,
@@ -2945,6 +2963,32 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
                 continue
             seen_daily.add(key)
             ordered_jobs.append((int(connection_id), str(period), snap))
+        # Unified Azure sources (e.g. Resource Graph) store each source in a
+        # derived Bronze table while keeping the environment connection as the
+        # provenance owner. The blob manifest can be absent after the source
+        # catalog migration, so recover the snapshot index from Iceberg itself.
+        if phys_lower in {"dest_cloud_orphan_resources", "dest_cloud_resource_inventory"}:
+            from app.services import iceberg_service as iceberg
+            from app.services.azure_source_registry import source_code as azure_source_code
+
+            source_key = "resource_graph"
+            requested_periods = [str(p) for p in body.billing_periods]
+            for connection_id in body.connection_ids:
+                connection = conn_by_id.get(int(connection_id))
+                if not connection:
+                    continue
+                bronze_code = azure_source_code(connection.code, source_key)
+                for period in requested_periods:
+                    for item in iceberg.list_bronze_slices(bronze_code, period):
+                        path = str(item.get("blob_path") or "")
+                        if not _blob_allowed(path):
+                            continue
+                        snap = snapshot_date_from_blob_path(path)
+                        key = (int(connection_id), str(snap or ""))
+                        if not snap or key in seen_daily:
+                            continue
+                        seen_daily.add(key)
+                        ordered_jobs.append((int(connection_id), str(period), snap))
         ordered_jobs.sort(key=lambda item: (item[2] or "", item[0]))
         available = {(connection_id, period) for connection_id, period, _ in ordered_jobs}
         empty_detail = (
@@ -3088,6 +3132,9 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     )
     audit_task_id = audit_result.scalar_one()
     task_ids: list[int] = []
+    resource_graph_source = phys_lower in {
+        "dest_cloud_orphan_resources", "dest_cloud_resource_inventory",
+    }
     for position, (connection_id, period, snapshot_date) in enumerate(ordered_jobs, start=1):
         details = {
             "connection_ids": [connection_id],
@@ -3105,6 +3152,8 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
             )
         else:
             log_message = f"Fila {position}/{len(ordered_jobs)}: fonte {connection_id}, mês {period}"
+        if resource_graph_source:
+            details["source_key"] = "resource_graph"
         result = await db.execute(
             insert(EtlTask).values(
                 task_type="reprocess", status="QUEUED", destination_table_id=body.destination_table_id,
