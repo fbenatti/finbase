@@ -514,6 +514,9 @@ async def lifespan(app: FastAPI):
                  ('copilot_license_snapshot', 'Copilot — Licenças', 'Gold auxiliar de licenças do GitHub Copilot.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_copilot_license_snapshot', 'PENDING'),
                  ('copilot_user_period', 'Copilot — Usuário/período', 'Gold auxiliar de adoção por usuário e período.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_copilot_user_period', 'PENDING')
                ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, active = TRUE, materialization_table = EXCLUDED.materialization_table""",
+            """INSERT INTO gold_rule (code, name, description, active, dimensions, measure_columns, snapshot_mode, snapshot_col, materialization_table, materialization_status)
+               VALUES ('vm_monthly_history', 'VM — Histórico mensal agregado', 'Cubo Gold de horas e custo por VM/mês, derivado da Silver e consumido pelo cubo Saving por desligue.', FALSE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_cost_vm_monthly_history', 'PENDING')
+               ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, materialization_table = EXCLUDED.materialization_table""",
             """CREATE TABLE IF NOT EXISTS shutdown_exception_rule (
               id SERIAL PRIMARY KEY,
               name VARCHAR(200) NOT NULL,
