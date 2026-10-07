@@ -145,8 +145,8 @@ export default function CommitmentsDashboard() {
         <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Período selecionado</Typography>
         <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel}</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={rangeLabel} />
-          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={rangeLabel} />
+          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={`Realizado, sem forecast · ${rangeLabel}`} />
+          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={`Realizado, sem forecast · ${rangeLabel}`} />
           <MetricCard title="Base OnDemand — RI" value={Number(selected.ri_ondemand || 0)} detail="Consumo coberto por reserva" />
           <MetricCard title="Base OnDemand — SavingPlan" value={Number(selected.savingplan_ondemand || 0)} detail="Consumo coberto por plano" />
           <MetricCard title="Saving estimado — RI" value={Number(selected.ri_saving || 0)} detail="Retorno sintético − compra RI" />
