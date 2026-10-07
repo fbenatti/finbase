@@ -777,7 +777,12 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
     )
     db.add(row); await db.flush()
     task = EtlTask(task_type="forecast", status="QUEUED", destination_table_id=config_id, result_json={"forecast_run_id": row.id}, errors=[])
-    db.add(task); await db.commit(); await db.refresh(row)
+    db.add(task)
+    await db.flush()
+    from app.services.processing_logs import async_sync_etl_task_log, async_sync_forecast_run_log
+    await async_sync_etl_task_log(db, task)
+    await async_sync_forecast_run_log(db, row)
+    await db.commit(); await db.refresh(row)
     return {"run_id": row.id, "task_id": task.id, "status": row.status}
 
 @router.get("/runs")
