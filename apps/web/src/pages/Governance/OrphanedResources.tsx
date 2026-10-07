@@ -98,9 +98,9 @@ export default function OrphanedResources() {
         tipo_recurso: tipo.length ? tipo.join(",") : undefined,
       });
       setSummary(data);
-      // Auto-seleciona o período apenas na primeira carga (sem filtro de período).
-      if (!period && data.periods.length) setPeriod(data.periods[0]);
-      if (!snapshotDate && data.latest_snapshot) setSnapshotDate(data.latest_snapshot);
+      // Sem filtro manual, a API mostra o snapshot mais recente de cada origem.
+      // Selecionar o período/snapshot global mais recente esconderia origens
+      // cuja última coleta ocorreu antes (ex.: Azure-4P em setembro, TI em outubro).
       if (data.error) setError(data.error);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao carregar resumo");
