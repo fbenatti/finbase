@@ -89,7 +89,7 @@ async def list_processing_logs(
             f"SELECT id, etl_task_id, process_type, status, source_label, destination_label, partitions_label, "
             "rows_source, rows_destination, started_at, finished_at, phase "
             f"FROM iceberg.gold.{PROCESSING_LOG_CUBE}{where} "
-            f"ORDER BY started_at DESC NULLS LAST, id DESC LIMIT {int(limit)} OFFSET {int(offset)}",
+            f"ORDER BY started_at DESC NULLS LAST, id DESC OFFSET {int(offset)} LIMIT {int(limit)}",
             timeout_s=20,
         )
         return {
