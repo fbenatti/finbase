@@ -467,8 +467,9 @@ considere a tentativa final do grupo e seus blobs/linhas processados.
 1. **`services/azure_resource_graph_service.py`** (novo) — coleta + Bronze; testar com
    `python -c` contra um tenant (valida permissão da SPN).
 2. **Setup de destino** — criar `dest_cloud_resource_inventory` e
-   `dest_cloud_orphan_resources` + mappings (função idempotente; hook no
-   `create_connection`).
+   `dest_cloud_orphan_resources` + mappings (função idempotente; hook ao habilitar
+   `resource_graph` em **Carregando fontes Azure**, com suporte legado para
+   conexões standalone).
 3. **Backend router** — scan/test/run em `etl.py`; guard de tipos em `task_runner.py`;
    branch no `worker.py`.
 4. **Frontend** — opção no wizard de Conexões; aba "Recursos Órfãos" na Governança
