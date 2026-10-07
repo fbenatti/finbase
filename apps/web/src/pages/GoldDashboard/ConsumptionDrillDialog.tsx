@@ -51,6 +51,7 @@ export default function ConsumptionDrillDialog({
   directorView,
   period,
   tipo = "realizado",
+  globalFilters = [],
 }: {
   open: boolean;
   onClose: () => void;
@@ -59,6 +60,7 @@ export default function ConsumptionDrillDialog({
   directorView: boolean;
   period?: string;
   tipo?: ConsumptionType;
+  globalFilters?: GoldQueryFilter[];
 }) {
   const [selectedTypes, setSelectedTypes] = useState(() => selectionFromType(tipo));
   useEffect(() => {
@@ -99,6 +101,7 @@ export default function ConsumptionDrillDialog({
           ? { column: "tipo", operator: "NOT_IN", values: ["rateio"] }
           : { column: "tipo", operator: "NOT_IN", values: ["forecast", "rateio"] },
       ...pathSegmentFilters(path, directorView),
+      ...globalFilters,
     ];
     if (/^\d{4}$/.test(period || "")) {
       filters.push({
@@ -112,7 +115,7 @@ export default function ConsumptionDrillDialog({
       filters.push({ column: "_billing_period", operator: "IN", values: [period] });
     }
     return filters;
-  }, [path, directorView, period, selectedTipo]);
+  }, [path, directorView, period, selectedTipo, globalFilters]);
   const queryKey = `${table}|${directorView}|${path.join(">")}|${period || ""}|${selectedTipo}`;
 
   return (

@@ -19,10 +19,11 @@ import {
   GoldQueryFilter, GoldQueryMeasure, GoldQueryResult, GoldInfo,
   formatApiError, Department,
   getForecastAccuracyMonths, runForecastHistoryPivot,
-  ForecastAccuracyMonth, HistoryFilter,
+  ForecastAccuracyMonth, HistoryFilter, ForecastAck, getExecutiveManualAcks,
 } from "../../services/api";
 import ExpectedView from "../Dashboards/ExpectedView";
 import HierarchicalDecompTree, { buildDecompChain, type DecompPathStep } from "./HierarchicalDecompTree";
+import ConsumptionDrillDialog from "./ConsumptionDrillDialog";
 import * as XLSX from "xlsx";
 import { ORG } from "../../constants/orgLabels";
 
@@ -434,6 +435,10 @@ export default function GoldDashboard() {
   const [organization, setOrganization] = useState<Department[]>([]);
   const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
+  const [consumptionDrill, setConsumptionDrill] = useState<{ open: boolean; tipo: "realizado" | "forecast" | "ambos"; period?: string }>({ open: false, tipo: "realizado" });
+  const [highlights, setHighlights] = useState<ForecastAck[]>([]);
+  const [highlightsLoading, setHighlightsLoading] = useState(true);
+  const [highlightsRefresh, setHighlightsRefresh] = useState(0);
   const displayedOrganization = useMemo(
     () => filters.visaoDiretoria ? swapDirectorTreeLevels(organization) : organization,
     [organization, filters.visaoDiretoria],
@@ -514,6 +519,27 @@ export default function GoldDashboard() {
   };
   const globalDirector = filters.path.length ? filters.path.join(" > ") : undefined;
 
+  useEffect(() => {
+    let active = true;
+    setHighlightsLoading(true);
+    const selectedPeriods = [...filters.months].sort();
+    const from = selectedPeriods[0];
+    const to = selectedPeriods[selectedPeriods.length - 1];
+    const periodKey = from && to ? `${from}-${to}` : "all";
+    if (!from || !to) {
+      setHighlights([]);
+      setHighlightsLoading(false);
+      return () => { active = false; };
+    }
+    const monthFrom = from.slice(0, 4) + from.slice(4, 6);
+    const monthTo = to.slice(0, 4) + to.slice(4, 6);
+    getExecutiveManualAcks(monthFrom, monthTo, filters.path.length ? [filters.path.join(" > ")] : [])
+      .then(result => { if (active) setHighlights(result.items); })
+      .catch(reason => { if (active) setError(formatApiError(reason, "Falha ao carregar Executive Highlights")); })
+      .finally(() => { if (active) setHighlightsLoading(false); });
+    return () => { active = false; };
+  }, [filters.months, filters.path, refreshTick, highlightsRefresh]);
+
   // ── carrega tabelas disponíveis (namespace gold) ──
   useEffect(() => {
     getAnalysisTables().then(t => {
@@ -564,7 +590,7 @@ export default function GoldDashboard() {
           <Typography color="text.secondary">Cockpit executivo pré-agregado (mensal)</Typography>
         </Box>
         <Stack direction="row" gap={1} alignItems="center">
-          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => setRefreshTick(t => t + 1)}>Atualizar</Button>
+          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => { setRefreshTick(t => t + 1); setHighlightsRefresh(t => t + 1); }}>Atualizar</Button>
         </Stack>
       </Stack>
       </Box>
@@ -640,7 +666,10 @@ export default function GoldDashboard() {
         <Tab value="visao-executiva" label="Visão Executiva" />
       </Tabs>
 
-      {tab === "visao-executiva" && <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} />}
+      {tab === "visao-executiva" && <>
+        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} />
+        <ExecutiveHighlights items={highlights} loading={highlightsLoading} />
+      </>}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}
@@ -651,6 +680,17 @@ export default function GoldDashboard() {
       {tab === "data-quality" && <DataQuality table={table} filters={filters} filterKey={filterKey} />}
         </Paper>
       </Box>
+      <ConsumptionDrillDialog
+        open={consumptionDrill.open}
+        onClose={() => setConsumptionDrill(current => ({ ...current, open: false }))}
+        table={table}
+        directorPath={filters.path.join(" > ")}
+        directorView={filters.visaoDiretoria}
+        period={consumptionDrill.period}
+        tipo={consumptionDrill.tipo}
+        key={JSON.stringify([filters, consumptionDrill.tipo, consumptionDrill.period])}
+        globalFilters={filtersOf(filters).filter(filter => filter.column !== "_billing_period")}
+      />
     </Box>
   );
 }
@@ -1324,6 +1364,33 @@ function SectionPanel({ title, subtitle, right, children }: {
       {children}
     </Paper>
   );
+}
+
+function ExecutiveHighlights({ items, loading }: { items: ForecastAck[]; loading: boolean }) {
+  const severity = (value?: string): "error" | "warning" | "info" => {
+    const normalized = (value || "").toLocaleLowerCase("pt-BR");
+    return normalized.includes("crít") || normalized.includes("crit") ? "error" : normalized.includes("perigo") ? "warning" : "info";
+  };
+  const ordered = [...items].sort((a, b) => Number(a.ordem ?? 999) - Number(b.ordem ?? 999)
+    || severityRank(a.severity) - severityRank(b.severity)
+    || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at)));
+  return <SectionPanel title="EXECUTIVE HIGHLIGHTS" subtitle="Anotações administrativas ativas no período e no caminho de organograma selecionado.">
+    {loading ? <Typography color="text.secondary">Carregando registros do período…</Typography>
+      : ordered.length ? <Stack spacing={1}>{ordered.map(ack => <Alert key={ack.id} severity={severity(ack.severity)}>
+        <b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />
+        {ack.department_path.join(" > ")}<br />{ack.reason}
+        <Typography variant="caption" display="block">{ack.registered_at ? new Date(ack.registered_at).toLocaleDateString("pt-BR") : ""}</Typography>
+      </Alert>)}</Stack>
+        : <Typography color="text.secondary">Nenhum highlight ativo nos meses e caminhos selecionados.</Typography>}
+  </SectionPanel>;
+}
+
+function severityRank(value?: string) {
+  const severity = (value || "").toLocaleLowerCase("pt-BR");
+  if (severity.includes("crít") || severity.includes("crit")) return 0;
+  if (severity.includes("perigo")) return 1;
+  if (severity.includes("sucesso")) return 3;
+  return 2;
 }
 
 function Decisao({ table, filters, filterKey, setFilters }: {
