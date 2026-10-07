@@ -30,6 +30,16 @@ const money = (value: unknown) =>
   );
 const percentage = (value: unknown) => `${Number(value || 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 const monthLabel = (period: string) => `${period.slice(4, 6)}/${period.slice(0, 4)}`;
+const periodsBetween = (start: string, end: string) => {
+  const [startYear, startMonth] = start.split("-").map(Number);
+  const [endYear, endMonth] = end.split("-").map(Number);
+  const periods: string[] = [];
+  for (let year = startYear, month = startMonth; year < endYear || (year === endYear && month <= endMonth);) {
+    periods.push(`${year}${String(month).padStart(2, "0")}`);
+    if (++month > 12) { month = 1; year += 1; }
+  }
+  return periods;
+};
 
 function MetricCard({ title, value, detail, isPercent = false }: { title: string; value: number; detail?: string; isPercent?: boolean }) {
   return (
@@ -90,7 +100,7 @@ export default function CommitmentsDashboard() {
   const monthCount = Math.max(1, (Number(endMonth.slice(0, 4)) - Number(startMonth.slice(0, 4))) * 12 + Number(endMonth.slice(5, 7)) - Number(startMonth.slice(5, 7)) + 1);
   const forecastByPeriod = new Map(forecasts.map((row) => [row.period, row]));
   const monthlyByPeriod = new Map(monthly.map((row) => [row.period, row]));
-  const chartPeriods = [...new Set([...monthly.map((row) => row.period || ""), ...forecasts.map((row) => row.period || "")])].filter(Boolean).sort();
+  const chartPeriods = periodsBetween(startMonth, endMonth);
   const riMonthlyBaseline = Number(selected.ri_ondemand || 0) / monthCount;
   const savingplanMonthlyBaseline = Number(selected.savingplan_ondemand || 0) / monthCount;
   const riPurchasePct = Number(selected.ri_ondemand || 0) ? Number(selected.ri_purchase || 0) / Number(selected.ri_ondemand) * 100 : 0;
