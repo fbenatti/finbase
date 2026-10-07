@@ -28,14 +28,15 @@ const money = (value: unknown) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
     Number(value || 0),
   );
+const percentage = (value: unknown) => `${Number(value || 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 const monthLabel = (period: string) => `${period.slice(4, 6)}/${period.slice(0, 4)}`;
 
-function MetricCard({ title, value, detail }: { title: string; value: number; detail?: string }) {
+function MetricCard({ title, value, detail, isPercent = false }: { title: string; value: number; detail?: string; isPercent?: boolean }) {
   return (
     <Card sx={{ flex: 1, minWidth: 210 }}>
       <CardContent>
         <Typography variant="overline" color="text.secondary">{title}</Typography>
-        <Typography variant="h5" sx={{ fontWeight: 700 }}>{money(value)}</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 700 }}>{isPercent ? percentage(value) : money(value)}</Typography>
         {detail && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{detail}</Typography>}
       </CardContent>
     </Card>
@@ -73,71 +74,46 @@ export default function CommitmentsDashboard() {
   }, [startMonth, endMonth, source]);
 
   const projectChart = useMemo(() => {
-    const totals = new Map<string, { RI: number; SavingPlan: number; riSaving: number; savingplanSaving: number }>();
+    const totals = new Map<string, { project: string; baseline: number; purchase: number; saving: number }>();
+    const grouped: Record<"RI" | "SavingPlan", Map<string, { project: string; baseline: number; purchase: number; saving: number }>> = {
+      RI: new Map(), SavingPlan: new Map(),
+    };
     for (const row of data?.projects || []) {
       const project = row.project || "Sem projeto";
-      const bucket = totals.get(project) || { RI: 0, SavingPlan: 0, riSaving: 0, savingplanSaving: 0 };
-      if (row.commitment_type === "RI") {
-        bucket.RI += Number(row.ondemand_baseline || 0);
-        bucket.riSaving += Number(row.estimated_saving || 0);
-      } else {
-        bucket.SavingPlan += Number(row.ondemand_baseline || 0);
-        bucket.savingplanSaving += Number(row.estimated_saving || 0);
-      }
-      totals.set(project, bucket);
+      const type = row.commitment_type === "RI" ? "RI" : "SavingPlan";
+      const bucket = grouped[type].get(project) || { project, baseline: 0, purchase: 0, saving: 0 };
+      bucket.baseline += Number(row.ondemand_baseline || 0);
+      bucket.purchase += Number(row.purchase_allocated || 0);
+      bucket.saving += Number(row.estimated_saving || 0);
+      grouped[type].set(project, bucket);
     }
-    return [...totals.entries()]
-      .map(([project, values]) => ({ project, ...values }))
-      .sort((a, b) => b.RI + b.SavingPlan - (a.RI + a.SavingPlan))
-      .slice(0, 10);
+    const rank = (rows: typeof totals) => [...rows.values()]
+      .map((row) => ({ ...row, purchasePct: row.baseline ? row.purchase / row.baseline * 100 : 0 }))
+      .sort((a, b) => b.baseline - a.baseline)
+      .slice(0, 8);
+    return { RI: rank(grouped.RI), SavingPlan: rank(grouped.SavingPlan) };
   }, [data?.projects]);
 
   const projectColumns: GridColDef<CommitmentDashboardRow>[] = [
-    { field: "project", headerName: "Projeto consumidor", minWidth: 240, flex: 1 },
-    { field: "commitment_type", headerName: "Compromisso", width: 145 },
+    { field: "project", headerName: "Projeto", minWidth: 220, flex: 1 },
     { field: "source", headerName: "Origem", width: 120 },
-    { field: "ondemand_baseline", headerName: "Base OnDemand", width: 175, valueFormatter: (value) => money(value) },
-    { field: "purchase_allocated", headerName: "Compra rateada", width: 165, valueFormatter: (value) => money(value) },
-    { field: "estimated_saving", headerName: "Saving estimado", width: 175, valueFormatter: (value) => money(value) },
-    { field: "usage_rows", headerName: "Linhas de consumo", width: 145, type: "number" },
-  ];
-
-  const forecastBreakdownRows = useMemo(() => {
-    const grouped = new Map<string, CommitmentDashboardRow>();
-    for (const row of data?.forecast_breakdown || []) {
-      const charge = String(row.chargecategory || "");
-      const commitment = String(row.commitment_type || "").toLowerCase();
-      if (!["Purchase", "Return"].includes(charge) || !["reservation", "savingsplan"].includes(commitment)) continue;
-      const priceCategory = row.pricingcategory || "Sem PricingCategory";
-      const key = `${row.source}:${commitment}:${charge}:${priceCategory}`;
-      const item = grouped.get(key) || {
-        id: key,
-        source: row.source,
-        commitment_type: commitment === "reservation" ? "RI" : "SavingPlan",
-        chargecategory: charge,
-        pricingcategory: priceCategory,
-        forecast_value: 0,
-      };
-      item.forecast_value = Number(item.forecast_value || 0) + Number(row.forecast_value || 0);
-      grouped.set(key, item);
-    }
-    return [...grouped.values()].sort((a, b) => Math.abs(Number(b.forecast_value || 0)) - Math.abs(Number(a.forecast_value || 0)));
-  }, [data?.forecast_breakdown]);
-  const forecastBreakdownColumns: GridColDef<CommitmentDashboardRow>[] = [
-    { field: "commitment_type", headerName: "Compromisso", width: 150 },
-    { field: "chargecategory", headerName: "ChargeCategory", width: 160 },
-    { field: "pricingcategory", headerName: "PricingCategory", minWidth: 240, flex: 1 },
-    { field: "source", headerName: "Origem", width: 130 },
-    { field: "forecast_value", headerName: "Valor forecast", width: 180, valueFormatter: (value) => money(value) },
+    { field: "ondemand_baseline", headerName: "Base OnDemand", width: 170, valueFormatter: (value) => money(value) },
+    { field: "purchase_allocated", headerName: "Compra atribuída", width: 165, valueFormatter: (value) => money(value) },
+    { field: "estimated_saving", headerName: "Saving realizado", width: 170, valueFormatter: (value) => money(value) },
+    { field: "purchase_pct_of_ondemand", headerName: "Compra / OnDemand", width: 155, valueFormatter: (value) => percentage(value) },
+    { field: "saving_pct_of_ondemand", headerName: "Saving / OnDemand", width: 155, valueFormatter: (value) => percentage(value) },
   ];
 
   const monthly = data?.monthly || [];
   const forecasts = data?.forecast_monthly || [];
   const selected = data?.period_summary || {};
   const rangeLabel = `${monthLabel(toPeriod(startMonth))} a ${monthLabel(toPeriod(endMonth))}`;
+  const monthCount = Math.max(1, (Number(endMonth.slice(0, 4)) - Number(startMonth.slice(0, 4))) * 12 + Number(endMonth.slice(5, 7)) - Number(startMonth.slice(5, 7)) + 1);
   const forecastByPeriod = new Map(forecasts.map((row) => [row.period, row]));
   const monthlyByPeriod = new Map(monthly.map((row) => [row.period, row]));
   const chartPeriods = [...new Set([...monthly.map((row) => row.period || ""), ...forecasts.map((row) => row.period || "")])].filter(Boolean).sort();
+  const riMonthlyBaseline = Number(selected.ri_ondemand || 0) / monthCount;
+  const savingplanMonthlyBaseline = Number(selected.savingplan_ondemand || 0) / monthCount;
   const currencyAxis = { tickprefix: "R$ ", separatethousands: true, automargin: true };
   const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#cbd5e1", gridcolor: "#e2e8f0" }, xaxis: { gridcolor: "#f1f5f9" }, showlegend: false };
 
@@ -165,21 +141,19 @@ export default function CommitmentsDashboard() {
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      <Alert severity="info" sx={{ mb: 2 }}>
-        Saving estimado = retorno sintético (base OnDemand) menos compra do mesmo tipo. No detalhamento por projeto, a compra é rateada mês a mês, por origem e compromisso, proporcionalmente à base OnDemand; os valores dos projetos reconciliam com o total do período.
-      </Alert>
-
       {loading && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
       {!loading && data && <>
         <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Período selecionado</Typography>
         <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel}</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={`Realizado, sem forecast · ${rangeLabel}`} />
-          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={`Realizado, sem forecast · ${rangeLabel}`} />
-          <MetricCard title="Base OnDemand — RI" value={Number(selected.ri_ondemand || 0)} detail="Consumo coberto por reserva" />
-          <MetricCard title="Base OnDemand — SavingPlan" value={Number(selected.savingplan_ondemand || 0)} detail="Consumo coberto por plano" />
-          <MetricCard title="Saving estimado — RI" value={Number(selected.ri_saving || 0)} detail="Retorno sintético − compra RI" />
-          <MetricCard title="Saving estimado — SavingPlan" value={Number(selected.savingplan_saving || 0)} detail="Retorno sintético − compra SavingPlan" />
+          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={`Realizado · ${rangeLabel}`} />
+          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={`Realizado · ${rangeLabel}`} />
+          <MetricCard title="Base OnDemand média / mês — RI" value={riMonthlyBaseline} detail={`Média no período · ${rangeLabel}`} />
+          <MetricCard title="Base OnDemand média / mês — SavingPlan" value={savingplanMonthlyBaseline} detail={`Média no período · ${rangeLabel}`} />
+          <MetricCard title="Saving realizado — RI" value={Number(selected.ri_saving || 0)} detail="Somente realizado; sem forecast" />
+          <MetricCard title="Saving realizado — SavingPlan" value={Number(selected.savingplan_saving || 0)} detail="Somente realizado; sem forecast" />
+          <MetricCard title="Compra RI / Base OnDemand" value={Number(selected.ri_purchase_pct_of_ondemand || 0)} detail="Compra como proporção da referência OnDemand" isPercent />
+          <MetricCard title="Compra SavingPlan / Base OnDemand" value={Number(selected.savingplan_purchase_pct_of_ondemand || 0)} detail="Compra como proporção da referência OnDemand" isPercent />
         </Stack>
 
         <Card sx={{ mb: 2 }}><CardContent>
