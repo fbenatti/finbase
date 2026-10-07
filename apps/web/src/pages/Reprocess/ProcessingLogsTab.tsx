@@ -21,13 +21,14 @@ const STATUS_COLOR: Record<string, "success" | "error" | "warning" | "info" | "d
 const dateLabel = (value?: string | null) => value ? format(new Date(value), "dd/MM/yyyy, HH:mm:ss") : "—";
 const text = (value: unknown) => value == null || value === "" ? "—" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
 const sourceLabel = (value: Record<string, unknown>) => {
+  if (value.label) return String(value.label);
   const names = value.connection_names as string[] | undefined;
   const ids = value.connection_ids as number[] | undefined;
   if (names?.length) return names.join(", ");
   if (ids?.length) return ids.map(id => `Conexão #${id}`).join(", ");
   return text(value);
 };
-const destinationLabel = (value: Record<string, unknown>) => text(value.destination_name || value.table || value.tables || value.namespace || value.destination_table_id || value);
+const destinationLabel = (value: Record<string, unknown>) => text(value.label || value.destination_name || value.table || value.tables || value.namespace || value.destination_table_id || value);
 const json = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 
 function Field({ label, value }: { label: string; value: unknown }) {

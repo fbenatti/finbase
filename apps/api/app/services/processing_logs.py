@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -28,7 +28,8 @@ async def _merge_processing_log_batch(rows: list[dict[str, Any]], *, create: boo
     from app.services.trino_service import execute
 
     columns = [
-        ("id", "BIGINT"), ("process_type", "VARCHAR"), ("status", "VARCHAR"),
+        ("id", "BIGINT"), ("etl_task_id", "BIGINT"),
+        ("process_type", "VARCHAR"), ("status", "VARCHAR"),
         ("source_label", "VARCHAR"), ("destination_label", "VARCHAR"),
         ("partitions_label", "VARCHAR"), ("rows_source", "BIGINT"),
         ("rows_destination", "BIGINT"), ("started_at", "TIMESTAMP(6) WITH TIME ZONE"),
@@ -68,7 +69,11 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
     from app.services.trino_service import execute
 
     session = SyncSession()
+    lock_acquired = False
     try:
+        lock_acquired = bool(session.execute(text("SELECT pg_try_advisory_lock(734219405)")).scalar())
+        if not lock_acquired:
+            return {"rows_written": 0, "checkpoint": 0}
         checkpoint_time: datetime | None = None
         checkpoint_id = 0
         if not full_refresh:
@@ -118,6 +123,7 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
             partitions = row.partitions or []
             payload.append({
                 "id": row.id,
+                "etl_task_id": row.etl_task_id,
                 "process_type": row.process_type or "processing",
                 "status": row.status,
                 "source_label": source_label,
@@ -140,6 +146,11 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
         checkpoint = max(item["id"] for item in payload) if payload else checkpoint_id
         return {"rows_written": len(payload), "checkpoint": checkpoint}
     finally:
+        if lock_acquired:
+            try:
+                session.execute(text("SELECT pg_advisory_unlock(734219405)"))
+            except Exception:
+                pass
         session.close()
 
 
@@ -362,6 +373,7 @@ def backfill_forecast_runs(session: Session) -> int:
                 if details.get("forecast_run") != forecast_detail:
                     details["forecast_run"] = forecast_detail
                     task_log.details = details
+                    task_log.updated_at = datetime.now(timezone.utc)
                 continue
         log = session.execute(select(ProcessingLog).where(
             ProcessingLog.etl_task_id.is_(None), ProcessingLog.process_type == "forecast",
@@ -371,6 +383,7 @@ def backfill_forecast_runs(session: Session) -> int:
             log = ProcessingLog(process_type="forecast", details={"forecast_run_id": run.id})
             session.add(log)
         log.process_type = "forecast"
+        log.updated_at = datetime.now(timezone.utc)
         log.status = run.status
         log.source_kind = "gold"
         log.source = {"kind": "gold", "snapshot_id": run.source_snapshot_id}
@@ -400,6 +413,7 @@ async def async_sync_forecast_run_log(session: Any, run: Any) -> ProcessingLog:
                 "source_snapshot_id": run.source_snapshot_id,
             }
             task_log.details = details
+            task_log.updated_at = datetime.now(timezone.utc)
             task_log.status = run.status
             task_log.phase = run.phase
             task_log.error = run.error
@@ -414,6 +428,7 @@ async def async_sync_forecast_run_log(session: Any, run: Any) -> ProcessingLog:
         log = ProcessingLog(process_type="forecast", details={"forecast_run_id": run.id})
         session.add(log)
     log.process_type = "forecast"
+    log.updated_at = datetime.now(timezone.utc)
     log.status = run.status
     log.source_kind = "gold"
     log.source = {"kind": "gold", "snapshot_id": run.source_snapshot_id}

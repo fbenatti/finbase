@@ -1,5 +1,7 @@
 import logging
 import re
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +13,21 @@ from app.seed import seed
 from app.services import scheduler_service
 
 logger = logging.getLogger(__name__)
+
+
+async def _refresh_processing_log_cube_loop() -> None:
+    import asyncio
+
+    from app.services.processing_logs import publish_processing_log_cube
+
+    while True:
+        try:
+            await publish_processing_log_cube()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Falha ao atualizar cubo operacional de logs")
+        await asyncio.sleep(15)
 
 
 async def _execute_migration(conn, statement: str, *, attempts: int = 5) -> None:
@@ -110,9 +127,13 @@ async def lifespan(app: FastAPI):
     # Scaled API replicas must not race database bootstrapping/migrations.
     # The dedicated scheduler service performs this once before replicas start.
     if not settings.bootstrap_enabled:
+        log_cube_task = asyncio.create_task(_refresh_processing_log_cube_loop())
         if settings.scheduler_enabled:
             await scheduler_service.start_scheduler()
         yield
+        log_cube_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await log_cube_task
         if settings.scheduler_enabled:
             await scheduler_service.stop_scheduler()
         return
@@ -930,7 +951,12 @@ async def lifespan(app: FastAPI):
     if settings.scheduler_enabled:
         await scheduler_service.start_scheduler()
 
+    log_cube_task = asyncio.create_task(_refresh_processing_log_cube_loop())
     yield
+
+    log_cube_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await log_cube_task
 
     if settings.scheduler_enabled:
         await scheduler_service.stop_scheduler()
