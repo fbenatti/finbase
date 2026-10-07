@@ -12,7 +12,7 @@ function Chart(props: any) {
   return <Plot {...props} />;
 }
 import {
-  getShutdownSavings, setupScheduledShutdown, listShutdownExceptions,
+  getShutdownSavings, listShutdownExceptions,
   saveShutdownException, deleteShutdownException, createExceptionFromDelta, getScheduleDelta, getTagDelta, getOpportunity, getSavingsMonthly, getOpportunitySubscriptions,
   getPadroes, getPadroesPeriodos, getPadroesRecursos, getSavingOrganograma, getVmDailyUsage, PadroesResponse, PadraoRecursosResponse, SavingOrganogramaResponse, VmDailyUsageResponse,
   SavingsFilter, VmMonthSaving, ShutdownExceptionRule, ScheduleDeltaResponse, TagDeltaResponse, OpportunityResponse, SavingsMonthlyRow, OpportunitySubscription,
@@ -73,7 +73,6 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   const [periods, setPeriods] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [setupDone, setSetupDone] = useState(false);
 
   const [exceptions, setExceptions] = useState<ShutdownExceptionRule[]>([]);
   const [exDialogOpen, setExDialogOpen] = useState(false);
@@ -98,10 +97,6 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   const [filter, setFilter] = useState<SavingsFilter>({});
   const [refreshTick, setRefreshTick] = useState(0);
   const [summary, setSummary] = useState<{ total_saving_brl: number; total_saved_hours: number; vm_count: number; new_vm_count: number; vm_with_shutdown: number } | null>(null);
-
-  useEffect(() => {
-    setupScheduledShutdown().then(() => setSetupDone(true)).catch(() => setSetupDone(false));
-  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -250,7 +245,6 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
   return (
     <Box>
-      {!setupDone && <Alert severity="info" sx={{ mb: 2 }}>Configurando origem Azure Automation…</Alert>}
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
