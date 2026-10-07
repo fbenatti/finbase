@@ -3460,6 +3460,8 @@ async def cancel_reprocess(task_id: int):
             row.status = "CANCELLED"
             row.phase = "Cancelado pelo usuario"
             row.finished_at = sa_func.now()
+            from app.services.processing_logs import sync_etl_task_log
+            sync_etl_task_log(db, row)
             db.commit()
             db.close()
             _append_reprocess_log(task_id, "Cancelado pelo usuário", level="WARNING")
