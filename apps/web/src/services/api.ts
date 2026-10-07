@@ -2201,6 +2201,43 @@ export interface SavingsDashboard {
   top_savings: SavingAction[];
   top_growth: SavingAction[];
 }
+export interface CommitmentDashboardRow {
+  period?: string;
+  source?: string;
+  commitment_type?: "RI" | "SavingPlan";
+  project?: string;
+  ri_purchase?: number;
+  savingplan_purchase?: number;
+  ri_ondemand?: number;
+  savingplan_ondemand?: number;
+  ondemand_baseline?: number;
+  usage_rows?: number;
+  usage?: number;
+  purchase?: number;
+  return?: number;
+  other?: number;
+  total?: number;
+}
+export interface CommitmentsDashboard {
+  start_period: string;
+  end_period: string;
+  source: string;
+  currency: string;
+  value_basis: string;
+  baseline_note: string;
+  period_summary: Record<string, number>;
+  year_summary: Record<string, number>;
+  monthly: CommitmentDashboardRow[];
+  projects: CommitmentDashboardRow[];
+  forecast_monthly: CommitmentDashboardRow[];
+}
+export async function getCommitmentsDashboard(params: {
+  start_period: string;
+  end_period: string;
+  source?: "all" | "azure-ti" | "azure-4p";
+}): Promise<CommitmentsDashboard> {
+  return (await api.get("/savings/commitments-dashboard", { params })).data;
+}
 export async function getSavingActions(): Promise<SavingAction[]> {
   return (await api.get("/savings/actions")).data;
 }
