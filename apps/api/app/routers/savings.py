@@ -31,6 +31,12 @@ def _commitment_actual_sql(start: str, end: str, source: str, *, by_project: boo
  table = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
  source_filter = _commitment_source_filter(source, "f")
  grouping = ", project" if by_project else ""
+ select_dimensions = "source, commitment_type, project" if by_project else "period, source, commitment_type"
+ eligible_filter = (
+  "AND f.chargecategory = 'Usage'"
+  if by_project else
+  "AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))"
+ )
  project_select = (
   "COALESCE(NULLIF(TRIM(f.organograma), ''), NULLIF(TRIM(f.source_resource_group_name), ''), 'Sem projeto') AS project,"
   if by_project else ""
@@ -59,15 +65,15 @@ WITH synthetic_returns AS (
   AND r.clone_rule_id = CASE WHEN lower(f.commitmentdiscounttype) = 'reservation' THEN 1 ELSE 2 END
  WHERE f._billing_period BETWEEN '{start}' AND '{end}'
    AND lower(f.commitmentdiscounttype) IN ('reservation', 'savingsplan')
-   AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))
+   {eligible_filter}
    {source_filter}
 )
-SELECT period, source, commitment_type{', project' if by_project else ''},
+SELECT {select_dimensions},
        SUM(CASE WHEN chargecategory = 'Purchase' THEN realizado_cloud ELSE 0 END) AS purchase,
        SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline ELSE 0 END) AS ondemand_baseline,
        COUNT_IF(chargecategory = 'Usage') AS usage_rows
 FROM eligible
-GROUP BY period, source, commitment_type{grouping}
+GROUP BY {select_dimensions}
 """
 
 
@@ -127,7 +133,7 @@ async def commitments_dashboard(
  projects = []
  for row in project_rows:
   projects.append({
-   "id": f"{row.get('source')}:{row.get('commitment_type')}:{row.get('project')}:{row.get('period')}",
+   "id": f"{row.get('source')}:{row.get('commitment_type')}:{row.get('project')}",
    "project": row.get("project") or "Sem projeto", "source": row.get("source"),
    "period": row.get("period"), "commitment_type": row.get("commitment_type"),
    "ondemand_baseline": float(row.get("ondemand_baseline") or 0),
