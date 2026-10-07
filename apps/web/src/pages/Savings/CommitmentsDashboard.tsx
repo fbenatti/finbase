@@ -74,8 +74,8 @@ export default function CommitmentsDashboard() {
   }, [startMonth, endMonth, source]);
 
   const projectChart = useMemo(() => {
-    const totals = new Map<string, { project: string; baseline: number; purchase: number; saving: number }>();
-    const grouped: Record<"RI" | "SavingPlan", Map<string, { project: string; baseline: number; purchase: number; saving: number }>> = {
+    type ProjectTotal = { project: string; baseline: number; purchase: number; saving: number };
+    const grouped: Record<"RI" | "SavingPlan", Map<string, ProjectTotal>> = {
       RI: new Map(), SavingPlan: new Map(),
     };
     for (const row of data?.projects || []) {
@@ -87,7 +87,7 @@ export default function CommitmentsDashboard() {
       bucket.saving += Number(row.estimated_saving || 0);
       grouped[type].set(project, bucket);
     }
-    const rank = (rows: typeof totals) => [...rows.values()]
+    const rank = (rows: Map<string, ProjectTotal>) => [...rows.values()]
       .map((row) => ({ ...row, purchasePct: row.baseline ? row.purchase / row.baseline * 100 : 0 }))
       .sort((a, b) => b.baseline - a.baseline)
       .slice(0, 8);
@@ -123,7 +123,7 @@ export default function CommitmentsDashboard() {
         <Box>
           <Typography variant="h5">Compra de RIs e SavingPlan</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Compras, consumo elegível e referência OnDemand simulada por projeto.
+            Compra, referência OnDemand e saving realizado por compromisso e projeto.
           </Typography>
         </Box>
         <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
@@ -150,8 +150,8 @@ export default function CommitmentsDashboard() {
           <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={`Realizado · ${rangeLabel}`} />
           <MetricCard title="Base OnDemand média / mês — RI" value={riMonthlyBaseline} detail={`Média no período · ${rangeLabel}`} />
           <MetricCard title="Base OnDemand média / mês — SavingPlan" value={savingplanMonthlyBaseline} detail={`Média no período · ${rangeLabel}`} />
-          <MetricCard title="Saving realizado — RI" value={Number(selected.ri_saving || 0)} detail="Somente realizado; sem forecast" />
-          <MetricCard title="Saving realizado — SavingPlan" value={Number(selected.savingplan_saving || 0)} detail="Somente realizado; sem forecast" />
+          <MetricCard title="Saving realizado — RI" value={Number(selected.ri_saving || 0)} detail={`Realizado · ${rangeLabel} · sem forecast`} />
+          <MetricCard title="Saving realizado — SavingPlan" value={Number(selected.savingplan_saving || 0)} detail={`Realizado · ${rangeLabel} · sem forecast`} />
           <MetricCard title="Compra RI / Base OnDemand" value={Number(selected.ri_purchase_pct_of_ondemand || 0)} detail="Compra como proporção da referência OnDemand" isPercent />
           <MetricCard title="Compra SavingPlan / Base OnDemand" value={Number(selected.savingplan_purchase_pct_of_ondemand || 0)} detail="Compra como proporção da referência OnDemand" isPercent />
         </Stack>
