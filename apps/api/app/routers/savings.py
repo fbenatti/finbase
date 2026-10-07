@@ -111,11 +111,14 @@ async def commitments_dashboard(
 
  def summarize(rows: list[dict[str, Any]]) -> dict[str, float]:
   result = {"ri_purchase": 0.0, "savingplan_purchase": 0.0,
-            "ri_ondemand": 0.0, "savingplan_ondemand": 0.0}
+            "ri_ondemand": 0.0, "savingplan_ondemand": 0.0,
+            "ri_saving": 0.0, "savingplan_saving": 0.0}
   for row in rows:
    prefix = "ri" if row.get("commitment_type") == "RI" else "savingplan"
    result[f"{prefix}_purchase"] += float(row.get("purchase") or 0)
    result[f"{prefix}_ondemand"] += float(row.get("ondemand_baseline") or 0)
+  result["ri_saving"] = result["ri_ondemand"] - result["ri_purchase"]
+  result["savingplan_saving"] = result["savingplan_ondemand"] - result["savingplan_purchase"]
   return result
 
  monthly: dict[str, dict[str, Any]] = {}
@@ -123,12 +126,13 @@ async def commitments_dashboard(
   period = str(row["period"])
   bucket = monthly.setdefault(period, {"period": period, **{
    key: 0.0 for key in ("ri_purchase", "savingplan_purchase", "ri_ondemand",
-    "savingplan_ondemand")
+    "savingplan_ondemand", "ri_saving", "savingplan_saving")
   }})
   prefix = "ri" if row.get("commitment_type") == "RI" else "savingplan"
   for metric in ("purchase", "ondemand_baseline"):
    key = {"purchase": "purchase", "ondemand_baseline": "ondemand"}[metric]
    bucket[f"{prefix}_{key}"] += float(row.get(metric) or 0)
+  bucket[f"{prefix}_saving"] = bucket[f"{prefix}_ondemand"] - bucket[f"{prefix}_purchase"]
 
  projects = []
  for row in project_rows:
@@ -159,7 +163,7 @@ async def commitments_dashboard(
   "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
   "projects": sorted(projects, key=lambda x: abs(x["ondemand_baseline"]), reverse=True),
   "forecast_monthly": sorted(forecast.values(), key=lambda x: x["period"]),
-  "baseline_note": "O OnDemand é uma simulação pareada por linhas sintéticas; compras são exibidas separadamente e não são rateadas por projeto.",
+  "baseline_note": "Saving estimado = valor absoluto da linha sintética de Return (base OnDemand) menos compra do mesmo tipo no período. Compras não são rateadas por projeto.",
  }
 
 class ActionIn(BaseModel):
