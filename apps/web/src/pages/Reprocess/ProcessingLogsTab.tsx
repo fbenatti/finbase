@@ -19,6 +19,14 @@ const STATUS_COLOR: Record<string, "success" | "error" | "warning" | "info" | "d
 };
 const dateLabel = (value?: string | null) => value ? format(new Date(value), "dd/MM/yyyy, HH:mm:ss") : "—";
 const text = (value: unknown) => value == null || value === "" ? "—" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+const sourceLabel = (value: Record<string, unknown>) => {
+  const names = value.connection_names as string[] | undefined;
+  const ids = value.connection_ids as number[] | undefined;
+  if (names?.length) return names.join(", ");
+  if (ids?.length) return ids.map(id => `Conexão #${id}`).join(", ");
+  return text(value);
+};
+const destinationLabel = (value: Record<string, unknown>) => text(value.table || value.tables || value.namespace || value.destination_table_id || value);
 const json = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 
 function Field({ label, value }: { label: string; value: unknown }) {
@@ -57,8 +65,8 @@ export default function ProcessingLogsTab() {
   const columns = useMemo<GridColDef<ProcessingLog>[]>(() => [
     { field: "process_type", headerName: "Tipo", minWidth: 190, flex: 1, valueGetter: (_, row) => PROCESS_LABELS[row.process_type] || row.process_type },
     { field: "status", headerName: "Status", width: 145, renderCell: ({ value }) => <Chip size="small" label={value} color={STATUS_COLOR[String(value)] || "default"} /> },
-    { field: "source", headerName: "Origem", minWidth: 180, flex: 1, valueGetter: (_, row) => text(row.source) },
-    { field: "destination", headerName: "Destino", minWidth: 180, flex: 1, valueGetter: (_, row) => text(row.destination) },
+    { field: "source", headerName: "Origem", minWidth: 180, flex: 1, valueGetter: (_, row) => sourceLabel(row.source) },
+    { field: "destination", headerName: "Destino", minWidth: 180, flex: 1, valueGetter: (_, row) => destinationLabel(row.destination) },
     { field: "partitions", headerName: "Partição", minWidth: 130, valueGetter: (_, row) => text(row.partitions) },
     { field: "rows", headerName: "Linhas destino", width: 130, valueGetter: (_, row) => row.counts?.rows_destination ?? 0, valueFormatter: value => Number(value || 0).toLocaleString("pt-BR") },
     { field: "started_at", headerName: "Início", minWidth: 165, valueFormatter: value => dateLabel(value as string) },
