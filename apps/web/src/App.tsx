@@ -60,7 +60,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
-        <Route index element={<Navigate to="/connections" replace />} />
+        <Route index element={<Navigate to="/gold-dashboard" replace />} />
         <Route path="connections" element={<Connections />} />
         <Route path="explorer/:connectionId" element={<Explorer />} />
         <Route path="departments" element={<Navigate to="/governance?tab=organization" replace />} />
