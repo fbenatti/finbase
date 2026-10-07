@@ -1,7 +1,6 @@
 from datetime import date, datetime, timezone
 from typing import Any
 import re
-import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -22,87 +21,10 @@ def _period(value: str, field: str) -> str:
  return value
 
 
-def _commitment_source_filter(source: str, alias: str = "f") -> str:
+def _commitment_source_filter(source: str) -> str:
  if source not in {"all", "azure-ti", "azure-4p"}:
   raise HTTPException(422, "source deve ser all, azure-ti ou azure-4p")
- return "" if source == "all" else f"AND lower({alias}.cloud_origem) = '{source}'"
-
-
-def _commitment_actual_sql(start: str, end: str, source: str, *, by_project: bool = False) -> str:
- table = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
- source_filter = _commitment_source_filter(source, "f")
- select_dimensions = (
-  "period, source, commitment_type, project, GROUPING(project) AS is_total"
-  if by_project else "period, source, commitment_type"
- )
- grouping_clause = (
-  "GROUP BY GROUPING SETS ((period, source, commitment_type), (period, source, commitment_type, project))"
-  if by_project else f"GROUP BY {select_dimensions}"
- )
- eligible_filter = "AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))"
- project_select = (
-  "COALESCE(NULLIF(TRIM(f.organograma), ''), NULLIF(TRIM(f.source_resource_group_name), ''), 'Sem projeto') AS project,"
-  if by_project else ""
- )
- return f"""
-WITH synthetic_returns AS (
- SELECT source_connection_id, _billing_period, clone_source_record_id,
-        clone_rule_id, SUM(realizado_cloud) AS return_realized
- FROM {table}
- WHERE _billing_period BETWEEN '{start}' AND '{end}'
-   AND is_synthetic = TRUE AND clone_rule_id IN (1, 2)
- GROUP BY 1, 2, 3, 4
-), eligible AS (
- SELECT f._billing_period AS period, lower(f.cloud_origem) AS source,
-        CASE WHEN lower(f.commitmentdiscounttype) = 'reservation' THEN 'RI' ELSE 'SavingPlan' END AS commitment_type,
-        {project_select}
-        f.chargecategory, f.realizado_cloud,
-        CASE WHEN f.chargecategory = 'Usage' AND r.clone_source_record_id IS NOT NULL THEN -r.return_realized ELSE 0 END AS ondemand_baseline,
-        f.source_record_id
- FROM {table} f
- LEFT JOIN synthetic_returns r
-   ON f.chargecategory = 'Usage'
-  AND r.source_connection_id = f.source_connection_id
-  AND r._billing_period = f._billing_period
-  AND r.clone_source_record_id = f.source_record_id
-  AND r.clone_rule_id = CASE WHEN lower(f.commitmentdiscounttype) = 'reservation' THEN 1 ELSE 2 END
- WHERE f._billing_period BETWEEN '{start}' AND '{end}'
-   AND lower(f.commitmentdiscounttype) IN ('reservation', 'savingsplan')
-   {eligible_filter}
-   {source_filter}
-)
-SELECT {select_dimensions},
-       SUM(CASE WHEN chargecategory = 'Purchase' THEN realizado_cloud ELSE 0 END) AS purchase,
-       SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline ELSE 0 END) AS ondemand_baseline
-FROM eligible
-{grouping_clause}
-"""
-
-
-def _commitment_forecast_sql(start: str, end: str, source: str, *, by_project: bool = False) -> str:
- planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
- source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
- project_select = (
-  "COALESCE(NULLIF(TRIM(organograma_nivel_7), ''), NULLIF(TRIM(organograma_nivel_6), ''), "
-  "NULLIF(TRIM(organograma_nivel_5), ''), NULLIF(TRIM(organograma_nivel_4), ''), "
-  "NULLIF(TRIM(organograma_nivel_3), ''), NULLIF(TRIM(organograma_nivel_2), ''), "
-  "NULLIF(TRIM(organograma_nivel_1), ''), 'Sem projeto') AS project,"
-  if by_project else ""
- )
- group_by = "GROUP BY 1, 2, 3, 4, 5" if by_project else "GROUP BY 1, 2, 3, 4"
- return f"""
-SELECT period, lower(cloud_origem) AS source,
-       lower(commitmentdiscounttype) AS commitment_type,
-       {project_select}
-       lower(chargecategory) AS chargecategory,
-       SUM(realizado_cloud) AS forecast_value
-FROM {planning}
-WHERE tipo = 'forecast' AND upper(financial_effect) = 'DIRECT_REALIZED'
-  AND period BETWEEN '{start}' AND '{end}'
-  AND lower(commitmentdiscounttype) IN ('reservation', 'savingsplan')
-  {source_filter}
-{group_by}
-"""
+ return "" if source == "all" else f"AND source = '{source}'"
 
 
 @router.get("/commitments-dashboard")
@@ -117,16 +39,28 @@ async def commitments_dashboard(
  end = _period(end_period or f"{today.year}12", "end_period")
  if start > end:
   raise HTTPException(422, "start_period não pode ser posterior a end_period")
- _commitment_source_filter(source)
- commitment_sql = _commitment_actual_sql(start, end, source, by_project=True)
- forecast_sql = _commitment_forecast_sql(start, end, source, by_project=True)
- commitment_rows, forecast_rows = await asyncio.gather(
-  trino_execute(commitment_sql, timeout_s=120),
-  trino_execute(forecast_sql, timeout_s=120),
- )
- is_total_row = lambda row: row.get("is_total") is True or row.get("is_total") == 1 or str(row.get("is_total")).lower() == "true"
- monthly_rows = [row for row in commitment_rows if is_total_row(row)]
- project_rows = [row for row in commitment_rows if not is_total_row(row)]
+ source_filter = _commitment_source_filter(source)
+ cube = f"iceberg.{layers.cube_layer()}.dest_dm_cost_commitments_dashboard"
+ try:
+  cube_rows = await trino_execute(
+   f"SELECT period, source, commitment_type, project, scope, ondemand_baseline, "
+   f"purchase, saving, forecast_purchase, forecast_return, forecast_saving "
+   f"FROM {cube} WHERE period BETWEEN '{start}' AND '{end}' {source_filter}",
+   timeout_s=60,
+  )
+ except Exception as exc:
+  detail = str(exc).lower()
+  if "not found" in detail or "does not exist" in detail or "table" in detail:
+   raise HTTPException(
+    503,
+    "Cubo Gold do painel de compromissos ainda não foi materializado. "
+    "Execute a materialização da regra Gold commitments_dashboard.",
+   ) from exc
+  raise
+ actual_totals = [row for row in cube_rows if row.get("scope") == "ACTUAL_TOTAL"]
+ actual_projects = [row for row in cube_rows if row.get("scope") == "ACTUAL_PROJECT"]
+ forecast_totals = [row for row in cube_rows if row.get("scope") == "FORECAST_TOTAL"]
+ forecast_project_rows = [row for row in cube_rows if row.get("scope") == "FORECAST_PROJECT"]
 
  def summarize(rows: list[dict[str, Any]]) -> dict[str, float]:
   result = {"ri_purchase": 0.0, "savingplan_purchase": 0.0,
@@ -148,7 +82,7 @@ async def commitments_dashboard(
   return result
 
  monthly: dict[str, dict[str, Any]] = {}
- for row in monthly_rows:
+ for row in actual_totals:
   period = str(row["period"])
   bucket = monthly.setdefault(period, {"period": period, **{
    key: 0.0 for key in ("ri_purchase", "savingplan_purchase", "ri_ondemand",
@@ -162,34 +96,14 @@ async def commitments_dashboard(
 
  project_totals: dict[tuple[str, str, str], dict[str, Any]] = {}
  project_monthly: dict[tuple[str, str, str, str], dict[str, Any]] = {}
- monthly_commitments = {
-  (str(row["period"]), str(row.get("source")), str(row.get("commitment_type"))): row
-  for row in monthly_rows
- }
- project_baselines: dict[tuple[str, str, str, str], float] = {}
- for row in project_rows:
-  key = (str(row["period"]), str(row.get("source")), str(row.get("commitment_type")))
-  project = str(row.get("project") or "Sem projeto")
-  project_baselines[(key[0], key[1], key[2], project)] = float(row.get("ondemand_baseline") or 0)
-
- group_baselines: dict[tuple[str, str, str], float] = {}
- for (period, source_name, commitment_type, _), baseline in project_baselines.items():
-  key = (period, source_name, commitment_type)
-  group_baselines[key] = group_baselines.get(key, 0.0) + baseline
-
- for row in project_rows:
+ for row in actual_projects:
   period = str(row["period"])
   source_name = str(row.get("source"))
   commitment_type = str(row.get("commitment_type"))
   project = str(row.get("project") or "Sem projeto")
-  key = (period, source_name, commitment_type)
   project_base = float(row.get("ondemand_baseline") or 0)
-  if project_base <= 0:
-   continue
-  total_base = group_baselines.get(key, 0.0)
-  commitment = monthly_commitments.get(key, {})
-  purchase = float(commitment.get("purchase") or 0)
-  purchase_allocated = purchase * project_base / total_base if total_base else 0.0
+  purchase_allocated = float(row.get("purchase") or 0)
+  saving = float(row.get("saving") or 0)
   aggregate_key = (source_name, commitment_type, project)
   result = project_totals.setdefault(aggregate_key, {
    "id": f"{source_name}:{commitment_type}:{project}", "project": project,
@@ -199,7 +113,7 @@ async def commitments_dashboard(
   })
   result["ondemand_baseline"] += project_base
   result["purchase_allocated"] += purchase_allocated
-  result["estimated_saving"] += project_base - purchase_allocated
+  result["estimated_saving"] += saving
   monthly_project_key = (period, source_name, commitment_type, project)
   monthly_project = project_monthly.setdefault(monthly_project_key, {
    "period": period, "source": source_name, "commitment_type": commitment_type,
@@ -208,7 +122,7 @@ async def commitments_dashboard(
   })
   monthly_project["ondemand_baseline"] += project_base
   monthly_project["purchase_allocated"] += purchase_allocated
-  monthly_project["estimated_saving"] += project_base - purchase_allocated
+  monthly_project["estimated_saving"] += saving
 
  projects = list(project_totals.values())
  for project in projects:
@@ -222,39 +136,41 @@ async def commitments_dashboard(
 
  forecast: dict[str, dict[str, Any]] = {}
  forecast_projects: dict[tuple[str, str, str, str], dict[str, float | str]] = {}
- for row in forecast_rows:
+ for row in forecast_totals:
   period = str(row["period"])
   bucket = forecast.setdefault(period, {"period": period, "usage": 0.0,
    "purchase": 0.0, "return": 0.0, "other": 0.0, "total": 0.0,
    "ri_forecast_purchase": 0.0, "savingplan_forecast_purchase": 0.0,
    "ri_forecast_return": 0.0, "savingplan_forecast_return": 0.0,
    "ri_forecast_saving": 0.0, "savingplan_forecast_saving": 0.0})
-  category = str(row.get("chargecategory") or "").lower()
-  key = category if category in {"usage", "purchase", "return"} else "other"
-  amount = float(row.get("forecast_value") or 0)
-  bucket[key] += amount
-  bucket["total"] += amount
-  commitment_type = str(row.get("commitment_type") or "").lower()
-  prefix = "ri" if commitment_type == "reservation" else "savingplan" if commitment_type == "savingsplan" else None
-  if prefix and category in {"purchase", "return"}:
-    bucket[f"{prefix}_forecast_{category}"] += amount
-  if prefix and row.get("project") and category in {"purchase", "return"}:
-   project_key = (period, str(row.get("source") or ""), prefix, str(row.get("project") or "Sem projeto"))
-   project_bucket = forecast_projects.setdefault(project_key, {"period": period, "source": project_key[1], "commitment_type": "RI" if prefix == "ri" else "SavingPlan", "project": project_key[3], "forecast_purchase": 0.0, "forecast_return": 0.0})
-   metric = f"forecast_{category}"
-   project_bucket[metric] = float(project_bucket[metric]) + amount
+  commitment_type = str(row.get("commitment_type") or "")
+  prefix = "ri" if commitment_type == "RI" else "savingplan"
+  purchase = float(row.get("forecast_purchase") or 0)
+  returned = float(row.get("forecast_return") or 0)
+  bucket["purchase"] += purchase
+  bucket["return"] += returned
+  bucket["total"] += purchase + returned
+  bucket[f"{prefix}_forecast_purchase"] += purchase
+  bucket[f"{prefix}_forecast_return"] += returned
+ for row in forecast_project_rows:
+  period = str(row["period"])
+  commitment_type = str(row.get("commitment_type") or "")
+  prefix = "ri" if commitment_type == "RI" else "savingplan"
+  project_key = (period, str(row.get("source") or ""), prefix, str(row.get("project") or "Sem projeto"))
+  project_bucket = forecast_projects.setdefault(project_key, {
+   "period": period, "source": project_key[1],
+   "commitment_type": commitment_type, "project": project_key[3],
+   "forecast_purchase": 0.0, "forecast_return": 0.0, "forecast_saving": 0.0,
+  })
+  project_bucket["forecast_purchase"] += float(row.get("forecast_purchase") or 0)
+  project_bucket["forecast_return"] += float(row.get("forecast_return") or 0)
+  project_bucket["forecast_saving"] += float(row.get("forecast_saving") or 0)
  for bucket in forecast.values():
   for prefix in ("ri", "savingplan"):
    bucket[f"{prefix}_forecast_saving"] = (
     -float(bucket.get(f"{prefix}_forecast_return") or 0)
     - float(bucket.get(f"{prefix}_forecast_purchase") or 0)
    )
-
- for project in forecast_projects.values():
-  project["forecast_saving"] = (
-   -float(project.get("forecast_return") or 0)
-   - float(project.get("forecast_purchase") or 0)
-  )
 
  return {
   "start_period": start, "end_period": end, "source": source,
