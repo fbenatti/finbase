@@ -83,14 +83,19 @@ async def list_processing_logs(
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         total_rows = await trino_execute(
             f"SELECT COUNT(*) AS total FROM iceberg.gold.{PROCESSING_LOG_CUBE}{where}",
-            timeout_s=20,
+            # This is an interactive grid. A queued Trino query must not keep
+            # the page waiting through the warehouse transport retry window;
+            # fall back to the authoritative PostgreSQL log table promptly.
+            timeout_s=8,
+            max_retries=1,
         )
         rows = await trino_execute(
             f"SELECT id, etl_task_id, process_type, status, source_label, destination_label, partitions_label, "
             "rows_source, rows_destination, started_at, finished_at, phase "
             f"FROM iceberg.gold.{PROCESSING_LOG_CUBE}{where} "
             f"ORDER BY started_at DESC NULLS LAST, id DESC OFFSET {int(offset)} LIMIT {int(limit)}",
-            timeout_s=20,
+            timeout_s=8,
+            max_retries=1,
         )
         return {
             "items": [{
