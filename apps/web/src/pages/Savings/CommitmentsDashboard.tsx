@@ -188,7 +188,7 @@ export default function CommitmentsDashboard() {
             {(["RI", "SavingPlan"] as const).map((type) => {
               const actualRows = data.projects.filter((row) => row.commitment_type === type)
                 .sort((a, b) => Number(b.purchase_allocated || 0) - Number(a.purchase_allocated || 0)).slice(0, 10);
-              const forecastRows = data.forecast_projects.filter((row) => row.commitment_type === type);
+              const forecastRows = (data.forecast_projects || []).filter((row) => row.commitment_type === type);
               const forecastByProject = new Map<string, number>();
               forecastRows.forEach((row) => forecastByProject.set(row.project || "Sem projeto", (forecastByProject.get(row.project || "Sem projeto") || 0) + Number(row.forecast_purchase || 0)));
               const names = actualRows.map((row) => row.project || "Sem projeto");
