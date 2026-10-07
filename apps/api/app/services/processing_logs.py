@@ -12,7 +12,7 @@ from app.models.processing_log import ProcessingLog
 
 
 def _task_type(task: EtlTask) -> str:
-    return str(task.task_type or "processing")
+    return str(task.task_type or "extraction")
 
 
 def _task_context(task: EtlTask) -> tuple[dict[str, Any], dict[str, Any], list[Any], dict[str, Any]]:
