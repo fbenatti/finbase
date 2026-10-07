@@ -154,6 +154,8 @@ async def lifespan(app: FastAPI):
         # erro rápido; o retry abaixo tenta de novo.
         await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
+        await _execute_migration(conn, "ALTER TABLE processing_log ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+        await _execute_migration(conn, "CREATE INDEX IF NOT EXISTS ix_processing_log_updated ON processing_log (updated_at)")
         # Retenção de auditoria (roda depois do create_all)
         await conn.execute(
             text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(

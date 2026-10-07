@@ -9,6 +9,7 @@ class ProcessingLog(Base):
     __tablename__ = "processing_log"
     __table_args__ = (
         Index("ix_processing_log_started", "started_at"),
+        Index("ix_processing_log_updated", "updated_at"),
         Index("ix_processing_log_type_status", "process_type", "status"),
         Index("ix_processing_log_etl_task", "etl_task_id", unique=True),
     )
@@ -28,4 +29,5 @@ class ProcessingLog(Base):
     details = Column(JSON, nullable=False, default=dict)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

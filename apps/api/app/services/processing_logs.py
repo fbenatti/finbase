@@ -11,6 +11,138 @@ from app.models.etl_task import EtlTask
 from app.models.processing_log import ProcessingLog
 
 
+PROCESSING_LOG_CUBE = "dest_dm_processing_logs"
+
+
+def _trino_literal(value: Any, type_name: str) -> str:
+    if value is None:
+        return f"CAST(NULL AS {type_name})"
+    if isinstance(value, datetime):
+        escaped = value.isoformat().replace("'", "''")
+        return f"CAST('{escaped}' AS TIMESTAMP(6) WITH TIME ZONE)"
+    escaped = str(value).replace("'", "''")
+    return f"CAST('{escaped}' AS {type_name})"
+
+
+async def _merge_processing_log_batch(rows: list[dict[str, Any]], *, create: bool) -> None:
+    from app.services.trino_service import execute
+
+    columns = [
+        ("id", "BIGINT"), ("process_type", "VARCHAR"), ("status", "VARCHAR"),
+        ("source_label", "VARCHAR"), ("destination_label", "VARCHAR"),
+        ("partitions_label", "VARCHAR"), ("rows_source", "BIGINT"),
+        ("rows_destination", "BIGINT"), ("started_at", "TIMESTAMP(6) WITH TIME ZONE"),
+        ("finished_at", "TIMESTAMP(6) WITH TIME ZONE"), ("phase", "VARCHAR"),
+        ("updated_at", "TIMESTAMP(6) WITH TIME ZONE"),
+    ]
+    value_rows = ["(" + ", ".join(
+        _trino_literal(row[column], data_type) for column, data_type in columns
+    ) + ")" for row in rows]
+    names = ", ".join(name for name, _ in columns)
+    source = f"(VALUES {', '.join(value_rows)}) AS incoming ({names})"
+    if create:
+        await execute(
+            f"CREATE TABLE iceberg.gold.{PROCESSING_LOG_CUBE} AS SELECT {names} FROM {source}",
+            timeout_s=180,
+        )
+        return
+    assignments = ", ".join(f"target.{name} = incoming.{name}" for name, _ in columns if name != "id")
+    insert_values = ", ".join(f"incoming.{name}" for name, _ in columns)
+    await execute(
+        f"MERGE INTO iceberg.gold.{PROCESSING_LOG_CUBE} AS target USING {source} "
+        "ON target.id = incoming.id "
+        f"WHEN MATCHED THEN UPDATE SET {assignments} "
+        f"WHEN NOT MATCHED THEN INSERT ({names}) VALUES ({insert_values})",
+        timeout_s=180,
+    )
+
+
+async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str, int]:
+    """Replicate canonical operational logs to Gold without reading Silver.
+
+    PostgreSQL remains authoritative. The Iceberg table is a compact serving
+    cube for the paginated log grid; details stay in PostgreSQL and are fetched
+    only when a user opens a row.
+    """
+    from app.database import SyncSession
+    from app.services.trino_service import execute
+
+    session = SyncSession()
+    try:
+        checkpoint_time: datetime | None = None
+        checkpoint_id = 0
+        if not full_refresh:
+            try:
+                rows = await execute(
+                    f"SELECT updated_at AS checkpoint_time, id AS checkpoint_id "
+                    f"FROM iceberg.gold.{PROCESSING_LOG_CUBE} "
+                    "ORDER BY updated_at DESC, id DESC LIMIT 1",
+                    timeout_s=30,
+                )
+                row = rows[0] if rows else {}
+                checkpoint_id = int(row.get("checkpoint_id") or 0)
+                value = row.get("checkpoint_time")
+                checkpoint_time = datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+            except Exception:
+                full_refresh = True
+
+        query = select(ProcessingLog).order_by(ProcessingLog.updated_at, ProcessingLog.id)
+        if checkpoint_time and not full_refresh:
+            query = query.where(
+                (ProcessingLog.updated_at > checkpoint_time)
+                | ((ProcessingLog.updated_at == checkpoint_time) & (ProcessingLog.id > checkpoint_id))
+            )
+        logs = session.execute(query).scalars().all()
+
+        if not logs and not full_refresh:
+            return {"rows_written": 0, "checkpoint": checkpoint_id}
+
+        table_exists = False
+        try:
+            await execute(f"DESCRIBE iceberg.gold.{PROCESSING_LOG_CUBE}", timeout_s=30)
+            table_exists = True
+        except Exception:
+            pass
+
+        payload = []
+        for row in logs:
+            source = row.source if isinstance(row.source, dict) else {"value": row.source}
+            destination = row.destination if isinstance(row.destination, dict) else {"value": row.destination}
+            source_label = ", ".join(source.get("connection_names") or []) or str(
+                source.get("name") or source.get("kind") or source.get("value") or ""
+            )
+            destination_label = str(
+                destination.get("destination_name") or destination.get("table")
+                or destination.get("namespace") or destination.get("value") or ""
+            )
+            partitions = row.partitions or []
+            payload.append({
+                "id": row.id,
+                "process_type": row.process_type or "processing",
+                "status": row.status,
+                "source_label": source_label,
+                "destination_label": destination_label,
+                "partitions_label": ", ".join(str(value) for value in partitions),
+                "rows_source": int((row.counts or {}).get("rows_source") or 0),
+                "rows_destination": int((row.counts or {}).get("rows_destination") or 0),
+                "started_at": row.started_at,
+                "finished_at": row.finished_at,
+                "phase": row.phase,
+                "updated_at": row.updated_at,
+            })
+        if full_refresh and table_exists:
+            await execute(f"DROP TABLE iceberg.gold.{PROCESSING_LOG_CUBE}", timeout_s=60)
+            table_exists = False
+        for offset in range(0, len(payload), 100):
+            batch = payload[offset:offset + 100]
+            await _merge_processing_log_batch(batch, create=not table_exists)
+            table_exists = True
+        checkpoint = max(item["id"] for item in payload) if payload else checkpoint_id
+        return {"rows_written": len(payload), "checkpoint": checkpoint}
+    finally:
+        session.close()
+
+
 def _task_type(task: EtlTask) -> str:
     return str(task.task_type or "extraction")
 
@@ -71,6 +203,7 @@ def sync_etl_task_log(session: Session, task: EtlTask) -> ProcessingLog:
     result = task.result_json if isinstance(task.result_json, dict) else {}
     errors = task.errors if isinstance(task.errors, list) else []
     log.process_type = _task_type(task)
+    log.updated_at = datetime.now(timezone.utc)
     log.status = task.status
     log.source_kind = result.get("source_kind") or ("connection" if source else None)
     log.source = source
@@ -113,6 +246,7 @@ async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> Proce
     result = task.result_json if isinstance(task.result_json, dict) else {}
     errors = task.errors if isinstance(task.errors, list) else []
     log.process_type = _task_type(task)
+    log.updated_at = datetime.now(timezone.utc)
     log.status = task.status
     log.source_kind = result.get("source_kind") or ("connection" if source else None)
     log.source = source
