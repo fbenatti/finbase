@@ -186,6 +186,7 @@ async def commitments_dashboard(
 
  projects = list(project_totals.values())
  for project in projects:
+  project.pop("usage_rows", None)
   baseline = float(project["ondemand_baseline"] or 0)
   project["purchase_pct_of_ondemand"] = (
    float(project["purchase_allocated"] or 0) / baseline * 100 if baseline else 0.0
