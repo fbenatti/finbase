@@ -56,7 +56,7 @@ const emptyForm = {
   department_id: null as number | null,
   cloud_scope: "global" as string,
   conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] as CondEntry[],
-  priority: 0, active: true,
+  priority: 20, active: true,
 };
 
 export default function Classification() {
@@ -293,7 +293,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: -0.5 }}>
             Use | nos valores para OR entre opções do mesmo campo.
-            {destColumns.length === 0 ? " Selecione a tabela destino no topo para listar os campos FOCUS." : ""}
+            {destColumns.length === 0 ? " Os campos FOCUS serão sugeridos quando a tabela estiver disponível." : ""}
           </Typography>
 
           <Box
@@ -317,6 +317,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
                   size="small"
                   options={destColumns}
                   value={cond.field}
+                  onChange={(_, value) => updateCondition(i, "field", value || "")}
                   onInputChange={(_, v, reason) => {
                     if (reason === "reset") return;
                     updateCondition(i, "field", v);
@@ -431,14 +432,16 @@ export function ClassificationRulesTab() {
   }, []);
 
   useEffect(() => {
-    if (selectedDestId) {
-      getDestinationSchema(selectedDestId as number)
+    const focusTable = destTables.find(table => `${table.name} ${table.physical_name}`.toLowerCase().includes("focus"));
+    const schemaTableId = focusTable?.id || selectedDestId;
+    if (schemaTableId) {
+      getDestinationSchema(schemaTableId as number)
         .then(schema => setDestColumns(schema.columns.map(c => c.name)))
         .catch(() => setDestColumns([]));
     } else {
       setDestColumns([]);
     }
-  }, [selectedDestId]);
+  }, [selectedDestId, destTables]);
 
   // cloud/dest sao passados explicitamente: setState e assincrono, entao ler do
   // estado em load usaria valores antigos no mesmo tick (stale closure).
