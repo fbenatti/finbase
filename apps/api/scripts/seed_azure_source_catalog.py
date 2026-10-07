@@ -56,11 +56,15 @@ def main() -> int:
             )
         }
 
+    declared_keys = {entry["source_key"] for entry in AZURE_SOURCE_CATALOG}
     to_insert = [e for e in AZURE_SOURCE_CATALOG if e["source_key"] not in existing]
+    to_remove = sorted(existing - declared_keys)
     print(f"catálogo: {len(AZURE_SOURCE_CATALOG)} fontes declaradas, {len(existing)} já na base, "
-          f"{len(to_insert)} a inserir")
+          f"{len(to_insert)} a inserir, {len(to_remove)} obsoletas")
     for entry in to_insert:
         print(f"  + {entry['source_key']:24s} {entry['display_name']}")
+    for source_key in to_remove:
+        print(f"  - {source_key:24s} metadata obsoleta (a conexão/histórico serão mantidos)")
 
     # Liga as conexões existentes ao catálogo e grava o slug do ambiente.
     with engine.connect() as conn:
@@ -98,6 +102,11 @@ def main() -> int:
         return 0
 
     with engine.begin() as conn:
+        for source_key in to_remove:
+            conn.execute(
+                text("DELETE FROM azure_source_catalog WHERE source_key = :source_key"),
+                {"source_key": source_key},
+            )
         for entry in to_insert:
             values = {
                 column: (entry.get("default_metrics") if column == "default_metrics" else entry.get(column))
@@ -121,7 +130,10 @@ def main() -> int:
                 {"cfg": _json.dumps(merged, ensure_ascii=False), "id": connection_id},
             )
 
-    print(f"\n{len(to_insert)} fonte(s) inserida(s), {len(link_changes)} conexão(ões) vinculada(s)")
+    print(
+        f"\n{len(to_insert)} fonte(s) inserida(s), {len(to_remove)} metadata obsoleta(s) removida(s), "
+        f"{len(link_changes)} conexão(ões) vinculada(s)"
+    )
     return 0
 
 
