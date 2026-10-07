@@ -55,9 +55,9 @@ const menuGroups = [
     background: "#f0fdfa",
     items: [
       { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
-      { path: "/analysis", label: "Análise dos dados", icon: <BarChartIcon /> },
-      { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
+      { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
+      { path: "/analysis", label: "Análise dos dados", icon: <BarChartIcon /> },
     ],
   },
   {
