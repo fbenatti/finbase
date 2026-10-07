@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Any
 import re
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -79,6 +80,31 @@ FROM eligible
 """
 
 
+def _commitment_forecast_sql(start: str, end: str, source: str, *, by_project: bool = False) -> str:
+ planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
+ source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
+ project_select = (
+  "COALESCE(NULLIF(TRIM(organograma_nivel_5), ''), NULLIF(TRIM(organograma_nivel_4), ''), "
+  "NULLIF(TRIM(organograma_nivel_3), ''), NULLIF(TRIM(organograma_nivel_2), ''), "
+  "NULLIF(TRIM(organograma_nivel_1), ''), 'Sem projeto') AS project,"
+  if by_project else ""
+ )
+ group_by = "GROUP BY period, source, commitment_type, project" if by_project else "GROUP BY period, source, commitment_type"
+ return f"""
+SELECT period, lower(cloud_origem) AS source,
+       lower(commitmentdiscounttype) AS commitment_type,
+       {project_select}
+       lower(chargecategory) AS chargecategory,
+       SUM(realizado_cloud) AS forecast_value
+FROM {planning}
+WHERE tipo = 'forecast' AND upper(financial_effect) = 'DIRECT_REALIZED'
+  AND period BETWEEN '{start}' AND '{end}'
+  AND lower(commitmentdiscounttype) IN ('reservation', 'savingsplan')
+  {source_filter}
+{group_by}, chargecategory
+"""
+
+
 @router.get("/commitments-dashboard")
 async def commitments_dashboard(
  start_period: str | None = Query(default=None),
@@ -92,23 +118,15 @@ async def commitments_dashboard(
  if start > end:
   raise HTTPException(422, "start_period não pode ser posterior a end_period")
  _commitment_source_filter(source)
- commitment_rows = await trino_execute(_commitment_actual_sql(start, end, source, by_project=True), timeout_s=120)
+ commitment_sql = _commitment_actual_sql(start, end, source, by_project=True)
+ forecast_sql = _commitment_forecast_sql(start, end, source, by_project=True)
+ commitment_rows, forecast_rows = await asyncio.gather(
+  trino_execute(commitment_sql, timeout_s=120),
+  trino_execute(forecast_sql, timeout_s=120),
+ )
  is_total_row = lambda row: row.get("is_total") is True or row.get("is_total") == 1 or str(row.get("is_total")).lower() == "true"
  monthly_rows = [row for row in commitment_rows if is_total_row(row)]
  project_rows = [row for row in commitment_rows if not is_total_row(row)]
-
- planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
- source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
- forecast_rows = await trino_execute(f"""
- SELECT period, lower(cloud_origem) AS source, lower(commitmentdiscounttype) AS commitment_type,
-        chargecategory,
-        SUM(realizado_cloud) AS forecast_value
- FROM {planning}
- WHERE tipo = 'forecast' AND financial_effect = 'DIRECT_REALIZED'
-   AND period BETWEEN '{start}' AND '{end}'
-   {source_filter}
- GROUP BY 1, 2, 3, 4
- """, timeout_s=120)
 
  def summarize(rows: list[dict[str, Any]]) -> dict[str, float]:
   result = {"ri_purchase": 0.0, "savingplan_purchase": 0.0,
@@ -196,6 +214,7 @@ async def commitments_dashboard(
   )
 
  forecast: dict[str, dict[str, Any]] = {}
+ forecast_projects: dict[tuple[str, str, str, str], dict[str, float | str]] = {}
  for row in forecast_rows:
   period = str(row["period"])
   bucket = forecast.setdefault(period, {"period": period, "usage": 0.0,
@@ -210,11 +229,34 @@ async def commitments_dashboard(
   bucket["total"] += amount
   commitment_type = str(row.get("commitment_type") or "").lower()
   prefix = "ri" if commitment_type == "reservation" else "savingplan" if commitment_type == "savingsplan" else None
-  if prefix and category in {"purchase", "return"}:
-   bucket[f"{prefix}_forecast_{category}"] += amount
+  if prefix and category in {"purchase", "return", "usage"}:
+   # Forecast Purchase e Return representam custos com efeitos opostos;
+   # Usage sintetico representa a base OnDemand prevista para o compromisso.
+   if category == "usage":
+    bucket[f"{prefix}_forecast_ondemand"] = bucket.get(f"{prefix}_forecast_ondemand", 0.0) + amount
+   else:
+    bucket[f"{prefix}_forecast_{category}"] += amount
+  if prefix and by_project if False else False:
+   pass
+  if prefix and row.get("project"):
+   project_key = (period, str(row.get("source") or ""), prefix, str(row.get("project") or "Sem projeto"))
+   project_bucket = forecast_projects.setdefault(project_key, {"period": period, "source": project_key[1], "commitment_type": "RI" if prefix == "ri" else "SavingPlan", "project": project_key[3], "forecast_purchase": 0.0, "forecast_return": 0.0, "forecast_ondemand": 0.0})
+   metric = "forecast_ondemand" if category == "usage" else f"forecast_{category}"
+   project_bucket[metric] = float(project_bucket[metric]) + amount
  for bucket in forecast.values():
-  bucket["ri_forecast_saving"] = -bucket["ri_forecast_return"] - bucket["ri_forecast_purchase"]
-  bucket["savingplan_forecast_saving"] = -bucket["savingplan_forecast_return"] - bucket["savingplan_forecast_purchase"]
+  for prefix in ("ri", "savingplan"):
+   bucket[f"{prefix}_forecast_saving"] = (
+    float(bucket.get(f"{prefix}_forecast_ondemand") or 0)
+    - float(bucket.get(f"{prefix}_forecast_purchase") or 0)
+    + float(bucket.get(f"{prefix}_forecast_return") or 0)
+   )
+
+ for project in forecast_projects.values():
+  project["forecast_saving"] = (
+   float(project.get("forecast_ondemand") or 0)
+   - float(project.get("forecast_purchase") or 0)
+   + float(project.get("forecast_return") or 0)
+  )
 
  return {
   "start_period": start, "end_period": end, "source": source,
@@ -223,6 +265,7 @@ async def commitments_dashboard(
   "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
   "projects": sorted(projects, key=lambda x: abs(x["estimated_saving"]), reverse=True),
   "forecast_monthly": sorted(forecast.values(), key=lambda x: x["period"]),
+  "forecast_projects": sorted(forecast_projects.values(), key=lambda x: (str(x["period"]), -abs(float(x["forecast_saving"])))),
   "baseline_note": "Saving estimado = base OnDemand sintética menos compra do mesmo tipo no período. A compra é rateada mensalmente por origem, tipo e projeto, proporcionalmente à base OnDemand do projeto.",
  }
 
