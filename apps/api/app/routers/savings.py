@@ -175,7 +175,7 @@ async def commitments_dashboard(
  return {
   "start_period": start, "end_period": end, "source": source,
   "currency": "BRL", "value_basis": "realizado_cloud",
-  "period_summary": summarize(monthly_rows),
+  "period_summary": summarize(actual_totals),
   "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
   "projects": sorted(projects, key=lambda x: abs(x["estimated_saving"]), reverse=True),
   "project_monthly": sorted(project_monthly.values(), key=lambda x: (str(x["period"]), -float(x["ondemand_baseline"]))),
