@@ -85,8 +85,18 @@ async def commitments_dashboard(
  if start > end:
   raise HTTPException(422, "start_period não pode ser posterior a end_period")
  _commitment_source_filter(source)
- monthly_rows = await trino_execute(_commitment_actual_sql(start, end, source), timeout_s=120)
  project_rows = await trino_execute(_commitment_actual_sql(start, end, source, by_project=True), timeout_s=120)
+ monthly_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+ for row in project_rows:
+  key = (str(row["period"]), str(row.get("source")), str(row.get("commitment_type")))
+  bucket = monthly_groups.setdefault(key, {
+   "period": key[0], "source": key[1], "commitment_type": key[2],
+   "purchase": 0.0, "ondemand_baseline": 0.0, "usage_rows": 0,
+  })
+  bucket["purchase"] += float(row.get("purchase") or 0)
+  bucket["ondemand_baseline"] += float(row.get("ondemand_baseline") or 0)
+  bucket["usage_rows"] += int(row.get("usage_rows") or 0)
+ monthly_rows = list(monthly_groups.values())
 
  planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
  source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
