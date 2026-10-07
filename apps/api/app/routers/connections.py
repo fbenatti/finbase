@@ -207,6 +207,8 @@ async def get_connection(connection_id: int, db: AsyncSession = Depends(get_db))
 
 @router.post("/", response_model=SourceConnectionOut, status_code=201)
 async def create_connection(data: SourceConnectionCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    if data.connector_type.strip().lower() == "azure_pricesheet" and data.code != "azure-pricesheet":
+        raise HTTPException(status_code=422, detail="A conexão Azure Price Sheet usa o código reservado 'azure-pricesheet'.")
     existing = await db.execute(
         select(SourceConnection).where(SourceConnection.code == data.code)
     )

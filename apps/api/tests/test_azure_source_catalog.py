@@ -142,10 +142,14 @@ def test_catalog_has_official_sources_and_mca_commitment():
 
 
 def test_price_sheet_has_its_own_connection_and_environment_identity():
+    from app.services.azure_source_registry import source_code, bronze_table_for
+
     c = conn(code="azure-pricesheet", connector_type="azure_pricesheet", cloud_name="Azure-4P")
     assert source_key_for(c) == "price_sheet"
     assert environment_slug(c) == "azure-pricesheet"
     assert environment_slug(conn(code="azure-4p", connector_type="azure_blob", cloud_name="Azure-4P")) == "4p"
+    assert source_code(c.code, "price_sheet") == "azure-pricesheet"
+    assert bronze_table_for(c.code, "price_sheet") == "raw_azure_pricesheet"
 
 
 def test_cost_exports_is_not_telemetry():

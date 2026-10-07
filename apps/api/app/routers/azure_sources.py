@@ -1,9 +1,8 @@
-"""API da seleção de fontes Azure agrupada por ambiente (P2).
+"""Catálogo Azure: fontes compartilhadas por ambiente e conexões independentes.
 
-O operador enxerga **um grupo por ambiente/tenant** com todas as fontes
-selecionáveis. Cada fonte continua sendo um registro `source_connection` próprio,
-porque o pipeline vincula Bronze a `code` — mas isso é detalhe interno e não
-aparece como dezenas de cards para configurar.
+Fontes com o mesmo caminho de coleta podem ser selecionadas no grupo do ambiente.
+Uma fonte com API, estrutura ou blob próprios permanece em conexão separada,
+mesmo quando reaproveita credenciais.
 
 Endpoints:
 
@@ -177,8 +176,8 @@ def _source_payload(
         ),
         "enabled": bool(selection.enabled),
         "is_cost_source": is_cost_source(connection),
-        # A credencial é do ambiente: derivada do tenant/cliente, nunca digitada
-        # por fonte (era o que repetia o mesmo segredo em cada card).
+        # Exibe apenas perfil ou identidade tenant/cliente, nunca o segredo.
+        # Em fontes independentes esse perfil não é fundido ao do ambiente.
         "credential_profile": (
             config.get("credential_profile") or shared_credential_key(connection)
         ),
@@ -248,11 +247,7 @@ async def list_azure_sources(
     ),
     db: AsyncSession = Depends(get_db),
 ):
-    """Catálogo agrupado por ambiente, com o estado real de cada fonte.
-
-    Um ambiente reúne todas as suas fontes sob **uma** credencial, que é o que
-    evita configurar dezenas de cards com o mesmo segredo.
-    """
+    """Fontes Azure por ambiente de coleta ou conexão independente."""
     connection_query = select(SourceConnection).where(SourceConnection.cloud_scope == "azure")
     if connection_id is not None:
         # Isola a conexão: editar a 4P não pode mostrar fontes da TI nem do
@@ -423,6 +418,12 @@ async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_d
             extractor = AzureExtractor(connection)
             items = extractor._scan_sync_for_test() if hasattr(extractor, "_scan_sync_for_test") else []
             capability = {"blobs": len(items)}
+        elif connector == "azure_pricesheet":
+            from app.routers.etl import _execute_connection_test
+            result = await _execute_connection_test(connection)
+            if result.get("status") != "OK":
+                raise RuntimeError(result.get("message") or "Falha ao validar Price Sheet")
+            capability = {"message": result.get("message")}
         else:
             entry = catalog_entry(source_key_for(connection) or "")
             return {
