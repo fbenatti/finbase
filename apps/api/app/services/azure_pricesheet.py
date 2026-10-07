@@ -28,13 +28,39 @@ def _azure_client(config: dict[str, Any] | None = None) -> tuple[BlobServiceClie
     the independent `azure-pricesheet` connection is configured.
     """
     config = config or {}
-    tenant = config.get("tenant_id") or settings.azure_4p_tenant_id or settings.azure_ti_tenant_id
-    client_id = config.get("client_id") or settings.azure_4p_client_id or settings.azure_ti_client_id
-    secret = config.get("client_secret") or settings.azure_4p_client_secret or settings.azure_ti_client_secret
-    account = config.get("storage_account") or settings.azure_4p_storage_account or settings.azure_ti_storage_account
-    container = config.get("container_name") or (
-        settings.azure_4p_container if settings.azure_4p_storage_account else settings.azure_ti_container
-    )
+    keys = ("tenant_id", "client_id", "client_secret", "storage_account", "container_name")
+    configured = [config.get(key) for key in keys]
+    if any(configured):
+        if not all(configured):
+            missing = [key for key, value in zip(keys, configured) if not value]
+            raise RuntimeError(
+                "Configuração independente do Azure Price Sheet incompleta; faltam: "
+                + ", ".join(missing)
+            )
+        tenant, client_id, secret, account, container = configured
+    else:
+        # Legacy fallback is selected as a complete credential/storage profile;
+        # never mix tenant/client/secret/account across independent profiles.
+        profiles = (
+            (
+                settings.azure_4p_tenant_id,
+                settings.azure_4p_client_id,
+                settings.azure_4p_client_secret,
+                settings.azure_4p_storage_account,
+                settings.azure_4p_container,
+            ),
+            (
+                settings.azure_ti_tenant_id,
+                settings.azure_ti_client_id,
+                settings.azure_ti_client_secret,
+                settings.azure_ti_storage_account,
+                settings.azure_ti_container,
+            ),
+        )
+        legacy = next((profile for profile in profiles if all(profile)), None)
+        if legacy is None:
+            raise RuntimeError("Credenciais Azure para azure-pricesheet não estão configuradas")
+        tenant, client_id, secret, account, container = legacy
     if not all((tenant, client_id, secret, account, container)):
         raise RuntimeError("Credenciais Azure para azure-pricesheet não estão configuradas")
     credential = ClientSecretCredential(tenant_id=tenant, client_id=client_id, client_secret=secret)
