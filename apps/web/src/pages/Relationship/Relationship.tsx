@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import {
   Delete, Save, Refresh, ArrowForward,
-  Undo, DragIndicator, ExpandMore, ChevronRight,
+  Undo, DragIndicator, ExpandMore, ChevronRight, EditOutlined,
 } from "@mui/icons-material";
 import {
   getConnections, SourceConnection, discoverSchema, ColumnInfo,
@@ -743,22 +743,6 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       ),
     },
     {
-      key: "_partition" as keyof TableRelationship, label: "Partição", width: 100, sortable: false, filterable: false,
-      render: (r) => (
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => {
-            setSelectedDestId(r.destination_table_id);
-            setSelectedConnId(r.source_connection_id);
-            scrollToPartitionSettings();
-          }}
-        >
-          Configurar
-        </Button>
-      ),
-    },
-    {
       key: "_edit" as keyof TableRelationship, label: "", width: 50, sortable: false, filterable: false,
       render: (r) => (
         <Tooltip title="Editar mapeamentos de colunas">
@@ -768,7 +752,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
               setSelectedDestId(r.destination_table_id);
               void loadAll();
             }}>
-            <Refresh sx={{ fontSize: 16 }} />
+            <EditOutlined sx={{ fontSize: 16 }} />
           </IconButton>
         </Tooltip>
       ),
