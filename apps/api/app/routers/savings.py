@@ -101,13 +101,13 @@ async def commitments_dashboard(
  source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
  forecast_rows = await trino_execute(f"""
  SELECT period, lower(cloud_origem) AS source, lower(commitmentdiscounttype) AS commitment_type,
-        chargecategory, pricingcategory,
+        chargecategory,
         SUM(realizado_cloud) AS forecast_value
  FROM {planning}
  WHERE tipo = 'forecast' AND financial_effect = 'DIRECT_REALIZED'
    AND period BETWEEN '{start}' AND '{end}'
    {source_filter}
- GROUP BY 1, 2, 3, 4, 5
+ GROUP BY 1, 2, 3, 4
  """, timeout_s=120)
 
  def summarize(rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -195,7 +195,6 @@ async def commitments_dashboard(
   )
 
  forecast: dict[str, dict[str, Any]] = {}
- forecast_breakdown = []
  for row in forecast_rows:
   period = str(row["period"])
   bucket = forecast.setdefault(period, {"period": period, "usage": 0.0,
@@ -212,11 +211,6 @@ async def commitments_dashboard(
   prefix = "ri" if commitment_type == "reservation" else "savingplan" if commitment_type == "savingsplan" else None
   if prefix and category in {"purchase", "return"}:
    bucket[f"{prefix}_forecast_{category}"] += amount
-  forecast_breakdown.append({
-   "period": period, "source": row.get("source"), "chargecategory": row.get("chargecategory"),
-   "commitment_type": row.get("commitment_type"), "pricingcategory": row.get("pricingcategory"),
-   "forecast_value": amount,
-  })
  for bucket in forecast.values():
   bucket["ri_forecast_saving"] = -bucket["ri_forecast_return"] - bucket["ri_forecast_purchase"]
   bucket["savingplan_forecast_saving"] = -bucket["savingplan_forecast_return"] - bucket["savingplan_forecast_purchase"]
@@ -228,7 +222,6 @@ async def commitments_dashboard(
   "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
   "projects": sorted(projects, key=lambda x: abs(x["estimated_saving"]), reverse=True),
   "forecast_monthly": sorted(forecast.values(), key=lambda x: x["period"]),
-  "forecast_breakdown": forecast_breakdown,
   "baseline_note": "Saving estimado = base OnDemand sintética menos compra do mesmo tipo no período. A compra é rateada mensalmente por origem, tipo e projeto, proporcionalmente à base OnDemand do projeto.",
  }
 
