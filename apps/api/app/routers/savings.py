@@ -64,9 +64,7 @@ WITH synthetic_returns AS (
 )
 SELECT period, source, commitment_type{', project' if by_project else ''},
        SUM(CASE WHEN chargecategory = 'Purchase' THEN realizado_cloud ELSE 0 END) AS purchase,
-       SUM(CASE WHEN chargecategory = 'Usage' THEN realizado_cloud ELSE 0 END) AS covered_cost,
        SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline ELSE 0 END) AS ondemand_baseline,
-       SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline - realizado_cloud ELSE 0 END) AS estimated_saving,
        COUNT_IF(chargecategory = 'Usage') AS usage_rows
 FROM eligible
 GROUP BY period, source, commitment_type{grouping}
@@ -107,15 +105,11 @@ async def commitments_dashboard(
 
  def summarize(rows: list[dict[str, Any]]) -> dict[str, float]:
   result = {"ri_purchase": 0.0, "savingplan_purchase": 0.0,
-            "ri_ondemand": 0.0, "ri_covered_cost": 0.0, "ri_saving": 0.0,
-            "savingplan_ondemand": 0.0, "savingplan_covered_cost": 0.0,
-            "savingplan_saving": 0.0}
+            "ri_ondemand": 0.0, "savingplan_ondemand": 0.0}
   for row in rows:
    prefix = "ri" if row.get("commitment_type") == "RI" else "savingplan"
    result[f"{prefix}_purchase"] += float(row.get("purchase") or 0)
    result[f"{prefix}_ondemand"] += float(row.get("ondemand_baseline") or 0)
-   result[f"{prefix}_covered_cost"] += float(row.get("covered_cost") or 0)
-   result[f"{prefix}_saving"] += float(row.get("estimated_saving") or 0)
   return result
 
  monthly: dict[str, dict[str, Any]] = {}
@@ -123,24 +117,20 @@ async def commitments_dashboard(
   period = str(row["period"])
   bucket = monthly.setdefault(period, {"period": period, **{
    key: 0.0 for key in ("ri_purchase", "savingplan_purchase", "ri_ondemand",
-    "ri_covered_cost", "ri_saving", "savingplan_ondemand",
-    "savingplan_covered_cost", "savingplan_saving")
+    "savingplan_ondemand")
   }})
   prefix = "ri" if row.get("commitment_type") == "RI" else "savingplan"
-  for metric in ("purchase", "ondemand_baseline", "covered_cost", "estimated_saving"):
-   key = {"purchase": "purchase", "ondemand_baseline": "ondemand",
-          "covered_cost": "covered_cost", "estimated_saving": "saving"}[metric]
+  for metric in ("purchase", "ondemand_baseline"):
+   key = {"purchase": "purchase", "ondemand_baseline": "ondemand"}[metric]
    bucket[f"{prefix}_{key}"] += float(row.get(metric) or 0)
 
  projects = []
  for index, row in enumerate(project_rows):
-  projects.append({
+ projects.append({
    "id": f"{row.get('source')}:{row.get('commitment_type')}:{row.get('project')}:{row.get('period')}",
    "project": row.get("project") or "Sem projeto", "source": row.get("source"),
    "period": row.get("period"), "commitment_type": row.get("commitment_type"),
    "ondemand_baseline": float(row.get("ondemand_baseline") or 0),
-   "covered_cost": float(row.get("covered_cost") or 0),
-   "estimated_saving": float(row.get("estimated_saving") or 0),
    "usage_rows": int(row.get("usage_rows") or 0),
   })
 
@@ -161,8 +151,9 @@ async def commitments_dashboard(
   "period_summary": summarize(monthly_rows),
   "year_summary": summarize(annual_rows),
   "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
-  "projects": sorted(projects, key=lambda x: abs(x["estimated_saving"]), reverse=True),
+  "projects": sorted(projects, key=lambda x: abs(x["ondemand_baseline"]), reverse=True),
   "forecast_monthly": sorted(forecast.values(), key=lambda x: x["period"]),
+  "baseline_note": "O OnDemand é uma simulação pareada por linhas sintéticas; compras são exibidas separadamente e não são rateadas por projeto.",
  }
 
 class ActionIn(BaseModel):
