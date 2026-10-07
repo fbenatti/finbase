@@ -118,6 +118,7 @@ async def list_processing_logs(
     except Exception:
         # Preserve availability while the first asynchronous materialization is
         # warming up or the analytics coordinator is temporarily unavailable.
+        logger.exception("Falha ao consultar cubo de logs; usando fallback PostgreSQL")
         pass
 
     filters = []
