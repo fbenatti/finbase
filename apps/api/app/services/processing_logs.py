@@ -157,4 +157,47 @@ def backfill_processing_logs(session: Session, *, limit: int | None = None) -> i
     rows = session.execute(query).scalars().all()
     for task in rows:
         sync_etl_task_log(session, task)
-    return len(rows)
+    return len(rows) + backfill_forecast_runs(session)
+
+
+def backfill_forecast_runs(session: Session) -> int:
+    """Expose forecast-only runs alongside their optional worker task row."""
+    from app.models.forecast import ForecastRun
+
+    runs = session.execute(select(ForecastRun).order_by(ForecastRun.id)).scalars().all()
+    for run in runs:
+        if run.source_etl_task_id:
+            # The linked task is the shared execution record; it carries the
+            # stable task identity and the run is linked in the detail payload.
+            task_log = session.execute(select(ProcessingLog).where(
+                ProcessingLog.etl_task_id == run.source_etl_task_id
+            )).scalar_one_or_none()
+            if task_log:
+                details = dict(task_log.details or {})
+                details["forecast_run"] = {
+                    "id": run.id, "config_snapshot": run.config_snapshot or {},
+                    "result_table": run.result_table, "cutoff_date": run.cutoff_date,
+                    "source_snapshot_id": run.source_snapshot_id,
+                }
+                task_log.details = details
+                continue
+        log = session.execute(select(ProcessingLog).where(
+            ProcessingLog.details["forecast_run_id"].astext == str(run.id)
+        )).scalar_one_or_none()
+        if log is None:
+            log = ProcessingLog(process_type="forecast", details={"forecast_run_id": run.id})
+            session.add(log)
+        log.process_type = "forecast"
+        log.status = run.status
+        log.source_kind = "gold"
+        log.source = {"kind": "gold", "snapshot_id": run.source_snapshot_id}
+        log.destination = {"table": run.result_table, "physical_name": run.destination_physical_name}
+        log.partitions = [run.cutoff_date] if run.cutoff_date else []
+        log.parameters = run.config_snapshot or {}
+        log.counts = {"items_total": run.total_series or 0, "items_processed": run.processed_series or 0, "rows_destination": run.rows_written or 0}
+        log.phase = run.phase
+        log.error = run.error
+        log.details = {"forecast_run_id": run.id, "config_snapshot": run.config_snapshot or {}, "error_metrics": run.error_metrics or {}, "selected_models": run.selected_models or {}}
+        log.started_at = run.started_at
+        log.finished_at = run.finished_at
+    return len(runs)
