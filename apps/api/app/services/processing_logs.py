@@ -18,11 +18,15 @@ def _task_type(task: EtlTask) -> str:
 def _task_context(task: EtlTask) -> tuple[dict[str, Any], dict[str, Any], list[Any], dict[str, Any]]:
     result = task.result_json if isinstance(task.result_json, dict) else {}
     source = result.get("source") or {}
+    if not isinstance(source, dict):
+        source = {"value": source}
     if not source and task.connection_ids:
         source = {"connection_ids": task.connection_ids}
     elif not source and task.connection_id:
         source = {"connection_ids": [task.connection_id]}
     destination = result.get("destination") or {}
+    if not isinstance(destination, dict):
+        destination = {"value": destination}
     if not destination:
         destination = {
             key: result[key]
