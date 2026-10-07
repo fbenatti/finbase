@@ -49,22 +49,36 @@ Com pelo menos 2 snapshots, a aba **Governança** do Desligue Programado compara
 - **REABILITADO**: schedule voltou.
 - **Custo desde a saída**: estimativa `dias_fora × 24h × preço_on_demand` da VM.
 
-## Regra Dimon de Saving (seed)
+## Regra Gold atual de Saving por desligue
 
-O setup cria automaticamente a regra Dimon `saving_desligue_vm` (SQL custom) com a
-**lógica de detecção de desligue**:
+O dashboard `/savings?tab=desligue` lê cubos Gold publicados; não exige conexão
+Azure Automation para consultar savings. A automação é usada apenas para
+enriquecer a informação de schedules/jobs.
 
-- **Passo 1**: agrupa consumo por VM/mês (`ResourceId` + `_billing_period`) filtrando
-  `ServiceSubcategory LIKE '%Virtual Machines%'` e `ChargeCategory = 'Usage'`.
-- **Passo 2**: calcula a baseline de horas possíveis proporcional à primeira aparição
-  da VM no mês (`first_seen` via `ChargePeriodStart`); VMs com histórico < 60 dias são
-  marcadas com `is_new_vm = TRUE` (baseline instável).
-- Preço por hora = `EffectiveCost / ConsumedQuantity` (proxy on-demand, pois
-  `ListUnitPrice` está vazio na Gold atual).
+O reprocessamento histórico (`POST /scheduled-shutdown/reprocess-history`) segue
+uma cadeia explícita:
 
-Reprocesse a regra em `/tables?tab=cost-relationship` para materializar
-`dest_dm_cost_saving_desligue_vm`. O dashboard `/dimon-dashboard?tab=desligue` pode
-consultar essa Dimon ou o endpoint `POST /scheduled-shutdown/savings`.
+1. Lê FOCUS normalizado em `iceberg.silver.dest_modelo_focus` e agrega horas e
+   `BilledCost` por `ResourceId`, origem Azure e mês.
+2. Publica esse agregado como cubo governado
+   `iceberg.gold.dest_dm_cost_vm_monthly_history`, associado à regra Gold
+   `vm_monthly_history` e com manifesto de materialização. A Silver é a origem
+   detalhada, não o contrato de leitura do cubo de saving.
+3. Calcula classificação e saving por mês usando o cubo agregado, os dados diários
+   FOCUS e as regras de histórico/estabilidade. A saída completa é construída em
+   staging e só substitui `iceberg.gold.dest_dm_cost_saving_desligue_vm` quando
+   todos os meses terminam com sucesso.
+
+O saving estimado atual é `horas economizadas × (BilledCost / ConsumedQuantity)`
+do mês/recurso. Essa taxa é o custo faturado médio por hora da linha FOCUS; não é
+o `ListUnitPrice` de mercado. A baseline é 24×7 do mês, e a regra de elegibilidade
+`DESLIGUE_PROGRAMADO` também exige histórico mínimo, consumo mensal consistente,
+atividade diária material e uptime abaixo dos limites configurados no código.
+
+As rotas de leitura são `POST /scheduled-shutdown/savings`,
+`GET /scheduled-shutdown/savings-monthly`, `GET /scheduled-shutdown/padroes` e
+`GET /scheduled-shutdown/padroes-periodos`. Erros de consulta devem retornar erro
+visível, não uma resposta vazia que pareça ausência de dados.
 
 ## Snapshot de tags shutdown=auto (modo Snapshot da Dimon)
 
