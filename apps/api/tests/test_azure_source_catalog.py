@@ -133,10 +133,19 @@ def test_only_cost_exports_is_a_cost_source_in_the_catalog():
 
 def test_catalog_has_official_sources_and_mca_commitment():
     keys = {entry["source_key"] for entry in AZURE_SOURCE_CATALOG}
-    assert keys == {"cost_exports", "resource_graph", "automation_jobs", "openai_ptu", "contracts_mca"}
-    commitment = next(entry for entry in AZURE_SOURCE_CATALOG if entry["source_key"] == "contracts_mca")
-    assert commitment["code_pattern"] == "contratos-mca"
-    assert commitment["bronze_pattern"] == "raw_azure_commitment_br"
+    assert keys == {"cost_exports", "resource_graph", "automation_jobs", "openai_ptu", "price_sheet"}
+    price_sheet = next(entry for entry in AZURE_SOURCE_CATALOG if entry["source_key"] == "price_sheet")
+    assert price_sheet["code_pattern"] == "azure-pricesheet"
+    assert price_sheet["bronze_pattern"] == "raw_azure_pricesheet"
+    assert price_sheet["independent_connection"] is True
+    assert price_sheet["collection_mode"] == "dedicated"
+
+
+def test_price_sheet_has_its_own_connection_and_environment_identity():
+    c = conn(code="azure-pricesheet", connector_type="azure_pricesheet", cloud_name="Azure-4P")
+    assert source_key_for(c) == "price_sheet"
+    assert environment_slug(c) == "azure-pricesheet"
+    assert environment_slug(conn(code="azure-4p", connector_type="azure_blob", cloud_name="Azure-4P")) == "4p"
 
 
 def test_cost_exports_is_not_telemetry():

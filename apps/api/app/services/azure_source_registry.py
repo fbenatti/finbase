@@ -19,22 +19,6 @@ from app.services.cost_sources import COST_EXPORTS_KEY
 #: Ordem e descrição das fontes possíveis. `code_pattern` usa `{env}`.
 AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
     {
-        "source_key": "contracts_mca",
-        "display_name": "Compromisso MCA (totais de invoice)",
-        "description": "Cost Management Query no billing account, agregado por competência, billing profile e invoiceId.",
-        "position": 90,
-        "connector_type": "azure_mca_invoice",
-        "code_pattern": "contratos-mca",
-        "bronze_pattern": "raw_azure_commitment_br",
-        "silver_target": "silver.azure_commitment_br",
-        "gold_target": None,
-        "is_cost_source": False,
-        "api_reference": "Microsoft.CostManagement Query (PreTaxCostUSD, BillingProfileId, InvoiceId)",
-        "required_permission": "Billing profile invoice and Cost Management read access",
-        "azure_scope": "billing_profile",
-        "implementation_status": "implemented",
-    },
-    {
         "source_key": COST_EXPORTS_KEY,
         "display_name": "Cost Management (FOCUS)",
         "description": "Export de custo do Cost Management. É o livro financeiro detalhado.",
@@ -65,6 +49,24 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "required_permission": "Reader nas subscriptions",
         "azure_scope": "subscription",
         "implementation_status": "implemented",
+    },
+    {
+        "source_key": "price_sheet",
+        "display_name": "Azure Price Sheet",
+        "description": "Snapshot contratual completo do Price Sheet, em conexão e Bronze independentes do Cost Management.",
+        "position": 40,
+        "connector_type": "azure_pricesheet",
+        "code_pattern": "azure-pricesheet",
+        "bronze_pattern": "raw_azure_pricesheet",
+        "silver_target": None,
+        "gold_target": None,
+        "is_cost_source": False,
+        "api_reference": "Azure Storage Blob · reports/report_-pricesheet/",
+        "required_permission": "Storage Blob Data Reader no container do Price Sheet",
+        "azure_scope": "billing_account",
+        "implementation_status": "implemented",
+        "independent_connection": True,
+        "collection_mode": "dedicated",
     },
     {
         "source_key": "automation_jobs",
@@ -102,8 +104,8 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
 
 #: `source_key` por `connector_type`, para ligar conexões existentes ao catálogo.
 CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
-    "azure_mca_invoice": "contracts_mca",
     "azure_blob": COST_EXPORTS_KEY,
+    "azure_pricesheet": "price_sheet",
     "azure_resource_graph": "resource_graph",
     "azure_automation_jobs": "automation_jobs",
     "azure_openai_ptu": "openai_ptu",
@@ -134,6 +136,8 @@ def environment_slug(connection: Any) -> str:
     Nada é renomeado: `code` continua sendo a identidade do pipeline.
     """
     config = getattr(connection, "config_json", None) or {}
+    if getattr(connection, "connector_type", "") == "azure_pricesheet":
+        return "azure-pricesheet"
     if isinstance(config, dict) and config.get("environment_slug"):
         return str(config["environment_slug"]).strip().lower()
 
@@ -218,8 +222,8 @@ def sanitized_bronze(connection: Any) -> str:
 # (raw_azure_4p, raw_azure_4p_monitor_vm, ...). Uma conexão só passa a escrever
 # várias tabelas por causa deste mapa — antes cada fonte era um `code` próprio.
 SOURCE_CODE_SUFFIX: dict[str, str] = {
-    "contracts_mca": "",
     "cost_exports": "",
+    "price_sheet": "",
     "resource_graph": "resource-graph",
     "automation_jobs": "automation",
     "openai_ptu": "ptu",
