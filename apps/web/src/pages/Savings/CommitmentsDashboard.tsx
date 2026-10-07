@@ -226,13 +226,14 @@ export default function CommitmentsDashboard() {
             const rows = data.projects.filter((row) => row.commitment_type === type);
             return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
               <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento — {type}</Typography>
-              <Box sx={{ height: 460, width: "100%" }}>
+              <Box sx={{ width: "100%" }}>
                 <DataGrid
                   rows={rows}
                   columns={projectColumns}
                   getRowId={(row) => `${row.source}:${row.commitment_type}:${row.project}`}
-                  initialState={{ sorting: { sortModel: [{ field: "estimated_saving", sort: "desc" }] }, pagination: { paginationModel: { pageSize: 10, page: 0 } } }}
-                  pageSizeOptions={[10, 25, 50]}
+                  autoHeight
+                  initialState={{ sorting: { sortModel: [{ field: "estimated_saving", sort: "desc" }] } }}
+                  hideFooter
                   disableRowSelectionOnClick
                 />
               </Box>
