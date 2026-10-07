@@ -196,24 +196,7 @@ def backfill_processing_logs(session: Session, *, limit: int | None = None) -> i
         if exists is None:
             sync_etl_task_log(session, task)
     forecast_count = backfill_forecast_runs(session)
-    extraction_count = backfill_extraction_metadata(session)
-    return len(rows) + forecast_count + extraction_count
-
-
-def backfill_extraction_metadata(session: Session) -> int:
-    """Attach durable connection names to extraction logs where available."""
-    from app.models.source_connection import SourceConnection
-
-    logs = session.execute(select(ProcessingLog).where(ProcessingLog.process_type == "extraction")).scalars().all()
-    for log in logs:
-        source = dict(log.source or {})
-        ids = source.get("connection_ids") or []
-        if not ids:
-            continue
-        connections = session.execute(select(SourceConnection).where(SourceConnection.id.in_(ids))).scalars().all()
-        source["connection_names"] = [item.name for item in connections]
-        log.source = source
-    return len(logs)
+    return len(rows) + forecast_count
 
 
 def backfill_forecast_runs(session: Session) -> int:
