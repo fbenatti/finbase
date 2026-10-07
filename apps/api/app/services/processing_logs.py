@@ -61,6 +61,7 @@ def sync_etl_task_log(session: Session, task: EtlTask) -> ProcessingLog:
         log = ProcessingLog(etl_task_id=task.id)
         session.add(log)
     source, destination, partitions, parameters = _task_context(task)
+    _enrich_task_context(session, source, destination)
     result = task.result_json if isinstance(task.result_json, dict) else {}
     errors = task.errors if isinstance(task.errors, list) else []
     log.process_type = _task_type(task)
@@ -100,6 +101,7 @@ async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> Proce
         log = ProcessingLog(etl_task_id=task.id)
         session.add(log)
     source, destination, partitions, parameters = _task_context(task)
+    await _async_enrich_task_context(session, source, destination)
     result = task.result_json if isinstance(task.result_json, dict) else {}
     errors = task.errors if isinstance(task.errors, list) else []
     log.process_type = _task_type(task)
@@ -123,6 +125,40 @@ async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> Proce
         log.started_at = task.started_at
     log.finished_at = task.finished_at
     return log
+
+
+def _enrich_task_context(session: Session, source: dict[str, Any], destination: dict[str, Any]) -> None:
+    from app.models.destination import DestinationTable
+    from app.models.source_connection import SourceConnection
+
+    ids = [int(value) for value in source.get("connection_ids", []) if str(value).isdigit()]
+    if ids:
+        connections = session.execute(select(SourceConnection).where(SourceConnection.id.in_(ids))).scalars().all()
+        source["connection_names"] = [item.name for item in connections]
+        source["connection_codes"] = [item.code for item in connections]
+    destination_id = destination.get("destination_table_id")
+    if destination_id:
+        target = session.get(DestinationTable, int(destination_id))
+        if target:
+            destination["destination_name"] = target.name
+            destination["physical_name"] = target.physical_name
+
+
+async def _async_enrich_task_context(session: AsyncSession, source: dict[str, Any], destination: dict[str, Any]) -> None:
+    from app.models.destination import DestinationTable
+    from app.models.source_connection import SourceConnection
+
+    ids = [int(value) for value in source.get("connection_ids", []) if str(value).isdigit()]
+    if ids:
+        connections = (await session.execute(select(SourceConnection).where(SourceConnection.id.in_(ids)))).scalars().all()
+        source["connection_names"] = [item.name for item in connections]
+        source["connection_codes"] = [item.code for item in connections]
+    destination_id = destination.get("destination_table_id")
+    if destination_id:
+        target = await session.get(DestinationTable, int(destination_id))
+        if target:
+            destination["destination_name"] = target.name
+            destination["physical_name"] = target.physical_name
 
 
 def record_processing_event(
@@ -157,7 +193,24 @@ def backfill_processing_logs(session: Session, *, limit: int | None = None) -> i
     rows = session.execute(query).scalars().all()
     for task in rows:
         sync_etl_task_log(session, task)
-    return len(rows) + backfill_forecast_runs(session)
+    count = len(rows) + backfill_forecast_runs(session)
+    return count + backfill_extraction_metadata(session)
+
+
+def backfill_extraction_metadata(session: Session) -> int:
+    """Attach durable connection names to extraction logs where available."""
+    from app.models.source_connection import SourceConnection
+
+    logs = session.execute(select(ProcessingLog).where(ProcessingLog.process_type == "extraction")).scalars().all()
+    for log in logs:
+        source = dict(log.source or {})
+        ids = source.get("connection_ids") or []
+        if not ids:
+            continue
+        connections = session.execute(select(SourceConnection).where(SourceConnection.id.in_(ids))).scalars().all()
+        source["connection_names"] = [item.name for item in connections]
+        log.source = source
+    return len(logs)
 
 
 def backfill_forecast_runs(session: Session) -> int:
