@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert, Box, Chip, Dialog, DialogContent, DialogTitle, Divider, IconButton, MenuItem,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Chip, Dialog, DialogContent, DialogTitle, Divider, IconButton, MenuItem,
   Stack, TextField, Typography,
 } from "@mui/material";
-import { Close } from "@mui/icons-material";
+import { Close, ExpandMore } from "@mui/icons-material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -49,15 +49,15 @@ const sourceLabel = (value: Record<string, unknown>) => {
 const destinationLabel = (value: Record<string, unknown>) => text(value.label || value.destination_name || value.table || value.tables || value.namespace || value.destination_table_id || value);
 
 function Field({ label, value }: { label: string; value: unknown }) {
-  return <Box sx={{ minWidth: 180, flex: "1 1 180px" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{text(value)}</Typography></Box>;
+  return <Box sx={{ minWidth: 180, flex: "1 1 180px", p: 1.25, bgcolor: "grey.50", border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="body2" fontWeight={600} sx={{ overflowWrap: "anywhere", mt: 0.25 }}>{text(value)}</Typography></Box>;
 }
 
 function StructuredValue({ value, field }: { value: unknown; field?: string }) {
   if (value == null || value === "") return <Typography variant="body2" color="text.secondary">—</Typography>;
   if (Array.isArray(value)) {
     if (!value.length) return <Typography variant="body2" color="text.secondary">Nenhum item</Typography>;
-    return <Stack component="ul" spacing={0.75} sx={{ m: 0, pl: 2.25 }}>
-      {value.map((item, index) => <Box component="li" key={`${field || "item"}-${index}`} sx={{ pl: 0.25 }}>
+    return <Stack spacing={0.75}>
+      {value.map((item, index) => <Box key={`${field || "item"}-${index}`} sx={item && typeof item === "object" ? { pl: 1.25, borderLeft: "2px solid", borderColor: "divider" } : undefined}>
         {item && typeof item === "object" ? <StructuredValue value={item} /> : <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{displayValue(item, field)}</Typography>}
       </Box>)}
     </Stack>;
@@ -65,10 +65,10 @@ function StructuredValue({ value, field }: { value: unknown; field?: string }) {
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     if (!entries.length) return <Typography variant="body2" color="text.secondary">Sem dados</Typography>;
-    return <Stack spacing={0.5} sx={{ width: "100%" }}>
-      {entries.map(([key, nested]) => <Box key={key} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(170px, 0.38fr) 1fr" }, gap: 1, py: 0.5, borderBottom: "1px solid", borderColor: "divider", "&:last-child": { borderBottom: 0 } }}>
-        <Typography variant="body2" color="text.secondary" fontWeight={600}>{fieldLabel(key)}</Typography>
-        <StructuredValue value={nested} field={key} />
+    return <Stack spacing={0} sx={{ width: "100%" }}>
+      {entries.map(([key, nested]) => <Box key={key} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(155px, 0.32fr) 1fr" }, gap: { xs: 0.25, sm: 1.5 }, alignItems: "start", py: 0.85, borderBottom: "1px solid", borderColor: "divider", "&:last-child": { borderBottom: 0 } }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ pt: 0.15 }}>{fieldLabel(key)}</Typography>
+        <Box sx={{ minWidth: 0 }}><StructuredValue value={nested} field={key} /></Box>
       </Box>)}
     </Stack>;
   }
@@ -76,7 +76,7 @@ function StructuredValue({ value, field }: { value: unknown; field?: string }) {
 }
 
 function StructuredPanel({ value }: { value: unknown }) {
-  return <Box sx={{ p: 1.5, bgcolor: "grey.50", border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}><StructuredValue value={value} /></Box>;
+  return <Box sx={{ px: 1.5, py: 0.5, bgcolor: "background.paper", border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}><StructuredValue value={value} /></Box>;
 }
 
 export default function ProcessingLogsTab() {
@@ -124,7 +124,11 @@ export default function ProcessingLogsTab() {
   const events = Array.isArray(detailData.event_log)
     ? detailData.event_log.filter((event): event is Record<string, unknown> => Boolean(event) && typeof event === "object")
     : [];
-  const otherDetails = Object.fromEntries(Object.entries(detailData).filter(([key]) => key !== "event_log"));
+  const otherDetails = Object.fromEntries(Object.entries(detailData).filter(([key]) => key !== "event_log").map(([key, value]) => {
+    if (key !== "result" || !value || typeof value !== "object" || Array.isArray(value)) return [key, value];
+    const { event_log: _duplicateEvents, ...result } = value as Record<string, unknown>;
+    return [key, result];
+  }));
 
   return <Stack spacing={1.5}>
     {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
@@ -141,7 +145,7 @@ export default function ProcessingLogsTab() {
     <Box sx={{ height: 560, width: "100%" }}>
       <DataGrid rows={rows} columns={columns} loading={loading} rowCount={total} paginationMode="server" paginationModel={pagination} onPaginationModelChange={setPagination} pageSizeOptions={[10, 25, 50, 100]} onRowClick={({ row }) => setSelected(row)} disableRowSelectionOnClick sx={{ "& .MuiDataGrid-row": { cursor: "pointer" }, "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc" } }} />
     </Box>
-    <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="md">
+    <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="lg">
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         {detail ? PROCESS_LABELS[detail.process_type] || detail.process_type : "Detalhe da execução"} · #{selected?.id}
         {detail && <Chip size="small" label={detail.status} color={STATUS_COLOR[detail.status] || "default"} />}
@@ -160,21 +164,24 @@ export default function ProcessingLogsTab() {
           <Divider /><Typography variant="subtitle2">Parâmetros da execução</Typography>
           <StructuredPanel value={detail.parameters} />
           <Divider /><Typography variant="subtitle2">Histórico de eventos</Typography>
-          {events.length ? <Stack spacing={1}>
+          {events.length ? <Stack spacing={0} sx={{ position: "relative", pl: 2.5, "&:before": { content: '""', position: "absolute", left: 7, top: 8, bottom: 8, width: 2, bgcolor: "divider" } }}>
             {events.map((event, index) => {
               const level = String(event.level || "INFO").toUpperCase();
               const color = level === "ERROR" ? "error" : level === "WARNING" || level === "WARN" ? "warning" : "info";
-              return <Box key={`${String(event.at || "event")}-${index}`} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderLeft: 3, borderLeftColor: `${color}.main`, borderRadius: 1.5, bgcolor: "background.paper" }}>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
-                  <Chip size="small" label={level === "INFO" ? "Informação" : level === "ERROR" ? "Erro" : level === "WARNING" || level === "WARN" ? "Atenção" : level} color={color} />
-                  <Typography variant="caption" color="text.secondary">{dateLabel(String(event.at || ""))}</Typography>
+              return <Box key={`${String(event.at || "event")}-${index}`} sx={{ position: "relative", pb: index === events.length - 1 ? 0 : 1.25, "&:before": { content: '""', position: "absolute", width: 10, height: 10, borderRadius: "50%", bgcolor: `${color}.main`, left: -20, top: 5, boxShadow: "0 0 0 3px white" } }}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 145 }}>{dateLabel(String(event.at || ""))}</Typography>
+                  <Chip size="small" label={level === "INFO" ? "Informação" : level === "ERROR" ? "Erro" : level === "WARNING" || level === "WARN" ? "Atenção" : level} color={color} sx={{ alignSelf: { xs: "flex-start", sm: "center" } }} />
+                  <Typography variant="body2" fontWeight={600} sx={{ flex: 1 }}>{displayValue(event.message)}</Typography>
                 </Stack>
-                <Typography variant="body2" fontWeight={600}>{displayValue(event.message)}</Typography>
-                {event.details != null && <Box sx={{ mt: 1 }}><StructuredPanel value={event.details} /></Box>}
+                {event.details != null && Object.keys(event.details as object || {}).length > 0 && <Accordion disableGutters elevation={0} sx={{ mt: 0.25, ml: { sm: 18 }, bgcolor: "transparent", "&:before": { display: "none" } }}>
+                  <AccordionSummary expandIcon={<ExpandMore />} sx={{ minHeight: 30, px: 0, "& .MuiAccordionSummary-content": { my: 0.25 } }}><Typography variant="caption" color="primary.main">Ver dados deste evento</Typography></AccordionSummary>
+                  <AccordionDetails sx={{ px: 0, pt: 0 }}><StructuredPanel value={event.details} /></AccordionDetails>
+                </Accordion>}
               </Box>;
             })}
           </Stack> : <Typography variant="body2" color="text.secondary">Nenhum evento adicional foi registrado para esta execução.</Typography>}
-          {Object.keys(otherDetails).length > 0 && <><Divider /><Typography variant="subtitle2">Resultado e informações do processamento</Typography><StructuredPanel value={otherDetails} /></>}
+          {Object.keys(otherDetails).length > 0 && <><Divider /><Accordion disableGutters elevation={0} sx={{ "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Typography variant="subtitle2">Resultado e informações adicionais</Typography></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><StructuredPanel value={otherDetails} /></AccordionDetails></Accordion></>}
           {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros Bronze desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados Bronze" onClick={() => navigate(`/extraction/history/${detail.etl_task_id}`)} /></Box>}
           {detail.etl_task_id && ["QUEUED", "RUNNING"].includes(detail.status) && <Chip clickable color="error" label="Cancelar execução" onClick={async () => { await cancelEtl(detail.etl_task_id!); await load(); setSelected(null); }} sx={{ alignSelf: "flex-start" }} />}
         </Stack>}
