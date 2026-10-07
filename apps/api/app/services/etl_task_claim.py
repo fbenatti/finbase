@@ -188,6 +188,8 @@ def claim_next_etl_task(session: Session, *, worker_pid: int | None = None) -> E
     task.last_progress_at = now
     task.worker_pid = worker_pid
     task.available_at = None
+    from app.services.processing_logs import sync_etl_task_log
+    sync_etl_task_log(session, task)
     session.flush()
     return task
 
@@ -380,6 +382,8 @@ def release_task_to_queue(
     task.worker_pid = None
     if defer_seconds > 0:
         task.available_at = datetime.now(timezone.utc) + timedelta(seconds=defer_seconds)
+    from app.services.processing_logs import sync_etl_task_log
+    sync_etl_task_log(session, task)
     session.flush()
 
 
