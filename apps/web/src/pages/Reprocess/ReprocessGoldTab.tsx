@@ -1,32 +1,19 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Checkbox, Chip, CircularProgress, Stack, Typography } from "@mui/material";
 import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
-import { GoldCubeHistoryItem, GoldCubeRule, formatApiError, getGoldCubeHistory, getGoldCubeRules, reprocessGoldCubes } from "../../services/api";
+import { GoldCubeRule, formatApiError, getGoldCubeRules, reprocessGoldCubes } from "../../services/api";
 
 export default function ReprocessGoldTab() {
   const [rules, setRules] = useState<GoldCubeRule[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<GoldCubeHistoryItem[]>([]);
-
   const load = async () => {
-    const [ruleList, hist] = await Promise.all([
-      getGoldCubeRules().catch(() => [] as GoldCubeRule[]),
-      getGoldCubeHistory().catch(() => [] as GoldCubeHistoryItem[]),
-    ]);
+    const ruleList = await getGoldCubeRules().catch(() => [] as GoldCubeRule[]);
     setRules(ruleList);
-    setHistory(hist);
     setSelectedIds(current => new Set([...current].filter(id => ruleList.some(r => r.id === id))));
   };
   useEffect(() => { void load(); }, []);
-
-  const hasActiveJobs = history.some(item => item.status === "QUEUED" || item.status === "RUNNING");
-  useEffect(() => {
-    if (!hasActiveJobs) return;
-    const timer = window.setInterval(() => { void load(); }, 4000);
-    return () => window.clearInterval(timer);
-  }, [hasActiveJobs]);
 
   const toggleRule = (id: number) => setSelectedIds(current => {
     const next = new Set(current);
@@ -38,7 +25,7 @@ export default function ReprocessGoldTab() {
 
   const startAll = async () => {
     setRunning(true); setError("");
-    try { await reprocessGoldCubes([]); await load(); }
+    try { await reprocessGoldCubes([]); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
     finally { setRunning(false); }
   };
@@ -46,7 +33,7 @@ export default function ReprocessGoldTab() {
   const startSelected = async () => {
     if (!selectedIds.size) return;
     setRunning(true); setError("");
-    try { await reprocessGoldCubes([...selectedIds]); await load(); }
+    try { await reprocessGoldCubes([...selectedIds]); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
     finally { setRunning(false); }
   };
@@ -83,22 +70,5 @@ export default function ReprocessGoldTab() {
       </Stack>}
     </Box>
 
-    <Typography variant="subtitle2">Histórico recente</Typography>
-    {history.length === 0 ? <Typography color="text.secondary">Nenhuma execução registrada.</Typography> : history.map(item => {
-      const failed = item.result_json?.failed || [];
-      const rowLabel = item.status === "COMPLETED" || item.status === "FAILED"
-        ? ` · ${(item.rows_destination ?? 0).toLocaleString()} linhas`
-        : "";
-      return <Box key={item.id}>
-        <Alert severity={item.status === "FAILED" ? "error" : item.status === "COMPLETED" ? (failed.length ? "warning" : "success") : "info"}>
-          #{item.id} · {item.status} · {item.phase || "Sem detalhe"}{rowLabel}
-        </Alert>
-        {failed.length > 0 && <Box sx={{ mt: 0.5, ml: 2 }}>
-          {failed.map((f, index) => <Typography key={`f-${index}`} variant="caption" display="block" color="error.main">
-            ✕ {f.code || `Regra #${f.rule_id}`}: {f.error || "erro"}
-          </Typography>)}
-        </Box>}
-      </Box>;
-    })}
   </Stack>;
 }
