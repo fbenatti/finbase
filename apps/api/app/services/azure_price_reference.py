@@ -24,6 +24,8 @@ def _credentials() -> tuple[ClientSecretCredential, str, str]:
     container = settings.azure_4p_container if settings.azure_4p_storage_account else settings.azure_ti_container
     if not all((tenant, client, secret, account, container)):
         raise RuntimeError("Credenciais Azure para Price Sheet não configuradas")
+    from app.core.network_override import register_storage_ip
+    register_storage_ip(account)
     credential = ClientSecretCredential(tenant_id=tenant, client_id=client, client_secret=secret)
     return credential, account, container
 

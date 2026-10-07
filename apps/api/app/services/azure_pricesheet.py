@@ -15,6 +15,7 @@ from azure.identity import ClientSecretCredential
 from azure.storage.blob import BlobServiceClient
 
 from app.config import settings
+from app.core.network_override import register_storage_ip
 
 logger = logging.getLogger(__name__)
 PREFIX = "reports/report_-pricesheet/"
@@ -63,6 +64,10 @@ def _azure_client(config: dict[str, Any] | None = None) -> tuple[BlobServiceClie
         tenant, client_id, secret, account, container = legacy
     if not all((tenant, client_id, secret, account, container)):
         raise RuntimeError("Credenciais Azure para azure-pricesheet não estão configuradas")
+    # Match the Azure Blob extractor's private-endpoint DNS handling. Keep the
+    # account hostname in account_url so TLS SNI and certificate validation
+    # remain bound to the real Storage endpoint.
+    register_storage_ip(str(account), config.get("storage_ip"))
     credential = ClientSecretCredential(tenant_id=tenant, client_id=client_id, client_secret=secret)
     service = BlobServiceClient(
         account_url=f"https://{account}.blob.core.windows.net", credential=credential,
