@@ -157,6 +157,9 @@ async def commitments_dashboard(
   project = str(row.get("project") or "Sem projeto")
   key = (period, source_name, commitment_type)
   project_base = float(row.get("ondemand_baseline") or 0)
+  usage_rows = int(row.get("usage_rows") or 0)
+  if project_base == 0 and usage_rows == 0:
+   continue
   total_base = group_baselines.get(key, 0.0)
   commitment = monthly_commitments.get(key, {})
   purchase = float(commitment.get("purchase") or 0)
@@ -171,7 +174,7 @@ async def commitments_dashboard(
   result["ondemand_baseline"] += project_base
   result["purchase_allocated"] += purchase_allocated
   result["estimated_saving"] += project_base - purchase_allocated
-  result["usage_rows"] += int(row.get("usage_rows") or 0)
+  result["usage_rows"] += usage_rows
 
  projects = list(project_totals.values())
 
