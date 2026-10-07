@@ -1325,6 +1325,36 @@ export interface ReprocessStatus {
   finished_at?: string;
 }
 
+export interface ProcessingLog {
+  id: number;
+  process_type: string;
+  status: string;
+  etl_task_id?: number | null;
+  source_kind?: string | null;
+  source: Record<string, unknown>;
+  destination: Record<string, unknown>;
+  partitions: unknown[];
+  parameters: Record<string, unknown>;
+  counts: Record<string, number>;
+  phase?: string | null;
+  error?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  details?: Record<string, unknown>;
+}
+
+export async function getProcessingLogs(params: {
+  limit?: number; offset?: number; search?: string; process_type?: string; status?: string;
+} = {}): Promise<{ items: ProcessingLog[]; total: number }> {
+  const { data } = await api.get("/processing-logs", { params });
+  return data;
+}
+
+export async function getProcessingLog(id: number): Promise<ProcessingLog> {
+  const { data } = await api.get(`/processing-logs/${id}`);
+  return data;
+}
+
 export async function getReprocessStatus(
   taskId: number,
 ): Promise<ReprocessStatus> {
