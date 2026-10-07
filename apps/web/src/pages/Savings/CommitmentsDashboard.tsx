@@ -191,33 +191,28 @@ export default function CommitmentsDashboard() {
         </CardContent></Card>
 
         <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600}>Compras mensais por projeto</Typography>
-          <Typography variant="body2" color="text.secondary" mb={2}>Mesmas séries mensais, discriminadas pelos cinco projetos com maior base OnDemand: compra realizada empilhada com forecast de compra.</Typography>
+          <Typography variant="subtitle1" fontWeight={600}>OnDemand x economia por projeto</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>Top 8 projetos por base OnDemand no período selecionado. Barras agrupadas, sem percentuais ou forecast neste comparativo.</Typography>
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
             {(["RI", "SavingPlan"] as const).map((type) => {
-              const allRows = (data.project_monthly || []).filter((row) => row.commitment_type === type);
-              const baselineByProject = new Map<string, number>();
-              allRows.forEach((row) => baselineByProject.set(row.project || "Sem projeto", (baselineByProject.get(row.project || "Sem projeto") || 0) + Number(row.ondemand_baseline || 0)));
-              const topProjects = [...baselineByProject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([project]) => project);
-              const forecastRows = (data.forecast_projects || []).filter((row) => row.commitment_type === type);
-              const colors = type === "RI"
-                ? ["#1565c0", "#0284c7", "#0f766e", "#0369a1", "#155e75"]
-                : ["#7b1fa2", "#9333ea", "#a21caf", "#6b21a8", "#86198f"];
-              const projectTraces = topProjects.flatMap((project, index) => {
-                const color = colors[index % colors.length];
-                const actualProjectRows = allRows.filter((row) => (row.project || "Sem projeto") === project);
-                const forecastProjectRows = forecastRows.filter((row) => (row.project || "Sem projeto") === project);
-                const byPeriod = (rows: CommitmentDashboardRow[], period: string, field: keyof CommitmentDashboardRow) =>
-                  rows.filter((row) => row.period === period).reduce((total, row) => total + Number(row[field] || 0), 0);
-                return [
-                  { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => byPeriod(actualProjectRows, period, "purchase_allocated")), type: "bar" as const, name: `${project} · realizada`, legendgroup: project, offsetgroup: project, marker: { color }, hovertemplate: `%{x}<br>R$ %{y:,.2f}<extra>${project} — compra realizada</extra>` },
-                  { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => byPeriod(forecastProjectRows, period, "forecast_purchase")), type: "bar" as const, name: `${project} · forecast`, legendgroup: project, offsetgroup: project, showlegend: false, marker: { color: type === "RI" ? "#60a5fa" : "#c084fc" }, hovertemplate: `%{x}<br>R$ %{y:,.2f}<extra>${project} — compra forecast</extra>` },
-                  { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => byPeriod(actualProjectRows, period, "ondemand_baseline")), type: "scatter" as const, mode: "lines+markers" as const, name: `${project} · base OnDemand`, legendgroup: project, showlegend: false, line: { color, dash: "dot", width: 2 }, marker: { size: 5 }, hovertemplate: `%{x}<br>R$ %{y:,.2f}<extra>${project} — base OnDemand</extra>` },
-                ];
-              });
+              const totals = new Map<string, { project: string; baseline: number; saving: number }>();
+              for (const row of data.projects.filter((item) => item.commitment_type === type)) {
+                const project = row.project || "Sem projeto";
+                const total = totals.get(project) || { project, baseline: 0, saving: 0 };
+                total.baseline += Number(row.ondemand_baseline || 0);
+                total.saving += Number(row.estimated_saving || 0);
+                totals.set(project, total);
+              }
+              const topProjects = [...totals.values()]
+                .sort((a, b) => b.baseline - a.baseline)
+                .slice(0, 8);
+              const names = topProjects.map((row) => row.project);
               return <Box key={type} sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="subtitle2" fontWeight={600}>{type}</Typography>
-                <Plot data={projectTraces} layout={{ ...chartLayout, height: 360, margin: { l: 76, r: 20, t: 12, b: 72 }, barmode: "stack", showlegend: true, legend: { orientation: "h", y: -0.25 }, xaxis: { ...chartLayout.xaxis, automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
+                <Plot data={[
+                  { x: names, y: topProjects.map((row) => row.baseline), type: "bar", name: "Base OnDemand", marker: { color: type === "RI" ? "#93c5fd" : "#d8b4fe" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Base OnDemand</extra>" },
+                  { x: names, y: topProjects.map((row) => row.saving), type: "bar", name: "Saving realizado", marker: { color: "#15803d" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Saving realizado</extra>" },
+                ]} layout={{ ...chartLayout, height: 380, margin: { l: 76, r: 20, t: 12, b: 100 }, barmode: "group", showlegend: true, legend: { orientation: "h", y: -0.32 }, xaxis: { ...chartLayout.xaxis, tickangle: -35, automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
               </Box>;
             })}
           </Stack>
