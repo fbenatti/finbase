@@ -231,7 +231,7 @@ def backfill_forecast_runs(session: Session) -> int:
                 continue
         log = session.execute(select(ProcessingLog).where(
             ProcessingLog.etl_task_id.is_(None), ProcessingLog.process_type == "forecast",
-            ProcessingLog.details["forecast_run_id"].astext == str(run.id)
+            ProcessingLog.details["forecast_run_id"].as_string() == str(run.id)
         )).scalar_one_or_none()
         if log is None:
             log = ProcessingLog(process_type="forecast", details={"forecast_run_id": run.id})
@@ -274,7 +274,7 @@ async def async_sync_forecast_run_log(session: Any, run: Any) -> ProcessingLog:
             return task_log
     log = (await session.execute(select(ProcessingLog).where(
         ProcessingLog.etl_task_id.is_(None), ProcessingLog.process_type == "forecast",
-        ProcessingLog.details["forecast_run_id"].astext == str(run.id)
+        ProcessingLog.details["forecast_run_id"].as_string() == str(run.id)
     ))).scalar_one_or_none()
     if log is None:
         log = ProcessingLog(process_type="forecast", details={"forecast_run_id": run.id})
