@@ -503,6 +503,14 @@ async def update_source_selection(
 
     await db.commit()
     await db.refresh(selection)
+    # O inventário unificado precisa de destination/mappings ligados à
+    # conexão do ambiente (azure-4p/azure-ti), não de uma conexão ARG
+    # standalone. Prepare-os ao habilitar a fonte no catálogo novo.
+    if source_key == "resource_graph" and selection.enabled and connection.connector_type == "azure_blob":
+        from app.routers.azure_resource_graph import _setup_for_connection
+
+        await _setup_for_connection(db, connection)
+        await db.refresh(selection)
     return _source_payload(connection, selection, entry, last_blob=None, running=0)
 
 

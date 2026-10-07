@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping
+from app.models.azure_connection_source import AzureConnectionSource
 from app.models.source_connection import SourceConnection
 from app.models.orphan_annotation import OrphanAnnotation
 from app.services.trino_service import execute as trino_execute
@@ -326,12 +327,28 @@ class SetupRequest(BaseModel):
 
 @router.post("/setup", response_model=SetupResponse)
 async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSession = Depends(get_db)):
-    """Configura tabelas destino + mappings para conexões azure_resource_graph."""
+    """Configura o modelo para fontes ARG habilitadas no catálogo por ambiente.
+
+    Mantém compatibilidade com conexões standalone legadas, mas o padrão atual
+    é Resource Graph selecionado dentro da conexão Azure do ambiente.
+    """
     conn_id = (body and body.connection_id) or None
     if conn_id:
         conn = await db.get(SourceConnection, conn_id)
-        if not conn or conn.connector_type != CONNECTOR_TYPE:
-            raise HTTPException(status_code=404, detail="Conexão Azure Resource Graph não encontrada")
+        if not conn:
+            raise HTTPException(status_code=404, detail="Conexão Azure não encontrada")
+        if conn.connector_type == "azure_blob":
+            selected = (await db.execute(
+                select(AzureConnectionSource.id).where(
+                    AzureConnectionSource.connection_id == conn.id,
+                    AzureConnectionSource.source_key == "resource_graph",
+                    AzureConnectionSource.enabled.is_(True),
+                )
+            )).scalar_one_or_none()
+            if selected is None:
+                raise HTTPException(status_code=422, detail="Resource Graph não está habilitado para esta conexão Azure")
+        elif conn.connector_type != CONNECTOR_TYPE:
+            raise HTTPException(status_code=404, detail="Conexão Resource Graph não encontrada")
         result = await _setup_for_connection(db, conn)
         return SetupResponse(
             connection_id=conn.id,
@@ -339,13 +356,26 @@ async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSessio
             message=result["message"],
         )
 
-    conns = (await db.execute(
+    legacy_conns = (await db.execute(
         select(SourceConnection).where(SourceConnection.connector_type == CONNECTOR_TYPE)
     )).scalars().all()
+    selected_parent_ids = (await db.execute(
+        select(AzureConnectionSource.connection_id).where(
+            AzureConnectionSource.source_key == "resource_graph",
+            AzureConnectionSource.enabled.is_(True),
+        )
+    )).scalars().all()
+    parent_conns = (await db.execute(
+        select(SourceConnection).where(
+            SourceConnection.id.in_(selected_parent_ids),
+            SourceConnection.connector_type == "azure_blob",
+        )
+    )).scalars().all() if selected_parent_ids else []
+    conns = list({conn.id: conn for conn in [*legacy_conns, *parent_conns]}.values())
     if not conns:
         raise HTTPException(
             status_code=422,
-            detail="Nenhuma conexão Azure Resource Graph configurada. Crie uma em Connections (Ferramentas Cloud → Azure Resource Graph).",
+            detail="Nenhuma fonte Resource Graph habilitada no catálogo de fontes Azure.",
         )
     last = None
     for conn in conns:

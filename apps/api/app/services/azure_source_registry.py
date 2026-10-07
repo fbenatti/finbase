@@ -59,7 +59,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "code_pattern": "azure-{env}-resource-graph",
         "bronze_pattern": "raw_azure_{env}_resource_graph",
         "silver_target": "silver.dest_cloud_resource_inventory, silver.dest_cloud_orphan_resources",
-        "gold_target": "gold.azure_orphan_cube",
+        "gold_target": "gold.dest_dm_cost_custo_recursos_orfaos",
         "is_cost_source": False,
         "api_reference": "Microsoft.ResourceGraph/resources (2022-10-01)",
         "required_permission": "Reader nas subscriptions",
