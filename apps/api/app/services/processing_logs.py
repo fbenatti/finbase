@@ -192,9 +192,12 @@ def backfill_processing_logs(session: Session, *, limit: int | None = None) -> i
         query = query.limit(limit)
     rows = session.execute(query).scalars().all()
     for task in rows:
-        sync_etl_task_log(session, task)
-    count = len(rows) + backfill_forecast_runs(session)
-    return count + backfill_extraction_metadata(session)
+        exists = session.execute(select(ProcessingLog.id).where(ProcessingLog.etl_task_id == task.id)).scalar_one_or_none()
+        if exists is None:
+            sync_etl_task_log(session, task)
+    forecast_count = backfill_forecast_runs(session)
+    extraction_count = backfill_extraction_metadata(session)
+    return len(rows) + forecast_count + extraction_count
 
 
 def backfill_extraction_metadata(session: Session) -> int:
@@ -227,12 +230,14 @@ def backfill_forecast_runs(session: Session) -> int:
             )).scalar_one_or_none()
             if task_log:
                 details = dict(task_log.details or {})
-                details["forecast_run"] = {
+                forecast_detail = {
                     "id": run.id, "config_snapshot": run.config_snapshot or {},
                     "result_table": run.result_table, "cutoff_date": run.cutoff_date,
                     "source_snapshot_id": run.source_snapshot_id,
                 }
-                task_log.details = details
+                if details.get("forecast_run") != forecast_detail:
+                    details["forecast_run"] = forecast_detail
+                    task_log.details = details
                 continue
         log = session.execute(select(ProcessingLog).where(
             ProcessingLog.etl_task_id.is_(None), ProcessingLog.process_type == "forecast",
