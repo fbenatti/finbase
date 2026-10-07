@@ -93,10 +93,9 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
 
         query = select(ProcessingLog).order_by(ProcessingLog.updated_at, ProcessingLog.id)
         if checkpoint_time and not full_refresh:
-            query = query.where(
-                (ProcessingLog.updated_at > checkpoint_time)
-                | ((ProcessingLog.updated_at == checkpoint_time) & (ProcessingLog.id > checkpoint_id))
-            )
+            # Include the checkpoint timestamp to capture rows sharing the same
+            # database precision; MERGE makes replaying that boundary idempotent.
+            query = query.where(ProcessingLog.updated_at >= checkpoint_time)
         logs = session.execute(query).scalars().all()
 
         if not logs and not full_refresh:
