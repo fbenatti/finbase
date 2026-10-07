@@ -218,6 +218,21 @@ export default function CommitmentsDashboard() {
         </CardContent></Card>
 
         <Card sx={{ mb: 2 }}><CardContent>
+          <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Forecast por compromisso e PricingCategory</Typography>
+          <Typography variant="body2" color="text.secondary" mb={1}>Return aparece negativo por representar neutralização de custo; o gráfico de saving converte esse valor para base OnDemand positiva.</Typography>
+          <Box sx={{ height: 340, width: "100%" }}>
+            <DataGrid
+              rows={forecastBreakdownRows}
+              columns={forecastBreakdownColumns}
+              getRowId={(row) => String(row.id)}
+              initialState={{ sorting: { sortModel: [{ field: "forecast_value", sort: "desc" }] }, pagination: { paginationModel: { pageSize: 10, page: 0 } } }}
+              pageSizeOptions={[10, 25, 50]}
+              disableRowSelectionOnClick
+            />
+          </Box>
+        </CardContent></Card>
+
+        <Card sx={{ mb: 2 }}><CardContent>
             <Typography variant="subtitle1" fontWeight={600}>Projetos — base OnDemand x saving estimado</Typography>
             <Typography variant="body2" color="text.secondary" mb={1}>Top 10 por base OnDemand; saving calculado após rateio da compra por modalidade.</Typography>
             <Plot data={[
