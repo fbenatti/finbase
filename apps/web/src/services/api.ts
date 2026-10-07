@@ -2233,6 +2233,9 @@ export interface CommitmentDashboardRow {
   ondemand_baseline?: number;
   purchase_allocated?: number;
   estimated_saving?: number;
+  forecast_purchase?: number;
+  forecast_return?: number;
+  forecast_saving?: number;
   purchase_pct_of_ondemand?: number;
   saving_pct_of_ondemand?: number;
   usage?: number;
@@ -2260,7 +2263,9 @@ export interface CommitmentsDashboard {
   period_summary: Record<string, number>;
   monthly: CommitmentDashboardRow[];
   projects: CommitmentDashboardRow[];
+  project_monthly: CommitmentDashboardRow[];
   forecast_monthly: CommitmentDashboardRow[];
+  forecast_projects: CommitmentDashboardRow[];
 }
 export async function getCommitmentsDashboard(params: {
   start_period: string;
