@@ -3270,6 +3270,8 @@ def cancel_task(task_id: int) -> bool:
             row.status = "CANCELLED"
             row.phase = "Cancelado pelo usuario"
             row.finished_at = datetime.now(timezone.utc)
+            from app.services.processing_logs import sync_etl_task_log
+            sync_etl_task_log(db, row)
             db.commit()
             cancelled = True
         else:
