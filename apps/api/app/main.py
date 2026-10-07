@@ -913,6 +913,7 @@ async def lifespan(app: FastAPI):
     from app.services.processing_logs import backfill_processing_logs
     async with async_session() as backfill_session:
         await backfill_session.run_sync(backfill_processing_logs)
+        await backfill_session.commit()
 
     async with async_session() as db:
         await seed(db)
