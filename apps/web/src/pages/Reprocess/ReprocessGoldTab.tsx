@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Checkbox, Chip, CircularProgress, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Checkbox, Chip, Stack, Tab, Tabs, Typography } from "@mui/material";
+import { useSearchParams } from "react-router-dom";
 import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
 import { GoldCubeRule, formatApiError, getGoldCubeRules, reprocessGoldCubes } from "../../services/api";
+import ReprocessAICostRelationshipsTab from "./ReprocessAICostRelationshipsTab";
 
 export default function ReprocessGoldTab() {
+  const [params, setParams] = useSearchParams();
+  const subtab = params.get("subtab") === "ai-cost" ? "ai-cost" : "cubes";
   const [rules, setRules] = useState<GoldCubeRule[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [running, setRunning] = useState(false);
@@ -46,6 +50,16 @@ export default function ReprocessGoldTab() {
   };
 
   return <Stack spacing={2}>
+    <Tabs value={subtab} onChange={(_, value) => {
+      const next = new URLSearchParams(params);
+      next.set("tab", "gold");
+      if (value === "cubes") next.delete("subtab"); else next.set("subtab", value);
+      setParams(next, { replace: true });
+    }} aria-label="Processos Gold">
+      <Tab value="cubes" label="Cubos Gold" />
+      <Tab value="ai-cost" label="Relacionamentos de custo IA" />
+    </Tabs>
+    {subtab === "ai-cost" ? <ReprocessAICostRelationshipsTab /> : <>
     <Typography variant="h6">Materialização Gold</Typography>
     <Typography color="text.secondary">Lê a Silver (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica cubos agregados no namespace iceberg.gold. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
     {error && <Alert severity="error">{error}</Alert>}
@@ -58,7 +72,7 @@ export default function ReprocessGoldTab() {
     {/* Regras ativas com status */}
     <Box>
       <Typography variant="subtitle2" mb={1}>Regras Gold ({rules.length}) · {selectedIds.size} selecionada(s)</Typography>
-      {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra criada — use o editor em Relacionamentos de custo IA.</Typography> : <Stack spacing={1}>
+      {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra de cubo Gold configurada.</Typography> : <Stack spacing={1}>
         {rules.map(r => <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, border: "1px solid", borderColor: selectedIds.has(r.id!) ? "primary.main" : "divider", borderRadius: 1, bgcolor: selectedIds.has(r.id!) ? "action.selected" : "transparent", cursor: "pointer" }} onClick={() => r.id != null && toggleRule(r.id)}>
           <Checkbox size="small" checked={r.id != null && selectedIds.has(r.id)} onChange={() => r.id != null && toggleRule(r.id)} onClick={e => e.stopPropagation()} />
           <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -69,6 +83,6 @@ export default function ReprocessGoldTab() {
         </Box>)}
       </Stack>}
     </Box>
-
+    </>}
   </Stack>;
 }
