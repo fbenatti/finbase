@@ -866,12 +866,13 @@ def materialize_golds_sync(session: Any, *, run_id: int, progress: Any | None = 
 # publicado dependia de uma tabela chamada "tmp". Além disso ela existia em dois
 # namespaces (`gold` e `dimon`), com 66.570 linhas num e 0 no outro.
 #
-# Agora é uma auxiliar de detalhe na Silver, com nome que diz o que é. Não é
-# cubo e não deve ser consumida por dashboard: quem consome é a regra que a
-# constrói, no mesmo run.
+# O agregado é publicado como cubo Gold governado. A Silver continua sendo a
+# fonte detalhada, mas o consumidor não depende de uma tabela lateral efêmera.
 
 VM_MONTHLY_TABLE = "vm_monthly_history"
 VM_MONTHLY_LAYER = layers.SILVER
+VM_MONTHLY_GOLD_CODE = "vm_monthly_history"
+VM_MONTHLY_GOLD_TABLE = "dest_dm_cost_vm_monthly_history"
 #: Nome legado, mantido só para limpeza. Não escrever nele.
 LEGACY_VM_MONTHLY_TABLE = "_tmp_vm_monthly"
 VM_MONTHLY_HISTORY_MONTHS = 8
@@ -1311,6 +1312,17 @@ async def materialize_saving_history(
     if progress:
         progress(0, len(periods), "Preparando histórico mensal de VMs (uma única vez)")
     await prepare_vm_monthly(progress=None, months=periods, sources=sources)
+    from app.services.gold_governance import publish_gold_cube
+    helper_result = await publish_gold_cube(
+        cube_code=VM_MONTHLY_GOLD_CODE,
+        table=VM_MONTHLY_GOLD_TABLE,
+        select_sql=f"SELECT * FROM iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE}",
+        namespace=GOLD,
+        partition_column="billing_period",
+        empty_is_error=True,
+        progress=progress,
+    )
+    logger.info("VM monthly Gold publicado: %d linhas", helper_result.rows)
 
     summary: dict[str, Any] = {"periods": [], "rows": {}}
     for i, target in enumerate(periods):
@@ -1344,7 +1356,7 @@ async def materialize_saving_history(
                 MIN(billing_period) AS first_period,
                 MAX(CASE WHEN billing_period = '{target}' THEN total_hours END) AS cur_hours,
                 MAX(CASE WHEN billing_period = '{target}' THEN total_cost END) AS cur_cost
-            FROM iceberg.{VM_MONTHLY_LAYER}.{VM_MONTHLY_TABLE}
+            FROM iceberg.{GOLD}.{VM_MONTHLY_GOLD_TABLE}
             WHERE billing_period <= '{target}'
             GROUP BY resource_id, vm_name, connection_code, subscription_name
         ),
