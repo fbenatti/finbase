@@ -1221,7 +1221,7 @@ SAVING_TEMPLATE_HEADER = """--
 -- ⚠ QUERY DE REPROCESSAMENTO MÊS A MÊS (NÃO RODAR PARA VÁRIOS MESES DE UMA VEZ)
 -- Esta regra classifica o PADRÃO de desligue de cada VM comparando o mês alvo
 -- (o MÊS ANTERIOR ao atual = mês fechado) com os meses anteriores da tabela
--- auxiliar silver.vm_monthly_history. Cada reprocess materializa APENAS UM período.
+-- cubo iceberg.gold.dest_dm_cost_vm_monthly_history. Cada reprocess materializa APENAS UM período.
 -- Para popular o histórico (ex.: jan/2026 → mês atual), reprocesse mês a mês
 -- via /scheduled-shutdown/reprocess-history ou reprocesse a regra a cada mês
 -- fechado. O padrão exige >= 3 meses de histórico (60+ dias) por VM.
