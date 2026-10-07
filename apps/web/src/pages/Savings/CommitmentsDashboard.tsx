@@ -228,12 +228,7 @@ export default function CommitmentsDashboard() {
             const rows = data.projects.filter((row) => row.commitment_type === type);
             const visibleRows = showAllProjects[type] ? rows : rows.slice(0, 10);
             return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-                <Typography variant="subtitle1" fontWeight={600}>Detalhamento — {type}</Typography>
-                <Button size="small" onClick={() => setShowAllProjects((current) => ({ ...current, [type]: !current[type] }))}>
-                  {showAllProjects[type] ? "Ver Top 10" : "Ver tudo"}
-                </Button>
-              </Stack>
+              <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento — {type}</Typography>
               <Box sx={{ width: "100%" }}>
                 <DataGrid
                   rows={visibleRows}
@@ -245,6 +240,9 @@ export default function CommitmentsDashboard() {
                   disableRowSelectionOnClick
                 />
               </Box>
+              <Button size="small" sx={{ mt: 1, px: 0 }} onClick={() => setShowAllProjects((current) => ({ ...current, [type]: !current[type] }))}>
+                {showAllProjects[type] ? "Ver Top 10" : "Ver tudo"}
+              </Button>
             </CardContent></Card>;
           })}
         </Stack>
