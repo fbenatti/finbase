@@ -191,14 +191,13 @@ def record_processing_event(
 
 def backfill_processing_logs(session: Session, *, limit: int | None = None) -> int:
     """Idempotently register legacy task rows so existing history is queryable."""
-    query = select(EtlTask).order_by(EtlTask.id)
+    existing_task_ids = select(ProcessingLog.etl_task_id).where(ProcessingLog.etl_task_id.is_not(None))
+    query = select(EtlTask).where(~EtlTask.id.in_(existing_task_ids)).order_by(EtlTask.id)
     if limit:
         query = query.limit(limit)
     rows = session.execute(query).scalars().all()
     for task in rows:
-        exists = session.execute(select(ProcessingLog.id).where(ProcessingLog.etl_task_id == task.id)).scalar_one_or_none()
-        if exists is None:
-            sync_etl_task_log(session, task)
+        sync_etl_task_log(session, task)
     forecast_count = backfill_forecast_runs(session)
     return len(rows) + forecast_count
 
