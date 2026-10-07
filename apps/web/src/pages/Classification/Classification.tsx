@@ -636,6 +636,13 @@ export function ClassificationRulesTab() {
             sx={{ mb: 2, maxWidth: 520 }}
           />
 
+          {selectedRuleIds.length >= 2 && (
+            <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+              <Button color="error" variant="contained" startIcon={<Delete />} onClick={() => setBulkDeleteOpen(true)}>
+                Excluir selecionadas ({selectedRuleIds.length})
+              </Button>
+            </Stack>
+          )}
           <ClassificationDataGrid
             key={cloudFilter + "|" + selectedDestId}
             rows={rules}
@@ -650,13 +657,6 @@ export function ClassificationRulesTab() {
             selectedRuleIds={selectedRuleIds}
             onSelectionChange={setSelectedRuleIds}
           />
-          {selectedRuleIds.length > 0 && (
-            <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }}>
-              <Button color="error" variant="outlined" startIcon={<Delete />} onClick={() => setBulkDeleteOpen(true)}>
-                Excluir selecionadas ({selectedRuleIds.length})
-              </Button>
-            </Stack>
-          )}
         </>
       )}
 

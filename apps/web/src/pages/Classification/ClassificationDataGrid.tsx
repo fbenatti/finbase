@@ -393,6 +393,7 @@ export default function ClassificationDataGrid({
           rowCount={total}
           getRowId={(row) => row.id}
           disableRowSelectionOnClick
+          disableMultipleRowSelection={false}
           checkboxSelection
           rowSelectionModel={selectedRuleIds}
           onRowSelectionModelChange={(model) => onSelectionChange(model.map(Number))}
