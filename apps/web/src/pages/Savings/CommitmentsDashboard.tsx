@@ -44,7 +44,7 @@ function MetricCard({ title, value, detail, isPercent = false }: { title: string
 }
 
 export default function CommitmentsDashboard() {
-  const [startMonth, setStartMonth] = useState(currentMonth);
+  const [startMonth, setStartMonth] = useState(`${currentMonth.slice(0, 4)}-01`);
   const [endMonth, setEndMonth] = useState(currentMonth);
   const [source, setSource] = useState<"all" | "azure-ti" | "azure-4p">("all");
   const [data, setData] = useState<CommitmentsDashboardData | null>(null);
