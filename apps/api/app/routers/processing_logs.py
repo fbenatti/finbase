@@ -57,6 +57,10 @@ async def list_processing_logs(
         filters.append(ProcessingLog.started_at <= started_before)
     if search and search.strip():
         needle = f"%{search.strip()}%"
+        from app.models.destination import DestinationTable
+        from app.models.source_connection import SourceConnection
+        connection_search = select(SourceConnection.id).where(SourceConnection.name.ilike(needle))
+        destination_search = select(DestinationTable.id).where(DestinationTable.name.ilike(needle))
         filters.append(or_(
             ProcessingLog.process_type.ilike(needle),
             ProcessingLog.status.ilike(needle),
@@ -64,6 +68,8 @@ async def list_processing_logs(
             ProcessingLog.error.ilike(needle),
             cast(ProcessingLog.source, String).ilike(needle),
             cast(ProcessingLog.destination, String).ilike(needle),
+            ProcessingLog.source["connection_ids"].contains(func.to_json(connection_search.scalar_subquery())),
+            ProcessingLog.destination["destination_table_id"].astext.in_(select(cast(DestinationTable.id, String)).where(DestinationTable.name.ilike(needle))),
         ))
     filtered = select(ProcessingLog).where(*filters)
     total = (await db.execute(select(func.count()).select_from(ProcessingLog).where(*filters))).scalar_one()
