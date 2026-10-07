@@ -125,8 +125,8 @@ async def commitments_dashboard(
    bucket[f"{prefix}_{key}"] += float(row.get(metric) or 0)
 
  projects = []
- for index, row in enumerate(project_rows):
- projects.append({
+ for row in project_rows:
+  projects.append({
    "id": f"{row.get('source')}:{row.get('commitment_type')}:{row.get('project')}:{row.get('period')}",
    "project": row.get("project") or "Sem projeto", "source": row.get("source"),
    "period": row.get("period"), "commitment_type": row.get("commitment_type"),
