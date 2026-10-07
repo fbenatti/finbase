@@ -389,13 +389,48 @@ função central `lakehouse_layers.detail_layer()`.
 
 Após publicar a versão corrigida do backend em PRD:
 
-1. Executar uma vez, autenticado na API PRD, `POST /azure-resource-graph/seed-gold`.
+1. Confirmar no PostgreSQL PRD que Resource Graph está habilitado no catálogo
+   das conexões Azure do ambiente. No padrão atual, **não** se cria uma conexão
+   `azure_resource_graph` separada: a credencial fica em `azure-4p`/`azure-ti` e
+   cada fonte é uma seleção em `azure_connection_source`.
+
+   ```sql
+   SELECT sc.id, sc.code, acs.source_key, acs.enabled, acs.subscription_ids
+   FROM source_connection sc
+   JOIN azure_connection_source acs ON acs.connection_id = sc.id
+   WHERE sc.code IN ('azure-4p', 'azure-ti')
+     AND sc.connector_type = 'azure_blob'
+     AND acs.source_key = 'resource_graph'
+   ORDER BY sc.code;
+   ```
+
+   Esperado: uma linha habilitada por ambiente que deve compor a visão unificada.
+   Não copie IDs de desenvolvimento: os IDs variam entre ambientes. Se a fonte
+   estiver desligada, habilite-a em **Carregando fontes Azure** antes de coletar.
+2. Confirmar destinos e mappings associados aos IDs reais das conexões do ambiente:
+
+   ```sql
+   SELECT sc.code, d.physical_name, COUNT(m.id) AS mappings_ativos
+   FROM source_connection sc
+   JOIN source_destination_mapping m ON m.source_connection_id = sc.id AND m.active
+   JOIN destination_table d ON d.id = m.destination_table_id
+   WHERE sc.code IN ('azure-4p', 'azure-ti')
+     AND d.physical_name IN ('dest_cloud_orphan_resources', 'dest_cloud_resource_inventory')
+   GROUP BY sc.code, d.physical_name
+   ORDER BY sc.code, d.physical_name;
+   ```
+
+   Se a seleção estiver habilitada e faltarem destinos/mappings, chamar
+   `POST /azure-resource-graph/setup` (ou habilitar novamente a fonte; o setup
+   agora é acionado pelo catálogo). O endpoint é idempotente e não cria conexão
+   standalone.
+3. Executar, autenticado na API PRD, `POST /azure-resource-graph/seed-gold`.
    O seed é idempotente: atualiza a regra PostgreSQL `gold_mart_rule` de código
    `custo_recursos_orfaos`, grava o SQL com o namespace resolvido para aquele
    ambiente, define `materialization_status = 'PENDING'` e limpa o erro anterior.
    Não é necessário alterar manualmente `destination_table` nem criar uma nova
    regra.
-2. Verificar no PostgreSQL PRD:
+4. Verificar no PostgreSQL PRD:
 
    ```sql
    SELECT id, code, materialization_status, materialization_error,
@@ -407,10 +442,10 @@ Após publicar a versão corrigida do backend em PRD:
    `materialization_status` deve estar `PENDING` antes da execução, e o campo
    `sql_template` não pode conter `{layers.detail_layer()}`. A tabela final
    configurada permanece `dest_dm_cost_custo_recursos_orfaos`.
-3. Reprocessar somente essa regra em `POST /gold/reprocess` usando seu `rule_id`;
+5. Reprocessar somente essa regra em `POST /gold/reprocess` usando seu `rule_id`;
    depois confirmar `materialization_status = 'UPDATED'`, ausência de erro e
    consulta bem-sucedida no dashboard.
-4. Confirmar que `silver.dest_cloud_orphan_resources` contém as duas origens
+6. Confirmar que `silver.dest_cloud_orphan_resources` contém as duas origens
    (4P e TI) e que a Gold mantém `cloud_origem`/`source_connection_id`, sem
    misturar custos: o join deve continuar particionado pela origem Azure
    correspondente (`azure-4p` ou `azure-ti`).
@@ -419,6 +454,13 @@ O seed não altera dados de custo diretamente nem cria uma tabela Silver. A Gold
 é reconstruída pelo fluxo normal de materialização. Em produção, executar os
 passos após o deploy e validar primeiro a contagem por `cloud_origem`; não rodar
 DDL manual no Trino.
+
+O startup da API reconcilia os destinos/mappings das fontes configuradas, mas a
+coleta continua controlada pela seleção do catálogo. Para conferir Bronze e
+Silver após a coleta/reprocessamento, use o histórico da tarefa e valide o
+`source_key = resource_graph`, o `source_connection_id` do ambiente e o snapshot
+selecionado. Uma tarefa anterior em `FAILED` não invalida uma tentativa posterior:
+considere a tentativa final do grupo e seus blobs/linhas processados.
 
 ## 8. Plano de implementação (ordem sugerida)
 
