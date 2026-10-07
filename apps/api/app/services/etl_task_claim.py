@@ -250,6 +250,8 @@ def recover_stalled_task(
         task.phase = "Worker encerrou tarefa sem progresso; tentativa automática na fila"
         task.current_blob = "Tarefa recuperada pelo watchdog do worker"
         task.result_json = result
+        from app.services.processing_logs import sync_etl_task_log
+        sync_etl_task_log(session, task)
         session.flush()
         return outcome
 
@@ -262,6 +264,8 @@ def recover_stalled_task(
     task.errors = list(task.errors or []) + [reason[:2000]]
     result["failure_kind"] = "worker_stalled"
     task.result_json = result
+    from app.services.processing_logs import sync_etl_task_log
+    sync_etl_task_log(session, task)
     session.flush()
     return outcome
 
