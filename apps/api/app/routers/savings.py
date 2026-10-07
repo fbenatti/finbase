@@ -30,7 +30,14 @@ def _commitment_source_filter(source: str, alias: str = "f") -> str:
 def _commitment_actual_sql(start: str, end: str, source: str, *, by_project: bool = False) -> str:
  table = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
  source_filter = _commitment_source_filter(source, "f")
- select_dimensions = "period, source, commitment_type, project" if by_project else "period, source, commitment_type"
+ select_dimensions = (
+  "period, source, commitment_type, project, GROUPING(project) AS is_total"
+  if by_project else "period, source, commitment_type"
+ )
+ grouping_clause = (
+  "GROUP BY GROUPING SETS ((period, source, commitment_type), (period, source, commitment_type, project))"
+  if by_project else f"GROUP BY {select_dimensions}"
+ )
  eligible_filter = "AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))"
  project_select = (
   "COALESCE(NULLIF(TRIM(f.organograma), ''), NULLIF(TRIM(f.source_resource_group_name), ''), 'Sem projeto') AS project,"
@@ -68,7 +75,7 @@ SELECT {select_dimensions},
        SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline ELSE 0 END) AS ondemand_baseline,
        COUNT_IF(chargecategory = 'Usage') AS usage_rows
 FROM eligible
-GROUP BY {select_dimensions}
+{grouping_clause}
 """
 
 
@@ -85,18 +92,9 @@ async def commitments_dashboard(
  if start > end:
   raise HTTPException(422, "start_period não pode ser posterior a end_period")
  _commitment_source_filter(source)
- project_rows = await trino_execute(_commitment_actual_sql(start, end, source, by_project=True), timeout_s=120)
- monthly_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
- for row in project_rows:
-  key = (str(row["period"]), str(row.get("source")), str(row.get("commitment_type")))
-  bucket = monthly_groups.setdefault(key, {
-   "period": key[0], "source": key[1], "commitment_type": key[2],
-   "purchase": 0.0, "ondemand_baseline": 0.0, "usage_rows": 0,
-  })
-  bucket["purchase"] += float(row.get("purchase") or 0)
-  bucket["ondemand_baseline"] += float(row.get("ondemand_baseline") or 0)
-  bucket["usage_rows"] += int(row.get("usage_rows") or 0)
- monthly_rows = list(monthly_groups.values())
+commitment_rows = await trino_execute(_commitment_actual_sql(start, end, source, by_project=True), timeout_s=120)
+monthly_rows = [row for row in commitment_rows if bool(row.get("is_total"))]
+project_rows = [row for row in commitment_rows if not bool(row.get("is_total"))]
 
  planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
  source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
