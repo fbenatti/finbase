@@ -109,6 +109,8 @@ export default function CommitmentsDashboard() {
   const forecastPurchase = forecasts.reduce((sum, row) => sum + Number(row.purchase || 0), 0);
   const forecastSaving = forecasts.reduce((sum, row) => sum + Number(row.return || 0) - Number(row.purchase || 0), 0);
   const forecastByPeriod = new Map(forecasts.map((row) => [row.period, row]));
+  const monthlyByPeriod = new Map(monthly.map((row) => [row.period, row]));
+  const chartPeriods = [...new Set([...monthly.map((row) => row.period || ""), ...forecasts.map((row) => row.period || "")])].filter(Boolean).sort();
   const currencyAxis = { tickprefix: "R$ ", separatethousands: true, automargin: true };
   const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#cbd5e1", gridcolor: "#e2e8f0" }, xaxis: { gridcolor: "#f1f5f9" }, showlegend: false };
 
@@ -157,27 +159,26 @@ export default function CommitmentsDashboard() {
           <Typography variant="subtitle1" fontWeight={600}>Compras mensais — RI e SavingPlan</Typography>
           <Typography variant="body2" color="text.secondary">Compra realizada e base OnDemand sintética por modalidade. O forecast de compra é exibido em outra cor e permanece global, sem rateio entre RI e SavingPlan.</Typography>
           <Plot data={[
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.ri_purchase || 0)), type: "bar", name: "RI — compra realizada", marker: { color: "#1565c0" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — compra realizada</extra>" },
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.savingplan_purchase || 0)), type: "bar", name: "SavingPlan — compra realizada", marker: { color: "#7b1fa2" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — compra realizada</extra>" },
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.ri_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "RI — base OnDemand", line: { color: "#0284c7", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — base OnDemand</extra>" },
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.savingplan_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "SavingPlan — base OnDemand", line: { color: "#c084fc", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — base OnDemand</extra>" },
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(forecastByPeriod.get(row.period || "")?.purchase || 0)), type: "bar", name: "Forecast de compra — geral", marker: { color: "#f59e0b" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast geral de compra</extra>" },
-          ]} layout={{ ...chartLayout, height: 390, barmode: "group", legend: { orientation: "h", y: -0.22 } }} config={{ displayModeBar: false, responsive: true }} />
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_purchase || 0)), type: "bar", name: "RI — compra realizada", marker: { color: "#1565c0" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — compra realizada</extra>" },
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_purchase || 0)), type: "bar", name: "SavingPlan — compra realizada", marker: { color: "#7b1fa2" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — compra realizada</extra>" },
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "RI — base OnDemand", line: { color: "#0284c7", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — base OnDemand</extra>" },
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "SavingPlan — base OnDemand", line: { color: "#c084fc", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — base OnDemand</extra>" },
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.purchase || 0)), type: "bar", name: "Forecast de compra — geral", marker: { color: "#f59e0b" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast geral de compra</extra>" },
+          ]} layout={{ ...chartLayout, height: 390, barmode: "stack", legend: { orientation: "h", y: -0.22 } }} config={{ displayModeBar: false, responsive: true }} />
         </CardContent></Card>
 
         <Card sx={{ mb: 2 }}><CardContent>
           <Typography variant="subtitle1" fontWeight={600}>Saving mensal — realizado e forecast</Typography>
           <Typography variant="body2" color="text.secondary">Realizado = base OnDemand sintética menos compra. Forecast global = retorno previsto menos compra prevista; não há quebra confiável por compromisso.</Typography>
           <Plot data={[
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.ri_saving || 0)), type: "bar", name: "RI — saving realizado", marker: { color: "#15803d" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — realizado</extra>" },
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.savingplan_saving || 0)), type: "bar", name: "SavingPlan — saving realizado", marker: { color: "#7e22ce" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — realizado</extra>" },
-            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => forecastByPeriod.get(row.period || "") ? Number(forecastByPeriod.get(row.period || "")?.return || 0) - Number(forecastByPeriod.get(row.period || "")?.purchase || 0) : 0), type: "bar", name: "Saving forecast — geral", marker: { color: "#f59e0b" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast geral</extra>" },
-          ]} layout={{ ...chartLayout, height: 340, barmode: "group", yaxis: { ...chartLayout.yaxis, zeroline: true, zerolinewidth: 2, zerolinecolor: "#64748b" }, legend: { orientation: "h", y: -0.22 } }} config={{ displayModeBar: false, responsive: true }} />
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_saving || 0)), type: "bar", name: "RI — saving realizado", marker: { color: "#15803d" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — realizado</extra>" },
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_saving || 0)), type: "bar", name: "SavingPlan — saving realizado", marker: { color: "#7e22ce" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — realizado</extra>" },
+            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => forecastByPeriod.get(period) ? Number(forecastByPeriod.get(period)?.return || 0) - Number(forecastByPeriod.get(period)?.purchase || 0) : 0), type: "bar", name: "Saving forecast — geral", marker: { color: "#f59e0b" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast geral</extra>" },
+          ]} layout={{ ...chartLayout, height: 340, barmode: "stack", yaxis: { ...chartLayout.yaxis, zeroline: true, zerolinewidth: 2, zerolinecolor: "#64748b" }, legend: { orientation: "h", y: -0.22 } }} config={{ displayModeBar: false, responsive: true }} />
           {forecasts.length === 0 && <Alert severity="info">Não há forecast para o período e origem selecionados.</Alert>}
         </CardContent></Card>
 
-        <Stack direction={{ xs: "column", xl: "row" }} gap={2} mb={2}>
-          <Card sx={{ flex: 1, minWidth: 0 }}><CardContent>
+        <Card sx={{ mb: 2 }}><CardContent>
             <Typography variant="subtitle1" fontWeight={600}>Projetos — base OnDemand x saving estimado</Typography>
             <Typography variant="body2" color="text.secondary" mb={1}>Top 10 por base OnDemand; saving calculado após rateio da compra por modalidade.</Typography>
             <Plot data={[
@@ -187,15 +188,6 @@ export default function CommitmentsDashboard() {
               { type: "bar", orientation: "h", x: projectChart.map((row) => row.savingplanSaving), y: projectChart.map((row) => row.project), name: "SavingPlan — saving", marker: { color: "#7e22ce" }, xaxis: "x2", yaxis: "y2", hovertemplate: "%{y}<br>R$ %{x:,.2f}<extra>SavingPlan — saving estimado</extra>" },
             ]} layout={{ height: 390, margin: { l: 18, r: 18, t: 25, b: 35 }, grid: { rows: 1, columns: 2, pattern: "independent" }, barmode: "group", paper_bgcolor: "white", plot_bgcolor: "white", xaxis: { ...currencyAxis, domain: [0, 0.48], gridcolor: "#e2e8f0" }, xaxis2: { ...currencyAxis, domain: [0.55, 1], gridcolor: "#e2e8f0" }, yaxis: { automargin: true, autorange: "reversed" }, yaxis2: { automargin: true, autorange: "reversed" }, showlegend: true, legend: { orientation: "h", y: -0.22 }, annotations: [{ text: "RI", x: 0.24, y: 1.08, xref: "paper", yref: "paper", showarrow: false }, { text: "SavingPlan", x: 0.775, y: 1.08, xref: "paper", yref: "paper", showarrow: false }] }} config={{ displayModeBar: false, responsive: true }} />
           </CardContent></Card>
-          <Card sx={{ flex: 1, minWidth: 0 }}><CardContent>
-            <Typography variant="subtitle1" fontWeight={600}>Forecast mensal vigente — composição</Typography>
-            <Typography variant="body2" color="text.secondary" mb={1}>Projeção global por categoria, exibida aqui como referência; séries globais não são rateadas entre RI e SavingPlan.</Typography>
-            {forecasts.length ? <>
-              <Plot data={[{ x: forecasts.map((row) => monthLabel(row.period || "")), y: forecasts.map((row) => Number(row.total || 0)), type: "scatter", mode: "lines+markers", name: "Total líquido previsto", line: { color: "#0f766e", width: 3 }, marker: { size: 7 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra></extra>" }]} layout={chartLayout} config={{ displayModeBar: false, responsive: true }} />
-              <Typography variant="body2" color="text.secondary">Uso: {money(forecasts.reduce((sum, row) => sum + Number(row.usage || 0), 0))} · Compra: {money(forecasts.reduce((sum, row) => sum + Number(row.purchase || 0), 0))} · Retorno: {money(forecasts.reduce((sum, row) => sum + Number(row.return || 0), 0))}</Typography>
-            </> : <Alert severity="info">Não há forecast para o período e origem selecionados.</Alert>}
-          </CardContent></Card>
-        </Stack>
 
         <Card><CardContent>
           <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento por projeto e compromisso</Typography>
