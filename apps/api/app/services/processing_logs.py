@@ -57,6 +57,8 @@ def sync_etl_task_log(session: Session, task: EtlTask) -> ProcessingLog:
     log = session.execute(
         select(ProcessingLog).where(ProcessingLog.etl_task_id == task.id)
     ).scalar_one_or_none()
+    if task.started_at is None and task.status == "QUEUED":
+        task.started_at = datetime.now(timezone.utc)
     if log is None:
         log = ProcessingLog(etl_task_id=task.id)
         session.add(log)
@@ -97,6 +99,8 @@ async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> Proce
     log = (await session.execute(
         select(ProcessingLog).where(ProcessingLog.etl_task_id == task.id)
     )).scalar_one_or_none()
+    if task.started_at is None and task.status == "QUEUED":
+        task.started_at = datetime.now(timezone.utc)
     if log is None:
         log = ProcessingLog(etl_task_id=task.id)
         session.add(log)
