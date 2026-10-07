@@ -1007,8 +1007,6 @@ def consumer_main(worker_id: int):
                     # Mark as RUNNING so no other worker picks it up
                     task.status = "RUNNING"
                     task_json = dict(task.result_json or {})
-                    from app.services.processing_logs import sync_etl_task_log
-                    sync_etl_task_log(session, task)
                     session.commit()
                     session.close()
 
