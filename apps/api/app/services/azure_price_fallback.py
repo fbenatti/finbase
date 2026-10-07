@@ -30,12 +30,22 @@ def load_azure_price_fallbacks(
         raise ValueError(f"Conexão Azure inválida para referência: {connection_code}")
     raw_table = "raw_" + connection_code.replace("-", "_")
     period_sql = str(billing_period).replace("'", "''")
-    curated_rows = execute("""
-        SELECT meter_id, reference_price_usd, unit_of_measure, currency
-        FROM iceberg.bronze.raw_azure_price_reference
-        WHERE coalesce(needs_review, false) = false
-          AND try_cast(reference_price_usd AS DOUBLE) > 0
-    """, timeout_s=30)
+    try:
+        curated_rows = execute("""
+            SELECT meter_id, reference_price_usd, unit_of_measure, currency
+            FROM iceberg.bronze.raw_azure_price_reference
+            WHERE coalesce(needs_review, false) = false
+              AND try_cast(reference_price_usd AS DOUBLE) > 0
+        """, timeout_s=30)
+    except Exception as exc:
+        message = str(exc).casefold()
+        missing_cache = (
+            "raw_azure_price_reference" in message
+            and any(marker in message for marker in ("does not exist", "not found", "no such table"))
+        )
+        if not missing_cache:
+            raise
+        curated_rows = []
     curated: dict[tuple[str, ...], Any] = {}
     curated_by_meter: dict[str, dict[str, Any]] = {}
     for row in curated_rows:

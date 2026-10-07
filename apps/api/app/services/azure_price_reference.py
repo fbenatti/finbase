@@ -108,13 +108,9 @@ def persist_reference(row: dict[str, Any]) -> None:
 
     from app.services.trino_service import execute_sync
     from app.services.iceberg_service import _get_catalog
+    from pyiceberg.exceptions import NoSuchTableError
 
     escaped_meter = str(row["meter_id"]).replace("'", "''")
-    execute_sync(
-        "DELETE FROM iceberg.bronze.raw_azure_price_reference "
-        f"WHERE meter_id = '{escaped_meter}' AND _billing_period = '{row['_billing_period']}'",
-        timeout_s=30,
-    )
     frame = pd.DataFrame([{
         "meter_id": row["meter_id"],
         "description": row.get("description"),
@@ -136,7 +132,27 @@ def persist_reference(row: dict[str, Any]) -> None:
         "source_blob": row.get("source_blob"),
         "_billing_period": str(row["_billing_period"]),
     }])
-    table = _get_catalog().load_table(("bronze", "raw_azure_price_reference"))
+    try:
+        table = _get_catalog().load_table(("bronze", "raw_azure_price_reference"))
+    except NoSuchTableError:
+        # First targeted lookup bootstraps the small cache; the full Price Sheet
+        # remains a separate Bronze source and is never copied into this table.
+        for column in (
+            "market_price_usd", "price_sheet_unit_price_usd", "contract_discount_pct",
+            "reference_price_usd", "table_reference_price_usd", "reference_delta_pct",
+        ):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("float64")
+        iceberg_service._append_or_create_table(
+            "bronze", "raw_azure_price_reference", frame, "_billing_period"
+        )
+        return
+
+    execute_sync(
+        "DELETE FROM iceberg.bronze.raw_azure_price_reference "
+        f"WHERE meter_id = '{escaped_meter}' AND _billing_period = '{row['_billing_period']}'",
+        timeout_s=30,
+    )
+    table.refresh()
     arrow = iceberg_service._df_to_arrow(frame, target_schema=table.schema())
     table.append(arrow)
 
