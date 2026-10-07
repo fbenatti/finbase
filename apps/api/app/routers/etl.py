@@ -1131,6 +1131,7 @@ def _process_blob_for_reprocess(
     batch_callback=None,
     connection_cloud_name: str | None = None,
     blob_path: str | None = None,
+    bronze_source_code: str | None = None,
 ) -> "pd.DataFrame | None":
     """Process a single blob in a thread — reads from DB, applies rules/mappings/classifications.
 
@@ -1151,6 +1152,7 @@ def _process_blob_for_reprocess(
 
     session = SyncSession()
     try:
+        bronze_code = bronze_source_code or connection_code
         # Reprocess must start from immutable Bronze, never from the removed
         # legacy SQL normalized_cost_line table.
         source = source_frame if source_frame is not None else None
@@ -1177,7 +1179,7 @@ def _process_blob_for_reprocess(
             # may contain historical append duplicates; never let those rows
             # inflate a reprocess beyond the validated CSV count.
             source = iceberg.read_bronze_batches(
-                connection_code, blob_path=meta.blob_path,
+                bronze_code, blob_path=meta.blob_path,
                 billing_period=billing_period,
                 max_rows=meta.row_count or 0,
                 batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
@@ -1188,7 +1190,7 @@ def _process_blob_for_reprocess(
             # Physical Bronze slices may have no IngestedBlob manifest row.
             # Read them by provenance path instead of leaving source=None.
             source = iceberg.read_bronze_batches(
-                connection_code, blob_path=blob_path,
+                bronze_code, blob_path=blob_path,
                 billing_period=billing_period,
                 batch_size=int(os.getenv("REPROCESS_BATCH_ROWS", "100000")),
             )
@@ -1591,6 +1593,15 @@ def _reprocess_destination_sync(
                     item for item in physical
                     if bronze_blob_eligible_for_focus(conn, str(item.get("blob_path") or ""))
                 ]
+            if source_key == "resource_graph":
+                required_prefix = (
+                    "arg/orphans/" if phys_name.lower() == "dest_cloud_orphan_resources"
+                    else "arg/inventory/"
+                )
+                physical = [
+                    item for item in physical
+                    if str(item.get("blob_path") or "").startswith(required_prefix)
+                ]
             if physical:
                 manifest_paths = {str(row[2]) for row in candidates}
                 physical_paths = {str(item["blob_path"]) for item in physical}
@@ -1606,7 +1617,7 @@ def _reprocess_destination_sync(
                     candidates = list(by_path.values())
             for blob_id, period, path in _select_reprocess_blobs(
                 candidates,
-                connector_type=connector_type,
+                connector_type="azure_resource_graph" if source_key == "resource_graph" else connector_type,
                 preferred_table=preferred_table,
             ):
                 all_blobs.append((blob_id, cid, period, path))
@@ -2156,13 +2167,14 @@ def _reprocess_destination_sync(
                     _sync_db()
 
                 _process_blob_for_reprocess(
-                    blob_id, cid, _bronze_code(conn, cid), bperiod,
+                    blob_id, cid, conn.code, bperiod,
                     brules, crules, cmapps, dest_col_names,
                     dept_cache, hierarchy_cache,
                     output_cols, task_id,
                     clone_engine=clone_engines.get(cid), batch_callback=_write_batch,
                     connection_cloud_name=conn_cloud,
                     blob_path=blob_path,
+                    bronze_source_code=_bronze_code(conn, cid),
                 )
                 expected_blob_rows = expected_rows_by_blob.get(blob_id, 0)
                 if blob_input_rows == 0:
@@ -2917,6 +2929,9 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     slice_cfg = resolve_destination_slice_config(dest_row.physical_name, dest_row.partition_spec_json)
     reprocess_group_id = str(uuid4())
     phys_lower = (dest_row.physical_name or "").lower()
+    resource_graph_source = phys_lower in {
+        "dest_cloud_orphan_resources", "dest_cloud_resource_inventory",
+    }
 
     def _blob_allowed(path: str) -> bool:
         if phys_lower == "dest_modelo_automation":
@@ -3120,31 +3135,31 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     if not ordered_jobs:
         raise HTTPException(status_code=422, detail=empty_detail)
 
-    audit_result = await db.execute(
-        insert(EtlTask).values(
-            task_type="bronze_audit", status="QUEUED", destination_table_id=body.destination_table_id,
-            connection_ids=sorted({connection_id for connection_id, _ in available}),
-            billing_periods=sorted({period for _, period, _ in ordered_jobs}),
-            result_json={"reprocess_group_id": reprocess_group_id, "audit_scope": "reprocess_group"},
-            total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
-            rows_destination=0, errors=[], phase="Na fila: auditoria física Bronze",
-        ).returning(EtlTask.id)
-    )
-    audit_task_id = audit_result.scalar_one()
+    audit_task_id = None
+    if not resource_graph_source:
+        audit_result = await db.execute(
+            insert(EtlTask).values(
+                task_type="bronze_audit", status="QUEUED", destination_table_id=body.destination_table_id,
+                connection_ids=sorted({connection_id for connection_id, _ in available}),
+                billing_periods=sorted({period for _, period, _ in ordered_jobs}),
+                result_json={"reprocess_group_id": reprocess_group_id, "audit_scope": "reprocess_group"},
+                total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
+                rows_destination=0, errors=[], phase="Na fila: auditoria física Bronze",
+            ).returning(EtlTask.id)
+        )
+        audit_task_id = audit_result.scalar_one()
     task_ids: list[int] = []
-    resource_graph_source = phys_lower in {
-        "dest_cloud_orphan_resources", "dest_cloud_resource_inventory",
-    }
     for position, (connection_id, period, snapshot_date) in enumerate(ordered_jobs, start=1):
         details = {
             "connection_ids": [connection_id],
             "billing_periods": [period],
             "publish_by_partition": True,
             "reprocess_group_id": reprocess_group_id,
-            "bronze_audit_task_id": audit_task_id,
             "queue_position": position,
             "queue_total": len(ordered_jobs),
         }
+        if audit_task_id is not None:
+            details["bronze_audit_task_id"] = audit_task_id
         if snapshot_date:
             details["snapshot_dates"] = [snapshot_date]
             log_message = (
@@ -3173,10 +3188,13 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     await db.commit()
 
     return {
-        "task_id": audit_task_id,
-        "task_ids": [audit_task_id, *task_ids],
+        "task_id": task_ids[0],
+        "task_ids": ([audit_task_id] if audit_task_id is not None else []) + task_ids,
         "reprocess_group_id": reprocess_group_id,
-        "message": f"Auditoria Bronze + {len(task_ids)} publicação(ões) {enqueue_label} enfileiradas",
+        "message": (
+            ("Auditoria Bronze + " if audit_task_id is not None else "")
+            + f"{len(task_ids)} publicação(ões) {enqueue_label} enfileiradas"
+        ),
     }
 
 
