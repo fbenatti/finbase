@@ -57,8 +57,6 @@ async def list_processing_logs(
         filters.append(ProcessingLog.started_at <= started_before)
     if search and search.strip():
         needle = f"%{search.strip()}%"
-        from app.models.destination import DestinationTable
-        from app.models.source_connection import SourceConnection
         filters.append(or_(
             ProcessingLog.process_type.ilike(needle),
             ProcessingLog.status.ilike(needle),
