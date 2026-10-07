@@ -1115,7 +1115,7 @@ async def savings_monthly():
     confiável); meses sem padrão validado (ex.: jan/2026) aparecem com 0.
     """
     # Todos os períodos disponíveis na Gold, a partir de 202601.
-    periods_sql = """
+    periods_sql = f"""
     SELECT DISTINCT _billing_period AS p
     FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm
     WHERE _billing_period >= '202601'
@@ -1124,7 +1124,7 @@ async def savings_monthly():
     periods_rows = await execute(periods_sql, timeout_s=60)
     all_periods = [str(r["p"]) for r in periods_rows if r.get("p")]
 
-    sql = """
+    sql = f"""
     SELECT
         _billing_period AS billing_period,
         COUNT(DISTINCT resource_id) AS resources,
@@ -1198,7 +1198,7 @@ async def padroes_distribuicao(period: str | None = None):
     """
     if not period:
         pr = await execute(
-            "SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
+            f"SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
             timeout_s=60,
         )
         period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1261,7 +1261,7 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
+                f"SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1506,7 +1506,7 @@ async def saving_organograma(period: str | None = None):
     if not period:
         try:
             pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
+                f"SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
                 timeout_s=60,
             )
             period = str((pr[0] or {}).get("p") or "") if pr else ""
@@ -1950,7 +1950,7 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
     atual (ou sumiu) = SAIU da automação. Estima o custo desde a saída usando o
     preço on-demand médio da VM no billing.
     """
-    dates_sql = """
+    dates_sql = f"""
     SELECT DISTINCT CAST(_snapshot_date AS VARCHAR) AS d
     FROM iceberg.{GOLD}.dest_dm_cost_snapshot_tags_automacao
     ORDER BY d DESC
