@@ -120,6 +120,13 @@ async def commitments_dashboard(
    result[f"{prefix}_ondemand"] += float(row.get("ondemand_baseline") or 0)
   result["ri_saving"] = result["ri_ondemand"] - result["ri_purchase"]
   result["savingplan_saving"] = result["savingplan_ondemand"] - result["savingplan_purchase"]
+  result["ri_purchase_pct_of_ondemand"] = (
+   result["ri_purchase"] / result["ri_ondemand"] * 100 if result["ri_ondemand"] else 0.0
+  )
+  result["savingplan_purchase_pct_of_ondemand"] = (
+   result["savingplan_purchase"] / result["savingplan_ondemand"] * 100
+   if result["savingplan_ondemand"] else 0.0
+  )
   return result
 
  monthly: dict[str, dict[str, Any]] = {}
@@ -178,6 +185,14 @@ async def commitments_dashboard(
   result["usage_rows"] += usage_rows
 
  projects = list(project_totals.values())
+ for project in projects:
+  baseline = float(project["ondemand_baseline"] or 0)
+  project["purchase_pct_of_ondemand"] = (
+   float(project["purchase_allocated"] or 0) / baseline * 100 if baseline else 0.0
+  )
+  project["saving_pct_of_ondemand"] = (
+   float(project["estimated_saving"] or 0) / baseline * 100 if baseline else 0.0
+  )
 
  forecast: dict[str, dict[str, Any]] = {}
  forecast_breakdown = []
