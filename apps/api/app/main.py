@@ -930,6 +930,11 @@ async def lifespan(app: FastAPI):
 
     async with async_session() as db:
         await seed(db)
+        # Registra o cubo agregado consumido pelo dashboard de compromissos;
+        # a consulta do painel não deve varrer FOCUS/planning Silver no Trino.
+        from app.services.commitments_gold import ensure_commitments_gold_rule
+        await ensure_commitments_gold_rule(db)
+        await db.commit()
         # Reconcile ARG destinations for connections created before the
         # automatic setup hook existed. The setup is idempotent and also
         # repairs missing mappings for existing Azure TI/4P connections,
