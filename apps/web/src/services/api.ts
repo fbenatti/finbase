@@ -2230,6 +2230,8 @@ export interface CommitmentDashboardRow {
   ri_saving?: number;
   savingplan_saving?: number;
   ondemand_baseline?: number;
+  purchase_allocated?: number;
+  estimated_saving?: number;
   usage_rows?: number;
   usage?: number;
   purchase?: number;
@@ -2245,7 +2247,6 @@ export interface CommitmentsDashboard {
   value_basis: string;
   baseline_note: string;
   period_summary: Record<string, number>;
-  year_summary: Record<string, number>;
   monthly: CommitmentDashboardRow[];
   projects: CommitmentDashboardRow[];
   forecast_monthly: CommitmentDashboardRow[];
