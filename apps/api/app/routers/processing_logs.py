@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, cast, or_, select, func
+from sqlalchemy import Integer, String, cast, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -65,13 +65,28 @@ async def list_processing_logs(
             cast(ProcessingLog.source, String).ilike(needle),
             cast(ProcessingLog.destination, String).ilike(needle),
         ))
-    total = (await db.execute(select(func.count()).select_from(ProcessingLog).where(*filters))).scalar_one()
-    rows = (await db.execute(
-        select(ProcessingLog).where(*filters)
-        .order_by(ProcessingLog.started_at.desc().nullslast(), ProcessingLog.id.desc())
+    from app.models.source_connection import SourceConnection
+    query = select(ProcessingLog, SourceConnection.name).outerjoin(
+        SourceConnection,
+        SourceConnection.id == cast(ProcessingLog.source["connection_ids"][0].astext, Integer),
+    )
+    if search and search.strip():
+        filters.append(SourceConnection.name.ilike(f"%{search.strip()}%"))
+    filtered = query.where(*filters)
+    total = (await db.execute(select(func.count()).select_from(filtered.subquery()))).scalar_one()
+    result = (await db.execute(
+        filtered.order_by(ProcessingLog.started_at.desc().nullslast(), ProcessingLog.id.desc())
         .offset(offset).limit(limit)
-    )).scalars().all()
-    return {"items": [_serialize(row) for row in rows], "total": total}
+    )).all()
+    rows = []
+    for row, source_name in result:
+        item = _serialize(row)
+        source = item["source"]
+        if source_name and source.get("connection_ids"):
+            source["connection_names"] = [source_name]
+        item["source"] = source
+        rows.append(item)
+    return {"items": rows, "total": total}
 
 
 @router.get("/{log_id}")
