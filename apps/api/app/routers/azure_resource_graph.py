@@ -486,27 +486,27 @@ async def orphan_summary(
         latest_snapshot = snapshot_dates[0] if snapshot_dates else None
         where = _build_orphan_where(
             period, rules, subscription_id, resource_group,
-            tipos=tipos, snapshot_date=selected_snapshot,
+            alias="o", tipos=tipos, snapshot_date=selected_snapshot,
         )
         if not selected_snapshot:
-            where = _latest_snapshot_per_origin_where(where, "", period)
+            where = _latest_snapshot_per_origin_where(where, "o", period)
         by_rule = await trino_execute(
-            f"SELECT orphan_rule, COUNT(*) AS cnt FROM {_orphan_table()}"
-            + where + " GROUP BY orphan_rule ORDER BY cnt DESC"
+            f"SELECT o.orphan_rule, COUNT(*) AS cnt FROM {_orphan_table('o')}"
+            + where + " GROUP BY o.orphan_rule ORDER BY cnt DESC"
         )
         by_tipo = await trino_execute(
-            f"SELECT tipo_recurso, COUNT(*) AS cnt FROM {_orphan_table()}"
-            + where + " GROUP BY tipo_recurso ORDER BY cnt DESC"
+            f"SELECT o.tipo_recurso, COUNT(*) AS cnt FROM {_orphan_table('o')}"
+            + where + " GROUP BY o.tipo_recurso ORDER BY cnt DESC"
         )
         cost_where = _build_orphan_where(
             period, rules, subscription_id, resource_group,
-            tipos=tipos, snapshot_date=selected_snapshot,
+            alias="o", tipos=tipos, snapshot_date=selected_snapshot,
         )
         if not selected_snapshot:
-            cost_where = _latest_snapshot_per_origin_where(cost_where, "", period)
+            cost_where = _latest_snapshot_per_origin_where(cost_where, "o", period)
         cost_total = await trino_execute(
-            "SELECT COALESCE(SUM(cost_brl), 0) AS cost_brl, COUNT(*) AS n "
-            f"FROM iceberg.{GOLD}.{ORPHAN_COST_GOLD_TABLE}"
+            "SELECT COALESCE(SUM(o.cost_brl), 0) AS cost_brl, COUNT(*) AS n "
+            f"FROM iceberg.{GOLD}.{ORPHAN_COST_GOLD_TABLE} o"
             + cost_where
         )
     except Exception as exc:  # noqa: BLE001 — Trino pode estar fora/ tabela ainda não criada

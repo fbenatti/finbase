@@ -1,6 +1,7 @@
 from app.routers.azure_resource_graph import (
     ORPHAN_COST_SQL_TEMPLATE,
     _build_orphan_where,
+    _latest_snapshot_per_origin_where,
     _orphan_table,
     _saving_generated,
 )
@@ -26,6 +27,12 @@ def test_orphan_snapshot_filter_keeps_one_daily_picture():
     assert 'o."_billing_period" = \'202608\'' in where
     assert "o.orphan_rule IN ('disk_unattached')" in where
     assert "o.snapshot_date = '2026-08-31'" in where
+
+
+def test_latest_snapshot_per_origin_correlates_to_outer_origin():
+    where = _latest_snapshot_per_origin_where("", "o")
+
+    assert "i.cloud_origem = o.cloud_origem" in where
 
 
 def test_generated_saving_is_prorated_over_observed_days():
