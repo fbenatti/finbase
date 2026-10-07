@@ -107,7 +107,6 @@ export default function CommitmentsDashboard() {
   const savingplanPurchasePct = Number(selected.savingplan_ondemand || 0) ? Number(selected.savingplan_purchase || 0) / Number(selected.savingplan_ondemand) * 100 : 0;
   const riSavingPct = Number(selected.ri_ondemand || 0) ? Number(selected.ri_saving || 0) / Number(selected.ri_ondemand) * 100 : 0;
   const savingplanSavingPct = Number(selected.savingplan_ondemand || 0) ? Number(selected.savingplan_saving || 0) / Number(selected.savingplan_ondemand) * 100 : 0;
-  const totalPurchase = Number(selected.ri_purchase || 0) + Number(selected.savingplan_purchase || 0);
   const totalBaseline = Number(selected.ri_ondemand || 0) + Number(selected.savingplan_ondemand || 0);
   const totalSaving = Number(selected.ri_saving || 0) + Number(selected.savingplan_saving || 0);
   const totalSavingPct = totalBaseline ? totalSaving / totalBaseline * 100 : 0;
@@ -144,7 +143,6 @@ export default function CommitmentsDashboard() {
         <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Consolidado do período</Typography>
         <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel} · valores realizados, exceto as séries identificadas como forecast.</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Compra total" value={totalPurchase} detail="RI + SavingPlan" />
           <MetricCard title="Saving total realizado" value={totalSaving} detail="Base OnDemand menos compra" />
           <MetricCard title="Saving / base OnDemand" value={totalSavingPct} detail="Percentual consolidado do período" isPercent />
           <MetricCard title="Base OnDemand média / mês" value={(Number(selected.ri_ondemand || 0) + Number(selected.savingplan_ondemand || 0)) / monthCount} detail="RI + SavingPlan" />
