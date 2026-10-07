@@ -1,54 +1,148 @@
-# Logs centralizados de processamento
+# Reestruturação operacional para PRD
 
-## Objetivo
+Este documento consolida as mudanças do branch atual que precisam ser avaliadas para produção: logs unificados, reprocessamento/clonagem com fallback de preços Azure, regras de classificação, ajustes de forecast e dashboard de compromissos. O branch contém commits anteriores e independentes da solicitação de logs; não os trate como escopo implícito de um único PR. Antes de abrir/mesclar, compare `origin/main...HEAD` e decida explicitamente quais blocos entram no release.
 
-Manter uma visão operacional única para extrações, reprocessamentos e materializações. `processing_log` é o contrato canônico de consulta; `etl_task` continua sendo a fila e o estado de execução para os processos já executados pelo worker. Os detalhes financeiros continuam no Iceberg/Trino e não são copiados para PostgreSQL.
+## 1. Resumo das mudanças
 
-## Contrato
+| Bloco | Mudança | Persistência principal |
+|---|---|---|
+| Logs | Nova camada única para listar e detalhar execuções; históricos separados deixam de ser exibidos nas abas de processamento | Tabela PostgreSQL `processing_log`; `etl_task` e `forecast_run` preservados |
+| Azure Price Sheet | Ingestão de snapshot completo para referência de preço em Bronze e busca direcionada de `MeterId` como fallback de clone | Iceberg `bronze.raw_azure_pricesheet` e `bronze.raw_azure_price_reference`; metadados de snapshot na conexão `azure-pricesheet` |
+| Reprocessamento e clones | Reuso de preço observado/curado e fallback Price Sheet com validação de produto/região/unidade e precedência determinística | Bronze/Silver/Gold existentes; tarefas em `etl_task` |
+| Regras/classificação | Correções de importação/reimportação e classificação de retornos/folhas de projeto | Tabelas de regras e dados Silver/Gold existentes |
+| Forecast | Cutoff limitado por data observada e `hoje - cutoff_days`; proteção de granularidade mensal restrita a CSV manual | `forecast_config`, `forecast_run`, Gold/forecast existentes |
+| Dashboard de compromissos | Nova API e aba Savings para compra RI/Savings Plan, baseline OnDemand e projeção | Consultas Trino sobre FOCUS/planejamento; sem tabela PostgreSQL nova |
 
-Cada execução publicada em `processing_log` contém:
+## 2. Logs centralizados
 
-- `process_type`, `status`, vínculo opcional com `etl_task_id` e `source_kind`;
-- `source`, `destination`, `partitions`, `parameters` e `counts` em JSON;
-- `phase`, `error`, `started_at`, `finished_at` e `details`;
-- em `details`, eventos cronológicos, erros e payloads operacionais específicos.
+### Modelo PostgreSQL
 
-Campos sem significado para um tipo ficam vazios. `counts.rows_source`, `rows_normalized` e `rows_destination` significam linhas lidas, normalizadas e publicadas quando o worker reporta tais métricas; `items_total` e `items_processed` representam blobs, regras, meses ou unidades do processo conforme seu tipo.
+Nova tabela `processing_log`, criada por `Base.metadata.create_all`, com índices por início, tipo/status e vínculo ETL:
 
-## Componentes e rotas
+- `id`, `process_type`, `status`, `etl_task_id`;
+- `source_kind`, `source`, `destination`, `partitions`, `parameters`, `counts`;
+- `phase`, `error`, `details`, `started_at`, `finished_at`, `created_at`.
 
-- `app/models/processing_log.py`: tabela canônica e índices.
-- `app/services/processing_logs.py`: normalização/sincronização idempotente e registro de eventos.
-- `GET /processing-logs`: paginação, busca e filtros por tipo/status/período.
-- `GET /processing-logs/{id}`: detalhe completo com eventos e metadados.
-- `/reprocess?tab=logs`: grid e dialog de detalhe.
+`etl_task` permanece sendo a fila e a fonte operacional do worker. O log canônico é a leitura padronizada. A FK para `etl_task` usa `ON DELETE SET NULL`; o índice único permite no máximo um registro canônico por tarefa. Registros especializados sem tarefa ETL, como um `ForecastRun` independente, podem existir sem esse vínculo e são identificados nos detalhes.
 
-O startup cria a tabela por `Base.metadata.create_all` e executa backfill idempotente das linhas legadas de `etl_task`. O payload legado permanece intacto. Novas atualizações de reprocessamento também sincronizam o registro canônico.
+### API
 
-## Estado da migração
+- `GET /processing-logs`: filtros `limit`, `offset`, `search`, `process_type`, `status`, `started_after`, `started_before`, `connection_id` e `destination_table_id`; mantém `task_type` como alias de compatibilidade.
+- `GET /processing-logs/{id}`: detalhe incluindo `details`, eventos, erros e payload específico.
+- A API é registrada em `apps/api/app/main.py`; router em `apps/api/app/routers/processing_logs.py`; serialização/sincronização em `apps/api/app/services/processing_logs.py`.
 
-1. **Contrato e base canônica:** implementados.
-2. **Backfill e leitura comum:** implementados para `etl_task` existente e expostos ao frontend.
-3. **Sincronização contínua:** conectada ao enqueue de extração/forecast, claim/recuperação/cancelamento de ETL e atualizações operacionais dos fluxos de reprocessamento no worker/API.
-4. **Registros próprios:** `forecast_run` continua sendo fonte especializada; seus parâmetros/resultado são ligados ao log ETL ou expostos como registro consolidado se não houver vínculo. Acurácia entra como `forecast_accuracy` via `etl_task`. Conteúdo Bronze permanece consultável por link para a visualização de dados da execução.
-5. **Aposentadoria visual:** as abas de dados, extração, forecast, custo compartilhado, Gold e relacionamentos IA deixaram de renderizar históricos separados. As rotas antigas permanecem ativas para compatibilidade; devem ser removidas só após confirmar que não há outros consumidores.
+### Escrita e cobertura
 
-## Implantação em produção
+O serviço central sincroniza tarefas no enqueue de extração/forecast, claim/liberação/recuperação/cancelamento e persistência dos eventos de reprocessamento. O startup faz backfill idempotente apenas de tarefas sem log e dos registros de forecast existentes. Eventos legados em `etl_task.result_json.event_log` são espelhados em `details.event_log`; não são apagados.
 
-1. Fazer backup e confirmar espaço/índices para `processing_log`.
-2. Implantar API que cria a tabela e faz o backfill incremental; validar `GET /processing-logs` e amostras de cada tipo.
-3. Implantar workers compatíveis para sincronizar atualizações e eventos em execução.
-4. Implantar frontend e validar filtros, paginação e dialog.
-5. Comparar contagens e status entre endpoints antigos e a nova rota por pelo menos um ciclo operacional completo.
-6. Em release futuro, migrar consumidores restantes e só então descontinuar as rotas antigas. Não excluir linhas de `etl_task` nem `forecast_run`: elas são estado de fila e snapshots operacionais/de domínio.
+Os campos comuns são snapshots. `source` e `destination` podem conter IDs, nomes, namespaces ou tabelas conforme o tipo. `counts` usa linhas de origem/normalizadas/destino quando informadas; `items_total` e `items_processed` cobrem unidades específicas, como blobs, regras ou meses. Dados financeiros não são duplicados no PostgreSQL.
 
-## Rollback
+### Frontend
 
-Frontend pode voltar a consultar as rotas antigas sem impacto nos jobs. A tabela `processing_log` é aditiva; em rollback não apagar seus dados. Reimplantar a versão anterior da API/worker mantém `etl_task` e os históricos específicos intactos. A remoção física da tabela, se algum dia necessária, deve ser uma migração separada após backup e auditoria de consumidores.
+`/reprocess?tab=logs` reúne busca, filtros por tipo/status, paginação server-side e dialog com origem, destino, partições, contagens, horários, parâmetros, erros e eventos. As abas Dados, Extração, Forecast, Custo compartilhado, Gold e Custo IA mantêm os controles de execução, mas não renderizam históricos paralelos. Cancelamento de tarefa ativa e link para conteúdo Bronze continuam no detalhe. Conteúdo de saída não é replicado: fica no destino analítico original.
 
-## Limitações conhecidas
+As rotas antigas continuam disponíveis para outros consumidores. Esta entrega remove a duplicação visual; não remove tabelas, endpoints nem registros legados.
 
-- O contrato comum organiza metadados e eventos; não replica linhas financeiras de saída.
-- Em registros antigos, origem/destino dependem do conteúdo que foi persistido à época; o backfill não consegue recuperar parâmetros ausentes.
-- A tela resolve nomes de conexão/destino quando os IDs ainda apontam para registros válidos.
-- O tamanho e a retenção de `details` precisam ser acompanhados; eventos são limitados ao último lote quando escritos pelos helpers de reprocessamento.
+## 3. Azure Price Sheet e clones
+
+### Dados e configuração
+
+- A origem lógica `azure-pricesheet` é criada sob demanda como `SourceConnection` pelo endpoint de refresh.
+- O endpoint `POST /etl/azure-pricesheet/refresh` cria uma tarefa `azure_pricesheet_refresh`; worker executa ingestão.
+- O snapshot completo é validado pelo manifest: arquivos CSV, bytes e linhas declaradas, tamanhos reais e contagem efetivamente ingerida.
+- Bronze guarda as colunas do CSV normalizadas para minúsculas, além de `snapshot_id`, `_blob_path`, `_billing_period` e `_ingested_at` em `bronze.raw_azure_pricesheet`.
+- O snapshot ativo e seu manifest/período/contagem são registrados em `source_connection.config_json` da conexão `azure-pricesheet`. Snapshot novo só fica ativo após validação; ingestões parciais anteriores são removidas por chave de snapshot em retry.
+- Consultas direcionadas usam Query Acceleration para `MeterId` e persistem referências em `bronze.raw_azure_price_reference`.
+
+Não há nova tabela PostgreSQL para armazenar preços. Os requisitos externos são credenciais Azure configuradas em `settings` e acesso ao container/prefixo de Price Sheet. O código escolhe credenciais 4P ou TI conforme configuração. Confirmar em PRD qual conta/container e prefixo são os corretos.
+
+### Regras do fallback
+
+O reprocessamento tenta preços observados e catálogo curado antes do Price Sheet; este é fallback para chaves ainda sem preço compatível. Match valida `MeterId` e dimensões contratuais disponíveis, incluindo produto/região e unidade. Unidades equivalentes são normalizadas com regra conservadora. Preço incompatível não é aceito; gaps ficam auditáveis e não inventam valor.
+
+Price Sheet fica em Bronze, fora do catálogo Silver de custos. Há mudança deliberada de comportamento de reprocessamento e potencial mudança de valores de clone, então deve-se validar amostras representativas contra saída atual antes de reprocessar produção em massa.
+
+## 4. Classificação, reimportação e Gold
+
+O branch também altera importação/reimportação de regras, classificação de retornos e folhas de projeto, seleção de meses usando Bronze físico, granularidade de linhas sintéticas de retorno e defaults de regras Gold. Isso afeta tabelas/configuração já existentes, incluindo `classification_rule`, `business_rule`, `gold_rule` e dados materializados.
+
+O bootstrap da API muda seeds/upserts Gold auxiliares para declarar explicitamente `dimensions`, `measure_columns`, `snapshot_mode` e `snapshot_col`. Também muda a comparação de JSON legado no seed de `visao-completa`. Não cria nova tabela PostgreSQL para essa parte, mas pode atualizar registros de regra existentes ao subir a API. Revisar a query seed em `main.py` com uma cópia de PRD antes de deploy; reprocessamento Gold é uma ação separada e pode alterar tabelas Iceberg.
+
+## 5. Forecast e granularidade
+
+O cutoff passa a ser o menor entre a maior data válida encontrada na fonte e `hoje - cutoff_days`. Isso evita consumir datas futuras sem recuar duas vezes uma origem atrasada. A proteção contra dados mensais agregados no mês corrente passa a se aplicar a CSV manual, cuja granularidade é detectada e persistida em `manual_csv_metadata`; extrações Azure/GCP podem publicar o realizado parcial disponível.
+
+Há alteração em `FORECAST.md` para documentar o novo contrato. Não é necessária tabela nova para logs; o processo usa `forecast_run`/`etl_task` atuais. Validar comportamento com configurações e fontes representativas antes de atualizar snapshots em PRD.
+
+## 6. Dashboard de compromissos (Savings)
+
+Nova rota `GET /savings/commitments-dashboard` calcula por período e origem (all, azure-ti, azure-4p): compras de Reservation/Savings Plan, baseline OnDemand a partir das linhas sintéticas Return vinculadas à linha de uso original, economia estimada e série de forecast. A aba nova em Savings exibe métricas, séries e visão por projeto.
+
+As consultas usam Trino nas tabelas FOCUS detalhadas e planejamento da camada ativa. Não criam tabelas. As compras não são rateadas por projeto; o baseline de projeto é mostrado separadamente. Validar moeda e semântica contábil dos valores com FinOps antes de divulgar como saving realizado. O retorno usa `realizado_cloud` e a documentação/resposta da API informa unidade monetária conforme a fonte; não presumir BRL quando a origem trouxer outra moeda.
+
+## 7. Tabelas, migrações e dados
+
+### PostgreSQL
+
+- **Nova:** `processing_log` e seus índices/FK, criados automaticamente no startup via SQLAlchemy metadata.
+- **Alteradas por esta funcionalidade:** nenhuma coluna nova em `etl_task` ou `forecast_run`; são lidas como fontes e mantidas compatíveis.
+- **Possíveis atualizações:** backfill cria linhas em `processing_log`; seeds idempotentes podem atualizar regras Gold existentes conforme `main.py`.
+- `etl_task.result_json`, `forecast_run`, rotas antigas e dados legados não são eliminados.
+
+### Iceberg / Trino
+
+- **Novas tabelas Bronze sob demanda:** `raw_azure_pricesheet` e `raw_azure_price_reference`.
+- Reprocessamento/clones podem publicar diferentes valores onde antes não havia preço compatível.
+- Dashboard de compromissos é somente leitura.
+- Regras Gold/FOCUS existentes podem ser reprocessadas depois do deploy, mas a implantação da aplicação não deve disparar esse reprocessamento automaticamente.
+
+## 8. Plano de deploy em PRD
+
+### Antes do deploy
+
+1. Revisar o diff completo `origin/main...HEAD`; os 126 commits locais no momento desta documentação incluem trabalho de preços Azure, forecast, regras, Savings e logs. Abrir PR somente com escopo aprovado.
+2. Fazer backup PostgreSQL e confirmar backup/retention do catálogo Iceberg/warehouse.
+3. Conferir variáveis Azure tenant/client/secret/storage account/container e permissões de list/read no prefixo `reports/report_-pricesheet/`.
+4. Confirmar que API/worker compartilham o mesmo banco, warehouse Iceberg e configuração Azure; alinhar versões de deploy.
+5. Registrar contagens/status atuais de `etl_task`, `forecast_run`, regras Gold e outputs de clone para comparação.
+
+### Ordem recomendada
+
+1. Fazer deploy da API que cria `processing_log`, executa backfill e disponibiliza as rotas; observar startup/locks e tamanho do backfill.
+2. Fazer deploy do worker compatível, que escreve status/eventos no log e reconhece `azure_pricesheet_refresh`.
+3. Validar `GET /processing-logs`, filtros e detalhes para execução antiga e uma nova execução curta de cada tipo habilitado.
+4. Fazer deploy do frontend e validar `/reprocess?tab=logs`, cancelamento e link Bronze.
+5. Azure Price Sheet: enfileirar refresh controlado; verificar manifest ativo, período, total de linhas e tabela Bronze. Não executar refresh sem credenciais/manifest válido.
+6. Executar um reprocessamento/clonagem piloto de fonte/período aprovado; comparar preços observados, curados e fallback, e validar contagens de Bronze/Silver/Gold.
+7. Validar forecast em uma configuração piloto e comparar cutoff/snapshot; validar `/savings/commitments-dashboard` contra consultas/relatórios financeiros de referência.
+8. Só após aceite funcional planejar backfill/reprocessamento histórico amplo e eventual aposentadoria de endpoints antigos em release posterior.
+
+## 9. Verificações pós-deploy
+
+- API e worker saudáveis; fila ETL sem tarefa presa ou falhas novas de serialização.
+- `processing_log` tem uma linha por `etl_task` histórico e novos jobs aparecem com tipo, origem/destino, parâmetros, status e timestamps.
+- Comparar amostra entre log canônico e `etl_task`/`forecast_run`, sem perda de detalhes legados.
+- Verificar latência de startup; backfill seleciona somente tarefas sem vínculo canônico, mais snapshots forecast especializados.
+- Confirmar Bronze Price Sheet ativo não aponta para snapshot incompleto; validar produto/região/unidade em amostras do clone.
+- Conferir totais da Gold/FOCUS e baseline de compromissos com FinOps.
+- Build validado nesta implementação: `npm run build`; compilação dos módulos Python passou. Os testes automatizados do repositório não foram executados nesta etapa.
+
+## 10. Rollback
+
+- Frontend: voltar à versão anterior restaura as telas anteriores; os endpoints específicos seguem ativos.
+- API/worker: retornar ambos a uma versão compatível. Não apagar `processing_log`; ele é aditivo e `etl_task`/`forecast_run` permanecem intactos.
+- Logs: interromper o backfill/sincronização só após rollback coordenado de API/worker; nenhum dado legado precisa ser revertido.
+- Price Sheet: não apagar a tabela Bronze nem limpar `active_snapshot_id` automaticamente. Reverter snapshot ativo exige decisão operacional e registro do snapshot anterior validado.
+- Reprocessamento: restaurar saída Silver/Gold a partir de snapshot/backup conhecido; não presumir que deploy reverso desfaz materializações.
+- Seeds: mudanças em `gold_rule` feitas no startup podem persistir após rollback do código; registrar os valores anteriores antes de deploy e restaurá-los somente se necessário.
+- Não remover tabelas nem endpoints legados durante o rollback.
+
+## 11. Riscos e itens que exigem aceite
+
+- Este branch reúne vários blocos independentes; conferir e reduzir o PR para o release aprovado.
+- Startup/backfill acessa todas as tarefas sem registro canônico e os runs forecast; medir em cópia de PRD se o volume for alto.
+- O schema de `processing_log.details` inclui payload operacional; estabelecer retenção/limite antes de crescimento prolongado.
+- Algumas execuções especializadas usam `etl_task` e outras `forecast_run`; o dashboard relaciona os detalhes, mas a cobertura de todo fluxo novo deve ser validada.
+- Price Sheet pode mudar resultados de clone; precisa de aceite de valores e teste piloto.
+- Métricas de Savings são estimativas com premissas de baseline; não publicar como economia contábil sem validação.
+- Nenhum endpoint ou tabela de log antigo foi apagado; aposentadoria requer busca de consumidores e release de breaking change separado.
