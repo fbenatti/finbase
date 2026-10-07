@@ -256,17 +256,21 @@ function EnvironmentCard({
           <Chip key={profile} size="small" variant="outlined" label={`credencial: ${profile}`} />
         ))}
         <Box sx={{ flex: 1 }} />
-        <Chip size="small" label={`${environment.enabled_count}/${environment.source_count} ligadas`} />
-        <Tooltip title="Enfileira a coleta de todas as fontes ligadas deste ambiente">
-          <span>
-            <Button
-              size="small" variant="contained" startIcon={collecting ? <CircularProgress size={14} /> : <PlayArrowIcon />}
-              onClick={collectAll} disabled={collecting || enabledSources.length === 0}
-            >
-              Carga full ({enabledSources.length})
-            </Button>
-          </span>
-        </Tooltip>
+        {enabledSources.length > 0 && (
+          <>
+            <Chip size="small" label={`${environment.enabled_count}/${environment.source_count} ligadas`} />
+            <Tooltip title="Enfileira a coleta de todas as fontes ligadas deste ambiente">
+              <span>
+                <Button
+                  size="small" variant="contained" startIcon={collecting ? <CircularProgress size={14} /> : <PlayArrowIcon />}
+                  onClick={collectAll} disabled={collecting}
+                >
+                  Carga full ({enabledSources.length})
+                </Button>
+              </span>
+            </Tooltip>
+          </>
+        )}
         <IconButton size="small" onClick={() => setExpanded((v) => !v)}>
           <ExpandMoreIcon fontSize="small" sx={{ transform: expanded ? "rotate(180deg)" : "none" }} />
         </IconButton>
