@@ -236,8 +236,6 @@ async def commitments_dashboard(
     bucket[f"{prefix}_forecast_ondemand"] = bucket.get(f"{prefix}_forecast_ondemand", 0.0) + amount
    else:
     bucket[f"{prefix}_forecast_{category}"] += amount
-  if prefix and by_project if False else False:
-   pass
   if prefix and row.get("project"):
    project_key = (period, str(row.get("source") or ""), prefix, str(row.get("project") or "Sem projeto"))
    project_bucket = forecast_projects.setdefault(project_key, {"period": period, "source": project_key[1], "commitment_type": "RI" if prefix == "ri" else "SavingPlan", "project": project_key[3], "forecast_purchase": 0.0, "forecast_return": 0.0, "forecast_ondemand": 0.0})
