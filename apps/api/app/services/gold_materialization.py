@@ -1245,6 +1245,7 @@ async def materialize_saving_history(
     sources: list[GoldMartRuleSource] | None = None,
     run_id: int | None = None,
     helper_rule_id: int | None = None,
+    saving_rule_id: int | None = None,
 ) -> dict[str, Any]:
     """Materializa a Gold de saving por desligue MÊS A MÊS.
 
@@ -1274,13 +1275,11 @@ async def materialize_saving_history(
         )
         periods = [str(r["_billing_period"]) for r in avail if str(r["_billing_period"]) < cur]
 
-    # Drop da Gold final para recomeçar do zero.
-    await execute(
-        f"DROP TABLE IF EXISTS iceberg.{GOLD}.dest_dm_cost_{SAVING_GOLD_CODE}",
-        timeout_s=120,
-    )
+    # Constrói fora do nome publicado. Em falha no meio do histórico, o cubo
+    # anterior permanece disponível; só fazemos swap após todos os períodos.
+    staging_table = f"dest_dm_cost_{SAVING_GOLD_CODE}_stg_{time.time_ns()}"
     await execute(f"""
-    CREATE TABLE iceberg.{GOLD}.dest_dm_cost_{SAVING_GOLD_CODE} (
+    CREATE TABLE iceberg.{GOLD}.{staging_table} (
         resource_id VARCHAR,
         resource_name VARCHAR,
         resource_type VARCHAR,
@@ -1453,11 +1452,11 @@ async def materialize_saving_history(
         WHERE {desligue_list_filter_sql()}
         """
         await execute(
-            f"INSERT INTO iceberg.{GOLD}.dest_dm_cost_{SAVING_GOLD_CODE} {sql}",
+            f"INSERT INTO iceberg.{GOLD}.{staging_table} {sql}",
             timeout_s=600,
         )
         result = await execute(
-            f"SELECT COUNT(*) AS c FROM iceberg.{GOLD}.dest_dm_cost_{SAVING_GOLD_CODE} WHERE _billing_period = '{target}'",
+            f"SELECT COUNT(*) AS c FROM iceberg.{GOLD}.{staging_table} WHERE _billing_period = '{target}'",
             timeout_s=120,
         )
         rows = int((result[0] if result else {}).get("c") or 0)
@@ -1465,6 +1464,19 @@ async def materialize_saving_history(
         summary["rows"][target] = rows
         logger.info("Saving desligue %s: %d linhas", target, rows)
 
+    saving_result = await publish_gold_cube(
+        cube_code=SAVING_GOLD_CODE,
+        table=f"dest_dm_cost_{SAVING_GOLD_CODE}",
+        select_sql=f"SELECT * FROM iceberg.{GOLD}.{staging_table}",
+        namespace=GOLD,
+        run_id=run_id,
+        rule_id=saving_rule_id,
+        partition_column="_billing_period",
+        empty_is_error=True,
+        progress=progress,
+    )
+    summary["published_rows"] = saving_result.rows
+    await execute(f"DROP TABLE IF EXISTS iceberg.{GOLD}.{staging_table}", timeout_s=120)
     return summary
 
 
