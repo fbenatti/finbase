@@ -2,30 +2,35 @@
 
 ## Performance da tela de logs e cubo operacional
 
-A listagem unificada de execuções deve ser servida por um cubo operacional
-materializado em Gold, com nome `dest_dm_processing_logs`. O cubo contém uma
+A listagem unificada de execuções é servida por um cubo operacional materializado
+em Gold, com nome `dest_dm_processing_logs`. O cubo contém uma
 linha por execução e dimensões para tipo, status, origem, destino, partições,
 início/fim, contagens e fase. A timeline detalhada, parâmetros e payloads de
 erro/eventos permanecem em `processing_log` no PostgreSQL e são carregados sob
 demanda ao abrir o diálogo. A grade lê apenas o cubo; não varre Silver nem
 materializa dados de origem durante a navegação.
 
-O cubo deve ser atualizado incrementalmente quando o serviço canônico registra
-ou sincroniza um log. A primeira publicação faz backfill do histórico uma vez;
-depois disso cada atualização da execução atualiza sua linha Gold. Para evitar
-varredura de Silver, a fonte do cubo é `processing_log`/`etl_task` via extração
-incremental controlada, com checkpoint por `updated_at` (adicionar esse campo
-se necessário). A materialização usa o serviço de governança Gold e registra
-manifesto/versionamento. A UI lê essa tabela com paginação, filtros e ordenação
-no backend. O diálogo consulta `GET /processing-logs/{id}`.
+O cubo é atualizado por uma rotina em segundo plano a cada 15 segundos. Ela lê
+somente linhas alteradas em `processing_log` desde o último `updated_at` (com
+replay idempotente da fronteira de timestamp) e faz `MERGE` por `id` em lotes de
+100. A primeira execução cria a tabela e carrega o histórico; reconstruções
+manuais fazem upsert de todo o histórico sem apagar a publicação existente.
+Uma trava consultiva PostgreSQL impede publicadores concorrentes. O cubo não
+contém parâmetros, erros nem eventos extensos. A UI lê essa tabela com paginação
+e filtros; o diálogo consulta `GET /processing-logs/{id}` para obter o registro
+completo no PostgreSQL.
 
-No release: criar o cubo e sua regra em Governança → Geração de Cubos,
-materializar uma vez em ambiente de validação, comparar contagens contra a
-tabela PostgreSQL e verificar que a lista não emite consultas às tabelas
-Silver. A execução inicial de backfill deve ocorrer fora do request da tela;
-falhas na publicação mantêm a listagem operacional atual como fallback. Para
-PRD, garantir refresh incremental, alerta de atraso e procedimento de
-reconstrução completa antes de retirar o fallback.
+O cubo aparece em Governança → Geração de Cubos como recurso operacional do
+sistema, com disponibilidade, contagem, última atualização e ação para
+reconstrução. A grade tenta a Gold primeiro e usa a consulta PostgreSQL atual
+como fallback durante o aquecimento ou indisponibilidade analítica. Os
+endpoints operacionais são `GET /processing-logs/cube/status` e
+`POST /processing-logs/cube/rebuild` (resposta assíncrona `202`).
+
+Para PRD, confirmar Trino/Iceberg com suporte a `MERGE`, validar contagens e
+atualizações de status de execuções existentes, observar atraso do ciclo e
+testar reconstrução sem indisponibilidade. A origem do cubo é exclusivamente
+PostgreSQL; a lista de logs não consulta Silver.
 
 Este documento consolida as mudanças do branch atual que precisam ser avaliadas para produção: logs unificados, reprocessamento/clonagem com fallback de preços Azure, regras de classificação, ajustes de forecast e dashboard de compromissos. O branch contém commits anteriores e independentes da solicitação de logs; não os trate como escopo implícito de um único PR. Antes de abrir/mesclar, compare `origin/main...HEAD` e decida explicitamente quais blocos entram no release.
 
@@ -48,7 +53,7 @@ Nova tabela `processing_log`, criada por `Base.metadata.create_all`, com índice
 
 - `id`, `process_type`, `status`, `etl_task_id`;
 - `source_kind`, `source`, `destination`, `partitions`, `parameters`, `counts`;
-- `phase`, `error`, `details`, `started_at`, `finished_at`, `created_at`.
+- `phase`, `error`, `details`, `started_at`, `finished_at`, `created_at`, `updated_at`.
 
 `etl_task` permanece sendo a fila e a fonte operacional do worker. O log canônico é a leitura padronizada. A FK para `etl_task` usa `ON DELETE SET NULL`; o índice único permite no máximo um registro canônico por tarefa. Registros especializados sem tarefa ETL, como um `ForecastRun` independente, podem existir sem esse vínculo e são identificados nos detalhes.
 
