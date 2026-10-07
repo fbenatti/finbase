@@ -1,38 +1,39 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
+import { lazy, Suspense } from "react";
 import type { ReactElement } from "react";
 import Layout from "./layout/Layout";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ChangePassword from "./auth/ChangePassword";
-import Login from "./pages/Login/Login";
-import Connections from "./pages/Connections/Connections";
-import Explorer from "./pages/Explorer/Explorer";
-import Mappings from "./pages/Mappings/Mappings";
-import Governance from "./pages/Governance/Governance";
-import Destinations from "./pages/Destinations/Destinations";
-import Extraction from "./pages/Extraction/Extraction";
-import ExtractionHistory from "./pages/Extraction/ExtractionHistory";
-import Analysis from "./pages/Analysis/Analysis";
-import PipelineBuilder from "./pages/Pipeline/PipelineBuilder";
-import Relationship from "./pages/Relationship/Relationship";
-import Reprocess from "./pages/Reprocess/Reprocess";
-import Forecast from "./pages/Forecast/Forecast";
-import ForecastHistory from "./pages/Forecast/ForecastHistory";
-import ForecastAccuracy from "./pages/ForecastAccuracy/ForecastAccuracy";
-import SharedCostHistory from "./pages/Reprocess/SharedCostHistory";
-import CloneRules from "./pages/CloneRules/CloneRules";
-import Tables from "./pages/Tables/Tables";
-import DashboardsIA from "./pages/Dashboards/DashboardsIA";
-import GitHubCopilotDashboard from "./pages/GitHubCopilotDashboard/GitHubCopilotDashboard";
-import FinancialPlanning from "./pages/Planning/FinancialPlanning";
-import Savings from "./pages/Savings/Savings";
-import AzurePtuOps from "./pages/AzurePTU/AzurePtuOps";
-import GoldDashboard from "./pages/GoldDashboard/GoldDashboard";
-import GoldDashboardV2 from "./pages/GoldDashboard/GoldDashboardV2";
-import Admin from "./pages/Admin/Admin";
-import SsoProviders from "./pages/Admin/SsoProviders";
-import Audit from "./pages/Admin/Audit";
-import Ideas from "./pages/Ideas/Ideas";
+const Login = lazy(() => import("./pages/Login/Login"));
+const Connections = lazy(() => import("./pages/Connections/Connections"));
+const Explorer = lazy(() => import("./pages/Explorer/Explorer"));
+const Mappings = lazy(() => import("./pages/Mappings/Mappings"));
+const Governance = lazy(() => import("./pages/Governance/Governance"));
+const Destinations = lazy(() => import("./pages/Destinations/Destinations"));
+const Extraction = lazy(() => import("./pages/Extraction/Extraction"));
+const ExtractionHistory = lazy(() => import("./pages/Extraction/ExtractionHistory"));
+const Analysis = lazy(() => import("./pages/Analysis/Analysis"));
+const PipelineBuilder = lazy(() => import("./pages/Pipeline/PipelineBuilder"));
+const Relationship = lazy(() => import("./pages/Relationship/Relationship"));
+const Reprocess = lazy(() => import("./pages/Reprocess/Reprocess"));
+const Forecast = lazy(() => import("./pages/Forecast/Forecast"));
+const ForecastHistory = lazy(() => import("./pages/Forecast/ForecastHistory"));
+const ForecastAccuracy = lazy(() => import("./pages/ForecastAccuracy/ForecastAccuracy"));
+const SharedCostHistory = lazy(() => import("./pages/Reprocess/SharedCostHistory"));
+const CloneRules = lazy(() => import("./pages/CloneRules/CloneRules"));
+const Tables = lazy(() => import("./pages/Tables/Tables"));
+const DashboardsIA = lazy(() => import("./pages/Dashboards/DashboardsIA"));
+const GitHubCopilotDashboard = lazy(() => import("./pages/GitHubCopilotDashboard/GitHubCopilotDashboard"));
+const FinancialPlanning = lazy(() => import("./pages/Planning/FinancialPlanning"));
+const Savings = lazy(() => import("./pages/Savings/Savings"));
+const AzurePtuOps = lazy(() => import("./pages/AzurePTU/AzurePtuOps"));
+const GoldDashboard = lazy(() => import("./pages/GoldDashboard/GoldDashboard"));
+const GoldDashboardV2 = lazy(() => import("./pages/GoldDashboard/GoldDashboardV2"));
+const Admin = lazy(() => import("./pages/Admin/Admin"));
+const SsoProviders = lazy(() => import("./pages/Admin/SsoProviders"));
+const Audit = lazy(() => import("./pages/Admin/Audit"));
+const Ideas = lazy(() => import("./pages/Ideas/Ideas"));
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -55,6 +56,7 @@ function RequireAuth({ children }: { children: ReactElement }) {
 function App() {
   return (
     <AuthProvider>
+      <Suspense fallback={<Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><CircularProgress /></Box>}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
@@ -108,6 +110,7 @@ function App() {
         <Route path="ideas" element={<Ideas />} />
         </Route>
       </Routes>
+      </Suspense>
     </AuthProvider>
   );
 }
