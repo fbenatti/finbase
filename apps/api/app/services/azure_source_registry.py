@@ -1,12 +1,12 @@
 """Catálogo declarativo das fontes Azure e agrupamento por ambiente.
 
 A lista em `AZURE_SOURCE_CATALOG` é a fonte de verdade do que pode ser ligado
-por ambiente. O seed (`scripts/seed_azure_source_catalog.py`) a projeta na tabela
-`azure_source_catalog` de forma idempotente.
+por ambiente ou representado por uma conexão independente. O seed
+(`scripts/seed_azure_source_catalog.py`) a projeta na tabela `azure_source_catalog`.
 
-O agrupamento é **por ambiente/tenant**, resolvido a partir do `code` da conexão
-legada — que não é renomeado. Assim o operador vê um grupo Azure só, com todas as
-fontes selecionáveis, sem precisar de dezenas de cards.
+Fontes que usam o mesmo caminho podem ser agrupadas por ambiente/tenant; fontes
+com API, estrutura ou blob próprios permanecem conexões independentes, ainda que
+reutilizem as mesmas credenciais.
 """
 
 from __future__ import annotations
