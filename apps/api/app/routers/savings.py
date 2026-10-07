@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException
+import re
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,158 @@ from app.services.saving_service import refresh_actions
 from app.services import lakehouse_layers as layers
 
 router = APIRouter(prefix="/savings", tags=["savings"])
+
+
+def _period(value: str, field: str) -> str:
+ if not re.fullmatch(r"\d{6}", value or "") or not 1 <= int(value[4:]) <= 12:
+  raise HTTPException(422, f"{field} deve estar no formato AAAAMM")
+ return value
+
+
+def _commitment_source_filter(source: str, alias: str = "f") -> str:
+ if source not in {"all", "azure-ti", "azure-4p"}:
+  raise HTTPException(422, "source deve ser all, azure-ti ou azure-4p")
+ return "" if source == "all" else f"AND lower({alias}.cloud_origem) = '{source}'"
+
+
+def _commitment_actual_sql(start: str, end: str, source: str, *, by_project: bool = False) -> str:
+ table = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
+ source_filter = _commitment_source_filter(source, "f")
+ grouping = ", project" if by_project else ""
+ project_select = (
+  "COALESCE(NULLIF(TRIM(f.organograma), ''), NULLIF(TRIM(f.source_resource_group_name), ''), 'Sem projeto') AS project,"
+  if by_project else ""
+ )
+ return f"""
+WITH synthetic_returns AS (
+ SELECT source_connection_id, _billing_period, clone_source_record_id,
+        clone_rule_id, SUM(realizado_cloud) AS return_realized
+ FROM {table}
+ WHERE _billing_period BETWEEN '{start}' AND '{end}'
+   AND is_synthetic = TRUE AND clone_rule_id IN (1, 2)
+ GROUP BY 1, 2, 3, 4
+), eligible AS (
+ SELECT f._billing_period AS period, lower(f.cloud_origem) AS source,
+        CASE WHEN lower(f.commitmentdiscounttype) = 'reservation' THEN 'RI' ELSE 'SavingPlan' END AS commitment_type,
+        {project_select}
+        f.chargecategory, f.realizado_cloud,
+        CASE WHEN r.clone_source_record_id IS NOT NULL THEN -r.return_realized ELSE 0 END AS ondemand_baseline,
+        f.source_record_id
+ FROM {table} f
+ LEFT JOIN synthetic_returns r
+   ON f.chargecategory = 'Usage'
+  AND r.source_connection_id = f.source_connection_id
+  AND r._billing_period = f._billing_period
+  AND r.clone_source_record_id = f.source_record_id
+  AND r.clone_rule_id = CASE WHEN lower(f.commitmentdiscounttype) = 'reservation' THEN 1 ELSE 2 END
+ WHERE f._billing_period BETWEEN '{start}' AND '{end}'
+   AND lower(f.commitmentdiscounttype) IN ('reservation', 'savingsplan')
+   AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))
+   {source_filter}
+)
+SELECT period, source, commitment_type{', project' if by_project else ''},
+       SUM(CASE WHEN chargecategory = 'Purchase' THEN realizado_cloud ELSE 0 END) AS purchase,
+       SUM(CASE WHEN chargecategory = 'Usage' THEN realizado_cloud ELSE 0 END) AS covered_cost,
+       SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline ELSE 0 END) AS ondemand_baseline,
+       SUM(CASE WHEN chargecategory = 'Usage' THEN ondemand_baseline - realizado_cloud ELSE 0 END) AS estimated_saving,
+       COUNT_IF(chargecategory = 'Usage') AS usage_rows
+FROM eligible
+GROUP BY period, source, commitment_type{grouping}
+"""
+
+
+@router.get("/commitments-dashboard")
+async def commitments_dashboard(
+ start_period: str | None = Query(default=None),
+ end_period: str | None = Query(default=None),
+ source: str = Query(default="all"),
+):
+ """Compra de compromissos, consumo coberto e baseline OnDemand sintético."""
+ today = date.today()
+ start = _period(start_period or f"{today.year}01", "start_period")
+ end = _period(end_period or f"{today.year}12", "end_period")
+ if start > end:
+  raise HTTPException(422, "start_period não pode ser posterior a end_period")
+ _commitment_source_filter(source)
+ year_start = f"{today.year}01"
+ year_end = f"{today.year}{today.month:02d}"
+
+ monthly_rows = await trino_execute(_commitment_actual_sql(start, end, source), timeout_s=120)
+ annual_rows = await trino_execute(_commitment_actual_sql(year_start, year_end, source), timeout_s=120)
+ project_rows = await trino_execute(_commitment_actual_sql(start, end, source, by_project=True), timeout_s=120)
+
+ planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
+ source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
+ forecast_rows = await trino_execute(f"""
+ SELECT period, lower(cloud_origem) AS source, chargecategory,
+        SUM(realizado_cloud) AS forecast_value
+ FROM {planning}
+ WHERE tipo = 'forecast' AND financial_effect = 'DIRECT_REALIZED'
+   AND period BETWEEN '{start}' AND '{end}'
+   {source_filter}
+ GROUP BY 1, 2, 3
+ """, timeout_s=120)
+
+ def summarize(rows: list[dict[str, Any]]) -> dict[str, float]:
+  result = {"ri_purchase": 0.0, "savingplan_purchase": 0.0,
+            "ri_ondemand": 0.0, "ri_covered_cost": 0.0, "ri_saving": 0.0,
+            "savingplan_ondemand": 0.0, "savingplan_covered_cost": 0.0,
+            "savingplan_saving": 0.0}
+  for row in rows:
+   prefix = "ri" if row.get("commitment_type") == "RI" else "savingplan"
+   result[f"{prefix}_purchase"] += float(row.get("purchase") or 0)
+   result[f"{prefix}_ondemand"] += float(row.get("ondemand_baseline") or 0)
+   result[f"{prefix}_covered_cost"] += float(row.get("covered_cost") or 0)
+   result[f"{prefix}_saving"] += float(row.get("estimated_saving") or 0)
+  return result
+
+ monthly: dict[str, dict[str, Any]] = {}
+ for row in monthly_rows:
+  period = str(row["period"])
+  bucket = monthly.setdefault(period, {"period": period, **{
+   key: 0.0 for key in ("ri_purchase", "savingplan_purchase", "ri_ondemand",
+    "ri_covered_cost", "ri_saving", "savingplan_ondemand",
+    "savingplan_covered_cost", "savingplan_saving")
+  }})
+  prefix = "ri" if row.get("commitment_type") == "RI" else "savingplan"
+  for metric in ("purchase", "ondemand_baseline", "covered_cost", "estimated_saving"):
+   key = {"purchase": "purchase", "ondemand_baseline": "ondemand",
+          "covered_cost": "covered_cost", "estimated_saving": "saving"}[metric]
+   bucket[f"{prefix}_{key}"] += float(row.get(metric) or 0)
+
+ projects = []
+ for index, row in enumerate(project_rows):
+  projects.append({
+   "id": f"{row.get('source')}:{row.get('commitment_type')}:{row.get('project')}:{row.get('period')}",
+   "project": row.get("project") or "Sem projeto", "source": row.get("source"),
+   "period": row.get("period"), "commitment_type": row.get("commitment_type"),
+   "ondemand_baseline": float(row.get("ondemand_baseline") or 0),
+   "covered_cost": float(row.get("covered_cost") or 0),
+   "estimated_saving": float(row.get("estimated_saving") or 0),
+   "usage_rows": int(row.get("usage_rows") or 0),
+  })
+
+ forecast: dict[str, dict[str, Any]] = {}
+ for row in forecast_rows:
+  period = str(row["period"])
+  bucket = forecast.setdefault(period, {"period": period, "usage": 0.0,
+   "purchase": 0.0, "return": 0.0, "other": 0.0, "total": 0.0})
+  category = str(row.get("chargecategory") or "").lower()
+  key = category if category in {"usage", "purchase", "return"} else "other"
+  amount = float(row.get("forecast_value") or 0)
+  bucket[key] += amount
+  bucket["total"] += amount
+
+ return {
+  "start_period": start, "end_period": end, "source": source,
+  "currency": "BRL", "value_basis": "realizado_cloud",
+  "period_summary": summarize(monthly_rows),
+  "year_summary": summarize(annual_rows),
+  "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
+  "projects": sorted(projects, key=lambda x: abs(x["estimated_saving"]), reverse=True),
+  "forecast_monthly": sorted(forecast.values(), key=lambda x: x["period"]),
+ }
+
 class ActionIn(BaseModel):
  name: str = Field(min_length=2); description: str|None=None; category: str|None=None; owner: str|None=None; destination_table_id:int; date_column:str; cost_column:str; currency_column:str|None=None; filters:list[dict[str,Any]]=[]; start_date:str; duration_days:int=Field(ge=1,le=3660); baseline_monthly:float; projected_monthly:float
 def out(a): return {c.name:getattr(a,c.name) for c in a.__table__.columns}
