@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -125,6 +125,7 @@ async def lifespan(app: FastAPI):
         from app.models.contract_story import ContractStoryLedger  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
+        from app.models.processing_log import ProcessingLog  # noqa: F401
         from app.models.destination import DestinationTable, DestinationColumn, SourceDestinationMapping  # noqa: F401
         from app.models.skipped_blob import SkippedBlob  # noqa: F401
         from app.models.scheduled_task import ScheduledTask  # noqa: F401
@@ -146,6 +147,9 @@ async def lifespan(app: FastAPI):
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         from app.models.gold_manifest import GoldManifest  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
+        from app.services.processing_logs import backfill_processing_logs
+        async with async_session() as backfill_session:
+            await backfill_session.run_sync(backfill_processing_logs)
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
         # startup esperava minutos — e, com a API já servindo, travava as coletas
@@ -954,6 +958,7 @@ app.include_router(sso_providers_router.router)
 app.include_router(connections.router)
 app.include_router(csv_upload.router)
 app.include_router(etl.router)
+app.include_router(processing_logs.router)
 app.include_router(rules.router)
 app.include_router(periods.router)
 app.include_router(analysis.router)
