@@ -45,8 +45,14 @@ async def list_processing_logs(
     started_after: datetime | None = None,
     started_before: datetime | None = None,
     db: AsyncSession = Depends(get_db),
+    # Existing consumers can adopt the shared history without rewriting their
+    # data model; compatibility aliases keep the deployed UI contract stable.
+    task_type: str | None = None,
+    connection_id: int | None = None,
+    destination_table_id: int | None = None,
 ):
     filters = []
+    process_type = process_type or task_type
     if process_type:
         filters.append(ProcessingLog.process_type == process_type)
     if status:
@@ -55,6 +61,10 @@ async def list_processing_logs(
         filters.append(ProcessingLog.started_at >= started_after)
     if started_before:
         filters.append(ProcessingLog.started_at <= started_before)
+    if connection_id is not None:
+        filters.append(ProcessingLog.source["connection_ids"].astext.contains(str(connection_id)))
+    if destination_table_id is not None:
+        filters.append(ProcessingLog.destination["destination_table_id"].astext == str(destination_table_id))
     if search and search.strip():
         needle = f"%{search.strip()}%"
         filters.append(or_(
