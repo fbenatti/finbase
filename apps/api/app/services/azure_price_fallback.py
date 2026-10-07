@@ -143,8 +143,11 @@ def load_azure_price_fallbacks(
             for key_row in unresolved_by_meter.get(meter, ()):
                 if account != key_row["account"] or currency != key_row["currency"]:
                     continue
-                if key_row["product"] and product and product != key_row["product"]:
-                    continue
+                # Azure billing exports and Price Sheet can expose different
+                # product identifiers for the same meter. Meter ID is the
+                # lookup key; account, currency, region, and compatible UOM
+                # remain the safety constraints. Ambiguous prices are rejected
+                # below rather than guessed.
                 if key_row["region"] and region and region != key_row["region"]:
                     continue
                 if price_unit_factor(reference_unit, key_row["unit"]) is None:
