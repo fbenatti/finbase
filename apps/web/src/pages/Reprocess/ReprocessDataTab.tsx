@@ -4,19 +4,18 @@ import {
   Box, Typography, Button, Alert, Chip, CircularProgress,
   FormControl, InputLabel, Select, MenuItem, Checkbox, ListItemText,
   OutlinedInput, Paper, LinearProgress, Divider, FormControlLabel, Switch,
-  TextField, InputAdornment,
+  TextField,
 } from "@mui/material";
-import { Refresh, Stop, Search, Replay } from "@mui/icons-material";
+import { Refresh, Stop } from "@mui/icons-material";
 import {
   getDestinationTables, DestinationTable,
   getConnectionsForDestination, MappedConnection,
   getAvailablePeriods, AvailablePeriod,
   reprocessDest, reclassifyDest, getReprocessStatus, cancelReprocess, ReprocessStatus,
-  getRunningTasks, TaskStatus, getWorkerHealth, WorkerHealth, getReprocessHistory,
+  getRunningTasks, TaskStatus, getWorkerHealth, WorkerHealth,
   getGoldCubeRules, GoldCubeRule,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
-import ReprocessHistoryDataGrid from "./ReprocessHistoryDataGrid";
 
 const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
@@ -50,56 +49,19 @@ export default function ReprocessDataTab() {
   const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [loadingConns, setLoadingConns] = useState(false);
   const [workerHealth, setWorkerHealth] = useState<WorkerHealth | null>(null);
-  const [history, setHistory] = useState<ReprocessStatus[]>([]);
-  const [historySearch, setHistorySearch] = useState("");
-  const [historyTotal, setHistoryTotal] = useState(0);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const notifications = useNotifications();
-  const historyQueryState = useRef<{
-    offset: number;
-    limit: number;
-    sort?: { field: string; direction: "asc" | "desc" };
-    filters: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
-  }>({ offset: 0, limit: 10, filters: [] });
-
-  const historyQuery = useCallback(async (queryParam?: {
-    offset: number;
-    limit: number;
-    sort?: { field: string; direction: "asc" | "desc" };
-    filters: Array<{ field: string; operator: "equals" | "notEquals" | "contains" | "notContains" | "after" | "before"; value: string }>;
-  }) => {
-    setHistoryLoading(true);
-    try {
-      if (queryParam) historyQueryState.current = queryParam;
-      const response = await getReprocessHistory({
-        ...historyQueryState.current,
-        search: historySearch || undefined,
-      });
-      setHistory(response.items);
-      setHistoryTotal(response.total);
-    } catch {
-      setHistory([]);
-      setHistoryTotal(0);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [historySearch]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
     getGoldCubeRules().then(setGoldRules).catch(() => {});
-    historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     const refreshWorker = () => getWorkerHealth().then(setWorkerHealth).catch(() => setWorkerHealth({ status: "offline", heartbeat_age_seconds: null }));
     refreshWorker();
     const healthTimer = setInterval(refreshWorker, 3000);
     return () => clearInterval(healthTimer);
   }, []);
 
-  useEffect(() => {
-    historyQuery({ offset: 0, limit: 10, filters: historyQueryState.current.filters });
-  }, [historySearch]);
 
   // When dest table changes: load only connections with active mappings
   useEffect(() => {
@@ -169,7 +131,6 @@ export default function ReprocessDataTab() {
           } else {
             setResult({ type: "error", message: "Processamento cancelado." });
           }
-          historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
         }
       } catch {
         if (pollRef.current) clearInterval(pollRef.current);
@@ -231,83 +192,10 @@ export default function ReprocessDataTab() {
       await notifications.addTaskById(res.task_id, { kind: "reprocess", title: classificationOnly ? "Reclassificar projetos" : "Reprocessar dados" });
       setTaskId(res.task_id);
       pollTask(res.task_ids || [res.task_id]);
-      historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
     } catch (e: unknown) {
       setResult({
         type: "error",
         message: e instanceof Error ? e.message : "Erro de conexao",
-      });
-      setProcessing(false);
-    }
-  };
-
-  const handleReprocessItem = async (item: ReprocessStatus) => {
-    const destId = item.destination_table_id || (destTables.find(t => t.name === item.table)?.id ?? (selDestId ? Number(selDestId) : undefined));
-    if (!destId) {
-      setResult({ type: "error", message: "Tabela de destino não identificada para este item." });
-      return;
-    }
-    if (!item.connection_ids || item.connection_ids.length === 0) {
-      setResult({ type: "error", message: "Conexões de origem não identificadas para este item." });
-      return;
-    }
-    setProcessing(true);
-    setResult(null);
-    try {
-      const res = await reprocessDest({
-        destination_table_id: Number(destId),
-        connection_ids: item.connection_ids,
-        billing_periods: item.billing_periods,
-        replace_existing: false,
-        chain_gold_cubes: { enabled: chainGoldCubes, rule_ids: chainGoldCubeRuleId === "" ? [] : [chainGoldCubeRuleId as number] },
-      });
-      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
-      setTaskId(res.task_id);
-      pollTask(res.task_ids || [res.task_id]);
-      historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
-    } catch (e: unknown) {
-      setResult({
-        type: "error",
-        message: e instanceof Error ? e.message : "Erro ao disparar reprocessamento",
-      });
-      setProcessing(false);
-    }
-  };
-
-  const failedItems = history.filter(h => h.status === "FAILED");
-
-  const handleReprocessAllFailed = async () => {
-    if (failedItems.length === 0) return;
-    setProcessing(true);
-    setResult(null);
-    try {
-      const allTaskIds: number[] = [];
-      for (const item of failedItems) {
-        const destId = item.destination_table_id || (destTables.find(t => t.name === item.table)?.id ?? (selDestId ? Number(selDestId) : undefined));
-        if (destId && item.connection_ids && item.connection_ids.length > 0) {
-          const res = await reprocessDest({
-            destination_table_id: Number(destId),
-            connection_ids: item.connection_ids,
-            billing_periods: item.billing_periods,
-            replace_existing: false,
-            chain_gold_cubes: { enabled: chainGoldCubes, rule_ids: chainGoldCubeRuleId === "" ? [] : [chainGoldCubeRuleId as number] },
-          });
-          await notifications.addTaskById(res.task_id, { kind: "reprocess", title: `Reprocessar ${item.table || "dados"}` });
-          if (res.task_ids) allTaskIds.push(...res.task_ids);
-          else allTaskIds.push(res.task_id);
-        }
-      }
-      if (allTaskIds.length > 0) {
-        setTaskId(allTaskIds[0]);
-        pollTask(allTaskIds);
-        historyQuery({ offset: 0, limit: 10, filters: [] }).catch(() => {});
-      } else {
-        setProcessing(false);
-      }
-    } catch (e: unknown) {
-      setResult({
-        type: "error",
-        message: e instanceof Error ? e.message : "Erro ao disparar reprocessamento das falhas",
       });
       setProcessing(false);
     }
@@ -556,50 +444,6 @@ export default function ReprocessDataTab() {
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, mb: 1.5, flexWrap: "wrap" }}>
-          <Box>
-            <Typography variant="h6">Histórico de reprocessamentos</Typography>
-            <Typography variant="caption" color="text.secondary">Últimas execuções e mensagens operacionais</Typography>
-          </Box>
-          <Box sx={{ display: "flex", gap: 1.5, alignItems: "center", flexWrap: "wrap" }}>
-            {failedItems.length > 0 && !isRunning && (
-              <Button
-                variant="outlined"
-                color="error"
-                size="small"
-                startIcon={<Replay />}
-                onClick={handleReprocessAllFailed}
-                disabled={processing || workerHealth?.status !== "ok"}
-              >
-                Reprocessar falhas ({failedItems.length})
-              </Button>
-            )}
-            <TextField
-              size="small"
-              placeholder="Buscar no histórico…"
-              value={historySearch}
-              onChange={(e) => setHistorySearch(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" />
-                  </InputAdornment>
-                ),
-                sx: { height: 40 },
-              }}
-              sx={{ minWidth: 260 }}
-            />
-          </Box>
-        </Box>
-        <ReprocessHistoryDataGrid
-          rows={history}
-          total={historyTotal}
-          loading={historyLoading}
-          onReprocess={handleReprocessItem}
-          onQuery={historyQuery}
-        />
-      </Paper>
 
       {/* ── Empty state ── */}
       {!selDestId && !isRunning && (
