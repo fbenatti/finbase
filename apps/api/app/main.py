@@ -532,6 +532,19 @@ async def lifespan(app: FastAPI):
             )""",
         ):
             await _execute_migration(conn, statement)
+        # A auxiliar mensal de VMs saiu de Gold (`_tmp_vm_monthly`) para Silver
+        # (`vm_monthly_history`). Atualiza apenas a regra conhecida que contém
+        # a referência antiga; SQLs personalizados de outras regras são intactos.
+        await _execute_migration(conn, """
+            UPDATE gold_rule
+            SET sql_template = REPLACE(
+                sql_template,
+                'iceberg.gold._tmp_vm_monthly',
+                'iceberg.silver.vm_monthly_history'
+            ), updated_at = now()
+            WHERE code = 'saving_desligue_vm'
+              AND sql_template LIKE '%iceberg.gold._tmp_vm_monthly%'
+        """)
         # Built-in schedules are idempotent and remain editable by users.
         await _execute_migration(conn, """
             INSERT INTO scheduled_task

@@ -412,7 +412,7 @@ async def _materialize_rule(
         snapshot_mode = bool(getattr(rule, "snapshot_mode", False))
         snapshot_col = str(getattr(rule, "snapshot_col", "_snapshot_date") or "_snapshot_date")
         # A regra de saving por desligue depende da auxiliar mensal de VMs
-        # (gold_mart._tmp_vm_monthly). O consumo DIÁRIO tem regra própria na Camada
+        # (silver.vm_monthly_history). O consumo DIÁRIO tem regra própria na Camada
         # Gold de Custo (consumo_diario_vm → dest_dm_cost_consumo_diario_vm).
         if rule.code == "saving_desligue_vm":
             if progress:
@@ -906,7 +906,7 @@ async def prepare_vm_monthly(
     months: list[str] | None = None,
     sources: list[GoldMartRuleSource] | None = None,
 ) -> int:
-    """Popula gold_mart._tmp_vm_monthly com histórico de VMs reais mês a mês.
+    """Popula silver.vm_monthly_history com histórico de VMs reais mês a mês.
 
     ``months`` opcional: lista explícita de períodos YYYYMM a coletar (ex. para
     reprocessar o histórico). Default: últimos ``VM_MONTHLY_HISTORY_MONTHS``
@@ -1220,7 +1220,7 @@ SAVING_TEMPLATE_HEADER = """--
 -- ⚠ QUERY DE REPROCESSAMENTO MÊS A MÊS (NÃO RODAR PARA VÁRIOS MESES DE UMA VEZ)
 -- Esta regra classifica o PADRÃO de desligue de cada VM comparando o mês alvo
 -- (o MÊS ANTERIOR ao atual = mês fechado) com os meses anteriores da tabela
--- auxiliar gold_mart._tmp_vm_monthly. Cada reprocess materializa APENAS UM período.
+-- auxiliar silver.vm_monthly_history. Cada reprocess materializa APENAS UM período.
 -- Para popular o histórico (ex.: jan/2026 → mês atual), reprocesse mês a mês
 -- via /scheduled-shutdown/reprocess-history ou reprocesse a regra a cada mês
 -- fechado. O padrão exige >= 3 meses de histórico (60+ dias) por VM.
