@@ -991,6 +991,7 @@ def consumer_main(worker_id: int):
                             # children visibly blocked; leaving them QUEUED
                             # would look like a stuck worker and invite an
                             # unsafe manual retry.
+                            blocked_children = []
                             for child in s.query(EtlTask).filter(EtlTask.status == "QUEUED").all():
                                 payload = child.result_json if isinstance(child.result_json, dict) else {}
                                 if payload.get("bronze_audit_task_id") == task_id:
@@ -998,6 +999,13 @@ def consumer_main(worker_id: int):
                                     child.phase = "Bloqueado pela auditoria Bronze"
                                     child.errors = [str(result.get("error"))]
                                     child.finished_at = datetime.now(timezone.utc)
+                                    blocked_children.append(child)
+                        from app.services.processing_logs import sync_etl_task_log
+                        if audit_row:
+                            sync_etl_task_log(s, audit_row)
+                        if not succeeded:
+                            for child in blocked_children:
+                                sync_etl_task_log(s, child)
                         s.commit()
                         s.close()
                     except Exception as exc:
@@ -1008,6 +1016,8 @@ def consumer_main(worker_id: int):
                             audit_row.phase = f"Erro na auditoria Bronze: {_format_task_error(exc)[:160]}"
                             audit_row.errors = [str(exc)]
                             audit_row.finished_at = datetime.now(timezone.utc)
+                            from app.services.processing_logs import sync_etl_task_log
+                            sync_etl_task_log(s, audit_row)
                         s.commit(); s.close()
 
                 elif task.task_type in ("reprocess", "reclassification"):
