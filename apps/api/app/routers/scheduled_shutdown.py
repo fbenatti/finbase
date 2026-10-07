@@ -1573,7 +1573,12 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
     Este endpoint roda a materialização histórica completa (janeiro até o mês
     anterior ao atual) e pode demorar vários minutos.
     """
-    from app.services.gold_materialization import SAVING_GOLD_CODE, materialize_saving_history
+    from app.services.gold_materialization import (
+        SAVING_GOLD_CODE,
+        VM_MONTHLY_GOLD_CODE,
+        VM_MONTHLY_GOLD_TABLE,
+        materialize_saving_history,
+    )
     from app.models.gold_mart_rule import GoldMartRule
     from app.models.etl_task import EtlTask
 
@@ -1593,9 +1598,36 @@ async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
             .options(selectinload(GoldMartRule.sources))
             .where(GoldMartRule.code == SAVING_GOLD_CODE)
         )).scalar_one_or_none()
+        helper_rule = (await db.execute(
+            select(GoldMartRule).where(GoldMartRule.code == VM_MONTHLY_GOLD_CODE)
+        )).scalar_one_or_none()
+        if helper_rule is None:
+            helper_rule = GoldMartRule(
+                code=VM_MONTHLY_GOLD_CODE,
+                name="VM — Histórico mensal agregado",
+                description=(
+                    "Cubo Gold de horas e custo por VM/mês, derivado da Silver "
+                    "e consumido pelo cubo Saving por desligue."
+                ),
+                active=False,
+                dimensions=[],
+                measure_columns=[],
+                materialization_table=VM_MONTHLY_GOLD_TABLE,
+                materialization_status="PENDING",
+            )
+            db.add(helper_rule)
+            await db.flush()
         summary = await materialize_saving_history(
-            sources=list(saving_rule.sources) if saving_rule else None
+            sources=list(saving_rule.sources) if saving_rule else None,
+            run_id=task.id,
+            helper_rule_id=helper_rule.id,
         )
+        helper_rule.materialization_table = VM_MONTHLY_GOLD_TABLE
+        helper_rule.materialization_rows = int(summary["vm_monthly_history_rows"])
+        helper_rule.materialization_run_id = task.id
+        helper_rule.materialized_at = datetime.now(timezone.utc)
+        helper_rule.materialization_status = "UPDATED"
+        helper_rule.materialization_error = None
         task.status = "COMPLETED"
         task.phase = f"Saving por desligue: {len(summary['periods'])} meses materializados"
         task.rows_destination = sum(summary["rows"].values())
