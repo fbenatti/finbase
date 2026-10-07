@@ -179,57 +179,41 @@ export default function CommitmentsDashboard() {
           </Stack>
         </CardContent></Card>
 
-        <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600}>Saving mensal — realizado e forecast</Typography>
-          <Typography variant="body2" color="text.secondary">Saving = base OnDemand sintética menos compra. No forecast, Return é armazenado negativo; saving previsto = −Return − Purchase, discriminado por tipo de compromisso.</Typography>
-          <Plot data={[
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_saving || 0)), type: "bar", name: "RI — saving realizado", marker: { color: "#15803d" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — realizado</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_saving || 0)), type: "bar", name: "SavingPlan — saving realizado", marker: { color: "#7e22ce" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — realizado</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.ri_forecast_saving || 0)), type: "bar", name: "RI — saving forecast", marker: { color: "#86efac" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — saving forecast</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.savingplan_forecast_saving || 0)), type: "bar", name: "SavingPlan — saving forecast", marker: { color: "#d8b4fe" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — saving forecast</extra>" },
-          ]} layout={{ ...chartLayout, height: 340, barmode: "stack", yaxis: { ...chartLayout.yaxis, zeroline: true, zerolinewidth: 2, zerolinecolor: "#64748b" }, legend: { orientation: "h", y: -0.3 } }} config={{ displayModeBar: false, responsive: true }} />
-          {forecasts.length === 0 && <Alert severity="info">Não há forecast para o período e origem selecionados.</Alert>}
-        </CardContent></Card>
+        <Stack direction={{ xs: "column", xl: "row" }} spacing={2} mb={2}>
+          {(["RI", "SavingPlan"] as const).map((type) => {
+            const rows = projectChart[type];
+            const color = type === "RI" ? "#1565c0" : "#7b1fa2";
+            const lightColor = type === "RI" ? "#93c5fd" : "#d8b4fe";
+            return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
+              <Typography variant="subtitle1" fontWeight={600}>Projetos — {type}: OnDemand x saving</Typography>
+              <Typography variant="body2" color="text.secondary" mb={1}>Top 8 por base OnDemand; compra rateada por projeto. Percentual mostra compra / base.</Typography>
+              <Plot data={[
+                { x: rows.map((row) => row.project), y: rows.map((row) => row.baseline), type: "bar", name: "Base OnDemand", marker: { color: lightColor }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Base OnDemand</extra>" },
+                { x: rows.map((row) => row.project), y: rows.map((row) => row.saving), type: "bar", name: "Saving realizado", marker: { color }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Saving realizado</extra>" },
+                { x: rows.map((row) => row.project), y: rows.map((row) => row.purchasePct), type: "scatter", mode: "lines+markers", name: "Compra / OnDemand", yaxis: "y2", line: { color: "#334155", width: 2 }, marker: { size: 7 }, hovertemplate: "%{x}<br>%{y:.1f}%<extra>Compra / OnDemand</extra>" },
+              ]} layout={{ ...chartLayout, height: 380, margin: { l: 76, r: 58, t: 18, b: 110 }, barmode: "group", showlegend: true, legend: { orientation: "h", y: -0.42 }, xaxis: { ...chartLayout.xaxis, tickangle: -35, automargin: true }, yaxis2: { title: "Compra / OnDemand", overlaying: "y", side: "right", showgrid: false, ticksuffix: "%", automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
+            </CardContent></Card>;
+          })}
+        </Stack>
 
-        <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Forecast por compromisso e PricingCategory</Typography>
-          <Typography variant="body2" color="text.secondary" mb={1}>Return aparece negativo por representar neutralização de custo; o gráfico de saving converte esse valor para base OnDemand positiva.</Typography>
-          <Box sx={{ height: 340, width: "100%" }}>
-            <DataGrid
-              rows={forecastBreakdownRows}
-              columns={forecastBreakdownColumns}
-              getRowId={(row) => String(row.id)}
-              initialState={{ sorting: { sortModel: [{ field: "forecast_value", sort: "desc" }] }, pagination: { paginationModel: { pageSize: 10, page: 0 } } }}
-              pageSizeOptions={[10, 25, 50]}
-              disableRowSelectionOnClick
-            />
-          </Box>
-        </CardContent></Card>
-
-        <Card sx={{ mb: 2 }}><CardContent>
-            <Typography variant="subtitle1" fontWeight={600}>Projetos — base OnDemand x saving estimado</Typography>
-            <Typography variant="body2" color="text.secondary" mb={1}>Top 10 por base OnDemand; saving calculado após rateio da compra por modalidade.</Typography>
-            <Plot data={[
-              { type: "bar", orientation: "h", x: projectChart.map((row) => row.RI), y: projectChart.map((row) => row.project), name: "RI — base OnDemand", marker: { color: "#93c5fd" }, hovertemplate: "%{y}<br>R$ %{x:,.2f}<extra>RI — base OnDemand</extra>" },
-              { type: "bar", orientation: "h", x: projectChart.map((row) => row.riSaving), y: projectChart.map((row) => row.project), name: "RI — saving", marker: { color: "#15803d" }, hovertemplate: "%{y}<br>R$ %{x:,.2f}<extra>RI — saving estimado</extra>" },
-              { type: "bar", orientation: "h", x: projectChart.map((row) => row.SavingPlan), y: projectChart.map((row) => row.project), name: "SavingPlan — base OnDemand", marker: { color: "#d8b4fe" }, xaxis: "x2", yaxis: "y2", hovertemplate: "%{y}<br>R$ %{x:,.2f}<extra>SavingPlan — base OnDemand</extra>" },
-              { type: "bar", orientation: "h", x: projectChart.map((row) => row.savingplanSaving), y: projectChart.map((row) => row.project), name: "SavingPlan — saving", marker: { color: "#7e22ce" }, xaxis: "x2", yaxis: "y2", hovertemplate: "%{y}<br>R$ %{x:,.2f}<extra>SavingPlan — saving estimado</extra>" },
-            ]} layout={{ height: 390, margin: { l: 18, r: 18, t: 25, b: 35 }, grid: { rows: 1, columns: 2, pattern: "independent" }, barmode: "group", paper_bgcolor: "white", plot_bgcolor: "white", xaxis: { ...currencyAxis, domain: [0, 0.48], gridcolor: "#e2e8f0" }, xaxis2: { ...currencyAxis, domain: [0.55, 1], gridcolor: "#e2e8f0" }, yaxis: { automargin: true, autorange: "reversed" }, yaxis2: { automargin: true, autorange: "reversed" }, showlegend: true, legend: { orientation: "h", y: -0.22 }, annotations: [{ text: "RI", x: 0.24, y: 1.08, xref: "paper", yref: "paper", showarrow: false }, { text: "SavingPlan", x: 0.775, y: 1.08, xref: "paper", yref: "paper", showarrow: false }] }} config={{ displayModeBar: false, responsive: true }} />
-          </CardContent></Card>
-
-        <Card><CardContent>
-          <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento por projeto e compromisso</Typography>
-          <Box sx={{ height: 520, width: "100%" }}>
-            <DataGrid
-              rows={data.projects}
-              columns={projectColumns}
-              getRowId={(row) => `${row.source}:${row.commitment_type}:${row.project}`}
-              initialState={{ sorting: { sortModel: [{ field: "estimated_saving", sort: "desc" }] }, pagination: { paginationModel: { pageSize: 25, page: 0 } } }}
-              pageSizeOptions={[10, 25, 50]}
-              disableRowSelectionOnClick
-            />
-          </Box>
-        </CardContent></Card>
+        <Stack direction={{ xs: "column", xl: "row" }} spacing={2}>
+          {(["RI", "SavingPlan"] as const).map((type) => {
+            const rows = data.projects.filter((row) => row.commitment_type === type);
+            return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
+              <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento — {type}</Typography>
+              <Box sx={{ height: 460, width: "100%" }}>
+                <DataGrid
+                  rows={rows}
+                  columns={projectColumns}
+                  getRowId={(row) => `${row.source}:${row.commitment_type}:${row.project}`}
+                  initialState={{ sorting: { sortModel: [{ field: "estimated_saving", sort: "desc" }] }, pagination: { paginationModel: { pageSize: 10, page: 0 } } }}
+                  pageSizeOptions={[10, 25, 50]}
+                  disableRowSelectionOnClick
+                />
+              </Box>
+            </CardContent></Card>;
+          })}
+        </Stack>
       </>}
     </Box>
   );
