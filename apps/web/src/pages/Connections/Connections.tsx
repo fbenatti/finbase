@@ -39,6 +39,15 @@ const CONNECTOR_TYPES = [
   { value: "databricks", label: "Databricks (SQL Warehouse)", scope: "databricks" },
 ];
 
+function describeConnectionLoadError(error: unknown, endpoint: string, fallback: string): string {
+  const response = typeof error === "object" && error !== null && "response" in error
+    ? (error as { response?: { status?: number } }).response
+    : undefined;
+  const status = response?.status ? ` (HTTP ${response.status})` : "";
+  const detail = error instanceof Error ? error.message : fallback;
+  return `${endpoint}${status}: ${detail}`;
+}
+
 // Categorias da página de Conexões.
 export type ConnectionCategory = "provedor" | "ferramenta" | "marketplace";
 
@@ -252,7 +261,7 @@ export default function Connections() {
       setLoading(true);
       setConnectionCatalog(await getConnections());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      setError(describeConnectionLoadError(e, "Falha ao atualizar conexões — GET /connections/", "Erro desconhecido"));
     } finally {
       setLoading(false);
     }
@@ -324,7 +333,7 @@ export default function Connections() {
       setGridTotal(data.total);
     } catch (gridError: unknown) {
       if (requestId !== gridRequestId.current) return;
-      setError(gridError instanceof Error ? gridError.message : "Falha ao carregar conexões");
+      setError(describeConnectionLoadError(gridError, "Falha ao atualizar a tabela — GET /connections/grid", "Erro desconhecido"));
     } finally {
       if (requestId === gridRequestId.current) setGridLoading(false);
     }

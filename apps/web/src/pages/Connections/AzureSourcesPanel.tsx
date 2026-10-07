@@ -277,7 +277,8 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
       setGroups(data.environments || []);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const detail = err instanceof Error ? err.message : String(err);
+      setError(`Falha ao consultar GET /azure-sources/: ${detail}`);
     } finally {
       setLoading(false);
     }
