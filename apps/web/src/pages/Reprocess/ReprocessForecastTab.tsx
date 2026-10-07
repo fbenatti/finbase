@@ -1,32 +1,43 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNotifications } from "../../context/NotificationContext";
 import {
-  Alert, Box, Button, Card, CardContent, CircularProgress, Stack, Typography,
+  Alert, Box, Button, Card, CardContent, CircularProgress, Stack, Tab, Tabs, Typography,
 } from "@mui/material";
+import { useSearchParams } from "react-router-dom";
 import { PlayArrow } from "@mui/icons-material";
 import {
   ForecastConfig, createForecastRun, getForecastConfigs,
 } from "../../services/api";
+import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 
 export default function ReprocessForecastTab() {
+  const [params, setParams] = useSearchParams();
+  const subtab = params.get("subtab") === "accuracy" ? "accuracy" : "forecast";
   const [configs, setConfigs] = useState<ForecastConfig[]>([]);
   const [error, setError] = useState("");
   const [runningConfig, setRunningConfig] = useState<number | null>(null);
   const notifications = useNotifications();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const nextConfigs = await getForecastConfigs();
       setConfigs(nextConfigs);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Não foi possível carregar o forecast");
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void load();
-    return undefined;
-  }, []);
+    if (subtab === "forecast") void load();
+  }, [subtab, load]);
+
+  const setSubtab = (value: string) => {
+    const next = new URLSearchParams(params);
+    next.set("tab", "forecast");
+    if (value === "accuracy") next.set("subtab", "accuracy");
+    else next.delete("subtab");
+    setParams(next, { replace: true });
+  };
 
   const run = async (configId: number) => {
     setRunningConfig(configId);
@@ -45,6 +56,11 @@ export default function ReprocessForecastTab() {
 
   return (
     <Box>
+      <Tabs value={subtab} onChange={(_, value) => setSubtab(value)} aria-label="Forecast e acurácia" sx={{ mb: 2 }}>
+        <Tab value="forecast" label="Forecast" />
+        <Tab value="accuracy" label="Acurácia" />
+      </Tabs>
+      {subtab === "accuracy" ? <ReprocessAccuracyTab /> : <>
       <Alert severity="info" sx={{ mb: 2 }}>
         Reprocessa o forecast da tabela Gold configurada. Na sequência, o worker também publica o rateio
         de custo compartilhado e enfileira a materialização do <strong>Gold de visão completa</strong>
@@ -76,6 +92,7 @@ export default function ReprocessForecastTab() {
           ))}
         </CardContent>
       </Card>
+      </>}
     </Box>
   );
 }
