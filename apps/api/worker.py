@@ -565,6 +565,8 @@ def consumer_main(worker_id: int):
                     run_id = (task.result_json or {}).get("forecast_run_id")
                     task_json = dict(task.result_json or {})
                     task.status = "RUNNING"
+                    from app.services.processing_logs import sync_etl_task_log
+                    sync_etl_task_log(session, task)
                     session.commit()
                     session.close()
                     try:
@@ -743,6 +745,8 @@ def consumer_main(worker_id: int):
                     months = list((task.result_json or {}).get("months") or [])
                     task.status = "RUNNING"
                     task.phase = "Validando configuração"
+                    from app.services.processing_logs import sync_etl_task_log
+                    sync_etl_task_log(session, task)
                     session.commit()
                     session.close()
                     try:
@@ -888,6 +892,8 @@ def consumer_main(worker_id: int):
                 elif task.task_type in ("ai_cost_relationship_reprocess", "gold_reprocess"):
                     task.status = "RUNNING"
                     task.phase = "Agregando cubos Gold e publicando as tabelas Gold"
+                    from app.services.processing_logs import sync_etl_task_log
+                    sync_etl_task_log(session, task)
                     session.commit()
                     session.close()
                     try:
