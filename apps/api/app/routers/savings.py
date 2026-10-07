@@ -30,8 +30,7 @@ def _commitment_source_filter(source: str, alias: str = "f") -> str:
 def _commitment_actual_sql(start: str, end: str, source: str, *, by_project: bool = False) -> str:
  table = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
  source_filter = _commitment_source_filter(source, "f")
- grouping = ", project" if by_project else ""
- select_dimensions = "source, commitment_type, project" if by_project else "period, source, commitment_type"
+ select_dimensions = "period, source, commitment_type, project" if by_project else "period, source, commitment_type"
  eligible_filter = (
   "AND f.chargecategory = 'Usage'"
   if by_project else
@@ -90,11 +89,7 @@ async def commitments_dashboard(
  if start > end:
   raise HTTPException(422, "start_period não pode ser posterior a end_period")
  _commitment_source_filter(source)
- year_start = f"{today.year}01"
- year_end = f"{today.year}{today.month:02d}"
-
  monthly_rows = await trino_execute(_commitment_actual_sql(start, end, source), timeout_s=120)
- annual_rows = await trino_execute(_commitment_actual_sql(year_start, year_end, source), timeout_s=120)
  project_rows = await trino_execute(_commitment_actual_sql(start, end, source, by_project=True), timeout_s=120)
 
  planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
@@ -134,15 +129,44 @@ async def commitments_dashboard(
    bucket[f"{prefix}_{key}"] += float(row.get(metric) or 0)
   bucket[f"{prefix}_saving"] = bucket[f"{prefix}_ondemand"] - bucket[f"{prefix}_purchase"]
 
- projects = []
+ project_totals: dict[tuple[str, str, str], dict[str, Any]] = {}
+ monthly_commitments = {
+  (str(row["period"]), str(row.get("source")), str(row.get("commitment_type"))): row
+  for row in monthly_rows
+ }
+ project_baselines: dict[tuple[str, str, str], float] = {}
  for row in project_rows:
-  projects.append({
-   "id": f"{row.get('source')}:{row.get('commitment_type')}:{row.get('project')}",
-   "project": row.get("project") or "Sem projeto", "source": row.get("source"),
-   "period": row.get("period"), "commitment_type": row.get("commitment_type"),
-   "ondemand_baseline": float(row.get("ondemand_baseline") or 0),
-   "usage_rows": int(row.get("usage_rows") or 0),
+  key = (str(row["period"]), str(row.get("source")), str(row.get("commitment_type")))
+  project = str(row.get("project") or "Sem projeto")
+  project_baselines[(key[0], key[1], key[2], project)] = float(row.get("ondemand_baseline") or 0)
+
+ for row in project_rows:
+  period = str(row["period"])
+  source_name = str(row.get("source"))
+  commitment_type = str(row.get("commitment_type"))
+  project = str(row.get("project") or "Sem projeto")
+  key = (period, source_name, commitment_type)
+  project_base = float(row.get("ondemand_baseline") or 0)
+  total_base = sum(
+   value for (p, s, c, _), value in project_baselines.items()
+   if (p, s, c) == key
+  )
+  commitment = monthly_commitments.get(key, {})
+  purchase = float(commitment.get("purchase") or 0)
+  purchase_allocated = purchase * project_base / total_base if total_base else 0.0
+  aggregate_key = (source_name, commitment_type, project)
+  result = project_totals.setdefault(aggregate_key, {
+   "id": f"{source_name}:{commitment_type}:{project}", "project": project,
+   "source": source_name, "commitment_type": commitment_type,
+   "ondemand_baseline": 0.0, "purchase_allocated": 0.0,
+   "estimated_saving": 0.0, "usage_rows": 0,
   })
+  result["ondemand_baseline"] += project_base
+  result["purchase_allocated"] += purchase_allocated
+  result["estimated_saving"] += project_base - purchase_allocated
+  result["usage_rows"] += int(row.get("usage_rows") or 0)
+
+ projects = list(project_totals.values())
 
  forecast: dict[str, dict[str, Any]] = {}
  for row in forecast_rows:
@@ -159,11 +183,10 @@ async def commitments_dashboard(
   "start_period": start, "end_period": end, "source": source,
   "currency": "BRL", "value_basis": "realizado_cloud",
   "period_summary": summarize(monthly_rows),
-  "year_summary": summarize(annual_rows),
   "monthly": sorted(monthly.values(), key=lambda x: x["period"]),
-  "projects": sorted(projects, key=lambda x: abs(x["ondemand_baseline"]), reverse=True),
+  "projects": sorted(projects, key=lambda x: abs(x["estimated_saving"]), reverse=True),
   "forecast_monthly": sorted(forecast.values(), key=lambda x: x["period"]),
-  "baseline_note": "Saving estimado = valor absoluto da linha sintética de Return (base OnDemand) menos compra do mesmo tipo no período. Compras não são rateadas por projeto.",
+  "baseline_note": "Saving estimado = base OnDemand sintética menos compra do mesmo tipo no período. A compra é rateada mensalmente por origem, tipo e projeto, proporcionalmente à base OnDemand do projeto.",
  }
 
 class ActionIn(BaseModel):
