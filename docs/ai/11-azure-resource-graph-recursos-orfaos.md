@@ -184,30 +184,56 @@ Na coleta real de 2026-08: **213 → 5 discos órfãos** (208 eram PVC/AKS, algu
 custo relevante — ex.: disco de 8192 GB a R$ 2.436/mês). O inventário completo
 continua guardando os PVCs (com tags) para eventuais análises de capacidade.
 
-### 3.5.2 Custo por disco/órfão — Dimon (join FOCUS)
+### 3.5.2 Custo por recurso órfão — cubo Gold (join com FOCUS)
 
-A regra Dimon `custo_recursos_orfaos` (criada automaticamente no setup, endpoint
-`POST /azure-resource-graph/seed-dimon`) agrupa os órfãos e cruza com a Gold FOCUS
-por `resourceid` no mesmo `_billing_period`:
+A regra Gold `custo_recursos_orfaos` (criada/atualizada no setup ou pelo endpoint
+`POST /azure-resource-graph/seed-gold`) materializa o custo dos órfãos cruzando
+o detalhe Silver com o detalhe FOCUS. O destino de órfãos é compartilhado entre
+as conexões 4P e TI; `cloud_origem` e `source_connection_id` mantêm a origem,
+enquanto os valores `azure-resource-graph-4p` e `azure-resource-graph-ti` são
+traduzidos para `azure-4p` e `azure-ti` no join de custo:
 
 ```sql
+WITH orphan_ids AS (
+  SELECT DISTINCT lower(resource_id) AS rid, "_billing_period",
+         CASE cloud_origem
+           WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
+           WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
+           ELSE cloud_origem END AS focus_cloud_origem
+  FROM iceberg.silver.dest_cloud_orphan_resources
+), focus_dedup AS (
+  SELECT resourceid, "_billing_period", cloud_origem, billedcost, effectivecost, realizado
+  FROM (
+    SELECT f.*, MIN(f.resourceid) OVER (
+      PARTITION BY lower(f.resourceid), f."_billing_period", f.cloud_origem
+    ) AS canonical
+    FROM iceberg.silver.dest_modelo_focus f
+    JOIN orphan_ids o ON lower(f.resourceid) = o.rid
+      AND f."_billing_period" = o."_billing_period"
+      AND lower(f.cloud_origem) = lower(o.focus_cloud_origem)
+  ) WHERE resourceid = canonical
+)
 SELECT o."_billing_period", o.resource_id, o.resource_name, o.orphan_rule,
        o.tipo_recurso, o.subscription_id, o.resource_group, o.disk_size_gb,
-       o.age_days, o.snapshot_date,
+       o.age_days, o.snapshot_date, o.cloud_origem, o.source_connection_id,
        COUNT(f.resourceid) AS focus_rows,
        ROUND(SUM(COALESCE(TRY_CAST(f.billedcost AS DOUBLE), 0)), 2) AS billedcost,
        ROUND(SUM(COALESCE(TRY_CAST(f.effectivecost AS DOUBLE), 0)), 2) AS effectivecost,
-       ROUND(SUM(COALESCE(TRY_CAST(f.totalcostondemandbrl AS DOUBLE), 0)), 2) AS cost_brl
-FROM iceberg.gold.dest_cloud_orphan_resources o
-LEFT JOIN iceberg.gold.dest_modelo_focus f
-  ON f.resourceid = o.resource_id AND f."_billing_period" = o."_billing_period"
-GROUP BY 1,2,3,4,5,6,7,8,9,10
+       ROUND(SUM(COALESCE(TRY_CAST(f.realizado AS DOUBLE), 0)), 2) AS cost_brl
+FROM iceberg.silver.dest_cloud_orphan_resources o
+LEFT JOIN focus_dedup f ON lower(f.resourceid) = lower(o.resource_id)
+  AND f."_billing_period" = o."_billing_period"
+  AND lower(f.cloud_origem) = lower(CASE o.cloud_origem
+    WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
+    WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
+    ELSE o.cloud_origem END)
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12
 ```
 
-A materialização (`POST /dimon/reprocess` com `rule_ids`) cria
-`dest_dm_cost_custo_recursos_orfaos` pré-agregada; os endpoints de governança
+A materialização (`POST /gold/reprocess` com `rule_ids`) cria
+`gold.dest_dm_cost_custo_recursos_orfaos` pré-agregada; os endpoints de governança
 (`/summary` → `cost_brl`/`by_tipo`; `/orphans` → `cost_brl` por linha) fazem apenas
-LEFT JOIN leve com essa Dimon, sem varrer o FOCUS por requisição. Foco no
+LEFT JOIN leve com essa materialização, sem varrer o FOCUS por requisição. Foco no
 particionamento `_billing_period` nas duas tabelas.
 
 > **Custo = coluna `realizado`**: a soma do custo do órfão usa a coluna
@@ -352,7 +378,49 @@ resources
           created_at = tostring(properties.timeCreated)
 ```
 
-## 7. Plano de implementação (ordem sugerida)
+## 7. Correção do erro Trino 200 e publicação em PRD
+
+O erro `Table 'iceberg.silver.dest_cloud_orphan_resources' does not exist` foi
+causado pelo template persistido no PostgreSQL conter literalmente
+`{layers.detail_layer()}`: o SQL da regra não era uma f-string. A query falhava
+no parser do Trino (erro de `{`), antes de consultar qualquer tabela. Também
+havia endpoints usando `silver` hardcoded; esses agora resolvem a camada pela
+função central `lakehouse_layers.detail_layer()`.
+
+Após publicar a versão corrigida do backend em PRD:
+
+1. Executar uma vez, autenticado na API PRD, `POST /azure-resource-graph/seed-gold`.
+   O seed é idempotente: atualiza a regra PostgreSQL `gold_mart_rule` de código
+   `custo_recursos_orfaos`, grava o SQL com o namespace resolvido para aquele
+   ambiente, define `materialization_status = 'PENDING'` e limpa o erro anterior.
+   Não é necessário alterar manualmente `destination_table` nem criar uma nova
+   regra.
+2. Verificar no PostgreSQL PRD:
+
+   ```sql
+   SELECT id, code, materialization_status, materialization_error,
+          materialization_table, updated_at
+   FROM gold_mart_rule
+   WHERE code = 'custo_recursos_orfaos';
+   ```
+
+   `materialization_status` deve estar `PENDING` antes da execução, e o campo
+   `sql_template` não pode conter `{layers.detail_layer()}`. A tabela final
+   configurada permanece `dest_dm_cost_custo_recursos_orfaos`.
+3. Reprocessar somente essa regra em `POST /gold/reprocess` usando seu `rule_id`;
+   depois confirmar `materialization_status = 'UPDATED'`, ausência de erro e
+   consulta bem-sucedida no dashboard.
+4. Confirmar que `silver.dest_cloud_orphan_resources` contém as duas origens
+   (4P e TI) e que a Gold mantém `cloud_origem`/`source_connection_id`, sem
+   misturar custos: o join deve continuar particionado pela origem Azure
+   correspondente (`azure-4p` ou `azure-ti`).
+
+O seed não altera dados de custo diretamente nem cria uma tabela Silver. A Gold
+é reconstruída pelo fluxo normal de materialização. Em produção, executar os
+passos após o deploy e validar primeiro a contagem por `cloud_origem`; não rodar
+DDL manual no Trino.
+
+## 8. Plano de implementação (ordem sugerida)
 
 1. **`services/azure_resource_graph_service.py`** (novo) — coleta + Bronze; testar com
    `python -c` contra um tenant (valida permissão da SPN).
@@ -367,7 +435,7 @@ resources
 6. **Multi-cloud** — repetir 1–3 para `gcp_asset_inventory`, `oci_resource_search`,
    `ibm_resource_controller` (mesmo destino Gold).
 
-## 8. Riscos e limites
+## 9. Riscos e limites
 
 - **Permissão**: a SPN precisa de leitura (Reader) nas subscriptions e a query do ARG
   exige o provider `Microsoft.ResourceGraph` — para escopo tenant-wide, papel no
@@ -382,7 +450,7 @@ resources
 - **"Órfão" é regra de negócio**: as definições (N dias desligado, sem tag, disco
   unattached) devem ficar **configuráveis** na conexão/regras — não hardcoded.
 
-## 9. Referências
+## 10. Referências
 
 - Azure Resource Graph REST: https://learn.microsoft.com/azure/governance/resource-graph/concepts/query-language
 - Consultas ARG para cost optimization (marketplace aiskillstore): https://github.com/aiskillstore/marketplace/blob/main/skills/microsoft/azure-cost-optimization/references/azure-resource-graph.md

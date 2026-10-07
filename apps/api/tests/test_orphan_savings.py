@@ -1,4 +1,17 @@
-from app.routers.azure_resource_graph import _build_orphan_where, _saving_generated
+from app.routers.azure_resource_graph import (
+    ORPHAN_COST_SQL_TEMPLATE,
+    _build_orphan_where,
+    _orphan_table,
+    _saving_generated,
+)
+
+
+def test_orphan_cost_gold_uses_resolved_unified_silver_table():
+    assert _orphan_table() == "iceberg.silver.dest_cloud_orphan_resources"
+    assert "{layers.detail_layer()}" not in ORPHAN_COST_SQL_TEMPLATE
+    assert "iceberg.silver.dest_cloud_orphan_resources" in ORPHAN_COST_SQL_TEMPLATE
+    assert "'azure-resource-graph-4p' THEN 'azure-4p'" in ORPHAN_COST_SQL_TEMPLATE
+    assert "'azure-resource-graph-ti' THEN 'azure-ti'" in ORPHAN_COST_SQL_TEMPLATE
 
 
 def test_orphan_snapshot_filter_keeps_one_daily_picture():

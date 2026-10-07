@@ -101,6 +101,12 @@ _ORPHAN_SOURCES = [
 ORPHAN_STATUSES = ("ORFAO", "EM_ANALISE", "EXCECAO")
 
 
+def _orphan_table(alias: str | None = None) -> str:
+    """Fully qualified unified orphan table in the canonical detail layer."""
+    table = f"iceberg.{layers.detail_layer()}.{ORPHAN_DEST_PHYSICAL}"
+    return f"{table} {alias}" if alias else table
+
+
 def _mappings_for(sources: list[str]) -> list[dict[str, Any]]:
     return [
         {"source_column": col, "destination_column": col, "transform_type": "RENAME",
@@ -119,7 +125,7 @@ ORPHAN_MAPPINGS = _mappings_for(_ORPHAN_SOURCES)
 ORPHAN_COST_GOLD_CODE = "custo_recursos_orfaos"
 ORPHAN_COST_GOLD_TABLE = f"dest_dm_cost_{ORPHAN_COST_GOLD_CODE}"
 
-ORPHAN_COST_SQL_TEMPLATE = """
+ORPHAN_COST_SQL_TEMPLATE = f"""
 -- O export FOCUS pode conter o mesmo recurso em duas variantes de case
 -- (resourceGroups/PRO-MONITOR vs pro-monitor). Deduplicamos mantendo UMA
 -- variante canônica (MIN) por (lower(resourceid), período) para não somar
@@ -133,9 +139,9 @@ WITH orphan_ids AS (
                          WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
                          ELSE cloud_origem
                      END AS focus_cloud_origem
-    FROM iceberg.{layers.detail_layer()}.dest_cloud_orphan_resources
+    FROM {_orphan_table()}
     WHERE "_billing_period" = (
-        SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources
+        SELECT MAX("_billing_period") FROM {_orphan_table()}
     )
 ), focus_dedup AS (
     SELECT resourceid, "_billing_period", cloud_origem, billedcost, effectivecost, realizado
@@ -169,7 +175,7 @@ SELECT
     -- Custo canônico da plataforma: coluna "realizado" (BRL com taxas/markup
     -- aplicados pelas regras de negócio; tipo='realizado' no FOCUS gold).
     ROUND(SUM(COALESCE(TRY_CAST(f.realizado AS DOUBLE), 0)), 2) AS cost_brl
-FROM iceberg.silver.dest_cloud_orphan_resources o
+FROM {_orphan_table('o')}
 LEFT JOIN focus_dedup f
   -- case-insensitive: o ARG devolve o resource group no case armazenado,
   -- enquanto o export de custo FOCUS normaliza para UPPER/lower.
@@ -182,7 +188,7 @@ LEFT JOIN focus_dedup f
  END)
 -- Restringe ao período mais recente dos órfãos (poda de partição no FOCUS).
 WHERE o."_billing_period" = (
-    SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources
+    SELECT MAX("_billing_period") FROM {_orphan_table()}
 )
 GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 """
@@ -351,8 +357,6 @@ async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSessio
 async def seed_gold_orphan_cost(db: AsyncSession = Depends(get_db)):
     """Cria (idempotente) a regra Gold de custo por recurso órfão."""
     result = await seed_orphan_cost_gold(db)
-    if result["status"] == "EXISTS":
-        raise HTTPException(status_code=409, detail=f"Regra Gold já existe: {result['code']} (rule {result['rule_id']})")
     return result
 
 
@@ -433,12 +437,12 @@ async def orphan_summary(
     tipos = _split_csv(tipo_recurso)
     try:
         periods_rows = await trino_execute(
-            'SELECT DISTINCT "_billing_period" FROM iceberg.silver.dest_cloud_orphan_resources '
+            f'SELECT DISTINCT "_billing_period" FROM {_orphan_table()} '
             'ORDER BY "_billing_period" DESC'
         )
         snapshot_period_where = _build_orphan_where(period, None, None, None)
         snapshots_rows = await trino_execute(
-            'SELECT DISTINCT snapshot_date FROM iceberg.silver.dest_cloud_orphan_resources'
+            f'SELECT DISTINCT snapshot_date FROM {_orphan_table()}'
             + snapshot_period_where + ' ORDER BY snapshot_date DESC'
         )
         snapshot_dates = [r.get("snapshot_date") for r in snapshots_rows if r.get("snapshot_date")]
@@ -451,11 +455,11 @@ async def orphan_summary(
         if not selected_snapshot:
             where = _latest_snapshot_per_origin_where(where, "", period)
         by_rule = await trino_execute(
-            "SELECT orphan_rule, COUNT(*) AS cnt FROM iceberg.silver.dest_cloud_orphan_resources"
+            f"SELECT orphan_rule, COUNT(*) AS cnt FROM {_orphan_table()}"
             + where + " GROUP BY orphan_rule ORDER BY cnt DESC"
         )
         by_tipo = await trino_execute(
-            "SELECT tipo_recurso, COUNT(*) AS cnt FROM iceberg.silver.dest_cloud_orphan_resources"
+            f"SELECT tipo_recurso, COUNT(*) AS cnt FROM {_orphan_table()}"
             + where + " GROUP BY tipo_recurso ORDER BY cnt DESC"
         )
         cost_where = _build_orphan_where(
@@ -530,7 +534,7 @@ async def list_orphans(
         try:
             latest = await trino_execute(
                 "SELECT MAX(snapshot_date) AS snapshot_date "
-                "FROM iceberg.silver.dest_cloud_orphan_resources" + snapshot_where
+                f"FROM {_orphan_table()}" + snapshot_where
             )
             snapshot_date = None
         except Exception as exc:  # noqa: BLE001
@@ -552,7 +556,7 @@ async def list_orphans(
     # LEFT JOIN com a Gold pré-agregada (custo via FOCUS) quando existir.
     # Tabela pode não existir ainda (materialização não executada) → custo 0.
     sql = (
-        "SELECT " + columns + " FROM iceberg.silver.dest_cloud_orphan_resources o "
+        "SELECT " + columns + " FROM " + _orphan_table("o") + " "
         f"LEFT JOIN iceberg.{GOLD}.{ORPHAN_COST_GOLD_TABLE} c "
         "ON c.resource_id = o.resource_id AND c.orphan_rule = o.orphan_rule "
         "AND c.\"_billing_period\" = o.\"_billing_period\" "
