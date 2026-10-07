@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select, func
+from sqlalchemy import String, cast, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -62,8 +62,8 @@ async def list_processing_logs(
             ProcessingLog.status.ilike(needle),
             ProcessingLog.phase.ilike(needle),
             ProcessingLog.error.ilike(needle),
-            ProcessingLog.source.cast(str).ilike(needle),
-            ProcessingLog.destination.cast(str).ilike(needle),
+            cast(ProcessingLog.source, String).ilike(needle),
+            cast(ProcessingLog.destination, String).ilike(needle),
         ))
     total = (await db.execute(select(func.count()).select_from(ProcessingLog).where(*filters))).scalar_one()
     rows = (await db.execute(
