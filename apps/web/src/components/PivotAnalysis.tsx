@@ -126,6 +126,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [error, setError] = useState("");
   const [views, setViews] = useState<PivotView[]>([]);
   const [viewName, setViewName] = useState("");
+  const [savedViewsOpen, setSavedViewsOpen] = useState(false);
   const [drill, setDrill] = useState<{ columns: string[]; rows: Record<string, unknown>[]; total: number; limit: number; offset: number } | null>(null);
   const [drillQuery, setDrillQuery] = useState<{ destId: number; cellFilters: Record<string, unknown> } | null>(null);
   const [drillPage, setDrillPage] = useState({ page: 0, pageSize: 100 });
@@ -618,7 +619,13 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           }}
         />
       </Stack>)}
-      <Stack direction="row" gap={1} mt={2} alignItems="center" flexWrap="wrap"><TextField size="small" label="Salvar visão compartilhada" value={viewName} onChange={e => setViewName(e.target.value)} /><Button startIcon={<Save />} onClick={saveView}>Salvar</Button><Typography variant="caption" color="text.secondary">Dashboards salvos:</Typography>{views.map(view => <Chip key={view.id} label={view.name} color={view.destination_table_id === tableId ? "primary" : "default"} onClick={() => loadView(view)} onDelete={() => deletePivotView(view.id).then(() => getPivotViews().then(setViews))} />)}</Stack>
+      <Stack direction="row" gap={1} mt={2} alignItems="center" flexWrap="wrap">
+        <TextField size="small" label="Salvar visão compartilhada" value={viewName} onChange={e => setViewName(e.target.value)} />
+        <Button startIcon={<Save />} onClick={saveView} disabled={!viewName.trim()}>Salvar</Button>
+        <Button variant="outlined" onClick={() => setSavedViewsOpen(true)} disabled={!views.length}>
+          Visões salvas ({views.length})
+        </Button>
+      </Stack>
     </Paper>
     {result?.currency_added && <Alert severity="info" sx={{ mb: 2 }}>Currency foi adicionada às linhas para impedir a soma de moedas diferentes.</Alert>}
     {result?.period_auto_applied && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu Gold e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
@@ -650,6 +657,30 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         />
       </Box>
     </Drawer>
+    <Dialog open={savedViewsOpen} onClose={() => setSavedViewsOpen(false)} fullWidth maxWidth="sm">
+      <DialogTitle>Escolher visão salva</DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={1}>
+          {views.map(view => (
+            <Paper key={view.id} variant="outlined" sx={{ p: 1.25, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="body2" fontWeight={600} noWrap>{view.name}</Typography>
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  {destinations.find(destination => destination.id === view.destination_table_id)?.name || "Tabela indisponível"}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={0.5} flexShrink={0}>
+                <Button size="small" variant="contained" onClick={() => { loadView(view); setSavedViewsOpen(false); }}>Selecionar</Button>
+                <IconButton size="small" color="error" aria-label={`Excluir visão ${view.name}`} onClick={() => deletePivotView(view.id).then(() => getPivotViews().then(setViews))}>
+                  <Delete fontSize="small" />
+                </IconButton>
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      </DialogContent>
+      <DialogActions><Button onClick={() => setSavedViewsOpen(false)}>Fechar</Button></DialogActions>
+    </Dialog>
     <Dialog open={queryOpen} onClose={() => setQueryOpen(false)} fullWidth maxWidth="md">
       <DialogTitle>Query SQL do Pivot</DialogTitle>
       <DialogContent>
