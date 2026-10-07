@@ -2219,9 +2219,10 @@ export interface SavingsDashboard {
   top_growth: SavingAction[];
 }
 export interface CommitmentDashboardRow {
+  id?: string;
   period?: string;
   source?: string;
-  commitment_type?: "RI" | "SavingPlan";
+  commitment_type?: string;
   project?: string;
   ri_purchase?: number;
   savingplan_purchase?: number;
@@ -2243,7 +2244,6 @@ export interface CommitmentDashboardRow {
   ri_forecast_saving?: number;
   savingplan_forecast_saving?: number;
   chargecategory?: string;
-  commitment_type?: string;
   pricingcategory?: string;
   forecast_value?: number;
   other?: number;
