@@ -4,11 +4,9 @@ import Extraction from "../Extraction/Extraction";
 import SchedulesPanel from "../Extraction/SchedulesPanel";
 import ReprocessDataTab from "./ReprocessDataTab";
 import ReprocessForecastTab from "./ReprocessForecastTab";
-import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
 import ReprocessGoldTab from "./ReprocessGoldTab";
 import ProcessingLogsTab from "./ProcessingLogsTab";
-import ReprocessAICostRelationshipsTab from "./ReprocessAICostRelationshipsTab";
 import { useEffect, useState } from "react";
 import { getConnections, SourceConnection, formatApiError } from "../../services/api";
 import { Alert } from "@mui/material";
@@ -16,21 +14,29 @@ import { Alert } from "@mui/material";
 const TABS = [
   { id: "data", label: "Reprocessar dados" },
   { id: "forecast", label: "Forecast" },
-  { id: "accuracy", label: "Acurácia de Forecast" },
   { id: "shared", label: "Custo compartilhado" },
   { id: "gold", label: "Gold (cubos analíticos)" },
-  { id: "ai-cost", label: "Relacionamentos de custo IA" },
-  { id: "logs", label: "Logs" },
   { id: "extraction", label: "Extração & Monitoramento" },
   { id: "schedules", label: "Agendamentos" },
+  { id: "logs", label: "Logs" },
 ] as const;
 
 export default function Reprocess() {
   const [params, setParams] = useSearchParams();
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [schedulesError, setSchedulesError] = useState("");
-  const requestedTab = params.get("tab") === "gold" ? "gold" : params.get("tab");
-  const tab = TABS.some(item => item.id === requestedTab) ? requestedTab! : "data";
+  const requestedTab = params.get("tab");
+  const legacyAccuracyTab = requestedTab === "accuracy";
+  const normalizedTab = legacyAccuracyTab ? "forecast" : requestedTab;
+  const tab = TABS.some(item => item.id === normalizedTab) ? normalizedTab! : "data";
+
+  useEffect(() => {
+    if (!legacyAccuracyTab) return;
+    const next = new URLSearchParams(params);
+    next.set("tab", "forecast");
+    next.set("subtab", "accuracy");
+    setParams(next, { replace: true });
+  }, [legacyAccuracyTab, params, setParams]);
 
   useEffect(() => {
     if (tab === "schedules") {
@@ -43,6 +49,7 @@ export default function Reprocess() {
   const setTab = (next: string) => {
     const updated = new URLSearchParams(params);
     updated.set("tab", next);
+    if (next !== "forecast" && next !== "gold") updated.delete("subtab");
     if (next !== "extraction") updated.delete("extTab");
     setParams(updated, { replace: true });
   };
@@ -62,10 +69,8 @@ export default function Reprocess() {
         <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
           {tab === "data" && <ReprocessDataTab />}
           {tab === "forecast" && <ReprocessForecastTab />}
-          {tab === "accuracy" && <ReprocessAccuracyTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}
           {tab === "gold" && <ReprocessGoldTab />}
-          {tab === "ai-cost" && <ReprocessAICostRelationshipsTab />}
           {tab === "logs" && <ProcessingLogsTab />}
           {tab === "extraction" && <Extraction embedded />}
           {tab === "schedules" && (
