@@ -91,7 +91,7 @@ function App() {
         <Route path="gold-dashboard" element={<Navigate to="/gold-dashboard" replace />} />
         <Route path="visoes-consumo-ia" element={<AzurePtuOps />} />
         <Route path="azure-ptu-ops" element={<Navigate to="/visoes-consumo-ia" replace />} />
-        <Route path="reservations" element={<Navigate to="/savings?tab=reservas" replace />} />
+        <Route path="reservations" element={<Navigate to="/governance?tab=reservas" replace />} />
         <Route path="github-copilot" element={<GitHubCopilotDashboard />} />
         <Route path="ai-cost-origin" element={<Navigate to="/governance?tab=cost-relationship" replace />} />
         <Route path="pipeline" element={<PipelineBuilder />} />

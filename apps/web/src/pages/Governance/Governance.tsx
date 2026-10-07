@@ -7,6 +7,7 @@ import CloneRules from "../CloneRules/CloneRules";
 import Gold from "../GoldMarts/GoldMarts";
 import FinancialContracts from "./FinancialContracts";
 import Departments from "../Departments/Departments";
+import Reservations from "../Reservations/Reservations";
 
 const TABS = [
   { id: "organization", label: "Organograma", perms: [{ module: "planning", scope: null }] },
@@ -14,6 +15,7 @@ const TABS = [
   { id: "rules", label: "Ajustes financeiros", perms: [{ module: "rules", scope: null }, { module: "reservations", scope: null }] },
   { id: "financial-contracts", label: "Compromissos financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "cost-relationship", label: "Geração de Cubos", perms: [{ module: "gold", scope: null }] },
+  { id: "reservas", label: "Reservas Azure", perms: [{ module: "reservations", scope: null }] },
   { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
 ] as const;
 
@@ -26,6 +28,9 @@ export default function Governance() {
   const requested = searchParams.get("tab");
   if (requested === "desligue" || requested === "orfaos") {
     return <Navigate to={`/savings?tab=${requested}`} replace />;
+  }
+  if (requested === "reservas-legacy") {
+    return <Navigate to="/governance?tab=reservas" replace />;
   }
   if (requested === "clone-rules") {
     return <Navigate to="/governance?tab=rules&subtab=clone-rules" replace />;
@@ -98,6 +103,11 @@ export default function Governance() {
         {tab === "cost-relationship" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Gold embedded />
+          </Paper>
+        )}
+        {tab === "reservas" && (
+          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+            <Reservations />
           </Paper>
         )}
         {tab === "tags" && (
