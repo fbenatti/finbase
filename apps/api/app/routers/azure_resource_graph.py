@@ -133,17 +133,21 @@ ORPHAN_COST_SQL_TEMPLATE = f"""
 -- linhas em dobro no join com os órfãos (ARG devolve o case armazenado).
 -- O filtro por orphan_ids roda ANTES do window function, evitando varrer o
 -- FOCUS inteiro (~15-20M linhas) — apenas as linhas que casam com órfãos.
-WITH orphan_ids AS (
-        SELECT DISTINCT lower(resource_id) AS rid, "_billing_period",
-                     CASE cloud_origem
+WITH latest_orphan_period AS (
+    SELECT cloud_origem, MAX("_billing_period") AS billing_period
+    FROM {_orphan_table()}
+    GROUP BY cloud_origem
+), orphan_ids AS (
+    SELECT DISTINCT lower(o.resource_id) AS rid, o."_billing_period",
+                     CASE o.cloud_origem
                          WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
                          WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
-                         ELSE cloud_origem
+                         ELSE o.cloud_origem
                      END AS focus_cloud_origem
-    FROM {_orphan_table()}
-    WHERE "_billing_period" = (
-        SELECT MAX("_billing_period") FROM {_orphan_table()}
-    )
+    FROM {_orphan_table('o')}
+    JOIN latest_orphan_period p
+      ON p.cloud_origem = o.cloud_origem
+     AND p.billing_period = o."_billing_period"
 ), focus_dedup AS (
     SELECT resourceid, "_billing_period", cloud_origem, billedcost, effectivecost, realizado
     FROM (
@@ -187,9 +191,11 @@ LEFT JOIN focus_dedup f
      WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
      ELSE o.cloud_origem
  END)
--- Restringe ao período mais recente dos órfãos (poda de partição no FOCUS).
-WHERE o."_billing_period" = (
-    SELECT MAX("_billing_period") FROM {_orphan_table()}
+-- Restringe ao período mais recente de cada origem (poda de partição no FOCUS).
+WHERE EXISTS (
+    SELECT 1 FROM latest_orphan_period p
+    WHERE p.cloud_origem = o.cloud_origem
+      AND p.billing_period = o."_billing_period"
 )
 GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 """

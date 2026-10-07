@@ -12,6 +12,9 @@ def test_orphan_cost_gold_uses_resolved_unified_silver_table():
     assert "iceberg.silver.dest_cloud_orphan_resources" in ORPHAN_COST_SQL_TEMPLATE
     assert "'azure-resource-graph-4p' THEN 'azure-4p'" in ORPHAN_COST_SQL_TEMPLATE
     assert "'azure-resource-graph-ti' THEN 'azure-ti'" in ORPHAN_COST_SQL_TEMPLATE
+    assert 'GROUP BY cloud_origem' in ORPHAN_COST_SQL_TEMPLATE
+    assert 'p.cloud_origem = o.cloud_origem' in ORPHAN_COST_SQL_TEMPLATE
+    assert 'SELECT MAX("_billing_period") FROM iceberg.silver.dest_cloud_orphan_resources' not in ORPHAN_COST_SQL_TEMPLATE
 
 
 def test_orphan_snapshot_filter_keeps_one_daily_picture():
