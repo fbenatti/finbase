@@ -67,7 +67,9 @@ async def list_processing_logs(
             cast(ProcessingLog.source, String).ilike(needle),
             cast(ProcessingLog.destination, String).ilike(needle),
             ProcessingLog.source["connection_names"].astext.ilike(needle),
+            ProcessingLog.source["name"].astext.ilike(needle),
             ProcessingLog.destination["destination_name"].astext.ilike(needle),
+            ProcessingLog.destination["table"].astext.ilike(needle),
         ))
     filtered = select(ProcessingLog).where(*filters)
     total = (await db.execute(select(func.count()).select_from(ProcessingLog).where(*filters))).scalar_one()
