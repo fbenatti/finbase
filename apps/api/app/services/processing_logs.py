@@ -182,6 +182,7 @@ def backfill_forecast_runs(session: Session) -> int:
                 task_log.details = details
                 continue
         log = session.execute(select(ProcessingLog).where(
+            ProcessingLog.etl_task_id.is_(None), ProcessingLog.process_type == "forecast",
             ProcessingLog.details["forecast_run_id"].astext == str(run.id)
         )).scalar_one_or_none()
         if log is None:
