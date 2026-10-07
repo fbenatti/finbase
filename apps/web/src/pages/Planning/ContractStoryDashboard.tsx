@@ -125,10 +125,19 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
     const target = contractIndex < 0 || !contractPeriods.length ? contract.target : Math.min(((contractIndex + 1) / contractPeriods.length) * contract.target, contract.target);
     return { month, x: periods.length <= 1 ? 0 : index / (periods.length - 1) * 100, target, actual, row };
   });
+  const actualPoints = points.filter(point => !latestActual || point.month <= latestActual);
+  const actualIndex = latestActual ? periods.indexOf(latestActual) : -1;
+  const estimatedIndex = estimatedMonth ? periods.indexOf(estimatedMonth) : -1;
+  const projectionPoints = estimatedMonth && latestActual && observedMonthlyPace > 0 && estimatedIndex > actualIndex
+    ? points.filter(point => point.month >= latestActual && point.month <= estimatedMonth).map(point => ({
+      ...point,
+      actual: Math.min(latestCumulative + observedMonthlyPace * (periods.indexOf(point.month) - actualIndex), contract.target),
+    }))
+    : [];
   const max = Math.max(contract.target, ...points.map(point => Math.max(point.target, point.actual)), 1);
   const chartHeight = 200;
-  const polyline = (key: "target" | "actual") => points.map(point => `${point.x * 7.2},${chartHeight - point[key] / max * chartHeight}`).join(" ");
-  const estimateX = estimatedMonth ? (periods.length <= 1 ? 0 : periods.indexOf(estimatedMonth) / (periods.length - 1) * 720) : null;
+  const polyline = (key: "target" | "actual", series = points) => series.map(point => `${point.x * 7.2},${chartHeight - point[key] / max * chartHeight}`).join(" ");
+  const estimateX = estimatedIndex >= 0 ? points[estimatedIndex].x * 7.2 : null;
   return <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, overflow: "hidden" }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} sx={{ mb: 2 }}><Box><Typography variant="h6" fontWeight={800}>Evolução do compromisso</Typography><Typography variant="body2" color="text.secondary">Consumo Brasil acumulado comparado à trajetória necessária para atingir 100%.</Typography></Box><Chip size="small" icon={<AutoGraph />} label={estimatedMonth ? <>Projeção commitment · {monthLabel(estimatedMonth)}</> : latestActual ? <>Atualizado até <MonthStatusLabel value={latestActual} /></> : "Aguardando consumo mensal"} color={estimatedMonth ? "error" : latestActual && invoicesStillUpdating(latestActual) ? "warning" : "default"} variant="outlined" /></Stack>
     {!entries.length ? <Box sx={{ py: 2 }}><Box sx={{ height: 145, borderBottom: 1, borderColor: "divider", borderLeft: 1, position: "relative", background: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(148,163,184,.15) 36px)" }}><Typography sx={{ position: "absolute", left: 12, top: 14 }} color="text.secondary" variant="body2">Ainda não há consumo com valor registrado no período.</Typography><Box sx={{ position: "absolute", bottom: 12, left: 12, right: 12, borderTop: "2px dashed #94a3b8" }} /></Box><Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">Meta · {money(contract.target, contract.currency)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack></Box> : <Box sx={{ overflowX: "auto" }}>
@@ -136,7 +145,8 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
         {[0, 25, 50, 75, 100].map(pct => <Box key={pct} sx={{ position: "absolute", left: 48, right: 8, top: `${8 + (100 - pct) * 1.78}px`, borderTop: "1px solid", borderColor: "divider" }}><Typography variant="caption" color="text.secondary" sx={{ position: "absolute", right: "100%", mr: 1, top: -10 }}>{pct}%</Typography></Box>)}
         <svg viewBox="0 0 720 200" preserveAspectRatio="none" width="100%" height="200" aria-label="Consumo acumulado contra objetivo do contrato" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
           <polyline points={polyline("target")} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="7 6" />
-          <polyline points={polyline("actual")} fill="none" stroke="#0f766e" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          <polyline points={polyline("actual", actualPoints)} fill="none" stroke="#0f766e" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          {projectionPoints.length > 1 && <polyline points={polyline("actual", projectionPoints)} fill="none" stroke="#dc2626" strokeWidth="2.5" strokeDasharray="6 5" strokeLinejoin="round" strokeLinecap="round" />}
           {estimateX !== null && <g><line x1={estimateX} y1="0" x2={estimateX} y2={chartHeight} stroke="#dc2626" strokeWidth="2.5" strokeDasharray="6 5" /><title>Projeção commitment: {monthLabel(estimatedMonth!)}</title></g>}
           {points.filter(point => point.row).map(point => <circle key={point.month} cx={point.x * 7.2} cy={chartHeight - point.actual / max * chartHeight} r="4" fill="#0f766e"><title>{monthLabel(point.month)}: {money(point.actual, contract.currency)}</title></circle>)}
         </svg>
