@@ -6,7 +6,7 @@ Gold nem histórico — apenas metadata do catálogo e o `source_key` das conex�
 
 Uso (a partir de `apps/api`):
 
-    PYTHONPATH=. ../../.venv/bin/python scripts/seed_azure_source_catalog.py --dry-run
+    PYTHONPATH=. ../../.venv/bin/python scripts/seed_azure_source_catalog.py
     PYTHONPATH=. ../../.venv/bin/python scripts/seed_azure_source_catalog.py --apply
 """
 
