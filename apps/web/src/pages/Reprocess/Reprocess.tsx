@@ -8,6 +8,7 @@ import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 import ReprocessSharedCostTab from "./ReprocessSharedCostTab";
 import ReprocessGoldTab from "./ReprocessGoldTab";
 import ProcessingLogsTab from "./ProcessingLogsTab";
+import ReprocessAICostRelationshipsTab from "./ReprocessAICostRelationshipsTab";
 import { useEffect, useState } from "react";
 import { getConnections, SourceConnection, formatApiError } from "../../services/api";
 import { Alert } from "@mui/material";
@@ -18,6 +19,7 @@ const TABS = [
   { id: "accuracy", label: "Acurácia de Forecast" },
   { id: "shared", label: "Custo compartilhado" },
   { id: "gold", label: "Gold (cubos analíticos)" },
+  { id: "ai-cost", label: "Relacionamentos de custo IA" },
   { id: "logs", label: "Logs" },
   { id: "extraction", label: "Extração & Monitoramento" },
   { id: "schedules", label: "Agendamentos" },
@@ -63,6 +65,7 @@ export default function Reprocess() {
           {tab === "accuracy" && <ReprocessAccuracyTab />}
           {tab === "shared" && <ReprocessSharedCostTab />}
           {tab === "gold" && <ReprocessGoldTab />}
+          {tab === "ai-cost" && <ReprocessAICostRelationshipsTab />}
           {tab === "logs" && <ProcessingLogsTab />}
           {tab === "extraction" && <Extraction embedded />}
           {tab === "schedules" && (
