@@ -307,28 +307,28 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
 
   const execute = async () => {
     if (!tableId || !measures.length) return;
-    // A single active source may be the planning pseudo-destination (negative
-    // id): pivot that table directly instead of the Gold table, otherwise a
-    // forecast-only view would query the realized Gold and never show forecast.
-    const pivotTarget = sourceIds.length === 1 ? sourceIds[0] : tableId;
-    let schema = meta;
-    if (pivotTarget !== tableId) {
-      try { schema = await getPivotMetadata(pivotTarget); } catch { schema = meta; }
-    }
-    const known = new Set((schema?.columns || []).map(column => column.name));
-    const originAllowed = sourceIds.length > 1;
-    const allowOrigin = (name: string) => known.has(name) || (originAllowed && isOriginDim(name));
-    // Planning tables expose the month as ``period`` while Gold uses
-    // ``_billing_period``; the backend aliases either spelling, so keep period
-    // names even when they are not in the target schema.
-    const isPeriodName = (name: string) => ["_billing_period", "period", "forecast_month"].includes((name || "").toLowerCase());
-    const safeRows = known.size ? rows.filter(name => allowOrigin(name) || isPeriodName(name)) : rows;
-    const safeCols = known.size ? cols.filter(name => allowOrigin(name) || isPeriodName(name)) : cols;
-    const safeFilters = known.size ? filters.filter(item => known.has(item.column) || isPeriodName(item.column)) : filters;
-    const safeMeasures = known.size ? measures.filter(item => known.has(item.column)) : measures;
-    if (!safeMeasures.length) return;
     setLoading(true); setError("");
     try {
+      // A single active source may be the planning pseudo-destination (negative
+      // id): pivot that table directly instead of the Gold table, otherwise a
+      // forecast-only view would query the realized Gold and never show forecast.
+      const pivotTarget = sourceIds.length === 1 ? sourceIds[0] : tableId;
+      let schema = meta;
+      if (pivotTarget !== tableId) {
+        try { schema = await getPivotMetadata(pivotTarget); } catch { schema = meta; }
+      }
+      const known = new Set((schema?.columns || []).map(column => column.name));
+      const originAllowed = sourceIds.length > 1;
+      const allowOrigin = (name: string) => known.has(name) || (originAllowed && isOriginDim(name));
+      // Planning tables expose the month as ``period`` while Gold uses
+      // ``_billing_period``; the backend aliases either spelling, so keep period
+      // names even when they are not in the target schema.
+      const isPeriodName = (name: string) => ["_billing_period", "period", "forecast_month"].includes((name || "").toLowerCase());
+      const safeRows = known.size ? rows.filter(name => allowOrigin(name) || isPeriodName(name)) : rows;
+      const safeCols = known.size ? cols.filter(name => allowOrigin(name) || isPeriodName(name)) : cols;
+      const safeFilters = known.size ? filters.filter(item => known.has(item.column) || isPeriodName(item.column)) : filters;
+      const safeMeasures = known.size ? measures.filter(item => known.has(item.column)) : measures;
+      if (!safeMeasures.length) return;
       setResult(sourceIds.length > 1
         ? await runPivotUnion({ destination_table_ids: sourceIds, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, origin_column: "origem", sort_rows: sortRows, sort_columns: sortCols })
         : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols }));
@@ -627,6 +627,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         </Button>
       </Stack>
     </Paper>
+    {loading && (
+      <Alert severity="info" icon={<CircularProgress size={18} />} sx={{ mb: 2 }}>
+        Executando consulta no Trino. O resultado aparecerá aqui quando estiver pronto.
+      </Alert>
+    )}
     {result?.currency_added && <Alert severity="info" sx={{ mb: 2 }}>Currency foi adicionada às linhas para impedir a soma de moedas diferentes.</Alert>}
     {result?.period_auto_applied && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu Gold e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
     {drillLoading && <Alert severity="info" sx={{ mb: 2 }}>Carregando drill-down...</Alert>}
