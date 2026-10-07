@@ -115,6 +115,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [sortRows, setSortRows] = useState<PivotSort[]>([]);
   const [sortCols, setSortCols] = useState<PivotSort[]>([]);
   const [filters, setFilters] = useState<PivotFilter[]>(initialFilters);
+  const [filterInputs, setFilterInputs] = useState<Record<string, string>>(() => Object.fromEntries(initialFilters.map(filter => [filter.column, filter.values.join(", ")])));
   const [didAutoRun, setDidAutoRun] = useState(false);
   const [field, setField] = useState("");
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
@@ -357,7 +358,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const removeField = (target: "rows" | "cols" | "filters", name: string) => {
     if (target === "rows") { setRows(rows.filter(item => item !== name)); setSortRows(sortRows.filter(item => item.column !== name)); }
     if (target === "cols") { setCols(cols.filter(item => item !== name)); setSortCols(sortCols.filter(item => item.column !== name)); }
-    if (target === "filters") setFilters(filters.filter(item => item.column !== name));
+    if (target === "filters") {
+      setFilters(filters.filter(item => item.column !== name));
+      setFilterInputs(current => { const next = { ...current }; delete next[name]; return next; });
+    }
   };
   const saveView = async () => {
     if (!viewName.trim()) return;
@@ -462,9 +466,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   return <Box>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
-        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{[...destinations.filter(d => d.id > 0), ...destinations.filter(d => d.id <= 0)].map(d => <MenuItem key={d.id} value={d.id}>{d.name}{d.id < 0 ? " · análise" : ""}</MenuItem>)}</Select></FormControl>
-        <Box sx={{ display: "flex", alignItems: "center", gap: .5, flexWrap: "wrap" }}>
+      <Stack spacing={1.5}>
+        <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
+          <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{[...destinations.filter(d => d.id > 0), ...destinations.filter(d => d.id <= 0)].map(d => <MenuItem key={d.id} value={d.id}>{d.name}{d.id < 0 ? " · análise" : ""}</MenuItem>)}</Select></FormControl>
+          <Box sx={{ display: "flex", alignItems: "center", gap: .5, flexWrap: "wrap" }}>
           <Typography variant="caption" color="text.secondary">Origem:</Typography>
           {destinations.filter(d => d.id === tableId || d.id === -Math.abs(tableId)).map(d => <Chip key={d.id} label={d.id < 0 ? "Forecast" : "Realizado"} color={sourceIds.includes(d.id) ? "primary" : "default"} variant={sourceIds.includes(d.id) ? "filled" : "outlined"} onClick={() => setSourceIds(current => {
             const next = current.includes(d.id) ? (current.length > 1 ? current.filter(id => id !== d.id) : current) : [...current, d.id];
@@ -476,8 +481,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             return next;
           })} />)}
           {sourceIds.length > 1 && <Typography variant="caption" color="text.secondary">Para separar realizado e forecast, adicione o campo <code>origem</code> em Linhas.</Typography>}
-        </Box>
-        <Autocomplete
+          </Box>
+        </Stack>
+        <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
+          <Autocomplete
           size="small"
           options={fieldOptions}
           value={fieldOptions.find(c => c.name === field) || null}
@@ -488,17 +495,17 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           }}
           getOptionLabel={option => `${option.name} · ${option.type}`}
           isOptionEqualToValue={(option, value) => option.name === value.name}
-          sx={{ minWidth: 300, flex: 1 }}
+          sx={{ minWidth: 300, flex: "1 1 300px" }}
           renderInput={params => <TextField {...params} label="Pesquisar campo para arrastar/adicionar" placeholder="Digite o nome da coluna" />}
         />
         <Button startIcon={<Add />} onClick={() => addField("rows")} disabled={!field}>Linhas</Button>
         <Button startIcon={<Add />} onClick={() => addField("cols")} disabled={!field}>Colunas</Button>
         <Button startIcon={<Add />} onClick={() => addField("filters")} disabled={!field}>Filtro</Button>
         <Button variant="outlined" startIcon={<Visibility />} onClick={() => setQueryOpen(true)}>Ver query</Button>
-        <Box flexGrow={1} />
-        <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando Trino..." : "Atualizar pivot"}</Button>
-        <Button variant="outlined" startIcon={<Download />} disabled={!result} onClick={() => result && downloadCsv(result)}>CSV</Button>
-        <Button variant="outlined" startIcon={<TableChart />} disabled={!result} onClick={() => result && downloadExcel(result)}>Excel</Button>
+          <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando Trino..." : "Atualizar pivot"}</Button>
+          <Button variant="outlined" startIcon={<Download />} disabled={!result} onClick={() => result && downloadCsv(result)}>CSV</Button>
+          <Button variant="outlined" startIcon={<TableChart />} disabled={!result} onClick={() => result && downloadExcel(result)}>Excel</Button>
+        </Stack>
       </Stack>
       {showSearch && <Stack direction="row" gap={1} alignItems="center" sx={{ mt: 1.5 }}>
         <TextField size="small" fullWidth label="Buscar texto em todas as colunas" placeholder="Ex.: marketplace" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === "Enter") executeSearch(); }} />
@@ -602,9 +609,13 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           placeholder="Digite o valor"
           helperText="Use valores separados por vírgula para selecionar mais de um"
           sx={{ minWidth: 330 }}
-          value={filter.values.join(", ")}
+          value={filterInputs[filter.column] ?? filter.values.join(", ")}
           disabled={filter.operator === "IS_NULL" || filter.operator === "IS_NOT_NULL"}
-          onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, values: e.target.value.split(",").map(v => v.trim()).filter(Boolean) } : f))}
+          onChange={e => {
+            const input = e.target.value;
+            setFilterInputs(current => ({ ...current, [filter.column]: input }));
+            setFilters(filters.map(f => f.column === filter.column ? { ...f, values: input.split(",").map(v => v.trim()).filter(Boolean) } : f));
+          }}
         />
       </Stack>)}
       <Stack direction="row" gap={1} mt={2} alignItems="center" flexWrap="wrap"><TextField size="small" label="Salvar visão compartilhada" value={viewName} onChange={e => setViewName(e.target.value)} /><Button startIcon={<Save />} onClick={saveView}>Salvar</Button><Typography variant="caption" color="text.secondary">Dashboards salvos:</Typography>{views.map(view => <Chip key={view.id} label={view.name} color={view.destination_table_id === tableId ? "primary" : "default"} onClick={() => loadView(view)} onDelete={() => deletePivotView(view.id).then(() => getPivotViews().then(setViews))} />)}</Stack>
