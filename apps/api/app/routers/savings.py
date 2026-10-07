@@ -89,13 +89,12 @@ def _commitment_forecast_sql(start: str, end: str, source: str, *, by_project: b
   "NULLIF(TRIM(organograma_nivel_1), ''), 'Sem projeto') AS project,"
   if by_project else ""
  )
- group_by = "GROUP BY 1, 2, 3, 4, 5, 6" if by_project else "GROUP BY 1, 2, 3, 4, 5"
+ group_by = "GROUP BY 1, 2, 3, 4, 5" if by_project else "GROUP BY 1, 2, 3, 4"
  return f"""
 SELECT period, lower(cloud_origem) AS source,
        lower(commitmentdiscounttype) AS commitment_type,
        {project_select}
        lower(chargecategory) AS chargecategory,
-       lower(pricingcategory) AS pricingcategory,
        SUM(realizado_cloud) AS forecast_value
 FROM {planning}
 WHERE tipo = 'forecast' AND upper(financial_effect) = 'DIRECT_REALIZED'
