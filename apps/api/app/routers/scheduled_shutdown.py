@@ -370,8 +370,6 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
     que 60 dias ainda recebem baseline cheia, mas são marcados com
     ``age_days < 60`` para alerta.
     """
-    await _ensure_setup(db)
-
     # Leitura da Gold materializada (dest_dm_cost_saving_desligue_vm), que já
     # contém baseline por VM/mês calculada no reprocess — muito mais rápido que
     # re-scanear a Gold (31M linhas).
@@ -420,14 +418,8 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
     WHERE _billing_period IN ({literals})
       AND is_desligue_programado = TRUE
     """
-    try:
-        rows = await execute(gold_sql, timeout_s=120)
-        totals_rows = await execute(totals_sql, timeout_s=120)
-    except Exception as exc:
-        # Gold ainda não materializada: recua para a query lenta da Gold.
-        if "does not exist" in str(exc):
-            return await _savings_from_gold_fallback(body, db)
-        raise
+    rows = await execute(gold_sql, timeout_s=120)
+    totals_rows = await execute(totals_sql, timeout_s=120)
     totals = (totals_rows[0] or {}) if totals_rows else {}
 
     # Automação: usa o INVENTÁRIO Bronze (4P + TI) — cada recurso com schedule
@@ -1129,10 +1121,7 @@ async def savings_monthly():
     WHERE _billing_period >= '202601'
     ORDER BY 1
     """
-    try:
-        periods_rows = await execute(periods_sql, timeout_s=60)
-    except Exception:
-        return SavingsMonthlyResponse(rows=[])
+    periods_rows = await execute(periods_sql, timeout_s=60)
     all_periods = [str(r["p"]) for r in periods_rows if r.get("p")]
 
     sql = """
@@ -1189,10 +1178,7 @@ async def padroes_periodos():
     GROUP BY 1
     ORDER BY 1
     """
-    try:
-        rows = await execute(sql, timeout_s=120)
-    except Exception:
-        return {"periods": []}
+    rows = await execute(sql, timeout_s=120)
     return {
         "periods": [
             {
@@ -1211,14 +1197,11 @@ async def padroes_distribuicao(period: str | None = None):
     ``period`` opcional (YYYYMM). Default: mês mais recente disponível.
     """
     if not period:
-        try:
-            pr = await execute(
-                "SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
-                timeout_s=60,
-            )
-            period = str((pr[0] or {}).get("p") or "") if pr else ""
-        except Exception:
-            pass
+        pr = await execute(
+            "SELECT MAX(_billing_period) AS p FROM iceberg.{GOLD}.dest_dm_cost_saving_desligue_vm",
+            timeout_s=60,
+        )
+        period = str((pr[0] or {}).get("p") or "") if pr else ""
     if not period:
         return PadroesResponse(billing_period="", rows=[])
     # Lista apenas padrões relevantes — exclui efêmeras (CICLO_CURTO, AKS) e 24×7.
@@ -1236,10 +1219,7 @@ async def padroes_distribuicao(period: str | None = None):
     GROUP BY 1
     ORDER BY saving_brl DESC
     """
-    try:
-        rows = await execute(sql, timeout_s=120)
-    except Exception:
-        return PadroesResponse(billing_period=period, rows=[])
+    rows = await execute(sql, timeout_s=120)
     return PadroesResponse(
         billing_period=period,
         rows=[
