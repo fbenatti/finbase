@@ -19,7 +19,7 @@ def _trino_literal(value: Any, type_name: str) -> str:
         return f"CAST(NULL AS {type_name})"
     if isinstance(value, datetime):
         escaped = value.isoformat().replace("'", "''")
-        return f"CAST('{escaped}' AS TIMESTAMP(6) WITH TIME ZONE)"
+        return f"CAST(from_iso8601_timestamp('{escaped}') AS TIMESTAMP(6) WITH TIME ZONE)"
     escaped = str(value).replace("'", "''")
     return f"CAST('{escaped}' AS {type_name})"
 
@@ -47,7 +47,7 @@ async def _merge_processing_log_batch(rows: list[dict[str, Any]], *, create: boo
             timeout_s=180,
         )
         return
-    assignments = ", ".join(f"target.{name} = incoming.{name}" for name, _ in columns if name != "id")
+    assignments = ", ".join(f"{name} = incoming.{name}" for name, _ in columns if name != "id")
     insert_values = ", ".join(f"incoming.{name}" for name, _ in columns)
     await execute(
         f"MERGE INTO iceberg.gold.{PROCESSING_LOG_CUBE} AS target USING {source} "

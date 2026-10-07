@@ -65,9 +65,9 @@ async def list_processing_logs(
         if status:
             conditions.append(f"status = '{status.replace(chr(39), chr(39) * 2)}'")
         if started_after:
-            conditions.append(f"started_at >= TIMESTAMP WITH TIME ZONE '{started_after.isoformat()}'")
+            conditions.append(f"started_at >= from_iso8601_timestamp('{started_after.isoformat()}')")
         if started_before:
-            conditions.append(f"started_at <= TIMESTAMP WITH TIME ZONE '{started_before.isoformat()}'")
+            conditions.append(f"started_at <= from_iso8601_timestamp('{started_before.isoformat()}')")
         if connection_id is not None:
             conditions.append(f"source_label LIKE '%{int(connection_id)}%'")
         if destination_table_id is not None:
