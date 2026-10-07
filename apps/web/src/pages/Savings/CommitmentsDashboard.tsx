@@ -124,7 +124,7 @@ export default function CommitmentsDashboard() {
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       <Alert severity="info" sx={{ mb: 2 }}>
-        A base OnDemand vem do valor das linhas sintéticas de retorno, pareadas ao uso e neutralizadas no custo. Ela é uma referência comparativa, não saving realizado; compras não são rateadas por projeto.
+        Saving estimado = valor absoluto do retorno sintético (base OnDemand) menos o valor da compra do mesmo tipo no período. O resultado pode ser negativo; compras não são rateadas por projeto.
       </Alert>
 
       {loading && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
@@ -135,6 +135,8 @@ export default function CommitmentsDashboard() {
           <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} />
           <MetricCard title="Base OnDemand — RI" value={Number(selected.ri_ondemand || 0)} detail="Consumo coberto por reserva" />
           <MetricCard title="Base OnDemand — SavingPlan" value={Number(selected.savingplan_ondemand || 0)} detail="Consumo coberto por plano" />
+          <MetricCard title="Saving estimado — RI" value={Number(selected.ri_saving || 0)} detail="Retorno sintético − compra RI" />
+          <MetricCard title="Saving estimado — SavingPlan" value={Number(selected.savingplan_saving || 0)} detail="Retorno sintético − compra SavingPlan" />
         </Stack>
 
         <Typography variant="subtitle1" fontWeight={700} mb={1}>Acumulado do ano corrente — {currentYear}</Typography>
@@ -143,6 +145,8 @@ export default function CommitmentsDashboard() {
           <MetricCard title="Compras SavingPlan no ano" value={Number(annual.savingplan_purchase || 0)} />
           <MetricCard title="Base OnDemand RI no ano" value={Number(annual.ri_ondemand || 0)} />
           <MetricCard title="Base OnDemand SavingPlan no ano" value={Number(annual.savingplan_ondemand || 0)} />
+          <MetricCard title="Saving estimado RI no ano" value={Number(annual.ri_saving || 0)} />
+          <MetricCard title="Saving estimado SavingPlan no ano" value={Number(annual.savingplan_saving || 0)} />
         </Stack>
 
         <Stack direction={{ xs: "column", xl: "row" }} gap={2} mb={2}>
@@ -161,6 +165,15 @@ export default function CommitmentsDashboard() {
             ]} layout={{ height: 320, margin: { l: 72, r: 20, t: 18, b: 55 }, barmode: "group", paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { title: "BRL" }, legend: { orientation: "h", y: -0.2 } }} config={{ displayModeBar: false, responsive: true }} />
           </CardContent></Card>
         </Stack>
+
+        <Card sx={{ mb: 2 }}><CardContent>
+          <Typography variant="subtitle1" fontWeight={600}>Saving estimado mensal — retorno sintético menos compra</Typography>
+          <Typography variant="body2" color="text.secondary" mb={1}>Valor positivo indica que a referência OnDemand superou a compra contabilizada no mês; valor negativo indica o contrário.</Typography>
+          <Plot data={[
+            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.ri_saving || 0)), type: "bar", name: "RI", marker: { color: "#2e7d32" } },
+            { x: monthly.map((row) => monthLabel(row.period || "")), y: monthly.map((row) => Number(row.savingplan_saving || 0)), type: "bar", name: "SavingPlan", marker: { color: "#7b1fa2" } },
+          ]} layout={{ height: 320, margin: { l: 72, r: 20, t: 18, b: 55 }, barmode: "group", paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { title: "BRL" }, legend: { orientation: "h", y: -0.2 } }} config={{ displayModeBar: false, responsive: true }} />
+        </CardContent></Card>
 
         <Stack direction={{ xs: "column", xl: "row" }} gap={2} mb={2}>
           <Card sx={{ flex: 1, minWidth: 0 }}><CardContent>
