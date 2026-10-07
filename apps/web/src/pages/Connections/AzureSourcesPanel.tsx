@@ -14,6 +14,7 @@ import {
   AzureSourceItem,
   collectAzureEnvironment,
   getAzureSources,
+  refreshAzurePriceSheet,
   testAzureSource,
   updateAzureSourceSelection,
 } from "../../services/api";
@@ -47,12 +48,14 @@ function SourceRow({
   busy,
   onToggle,
   onTest,
+  onRefreshDedicated,
   onWindow,
 }: {
   source: AzureSourceItem;
   busy: boolean;
   onToggle: (enabled: boolean) => void;
   onTest: () => void;
+  onRefreshDedicated: () => void;
   onWindow: (days: number) => void;
 }) {
   const state = STATE_LABEL[source.state] || STATE_LABEL.NOT_CONFIGURED;
@@ -65,12 +68,12 @@ function SourceRow({
   return (
     <Box sx={{ borderBottom: 1, borderColor: "divider", py: 1 }}>
       <Stack direction="row" alignItems="center" spacing={1}>
-        <Tooltip title={planned ? "Fonte planejada: ainda não tem coletor" : "Ligar/desligar a coleta"}>
+        <Tooltip title={planned ? "Fonte planejada: ainda não tem coletor" : source.independent_connection ? "Conexão independente: não é ligada dentro de outro ambiente" : "Ligar/desligar a coleta"}>
           <span>
             <Checkbox
               size="small"
               checked={source.enabled}
-              disabled={busy || planned}
+              disabled={busy || planned || source.independent_connection || source.collection_mode === "dedicated"}
               onChange={(e) => onToggle(e.target.checked)}
             />
           </span>
@@ -80,6 +83,7 @@ function SourceRow({
             <Typography variant="body2" fontWeight={600}>{source.display_name}</Typography>
             <Chip size="small" label={state.label} color={state.color} variant="outlined" />
             {source.is_cost_source && <Chip size="small" label="custo" color="info" variant="outlined" />}
+            {source.independent_connection && <Chip size="small" label="conexão independente" color="info" variant="outlined" />}
             {planned && <Chip size="small" label="planejada" variant="outlined" />}
             {source.running_tasks > 0 && <Chip size="small" label="coletando" color="primary" />}
           </Stack>
@@ -96,6 +100,15 @@ function SourceRow({
             </IconButton>
           </span>
         </Tooltip>
+        {source.collection_mode === "dedicated" && (
+          <Tooltip title="Baixar e validar o snapshot completo no Bronze desta conexão">
+            <span>
+              <IconButton size="small" onClick={onRefreshDedicated} disabled={busy}>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
         <IconButton size="small" onClick={() => setOpen((v) => !v)}>
           <ExpandMoreIcon fontSize="small" sx={{ transform: open ? "rotate(180deg)" : "none" }} />
         </IconButton>
@@ -155,7 +168,7 @@ function EnvironmentCard({
   const [expanded, setExpanded] = useState(true);
 
   const enabledSources = useMemo(
-    () => environment.sources.filter((s) => s.enabled && s.implementation_status !== "planned"),
+    () => environment.sources.filter((s) => s.enabled && s.implementation_status !== "planned" && s.collection_mode !== "dedicated"),
     [environment.sources],
   );
 
@@ -215,6 +228,20 @@ function EnvironmentCard({
     }
   }, [environment.environment_slug, onChanged]);
 
+  const refreshDedicated = useCallback(async (source: AzureSourceItem) => {
+    setBusyId(source.connection_id);
+    setMessage({ severity: "info", text: `Enfileirando snapshot independente de ${source.display_name}…` });
+    try {
+      const task = await refreshAzurePriceSheet();
+      setMessage({ severity: "success", text: task.message || `Snapshot enfileirado na conexão ${task.source || "azure-pricesheet"} (tarefa ${task.task_id}).` });
+      onChanged();
+    } catch (error) {
+      setMessage({ severity: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusyId(null);
+    }
+  }, [onChanged]);
+
   return (
     <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 2, mb: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
@@ -222,6 +249,9 @@ function EnvironmentCard({
           {environment.environment_slug.toUpperCase()}
         </Typography>
         {environment.cloud_names.map((name) => <Chip key={name} size="small" label={name} />)}
+        {environment.sources.some((source) => source.independent_connection) && (
+          <Chip size="small" label="credenciais e coleta próprias" color="info" variant="outlined" />
+        )}
         {environment.credential_profiles.map((profile) => (
           <Chip key={profile} size="small" variant="outlined" label={`credencial: ${profile}`} />
         ))}
@@ -243,7 +273,8 @@ function EnvironmentCard({
       </Stack>
 
       <Typography variant="caption" color="text.secondary">
-        Uma credencial por ambiente: ligue as fontes aqui em vez de configurar cada uma.
+        Fontes compartilhadas usam as credenciais do ambiente; fontes independentes preservam conexão,
+        credenciais e fluxo de coleta próprios.
       </Typography>
 
       {message && <Alert severity={message.severity} sx={{ mt: 1 }} onClose={() => setMessage(null)}>{message.text}</Alert>}
@@ -257,6 +288,7 @@ function EnvironmentCard({
               busy={busyId === source.connection_id}
               onToggle={(enabled) => toggle(source, enabled)}
               onTest={() => test(source)}
+              onRefreshDedicated={() => void refreshDedicated(source)}
               onWindow={(days) => changeWindow(source, days)}
             />
           ))}
@@ -316,8 +348,8 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
   if (groups.length === 0) {
     return (
       <Alert severity="info">
-        Nenhuma fonte Azure cadastrada. Crie uma conexão Azure para começar; as demais fontes
-        (Resource Graph, Automation, Azure Monitor) são ligadas a partir dela, no mesmo grupo.
+        Nenhuma fonte Azure cadastrada. Crie conexões Azure; fontes do mesmo ambiente podem compartilhar
+        a credencial, enquanto fontes com caminho de ingestão independente devem ter conexão própria.
       </Alert>
     );
   }
@@ -336,8 +368,8 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
         </Tooltip>
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-        Ligue as fontes que devem compor a Bronze e use <b>Carga full</b> para enfileirar a coleta
-        completa do ambiente. Desligar uma fonte não apaga o histórico já coletado.
+        Ligue fontes do ambiente para a carga genérica. Conexões independentes mantêm sua ação de coleta
+        e Bronze próprios. Desligar uma fonte não apaga o histórico já coletado.
       </Typography>
 
       {groups.map((group) => (

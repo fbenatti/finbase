@@ -21,6 +21,7 @@ import IntegrationsPanel from "./IntegrationsPanel";
 const CONNECTOR_TYPES = [
   { value: "azure_mca_invoice", label: "Azure MCA (Invoices)", scope: "azure" },
   { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
+  { value: "azure_pricesheet", label: "Azure Price Sheet", scope: "azure" },
   { value: "azure_openai_ptu", label: "Azure OpenAI PTU", scope: "azure" },
   { value: "azure_automation_jobs", label: "Azure Automation Jobs", scope: "azure" },
   { value: "azure_resource_graph", label: "Azure Resource Graph", scope: "azure" },
@@ -110,6 +111,7 @@ const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: str
   // Provedores Cloud
   { value: "azure_mca_invoice", label: "Azure MCA", description: "Invoices e compromisso global", icon: <Cloud />, color: "#0078D4", category: "provedor" },
   { value: "azure_blob", label: "Azure", description: "Blob Storage", icon: <Cloud />, color: "#0078D4", category: "provedor" },
+  { value: "azure_pricesheet", label: "Azure Price Sheet", description: "Snapshot contratual em conexão independente", icon: <Cloud />, color: "#0078D4", category: "provedor" },
   { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, color: "#0078D4", category: "ferramenta" },
   { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de Start/Stop de VMs", icon: <Cloud />, color: "#0078D4", category: "ferramenta" },
   { value: "azure_resource_graph", label: "Azure Resource Graph", description: "Inventário / recursos órfãos", icon: <Search />, color: "#0078D4", category: "ferramenta" },
@@ -350,7 +352,14 @@ export default function Connections() {
     setFormTestMessage(null);
     const scope = CONNECTOR_TYPES.find((type) => type.value === connectorType)?.scope || "";
     const latestPeriod = latestMcaInvoiceMonth();
-    setForm({ ...emptyForm, connector_type: connectorType, cloud_scope: scope, mca_start_period: latestPeriod, mca_end_period: latestPeriod });
+    const initialForm = { ...emptyForm, connector_type: connectorType, cloud_scope: scope, mca_start_period: latestPeriod, mca_end_period: latestPeriod };
+    if (connectorType === "azure_pricesheet") {
+      Object.assign(initialForm, {
+        code: "azure-pricesheet", name: "Azure Price Sheet", cloud_name: "Azure Price Sheet",
+        blob_prefixes: "reports/report_-pricesheet/",
+      });
+    }
+    setForm(initialForm);
     if (connectorType === "azure_mca_invoice") {
       void getMcaCommitmentStatus().then((data) => {
         setForm((current) => ({ ...current, mca_auth_mode: data.auth_mode || "bearer", mca_billing_account_ids: (data.billing_account_ids || []).join("\n") }));
@@ -412,7 +421,7 @@ export default function Connections() {
           mca_billing_account_ids: (status.billing_account_ids || []).join("\n"),
         }));
       }).catch(() => undefined);
-    } else if (conn.connector_type === "azure_blob") {
+    } else if (conn.connector_type === "azure_blob" || conn.connector_type === "azure_pricesheet") {
       setForm({
         ...emptyForm,
         code: conn.code, name: conn.name,
@@ -424,7 +433,7 @@ export default function Connections() {
         client_secret: cfg.client_secret || "",
         storage_account: cfg.storage_account || "",
         container_name: cfg.container_name || "",
-        blob_prefixes: prefixesToText(conn.blob_prefixes),
+        blob_prefixes: conn.connector_type === "azure_pricesheet" ? "reports/report_-pricesheet/" : prefixesToText(conn.blob_prefixes),
       });
     } else if (conn.connector_type === "azure_openai_ptu") {
       // The API deliberately omits secrets. Never repopulate the write-only field.
@@ -631,12 +640,18 @@ export default function Connections() {
 
   const buildConnectionBody = () => {
     const configJson: Record<string, unknown> = {};
-    if (form.connector_type === "azure_blob") {
+    if (form.connector_type === "azure_blob" || form.connector_type === "azure_pricesheet") {
       if (form.tenant_id) configJson.tenant_id = form.tenant_id;
       if (form.client_id) configJson.client_id = form.client_id;
       if (form.client_secret) configJson.client_secret = form.client_secret;
       if (form.storage_account) configJson.storage_account = form.storage_account;
       if (form.container_name) configJson.container_name = form.container_name;
+      if (form.connector_type === "azure_pricesheet") {
+        configJson.source_key = "price_sheet";
+        configJson.environment_slug = "azure-pricesheet";
+        configJson.independent_connection = true;
+        configJson.scope = "BillingAccountId";
+      }
     } else if (form.connector_type === "azure_openai_ptu") {
       configJson.credential_profile = form.credential_profile || "azure-4p";
       if (form.tenant_id) configJson.tenant_id = form.tenant_id;
@@ -1161,7 +1176,7 @@ export default function Connections() {
                 {CONNECTOR_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+            <TextField label="Code" value={form.code} disabled={form.connector_type === "azure_pricesheet"} onChange={(e) => setForm({ ...form, code: e.target.value })} />
             <TextField label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <TextField label="Cloud Name" value={form.cloud_name} onChange={(e) => setForm({ ...form, cloud_name: e.target.value })} />
             <FormControl fullWidth>
@@ -1312,8 +1327,14 @@ export default function Connections() {
               </>
             )}
 
-            {form.connector_type === "azure_blob" && (
+            {(form.connector_type === "azure_blob" || form.connector_type === "azure_pricesheet") && (
               <>
+                {form.connector_type === "azure_pricesheet" && (
+                  <Alert severity="info">
+                    Conexão independente do Azure 4P Cost Management. As credenciais são gravadas nesta conexão;
+                    o snapshot vai para Bronze <code>raw_azure_pricesheet</code> pelo prefixo próprio.
+                  </Alert>
+                )}
                 <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>Azure Credentials</Typography>
                 <TextField label="Tenant ID" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
@@ -1328,14 +1349,18 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, storage_account: e.target.value })} />
                 <TextField label="Container Name" value={form.container_name}
                   onChange={(e) => setForm({ ...form, container_name: e.target.value })} />
-                <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={4}
-                  value={form.blob_prefixes}
-                  onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
-                  helperText={
-                    "O tipo decide qual coletor usa o caminho — não é chumbado no código.\n"
-                    + "Ex.:\nactual_cost: reports/Report4P-actual-cost/\n"
-                    + "amortized_cost: reports/Report4P-amortized-cost/"
-                  } />
+                {form.connector_type === "azure_blob" ? (
+                  <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={4}
+                    value={form.blob_prefixes}
+                    onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
+                    helperText={
+                      "O tipo decide qual coletor usa o caminho — não é chumbado no código.\n"
+                      + "Ex.:\nactual_cost: reports/Report4P-actual-cost/\n"
+                      + "amortized_cost: reports/Report4P-amortized-cost/"
+                    } />
+                ) : (
+                  <TextField label="Prefixo do Price Sheet" value="reports/report_-pricesheet/" disabled />
+                )}
               </>
             )}
 

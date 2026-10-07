@@ -5533,6 +5533,8 @@ export interface AzureSourceItem {
   api_reference?: string | null;
   required_permission?: string | null;
   implementation_status?: string | null;
+  independent_connection?: boolean;
+  collection_mode?: "environment" | "dedicated";
   scope?: string | null;
   position: number;
   last_test_status?: string | null;
@@ -5602,6 +5604,17 @@ export async function collectAzureEnvironment(
   message: string;
 }> {
   const { data } = await api.post(`/azure-sources/environments/${encodeURIComponent(environment)}/collect`, body, { timeout: 120000 });
+  return data;
+}
+
+export async function refreshAzurePriceSheet(): Promise<{
+  task_id: number;
+  status: string;
+  connection_id: number;
+  source?: string;
+  message?: string;
+}> {
+  const { data } = await api.post("/etl/azure-pricesheet/refresh", {}, { timeout: 120000 });
   return data;
 }
 
