@@ -83,7 +83,8 @@ def _commitment_forecast_sql(start: str, end: str, source: str, *, by_project: b
  planning = f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
  source_filter = "" if source == "all" else f"AND lower(cloud_origem) = '{source}'"
  project_select = (
-  "COALESCE(NULLIF(TRIM(organograma_nivel_5), ''), NULLIF(TRIM(organograma_nivel_4), ''), "
+  "COALESCE(NULLIF(TRIM(organograma_nivel_7), ''), NULLIF(TRIM(organograma_nivel_6), ''), "
+  "NULLIF(TRIM(organograma_nivel_5), ''), NULLIF(TRIM(organograma_nivel_4), ''), "
   "NULLIF(TRIM(organograma_nivel_3), ''), NULLIF(TRIM(organograma_nivel_2), ''), "
   "NULLIF(TRIM(organograma_nivel_1), ''), 'Sem projeto') AS project,"
   if by_project else ""
