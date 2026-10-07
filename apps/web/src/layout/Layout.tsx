@@ -49,6 +49,17 @@ const COLLAPSED_WIDTH = 56;
 
 const menuGroups = [
   {
+    label: "Visualizações",
+    icon: <BarChartIcon fontSize="small" />,
+    color: "#0f766e",
+    background: "#f0fdfa",
+    items: [
+      { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
+      { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
+      { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
+    ],
+  },
+  {
     label: "Importação de dados",
     icon: <FolderOpenIcon fontSize="small" />,
     color: "#2563eb",
@@ -70,18 +81,6 @@ const menuGroups = [
       { path: "/savings", label: "Savings", icon: <SavingsIcon /> },
       { path: "/financial-planning", label: "Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
-    ],
-  },
-  {
-    label: "Visualizações",
-    icon: <BarChartIcon fontSize="small" />,
-    color: "#0f766e",
-    background: "#f0fdfa",
-    items: [
-      { path: "/analysis", label: "Análise", icon: <BarChartIcon /> },
-      { path: "/gold-dashboard", label: "FinOps Intelligence", icon: <BarChartIcon /> },
-      { path: "/gold-dashboard-v2", label: "FinOps Intelligence v2 (BETA)", icon: <BarChartIcon /> },
-      { path: "/visoes-consumo-ia", label: "Unit Economics", icon: <SmartToyIcon /> },
     ],
   },
   {
