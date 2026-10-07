@@ -154,15 +154,30 @@ export default function CommitmentsDashboard() {
         </Stack>
 
         <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600}>Compras mensais — RI e SavingPlan</Typography>
-          <Typography variant="body2" color="text.secondary">Compra realizada e base OnDemand sintética por modalidade. O forecast de compra é exibido em outra cor e permanece global, sem rateio entre RI e SavingPlan.</Typography>
-          <Plot data={[
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_purchase || 0)), type: "bar", name: "RI — compra realizada", marker: { color: "#1565c0" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — compra realizada</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_purchase || 0)), type: "bar", name: "SavingPlan — compra realizada", marker: { color: "#7b1fa2" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — compra realizada</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "RI — base OnDemand", line: { color: "#0284c7", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — base OnDemand</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "SavingPlan — base OnDemand", line: { color: "#c084fc", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — base OnDemand</extra>" },
-            { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.purchase || 0)), type: "bar", name: "Forecast de compra — geral", marker: { color: "#f59e0b" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast geral de compra</extra>" },
-          ]} layout={{ ...chartLayout, height: 390, barmode: "stack", legend: { orientation: "h", y: -0.22 } }} config={{ displayModeBar: false, responsive: true }} />
+          <Typography variant="subtitle1" fontWeight={600}>Compras mensais</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>RI e SavingPlan ficam em gráficos separados, com a mesma leitura: compra realizada em barras e base OnDemand em linha. O forecast de compra é geral e permanece sem rateio entre modalidades.</Typography>
+          <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle2" fontWeight={600}>RI</Typography>
+              <Plot data={[
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_purchase || 0)), type: "bar", name: "Compra realizada", marker: { color: "#1565c0" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — compra realizada</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "Base OnDemand", line: { color: "#0284c7", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — base OnDemand</extra>" },
+              ]} layout={{ ...chartLayout, height: 340, showlegend: true, legend: { orientation: "h", y: -0.24 } }} config={{ displayModeBar: false, responsive: true }} />
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle2" fontWeight={600}>SavingPlan</Typography>
+              <Plot data={[
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_purchase || 0)), type: "bar", name: "Compra realizada", marker: { color: "#7b1fa2" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — compra realizada</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "Base OnDemand", line: { color: "#c084fc", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — base OnDemand</extra>" },
+              ]} layout={{ ...chartLayout, height: 340, showlegend: true, legend: { orientation: "h", y: -0.24 } }} config={{ displayModeBar: false, responsive: true }} />
+            </Box>
+          </Stack>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" fontWeight={600}>Forecast geral de compra</Typography>
+            <Plot data={[
+              { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.purchase || 0)), type: "bar", name: "Forecast de compra — geral", marker: { color: "#f59e0b" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast geral de compra</extra>" },
+            ]} layout={{ ...chartLayout, height: 280 }} config={{ displayModeBar: false, responsive: true }} />
+          </Box>
         </CardContent></Card>
 
         <Card sx={{ mb: 2 }}><CardContent>
