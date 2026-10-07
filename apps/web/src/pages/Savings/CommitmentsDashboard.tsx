@@ -181,22 +181,28 @@ export default function CommitmentsDashboard() {
           </Stack>
         </CardContent></Card>
 
-        <Stack direction={{ xs: "column", xl: "row" }} spacing={2} mb={2}>
-          {(["RI", "SavingPlan"] as const).map((type) => {
-            const rows = projectChart[type];
-            const color = type === "RI" ? "#1565c0" : "#7b1fa2";
-            const lightColor = type === "RI" ? "#93c5fd" : "#d8b4fe";
-            return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
-              <Typography variant="subtitle1" fontWeight={600}>Projetos — {type}: OnDemand x saving</Typography>
-              <Typography variant="body2" color="text.secondary" mb={1}>Top 8 por base OnDemand; compra rateada por projeto. Percentual mostra compra / base.</Typography>
-              <Plot data={[
-                { x: rows.map((row) => row.project), y: rows.map((row) => row.baseline), type: "bar", name: "Base OnDemand", marker: { color: lightColor }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Base OnDemand</extra>" },
-                { x: rows.map((row) => row.project), y: rows.map((row) => row.saving), type: "bar", name: "Saving realizado", marker: { color }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Saving realizado</extra>" },
-                { x: rows.map((row) => row.project), y: rows.map((row) => row.purchasePct), type: "scatter", mode: "lines+markers", name: "Compra / OnDemand", yaxis: "y2", line: { color: "#334155", width: 2 }, marker: { size: 7 }, hovertemplate: "%{x}<br>%{y:.1f}%<extra>Compra / OnDemand</extra>" },
-              ]} layout={{ ...chartLayout, height: 380, margin: { l: 76, r: 58, t: 18, b: 110 }, barmode: "group", showlegend: true, legend: { orientation: "h", y: -0.42 }, xaxis: { ...chartLayout.xaxis, tickangle: -35, automargin: true }, yaxis2: { title: "Compra / OnDemand", overlaying: "y", side: "right", showgrid: false, ticksuffix: "%", automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
-            </CardContent></Card>;
-          })}
-        </Stack>
+        <Card sx={{ mb: 2 }}><CardContent>
+          <Typography variant="subtitle1" fontWeight={600}>Compras e saving por projeto</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>Valores do período selecionado; compra forecast e saving realizado aparecem separados.</Typography>
+          <Stack direction={{ xs: "column", xl: "row" }} spacing={2}>
+            {(["RI", "SavingPlan"] as const).map((type) => {
+              const actualRows = data.projects.filter((row) => row.commitment_type === type)
+                .sort((a, b) => Number(b.purchase_allocated || 0) - Number(a.purchase_allocated || 0)).slice(0, 10);
+              const forecastRows = data.forecast_projects.filter((row) => row.commitment_type === type);
+              const forecastByProject = new Map<string, number>();
+              forecastRows.forEach((row) => forecastByProject.set(row.project || "Sem projeto", (forecastByProject.get(row.project || "Sem projeto") || 0) + Number(row.forecast_purchase || 0)));
+              const names = actualRows.map((row) => row.project || "Sem projeto");
+              return <Box key={type} sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="subtitle2" fontWeight={600}>{type}</Typography>
+                <Plot data={[
+                  { x: names, y: actualRows.map((row) => Number(row.purchase_allocated || 0)), type: "bar", name: "Compra realizada", marker: { color: type === "RI" ? "#1565c0" : "#7b1fa2" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Compra realizada</extra>" },
+                  { x: names, y: names.map((name) => forecastByProject.get(name) || 0), type: "bar", name: "Forecast de compra", marker: { color: type === "RI" ? "#93c5fd" : "#d8b4fe" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Forecast de compra</extra>" },
+                  { x: names, y: actualRows.map((row) => Number(row.estimated_saving || 0)), type: "bar", name: "Saving realizado", marker: { color: "#15803d" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Saving realizado</extra>" },
+                ]} layout={{ ...chartLayout, height: 360, margin: { l: 76, r: 20, t: 12, b: 105 }, barmode: "group", showlegend: true, legend: { orientation: "h", y: -0.38 }, xaxis: { ...chartLayout.xaxis, tickangle: -35, automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
+              </Box>;
+            })}
+          </Stack>
+        </CardContent></Card>
 
         <Stack direction={{ xs: "column", xl: "row" }} spacing={2}>
           {(["RI", "SavingPlan"] as const).map((type) => {
