@@ -31,11 +31,7 @@ def _commitment_actual_sql(start: str, end: str, source: str, *, by_project: boo
  table = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
  source_filter = _commitment_source_filter(source, "f")
  select_dimensions = "period, source, commitment_type, project" if by_project else "period, source, commitment_type"
- eligible_filter = (
-  "AND f.chargecategory = 'Usage'"
-  if by_project else
-  "AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))"
- )
+ eligible_filter = "AND (f.chargecategory = 'Purchase' OR (f.chargecategory = 'Usage' AND coalesce(f.is_synthetic, FALSE) = FALSE))"
  project_select = (
   "COALESCE(NULLIF(TRIM(f.organograma), ''), NULLIF(TRIM(f.source_resource_group_name), ''), 'Sem projeto') AS project,"
   if by_project else ""
@@ -53,7 +49,7 @@ WITH synthetic_returns AS (
         CASE WHEN lower(f.commitmentdiscounttype) = 'reservation' THEN 'RI' ELSE 'SavingPlan' END AS commitment_type,
         {project_select}
         f.chargecategory, f.realizado_cloud,
-        CASE WHEN r.clone_source_record_id IS NOT NULL THEN -r.return_realized ELSE 0 END AS ondemand_baseline,
+        CASE WHEN f.chargecategory = 'Usage' AND r.clone_source_record_id IS NOT NULL THEN -r.return_realized ELSE 0 END AS ondemand_baseline,
         f.source_record_id
  FROM {table} f
  LEFT JOIN synthetic_returns r
@@ -134,11 +130,16 @@ async def commitments_dashboard(
   (str(row["period"]), str(row.get("source")), str(row.get("commitment_type"))): row
   for row in monthly_rows
  }
- project_baselines: dict[tuple[str, str, str], float] = {}
+ project_baselines: dict[tuple[str, str, str, str], float] = {}
  for row in project_rows:
   key = (str(row["period"]), str(row.get("source")), str(row.get("commitment_type")))
   project = str(row.get("project") or "Sem projeto")
   project_baselines[(key[0], key[1], key[2], project)] = float(row.get("ondemand_baseline") or 0)
+
+ group_baselines: dict[tuple[str, str, str], float] = {}
+ for (period, source_name, commitment_type, _), baseline in project_baselines.items():
+  key = (period, source_name, commitment_type)
+  group_baselines[key] = group_baselines.get(key, 0.0) + baseline
 
  for row in project_rows:
   period = str(row["period"])
@@ -147,10 +148,7 @@ async def commitments_dashboard(
   project = str(row.get("project") or "Sem projeto")
   key = (period, source_name, commitment_type)
   project_base = float(row.get("ondemand_baseline") or 0)
-  total_base = sum(
-   value for (p, s, c, _), value in project_baselines.items()
-   if (p, s, c) == key
-  )
+  total_base = group_baselines.get(key, 0.0)
   commitment = monthly_commitments.get(key, {})
   purchase = float(commitment.get("purchase") or 0)
   purchase_allocated = purchase * project_base / total_base if total_base else 0.0
