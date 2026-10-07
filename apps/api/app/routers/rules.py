@@ -522,7 +522,6 @@ async def list_classifications_grid(
     filters: str | None = None,
     destination_table_id: int | None = None,
     cloud: str | None = None,
-    department_ids: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Server-side grid over classification rules (pagination, search, sort, AND filters).
@@ -532,7 +531,8 @@ async def list_classifications_grid(
     """
     import json
     from datetime import datetime as _dt
-    from sqlalchemy import or_, func, cast, String
+    from sqlalchemy import or_, func, cast, String, literal, not_, select
+    from sqlalchemy.orm import aliased
 
     dept = Department
     stmt = select(ClassificationRule, dept.name).outerjoin(dept, dept.id == ClassificationRule.department_id)
@@ -544,13 +544,6 @@ async def list_classifications_grid(
             conditions.append(ClassificationRule.cloud_scope.is_(None))
         else:
             conditions.append(ClassificationRule.cloud_scope == cloud)
-    if department_ids:
-        try:
-            department_id_values = [int(value) for value in department_ids.split(",") if value.strip()]
-        except ValueError as exc:
-            raise HTTPException(422, "IDs de organograma inválidos") from exc
-        if department_id_values:
-            conditions.append(ClassificationRule.department_id.in_(department_id_values))
     # Busca global: qualquer campo textual/numerico da regra, incluindo o
     # JSON de condições. Quando o valor é apagado, não adiciona predicado e a
     # consulta volta naturalmente para todos os registros do escopo.
@@ -590,6 +583,19 @@ async def list_classifications_grid(
         specs = json.loads(filters) if filters else []
     except json.JSONDecodeError as exc:
         raise HTTPException(422, "Filtros inválidos") from exc
+    department_path = select(
+        Department.id.label("id"),
+        Department.parent_id.label("parent_id"),
+        Department.name.label("path"),
+    ).where(Department.parent_id.is_(None)).cte("classification_department_path", recursive=True)
+    child_department = aliased(Department)
+    department_path = department_path.union_all(
+        select(
+            child_department.id,
+            child_department.parent_id,
+            department_path.c.path + literal(" > ") + child_department.name,
+        ).join(department_path, child_department.parent_id == department_path.c.id)
+    )
     for spec in specs if isinstance(specs, list) else []:
         field = str(spec.get("field", ""))
         value = str(spec.get("value", ""))
@@ -616,7 +622,28 @@ async def list_classifications_grid(
         elif field == "cloud_scope":
             expr = column.is_(None) if value.strip().lower() in {"global", "null", "none"} else column == value
         elif field == "department_name":
-            expr = dept.name == value
+            path_column = select(department_path.c.id).where(department_path.c.path.ilike(f"%{value}%"))
+            if op == "contains":
+                expr = dept.id.in_(path_column)
+            elif op == "notContains":
+                expr = not_(dept.id.in_(path_column))
+            elif op == "startsWith":
+                expr = dept.id.in_(select(department_path.c.id).where(department_path.c.path.ilike(f"{value}%")))
+            elif op == "endsWith":
+                expr = func.lower(dept.name).like(f"%{value.lower()}")
+            else:
+                expr = or_(func.lower(dept.name) == value.lower(), dept.id.in_(select(department_path.c.id).where(func.lower(department_path.c.path) == value.lower())))
+        elif isinstance(column.type, String):
+            if op == "contains":
+                expr = column.ilike(f"%{value}%")
+            elif op == "notContains":
+                expr = not_(column.ilike(f"%{value}%"))
+            elif op == "startsWith":
+                expr = column.ilike(f"{value}%")
+            elif op == "endsWith":
+                expr = column.ilike(f"%{value}")
+            else:
+                expr = func.lower(column) == value.lower()
         else:
             expr = column == value
         conditions.append(or_(column.is_(None), expr == False) if op == "notEquals" else expr)

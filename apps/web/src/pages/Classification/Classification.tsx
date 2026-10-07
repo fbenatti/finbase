@@ -19,7 +19,6 @@ import {
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
-import { DepartmentTreeMultiPicker, descendantIds } from "../../components/DepartmentTreePicker";
 import PolicyFlow from "./PolicyFlow";
 import { ORG } from "../../constants/orgLabels";
 
@@ -424,7 +423,6 @@ export function ClassificationRulesTab() {
   const [deletePending, setDeletePending] = useState<ClassificationRule | null>(null);
   const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [departmentFilter, setDepartmentFilter] = useState<number[]>([]);
   const [destColumns, setDestColumns] = useState<string[]>([]);
 
   useEffect(() => {
@@ -448,7 +446,6 @@ export function ClassificationRulesTab() {
     query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] },
     cloudOverride?: string,
     destOverride?: number | "",
-    departmentOverride: number[] = departmentFilter,
   ) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -461,10 +458,6 @@ export function ClassificationRulesTab() {
         search: search.trim() || undefined,
         destination_table_id: destId,
         cloud,
-        department_ids: departmentOverride.length ? [...new Set(departmentOverride.flatMap(id => {
-          const node = flattenDepartments(departments).find(item => item.id === id);
-          return node ? [...descendantIds(node)] : [id];
-        }))] : undefined,
       }, abortRef.current.signal);
       setRules(data.items);
       setTotal(data.total);
@@ -570,7 +563,7 @@ export function ClassificationRulesTab() {
       </Stack>
 
       {/* Filtros: Cloud primeiro, depois Tabela Destino */}
-      <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="flex-end">
+      <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="center">
         <FormControl sx={{ minWidth: 220 }} size="small">
           <InputLabel>Cloud</InputLabel>
           <Select
@@ -597,20 +590,6 @@ export function ClassificationRulesTab() {
             ))}
           </Select>
         </FormControl>
-
-        <Box sx={{ minWidth: 300, maxWidth: 460, flex: "1 1 300px" }}>
-          <DepartmentTreeMultiPicker
-            departments={departments}
-            values={departmentFilter}
-            label="Organograma"
-            placeholder="Filtrar pelo organograma"
-            onChange={(values) => {
-              setDepartmentFilter(values);
-              queryRef.current = { ...queryRef.current, offset: 0 };
-              void load(queryRef.current, undefined, undefined, values);
-            }}
-          />
-        </Box>
 
         {selectedDestName && (
           <Chip

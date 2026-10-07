@@ -29,7 +29,7 @@ import { flattenDepartments } from "../../components/DepartmentTreePicker";
 
 export type ClassificationGridFilter = {
   field: string;
-  operator: "equals" | "notEquals";
+  operator: "equals" | "notEquals" | "contains" | "notContains" | "startsWith" | "endsWith";
   value: string;
 };
 
@@ -262,23 +262,43 @@ export default function ClassificationDataGrid({
   };
 
   const onFilter = (model: GridFilterModel) => {
+    const previousModel = filterModel;
     setFilterModel(model);
-    const item = model.items.find((candidate) => candidate.value !== undefined && candidate.value !== "");
-
-    // User cleared the filter chip — clear all active filters and reload.
-    if (!item?.field) {
+    if (model.items.length === 0) {
       setActiveFilters({});
       setPaginationModel((current) => ({ ...current, page: 0 }));
       query({ offset: 0, filters: [] });
       return;
     }
-
     setPaginationModel((current) => ({ ...current, page: 0 }));
-    const value = item.value instanceof Date ? item.value.toISOString() : String(item.value);
-    const filter: ClassificationGridFilter = { field: item.field, operator: "equals", value };
-    const filters = { ...activeFilters, [filter.field]: filter };
-    setActiveFilters(filters);
-    query({ offset: 0, filters: Object.values(filters) });
+    const operatorMap: Record<string, ClassificationGridFilter["operator"]> = {
+      equals: "equals",
+      is: "equals",
+      "=": "equals",
+      not: "notEquals",
+      "!=": "notEquals",
+      contains: "contains",
+      doesNotContain: "notContains",
+      startsWith: "startsWith",
+      endsWith: "endsWith",
+    };
+    const nextFilters = { ...activeFilters };
+    const currentFields = new Set(model.items.map(item => item.field).filter(Boolean));
+    for (const previous of previousModel.items) {
+      if (previous.field && !currentFields.has(previous.field)) delete nextFilters[previous.field];
+    }
+    for (const item of model.items) {
+      if (!item.field) continue;
+      if (item.value === undefined || item.value === "") {
+        if (previousModel.items.some(previous => previous.field === item.field)) delete nextFilters[item.field];
+        continue;
+      }
+      const value = item.value instanceof Date ? item.value.toISOString() : String(item.value);
+      const filter: ClassificationGridFilter = { field: item.field, operator: operatorMap[item.operator || "contains"] || "contains", value };
+      nextFilters[filter.field] = filter;
+    }
+    setActiveFilters(nextFilters);
+    query({ offset: 0, filters: Object.values(nextFilters) });
   };
 
   const onCellContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -290,7 +310,7 @@ export default function ClassificationDataGrid({
     const allowedFields = new Set(["name", "department_name", "cloud_scope", "priority", "active", "updated_at"]);
     let value = "";
     if (field === "name") value = row?.name || "";
-    else if (field === "department_name") value = row?.department_name || "";
+    else if (field === "department_name") value = row?.department_id ? departmentPathById.get(row.department_id) || row.department_name || "" : row?.department_name || "";
     else if (field === "cloud_scope") value = row?.cloud_scope || "";
     else if (field === "priority") value = String(row?.priority ?? "");
     else if (field === "active") value = String(row?.active ?? "");
@@ -302,7 +322,7 @@ export default function ClassificationDataGrid({
     }
   };
 
-  const applyContextFilter = (operator: "equals" | "notEquals") => {
+  const applyContextFilter = (operator: ClassificationGridFilter["operator"]) => {
     if (!context) return;
     setPaginationModel((current) => ({ ...current, page: 0 }));
     const filter: ClassificationGridFilter = { field: context.field, operator, value: context.value };
@@ -409,7 +429,9 @@ export default function ClassificationDataGrid({
         anchorReference="anchorPosition"
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
-        <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>
+        {context?.field === "department_name" ? (
+          <MenuItem onClick={() => applyContextFilter("contains")}>Filtrar por este organograma</MenuItem>
+        ) : <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>}
         <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
         <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
         <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
@@ -421,6 +443,11 @@ export default function ClassificationDataGrid({
         anchorReference="anchorPosition"
         anchorPosition={headerContext ? { top: headerContext.mouseY, left: headerContext.mouseX } : undefined}
       >
+        <MenuItem onClick={() => {
+          const field = headerContext?.field;
+          setHeaderContext(null);
+          if (field) apiRef.current.showFilterPanel(field);
+        }}>Filtrar esta coluna</MenuItem>
         <MenuItem onClick={() => {
           const field = headerContext?.field;
           setHeaderContext(null);

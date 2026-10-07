@@ -1575,20 +1575,20 @@ export async function getClassificationsGrid(
         | "notEquals"
         | "contains"
         | "notContains"
+        | "startsWith"
+        | "endsWith"
         | "after"
         | "before";
       value: string;
     }>;
     destination_table_id?: number;
     cloud?: string;
-    department_ids?: number[];
   } = {},
   signal?: AbortSignal,
 ): Promise<ClassificationsGridResponse> {
   const { data } = await api.get("/classifications/grid", {
     params: {
       ...params,
-      department_ids: params.department_ids?.length ? params.department_ids.join(",") : undefined,
       filters: params.filters?.length
         ? JSON.stringify(params.filters)
         : undefined,
