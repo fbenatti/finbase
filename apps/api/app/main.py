@@ -147,9 +147,6 @@ async def lifespan(app: FastAPI):
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         from app.models.gold_manifest import GoldManifest  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
-        from app.services.processing_logs import backfill_processing_logs
-        async with async_session() as backfill_session:
-            await backfill_session.run_sync(backfill_processing_logs)
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
         # startup esperava minutos — e, com a API já servindo, travava as coletas
@@ -887,6 +884,12 @@ async def lifespan(app: FastAPI):
         from app.services.iceberg_catalog_migration import migrate_iceberg_catalog_paths
         from app.services.iceberg_service import _LOCAL_WAREHOUSE
         await migrate_iceberg_catalog_paths(conn, _LOCAL_WAREHOUSE)
+
+    # Run the backfill only after the schema transaction commits. A separate
+    # session cannot see tables created by the still-open transaction above.
+    from app.services.processing_logs import backfill_processing_logs
+    async with async_session() as backfill_session:
+        await backfill_session.run_sync(backfill_processing_logs)
 
     async with async_session() as db:
         await seed(db)
