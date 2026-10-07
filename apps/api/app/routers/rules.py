@@ -531,7 +531,7 @@ async def list_classifications_grid(
     """
     import json
     from datetime import datetime as _dt
-    from sqlalchemy import or_, func, cast, String, literal, not_, select
+    from sqlalchemy import or_, func, cast, String, Text, literal, not_, select
     from sqlalchemy.orm import aliased
 
     dept = Department
@@ -586,7 +586,7 @@ async def list_classifications_grid(
     department_path = select(
         Department.id.label("id"),
         Department.parent_id.label("parent_id"),
-        Department.name.label("path"),
+        cast(Department.name, Text).label("path"),
     ).where(Department.parent_id.is_(None)).cte("classification_department_path", recursive=True)
     child_department = aliased(Department)
     department_path = department_path.union_all(
