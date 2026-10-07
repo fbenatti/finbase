@@ -631,6 +631,10 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         ).returning(EtlTask.id)
     )
     task_id = new_id.scalar_one()
+    from app.services.processing_logs import async_sync_etl_task_log
+    task_row = await db.get(EtlTask, task_id)
+    if task_row:
+        await async_sync_etl_task_log(db, task_row)
     await db.commit()
 
     # Register in in-memory dict so the frontend can see it immediately
