@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.etl_task import EtlTask
@@ -72,6 +73,39 @@ def sync_etl_task_log(session: Session, task: EtlTask) -> ProcessingLog:
         "errors": errors,
         "result": result,
     }
+    log.started_at = task.started_at
+    log.finished_at = task.finished_at
+    return log
+
+
+async def async_sync_etl_task_log(session: AsyncSession, task: EtlTask) -> ProcessingLog:
+    """AsyncSession counterpart used by queueing/API endpoints."""
+    log = (await session.execute(
+        select(ProcessingLog).where(ProcessingLog.etl_task_id == task.id)
+    )).scalar_one_or_none()
+    if log is None:
+        log = ProcessingLog(etl_task_id=task.id)
+        session.add(log)
+    source, destination, partitions, parameters = _task_context(task)
+    result = task.result_json if isinstance(task.result_json, dict) else {}
+    errors = task.errors if isinstance(task.errors, list) else []
+    log.process_type = _task_type(task)
+    log.status = task.status
+    log.source_kind = result.get("source_kind") or ("connection" if source else None)
+    log.source = source
+    log.destination = destination
+    log.partitions = partitions
+    log.parameters = parameters
+    log.counts = {
+        "rows_source": task.rows_raw or 0,
+        "rows_normalized": task.rows_normalized or 0,
+        "rows_destination": task.rows_destination or 0,
+        "items_total": task.total_blobs or 0,
+        "items_processed": task.processed_blobs or 0,
+    }
+    log.phase = task.phase or task.current_blob
+    log.error = result.get("error") or (errors[0] if errors else None)
+    log.details = {"etl_task_id": task.id, "event_log": result.get("event_log") or [], "errors": errors, "result": result}
     log.started_at = task.started_at
     log.finished_at = task.finished_at
     return log
