@@ -2364,8 +2364,8 @@ async def _expected_view_core(
                     actual_rateio.append(fact)
             elif medida != RATEIO_MEDIDA_ACTUAL:
                 forecast_rateio.append(fact)
-        apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_value")
-        apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_value")
+        apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_actual_value")
+        apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_forecast_value")
     fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
     budget_year = body.year if body.year > 0 else datetime.now().year
     if body.month_from and body.month_to:
@@ -2509,6 +2509,10 @@ async def _expected_view_core(
             "shared_value": shared if abs(shared) >= 1e-12 else 0.0,
             "shared_received": received if abs(received) >= 1e-12 else 0.0,
             "shared_given": given if abs(given) >= 1e-12 else 0.0,
+            "shared_actual_received": float(row.get("shared_actual_received") or 0.0),
+            "shared_actual_given": float(row.get("shared_actual_given") or 0.0),
+            "shared_forecast_received": float(row.get("shared_forecast_received") or 0.0),
+            "shared_forecast_given": float(row.get("shared_forecast_given") or 0.0),
             "budget_value": budget,
             "expected_value": expected,
             "cumulative_value": cumulative,

@@ -455,11 +455,17 @@ def apply_rateio_facts(
             continue
         current = by_period_facts.setdefault(period, {"period": period, "actual_value": None, "forecast_value": None})
         current[measure_key] = float(current.get(measure_key) or 0) + value
-        if measure_key == "shared_value":
+        if measure_key.startswith("shared_"):
+            if measure_key != "shared_value":
+                current["shared_value"] = float(current.get("shared_value") or 0) + value
             if value > 0:
                 current["shared_received"] = float(current.get("shared_received") or 0) + value
+                received_key = f"{measure_key.removesuffix('_value')}_received"
+                current[received_key] = float(current.get(received_key) or 0) + value
             else:
                 current["shared_given"] = float(current.get("shared_given") or 0) + value
+                given_key = f"{measure_key.removesuffix('_value')}_given"
+                current[given_key] = float(current.get(given_key) or 0) + value
         by_driver[driver] = by_driver.get(driver, 0.0) + value
 
 

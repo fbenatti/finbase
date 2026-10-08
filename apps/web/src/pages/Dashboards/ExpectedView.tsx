@@ -631,20 +631,48 @@ export default function ExpectedView({
   const dailyForecastRows = dailyGroupRows.filter((row) => String((row as Record<string, unknown>).tipo || "").toLowerCase() === "forecast");
   const dailyActualRows = dailyGroupRows.filter((row) => String((row as Record<string, unknown>).tipo || "").toLowerCase() !== "forecast");
   const dailyLabels = [...new Set(dailyGroupRows.map((row) => String(row.day)))].sort();
+  const dailyActualTotals = new Map<string, number>();
+  const dailyForecastTotals = new Map<string, number>();
+  for (const row of dailyActualRows) dailyActualTotals.set(String(row.day), (dailyActualTotals.get(String(row.day)) || 0) + (Number(row.realizado) || 0));
+  for (const row of dailyForecastRows) dailyForecastTotals.set(String(row.day), (dailyForecastTotals.get(String(row.day)) || 0) + (Number(row.realizado) || 0));
+  const sharedActualGivenByDay = new Map<string, number>();
+  const sharedForecastGivenByDay = new Map<string, number>();
+  const sharedReceivedByDay = new Map<string, number>();
+  const distributeSharedByMonth = (amount: number, period: string, source: Map<string, number>, target: Map<string, number>) => {
+    if (!amount) return;
+    const month = period.replace("-", "").slice(0, 6);
+    const days = [...source.keys()].filter((day) => day.slice(0, 7).replace("-", "") === month).sort();
+    if (!days.length) return;
+    const weights = days.map((day) => Math.max(0, source.get(day) || 0));
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    const effectiveWeights = total > 0 ? weights : days.map(() => 1);
+    const denominator = total > 0 ? total : days.length;
+    days.forEach((day, index) => target.set(day, (target.get(day) || 0) + amount * effectiveWeights[index] / denominator));
+  };
+  if (sharedOn) filteredRows.forEach((row) => {
+    distributeSharedByMonth(Number(row.shared_actual_given || 0), row.period, dailyActualTotals, sharedActualGivenByDay);
+    distributeSharedByMonth(Number(row.shared_forecast_given || 0), row.period, dailyForecastTotals, sharedForecastGivenByDay);
+    distributeSharedByMonth(Number(row.shared_actual_received || 0), row.period, dailyActualTotals, sharedReceivedByDay);
+    distributeSharedByMonth(Number(row.shared_forecast_received || 0), row.period, dailyForecastTotals, sharedReceivedByDay);
+  });
   const dailyGroupNames = groupBy
     ? [...new Set(dailyActualRows.map((row) => String((row as Record<string, unknown>)[groupBy] ?? "Não informado")))].sort((a, b) => a.localeCompare(b, "pt-BR"))
     : [];
   const dailyActualTraces: any[] = groupBy
     ? dailyGroupNames.slice(0, 6).map((name, index) => ({
         x: dailyLabels,
-        y: dailyLabels.map((day) => dailyActualRows.filter((row) => String(row.day) === day && String((row as Record<string, unknown>)[groupBy] ?? "Não informado") === name).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0)),
+        y: dailyLabels.map((day) => {
+          const groupAmount = dailyActualRows.filter((row) => String(row.day) === day && String((row as Record<string, unknown>)[groupBy] ?? "Não informado") === name).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0);
+          const dayTotal = dailyActualTotals.get(day) || 0;
+          return groupAmount + (dayTotal > 0 ? (sharedActualGivenByDay.get(day) || 0) * groupAmount / dayTotal : 0);
+        }),
         type: "bar",
         name,
         marker: { color: ["#F2A900", "#6416dc", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d"][index] },
       }))
     : [{
         x: dailyLabels,
-        y: dailyLabels.map((day) => dailyActualRows.filter((row) => String(row.day) === day).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0)),
+        y: dailyLabels.map((day) => (dailyActualTotals.get(day) || 0) + (sharedActualGivenByDay.get(day) || 0)),
         type: "bar",
         name: "Realizado diário",
         marker: { color: "#F2A900" },
@@ -653,13 +681,20 @@ export default function ExpectedView({
     x: dailyLabels,
     y: dailyLabels.map((day) => {
       const rows = dailyForecastRows.filter((row) => String(row.day) === day);
-      return rows.length ? rows.reduce((sum, row) => sum + (Number(row.realizado) || 0), 0) : null;
+      return rows.length ? rows.reduce((sum, row) => sum + (Number(row.realizado) || 0), 0) + (sharedForecastGivenByDay.get(day) || 0) : null;
     }),
     type: "bar",
     name: "Forecast",
     marker: { color: "#22C55E" },
   }] : [];
-  const dailyChartData: any[] = [...dailyActualTraces, ...dailyForecastTrace];
+  const dailySharedTrace = sharedOn && [...sharedReceivedByDay.values()].some((value) => value > 0) ? [{
+    x: dailyLabels,
+    y: dailyLabels.map((day) => Math.max(0, sharedReceivedByDay.get(day) || 0)),
+    type: "bar",
+    name: "Custo compartilhado",
+    marker: { color: "#EA580C" },
+  }] : [];
+  const dailyChartData: any[] = [...dailyActualTraces, ...dailyForecastTrace, ...dailySharedTrace];
   const groupedRows = groupedGold?.rows || [];
   const groupedValue = (row: Record<string, unknown>, field: string) => {
     if (field in row) return row[field];

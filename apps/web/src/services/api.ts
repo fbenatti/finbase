@@ -4107,6 +4107,10 @@ export interface ExpectedViewRow {
   shared_value?: number | null;
   shared_received?: number | null;
   shared_given?: number | null;
+  shared_actual_received?: number | null;
+  shared_actual_given?: number | null;
+  shared_forecast_received?: number | null;
+  shared_forecast_given?: number | null;
   budget_value: number;
   expected_value: number;
   cumulative_value: number;
