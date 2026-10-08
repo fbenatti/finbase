@@ -376,7 +376,23 @@ compose_cmd() {
 }
 
 docker_daemon_ready() {
-  docker ps >/dev/null 2>&1
+  "$ROOT_DIR/.venv/bin/python" - "${DOCKER_CLI_TIMEOUT_SECONDS:-8}" <<'PY'
+import subprocess
+import sys
+
+try:
+    result = subprocess.run(
+        ["docker", "ps"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=float(sys.argv[1]),
+    )
+except (OSError, subprocess.TimeoutExpired, ValueError):
+    sys.exit(1)
+
+sys.exit(result.returncode)
+PY
 }
 
 configure_docker_host() {
