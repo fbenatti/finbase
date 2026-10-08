@@ -4923,6 +4923,8 @@ export interface GoldQueryRequestV2 {
   row_limit?: number;
   sort_column?: string | null;
   sort_direction?: "asc" | "desc";
+  day_from?: string;
+  day_to?: string;
 }
 
 export interface GoldQueryResult {
