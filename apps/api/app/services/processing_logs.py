@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
