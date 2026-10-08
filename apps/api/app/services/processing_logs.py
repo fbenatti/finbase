@@ -1,9 +1,12 @@
 """Shared persistence helpers for the canonical processing log."""
 
-from datetime import datetime, timezone
+import asyncio
+import logging
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -12,6 +15,46 @@ from app.models.processing_log import ProcessingLog
 
 
 PROCESSING_LOG_CUBE = "dest_dm_processing_logs"
+_SNAPSHOT_MAINTENANCE_INTERVAL_SECONDS = 15 * 60
+_last_snapshot_maintenance_attempt = 0.0
+logger = logging.getLogger(__name__)
+
+
+def _is_missing_processing_log_cube_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in (
+        "table_not_found", "table not found", "does not exist", "not found in catalog",
+    ))
+
+
+def _maintain_processing_log_cube_snapshots() -> bool:
+    """Keep only the latest hour of snapshot history for the derived log cube."""
+    from pyiceberg.table.maintenance import MaintenanceTable
+
+    from app.services.iceberg_service import _get_catalog, _trino_remove_orphan_files
+
+    table = _get_catalog().load_table(("gold", PROCESSING_LOG_CUBE))
+    if table.current_snapshot() is None:
+        return False
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    MaintenanceTable(table).expire_snapshots().older_than(cutoff).commit()
+    return _trino_remove_orphan_files("gold", PROCESSING_LOG_CUBE, retention="1h")
+
+
+async def _maybe_maintain_processing_log_cube_snapshots() -> None:
+    global _last_snapshot_maintenance_attempt
+    now = time.monotonic()
+    if now - _last_snapshot_maintenance_attempt < _SNAPSHOT_MAINTENANCE_INTERVAL_SECONDS:
+        return
+    # Avoid launching overlapping maintenance attempts when a large orphan scan
+    # takes longer than one publisher interval.
+    _last_snapshot_maintenance_attempt = now
+    try:
+        maintained = await asyncio.to_thread(_maintain_processing_log_cube_snapshots)
+        if not maintained:
+            logger.warning("A manutenção de snapshots do cubo de logs não foi concluída")
+    except Exception:
+        logger.warning("Falha ao expirar snapshots do cubo de logs", exc_info=True)
 
 
 def _trino_literal(value: Any, type_name: str) -> str:
@@ -49,10 +92,14 @@ async def _merge_processing_log_batch(rows: list[dict[str, Any]], *, create: boo
         return
     assignments = ", ".join(f"{name} = incoming.{name}" for name, _ in columns if name != "id")
     insert_values = ", ".join(f"incoming.{name}" for name, _ in columns)
+    changed_values = " OR ".join(
+        f"target.{name} IS DISTINCT FROM incoming.{name}"
+        for name, _ in columns if name != "id"
+    )
     await execute(
         f"MERGE INTO iceberg.gold.{PROCESSING_LOG_CUBE} AS target USING {source} "
         "ON target.id = incoming.id "
-        f"WHEN MATCHED THEN UPDATE SET {assignments} "
+        f"WHEN MATCHED AND ({changed_values}) THEN UPDATE SET {assignments} "
         f"WHEN NOT MATCHED THEN INSERT ({names}) VALUES ({insert_values})",
         timeout_s=180,
     )
@@ -88,8 +135,17 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
                 checkpoint_id = int(row.get("checkpoint_id") or 0)
                 value = row.get("checkpoint_time")
                 checkpoint_time = datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
-            except Exception:
-                full_refresh = True
+                await _maybe_maintain_processing_log_cube_snapshots()
+            except Exception as exc:
+                if _is_missing_processing_log_cube_error(exc):
+                    full_refresh = True
+                else:
+                    logger.warning(
+                        "Falha transitória ao ler checkpoint do cubo de logs; "
+                        "pulando este ciclo sem rebuild completo: %s",
+                        exc,
+                    )
+                    return {"rows_written": 0, "checkpoint": checkpoint_id}
 
         query = select(ProcessingLog).order_by(ProcessingLog.updated_at, ProcessingLog.id)
         if checkpoint_time and not full_refresh:

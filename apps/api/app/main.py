@@ -973,12 +973,7 @@ async def lifespan(app: FastAPI):
     if settings.scheduler_enabled:
         await scheduler_service.start_scheduler()
 
-    log_cube_task = asyncio.create_task(_refresh_processing_log_cube_loop())
     yield
-
-    log_cube_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await log_cube_task
 
     if settings.scheduler_enabled:
         await scheduler_service.stop_scheduler()
