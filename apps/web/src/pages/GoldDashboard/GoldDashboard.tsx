@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Paper, Grid, Chip, Alert, CircularProgress, Button,
@@ -463,6 +463,7 @@ export default function GoldDashboard() {
   const [organization, setOrganization] = useState<Department[]>([]);
   const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
   const [organizationSearch, setOrganizationSearch] = useState("");
+  const organizationSearchInput = useRef<HTMLInputElement>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [highlightsDepartment, setHighlightsDepartment] = useState("");
   const [consumptionDrill, setConsumptionDrill] = useState<{ open: boolean; tipo: "realizado" | "forecast" | "ambos"; period?: string }>({ open: false, tipo: "realizado" });
@@ -470,6 +471,11 @@ export default function GoldDashboard() {
   const [highlightsLoading, setHighlightsLoading] = useState(true);
   const [highlightsError, setHighlightsError] = useState("");
   const [highlightsRefresh, setHighlightsRefresh] = useState(0);
+  useEffect(() => {
+    if (!organizationAnchor) return;
+    const timer = window.setTimeout(() => organizationSearchInput.current?.focus(), 120);
+    return () => window.clearTimeout(timer);
+  }, [organizationAnchor]);
   const displayedOrganization = useMemo(
     () => filters.visaoDiretoria ? swapDirectorTreeLevels(organization) : organization,
     [organization, filters.visaoDiretoria],
@@ -714,7 +720,7 @@ export default function GoldDashboard() {
               {highlightsDepartment || displayOrgPath(filters)}
             </Button>
           </Box>
-          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => { setOrganizationAnchor(null); setOrganizationSearch(""); }} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
+          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} autoFocus={false} disableAutoFocusItem onClose={() => { setOrganizationAnchor(null); setOrganizationSearch(""); }} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
               {filters.visaoDiretoria
                 ? `Selecione na árvore — níveis mapeados como ${ORG.directorViewLevels} (profundidade 3↔4 invertida).`
@@ -724,8 +730,11 @@ export default function GoldDashboard() {
               <TextField
                 fullWidth
                 size="small"
+                autoFocus
+                inputRef={organizationSearchInput}
                 value={organizationSearch}
                 onChange={event => setOrganizationSearch(event.target.value)}
+                onKeyDown={event => event.stopPropagation()}
                 placeholder="Buscar no organograma"
               />
             </Box>
