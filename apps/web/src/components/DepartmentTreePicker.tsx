@@ -159,7 +159,7 @@ export default function DepartmentTreePicker({
             sx={{ my: 0 }}
             primaryTypographyProps={{
               variant: "body2",
-              fontWeight: depth < 3 ? 700 : 400,
+              fontWeight: children.length > 0 ? 700 : 400,
               sx: { lineHeight: 1.35 },
             }}
           />
