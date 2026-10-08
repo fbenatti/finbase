@@ -647,12 +647,9 @@ export default function ExpectedView({
       const rows = dailyForecastRows.filter((row) => String(row.day) === day);
       return rows.length ? rows.reduce((sum, row) => sum + (Number(row.realizado) || 0), 0) : null;
     }),
-    type: "scatter",
-    mode: "lines+markers",
+    type: "bar",
     name: "Forecast",
-    connectgaps: false,
-    line: { color: "#22C55E", width: 3, dash: "dash" },
-    marker: { size: 5 },
+    marker: { color: "#22C55E" },
   }] : [];
   const dailyChartData: any[] = [...dailyActualTraces, ...dailyForecastTrace];
   const groupedRows = groupedGold?.rows || [];
