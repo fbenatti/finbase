@@ -495,7 +495,7 @@ export default function GoldDashboard() {
     return (
       <Box key={node.id}>
         <ListItemButton
-          sx={{ pl: 1 + depth * 2, py: 0.25 }}
+          sx={{ pl: 1 + depth * 2, py: 0.375, mb: 0.25, borderRadius: 1 }}
           onClick={() => {
             const groupedDirector = filters.visaoDiretoria && depth === 2;
             setHighlightsDepartment(path.join(" > "));
@@ -515,7 +515,12 @@ export default function GoldDashboard() {
           <ListItemText
             primary={node.name}
             secondary={filters.visaoDiretoria ? directorNivelLabel(depth) : undefined}
-            primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }}
+            sx={{ my: 0 }}
+            primaryTypographyProps={{
+              variant: "body2",
+              fontWeight: children.length > 0 ? 700 : 400,
+              sx: { lineHeight: 1.35 },
+            }}
             secondaryTypographyProps={{ variant: "caption", color: "secondary" }}
           />
         </ListItemButton>
@@ -631,7 +636,7 @@ export default function GoldDashboard() {
           <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
             {highlightsDepartment || displayOrgPath(filters)}
           </Button>
-          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
+          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
               {filters.visaoDiretoria
                 ? `Selecione na árvore — níveis mapeados como ${ORG.directorViewLevels} (profundidade 3↔4 invertida).`
