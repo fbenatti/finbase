@@ -472,9 +472,12 @@ export default function GoldDashboard() {
   const [highlightsLoading, setHighlightsLoading] = useState(true);
   const [highlightsError, setHighlightsError] = useState("");
   const [highlightsRefresh, setHighlightsRefresh] = useState(0);
-  const groupByOptions = useMemo(() => [...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])]
-    .filter((column) => !["_billing_period", "tipo", "period", "source connection id", "rateio medida"].includes(column.toLowerCase().replace(/_/g, " ")))
+  const filterDimensionOptions = useMemo(() => [...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])]
+    .filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()))
     .sort((a, b) => labelDimension(a).localeCompare(labelDimension(b), "pt-BR", { sensitivity: "base" })), [info]);
+  const groupByOptions = useMemo(() => filterDimensionOptions
+    .filter((column) => !["period", "source connection id", "rateio medida"].includes(column.toLowerCase().replace(/_/g, " ")))
+    .sort((a, b) => labelDimension(a).localeCompare(labelDimension(b), "pt-BR", { sensitivity: "base" })), [filterDimensionOptions]);
   useEffect(() => {
     if (!organizationAnchor) return;
     const timer = window.setTimeout(() => organizationSearchInput.current?.focus(), 120);
@@ -793,14 +796,14 @@ export default function GoldDashboard() {
             onClose={() => setFilterMenuAnchor(null)}
             anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
             transformOrigin={{ vertical: "top", horizontal: "left" }}
-            slotProps={{ paper: { sx: { p: 1.25, width: 340, maxWidth: "calc(100vw - 32px)", borderRadius: "12px", overflow: "visible" } } }}
+              slotProps={{ paper: { sx: { p: 1.25, width: 380, maxWidth: "calc(100vw - 32px)", borderRadius: "12px", overflow: "visible" } } }}
           >
             <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
             <Autocomplete
               autoHighlight
               open
               disablePortal
-              options={groupByOptions.filter((column) => !filters.extra[column])}
+              options={filterDimensionOptions.filter((column) => !filters.extra[column])}
               getOptionLabel={labelDimension}
               onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }}
               noOptionsText={!info ? "Carregando esquema Gold…" : "Todas as colunas já foram adicionadas"}
@@ -812,7 +815,7 @@ export default function GoldDashboard() {
             />
           </Popover>
         </Box>
-        {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 300px), 340px))", gap: 1, width: "100%", mt: 1, alignItems: "start" }}>
+        {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 340px), 380px))", gap: 1, width: "100%", mt: 1, alignItems: "start" }}>
           {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5} sx={{ minWidth: 0 }}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={labelDimension(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><Chip size="small" color={values.length ? "success" : "default"} variant={values.length ? "filled" : "outlined"} label={values.length ? `${values.length} aplicado${values.length === 1 ? "" : "s"}` : "Sem filtro"} sx={{ mt: 1, flexShrink: 0 }} /><IconButton size="small" aria-label={`Remover filtro ${labelDimension(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><Close fontSize="small" /></IconButton></Stack>)}
         </Box>}
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>

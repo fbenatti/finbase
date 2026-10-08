@@ -52,6 +52,20 @@ const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
     ? `R$ ${(value / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} K`
     : `R$ ${money.format(value)}`;
 const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative";
+const labelDimension = (column: string) => ({
+  centro_custo: "Centro custo",
+  cloud_origem: "Cloud",
+  organograma_nivel_1: "Segmento",
+  organograma_nivel_2: "Modelo",
+  organograma_nivel_3: "VP",
+  organograma_nivel_4: "Diretoria",
+  organograma_nivel_5: "Projeto",
+  organograma_nivel_6: "SubProjeto",
+  servicename: "Serviço",
+  servicecategory: "Família de serviço",
+  regionname: "Região",
+  subaccountname: "Subconta",
+} as Record<string, string>)[column] || column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 type ChartGranularity = "accumulated" | "monthly" | "daily";
 const flattenDepartments = (
   nodes: Department[],
@@ -1340,7 +1354,7 @@ export default function ExpectedView({
                     <InputLabel>Agrupar por</InputLabel>
                     <Select value={groupBy} onChange={(event) => setGroupBy(event.target.value)} input={<OutlinedInput label="Agrupar por" />}>
                       <MenuItem value="">Sem agrupamento</MenuItem>
-                      {groupByOptions.map((column) => <MenuItem key={column} value={column}>{column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase())}</MenuItem>)}
+                      {groupByOptions.map((column) => <MenuItem key={column} value={column}>{labelDimension(column)}</MenuItem>)}
                     </Select>
                   </FormControl>}
                   <FormControl size="small" sx={{ minWidth: 170 }}>
