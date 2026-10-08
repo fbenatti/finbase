@@ -396,6 +396,15 @@ def _quote_ident(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+def _pivot_dimension_sql(name: str, schema: dict[str, str]) -> str:
+    """Use case-insensitive grouping for textual pivot dimensions."""
+    column = _quote_ident(name)
+    column_type = schema.get(name, "").lower()
+    if any(token in column_type for token in ("varchar", "char", "string")):
+        return f"lower(CAST({column} AS VARCHAR))"
+    return column
+
+
 def _quote_literal(value: str | int | float | bool) -> str:
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
@@ -1340,10 +1349,10 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
         axis_names=[*rows, *columns],
     )
     dimensions = rows + columns
-    select_dims = [f"{_quote_ident(name)} AS d{index}" for index, name in enumerate(dimensions)]
+    select_dims = [f"{_pivot_dimension_sql(name, schema)} AS d{index}" for index, name in enumerate(dimensions)]
     measure_parts, aliases = zip(*[_measure_sql(measure, index) for index, measure in enumerate(measures)])
     where = _where_clause(req.filters)
-    group_by = f" GROUP BY {', '.join(_quote_ident(name) for name in dimensions)}" if dimensions else ""
+    group_by = f" GROUP BY {', '.join(str(index + 1) for index in range(len(dimensions)))}" if dimensions else ""
     if req.sort_rows:
         order_by = _build_order_by(req.sort_rows, rows, columns, len(measures))
     else:
@@ -1507,7 +1516,7 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
 
     # The outer query aliases the aligned columns back to d0..dn / m0..mk and
     # aggregates with the same measure SQL used by the single-table pivot.
-    dim_aliases = [f"{_quote_ident(name)} AS d{i}" for i, name in enumerate(dimension_columns)]
+    dim_aliases = [f"{_pivot_dimension_sql(name, merged_schema)} AS d{i}" for i, name in enumerate(dimension_columns)]
     measure_aliases = []
     for i, measure in enumerate(measures):
         inner = _quote_ident(measure_aliases_inner[i])
@@ -1522,7 +1531,7 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         measure_aliases.append(f"{expression} AS m{i}")
 
     dimensions = rows + columns
-    group_by = f" GROUP BY {', '.join(_quote_ident(name) for name in dimensions)}" if dimensions else ""
+    group_by = f" GROUP BY {', '.join(str(index + 1) for index in range(len(dimensions)))}" if dimensions else ""
     if req.sort_rows:
         order_by = _build_order_by(req.sort_rows, rows, columns, len(measures))
     else:
