@@ -248,6 +248,24 @@ def _build_series_context(daily: pd.Series, effective_cutoff: date) -> dict[str,
     }
 
 
+def _close_missing_months(daily: pd.Series, effective_cutoff: date) -> pd.Series:
+    """Represent closed months with no fact for this series as realized zero."""
+    if daily.empty:
+        return daily
+    first_period = daily.index.min().to_period("M")
+    cutoff_period = pd.Timestamp(effective_cutoff).to_period("M")
+    monthly_totals = daily.groupby(daily.index.to_period("M")).sum()
+    for month_period in pd.period_range(first_period, cutoff_period, freq="M"):
+        month_last_day = calendar.monthrange(month_period.year, month_period.month)[1]
+        month_closed = (
+            month_period < cutoff_period
+            or effective_cutoff.day >= month_last_day
+        )
+        if month_closed and float(monthly_totals.get(month_period, 0.0)) == 0.0:
+            daily.loc[daily.index.to_period("M") == month_period] = 0.0
+    return daily
+
+
 def _month_offset(base_yyyymm: str, target_yyyymm: str) -> int:
     base_year, base_month = int(base_yyyymm[:4]), int(base_yyyymm[4:6])
     target_year, target_month = int(target_yyyymm[:4]), int(target_yyyymm[4:6])
@@ -1492,6 +1510,8 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             pd.date_range(daily.index.min(), pd.Timestamp(series_cutoff), freq="D"),
             fill_value=0.0,
         )
+        # Gold omits dimension tuples with no realized rows in a month.
+        daily = _close_missing_months(daily, series_cutoff)
         series_context[_series_key(key_values, key_cols)] = _build_series_context(daily, series_cutoff)
         enabled_windows = [int(w) for w in config.enabled_windows or [7, 14, 28]]
         # Séries de fatura mensal ("lump"): poucas cobranças no mês, valor alto.

@@ -6,6 +6,7 @@ import pandas as pd
 from app.services.forecast_service import (
     _apply_forecast_business_rules,
     _build_series_context,
+    _close_missing_months,
     _cloud_effective_cutoff,
     _forecast_history_start,
     _replicated_month_value,
@@ -54,6 +55,27 @@ def test_last_closed_month_is_zero_when_no_prior_nonzero_month():
     daily = pd.Series([100.0] * len(index), index=index)
     ctx = _build_series_context(daily, date(2026, 8, 18))
     assert ctx["last_closed_month_total"] == 0.0
+
+
+def test_closed_month_without_series_rows_is_materialized_as_zero():
+    daily = pd.Series([100.0] * 31, index=pd.date_range("2026-07-01", periods=31, freq="D"))
+    daily = daily.reindex(pd.date_range("2026-07-01", "2026-08-31", freq="D"), fill_value=0.0)
+
+    closed = _close_missing_months(daily, date(2026, 8, 31))
+    ctx = _build_series_context(closed, date(2026, 8, 31))
+
+    assert float(closed[closed.index.month == 8].sum()) == 0.0
+    assert ctx["last_closed_month_total"] == 0.0
+
+
+def test_open_month_without_rows_is_not_closed_before_cutoff():
+    daily = pd.Series([100.0] * 31, index=pd.date_range("2026-07-01", periods=31, freq="D"))
+    daily = daily.reindex(pd.date_range("2026-07-01", "2026-08-18", freq="D"), fill_value=0.0)
+
+    closed = _close_missing_months(daily, date(2026, 8, 18))
+    ctx = _build_series_context(closed, date(2026, 8, 18))
+
+    assert ctx["last_closed_month_total"] == 3100.0
 
 
 def test_recurring_monthly_uses_last_nonzero_closed_month():
