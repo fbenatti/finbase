@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-import asyncio
 from datetime import date, timedelta
 from typing import Any
 
@@ -733,7 +733,6 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     tipo = schema.get("tipo")
     if tipo:
         where = f"({where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
-    scope_where = where
     effective_from = body.day_from
     if body.day_from and body.day_to:
         if body.day_from > body.day_to:
