@@ -4961,12 +4961,23 @@ export async function queryDimonTable(body: {
   });
 }
 
-export async function queryGoldDailyConsumption(body: GoldQueryRequestV2): Promise<{
+interface GoldDailyConsumptionResult {
   table: string; available: boolean; day_column: string | null;
   rows: Array<{ day: string; realizado: number; [column: string]: unknown }>; row_count: number;
-}> {
-  const { data } = await api.post("/gold/daily-consumption", body, { timeout: 180000 });
-  return data;
+}
+
+const dailyConsumptionInflight = new Map<string, Promise<GoldDailyConsumptionResult>>();
+
+export async function queryGoldDailyConsumption(body: GoldQueryRequestV2): Promise<GoldDailyConsumptionResult> {
+  const key = JSON.stringify(body);
+  const pending = dailyConsumptionInflight.get(key);
+  if (pending) return pending;
+  // Share only active requests. The next request after completion reads fresh data.
+  const request = api.post<GoldDailyConsumptionResult>("/gold/daily-consumption", body, { timeout: 180000 })
+    .then(({ data }) => data)
+    .finally(() => dailyConsumptionInflight.delete(key));
+  dailyConsumptionInflight.set(key, request);
+  return request;
 }
 
 export async function getGoldFilterOptions(body: {
