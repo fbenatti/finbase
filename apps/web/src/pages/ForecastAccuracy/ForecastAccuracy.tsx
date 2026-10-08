@@ -323,7 +323,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       <Box key={node.id}>
         <ListItemButton
           onClick={() => chooseDepartment(buildPath(node))}
-          sx={{ pl: 1 + depth * 2, py: 0.25 }}
+          sx={{ pl: 1 + depth * 2, py: 0.375, mb: 0.25, borderRadius: 1 }}
         >
           <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
             {children.length > 0 && (
@@ -332,7 +332,15 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
               </IconButton>
             )}
           </Box>
-          <ListItemText primary={node.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
+          <ListItemText
+            primary={node.name}
+            sx={{ my: 0 }}
+            primaryTypographyProps={{
+              variant: "body2",
+              fontWeight: children.length > 0 ? 700 : 400,
+              sx: { lineHeight: 1.35 },
+            }}
+          />
         </ListItemButton>
         <Collapse in={expanded} timeout="auto" unmountOnExit>
           {children.map(child => renderOrganizationNode(child, depth + 1))}
@@ -420,7 +428,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
             >
               {department || "Todos"}
             </Button>
-            <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: 430, maxHeight: 520 } }}>
+            <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
                 Selecione um nível para consolidar todos os seus filhos
               </Typography>
