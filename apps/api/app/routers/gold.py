@@ -790,11 +790,18 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
                 profile_where = f"({profile_where}) AND ({' OR '.join(f'({clause})' for clause in profile_groups)})"
         if tipo:
             profile_where = f"({profile_where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
+        # Parse each distinct source date/period after aggregation, rather than
+        # repeating the mixed-format date parser for every Silver cost line.
+        profile_date_columns = list(dict.fromkeys([date_col, *([period_col] if period_col else [])]))
+        profile_date_sql = ', '.join(_quote_ident(column) for column in profile_date_columns)
         profile_sql = (
-            f"SELECT day_of_week(CAST({day_expr} AS DATE)) AS weekday, "
-            f"SUM(GREATEST(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0), 0)) AS weight "
+            f"WITH raw_profile AS (SELECT {profile_date_sql}, "
+            f"SUM(GREATEST(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0), 0)) AS daily_weight "
             f"FROM iceberg.silver.{silver_table} WHERE ({profile_where}) "
-            f"AND CAST({day_expr} AS DATE) BETWEEN date_add('day', -90, current_date) AND current_date "
+            f"GROUP BY {profile_date_sql}) "
+            f"SELECT day_of_week(CAST({day_expr} AS DATE)) AS weekday, "
+            f"SUM(daily_weight) AS weight FROM raw_profile "
+            f"WHERE CAST({day_expr} AS DATE) BETWEEN date_add('day', -90, current_date) AND current_date "
             f"AND {day_expr} IS NOT NULL GROUP BY 1"
         )
         try:
