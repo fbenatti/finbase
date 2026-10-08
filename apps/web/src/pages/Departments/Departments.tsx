@@ -325,8 +325,8 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     });
   };
 
-  // Organograma filtrado pela busca: mantem o no quando ele ou um descendente
-  // corresponde ao termo (os ancestrais ficam visiveis para dar contexto).
+  // Mantém os ancestrais para contexto e a subárvore completa de cada
+  // departamento correspondente à busca.
   const searchTerm = deptSearch.trim().toLowerCase();
   const filteredTree = useMemo(() => {
     if (!searchTerm) return departments;
@@ -334,12 +334,16 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       [d.name, d.centro_custo, d.id_orcamento, d.ambiente, d.cloud_filter]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(searchTerm));
+    const includeSubtree = (node: Department): Department => ({
+      ...node,
+      children: (node.children || []).map(includeSubtree),
+    });
     const filter = (nodes: Department[]): Department[] =>
       nodes
         .map((node) => {
+          if (matches(node)) return includeSubtree(node);
           const children = filter(node.children || []);
-          if (matches(node) || children.length > 0)
-            return { ...node, children };
+          if (children.length > 0) return { ...node, children };
           return null;
         })
         .filter(Boolean) as Department[];
