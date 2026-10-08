@@ -671,7 +671,7 @@ async def query_gold_filter_options(body: GoldFilterOptionsRequest):
     sql = (
         f"SELECT DISTINCT CAST({_quote_ident(physical)} AS VARCHAR) AS value "
         f"FROM iceberg.{GOLD}.{body.table} WHERE ({where}) AND {_quote_ident(physical)} IS NOT NULL "
-        f"ORDER BY value LIMIT {int(body.limit)} OFFSET {int(body.offset)}"
+        f"ORDER BY value OFFSET {int(body.offset)} LIMIT {int(body.limit)}"
     )
     try:
         result = await execute(sql, timeout_s=120)
