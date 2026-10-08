@@ -138,7 +138,7 @@ export default function DepartmentTreePicker({
         <ListItemButton
           selected={department.id === value}
           onClick={() => chooseDepartment(department)}
-          sx={{ pl: 1 + depth * 2, py: 0.125 }}
+          sx={{ pl: 1 + depth * 2, py: 0.375, mb: 0.25, borderRadius: 1 }}
         >
           <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
             {children.length > 0 && (
@@ -160,7 +160,7 @@ export default function DepartmentTreePicker({
             primaryTypographyProps={{
               variant: "body2",
               fontWeight: depth < 3 ? 700 : 400,
-              sx: { lineHeight: 1.25 },
+              sx: { lineHeight: 1.35 },
             }}
           />
         </ListItemButton>
