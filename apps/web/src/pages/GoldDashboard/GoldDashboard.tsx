@@ -684,7 +684,6 @@ export default function GoldDashboard() {
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2} mb={2}>
         <Box>
           <Typography variant="h4">FinOps Intelligence</Typography>
-          <Typography color="text.secondary">Cockpit executivo pré-agregado (mensal)</Typography>
         </Box>
         <Stack direction="row" gap={1} alignItems="center">
           <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => { setRefreshTick(t => t + 1); setHighlightsRefresh(t => t + 1); }}>Atualizar</Button>
@@ -785,9 +784,29 @@ export default function GoldDashboard() {
         )}
         <Box sx={{ mt: 1 }}>
           <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 38, borderRadius: "12px", textTransform: "none" }}>Adicionar filtro</Button>
-          <Popover anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} PaperProps={{ sx: { p: 1.25, width: 340, borderRadius: "12px" } }}>
+          <Popover
+            anchorEl={filterMenuAnchor}
+            open={Boolean(filterMenuAnchor)}
+            onClose={() => setFilterMenuAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            slotProps={{ paper: { sx: { p: 1.25, width: 340, maxWidth: "calc(100vw - 32px)", borderRadius: "12px", overflow: "visible" } } }}
+          >
             <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
-            <Autocomplete autoHighlight open disablePortal options={[...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])].filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()) && !filters.extra[column])} getOptionLabel={labelDimension} onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }} noOptionsText={!info ? "Carregando esquema Gold…" : "Todas as colunas já foram adicionadas"} renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar coluna" />} />
+            <Autocomplete
+              autoHighlight
+              open
+              disablePortal
+              options={[...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])].filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()) && !filters.extra[column])}
+              getOptionLabel={labelDimension}
+              onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }}
+              noOptionsText={!info ? "Carregando esquema Gold…" : "Todas as colunas já foram adicionadas"}
+              slotProps={{
+                popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 1 } },
+                listbox: { sx: { maxHeight: 280, overflowY: "auto" } },
+              }}
+              renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar coluna" />}
+            />
           </Popover>
         </Box>
         {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 1, width: "100%", mt: 1 }}>
