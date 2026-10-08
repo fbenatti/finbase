@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Paper, Grid, Chip, Alert, CircularProgress, Button,
-  FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Stack, TextField,
+  FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Stack, TextField, Autocomplete, Popover,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Divider, Tooltip, LinearProgress, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
   FormControlLabel, Switch,
 } from "@mui/material";
-import { Refresh, ContentCopy, FilterAltOff, ExpandMore, ChevronRight, Business, FileDownload } from "@mui/icons-material";
+import { Refresh, ContentCopy, FilterAltOff, ExpandMore, ChevronRight, Business, FileDownload, CalendarMonth, Add, Close } from "@mui/icons-material";
 import Plot from "@/components/Plot";
 // Wrapper: react-plotly.js Data/DataTitle typings são excessivamente rígidos
 // para traces com name/text customizados; mantém o restante tipado.
@@ -17,7 +17,7 @@ function Chart(props: any) {
 import {
   queryDimonTable, getDimonInfo, getAnalysisTables, getDepartments,
   GoldQueryFilter, GoldQueryMeasure, GoldQueryResult, GoldInfo,
-  formatApiError, Department,
+  formatApiError, Department, getGoldFilterOptions,
   getForecastAccuracyMonths, runForecastHistoryPivot,
   ForecastAccuracyMonth, HistoryFilter, ForecastAck, getExecutiveManualAcks,
 } from "../../services/api";
@@ -33,6 +33,25 @@ import { ORG } from "../../constants/orgLabels";
 const DEFAULT_TABLE = "dest_dm_cost_visao_completa";
 const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
 const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
+const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+const shiftMonth = (value: string, delta: number) => { const [year, month] = value.split("-").map(Number); return toMonthValue(new Date(year, month - 1 + delta, 1)); };
+const labelMonthRange = (from: string, to: string) => {
+  const label = (value: string) => { const [year, month] = value.split("-").map(Number); return `${MONTHS_PT[month - 1] || ""} ${year}`; };
+  return `${label(from)} – ${label(to)}`;
+};
+const monthsBetween = (from: string, to: string) => {
+  const [fromYear, fromMonth] = from.split("-").map(Number);
+  const [toYear, toMonth] = to.split("-").map(Number);
+  const months: string[] = [];
+  if (!fromYear || !toYear || from > to) return months;
+  for (let year = fromYear, month = fromMonth; year < toYear || (year === toYear && month <= toMonth);) {
+    months.push(`${year}${String(month).padStart(2, "0")}`);
+    if (++month > 12) { year++; month = 1; }
+  }
+  return months;
+};
+const labelDimension = (column: string) => ({ cloud_origem: "Cloud", organograma_nivel_1: "Segmento", organograma_nivel_2: "Modelo", organograma_nivel_3: "VP", organograma_nivel_4: "Diretoria", organograma_nivel_5: "Projeto", organograma_nivel_6: "SubProjeto", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" }[column] || column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase()));
 
 /** Hierarquia da Visão Diretoria: nivel_1 → 2 → 4 → 3 → 5 → 6 */
 const VISAO_DIRETORIA_LEVELS = [
@@ -425,10 +444,18 @@ export default function GoldDashboard() {
   const [tab, setTab] = useState<TabId>(initialTab);
   const [filters, setFilters] = useState<Filters>(() => ({
     ...EMPTY_FILTERS,
+    months: monthsBetween(`${new Date().getFullYear()}-01`, `${new Date().getFullYear()}-12`),
     visaoDiretoria: window.localStorage.getItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY) === "1",
   }));
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
-  const [periodPreset, setPeriodPreset] = useState("all");
+  const currentYear = new Date().getFullYear();
+  const [monthFrom, setMonthFrom] = useState(`${currentYear}-01`);
+  const [monthTo, setMonthTo] = useState(`${currentYear}-12`);
+  const [dateAnchor, setDateAnchor] = useState<HTMLElement | null>(null);
+  const [draftFrom, setDraftFrom] = useState(`${currentYear}-01`);
+  const [draftTo, setDraftTo] = useState(`${currentYear}-12`);
+  const [filterMenuAnchor, setFilterMenuAnchor] = useState<HTMLElement | null>(null);
+  const [includeSharedCost, setIncludeSharedCost] = useState(false);
   const [executivePeriodFilter, setExecutivePeriodFilter] = useState("current");
   const [error, setError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
@@ -607,22 +634,32 @@ export default function GoldDashboard() {
     return () => { alive = false; };
   }, [table]);
 
-  const applyPreset = (preset: string) => {
-    setPeriodPreset(preset);
-    if (preset === "all") { setFilters(f => ({ ...f, months: [] })); return; }
-    const n = Number(preset.replace("last", ""));
-    const sorted = [...(info?.periods || monthsAll)].sort().reverse();
-    setFilters(f => ({ ...f, months: sorted.slice(0, n) }));
+  const applyPreset = (preset: "this_month" | "last_month" | "last_3" | "last_6" | "last_12" | "this_year" | "last_year") => {
+    const now = new Date(); const current = toMonthValue(now); const year = now.getFullYear();
+    const ranges: Record<typeof preset, [string, string]> = {
+      this_month: [current, current], last_month: [shiftMonth(current, -1), shiftMonth(current, -1)],
+      last_3: [shiftMonth(current, -2), current], last_6: [shiftMonth(current, -5), current],
+      last_12: [shiftMonth(current, -11), current], this_year: [`${year}-01`, `${year}-12`],
+      last_year: [`${year - 1}-01`, `${year - 1}-12`],
+    };
+    const [from, to] = ranges[preset];
+    setMonthFrom(from); setMonthTo(to); setFilters((currentFilters) => ({ ...currentFilters, months: monthsBetween(from, to) })); setDateAnchor(null);
   };
 
   const filterKey = JSON.stringify([filters, tab, refreshTick, measureFor(filters)]);
+  const executiveScope = useMemo(() => ({
+    monthFrom: monthFrom.replace("-", ""),
+    monthTo: monthTo.replace("-", ""),
+    dimensionFilters: Object.fromEntries(Object.entries(filters.extra).filter(([, values]) => values.length > 0)),
+  }), [monthFrom, monthTo, filters.extra]);
   const setFilter = (key: keyof Filters, values: string[]) => setFilters(f => ({ ...f, [key]: values }));
 
   const clearFilters = () => {
     window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
     window.localStorage.removeItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY);
     setFilters(EMPTY_FILTERS);
-    setPeriodPreset("all");
+    const from = `${currentYear}-01`; const to = `${currentYear}-12`;
+    setMonthFrom(from); setMonthTo(to); setFilters({ ...EMPTY_FILTERS, months: monthsBetween(from, to) });
   };
 
   const [copied, setCopied] = useState(false);
@@ -649,18 +686,28 @@ export default function GoldDashboard() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       {/* ── Filtros globais ── */}
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
-          <FormControl size="small" sx={{ minWidth: 190 }}>
-            <InputLabel>Período · mensal</InputLabel>
-            <Select label="Período · mensal" value={periodPreset} onChange={e => applyPreset(e.target.value)}>
-              <MenuItem value="all">Todos os meses</MenuItem>
-              <MenuItem value="last1">Último mês</MenuItem>
-              <MenuItem value="last3">Últimos 3 meses</MenuItem>
-              <MenuItem value="last6">Últimos 6 meses</MenuItem>
-              <MenuItem value="last12">Últimos 12 meses</MenuItem>
-            </Select>
-          </FormControl>
+          <Box sx={{ width: { xs: "100%", md: 330 }, minWidth: { xs: 0, md: 330 }, flex: { xs: "1 1 100%", md: "0 0 330px" } }}>
+            <Typography variant="caption" color="text.secondary">Período · mensal</Typography>
+            <Button fullWidth variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(monthFrom); setDraftTo(monthTo); setDateAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, px: 1.5, justifyContent: "flex-start", textTransform: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {labelMonthRange(monthFrom, monthTo)}
+            </Button>
+          </Box>
+          <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+            <Stack direction={{ xs: "column", sm: "row" }} sx={{ p: 2 }} gap={2}>
+              <Box sx={{ minWidth: 180 }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Períodos rápidos</Typography><Stack spacing={.25} mt={.5}>
+                <Button size="small" onClick={() => applyPreset("this_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este mês</Button>
+                <Button size="small" onClick={() => applyPreset("last_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Mês anterior</Button>
+                <Button size="small" onClick={() => applyPreset("last_3")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos 3 meses</Button>
+                <Button size="small" onClick={() => applyPreset("last_6")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos 6 meses</Button>
+                <Button size="small" onClick={() => applyPreset("last_12")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos 12 meses</Button>
+                <Button size="small" onClick={() => applyPreset("this_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este ano</Button>
+                <Button size="small" onClick={() => applyPreset("last_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Ano anterior</Button>
+              </Stack></Box>
+              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #edf0f6" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · mensal</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="month" label="Mês inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="month" label="Mês final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>O mês inicial deve ser anterior ou igual ao mês final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setMonthFrom(draftFrom); setMonthTo(draftTo); setFilters((current) => ({ ...current, months: monthsBetween(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
+            </Stack>
+          </Popover>
           <Box sx={{ minWidth: 280 }}>
             <Typography variant="caption" color="text.secondary">Organograma · selecione níveis</Typography>
             <Button fullWidth variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => { setOrganizationSearch(""); setOrganizationAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, justifyContent: "flex-start", textTransform: "none" }}>
@@ -716,16 +763,22 @@ export default function GoldDashboard() {
             )}
             sx={{ ml: 0.5 }}
           />
-          <Button size="small" startIcon={<FilterAltOff />} onClick={() => { setHighlightsDepartment(""); clearFilters(); }}>Limpar</Button>
+          <FormControlLabel control={<Switch size="small" checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label="Custo compartilhado" sx={{ ml: 0.5 }} />
+          <Button size="small" startIcon={<FilterAltOff />} onClick={() => { setHighlightsDepartment(""); setIncludeSharedCost(false); clearFilters(); }}>Limpar</Button>
         </Stack>
         {filters.visaoDiretoria && (
           <Chip size="small" color="secondary" label={`Visão Diretoria: ${ORG.directorViewChain}`} sx={{ mt: 1, fontWeight: 800 }} />
         )}
-        {filters.months.length > 0 && (
-          <Stack direction="row" gap={0.5} flexWrap="wrap" mt={1}>
-            {filters.months.map(m => <Chip key={m} size="small" label={monthLabel(m)} onDelete={() => setFilter("months", filters.months.filter(x => x !== m))} />)}
-          </Stack>
-        )}
+        <Box sx={{ mt: 1 }}>
+          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 38, borderRadius: "12px", textTransform: "none" }}>Adicionar filtro</Button>
+          <Popover anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={() => setFilterMenuAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} PaperProps={{ sx: { p: 1.25, width: 340, borderRadius: "12px" } }}>
+            <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
+            <Autocomplete autoHighlight open disablePortal options={[...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])].filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()) && !filters.extra[column])} getOptionLabel={labelDimension} onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }} noOptionsText={!info ? "Carregando esquema Gold…" : "Todas as colunas já foram adicionadas"} renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar coluna" />} />
+          </Popover>
+        </Box>
+        {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 1, width: "100%", mt: 1 }}>
+          {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={labelDimension(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><IconButton size="small" aria-label={`Remover filtro ${labelDimension(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><Close fontSize="small" /></IconButton></Stack>)}
+        </Box>}
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>
           Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.
         </Typography>
@@ -736,7 +789,7 @@ export default function GoldDashboard() {
       </Tabs>
 
       {tab === "visao-executiva" && <>
-        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
+        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
       <ExecutiveHighlights items={highlights} loading={highlightsLoading} error={highlightsError} />
       </>}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
@@ -762,6 +815,24 @@ export default function GoldDashboard() {
       />
     </Box>
   );
+}
+
+function CascadeDimensionFilter({ column, label, table, value, filters, onChange }: {
+  column: string; label: string; table: string; value: string[]; filters: GoldQueryFilter[]; onChange: (values: string[]) => void;
+}) {
+  const [options, setOptions] = useState<string[]>(value);
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+  const contextKey = JSON.stringify([column, filters, search]);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    const timer = window.setTimeout(() => getGoldFilterOptions({ table, column, filters, search, limit: 100 })
+      .then((result) => { if (active) setOptions([...new Set([...value, ...result.values])]); })
+      .catch(() => { if (active) setOptions(value); }), 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [contextKey, open]);
+  return <Autocomplete multiple size="small" open={open} onOpen={() => setOpen(true)} onClose={() => setOpen(false)} options={options} value={value} onChange={(_, values) => onChange(values)} onInputChange={(_, text) => setSearch(text)} filterOptions={(items) => items} renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Adicionar" : "Todos"} />} />;
 }
 
 // ═══════════════════════════════════════════════════════════════════

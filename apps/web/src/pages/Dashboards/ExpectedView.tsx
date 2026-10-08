@@ -70,6 +70,8 @@ export default function ExpectedView({
   measureColumn = "realizado",
   onMeasureColumnChange,
   onPeriodFilterChange,
+  externalIncludeSharedCost,
+  externalScope,
 }: {
   embedded?: boolean;
   director?: string;
@@ -80,6 +82,8 @@ export default function ExpectedView({
   measureColumn?: "realizado" | "realizado_cloud";
   onMeasureColumnChange?: (value: "realizado" | "realizado_cloud") => void;
   onPeriodFilterChange?: (value: string) => void;
+  externalIncludeSharedCost?: boolean;
+  externalScope?: { monthFrom: string; monthTo: string; dimensionFilters: Record<string, string[]> };
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -118,6 +122,9 @@ export default function ExpectedView({
   const [includeSharedCost, setIncludeSharedCost] = useState(
     params.get("shared") === "1",
   );
+  useEffect(() => {
+    if (externalIncludeSharedCost !== undefined) setIncludeSharedCost(externalIncludeSharedCost);
+  }, [externalIncludeSharedCost]);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [showBudget, setShowBudget] = useState(true);
   const [drillOpen, setDrillOpen] = useState(false);
@@ -178,7 +185,7 @@ export default function ExpectedView({
       // "Todos os períodos" envia year=0: o backend remove o recorte de ano e
       // traz todo o realizado + forecast disponível (inclusive meses futuros).
       const year =
-        periodFilter === "all"
+        externalScope ? 0 : periodFilter === "all"
           ? 0
           : periodFilter === "current"
             ? new Date().getFullYear()
@@ -191,7 +198,7 @@ export default function ExpectedView({
         includeSharedCost,
         directorView,
         table,
-        undefined,
+        externalScope,
         measureColumn,
       )
         .then((result) => {
@@ -226,10 +233,11 @@ export default function ExpectedView({
     directorView,
     measureColumn,
     table,
+    externalScope,
   ]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows =
-    periodFilter === "all"
+    externalScope ? rows : periodFilter === "all"
       ? rows
       : periodFilter === "current"
         ? rows.filter((row) =>
@@ -1072,7 +1080,7 @@ export default function ExpectedView({
               </Menu>
             </>
           )}
-          <FormControl sx={{ minWidth: 170 }}>
+          {!externalScope && <FormControl sx={{ minWidth: 170 }}>
             <InputLabel>Período</InputLabel>
             <Select
               label="Período"
@@ -1091,16 +1099,11 @@ export default function ExpectedView({
                 </MenuItem>
               ))}
             </Select>
-          </FormControl>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={includeSharedCost}
-                onChange={(_, checked) => setIncludeSharedCost(checked)}
-              />
-            }
+          </FormControl>}
+          {!externalScope && <FormControlLabel
+            control={<Switch checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />}
             label="Custo compartilhado"
-          />
+          />}
           {onMeasureColumnChange && <FormControlLabel control={<Switch checked={measureColumn === "realizado"} onChange={(_, checked) => onMeasureColumnChange(checked ? "realizado" : "realizado_cloud")} />} label="Consumo faturado" />}
         </Stack>
       </Stack>
