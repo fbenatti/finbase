@@ -1,11 +1,12 @@
 """Shared persistence helpers for the canonical processing log."""
 
-import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urljoin
 
+import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -27,18 +28,52 @@ def _is_missing_processing_log_cube_error(exc: Exception) -> bool:
     ))
 
 
-def _maintain_processing_log_cube_snapshots() -> bool:
+async def _maintain_processing_log_cube_snapshots() -> bool:
     """Keep only the latest hour of snapshot history for the derived log cube."""
-    from pyiceberg.table.maintenance import MaintenanceTable
-
-    from app.services.iceberg_service import _get_catalog, _trino_remove_orphan_files
+    from app.services.iceberg_service import _get_catalog
+    from app.services.trino_service import TRINO_URL, TRINO_USER
 
     table = _get_catalog().load_table(("gold", PROCESSING_LOG_CUBE))
-    if table.current_snapshot() is None:
+    if table.current_snapshot() is None or "_stg_" in str(table.location()):
         return False
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
-    MaintenanceTable(table).expire_snapshots().older_than(cutoff).commit()
-    return _trino_remove_orphan_files("gold", PROCESSING_LOG_CUBE, retention="1h")
+
+    retention = "1h"
+    headers = {
+        "X-Trino-User": TRINO_USER,
+        "X-Trino-Catalog": "iceberg",
+        "X-Trino-Schema": "gold",
+        "X-Trino-Session": (
+            f"iceberg.expire_snapshots_min_retention={retention},"
+            f"iceberg.remove_orphan_files_min_retention={retention}"
+        ),
+    }
+    statements = (
+        f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
+        f"EXECUTE expire_snapshots(retention_threshold => '{retention}')",
+        f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
+        f"EXECUTE remove_orphan_files(retention_threshold => '{retention}')",
+    )
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+        for sql in statements:
+            response = await client.post(
+                urljoin(TRINO_URL, "/v1/statement"), content=sql, headers=headers,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"Trino HTTP {response.status_code}: {response.text[:300]}")
+            data = response.json()
+            while True:
+                if "error" in data:
+                    raise RuntimeError(data["error"].get("message", "Trino query failed"))
+                state = data.get("stats", {}).get("state")
+                if state in ("FAILED", "CANCELED"):
+                    raise RuntimeError(f"Trino maintenance state={state}")
+                next_uri = data.get("nextUri")
+                if not next_uri:
+                    break
+                response = await client.get(next_uri, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+    return True
 
 
 async def _maybe_maintain_processing_log_cube_snapshots() -> None:
@@ -50,7 +85,7 @@ async def _maybe_maintain_processing_log_cube_snapshots() -> None:
     # takes longer than one publisher interval.
     _last_snapshot_maintenance_attempt = now
     try:
-        maintained = await asyncio.to_thread(_maintain_processing_log_cube_snapshots)
+        maintained = await _maintain_processing_log_cube_snapshots()
         if not maintained:
             logger.warning("A manutenção de snapshots do cubo de logs não foi concluída")
     except Exception:
