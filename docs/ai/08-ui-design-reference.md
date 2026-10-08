@@ -113,6 +113,25 @@ não devem aparecer em dashboards.
   Ao concluir, mostrar `Snackbar` de sucesso e recarregar a grade.
 - Estados de carregamento, vazio, erro e sucesso precisam ter feedback explícito.
 
+### Seletor de Organograma
+
+Use `apps/web/src/components/DepartmentTreePicker.tsx` para selecionar um único
+nó da hierarquia. O seletor deve manter a estrutura em árvore também durante a
+busca: mostrar ancestrais para contexto, resultados com seus descendentes e
+indentação proporcional à profundidade. A busca expande os caminhos exibidos;
+fora da busca, os níveis continuam expansíveis manualmente.
+
+- Nós com filhos ativos aparecem em negrito; nós finais usam peso normal.
+- Mantenha espaçamento vertical moderado entre linhas e `line-height` suficiente
+  para nomes que ocupem mais de uma linha, sem comprimir ou separar demais os itens.
+- O menu usa até 560 px de largura, respeitando a largura da tela em dispositivos
+  menores. Não fixe uma largura que cause overflow horizontal.
+- A opção selecionada continua clicável em qualquer nível; o controle de expandir
+  ou recolher não deve selecionar o nó por acidente.
+- Ao criar uma árvore equivalente fora do seletor compartilhado, aplique a mesma
+  hierarquia visual. Evite regras baseadas apenas na profundidade, pois a
+  profundidade varia entre organogramas; a presença de filhos define o destaque.
+
 ## Referências de implementação
 
 | Responsabilidade | Referência |
