@@ -620,25 +620,41 @@ export default function ExpectedView({
         },
       ];
   const dailyGroupRows = dailyGold?.rows || [];
+  const dailyForecastRows = dailyGroupRows.filter((row) => String((row as Record<string, unknown>).tipo || "").toLowerCase() === "forecast");
+  const dailyActualRows = dailyGroupRows.filter((row) => String((row as Record<string, unknown>).tipo || "").toLowerCase() !== "forecast");
   const dailyLabels = [...new Set(dailyGroupRows.map((row) => String(row.day)))].sort();
   const dailyGroupNames = groupBy
-    ? [...new Set(dailyGroupRows.map((row) => String((row as Record<string, unknown>)[groupBy] ?? "Não informado")))].sort((a, b) => a.localeCompare(b, "pt-BR"))
+    ? [...new Set(dailyActualRows.map((row) => String((row as Record<string, unknown>)[groupBy] ?? "Não informado")))].sort((a, b) => a.localeCompare(b, "pt-BR"))
     : [];
-  const dailyChartData: any[] = groupBy
+  const dailyActualTraces: any[] = groupBy
     ? dailyGroupNames.slice(0, 6).map((name, index) => ({
         x: dailyLabels,
-        y: dailyLabels.map((day) => dailyGroupRows.filter((row) => String(row.day) === day && String((row as Record<string, unknown>)[groupBy] ?? "Não informado") === name).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0)),
+        y: dailyLabels.map((day) => dailyActualRows.filter((row) => String(row.day) === day && String((row as Record<string, unknown>)[groupBy] ?? "Não informado") === name).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0)),
         type: "bar",
         name,
         marker: { color: ["#F2A900", "#6416dc", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d"][index] },
       }))
     : [{
-        x: dailyGold?.rows.map((row) => row.day) || [],
-        y: dailyGold?.rows.map((row) => Number(row.realizado) || 0) || [],
+        x: dailyLabels,
+        y: dailyLabels.map((day) => dailyActualRows.filter((row) => String(row.day) === day).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0)),
         type: "bar",
         name: "Realizado diário",
         marker: { color: "#F2A900" },
       }];
+  const dailyForecastTrace = dailyForecastRows.length ? [{
+    x: dailyLabels,
+    y: dailyLabels.map((day) => {
+      const rows = dailyForecastRows.filter((row) => String(row.day) === day);
+      return rows.length ? rows.reduce((sum, row) => sum + (Number(row.realizado) || 0), 0) : null;
+    }),
+    type: "scatter",
+    mode: "lines+markers",
+    name: "Forecast",
+    connectgaps: false,
+    line: { color: "#22C55E", width: 3, dash: "dash" },
+    marker: { size: 5 },
+  }] : [];
+  const dailyChartData: any[] = [...dailyActualTraces, ...dailyForecastTrace];
   const groupedRows = groupedGold?.rows || [];
   const groupedValue = (row: Record<string, unknown>, field: string) => {
     if (field in row) return row[field];
@@ -1295,7 +1311,7 @@ export default function ExpectedView({
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {chartGranularity === "daily"
-                        ? "Diário · consumo realizado agrupado pela data real da fonte · até 90 dias mais recentes"
+                        ? "Diário · realizado por data real + forecast mensal distribuído pelo perfil histórico · até 90 dias"
                         : cumulative
                         ? sharedOn
                           ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast"
