@@ -273,6 +273,14 @@ export default function ExpectedView({
     table,
     externalScope,
   ]);
+  const dailyRequestKey = JSON.stringify({
+    table,
+    filters: externalScope?.filters || [],
+    day_from: externalScope?.dateFrom,
+    day_to: externalScope?.dateTo,
+    group_by: groupBy || null,
+    row_limit: 10000,
+  });
   useEffect(() => {
     if (!embedded || !table || chartGranularity !== "daily") {
       setDailyGold(null);
@@ -283,18 +291,18 @@ export default function ExpectedView({
     let active = true;
     setDailyLoading(true);
     setDailyError("");
-    queryGoldDailyConsumption({ table, filters: externalScope?.filters || [], day_from: externalScope?.dateFrom, day_to: externalScope?.dateTo, group_by: groupBy || null, row_limit: 10000 })
+    queryGoldDailyConsumption(JSON.parse(dailyRequestKey))
       .then((result) => {
         if (!active) return;
         setDailyGold({
           available: result.available,
-          rows: result.rows.sort((a, b) => a.day.localeCompare(b.day)),
+          rows: [...result.rows].sort((a, b) => a.day.localeCompare(b.day)),
         });
       })
       .catch((reason) => { if (active) setDailyError(formatApiError(reason, "Não foi possível carregar o consumo diário")); })
       .finally(() => { if (active) setDailyLoading(false); });
     return () => { active = false; };
-  }, [embedded, table, chartGranularity, externalScope, groupBy]);
+  }, [embedded, table, chartGranularity, dailyRequestKey]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows =
     externalScope ? rows : periodFilter === "all"
