@@ -86,7 +86,7 @@ export default function ExpectedView({
   onMeasureColumnChange?: (value: "realizado" | "realizado_cloud") => void;
   onPeriodFilterChange?: (value: string) => void;
   externalIncludeSharedCost?: boolean;
-  externalScope?: { monthFrom: string; monthTo: string; dimensionFilters: Record<string, string[]>; filters?: GoldQueryFilter[] };
+  externalScope?: { monthFrom: string; monthTo: string; dateFrom?: string; dateTo?: string; dimensionFilters: Record<string, string[]>; filters?: GoldQueryFilter[] };
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -153,12 +153,20 @@ export default function ExpectedView({
       ? (toYear - fromYear) * 12 + toMonth - fromMonth + 1
       : 0;
   }, [externalScope]);
+  const rangeDayCount = useMemo(() => {
+    if (!externalScope?.dateFrom || !externalScope.dateTo) return 0;
+    const from = new Date(`${externalScope.dateFrom}T00:00:00Z`).getTime();
+    const to = new Date(`${externalScope.dateTo}T00:00:00Z`).getTime();
+    return Number.isFinite(from) && Number.isFinite(to) && to >= from ? Math.floor((to - from) / 86400000) + 1 : 0;
+  }, [externalScope?.dateFrom, externalScope?.dateTo]);
+  const dailyAvailable = rangeMonthCount > 0 && (rangeMonthCount <= 3 || (rangeDayCount > 0 && rangeDayCount <= 90));
   useEffect(() => {
     const previous = previousRangeMonths.current;
-    if (previous > 3 && rangeMonthCount > 0 && rangeMonthCount <= 3) setChartGranularity("daily");
-    else if (previous > 0 && previous <= 3 && rangeMonthCount > 3) setChartGranularity((current) => current === "daily" ? "monthly" : current);
+    if (!previous && dailyAvailable) setChartGranularity("daily");
+    else if (previous > 3 && dailyAvailable) setChartGranularity("daily");
+    else if (!dailyAvailable) setChartGranularity((current) => current === "daily" ? "monthly" : current);
     previousRangeMonths.current = rangeMonthCount;
-  }, [rangeMonthCount]);
+  }, [rangeMonthCount, dailyAvailable]);
   useEffect(() => {
     let cancelled = false;
     getDepartments()
@@ -269,7 +277,7 @@ export default function ExpectedView({
     let active = true;
     setDailyLoading(true);
     setDailyError("");
-    queryGoldDailyConsumption({ table, filters: externalScope?.filters || [], row_limit: 10000 })
+    queryGoldDailyConsumption({ table, filters: externalScope?.filters || [], day_from: externalScope?.dateFrom, day_to: externalScope?.dateTo, row_limit: 10000 })
       .then((result) => {
         if (!active) return;
         setDailyGold({
@@ -1243,7 +1251,7 @@ export default function ExpectedView({
                     <Select label="Granularidade" value={chartGranularity} onChange={(event) => setChartGranularity(event.target.value as ChartGranularity)}>
                       <MenuItem value="accumulated">Acumulado</MenuItem>
                       <MenuItem value="monthly">Mensal</MenuItem>
-                      <MenuItem value="daily" disabled={rangeMonthCount === 0 || rangeMonthCount > 3}>Diário</MenuItem>
+                      <MenuItem value="daily" disabled={!dailyAvailable}>Diário</MenuItem>
                     </Select>
                   </FormControl>
                 </Stack>
