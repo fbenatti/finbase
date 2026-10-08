@@ -737,17 +737,26 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     if tipo:
         where = f"({where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
     effective_from = body.day_from
+    day_range_where = ""
     if body.day_from and body.day_to:
         if body.day_from > body.day_to:
             raise HTTPException(status_code=422, detail="Data inicial deve ser anterior ou igual à data final")
         effective_from = max(body.day_from, body.day_to - timedelta(days=89))
-        where = f"({where}) AND CAST({day_expr} AS DATE) BETWEEN DATE '{effective_from.isoformat()}' AND DATE '{body.day_to.isoformat()}'"
+        day_range_where = f" AND CAST({day_expr} AS DATE) BETWEEN DATE '{effective_from.isoformat()}' AND DATE '{body.day_to.isoformat()}'"
     group_select = f", {_quote_ident(group_by_physical)} AS {_quote_ident(group_by_physical.lower())}" if group_by_physical else ""
     group_by_sql = "GROUP BY 1, 2" if group_by_physical else "GROUP BY 1"
+    raw_date_columns = list(dict.fromkeys([
+        date_col, *([period_col] if period_col else []),
+        *([group_by_physical] if group_by_physical else []),
+    ]))
+    raw_date_sql = ', '.join(_quote_ident(column) for column in raw_date_columns)
     sql = (
+        f"WITH raw_daily AS (SELECT {raw_date_sql}, "
+        f"SUM(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0)) AS daily_value "
+        f"FROM iceberg.silver.{silver_table} WHERE ({where}) GROUP BY {raw_date_sql}) "
         f"SELECT CAST({day_expr} AS VARCHAR) AS day{group_select}, "
-        f"SUM(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0)) AS realizado "
-        f"FROM iceberg.silver.{silver_table} WHERE ({where}) AND {day_expr} IS NOT NULL "
+        f"SUM(daily_value) AS realizado FROM raw_daily "
+        f"WHERE {day_expr} IS NOT NULL{day_range_where} "
         f"{group_by_sql} ORDER BY 1 LIMIT 10000"
     )
     forecast_rows: list[dict[str, Any]] = []
