@@ -699,7 +699,10 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     if not silver_table:
         raise HTTPException(status_code=422, detail=f"Série diária indisponível para o cubo: {body.table}")
     try:
-        described = await execute(f"DESCRIBE iceberg.silver.{silver_table}", timeout_s=30)
+        described, forecast_schema = await asyncio.gather(
+            execute(f"DESCRIBE iceberg.silver.{silver_table}", timeout_s=30),
+            _gold_schema(body.table),
+        )
     except Exception as exc:  # noqa: BLE001
         _raise_gold_query_error(body.table, exc)
     schema: dict[str, str] = {}
@@ -747,12 +750,7 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
         f"FROM iceberg.silver.{silver_table} WHERE ({where}) AND {day_expr} IS NOT NULL "
         f"{group_by_sql} ORDER BY 1 LIMIT 10000"
     )
-    try:
-        result = await execute(sql, timeout_s=180)
-    except Exception as exc:  # noqa: BLE001
-        _raise_gold_query_error(body.table, exc)
     forecast_rows: list[dict[str, Any]] = []
-    forecast_schema = await _gold_schema(body.table)
     forecast_period_col = _gold_resolve(forecast_schema, "period") or _gold_resolve(forecast_schema, "_billing_period")
     forecast_type_col = forecast_schema.get("tipo")
     forecast_value_col = _gold_resolve(forecast_schema, "realizado") or _gold_resolve(forecast_schema, "realizado_cloud")
@@ -800,7 +798,8 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
             f"AND {day_expr} IS NOT NULL GROUP BY 1"
         )
         try:
-            monthly_forecasts, weekday_profile = await asyncio.gather(
+            result, monthly_forecasts, weekday_profile = await asyncio.gather(
+                execute(sql, timeout_s=180),
                 execute(forecast_sql, timeout_s=180),
                 execute(profile_sql, timeout_s=180),
             )
@@ -846,6 +845,11 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
                 if body.day_to and forecast_day > body.day_to:
                     continue
                 forecast_rows.append({"day": forecast_day.isoformat(), "realizado": amount * weight / weight_total, "tipo": "forecast"})
+    else:
+        try:
+            result = await execute(sql, timeout_s=180)
+        except Exception as exc:  # noqa: BLE001
+            _raise_gold_query_error(body.table, exc)
     result.extend(forecast_rows)
     return {"table": body.table, "source": f"silver.{silver_table}", "available": True, "day_column": date_col, "rows": result, "row_count": len(result)}
 
