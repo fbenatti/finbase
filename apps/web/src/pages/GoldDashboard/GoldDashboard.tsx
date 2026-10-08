@@ -435,6 +435,7 @@ export default function GoldDashboard() {
   // Árvore do organograma para o filtro global de departamento.
   const [organization, setOrganization] = useState<Department[]>([]);
   const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
+  const [organizationSearch, setOrganizationSearch] = useState("");
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [highlightsDepartment, setHighlightsDepartment] = useState("");
   const [consumptionDrill, setConsumptionDrill] = useState<{ open: boolean; tipo: "realizado" | "forecast" | "ambos"; period?: string }>({ open: false, tipo: "realizado" });
@@ -446,6 +447,32 @@ export default function GoldDashboard() {
     () => filters.visaoDiretoria ? swapDirectorTreeLevels(organization) : organization,
     [organization, filters.visaoDiretoria],
   );
+  const filteredOrganization = useMemo(() => {
+    const term = organizationSearch.trim().toLocaleLowerCase("pt-BR");
+    if (!term) return displayedOrganization;
+
+    const matchingIds = new Set<number>();
+    const findMatches = (nodes: Department[], parentPath: string[] = []) => {
+      nodes.filter(node => node.active).forEach(node => {
+        const path = [...parentPath, node.name];
+        if (path.join(" ").toLocaleLowerCase("pt-BR").includes(term)) matchingIds.add(node.id);
+        findMatches(node.children || [], path);
+      });
+    };
+    findMatches(displayedOrganization);
+
+    const includeSubtree = (node: Department): Department => ({
+      ...node,
+      children: (node.children || []).filter(child => child.active).map(includeSubtree),
+    });
+    const filterTree = (nodes: Department[]): Department[] => nodes.flatMap(node => {
+      if (!node.active) return [];
+      if (matchingIds.has(node.id)) return [includeSubtree(node)];
+      const children = filterTree(node.children || []);
+      return children.length ? [{ ...node, children }] : [];
+    });
+    return filterTree(displayedOrganization);
+  }, [displayedOrganization, organizationSearch]);
 
   useEffect(() => {
     getDepartments().then(departments => {
@@ -488,9 +515,9 @@ export default function GoldDashboard() {
   // rendering instead of trying to find parents only among root nodes: the
   // latter truncated selections such as Azure > DIR DADOS..., causing the
   // executive widgets to query a different (empty) scope.
-  const renderOrgNode = (node: Department, depth = 0, parentPath: string[] = []): React.ReactNode => {
+  const renderOrgNode = (node: Department, depth = 0, parentPath: string[] = [], forceExpanded = false): React.ReactNode => {
     const children = (node.children || []).filter(child => child.active);
-    const expanded = expandedNodes.has(node.id);
+    const expanded = forceExpanded || expandedNodes.has(node.id);
     const path = [...parentPath, node.name];
     return (
       <Box key={node.id}>
@@ -503,6 +530,7 @@ export default function GoldDashboard() {
             if (groupedDirector) window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
             else window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(node.id));
             setOrganizationAnchor(null);
+            setOrganizationSearch("");
           }}
         >
           <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
@@ -525,7 +553,7 @@ export default function GoldDashboard() {
           />
         </ListItemButton>
         <Collapse in={expanded} timeout="auto" unmountOnExit>
-          {children.map(child => renderOrgNode(child, depth + 1, path))}
+          {children.map(child => renderOrgNode(child, depth + 1, path, forceExpanded))}
         </Collapse>
       </Box>
     );
@@ -633,17 +661,31 @@ export default function GoldDashboard() {
               <MenuItem value="last12">Últimos 12 meses</MenuItem>
             </Select>
           </FormControl>
-          <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => setOrganizationAnchor(event.currentTarget)} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
+          <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => { setOrganizationSearch(""); setOrganizationAnchor(event.currentTarget); }} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
             {highlightsDepartment || displayOrgPath(filters)}
           </Button>
-          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
+          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => { setOrganizationAnchor(null); setOrganizationSearch(""); }} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
               {filters.visaoDiretoria
                 ? `Selecione na árvore — níveis mapeados como ${ORG.directorViewLevels} (profundidade 3↔4 invertida).`
                 : ORG.selectNodeFilterHint}
             </Typography>
+            <Box sx={{ px: 1.5, pt: 1 }}>
+              <TextField
+                fullWidth
+                size="small"
+                value={organizationSearch}
+                onChange={event => setOrganizationSearch(event.target.value)}
+                placeholder="Buscar no organograma"
+              />
+            </Box>
             <List dense disablePadding>
-              {displayedOrganization.filter(department => department.active).map(node => renderOrgNode(node))}
+              {filteredOrganization.map(node => renderOrgNode(node, 0, [], Boolean(organizationSearch.trim())))}
+              {organizationSearch.trim() && filteredOrganization.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>
+                  Nenhum nível encontrado.
+                </Typography>
+              )}
             </List>
           </Menu>
           <FormControlLabel
