@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
 import {
@@ -37,6 +37,8 @@ import {
   getExpectedView,
   ExpectedViewDriver,
   ExpectedViewRow,
+  GoldQueryFilter,
+  queryGoldDailyConsumption,
 } from "../../services/api";
 import AccuracyWidget from "./BudgetAccuracyWidget";
 import ConsumptionDrillDialog from "../GoldDashboard/ConsumptionDrillDialog";
@@ -48,6 +50,7 @@ const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
     ? `R$ ${(value / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} K`
     : `R$ ${money.format(value)}`;
 const CUMULATIVE_STORAGE_KEY = "openfinops.executiveCumulative";
+type ChartGranularity = "accumulated" | "monthly" | "daily";
 const flattenDepartments = (
   nodes: Department[],
   parents: string[] = [],
@@ -83,7 +86,7 @@ export default function ExpectedView({
   onMeasureColumnChange?: (value: "realizado" | "realizado_cloud") => void;
   onPeriodFilterChange?: (value: string) => void;
   externalIncludeSharedCost?: boolean;
-  externalScope?: { monthFrom: string; monthTo: string; dimensionFilters: Record<string, string[]> };
+  externalScope?: { monthFrom: string; monthTo: string; dimensionFilters: Record<string, string[]>; filters?: GoldQueryFilter[] };
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -115,10 +118,15 @@ export default function ExpectedView({
     useState<HTMLElement | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [periodFilter, setPeriodFilter] = useState("current");
-  const [cumulative, setCumulative] = useState(() => {
+  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>(() => {
     const saved = window.localStorage.getItem(CUMULATIVE_STORAGE_KEY);
-    return saved === null ? true : saved === "1";
+    return saved === null || saved === "1" ? "accumulated" : "monthly";
   });
+  const cumulative = chartGranularity === "accumulated";
+  const [dailyGold, setDailyGold] = useState<{ available: boolean; rows: Array<{ day: string; realizado: number }> } | null>(null);
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailyError, setDailyError] = useState("");
+  const previousRangeMonths = useRef(0);
   const [includeSharedCost, setIncludeSharedCost] = useState(
     params.get("shared") === "1",
   );
@@ -135,6 +143,22 @@ export default function ExpectedView({
   useEffect(() => {
     window.localStorage.setItem(CUMULATIVE_STORAGE_KEY, cumulative ? "1" : "0");
   }, [cumulative]);
+  const rangeMonthCount = useMemo(() => {
+    if (!externalScope) return 0;
+    const fromYear = Number(externalScope.monthFrom.slice(0, 4));
+    const fromMonth = Number(externalScope.monthFrom.slice(4, 6));
+    const toYear = Number(externalScope.monthTo.slice(0, 4));
+    const toMonth = Number(externalScope.monthTo.slice(4, 6));
+    return fromYear && fromMonth && toYear && toMonth && externalScope.monthFrom <= externalScope.monthTo
+      ? (toYear - fromYear) * 12 + toMonth - fromMonth + 1
+      : 0;
+  }, [externalScope]);
+  useEffect(() => {
+    const previous = previousRangeMonths.current;
+    if (previous > 3 && rangeMonthCount > 0 && rangeMonthCount <= 3) setChartGranularity("daily");
+    else if (previous > 0 && previous <= 3 && rangeMonthCount > 3) setChartGranularity((current) => current === "daily" ? "monthly" : current);
+    previousRangeMonths.current = rangeMonthCount;
+  }, [rangeMonthCount]);
   useEffect(() => {
     let cancelled = false;
     getDepartments()
@@ -235,6 +259,28 @@ export default function ExpectedView({
     table,
     externalScope,
   ]);
+  useEffect(() => {
+    if (!embedded || !table || chartGranularity !== "daily") {
+      setDailyGold(null);
+      setDailyError("");
+      setDailyLoading(false);
+      return;
+    }
+    let active = true;
+    setDailyLoading(true);
+    setDailyError("");
+    queryGoldDailyConsumption({ table, filters: externalScope?.filters || [], row_limit: 10000 })
+      .then((result) => {
+        if (!active) return;
+        setDailyGold({
+          available: result.available,
+          rows: result.rows.sort((a, b) => a.day.localeCompare(b.day)).slice(-90),
+        });
+      })
+      .catch((reason) => { if (active) setDailyError(formatApiError(reason, "Não foi possível carregar o consumo diário")); })
+      .finally(() => { if (active) setDailyLoading(false); });
+    return () => { active = false; };
+  }, [embedded, table, chartGranularity, externalScope]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows =
     externalScope ? rows : periodFilter === "all"
@@ -559,6 +605,14 @@ export default function ExpectedView({
           marker: { size: 6 },
         },
       ];
+  const dailyChartData: any[] = [{
+    x: dailyGold?.rows.map((row) => row.day) || [],
+    y: dailyGold?.rows.map((row) => Number(row.realizado) || 0) || [],
+    type: "bar",
+    name: "Realizado diário",
+    marker: { color: "#F2A900" },
+  }];
+  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : chartData;
   const chartLayout: any = {
     autosize: true,
     barmode: "stack",
@@ -566,8 +620,8 @@ export default function ExpectedView({
     hovermode: "x unified",
     xaxis: {
       type: "date",
-      tickformat: "%b %Y",
-      dtick: "M1",
+      tickformat: chartGranularity === "daily" ? "%d/%m" : "%b %Y",
+      dtick: chartGranularity === "daily" ? undefined : "M1",
       title: { text: "Período", standoff: 18 },
       side: "bottom",
       showticklabels: true,
@@ -575,7 +629,7 @@ export default function ExpectedView({
     },
     yaxis: {
       title: {
-        text: cumulative ? "Valor acumulado (R$)" : "Valor mensal (R$)",
+        text: chartGranularity === "daily" ? "Consumo diário (R$)" : cumulative ? "Valor acumulado (R$)" : "Valor mensal (R$)",
         standoff: 12,
       },
       side: "left",
@@ -1172,7 +1226,9 @@ export default function ExpectedView({
                       Gasto ao longo do tempo
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {cumulative
+                      {chartGranularity === "daily"
+                        ? "Diário · consumo realizado agrupado pela data real da fonte · até 90 dias mais recentes"
+                        : cumulative
                         ? sharedOn
                           ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast"
                           : "Acumulado · Realizado, orçamento e forecast"
@@ -1182,24 +1238,30 @@ export default function ExpectedView({
                       · clique para decompor o consumo
                     </Typography>
                   </Box>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={cumulative}
-                        onChange={(_, checked) => setCumulative(checked)}
-                      />
-                    }
-                    label="Acumulado"
-                  />
+                  <FormControl size="small" sx={{ minWidth: 170 }}>
+                    <InputLabel>Granularidade</InputLabel>
+                    <Select label="Granularidade" value={chartGranularity} onChange={(event) => setChartGranularity(event.target.value as ChartGranularity)}>
+                      <MenuItem value="accumulated">Acumulado</MenuItem>
+                      <MenuItem value="monthly">Mensal</MenuItem>
+                      <MenuItem value="daily" disabled={rangeMonthCount === 0 || rangeMonthCount > 3}>Diário</MenuItem>
+                    </Select>
+                  </FormControl>
                 </Stack>
-                <Plot
-                  useResizeHandler
-                  style={{ width: "100%", height: 420, cursor: "pointer" }}
-                  data={chartData}
-                  layout={chartLayout}
-                  config={{ responsive: true, displaylogo: false }}
-                  onClick={onMainChartClick}
-                />
+                {dailyError && chartGranularity === "daily" && <Alert severity="error" sx={{ mt: 1 }}>{dailyError}</Alert>}
+                {chartGranularity === "daily" && dailyLoading
+                  ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Consultando consumo diário no Trino…</Typography></Stack>
+                  : chartGranularity === "daily" && dailyGold?.available === false
+                    ? <Alert severity="info" sx={{ mt: 1 }}>A fonte Silver não disponibiliza uma data real de consumo para este recorte.</Alert>
+                    : chartGranularity === "daily" && !dailyGold?.rows.length
+                      ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários disponíveis neste período.</Alert>
+                      : <Plot
+                          useResizeHandler
+                          style={{ width: "100%", height: 420, cursor: chartGranularity === "daily" ? "default" : "pointer" }}
+                          data={chartDataForRender}
+                          layout={chartLayout}
+                          config={{ responsive: true, displaylogo: false }}
+                          onClick={chartGranularity === "daily" ? undefined : onMainChartClick}
+                        />}
               </Paper>
             </Grid>
             <Grid item xs={12} md={5}>

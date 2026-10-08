@@ -657,7 +657,8 @@ export default function GoldDashboard() {
     monthFrom: monthFrom.replace("-", ""),
     monthTo: monthTo.replace("-", ""),
     dimensionFilters: Object.fromEntries(Object.entries(filters.extra).filter(([, values]) => values.length > 0)),
-  }), [monthFrom, monthTo, filters.extra]);
+    filters: filtersOf(filters),
+  }), [monthFrom, monthTo, filters]);
   const setFilter = (key: keyof Filters, values: string[]) => setFilters(f => ({ ...f, [key]: values }));
 
   const clearFilters = () => {
