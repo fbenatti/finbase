@@ -472,6 +472,9 @@ export default function GoldDashboard() {
   const [highlightsLoading, setHighlightsLoading] = useState(true);
   const [highlightsError, setHighlightsError] = useState("");
   const [highlightsRefresh, setHighlightsRefresh] = useState(0);
+  const groupByOptions = useMemo(() => [...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])]
+    .filter((column) => !["_billing_period", "tipo", "period", "source connection id", "rateio medida"].includes(column.toLowerCase().replace(/_/g, " ")))
+    .sort((a, b) => labelDimension(a).localeCompare(labelDimension(b), "pt-BR", { sensitivity: "base" })), [info]);
   useEffect(() => {
     if (!organizationAnchor) return;
     const timer = window.setTimeout(() => organizationSearchInput.current?.focus(), 120);
@@ -797,7 +800,7 @@ export default function GoldDashboard() {
               autoHighlight
               open
               disablePortal
-              options={[...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])].filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()) && !filters.extra[column])}
+              options={groupByOptions.filter((column) => !filters.extra[column])}
               getOptionLabel={labelDimension}
               onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }}
               noOptionsText={!info ? "Carregando esquema Gold…" : "Todas as colunas já foram adicionadas"}
@@ -822,7 +825,7 @@ export default function GoldDashboard() {
       </Tabs>
 
       {tab === "visao-executiva" && <>
-        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} groupByOptions={[...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])].filter((column) => !["_billing_period", "tipo", "period", "source connection id", "rateio medida"].includes(column.toLowerCase().replace(/_/g, " "))).sort((a, b) => labelDimension(a).localeCompare(labelDimension(b), "pt-BR", { sensitivity: "base" }))} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
+        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} groupByOptions={groupByOptions} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
       <ExecutiveHighlights items={highlights} loading={highlightsLoading} error={highlightsError} />
       </>}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
@@ -865,7 +868,23 @@ function CascadeDimensionFilter({ column, label, table, value, filters, onChange
       .catch(() => { if (active) setOptions(value); }), 250);
     return () => { active = false; window.clearTimeout(timer); };
   }, [contextKey, open]);
-  return <Autocomplete multiple size="small" open={open} onOpen={() => setOpen(true)} onClose={() => setOpen(false)} options={options} value={value} onChange={(_, values) => onChange(values)} onInputChange={(_, text) => setSearch(text)} filterOptions={(items) => items} renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Adicionar" : "Todos"} />} />;
+  return <Autocomplete
+    multiple
+    freeSolo
+    selectOnFocus
+    clearOnBlur
+    handleHomeEndKeys
+    size="small"
+    open={open}
+    onOpen={() => setOpen(true)}
+    onClose={() => setOpen(false)}
+    options={options}
+    value={value}
+    onChange={(_, values) => onChange(values.map((item) => String(item).trim()).filter(Boolean))}
+    onInputChange={(_, text) => setSearch(text)}
+    filterOptions={(items, state) => items.filter((item) => item.toLocaleLowerCase().includes(state.inputValue.toLocaleLowerCase()))}
+    renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Digite ou selecione valores" : "Todos — digite para buscar ou adicionar"} />}
+  />;
 }
 
 // ═══════════════════════════════════════════════════════════════════
