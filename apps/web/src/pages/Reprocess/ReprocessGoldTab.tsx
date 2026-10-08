@@ -12,6 +12,13 @@ export default function ReprocessGoldTab() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const load = async () => {
     const ruleList = await getGoldCubeRules().catch(() => [] as GoldCubeRule[]);
     setRules(ruleList);
@@ -44,9 +51,20 @@ export default function ReprocessGoldTab() {
 
   const statusChip = (r: GoldCubeRule) => {
     const s = r.materialization_status || "PENDING";
-    const label = s === "UPDATED" ? "Atualizada" : s === "EMPTY" ? "Sem dados" : s === "ERROR" ? "Com erro" : "Pendente";
-    const color = s === "UPDATED" ? "success" : s === "ERROR" ? "error" : "warning";
-    return <Chip size="small" label={label} color={color as any} />;
+    const materializedAt = r.materialized_at ? new Date(r.materialized_at) : null;
+    const hasValidDate = materializedAt != null && !Number.isNaN(materializedAt.getTime());
+    const stale = s === "UPDATED" && (!hasValidDate || now - materializedAt.getTime() > 24 * 60 * 60 * 1000);
+    const label = stale ? "Cubo desatualizado" : s === "UPDATED" ? "Atualizado" : s === "EMPTY" ? "Sem dados" : s === "ERROR" ? "Com erro" : "Pendente";
+    const color = stale ? "warning" : s === "UPDATED" ? "success" : s === "ERROR" ? "error" : "warning";
+    const dateLabel = hasValidDate
+      ? `Última atualização: ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(materializedAt)}`
+      : s === "UPDATED" ? "Última atualização não registrada" : null;
+    return (
+      <Stack spacing={0.25} alignItems="flex-end">
+        <Chip size="small" label={label} color={color} />
+        {dateLabel && <Typography variant="caption" color="text.secondary">{dateLabel}</Typography>}
+      </Stack>
+    );
   };
 
   return <Stack spacing={2}>
