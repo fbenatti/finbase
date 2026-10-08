@@ -112,10 +112,26 @@ export default function DepartmentTreePicker({
     ).slice(0, 100);
   }, [flatDepartments, search]);
 
-  const renderNode = (department: Department, depth = 0): ReactElement | null => {
+  const filteredDepartments = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase("pt-BR");
+    if (!term) return departments;
+    const matchingIds = new Set(matchedDepartments.map((department) => department.id));
+    const includeSubtree = (node: Department): Department => ({
+      ...node,
+      children: (node.children || []).map(includeSubtree),
+    });
+    const filter = (nodes: Department[]): Department[] => nodes.flatMap((node) => {
+      if (matchingIds.has(node.id)) return [includeSubtree(node)];
+      const children = filter(node.children || []);
+      return children.length ? [{ ...node, children }] : [];
+    });
+    return filter(departments);
+  }, [departments, matchedDepartments, search]);
+
+  const renderNode = (department: Department, depth = 0, forceExpanded = false): ReactElement | null => {
     if (blockedIds.has(department.id)) return null;
     const children = (department.children || []).filter((child) => !blockedIds.has(child.id));
-    const isExpanded = expanded.has(department.id);
+    const isExpanded = forceExpanded || expanded.has(department.id);
 
     return (
       <Box key={department.id}>
@@ -144,7 +160,7 @@ export default function DepartmentTreePicker({
           />
         </ListItemButton>
         <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-          {children.map((child) => renderNode(child, depth + 1))}
+          {children.map((child) => renderNode(child, depth + 1, forceExpanded))}
         </Collapse>
       </Box>
     );
@@ -198,11 +214,7 @@ export default function DepartmentTreePicker({
             </ListItemButton>
           )}
           {search.trim()
-            ? matchedDepartments.map((department) => (
-              <ListItemButton key={department.id} selected={department.id === value} onClick={() => chooseDepartment(department)} sx={{ py: 0.5 }}>
-                <ListItemText primary={department.name} secondary={department.path} primaryTypographyProps={{ variant: "body2", fontWeight: 600 }} secondaryTypographyProps={{ variant: "caption", noWrap: true }} />
-              </ListItemButton>
-            ))
+            ? filteredDepartments.map((department) => renderNode(department, 0, true))
             : departments.map((department) => renderNode(department))}
           {search.trim() && matchedDepartments.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>Nenhum projeto ou diretoria encontrado.</Typography>}
         </List>
