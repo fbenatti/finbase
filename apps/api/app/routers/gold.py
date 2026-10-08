@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -502,6 +503,8 @@ class GoldQueryRequest(BaseModel):
     row_limit: int = Field(default=2000, ge=1, le=10000)
     sort_column: str | None = None
     sort_direction: _Literal["asc", "desc"] = "desc"
+    day_from: date | None = None
+    day_to: date | None = None
 
 
 class GoldFilterOptionsRequest(BaseModel):
@@ -722,6 +725,11 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     if body.group_by and not group_by_physical:
         raise HTTPException(status_code=422, detail=f"Coluna de agrupamento inexistente na Gold: {body.group_by}")
     where = _gold_filter_clause(schema, body.filters)
+    if body.day_from and body.day_to:
+        if body.day_from > body.day_to:
+            raise HTTPException(status_code=422, detail="Data inicial deve ser anterior ou igual à data final")
+        effective_from = max(body.day_from, body.day_to - timedelta(days=89))
+        where = f"({where}) AND CAST({day_expr} AS DATE) BETWEEN DATE '{effective_from.isoformat()}' AND DATE '{body.day_to.isoformat()}'"
     if body.filter_groups:
         group_clauses = [_gold_filter_clause(schema, group) for group in body.filter_groups if group]
         if group_clauses:
