@@ -90,6 +90,12 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
         conn_ids = list(task.connection_ids or [])
         periods = [str(p) for p in (task.billing_periods or [])]
         snapshot_dates = [str(s) for s in (payload.get("snapshot_dates") or [])]
+        # Extraction and reprocessing must see one stable Bronze inventory.
+        # Without a shared per-source lock, a reprocess can inventory/audit a
+        # partial Azure export while the remaining CSV parts are still being
+        # ingested, then publish that incomplete Silver slice successfully.
+        for connection_id in conn_ids:
+            keys.append(_stable_lock_key("bronze_source", connection_id))
         if conn_ids and snapshot_dates:
             for connection_id in conn_ids:
                 for snap in snapshot_dates:
@@ -106,7 +112,10 @@ def task_resource_lock_keys(task: EtlTask) -> list[int]:
             keys.append(_stable_lock_key("destination", task.destination_table_id))
 
     if task.task_type == "extraction" and task.connection_id:
+        # Keep extractions serialized per connection and share a lock with
+        # reprocess tasks so Bronze ingestion cannot race Silver publication.
         keys.append(_stable_lock_key("extraction", task.connection_id))
+        keys.append(_stable_lock_key("bronze_source", task.connection_id))
 
     if task.task_type in {"gold_reprocess", "shared_cost"}:
         keys.append(_stable_lock_key("singleton", task.task_type))
