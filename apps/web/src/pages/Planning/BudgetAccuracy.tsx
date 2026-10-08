@@ -305,11 +305,14 @@ export default function BudgetAccuracy() {
           ? "Visão anual: soma de Forecast + Realizado comparada ao orçamento anual por departamento."
           : "Visão mensal do orçamento vigente contra o realizado por departamento."}
       </Typography>
-      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "#fff" }}>
+      <Paper
+        variant="outlined"
+        sx={{ p: 2, mb: 2, bgcolor: "#fff", width: "fit-content", maxWidth: "100%" }}
+      >
         <Stack
-          direction={{ xs: "column", md: "row" }}
+          direction="column"
           gap={2}
-          alignItems={{ md: "start" }}
+          alignItems="flex-start"
         >
           <Stack
             direction={{ xs: "column", sm: "row" }}
