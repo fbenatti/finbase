@@ -32,7 +32,7 @@ const formatPeriod = (value: unknown) => {
 };
 const isPeriodDim = (name?: string) => ["_billing_period", "period", "forecast_month"].includes((name || "").toLowerCase());
 const formatKey = (values: unknown[], dimNames?: string[]) => values.map((v, index) => {
-  if (isPeriodDim(dimNames?.[index]) || String(v ?? "").replace(/\D/g, "").length === 6) return formatPeriod(v);
+  if (isPeriodDim(dimNames?.[index])) return formatPeriod(v);
   return v == null || v === "" ? "(vazio)" : String(v);
 }).join(" › ");
 
@@ -40,7 +40,7 @@ const ORIGIN_FIELD = { name: "origem", type: "varchar", numeric: false };
 const isOriginDim = (name?: string) => (name || "").toLowerCase() === "origem";
 const measureLabel = (m: PivotMeasure) => m.label || `${m.aggregation} ${m.column}`;
 const dimLabel = (name: string, value: unknown) => {
-  if (isPeriodDim(name) || String(value ?? "").replace(/\D/g, "").length === 6) return formatPeriod(value);
+  if (isPeriodDim(name)) return formatPeriod(value);
   return value == null || value === "" ? "(vazio)" : String(value);
 };
 
