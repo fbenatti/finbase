@@ -651,9 +651,9 @@ export default function GoldDashboard() {
       {/* ── Filtros globais ── */}
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Período</InputLabel>
-            <Select label="Período" value={periodPreset} onChange={e => applyPreset(e.target.value)}>
+          <FormControl size="small" sx={{ minWidth: 190 }}>
+            <InputLabel>Período · mensal</InputLabel>
+            <Select label="Período · mensal" value={periodPreset} onChange={e => applyPreset(e.target.value)}>
               <MenuItem value="all">Todos os meses</MenuItem>
               <MenuItem value="last1">Último mês</MenuItem>
               <MenuItem value="last3">Últimos 3 meses</MenuItem>
@@ -661,9 +661,12 @@ export default function GoldDashboard() {
               <MenuItem value="last12">Últimos 12 meses</MenuItem>
             </Select>
           </FormControl>
-          <Button variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => { setOrganizationSearch(""); setOrganizationAnchor(event.currentTarget); }} sx={{ minWidth: 280, justifyContent: "flex-start", textTransform: "none" }}>
-            {highlightsDepartment || displayOrgPath(filters)}
-          </Button>
+          <Box sx={{ minWidth: 280 }}>
+            <Typography variant="caption" color="text.secondary">Organograma · selecione níveis</Typography>
+            <Button fullWidth variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => { setOrganizationSearch(""); setOrganizationAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, justifyContent: "flex-start", textTransform: "none" }}>
+              {highlightsDepartment || displayOrgPath(filters)}
+            </Button>
+          </Box>
           <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => { setOrganizationAnchor(null); setOrganizationSearch(""); }} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
               {filters.visaoDiretoria
@@ -723,6 +726,9 @@ export default function GoldDashboard() {
             {filters.months.map(m => <Chip key={m} size="small" label={monthLabel(m)} onDelete={() => setFilter("months", filters.months.filter(x => x !== m))} />)}
           </Stack>
         )}
+        <Typography variant="caption" color="text.secondary" display="block" mt={1}>
+          Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.
+        </Typography>
       </Paper>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
