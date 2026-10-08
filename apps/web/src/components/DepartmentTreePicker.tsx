@@ -138,7 +138,7 @@ export default function DepartmentTreePicker({
         <ListItemButton
           selected={department.id === value}
           onClick={() => chooseDepartment(department)}
-          sx={{ pl: 1 + depth * 2, py: 0.25 }}
+          sx={{ pl: 1 + depth * 2, py: 0.125 }}
         >
           <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
             {children.length > 0 && (
@@ -156,7 +156,12 @@ export default function DepartmentTreePicker({
           </Box>
           <ListItemText
             primary={department.name}
-            primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }}
+            sx={{ my: 0 }}
+            primaryTypographyProps={{
+              variant: "body2",
+              fontWeight: depth < 3 ? 700 : 400,
+              sx: { lineHeight: 1.25 },
+            }}
           />
         </ListItemButton>
         <Collapse in={isExpanded} timeout="auto" unmountOnExit>
@@ -185,7 +190,7 @@ export default function DepartmentTreePicker({
         disablePortal
         disableAutoFocusItem
         disableRestoreFocus
-        PaperProps={{ sx: { width: 430, maxHeight: 520 } }}
+        PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}
       >
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
           {menuHint}
