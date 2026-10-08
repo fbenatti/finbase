@@ -859,13 +859,23 @@ function CascadeDimensionFilter({ column, label, table, value, filters, onChange
   const [options, setOptions] = useState<string[]>(value);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [optionsError, setOptionsError] = useState("");
   const contextKey = JSON.stringify([column, filters, search]);
   useEffect(() => {
     if (!open) return;
     let active = true;
+    setLoadingOptions(true);
+    setOptionsError("");
     const timer = window.setTimeout(() => getGoldFilterOptions({ table, column, filters, search, limit: 100 })
       .then((result) => { if (active) setOptions([...new Set([...value, ...result.values])]); })
-      .catch(() => { if (active) setOptions(value); }), 250);
+      .catch((error) => {
+        if (active) {
+          setOptions(value);
+          setOptionsError(formatApiError(error, `Não foi possível carregar opções de ${label}.`));
+        }
+      })
+      .finally(() => { if (active) setLoadingOptions(false); }), 250);
     return () => { active = false; window.clearTimeout(timer); };
   }, [contextKey, open]);
   return <Autocomplete
@@ -878,12 +888,15 @@ function CascadeDimensionFilter({ column, label, table, value, filters, onChange
     open={open}
     onOpen={() => setOpen(true)}
     onClose={() => setOpen(false)}
+    loading={loadingOptions}
+    loadingText="Carregando opções…"
+    noOptionsText={optionsError || (search ? "Nenhum resultado encontrado. Digite outro termo para adicionar um valor." : "Nenhuma opção encontrada.")}
     options={options}
     value={value}
     onChange={(_, values) => onChange(values.map((item) => String(item).trim()).filter(Boolean))}
     onInputChange={(_, text) => setSearch(text)}
     filterOptions={(items, state) => items.filter((item) => item.toLocaleLowerCase().includes(state.inputValue.toLocaleLowerCase()))}
-    renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Digite ou selecione valores" : "Todos — digite para buscar ou adicionar"} />}
+    renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Digite ou selecione valores" : "Selecione ou digite para buscar"} />}
   />;
 }
 
