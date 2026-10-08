@@ -35,11 +35,12 @@ const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
 const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
 const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+const toDateValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const shiftMonth = (value: string, delta: number) => { const [year, month] = value.split("-").map(Number); return toMonthValue(new Date(year, month - 1 + delta, 1)); };
-const labelMonthRange = (from: string, to: string) => {
-  const label = (value: string) => { const [year, month] = value.split("-").map(Number); return `${MONTHS_PT[month - 1] || ""} ${year}`; };
-  return `${label(from)} – ${label(to)}`;
-};
+const monthStart = (month: string) => `${month}-01`;
+const monthEnd = (month: string) => { const [year, value] = month.split("-").map(Number); return toDateValue(new Date(year, value, 0)); };
+const labelDateRange = (from: string, to: string) => `${new Date(`${from}T00:00:00`).toLocaleDateString("pt-BR")} – ${new Date(`${to}T00:00:00`).toLocaleDateString("pt-BR")}`;
+const monthsInDateRange = (from: string, to: string) => monthsBetween(from.slice(0, 7), to.slice(0, 7));
 const monthsBetween = (from: string, to: string) => {
   const [fromYear, fromMonth] = from.split("-").map(Number);
   const [toYear, toMonth] = to.split("-").map(Number);
@@ -449,11 +450,11 @@ export default function GoldDashboard() {
   }));
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
   const currentYear = new Date().getFullYear();
-  const [monthFrom, setMonthFrom] = useState(`${currentYear}-01`);
-  const [monthTo, setMonthTo] = useState(`${currentYear}-12`);
+  const [dateFrom, setDateFrom] = useState(`${currentYear}-01-01`);
+  const [dateTo, setDateTo] = useState(`${currentYear}-12-31`);
   const [dateAnchor, setDateAnchor] = useState<HTMLElement | null>(null);
-  const [draftFrom, setDraftFrom] = useState(`${currentYear}-01`);
-  const [draftTo, setDraftTo] = useState(`${currentYear}-12`);
+  const [draftFrom, setDraftFrom] = useState(`${currentYear}-01-01`);
+  const [draftTo, setDraftTo] = useState(`${currentYear}-12-31`);
   const [filterMenuAnchor, setFilterMenuAnchor] = useState<HTMLElement | null>(null);
   const [includeSharedCost, setIncludeSharedCost] = useState(false);
   const [executivePeriodFilter, setExecutivePeriodFilter] = useState("current");
@@ -648,25 +649,28 @@ export default function GoldDashboard() {
       last_12: [shiftMonth(current, -11), current], this_year: [`${year}-01`, `${year}-12`],
       last_year: [`${year - 1}-01`, `${year - 1}-12`],
     };
-    const [from, to] = ranges[preset];
-    setMonthFrom(from); setMonthTo(to); setFilters((currentFilters) => ({ ...currentFilters, months: monthsBetween(from, to) })); setDateAnchor(null);
+    const [fromMonth, toMonth] = ranges[preset];
+    const from = monthStart(fromMonth); const to = monthEnd(toMonth);
+    setDateFrom(from); setDateTo(to); setFilters((currentFilters) => ({ ...currentFilters, months: monthsInDateRange(from, to) })); setDateAnchor(null);
   };
 
   const filterKey = JSON.stringify([filters, tab, refreshTick, measureFor(filters)]);
   const executiveScope = useMemo(() => ({
-    monthFrom: monthFrom.replace("-", ""),
-    monthTo: monthTo.replace("-", ""),
+    monthFrom: dateFrom.slice(0, 7).replace("-", ""),
+    monthTo: dateTo.slice(0, 7).replace("-", ""),
+    dateFrom,
+    dateTo,
     dimensionFilters: Object.fromEntries(Object.entries(filters.extra).filter(([, values]) => values.length > 0)),
     filters: filtersOf(filters),
-  }), [monthFrom, monthTo, filters]);
+  }), [dateFrom, dateTo, filters]);
   const setFilter = (key: keyof Filters, values: string[]) => setFilters(f => ({ ...f, [key]: values }));
 
   const clearFilters = () => {
     window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
     window.localStorage.removeItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY);
     setFilters(EMPTY_FILTERS);
-    const from = `${currentYear}-01`; const to = `${currentYear}-12`;
-    setMonthFrom(from); setMonthTo(to); setFilters({ ...EMPTY_FILTERS, months: monthsBetween(from, to) });
+    const from = `${currentYear}-01-01`; const to = `${currentYear}-12-31`;
+    setDateFrom(from); setDateTo(to); setFilters({ ...EMPTY_FILTERS, months: monthsInDateRange(from, to) });
   };
 
   const [copied, setCopied] = useState(false);
@@ -696,9 +700,9 @@ export default function GoldDashboard() {
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
           <Box sx={{ width: { xs: "100%", md: 330 }, minWidth: { xs: 0, md: 330 }, flex: { xs: "1 1 100%", md: "0 0 330px" } }}>
-            <Typography variant="caption" color="text.secondary">Período · mensal</Typography>
-            <Button fullWidth variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(monthFrom); setDraftTo(monthTo); setDateAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, px: 1.5, justifyContent: "flex-start", textTransform: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {labelMonthRange(monthFrom, monthTo)}
+            <Typography variant="caption" color="text.secondary">Período</Typography>
+            <Button fullWidth variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(dateFrom); setDraftTo(dateTo); setDateAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, px: 1.5, justifyContent: "flex-start", textTransform: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {labelDateRange(dateFrom, dateTo)}
             </Button>
           </Box>
           <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
@@ -712,7 +716,7 @@ export default function GoldDashboard() {
                 <Button size="small" onClick={() => applyPreset("this_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este ano</Button>
                 <Button size="small" onClick={() => applyPreset("last_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Ano anterior</Button>
               </Stack></Box>
-              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #edf0f6" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · mensal</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="month" label="Mês inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="month" label="Mês final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>O mês inicial deve ser anterior ou igual ao mês final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setMonthFrom(draftFrom); setMonthTo(draftTo); setFilters((current) => ({ ...current, months: monthsBetween(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
+              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #edf0f6" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · datas</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="date" label="Data inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="date" label="Data final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>A data inicial deve ser anterior ou igual à data final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setDateFrom(draftFrom); setDateTo(draftTo); setFilters((current) => ({ ...current, months: monthsInDateRange(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
             </Stack>
           </Popover>
           <Box sx={{ minWidth: 280 }}>
