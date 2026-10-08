@@ -666,20 +666,27 @@ export default function ExpectedView({
     const key = Object.keys(row).find((candidate) => candidate.toLowerCase() === field.toLowerCase());
     return key ? row[key] : undefined;
   };
-  const groupedLabels = [...new Set(groupedRows.map((row) => String(groupedValue(row, "_billing_period") ?? "")))].sort();
-  const groupNames = groupBy ? [...new Set(groupedRows.map((row) => String(groupedValue(row, groupBy) ?? "Não informado")))].sort((a, b) => a.localeCompare(b, "pt-BR")) : [];
-  const groupedActualTraces = groupBy ? groupNames.slice(0, 6).map((name, index) => {
-    const monthlyValues = groupedLabels.map((period) => groupedRows.filter((row) => String(groupedValue(row, "_billing_period")) === period && String(groupedValue(row, groupBy) ?? "Não informado") === name).reduce((sum, row) => sum + Number(groupedValue(row, "realizado") || 0), 0));
+  const groupedPeriods = [...new Set(filteredRows.map((row) => row.period))].sort();
+  const groupedLabels = groupedPeriods.map((period) => new Date(`${toDate(period)}T00:00:00`).toLocaleDateString("pt-BR", { month: "short", year: "numeric" }));
+  const groupedNamesBySpend = groupBy ? [...new Set(groupedRows.map((row) => String(groupedValue(row, groupBy) ?? "Não informado")))].map((name) => ({
+    name,
+    total: groupedRows.filter((row) => String(groupedValue(row, groupBy) ?? "Não informado") === name).reduce((sum, row) => sum + Number(groupedValue(row, "realizado") || 0), 0),
+  })).sort((a, b) => b.total - a.total) : [];
+  const topGroupNames = groupedNamesBySpend.slice(0, 5).map((group) => group.name);
+  const otherGroupKey = "__outros_agrupamento__";
+  const groupNames = [...topGroupNames, ...(groupedNamesBySpend.length > 5 ? [otherGroupKey] : [])];
+  const groupedActualTraces = groupBy ? groupNames.map((name, index) => {
+    const monthlyValues = groupedPeriods.map((period) => groupedRows.filter((row) => String(groupedValue(row, "_billing_period")) === period && (name === otherGroupKey ? !topGroupNames.includes(String(groupedValue(row, groupBy) ?? "Não informado")) : String(groupedValue(row, groupBy) ?? "Não informado") === name)).reduce((sum, row) => sum + Number(groupedValue(row, "realizado") || 0), 0));
     return {
       x: groupedLabels,
       y: cumulative ? monthlyValues.map((_, monthIndex) => monthlyValues.slice(0, monthIndex + 1).reduce((sum, value) => sum + value, 0)) : monthlyValues,
       type: cumulative ? "scatter" : "bar",
       ...(cumulative ? { mode: "lines+markers", fill: "tozeroy" } : {}),
-      name,
+      name: name === otherGroupKey ? "Outros" : name,
       marker: { color: ["#F2A900", "#6416dc", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d"][index] },
     };
   }) : [];
-  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : groupBy ? [...groupedActualTraces, ...chartData.filter((trace) => ["Forecast", "Forecast manual", "Orçamento", "Custo compartilhado"].includes(trace.name))] : chartData;
+  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : groupBy ? [...groupedActualTraces, ...chartData.filter((trace) => ["Forecast", "Forecast manual", "Orçamento", "Custo compartilhado"].includes(trace.name)).map((trace) => ({ ...trace, x: groupedLabels }))] : chartData;
   const [groupQueryLoading, setGroupQueryLoading] = useState(false);
   useEffect(() => {
     if (!embedded || !table || chartGranularity === "daily" || !groupBy) {
@@ -708,9 +715,9 @@ export default function ExpectedView({
     margin: { l: 82, r: 24, t: 20, b: 82 },
     hovermode: "x unified",
     xaxis: {
-      type: "date",
-      tickformat: chartGranularity === "daily" ? "%d/%m" : "%b %Y",
-      dtick: chartGranularity === "daily" ? undefined : "M1",
+      type: chartGranularity === "daily" || !groupBy ? "date" : "category",
+      tickformat: chartGranularity === "daily" ? "%d/%m" : groupBy ? undefined : "%b %Y",
+      dtick: chartGranularity === "daily" || groupBy ? undefined : "M1",
       title: { text: "Período", standoff: 18 },
       side: "bottom",
       showticklabels: true,
