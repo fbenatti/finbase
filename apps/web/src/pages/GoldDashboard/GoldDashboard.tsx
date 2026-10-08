@@ -812,8 +812,8 @@ export default function GoldDashboard() {
             />
           </Popover>
         </Box>
-        {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 1, width: "100%", mt: 1 }}>
-          {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={labelDimension(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><IconButton size="small" aria-label={`Remover filtro ${labelDimension(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><Close fontSize="small" /></IconButton></Stack>)}
+        {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 300px), 340px))", gap: 1, width: "100%", mt: 1, alignItems: "start" }}>
+          {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5} sx={{ minWidth: 0 }}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={labelDimension(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><Chip size="small" color={values.length ? "success" : "default"} variant={values.length ? "filled" : "outlined"} label={values.length ? `${values.length} aplicado${values.length === 1 ? "" : "s"}` : "Sem filtro"} sx={{ mt: 1, flexShrink: 0 }} /><IconButton size="small" aria-label={`Remover filtro ${labelDimension(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><Close fontSize="small" /></IconButton></Stack>)}
         </Box>}
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>
           Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.
@@ -896,6 +896,10 @@ function CascadeDimensionFilter({ column, label, table, value, filters, onChange
     onChange={(_, values) => onChange(values.map((item) => String(item).trim()).filter(Boolean))}
     onInputChange={(_, text) => setSearch(text)}
     filterOptions={(items, state) => items.filter((item) => item.toLocaleLowerCase().includes(state.inputValue.toLocaleLowerCase()))}
+    renderTags={(selected, getTagProps) => <>
+      {selected.slice(0, 1).map((item, index) => <Chip {...getTagProps({ index })} key={`${item}-${index}`} label={item} size="small" sx={{ maxWidth: 155 }} />)}
+      {selected.length > 1 && <Chip size="small" label={`+${selected.length - 1}`} title={selected.slice(1).join(", ")} />}
+    </>}
     renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Digite ou selecione valores" : "Selecione ou digite para buscar"} />}
   />;
 }
