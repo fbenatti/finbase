@@ -674,7 +674,8 @@ export default function ExpectedView({
   })).sort((a, b) => b.total - a.total) : [];
   const topGroupNames = groupedNamesBySpend.slice(0, 5).map((group) => group.name);
   const otherGroupKey = "__outros_agrupamento__";
-  const groupNames = [...topGroupNames, ...(groupedNamesBySpend.length > 5 ? [otherGroupKey] : [])];
+  const groupNames = [...topGroupNames].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  if (groupedNamesBySpend.length > 5) groupNames.push(otherGroupKey);
   const groupedActualTraces = groupBy ? groupNames.map((name, index) => {
     const monthlyValues = groupedPeriods.map((period) => groupedRows.filter((row) => String(groupedValue(row, "_billing_period")) === period && (name === otherGroupKey ? !topGroupNames.includes(String(groupedValue(row, groupBy) ?? "Não informado")) : String(groupedValue(row, groupBy) ?? "Não informado") === name)).reduce((sum, row) => sum + Number(groupedValue(row, "realizado") || 0), 0));
     return {
