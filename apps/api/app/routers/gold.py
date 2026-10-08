@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import asyncio
 from datetime import date, timedelta
 from typing import Any
 
@@ -725,11 +726,6 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     if body.group_by and not group_by_physical:
         raise HTTPException(status_code=422, detail=f"Coluna de agrupamento inexistente na Gold: {body.group_by}")
     where = _gold_filter_clause(schema, body.filters)
-    if body.day_from and body.day_to:
-        if body.day_from > body.day_to:
-            raise HTTPException(status_code=422, detail="Data inicial deve ser anterior ou igual à data final")
-        effective_from = max(body.day_from, body.day_to - timedelta(days=89))
-        where = f"({where}) AND CAST({day_expr} AS DATE) BETWEEN DATE '{effective_from.isoformat()}' AND DATE '{body.day_to.isoformat()}'"
     if body.filter_groups:
         group_clauses = [_gold_filter_clause(schema, group) for group in body.filter_groups if group]
         if group_clauses:
@@ -737,6 +733,13 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     tipo = schema.get("tipo")
     if tipo:
         where = f"({where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
+    scope_where = where
+    effective_from = body.day_from
+    if body.day_from and body.day_to:
+        if body.day_from > body.day_to:
+            raise HTTPException(status_code=422, detail="Data inicial deve ser anterior ou igual à data final")
+        effective_from = max(body.day_from, body.day_to - timedelta(days=89))
+        where = f"({where}) AND CAST({day_expr} AS DATE) BETWEEN DATE '{effective_from.isoformat()}' AND DATE '{body.day_to.isoformat()}'"
     group_select = f", {_quote_ident(group_by_physical)} AS {_quote_ident(group_by_physical.lower())}" if group_by_physical else ""
     group_by_sql = "GROUP BY 1, 2" if group_by_physical else "GROUP BY 1"
     sql = (
@@ -749,6 +752,102 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
         result = await execute(sql, timeout_s=180)
     except Exception as exc:  # noqa: BLE001
         _raise_gold_query_error(body.table, exc)
+    forecast_rows: list[dict[str, Any]] = []
+    forecast_schema = await _gold_schema(body.table)
+    forecast_period_col = _gold_resolve(forecast_schema, "period") or _gold_resolve(forecast_schema, "_billing_period")
+    forecast_type_col = forecast_schema.get("tipo")
+    forecast_value_col = _gold_resolve(forecast_schema, "realizado") or _gold_resolve(forecast_schema, "realizado_cloud")
+    if forecast_period_col and forecast_type_col and forecast_value_col:
+        # Gold stores forecast as monthly facts. Reuse all dimensional filters,
+        # translating the realized cube's _billing_period predicate to the
+        # forecast fact's `period` column.
+        forecast_filters = [
+            GoldQueryFilter(column=forecast_period_col if item.column.lower() == "_billing_period" else item.column, operator=item.operator, values=item.values)
+            for item in body.filters
+        ]
+        forecast_where = _gold_filter_clause(forecast_schema, forecast_filters)
+        if body.filter_groups:
+            forecast_groups = []
+            for group in body.filter_groups:
+                mapped = [
+                    GoldQueryFilter(column=forecast_period_col if item.column.lower() == "_billing_period" else item.column, operator=item.operator, values=item.values)
+                    for item in group
+                ]
+                if mapped:
+                    forecast_groups.append(_gold_filter_clause(forecast_schema, mapped))
+            if forecast_groups:
+                forecast_where = f"({forecast_where}) AND ({' OR '.join(f'({clause})' for clause in forecast_groups)})"
+        forecast_sql = (
+            f"SELECT CAST({_quote_ident(forecast_period_col)} AS VARCHAR) AS period, "
+            f"SUM(COALESCE(TRY_CAST({_quote_ident(forecast_value_col)} AS DOUBLE), 0)) AS forecast_value "
+            f"FROM iceberg.{GOLD}.{body.table} WHERE ({forecast_where}) "
+            f"AND lower(CAST({_quote_ident(forecast_type_col)} AS VARCHAR)) = 'forecast' "
+            f"GROUP BY 1 ORDER BY 1"
+        )
+        profile_filters = [item for item in body.filters if item.column.lower() != "_billing_period"]
+        profile_where = _gold_filter_clause(schema, profile_filters)
+        if body.filter_groups:
+            profile_groups = [_gold_filter_clause(schema, [item for item in group if item.column.lower() != "_billing_period"]) for group in body.filter_groups]
+            profile_groups = [clause for clause in profile_groups if clause != "1=1"]
+            if profile_groups:
+                profile_where = f"({profile_where}) AND ({' OR '.join(f'({clause})' for clause in profile_groups)})"
+        if tipo:
+            profile_where = f"({profile_where}) AND ({_gold_filter_clause(schema, [GoldQueryFilter(column=tipo, operator='IS_REALIZED')])})"
+        profile_sql = (
+            f"SELECT day_of_week(CAST({day_expr} AS DATE)) AS weekday, "
+            f"SUM(GREATEST(COALESCE(TRY_CAST({_quote_ident(value_col)} AS DOUBLE), 0), 0)) AS weight "
+            f"FROM iceberg.silver.{silver_table} WHERE ({profile_where}) "
+            f"AND CAST({day_expr} AS DATE) BETWEEN date_add('day', -90, current_date) AND current_date "
+            f"AND {day_expr} IS NOT NULL GROUP BY 1"
+        )
+        try:
+            monthly_forecasts, weekday_profile = await asyncio.gather(
+                execute(forecast_sql, timeout_s=180),
+                execute(profile_sql, timeout_s=180),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _raise_gold_query_error(body.table, exc)
+        weights = {int(row.get("weekday")): max(0.0, float(row.get("weight") or 0)) for row in weekday_profile}
+        actual_by_month: dict[str, str] = {}
+        for row in result:
+            day = str(row.get("day") or "")[:10]
+            if len(day) == 10:
+                month = day[:7].replace("-", "")
+                actual_by_month[month] = max(actual_by_month.get(month, ""), day)
+        for monthly in monthly_forecasts:
+            raw_period = str(monthly.get("period") or "")
+            month_key = raw_period.replace("-", "")[:6]
+            if len(month_key) != 6 or not month_key.isdigit():
+                continue
+            year, month = int(month_key[:4]), int(month_key[4:6])
+            if not 1 <= month <= 12:
+                continue
+            month_start = date(year, month, 1)
+            month_end = date(year + (month == 12), 1 if month == 12 else month + 1, 1) - timedelta(days=1)
+            days = []
+            day = month_start
+            while day <= month_end:
+                if month_key == date.today().strftime("%Y%m"):
+                    last_actual = actual_by_month.get(month_key)
+                    if day.isoformat() <= (last_actual or date.today().isoformat()):
+                        day += timedelta(days=1); continue
+                days.append(day)
+                day += timedelta(days=1)
+            if not days:
+                continue
+            day_weights = [weights.get(day.isoweekday(), 0.0) for day in days]
+            weight_total = sum(day_weights)
+            if weight_total <= 0:
+                day_weights = [1.0] * len(days)
+                weight_total = float(len(days))
+            amount = float(monthly.get("forecast_value") or 0)
+            for forecast_day, weight in zip(days, day_weights):
+                if effective_from and forecast_day < effective_from:
+                    continue
+                if body.day_to and forecast_day > body.day_to:
+                    continue
+                forecast_rows.append({"day": forecast_day.isoformat(), "realizado": amount * weight / weight_total, "tipo": "forecast"})
+    result.extend(forecast_rows)
     return {"table": body.table, "source": f"silver.{silver_table}", "available": True, "day_column": date_col, "rows": result, "row_count": len(result)}
 
 
