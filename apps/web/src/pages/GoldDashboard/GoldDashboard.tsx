@@ -734,7 +734,7 @@ export default function GoldDashboard() {
                 inputRef={organizationSearchInput}
                 value={organizationSearch}
                 onChange={event => setOrganizationSearch(event.target.value)}
-                onKeyDown={event => event.stopPropagation()}
+                onKeyDown={event => { if (event.key.length === 1) event.stopPropagation(); }}
                 placeholder="Buscar no organograma"
               />
             </Box>
