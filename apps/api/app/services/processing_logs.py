@@ -48,6 +48,8 @@ async def _maintain_processing_log_cube_snapshots() -> bool:
         ),
     }
     statements = (
+        f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} SET PROPERTIES "
+        "delete_after_commit_enabled = true, max_previous_versions = 10",
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
         f"EXECUTE expire_snapshots(retention_threshold => '{retention}')",
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
