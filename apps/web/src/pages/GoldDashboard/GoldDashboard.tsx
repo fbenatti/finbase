@@ -803,7 +803,7 @@ export default function GoldDashboard() {
       </Tabs>
 
       {tab === "visao-executiva" && <>
-        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
+        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} groupByOptions={[...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])].filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()))} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
       <ExecutiveHighlights items={highlights} loading={highlightsLoading} error={highlightsError} />
       </>}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}

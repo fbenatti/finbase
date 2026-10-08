@@ -22,6 +22,7 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  OutlinedInput,
   Paper,
   Select,
   Stack,
@@ -38,6 +39,7 @@ import {
   ExpectedViewDriver,
   ExpectedViewRow,
   GoldQueryFilter,
+  queryDimonTable,
   queryGoldDailyConsumption,
 } from "../../services/api";
 import AccuracyWidget from "./BudgetAccuracyWidget";
@@ -73,6 +75,7 @@ export default function ExpectedView({
   measureColumn = "realizado",
   onMeasureColumnChange,
   onPeriodFilterChange,
+  groupByOptions = [],
   externalIncludeSharedCost,
   externalScope,
 }: {
@@ -85,8 +88,9 @@ export default function ExpectedView({
   measureColumn?: "realizado" | "realizado_cloud";
   onMeasureColumnChange?: (value: "realizado" | "realizado_cloud") => void;
   onPeriodFilterChange?: (value: string) => void;
+  groupByOptions?: string[];
   externalIncludeSharedCost?: boolean;
-  externalScope?: { monthFrom: string; monthTo: string; dateFrom?: string; dateTo?: string; dimensionFilters: Record<string, string[]>; filters?: GoldQueryFilter[] };
+  externalScope?: { monthFrom: string; monthTo: string; dateFrom?: string; dateTo?: string; dimensionFilters: Record<string, string[]>; filters?: GoldQueryFilter[]; filterGroups?: GoldQueryFilter[][] };
 } = {}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -124,8 +128,10 @@ export default function ExpectedView({
   });
   const cumulative = chartGranularity === "accumulated";
   const [dailyGold, setDailyGold] = useState<{ available: boolean; rows: Array<{ day: string; realizado: number }> } | null>(null);
+  const [groupedGold, setGroupedGold] = useState<{ rows: Record<string, unknown>[] } | null>(null);
   const [dailyLoading, setDailyLoading] = useState(false);
   const [dailyError, setDailyError] = useState("");
+  const [groupBy, setGroupBy] = useState("");
   const previousRangeMonths = useRef(0);
   const [includeSharedCost, setIncludeSharedCost] = useState(
     params.get("shared") === "1",
@@ -277,18 +283,18 @@ export default function ExpectedView({
     let active = true;
     setDailyLoading(true);
     setDailyError("");
-    queryGoldDailyConsumption({ table, filters: externalScope?.filters || [], day_from: externalScope?.dateFrom, day_to: externalScope?.dateTo, row_limit: 10000 })
+    queryGoldDailyConsumption({ table, filters: externalScope?.filters || [], day_from: externalScope?.dateFrom, day_to: externalScope?.dateTo, group_by: groupBy || null, row_limit: 10000 })
       .then((result) => {
         if (!active) return;
         setDailyGold({
           available: result.available,
-          rows: result.rows.sort((a, b) => a.day.localeCompare(b.day)).slice(-90),
+          rows: result.rows.sort((a, b) => a.day.localeCompare(b.day)),
         });
       })
       .catch((reason) => { if (active) setDailyError(formatApiError(reason, "Não foi possível carregar o consumo diário")); })
       .finally(() => { if (active) setDailyLoading(false); });
     return () => { active = false; };
-  }, [embedded, table, chartGranularity, externalScope]);
+  }, [embedded, table, chartGranularity, externalScope, groupBy]);
   const years = [...new Set(rows.map((row) => row.period.slice(0, 4)))].sort();
   const filteredRows =
     externalScope ? rows : periodFilter === "all"
@@ -613,14 +619,68 @@ export default function ExpectedView({
           marker: { size: 6 },
         },
       ];
-  const dailyChartData: any[] = [{
-    x: dailyGold?.rows.map((row) => row.day) || [],
-    y: dailyGold?.rows.map((row) => Number(row.realizado) || 0) || [],
-    type: "bar",
-    name: "Realizado diário",
-    marker: { color: "#F2A900" },
-  }];
-  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : chartData;
+  const dailyGroupRows = dailyGold?.rows || [];
+  const dailyLabels = [...new Set(dailyGroupRows.map((row) => String(row.day)))].sort();
+  const dailyGroupNames = groupBy
+    ? [...new Set(dailyGroupRows.map((row) => String((row as Record<string, unknown>)[groupBy] ?? "Não informado")))].sort((a, b) => a.localeCompare(b, "pt-BR"))
+    : [];
+  const dailyChartData: any[] = groupBy
+    ? dailyGroupNames.slice(0, 6).map((name, index) => ({
+        x: dailyLabels,
+        y: dailyLabels.map((day) => dailyGroupRows.filter((row) => String(row.day) === day && String((row as Record<string, unknown>)[groupBy] ?? "Não informado") === name).reduce((sum, row) => sum + (Number(row.realizado) || 0), 0)),
+        type: "bar",
+        name,
+        marker: { color: ["#F2A900", "#6416dc", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d"][index] },
+      }))
+    : [{
+        x: dailyGold?.rows.map((row) => row.day) || [],
+        y: dailyGold?.rows.map((row) => Number(row.realizado) || 0) || [],
+        type: "bar",
+        name: "Realizado diário",
+        marker: { color: "#F2A900" },
+      }];
+  const groupedRows = groupedGold?.rows || [];
+  const groupedValue = (row: Record<string, unknown>, field: string) => {
+    if (field in row) return row[field];
+    const key = Object.keys(row).find((candidate) => candidate.toLowerCase() === field.toLowerCase());
+    return key ? row[key] : undefined;
+  };
+  const groupedLabels = [...new Set(groupedRows.map((row) => String(groupedValue(row, "_billing_period") ?? "")))].sort();
+  const groupNames = groupBy ? [...new Set(groupedRows.map((row) => String(groupedValue(row, groupBy) ?? "Não informado")))].sort((a, b) => a.localeCompare(b, "pt-BR")) : [];
+  const groupedActualTraces = groupBy ? groupNames.slice(0, 6).map((name, index) => {
+    const monthlyValues = groupedLabels.map((period) => groupedRows.filter((row) => String(groupedValue(row, "_billing_period")) === period && String(groupedValue(row, groupBy) ?? "Não informado") === name).reduce((sum, row) => sum + Number(groupedValue(row, "realizado") || 0), 0));
+    return {
+      x: groupedLabels,
+      y: cumulative ? monthlyValues.map((_, monthIndex) => monthlyValues.slice(0, monthIndex + 1).reduce((sum, value) => sum + value, 0)) : monthlyValues,
+      type: cumulative ? "scatter" : "bar",
+      ...(cumulative ? { mode: "lines+markers", fill: "tozeroy" } : {}),
+      name,
+      marker: { color: ["#F2A900", "#6416dc", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d"][index] },
+    };
+  }) : [];
+  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : groupBy ? [...groupedActualTraces, ...chartData.filter((trace) => ["Forecast", "Forecast manual", "Orçamento", "Custo compartilhado"].includes(trace.name))] : chartData;
+  const [groupQueryLoading, setGroupQueryLoading] = useState(false);
+  useEffect(() => {
+    if (!embedded || !table || chartGranularity === "daily" || !groupBy) {
+      setGroupedGold(null);
+      setGroupQueryLoading(false);
+      return;
+    }
+    let active = true;
+    setGroupQueryLoading(true);
+    setGroupedGold(null);
+    queryDimonTable({
+      table,
+      rows: [groupBy, "_billing_period"],
+      measures: [{ column: "realizado", aggregation: "SUM" }],
+      filters: [...(externalScope?.filters || []), { column: "tipo", operator: "IS_REALIZED", values: [] }],
+      filter_groups: externalScope?.filterGroups || [],
+      row_limit: 10000,
+    }).then((result) => { if (active) setGroupedGold(result); })
+      .catch((reason) => { if (active) setDailyError(formatApiError(reason, "Não foi possível carregar o agrupamento do realizado")); })
+      .finally(() => { if (active) setGroupQueryLoading(false); });
+    return () => { active = false; };
+  }, [embedded, table, chartGranularity, groupBy, externalScope?.filters, externalScope?.filterGroups]);
   const chartLayout: any = {
     autosize: true,
     barmode: "stack",
@@ -1246,6 +1306,14 @@ export default function ExpectedView({
                       · clique para decompor o consumo
                     </Typography>
                   </Box>
+                  <Stack direction="row" gap={1}>
+                  {embedded && groupByOptions.length > 0 && <FormControl size="small" sx={{ minWidth: 170 }}>
+                    <InputLabel>Agrupar por</InputLabel>
+                    <Select value={groupBy} onChange={(event) => setGroupBy(event.target.value)} input={<OutlinedInput label="Agrupar por" />}>
+                      <MenuItem value="">Sem agrupamento</MenuItem>
+                      {groupByOptions.map((column) => <MenuItem key={column} value={column}>{column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase())}</MenuItem>)}
+                    </Select>
+                  </FormControl>}
                   <FormControl size="small" sx={{ minWidth: 170 }}>
                     <InputLabel>Granularidade</InputLabel>
                     <Select label="Granularidade" value={chartGranularity} onChange={(event) => setChartGranularity(event.target.value as ChartGranularity)}>
@@ -1254,14 +1322,17 @@ export default function ExpectedView({
                       <MenuItem value="daily" disabled={!dailyAvailable}>Diário</MenuItem>
                     </Select>
                   </FormControl>
+                  </Stack>
                 </Stack>
-                {dailyError && chartGranularity === "daily" && <Alert severity="error" sx={{ mt: 1 }}>{dailyError}</Alert>}
-                {chartGranularity === "daily" && dailyLoading
-                  ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Consultando consumo diário no Trino…</Typography></Stack>
+                {dailyError && (chartGranularity === "daily" || groupBy) && <Alert severity="error" sx={{ mt: 1 }}>{dailyError}</Alert>}
+                {(chartGranularity === "daily" && dailyLoading) || groupQueryLoading
+                  ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">{chartGranularity === "daily" ? "Consultando consumo diário no Trino…" : "Consultando agrupamento do realizado no Trino…"}</Typography></Stack>
                   : chartGranularity === "daily" && dailyGold?.available === false
                     ? <Alert severity="info" sx={{ mt: 1 }}>A fonte Silver não disponibiliza uma data real de consumo para este recorte.</Alert>
                     : chartGranularity === "daily" && !dailyGold?.rows.length
                       ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários disponíveis neste período.</Alert>
+                      : groupBy && chartGranularity !== "daily" && groupedGold && !groupedGold.rows.length
+                        ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados realizados para agrupar por esta coluna no período selecionado.</Alert>
                       : <Plot
                           useResizeHandler
                           style={{ width: "100%", height: 420, cursor: chartGranularity === "daily" ? "default" : "pointer" }}
