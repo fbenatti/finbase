@@ -1,13 +1,14 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Plot from "@/components/Plot";
 import { useSearchParams } from "react-router-dom";
 import {
-  Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,
-  InputLabel, LinearProgress, Link, List, ListItemButton, ListItemText, Menu, MenuItem,
+  Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,
+  InputLabel, LinearProgress, Link, MenuItem,
   Paper, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, TextField, Typography,
 } from "@mui/material";
-import { Add, ArrowBack, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
+import { Add, ArrowBack, Remove } from "@mui/icons-material";
+import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import DesviosTab from "./DesviosTab";
 import AcksRegisteredTab from "./AcksRegisteredTab";
 import {
@@ -34,12 +35,6 @@ const DIM_LABELS: Record<string, string> = {
   subaccountname: "SubAccountName",
 };
 
-const flattenDepartments = (nodes: Department[], parents: string[] = []): Array<Department & { path: string }> =>
-  nodes.flatMap(node => {
-    const path = [...parents, node.name];
-    return [{ ...node, path: path.join(" > ") }, ...flattenDepartments(node.children || [], path)];
-  });
-
 function KpiCard({ label, value, hint, color }: { label: string; value: string; hint?: string; color?: string }) {
   return (
     <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider", height: "100%" }}>
@@ -63,8 +58,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
   const [department, setDepartmentState] = useState(params.get("dept") ?? "");
   const departmentRef = useRef(department);
   const [organization, setOrganization] = useState<Department[]>([]);
-  const [organizationAnchor, setOrganizationAnchor] = useState<HTMLElement | null>(null);
-  const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dimsLoading, setDimsLoading] = useState(false);
@@ -134,8 +127,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       const cloud = flat.find(d => d.name === "Consumo Cloud" && d.parent_id === null);
       if (cloud && !department) {
         setDepartment(cloud.path);
-        const root = departments.find(d => d.id === cloud.id);
-        if (root) setExpandedNodes(new Set([root.id]));
       }
     }).catch(() => { /* hierarquia indisponível: fica "Todos" */ })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -268,16 +259,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
 
   const chooseDepartment = (path: string) => {
     setDepartment(path);
-    setOrganizationAnchor(null);
-  };
-
-  const toggleNode = (id: number) => {
-    setExpandedNodes(current => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   // Navega um nível abaixo: clicar num ofensor estende o caminho do departamento.
@@ -314,39 +295,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
     }
     const full = row.path && row.path.length ? row.path.join(" > ") : [deltaData.department, row.name].filter(Boolean).join(" > ");
     setDepartment(full);
-  };
-
-  const renderOrganizationNode = (node: Department, depth = 0): ReactElement => {
-    const children = (node.children || []).filter(child => child.active);
-    const expanded = expandedNodes.has(node.id);
-    return (
-      <Box key={node.id}>
-        <ListItemButton
-          onClick={() => chooseDepartment(buildPath(node))}
-          sx={{ pl: 1 + depth * 2, py: 0.375, mb: 0.25, borderRadius: 1 }}
-        >
-          <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
-            {children.length > 0 && (
-              <IconButton size="small" onClick={event => { event.stopPropagation(); toggleNode(node.id); }}>
-                {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
-              </IconButton>
-            )}
-          </Box>
-          <ListItemText
-            primary={node.name}
-            sx={{ my: 0 }}
-            primaryTypographyProps={{
-              variant: "body2",
-              fontWeight: children.length > 0 ? 700 : 400,
-              sx: { lineHeight: 1.35 },
-            }}
-          />
-        </ListItemButton>
-        <Collapse in={expanded} timeout="auto" unmountOnExit>
-          {children.map(child => renderOrganizationNode(child, depth + 1))}
-        </Collapse>
-      </Box>
-    );
   };
 
   const buildPath = (node: Department): string => {
@@ -419,26 +367,18 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
               O que foi projetado no início do mês × o que realmente foi realizado.
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap" }}>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={event => setOrganizationAnchor(event.currentTarget)}
-              sx={{ minWidth: 320, justifyContent: "flex-start", textTransform: "none" }}
-            >
-              {department || "Todos"}
-            </Button>
-            <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} onClose={() => setOrganizationAnchor(null)} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
-                Selecione um nível para consolidar todos os seus filhos
-              </Typography>
-              <List dense disablePadding>
-                <ListItemButton onClick={() => chooseDepartment("")} sx={{ pl: 1, py: 0.25 }}>
-                  <ListItemText primary="Todos" primaryTypographyProps={{ variant: "body2", fontWeight: 700 }} />
-                </ListItemButton>
-                {organization.filter(d => d.active).map(node => renderOrganizationNode(node))}
-              </List>
-            </Menu>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ alignItems: { md: "flex-end" }, flexWrap: "wrap", width: "100%" }}>
+            <Box sx={{ width: { xs: "100%", md: 360 }, mr: "auto" }}>
+              <DepartmentTreePicker
+                departments={organization.filter(node => node.active)}
+                value={flattenDepartments(organization).find(node => node.path === department)?.id ?? null}
+                onChange={id => chooseDepartment(id == null ? "" : flattenDepartments(organization).find(node => node.id === id)?.path || "")}
+                allowClear
+                clearLabel="Todos"
+                label="Organograma"
+                menuHint="Selecione um nível para consolidar todos os seus filhos."
+              />
+            </Box>
             <FormControl size="small" sx={{ minWidth: 160 }}>
               <InputLabel id="accuracy-month-label">Mês realizado</InputLabel>
               <Select
