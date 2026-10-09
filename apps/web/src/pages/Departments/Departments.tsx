@@ -958,9 +958,24 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                               alignItems: "center",
                             }}
                           >
-                            <Typography variant="body2" sx={{ flex: 1 }}>
-                              {target.path || target.name}
-                            </Typography>
+                            <Chip
+                              size="medium"
+                              label={target.path || target.name}
+                              onDelete={() => {
+                                setSharedTargets((current) => current.filter((item) => item.department_id !== target.department_id));
+                                setSharedPercentInputs((current) => { const next = { ...current }; delete next[target.department_id]; return next; });
+                              }}
+                              sx={{
+                                flex: "1 1 auto",
+                                minWidth: 0,
+                                maxWidth: "100%",
+                                justifyContent: "flex-start",
+                                bgcolor: "#ececee",
+                                color: "#252525",
+                                borderRadius: "18px",
+                                "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                              }}
+                            />
                             <TextField
                               size="small"
                               type="text"
@@ -979,16 +994,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                               }}
                               sx={{ width: 130 }}
                             />
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => {
-                                setSharedTargets((current) => current.filter((item) => item.department_id !== target.department_id));
-                                setSharedPercentInputs((current) => { const next = { ...current }; delete next[target.department_id]; return next; });
-                              }}
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
                           </Box>
                         ))}
                         <Typography variant="body2" color="text.secondary">
