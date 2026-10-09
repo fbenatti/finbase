@@ -255,12 +255,10 @@ import os
 import psutil
 
 root = os.environ['OPENFINOPS_PROJECT_ROOT']
-interpreter = os.path.realpath(root + '/.venv/bin/python')
 for proc in psutil.process_iter(['pid', 'cmdline', 'cwd']):
     try:
         args = proc.info['cmdline'] or []
-        if (proc.info['cwd'] == root + '/apps/api' and args[-1:] == ['worker.py']
-                and os.path.realpath(args[0]) == interpreter):
+        if (proc.info['cwd'] == root + '/apps/api' and args[-1:] == ['worker.py']):
             print(proc.pid)
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         continue
@@ -284,8 +282,7 @@ for proc in psutil.process_iter(['pid', 'ppid', 'cmdline', 'cwd']):
         command = ' '.join(info['cmdline'] or [])
         if (info['ppid'] == 1 and 'multiprocessing.spawn import spawn_main' in command
                 and (info['cwd'] or '') == root + '/apps/api'
-                and info['cmdline']
-                and os.path.realpath(info['cmdline'][0]) == os.path.realpath(root + '/.venv/bin/python')):
+                and info['cmdline']):
             print(info['pid'])
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         continue
