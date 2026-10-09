@@ -498,7 +498,9 @@ def _apply_source_validity_rules(
             age_days = max(0, (evaluated_at - last_observed).days)
             newest_age = age_days if newest_age is None else max(newest_age, age_days)
             if age_days > max_age_days:
-                output.at[idx, "forecast_value"] = 0.0
+                for value_column in ("forecast_value", "realizado", "realizado_cloud"):
+                    if value_column in output.columns:
+                        output.at[idx, value_column] = 0.0
                 suspended += 1
         if suspended:
             applied.append(
