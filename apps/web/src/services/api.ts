@@ -3943,7 +3943,7 @@ export interface PivotRequest {
 }
 export interface PivotMetadata {
   destination_table_id: number;
-  columns: { name: string; type: string; numeric: boolean }[];
+  columns: { name: string; type: string; numeric: boolean; enrichment?: "financial" | "organization" | null }[];
   dimensions: string[];
   measures: string[];
   recommended_dimensions: string[];
@@ -4040,7 +4040,12 @@ export interface PivotSourceDetail {
   source_unmatched?: Record<string, unknown>;
 }
 export async function getPivotSourceDetail(destination_table_id: number, row: Record<string, unknown>): Promise<PivotSourceDetail> {
-  return (await api.post("/analysis/pivot/source-detail", { destination_table_id, source_record_id: row.source_record_id ?? null })).data;
+  return (await api.post("/analysis/pivot/source-detail", {
+    destination_table_id,
+    source_record_id: row.source_record_id ?? null,
+    source_blob_path: row.source_blob_path ?? null,
+    source_row_offset: row.source_row_offset ?? null,
+  })).data;
 }
 export interface PivotRecordRequest {
   destination_table_id: number;

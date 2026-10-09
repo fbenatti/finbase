@@ -25,7 +25,7 @@ import pandas as pd
 from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, text, and_
+from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -320,6 +320,8 @@ class PivotDrillDownRequest(PivotRequest):
 class PivotSourceDetailRequest(BaseModel):
     destination_table_id: int
     source_record_id: str | None = None
+    source_blob_path: str | None = None
+    source_row_offset: int | None = None
 
 
 @router.post("/pivot/source-detail")
@@ -328,16 +330,21 @@ async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = 
     from app.models.destination import SourceDestinationMapping
 
     parts = (req.source_record_id or "").split(":")
-    has_record_pointer = len(parts) == 3 and all(part.isdigit() for part in parts)
+    has_record_pointer = len(parts) == 3 and parts[0].isdigit() and re.fullmatch(r"-?\d+", parts[1]) and parts[2].isdigit()
     if not has_record_pointer:
         return {"available": False, "reason": "Esta linha ainda não tem source_record_id. Reprocesse a origem para gerar a linhagem."}
     connection_id, blob_id, row_offset = map(int, parts)
     connection = await db.get(SourceConnection, connection_id)
-    blob = await db.get(IngestedBlob, blob_id)
-    if not connection or connection_id is None:
+    if not connection:
         return {"available": False, "reason": "A conexão de origem desta linha não existe mais."}
-    if not blob or blob.connection_id != connection_id:
+    blob = await db.get(IngestedBlob, blob_id) if blob_id > 0 else None
+    blob_path = blob.blob_path if blob else req.source_blob_path
+    if blob_id > 0 and (not blob or blob.connection_id != connection_id):
         return {"available": False, "reason": "O arquivo de origem deste registro não está mais disponível."}
+    if not blob_path:
+        return {"available": False, "reason": "O arquivo de origem desta linha não está identificado; reprocese a origem para atualizar a linhagem."}
+    if req.source_row_offset is not None and req.source_row_offset != row_offset:
+        return {"available": False, "reason": "A posição da linha de origem não corresponde ao identificador de linhagem."}
     mappings = (await db.execute(select(SourceDestinationMapping).where(
         SourceDestinationMapping.source_connection_id == connection_id,
         SourceDestinationMapping.destination_table_id == req.destination_table_id,
@@ -352,7 +359,8 @@ async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = 
     def read_origin_row() -> dict[str, Any] | None:
         from app.services import iceberg_service as iceberg
         batches = iceberg.read_bronze_batches(
-            bronze_code, blob_path=blob.blob_path, billing_period=blob.billing_period,
+            bronze_code, blob_path=blob_path,
+            billing_period=blob.billing_period if blob else None,
             max_rows=row_offset + 1, batch_size=min(25_000, row_offset + 1),
         )
         remaining = row_offset
@@ -381,7 +389,7 @@ async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = 
     return {
         "available": True,
         "connection_name": connection.name,
-        "blob_path": blob.blob_path if blob else origin_row.get("_blob_path"),
+        "blob_path": blob_path,
         "pairs": active_pairs,
         "source_unmatched": unmatched,
     }
@@ -1003,6 +1011,38 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
     """Return the live Gold/Iceberg schema, ordered by destination column metadata."""
     _, schema = await _pivot_table_context(db, destination_table_id)
     ordered = await _declared_column_order(db, destination_table_id, schema)
+    from app.models.rules import BusinessRule, ClassificationRule
+
+    financial_rules = (await db.execute(select(BusinessRule).where(
+        BusinessRule.active.is_(True),
+        or_(BusinessRule.destination_table_id == destination_table_id,
+            (BusinessRule.destination_table_id.is_(None) if destination_table_id == 1 else False)),
+    ))).scalars().all()
+    classification_rules = (await db.execute(select(ClassificationRule).where(
+        ClassificationRule.active.is_(True),
+        or_(ClassificationRule.destination_table_id == destination_table_id,
+            (ClassificationRule.destination_table_id.is_(None) if destination_table_id == 1 else False)),
+    ))).scalars().all()
+    financial_columns: set[str] = set()
+    for rule in financial_rules:
+        if rule.target_column:
+            financial_columns.add(str(rule.target_column).lower())
+        for condition in rule.conditions or []:
+            if isinstance(condition, dict) and condition.get("then_field"):
+                financial_columns.add(str(condition["then_field"]).lower())
+    if financial_rules:
+        financial_columns.add("business_rule")
+    org_columns = ({
+        "organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields",
+        *(f"organograma_nivel_{level}" for level in range(1, 8)),
+    } if classification_rules else set())
+    org_columns.update(
+        str(rule.target_field).lower()
+        for rule in classification_rules
+        if rule.target_field
+    )
+    if classification_rules:
+        org_columns.add("business_rule")
     numeric = [
         name for name in ordered
         if any(token in schema[name].lower() for token in ("int", "double", "real", "decimal", "float", "bigint"))
@@ -1015,7 +1055,16 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
     ]
     return {
         "destination_table_id": destination_table_id,
-        "columns": [{"name": name, "type": schema[name], "numeric": name in numeric_set} for name in ordered],
+        "columns": [{
+            "name": name,
+            "type": schema[name],
+            "numeric": name in numeric_set,
+            "enrichment": (
+                "financial" if name.lower() in financial_columns
+                else "organization" if name.lower() in org_columns
+                else None
+            ),
+        } for name in ordered],
         "dimensions": dimensions,
         "measures": numeric,
         "recommended_dimensions": dimensions[:8],

@@ -1279,6 +1279,7 @@ def _process_blob_for_reprocess(
                         records=chunk.to_dict(orient="records"),
                         connection_id=connection_id,
                         blob_id=blob_id,
+                        blob_path=meta.blob_path if meta is not None else blob_path or "",
                         row_offset=chunk_row_offset,
                         connection_code=connection_code,
                         billing_period=str(billing_period),
@@ -1323,6 +1324,10 @@ def _process_blob_for_reprocess(
                     connection_id=connection_id,
                     blob_id=blob_id,
                     row_offset=chunk_row_offset,
+                )
+                target["source_blob_path"] = meta.blob_path if meta is not None else blob_path or ""
+                target["source_row_offset"] = range(
+                    chunk_row_offset, chunk_row_offset + len(target),
                 )
                 # Gold facts are historical realized data. Keeping this explicit
                 # on every mapped batch prevents downstream Forecast from having
@@ -1778,6 +1783,8 @@ def _reprocess_destination_sync(
         # clone-enabled batch failed with ``Mismatch in fields``.
         internal_col_types = {
             "source_record_id": "TEXT",
+            "source_blob_path": "TEXT",
+            "source_row_offset": "BIGINT",
             "clone_source_record_id": "TEXT",
             "is_synthetic": "BOOLEAN",
             "clone_rule_id": "BIGINT",
@@ -1971,6 +1978,7 @@ def _reprocess_destination_sync(
             # Without the nullable integer dtype, pandas promotes batches
             # containing NULLs to float64 and Iceberg rejects long -> double.
             "financial_contract_id",
+            "source_row_offset",
         }
 
         def _prepare_for_stage(frame: pd.DataFrame) -> pd.DataFrame:

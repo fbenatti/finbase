@@ -104,6 +104,7 @@ def build_chunk_payload(
     records: list[dict[str, Any]],
     connection_id: int,
     blob_id: int = 0,
+    blob_path: str = "",
     row_offset: int = 0,
     connection_code: str,
     billing_period: str,
@@ -118,6 +119,7 @@ def build_chunk_payload(
         "records": records,
         "connection_id": connection_id,
         "blob_id": blob_id,
+        "blob_path": blob_path,
         "row_offset": row_offset,
         "connection_code": connection_code,
         "billing_period": str(billing_period),
@@ -160,6 +162,12 @@ def transform_reprocess_chunk(payload: dict[str, Any]) -> list[dict[str, Any]]:
         connection_id=payload["connection_id"],
         blob_id=payload["blob_id"],
         row_offset=payload["row_offset"],
+    )
+    # Preserve the exact Bronze slice and ordinal through Silver so source
+    # drill-through never depends on reconstructing a row from a later batch.
+    target["source_blob_path"] = payload["blob_path"]
+    target["source_row_offset"] = range(
+        payload["row_offset"], payload["row_offset"] + len(target),
     )
 
     if "TotalCostOnDemandBRL" in dest_col_names:

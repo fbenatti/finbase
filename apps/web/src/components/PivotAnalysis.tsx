@@ -467,6 +467,17 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         minWidth: 140,
         flex: 1,
         type: (byName.get(name)?.numeric ? "number" : "string") as GridColDef["type"],
+        cellClassName: byName.get(name)?.enrichment === "financial"
+          ? "pivot-enriched-financial"
+          : byName.get(name)?.enrichment === "organization" ? "pivot-enriched-organization" : undefined,
+        renderHeader: () => {
+          const enrichment = byName.get(name)?.enrichment;
+          const financial = enrichment === "financial";
+          return <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+            <Typography variant="caption" fontWeight={700} noWrap>{name}</Typography>
+            {enrichment && <Chip size="small" label={financial ? "Regra financeira" : "Organograma"} sx={{ height: 20, fontSize: 10, fontWeight: 700, bgcolor: financial ? "#fff1e6" : "#e8f3ff", color: financial ? "#b45309" : "#1d4ed8", "& .MuiChip-label": { px: 0.75 } }} />}
+          </Stack>;
+        },
       } as GridColDef)),
     ];
   }, [drill, meta]);
@@ -755,6 +766,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           pageSizeOptions={[50, 100]}
           paginationModel={drillPage}
           onPaginationModelChange={model => { void onDrillPageChange(model); }}
+          sx={{
+            "& .pivot-enriched-financial": { bgcolor: "#fff8f1", color: "#7c2d12" },
+            "& .pivot-enriched-financial:hover": { bgcolor: "#ffeddc" },
+            "& .pivot-enriched-organization": { bgcolor: "#f2f8ff", color: "#1e3a8a" },
+            "& .pivot-enriched-organization:hover": { bgcolor: "#e3f0ff" },
+          }}
         />
       </Box>
     </Drawer>
