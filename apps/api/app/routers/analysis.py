@@ -832,9 +832,11 @@ def _destination_id_for_origin(table_id: int, origin_value: str | None) -> int:
         return table_id
     label = origin_value.strip().lower()
     if label in {"forecast", "previsto", "planejado"}:
-        return -abs(table_id) if table_id else table_id
+        base_id = shared_cost_base_destination_id(table_id) if is_shared_cost_pivot_id(table_id) else abs(table_id)
+        return -base_id if base_id else table_id
     if label in {"custo compartilhado", "shared_cost"}:
-        return shared_cost_pivot_id(table_id) if table_id else table_id
+        base_id = shared_cost_base_destination_id(table_id) if is_shared_cost_pivot_id(table_id) else abs(table_id)
+        return shared_cost_pivot_id(base_id) if base_id else table_id
     if label in {"realizado", "actual", "gold"}:
         return abs(table_id)
     return table_id
