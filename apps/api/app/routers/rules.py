@@ -1121,7 +1121,7 @@ async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSess
         raise HTTPException(status_code=404, detail="Department not found")
     mode = (data.mode or "consumption").lower()
     allocation_type = (data.allocation_type or "shared_cost").strip().lower()
-    if allocation_type not in {"shared_cost", "consumption_rateio"}:
+    if allocation_type not in {"shared_cost", "rateio"}:
         raise HTTPException(status_code=422, detail="Tipo de alocação inválido")
     if mode not in SHARED_COST_MODES:
         raise HTTPException(status_code=422, detail="Modo de rateio inválido")

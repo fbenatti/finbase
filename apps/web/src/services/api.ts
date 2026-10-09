@@ -1821,7 +1821,7 @@ export async function deleteDepartment(id: number): Promise<void> {
 }
 
 export type SharedCostMode = "consumption" | "equal" | "custom";
-export type AllocationType = "shared_cost" | "consumption_rateio";
+export type AllocationType = "shared_cost" | "rateio";
 export interface SharedCostTarget {
   department_id: number;
   percent: number | null;

@@ -241,8 +241,8 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     setDeptDialog(true);
     try {
       const config = await getDepartmentSharedCost(d.id);
-      setSharedEnabled(config.enabled && config.allocation_type !== "consumption_rateio");
-      setRateioEnabled(config.enabled && config.allocation_type === "consumption_rateio");
+      setSharedEnabled(config.enabled && config.allocation_type !== "rateio");
+      setRateioEnabled(config.enabled && config.allocation_type === "rateio");
       setSharedMode(config.mode);
       setSharedTargets(config.targets || []);
       setSharedPercentInputs(Object.fromEntries((config.targets || []).map((target) => [target.department_id, target.percent == null ? "" : String(target.percent).replace(".", ",")])));
@@ -284,7 +284,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         : await createDepartment(body);
       await upsertDepartmentSharedCost(saved.id, {
         enabled: sharedEnabled || rateioEnabled,
-        allocation_type: (rateioEnabled ? "consumption_rateio" : "shared_cost") as AllocationType,
+        allocation_type: (rateioEnabled ? "rateio" : "shared_cost") as AllocationType,
         mode: sharedMode,
         targets:
           sharedMode === "consumption"
@@ -453,7 +453,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               )}
               {isShared && (
                 <Chip
-                  label={isConsumptionRateio ? "Rateio de consumo" : "Custo compartilhado"}
+                  label={isConsumptionRateio ? "Rateio" : "Custo compartilhado"}
                   size="small"
                   color={isConsumptionRateio ? "primary" : "warning"}
                   sx={{ ml: 1, height: 18, fontSize: "0.6rem" }}
@@ -920,7 +920,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                       disabled={!sharedLoaded}
                     />
                   }
-                  label="Rateio de consumo"
+                  label="Rateio"
                 />
                 {(sharedEnabled || rateioEnabled) && (
                   <>
