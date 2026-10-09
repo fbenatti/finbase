@@ -104,9 +104,20 @@ export default function ProcessingLogsTab() {
     finally { setLoading(false); }
   }, [pagination, processType, status, search]);
   useEffect(() => { void load(); }, [load]);
+  const hasActiveRows = rows.some(row => row.status === "QUEUED" || row.status === "RUNNING");
+  useEffect(() => {
+    if (!hasActiveRows) return;
+    const timer = window.setInterval(() => { void load(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveRows, load]);
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
-    getProcessingLog(selected.id).then(setDetail).catch(e => setError(e instanceof Error ? e.message : "Falha ao carregar detalhe"));
+    let cancelled = false;
+    const refresh = () => getProcessingLog(selected.id).then(value => { if (!cancelled) setDetail(value); }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : "Falha ao carregar detalhe"); });
+    void refresh();
+    const active = selected.status === "QUEUED" || selected.status === "RUNNING";
+    const timer = active ? window.setInterval(() => { void refresh(); }, 5000) : undefined;
+    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
   }, [selected]);
 
   const columns = useMemo<GridColDef<ProcessingLog>[]>(() => [
