@@ -722,7 +722,17 @@ async def run_shared_cost_job(
     rateio_rows = build_rateio_rows(resolved, actual_rows, forecast_rows)
     import pandas as pd
     rateio_df = pd.DataFrame(rateio_rows)
-    written = iceberg.merge_planning_rateio(planning_table, rateio_df, value_column="realizado")
+    replace_types = (
+        {SHARED_COST_TIPO if item == "rateio" else RATEIO_TIPO for item in allocation_types}
+        if allocation_types is not None
+        else {RATEIO_TIPO, SHARED_COST_TIPO}
+    )
+    written = iceberg.merge_planning_rateio(
+        planning_table,
+        rateio_df,
+        value_column="realizado",
+        replace_types=tuple(sorted(replace_types)),
+    )
     logger.info("Wrote %s rateio rows to gold.%s", written, planning_table)
     return {
         "snapshot": snapshot,
