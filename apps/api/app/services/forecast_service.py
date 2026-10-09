@@ -448,6 +448,70 @@ def _apply_forecast_business_rules(
     return applied_rules
 
 
+def _apply_source_validity_rules(
+    output: pd.DataFrame,
+    business_rules: list[Any],
+    series_context: dict[tuple[tuple[str, Any], ...], dict[str, Any]],
+    key_cols: list[str],
+    evaluated_at: date,
+) -> list[str]:
+    """Suppress scoped forecasts whose latest input is older than its rule allows."""
+    applied: list[str] = []
+    by_lower = {str(column).lower(): column for column in output.columns}
+    forecast_rows = output["tipo"].eq("forecast")
+    for rule in sorted(business_rules or [], key=lambda item: item.priority):
+        if not getattr(rule, "active", True) or getattr(rule, "behavior", "") != "SOURCE_VALIDITY":
+            continue
+        options = getattr(rule, "behavior_options", None) or {}
+        max_age_days = options.get("max_age_days")
+        if isinstance(max_age_days, bool) or not isinstance(max_age_days, int) or not 1 <= max_age_days <= 365:
+            raise ValueError(f"Regra '{rule.name}' tem max_age_days inválido")
+
+        mask = forecast_rows.copy()
+        identity, has_identity, missing = _rule_identity_mask(output, rule, by_lower)
+        if missing:
+            raise ValueError(f"Regra '{rule.name}' requer coluna fora das dimensões: {missing}")
+        if identity is not None:
+            mask &= identity
+        for column, value in (rule.scope or {}).items():
+            field = by_lower.get(str(column).lower())
+            if field is None:
+                raise ValueError(f"Regra '{rule.name}' usa escopo fora das dimensões: {column}")
+            mask &= output[field].astype(str).eq(str(value))
+            has_identity = True
+        if not has_identity:
+            raise ValueError(f"Regra '{rule.name}' de validade exige identificação ou escopo")
+        if rule.start_period:
+            mask &= output["forecast_month"] >= rule.start_period
+        if rule.end_period:
+            mask &= output["forecast_month"] <= rule.end_period
+        indexes = output.index[mask]
+        suspended = 0
+        newest_age: int | None = None
+        for idx in indexes:
+            row = output.loc[idx]
+            key = _series_key({col: row.get(col) for col in key_cols}, key_cols)
+            context = series_context.get(key)
+            last_observed = context.get("last_observed_date") if context else None
+            if not last_observed:
+                continue
+            age_days = max(0, (evaluated_at - last_observed).days)
+            newest_age = age_days if newest_age is None else max(newest_age, age_days)
+            if age_days > max_age_days:
+                output.at[idx, "forecast_value"] = 0.0
+                suspended += 1
+        if suspended:
+            applied.append(
+                f"{rule.name} (suspensas {suspended} linhas; validade {max_age_days} dias; "
+                f"idade avaliada {newest_age} dias em {evaluated_at.isoformat()})"
+            )
+        elif len(indexes):
+            applied.append(f"{rule.name} (válida; idade máxima {newest_age} dias)")
+        else:
+            applied.append(f"{rule.name} (sem séries correspondentes)")
+    return applied
+
+
 def _billing_period_end_expr(period_col: str) -> str:
     return f"last_day_of_month(date_parse(CAST({_q(period_col)} AS VARCHAR) || '01', '%Y%m%d'))"
 
@@ -1513,6 +1577,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         # Gold omits dimension tuples with no realized rows in a month.
         daily = _close_missing_months(daily, series_cutoff)
         series_context[_series_key(key_values, key_cols)] = _build_series_context(daily, series_cutoff)
+        series_context[_series_key(key_values, key_cols)]["last_observed_date"] = series_last_date
         enabled_windows = [int(w) for w in config.enabled_windows or [7, 14, 28]]
         # Séries de fatura mensal ("lump"): poucas cobranças no mês, valor alto.
         # Tratar como taxa diária (fatura / dias do mês) evita tanto o
@@ -1663,6 +1728,15 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             type_filter=type_filter,
             period_column=period,
         )
+    freshness_reference = simulated_as_of or date.today()
+    freshness_results = _apply_source_validity_rules(
+        output,
+        business_rules or [],
+        series_context,
+        key_cols,
+        freshness_reference,
+    )
+    applied_rules = list(dict.fromkeys([*applied_rules, *freshness_results]))
     # Component is an execution-only key. Planning/forecast tables retain the
     # configured dimensions and sum the base + special components naturally.
     output = output.drop(columns=[component_col], errors="ignore")
