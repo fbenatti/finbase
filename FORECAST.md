@@ -499,6 +499,14 @@ Meses futuros continuam usando a referência mensal e o crescimento configurado.
 Essas opções pertencem à regra, são versionadas e congeladas no snapshot do run;
 não dependem de nomes fixos de provedores, projetos ou tipos de compromisso.
 
+As regras são independentes em cada banco de DEV e PROD: atualizar o código não
+transfere `behavior_options` entre ambientes. Ao validar uma correção, confira
+na tela o campo **Mês corrente** e, no novo run, a versão/opções da regra no
+`config_snapshot.business_rules`. Reinicie o worker local ocioso após mudar seu
+código, pois seus processos persistentes não acompanham o reload da API/Vite.
+Em DEV, a regra 8 da configuração 9 também foi atualizada para a versão 2 com
+`ZERO_WHEN_REALIZED` em 09/10/2026; o forecast 388 usava a versão 1, sem a opção.
+
 Em 09/10/2026 foi reproduzida a regressão de SAPTDF: compras de Reservation de
 R$ 88.783,58 em outubro geravam mais R$ 329.767,60 de forecast (`MEAN_7D`).
 O commit `3acdce04` havia condicionado o fechamento do mês à classificação
