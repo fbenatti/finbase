@@ -484,6 +484,35 @@ Forecast usa a fila persistida de tarefas e o heartbeat do worker. A execução 
 
 ## Boas práticas
 
+### Cobranças recorrentes já realizadas no mês
+
+As regras `RECURRING_MONTHLY` e `RECURRING_UNTIL_END` têm a opção visível
+**Mês corrente**, persistida em `behavior_options.current_month_policy`:
+
+- `AUTO`: preserva a classificação automática de cobrança mensal versus uso diário.
+- `ZERO_WHEN_REALIZED`: qualquer total realizado diferente de zero encerra a
+  projeção adicional da série no mês corrente, mesmo sem mês anterior. Se a
+  cobrança ainda não entrou, projeta o total mensal de referência quando disponível.
+- `DAILY_REMAINDER`: mantém a projeção matemática dos dias restantes.
+
+Meses futuros continuam usando a referência mensal e o crescimento configurado.
+Essas opções pertencem à regra, são versionadas e congeladas no snapshot do run;
+não dependem de nomes fixos de provedores, projetos ou tipos de compromisso.
+
+Em 09/10/2026 foi reproduzida a regressão de SAPTDF: compras de Reservation de
+R$ 88.783,58 em outubro geravam mais R$ 329.767,60 de forecast (`MEAN_7D`).
+O commit `3acdce04` havia condicionado o fechamento do mês à classificação
+`lumpy`; `ab0609b4` passou a incluir todo o mês anterior no histórico. Como o
+classificador conta até três datas de cobrança em todo o histórico, as três
+datas de setembro mais duas de outubro perderam a classificação mensal.
+A opção explícita `ZERO_WHEN_REALIZED` restaura o fechamento independente dessa
+heurística. A regra de validade Azure-4P continua separada e configurável.
+
+Agendamentos de reprocessamento precisam marcar as tarefas de reclassificação
+como `scheduled_pipeline`. O worker espera as demais tarefas do mesmo agendamento
+antes de liberar o forecast; em seguida usa as opções de rateio, acurácia e Gold
+do agendamento. A execução manual isolada de forecast não materializa cubos Gold.
+
 - Use `AUTO_BACKTEST` quando houver histórico suficiente.
 - Use `WEIGHTED` quando quiser dar prioridade explícita ao consumo recente.
 - Use `MEAN_28` para uma projeção mais conservadora.
