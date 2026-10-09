@@ -1038,7 +1038,11 @@ async def _declared_column_order(
     from app.models.destination import DestinationColumn
 
     declared: list[str] = []
-    dest_id = abs(destination_table_id)
+    dest_id = (
+        shared_cost_base_destination_id(destination_table_id)
+        if is_shared_cost_pivot_id(destination_table_id)
+        else abs(destination_table_id)
+    )
     if dest_id:
         result = await db.execute(
             select(DestinationColumn.column_name)
@@ -1136,6 +1140,7 @@ async def _search_pivot_table_core(
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     filter_request = PivotRequest(destination_table_id=req.destination_table_id, filters=req.filters)
     _canonicalize_request(filter_request, schema)
+    filter_request.filters = _shared_cost_pivot_filters(req.destination_table_id, schema, filter_request.filters)
     invalid_filters = [item.column for item in filter_request.filters if item.column not in schema]
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
@@ -1752,6 +1757,7 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     else:
         canonical_columns = await _declared_column_order(db, req.destination_table_id, schema)
     filter_items = [item.model_copy(update={"column": by_lower.get(item.column.lower(), item.column)}) for item in req.filters]
+    filter_items = _shared_cost_pivot_filters(req.destination_table_id, schema, filter_items)
     invalid_filters = sorted({item.column for item in filter_items if item.column not in schema})
     if invalid_filters:
         raise HTTPException(status_code=422, detail=f"Colunas de filtro inválidas: {', '.join(invalid_filters)}")
@@ -1804,6 +1810,7 @@ async def _pivot_drill_down_core(req: PivotDrillDownRequest, db: AsyncSession, t
         [item.model_copy(update={"column": next((name for name in schema if name.lower() == item.column.lower()), item.column)}) for item in req.filters],
         schema,
     )
+    req.filters = _shared_cost_pivot_filters(table_id, schema, req.filters)
     cell_filters = _cell_filters_for_side(cell_filters, schema)
     period_in_cell = any(str(column).lower() in _PERIOD_NAMES_LOWER for column in cell_filters)
     auto_period: str | None = None
