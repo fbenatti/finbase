@@ -35,7 +35,21 @@ if [[ ! -s .env.production ]]; then
   echo "Criado .env.production com segredo JWT exclusivo da VM."
 fi
 
-docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build
+# Build while the current worker finishes its jobs. Recreating it during a
+# reclassification terminates consumers and forces unfinished work to restart.
+docker compose -f docker-compose.yml -f docker-compose.vm.yml build
+if [[ "${OPENFINOPS_DEPLOY_WAIT_IDLE:-true}" == "true" ]] && docker inspect openfinops-worker-1 >/dev/null 2>&1; then
+  while true; do
+    active_tasks="$(docker exec openfinops-postgres-1 psql -U finops -d finops -Atc \
+      "SELECT count(*) FROM etl_task WHERE status IN ('RUNNING','QUEUED')")"
+    if [[ "$active_tasks" == "0" ]]; then
+      break
+    fi
+    echo "Aguardando $active_tasks tarefa(s) da fila antes de atualizar o worker."
+    sleep 20
+  done
+fi
+docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --no-build
 
 if [[ -f infra/nginx/openfinops.conf ]]; then
   sudo install -o root -g root -m 0644 infra/nginx/openfinops.conf /etc/nginx/conf.d/openfinops.conf
