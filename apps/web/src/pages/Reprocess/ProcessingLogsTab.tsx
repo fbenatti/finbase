@@ -110,15 +110,17 @@ export default function ProcessingLogsTab() {
     const timer = window.setInterval(() => { void load(); }, 5000);
     return () => window.clearInterval(timer);
   }, [hasActiveRows, load]);
+  const selectedId = selected?.id;
+  const selectedStatus = selectedId != null && detail?.id === selectedId ? detail.status : selected?.status;
   useEffect(() => {
-    if (!selected) { setDetail(null); return; }
+    if (selectedId == null) { setDetail(null); return; }
     let cancelled = false;
-    const refresh = () => getProcessingLog(selected.id).then(value => { if (!cancelled) setDetail(value); }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : "Falha ao carregar detalhe"); });
+    const refresh = () => getProcessingLog(selectedId).then(value => { if (!cancelled) setDetail(value); }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : "Falha ao carregar detalhe"); });
     void refresh();
-    const active = selected.status === "QUEUED" || selected.status === "RUNNING";
+    const active = selectedStatus === "QUEUED" || selectedStatus === "RUNNING";
     const timer = active ? window.setInterval(() => { void refresh(); }, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [selected]);
+  }, [selectedId, selectedStatus]);
 
   const columns = useMemo<GridColDef<ProcessingLog>[]>(() => [
     { field: "process_type", headerName: "Tipo", minWidth: 190, flex: 1, valueGetter: (_, row) => PROCESS_LABELS[row.process_type] || row.process_type },
