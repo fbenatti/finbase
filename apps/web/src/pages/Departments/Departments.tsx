@@ -401,7 +401,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       (config) => config.department_id === dept.id && config.enabled,
     );
     const isShared = Boolean(allocationConfig);
-    const isConsumptionRateio = allocationConfig?.allocation_type === "rateio";
+    const isRateio = allocationConfig?.allocation_type === "rateio";
 
     return (
       <Box key={dept.id}>
@@ -415,13 +415,13 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             gap: 1,
             borderLeft: 4,
             borderColor: isShared
-              ? isConsumptionRateio ? "#1976D2" : "#ED6C02"
+              ? isRateio ? "#1976D2" : "#ED6C02"
               : depth === 0
                 ? "primary.main"
                 : depth === 1
                   ? "secondary.main"
                   : "grey.400",
-            bgcolor: isShared ? isConsumptionRateio ? "#EAF3FF" : "#FFF4E5" : "background.paper",
+            bgcolor: isShared ? isRateio ? "#EAF3FF" : "#FFF4E5" : "background.paper",
           }}
         >
           {dept.children.length > 0 ? (
@@ -434,14 +434,14 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
           {depth === 0 ? (
             <Business color="primary" />
           ) : (
-            <AccountTree color={isShared ? isConsumptionRateio ? "primary" : "warning" : "secondary"} />
+            <AccountTree color={isShared ? isRateio ? "primary" : "warning" : "secondary"} />
           )}
           <Box sx={{ flexGrow: 1 }}>
             <Typography
               variant="body2"
               fontWeight={600}
               component="div"
-              color={isShared ? isConsumptionRateio ? "primary.main" : "warning.dark" : "inherit"}
+              color={isShared ? isRateio ? "primary.main" : "warning.dark" : "inherit"}
             >
               {dept.name}
               {dept.parent_id && (
@@ -453,9 +453,9 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               )}
               {isShared && (
                 <Chip
-                  label={isConsumptionRateio ? "Rateio" : "Custo compartilhado"}
+                  label={isRateio ? "Rateio" : "Custo compartilhado"}
                   size="small"
-                  color={isConsumptionRateio ? "primary" : "warning"}
+                  color={isRateio ? "primary" : "warning"}
                   sx={{ ml: 1, height: 18, fontSize: "0.6rem" }}
                 />
               )}

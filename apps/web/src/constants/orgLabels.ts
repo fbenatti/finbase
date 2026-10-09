@@ -20,7 +20,7 @@ export const ORG = {
   emptyNone: "Nenhum nó cadastrado no organograma. Clique em 'Novo organograma' ou 'Importar CSV' para começar.",
   emptySearch: "Nenhum nó corresponde à busca.",
   saved: "Organograma salvo.",
-  savedWithShared: "Organograma e custo compartilhado salvos.",
+  savedWithShared: "Organograma e configuração de rateio salvos.",
   deleted: "Organograma excluído.",
   deleteConfirm: "Excluir organograma?",
   deleteAction: "Excluir organograma",
