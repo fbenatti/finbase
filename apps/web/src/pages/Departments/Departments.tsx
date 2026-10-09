@@ -15,7 +15,6 @@ import {
   FormControlLabel,
   FormLabel,
   IconButton,
-  InputAdornment,
   Menu,
   MenuItem,
   Paper,
@@ -58,6 +57,7 @@ import {
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, {
+  DepartmentTreeMultiPicker,
   flattenDepartments,
   descendantIds,
 } from "../../components/DepartmentTreePicker";
@@ -111,6 +111,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   const [sharedMode, setSharedMode] = useState<SharedCostMode>("consumption");
   const [sharedTargets, setSharedTargets] = useState<SharedCostTarget[]>([]);
   const [sharedPicker, setSharedPicker] = useState<number | null>(null);
+  const [sharedPercentInputs, setSharedPercentInputs] = useState<Record<number, string>>({});
   const [sharedLoaded, setSharedLoaded] = useState(true);
 
   // Confirmacoes Material
@@ -198,6 +199,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     setSharedEnabled(false);
     setSharedMode("consumption");
     setSharedTargets([]);
+    setSharedPercentInputs({});
     setSharedPicker(null);
     setSharedLoaded(true);
     setDeptDialogError("");
@@ -227,6 +229,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     setSharedEnabled(false);
     setSharedMode("consumption");
     setSharedTargets([]);
+    setSharedPercentInputs({});
     setSharedPicker(null);
     setSharedLoaded(false);
     setDeptDialogError("");
@@ -236,6 +239,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       setSharedEnabled(config.enabled);
       setSharedMode(config.mode);
       setSharedTargets(config.targets || []);
+      setSharedPercentInputs(Object.fromEntries((config.targets || []).map((target) => [target.department_id, target.percent == null ? "" : String(target.percent).replace(".", ",")])));
     } catch (e: unknown) {
       setDeptDialogError(
         formatApiError(e, "Não foi possível carregar o custo compartilhado"),
@@ -246,6 +250,17 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   };
 
   const saveDept = async () => {
+    if (sharedEnabled && sharedMode === "custom") {
+      if (!sharedTargets.length || sharedTargets.some((target) => target.percent == null || !Number.isFinite(target.percent))) {
+        setDeptDialogError("Informe um percentual para cada destino selecionado.");
+        return;
+      }
+      const totalPercent = sharedTargets.reduce((sum, target) => sum + Number(target.percent), 0);
+      if (totalPercent > 100 + 1e-9) {
+        setDeptDialogError("A soma dos percentuais não pode passar de 100%.");
+        return;
+      }
+    }
     const cf: Record<string, unknown> = {};
     for (const { key, value } of customFields) {
       if (key.trim()) cf[key.trim()] = value;
@@ -270,7 +285,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             : sharedTargets.map((target) => ({
                 department_id: target.department_id,
                 percent:
-                  sharedMode === "custom" ? Number(target.percent || 0) : null,
+                  sharedMode === "custom" ? target.percent : null,
               })),
       });
       setDeptDialog(false);
@@ -288,6 +303,25 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   const blockedParentIds = editingDept
     ? descendantIds(editingDept)
     : new Set<number>();
+
+  const addCustomDestinations = (departmentIds: number[]) => {
+    const flat = flattenDepartments(departments);
+    const existing = sharedTargets.map((target) => flat.find((item) => item.id === target.department_id)).filter(Boolean);
+    const additions = departmentIds.filter((id) => !sharedTargets.some((target) => target.department_id === id));
+    for (const id of additions) {
+      const candidate = flat.find((item) => item.id === id);
+      if (!candidate) continue;
+      const overlaps = [...existing, ...additions.filter((otherId) => otherId !== id).map((otherId) => flat.find((item) => item.id === otherId)).filter(Boolean)]
+        .some((item) => item && (candidate.path.startsWith(`${item.path} > `) || item.path.startsWith(`${candidate.path} > `)));
+      if (overlaps) {
+        setDeptDialogError("Não é possível selecionar um destino e outro nó acima ou abaixo dele na mesma hierarquia.");
+        continue;
+      }
+      const target = { department_id: candidate.id, percent: null, name: candidate.name, path: candidate.path };
+      setSharedTargets((current) => current.some((item) => item.department_id === candidate.id) ? current : [...current, target]);
+      setSharedPercentInputs((current) => ({ ...current, [candidate.id]: "" }));
+    }
+  };
 
   const removeDept = async () => {
     if (!deleteDeptPending) return;
@@ -898,39 +932,22 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                         da mesma cloud, na proporção do consumo. Quem não
                         consumiu não paga.
                       </Typography>
-                    ) : (
+                    ) : sharedMode === "custom" ? (
                       <>
-                        <DepartmentTreePicker
+                        <DepartmentTreeMultiPicker
                           departments={departments}
-                          value={sharedPicker}
-                          onChange={(departmentId) => {
-                            if (departmentId == null) return;
-                            if (
-                              sharedTargets.some(
-                                (target) =>
-                                  target.department_id === departmentId,
-                              )
-                            )
-                              return;
-                            const found = flattenDepartments(departments).find(
-                              (item) => item.id === departmentId,
-                            );
-                            if (!found) return;
-                            setSharedTargets([
-                              ...sharedTargets,
-                              {
-                                department_id: found.id,
-                                percent: null,
-                                name: found.name,
-                                path: found.path,
-                              },
-                            ]);
-                            setSharedPicker(null);
+                          values={sharedTargets.map((target) => target.department_id)}
+                          allowMixedLevels
+                          onChange={(ids) => {
+                            const selectedIds = new Set(ids);
+                            setSharedTargets((current) => current.filter((target) => selectedIds.has(target.department_id)));
+                            setSharedPercentInputs((current) => Object.fromEntries(Object.entries(current).filter(([id]) => selectedIds.has(Number(id)))));
+                            addCustomDestinations(ids);
                           }}
-                          label="Adicionar nó destino no organograma"
-                          placeholder="Selecione para incluir no rateio"
-                          blockedIds={blockedParentIds}
+                          label="Organograma · selecione níveis"
+                          placeholder="Navegue e marque destinos"
                         />
+                        <Typography variant="caption" color="text.secondary">Selecione destinos em qualquer nível. Selecione apenas um nó em cada ramo; o percentual será lançado nesse próprio nó.</Typography>
                         {sharedTargets.map((target, index) => (
                           <Box
                             key={target.department_id}
@@ -943,60 +960,66 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                             <Typography variant="body2" sx={{ flex: 1 }}>
                               {target.path || target.name}
                             </Typography>
-                            {sharedMode === "custom" && (
-                              <TextField
-                                size="small"
-                                type="number"
-                                label="%"
-                                value={target.percent ?? ""}
-                                onChange={(event) => {
-                                  const next = [...sharedTargets];
-                                  next[index] = {
-                                    ...target,
-                                    percent:
-                                      event.target.value === ""
-                                        ? null
-                                        : Number(event.target.value),
-                                  };
-                                  setSharedTargets(next);
-                                }}
-                                sx={{ width: 100 }}
-                              />
-                            )}
+                            <TextField
+                              size="small"
+                              type="text"
+                              inputProps={{ inputMode: "decimal", "aria-label": `Percentual para ${target.name || target.path}` }}
+                              label="Rateio %"
+                              value={sharedPercentInputs[target.department_id] ?? ""}
+                              onChange={(event) => {
+                                const input = event.target.value;
+                                if (input && !/^\d{0,3}(?:[.,]\d{0,2})?$/.test(input)) return;
+                                const normalized = input.replace(",", ".");
+                                const value = input === "" || /[.,]$/.test(input) ? null : Number(normalized);
+                                const otherTotal = sharedTargets.reduce((sum, item, itemIndex) => itemIndex === index ? sum : sum + Number(item.percent ?? 0), 0);
+                                if (value != null && (value < 0 || value > 100 - otherTotal + 1e-9)) return;
+                                setSharedPercentInputs((current) => ({ ...current, [target.department_id]: input }));
+                                setSharedTargets((current) => current.map((item) => item.department_id === target.department_id ? { ...item, percent: value } : item));
+                              }}
+                              sx={{ width: 130 }}
+                            />
                             <IconButton
                               size="small"
                               color="error"
-                              onClick={() =>
-                                setSharedTargets(
-                                  sharedTargets.filter(
-                                    (item) =>
-                                      item.department_id !==
-                                      target.department_id,
-                                  ),
-                                )
-                              }
+                              onClick={() => {
+                                setSharedTargets((current) => current.filter((item) => item.department_id !== target.department_id));
+                                setSharedPercentInputs((current) => { const next = { ...current }; delete next[target.department_id]; return next; });
+                              }}
                             >
                               <Delete fontSize="small" />
                             </IconButton>
                           </Box>
                         ))}
-                        {sharedMode === "custom" && (
-                          <Typography variant="caption" color="text.secondary">
-                            Soma:{" "}
-                            {sharedTargets.reduce(
-                              (sum, target) =>
-                                sum + Number(target.percent || 0),
-                              0,
-                            )}
-                            %. O restante permanece no doador.
-                          </Typography>
-                        )}
-                        {sharedMode === "equal" && (
+                        <Typography variant="body2" color="text.secondary">
+                          Soma: {sharedTargets.reduce((sum, target) => sum + Number(target.percent || 0), 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}% · Doador: {(100 - sharedTargets.reduce((sum, target) => sum + Number(target.percent || 0), 0)).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%
+                        </Typography>
+                      </>
+                    ) : (
+                      <>
+                        <DepartmentTreePicker
+                          departments={departments}
+                          value={sharedPicker}
+                          onChange={(departmentId) => {
+                            if (departmentId == null || sharedTargets.some((target) => target.department_id === departmentId)) return;
+                            const found = flattenDepartments(departments).find((item) => item.id === departmentId);
+                            if (!found) return;
+                            setSharedTargets((current) => [...current, { department_id: found.id, percent: null, name: found.name, path: found.path }]);
+                            setSharedPicker(null);
+                          }}
+                          label="Adicionar nó destino no organograma"
+                          placeholder="Selecione para incluir no rateio"
+                          blockedIds={blockedParentIds}
+                        />
+                        {sharedTargets.map((target) => (
+                          <Box key={target.department_id} sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                            <Typography variant="body2" sx={{ flex: 1 }}>{target.path || target.name}</Typography>
+                            <IconButton size="small" color="error" onClick={() => setSharedTargets((current) => current.filter((item) => item.department_id !== target.department_id))}><Delete fontSize="small" /></IconButton>
+                          </Box>
+                        ))}
                           <Typography variant="caption" color="text.secondary">
                             O valor é dividido igualmente entre os destinos
                             selecionados que tiverem consumo no período.
                           </Typography>
-                        )}
                       </>
                     )}
                   </>

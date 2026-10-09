@@ -144,10 +144,10 @@ def allocate_amount(
         for leaves, percent in custom_targets or []:
             bucket = donor * (float(percent or 0) / 100.0)
             residual -= bucket
-            part, rest = _split_by_weight(bucket, {leaf_id: weights.get(leaf_id, 0.0) for leaf_id in leaves})
-            for leaf_id, value in part.items():
-                shares[leaf_id] = shares.get(leaf_id, 0.0) + value
-            residual += rest
+            # Custom percentages belong to the selected organogram node
+            # itself; descendant consumption must not redistribute its share.
+            for department_id in leaves:
+                shares[department_id] = shares.get(department_id, 0.0) + bucket
         return shares, residual
     active = [leaf_id for leaf_id in unique_leaves if weights.get(leaf_id, 0.0) > 0]
     if not active:
@@ -265,13 +265,16 @@ def resolve_shared_costs(
                     continue
                 if node.id in donor_tree:
                     continue
+                if mode == "custom":
+                    target_leaves.append(node.id)
+                    leaf_paths[node.id] = department_path(node.id, departments)
+                    custom_targets.append(([node.id], float(target.percent or 0)))
+                    continue
                 leaves = [leaf_id for leaf_id in leaf_ids(node.id, child_ids) if leaf_id not in donor_tree]
                 active_leaves = [leaf_id for leaf_id in leaves if departments.get(leaf_id) and departments[leaf_id].active]
                 if not active_leaves:
                     continue
                 target_leaves.extend(active_leaves)
-                if mode == "custom":
-                    custom_targets.append((active_leaves, float(target.percent or 0)))
                 for leaf_id in active_leaves:
                     leaf_paths[leaf_id] = department_path(leaf_id, departments)
         unique_leaves = list(dict.fromkeys(target_leaves))

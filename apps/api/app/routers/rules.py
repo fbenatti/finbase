@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import logging
+import math
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -1134,13 +1135,22 @@ async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSess
             continue
         if target.department_id in donor_tree:
             raise HTTPException(status_code=422, detail="O destino não pode estar dentro do próprio custo compartilhado")
+        target_path = department_path(target.department_id, departments)
+        if mode == "custom" and any(
+            target_path[: len(existing_path)] == existing_path
+            or existing_path[: len(target_path)] == target_path
+            for existing_path in (department_path(existing_id, departments) for existing_id in seen)
+        ):
+            raise HTTPException(status_code=422, detail="Destinos personalizados não podem ter relação de pai e filho")
         seen.add(target.department_id)
         percent = target.percent
         if mode == "custom":
             if percent is None:
                 raise HTTPException(status_code=422, detail="Informe o percentual de cada destino")
-            if percent < 0 or percent > 100:
+            if not math.isfinite(percent) or percent < 0 or percent > 100:
                 raise HTTPException(status_code=422, detail="Percentual deve estar entre 0 e 100")
+            if abs(percent * 100 - round(percent * 100)) > 1e-7:
+                raise HTTPException(status_code=422, detail="Percentual deve ter no máximo duas casas decimais")
             percent_sum += percent
         else:
             percent = None
