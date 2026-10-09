@@ -147,6 +147,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
       value_column: initial.value_column || config.measure_column,
       reference_column: initial.reference_column || "",
       scopeText: formatScope(initial.scope || {}),
+      maxAgeDays: Number(initial.behavior_options?.max_age_days ?? 30),
     });
   }, [open, initial, config]);
 
@@ -168,6 +169,10 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
       setError("Informe a coluna de fim do período (ex.: ChargePeriodEnd).");
       return;
     }
+    if (rule.behavior === "SOURCE_VALIDITY" && (!Number.isInteger(Number(rule.maxAgeDays)) || Number(rule.maxAgeDays) < 1 || Number(rule.maxAgeDays) > 365)) {
+      setError("Informe a validade da fonte entre 1 e 365 dias.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -179,6 +184,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
           .filter(Boolean),
         value_column: rule.value_column || config.measure_column,
         scope: parseScope(rule.scopeText || ""),
+        behavior_options: rule.behavior === "SOURCE_VALIDITY" ? { max_age_days: Number(rule.maxAgeDays || 30) } : {},
       });
       if (initial) await updateForecastBusinessRule(initial.id, payload);
       else await createForecastBusinessRule(config.id, payload);
@@ -210,6 +216,11 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
             O campo será separado diretamente na Gold usando “começa com” e projetado pela média diária dos últimos 30 dias. Ele não precisa estar nas dimensões do forecast.
           </Alert>
         )}
+        {rule.behavior === "SOURCE_VALIDITY" && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Suspende as projeções do escopo quando a última data de realizado usada pelo forecast estiver além da validade. A simulação usa a própria data simulada.
+          </Alert>
+        )}
 
         <Stack spacing={2}>
           <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">
@@ -235,6 +246,19 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
               </FormControl>
             </FieldWithHelp>
           </Stack>
+
+          {rule.behavior === "SOURCE_VALIDITY" && (
+            <FieldWithHelp help="Idade máxima dos dados realizados para permitir a projeção deste escopo. Com 30 dias, suspende quando a idade passar de 30 dias.">
+              <TextField
+                type="number"
+                label="Validade da fonte (dias)"
+                inputProps={{ min: 1, max: 365, step: 1 }}
+                value={rule.maxAgeDays ?? 30}
+                onChange={(e) => setRule({ ...rule, maxAgeDays: Number(e.target.value) })}
+                sx={{ width: 240 }}
+              />
+            </FieldWithHelp>
+          )}
 
           {rule.clauseMode === "or" ? (
             <Stack spacing={1.5}>

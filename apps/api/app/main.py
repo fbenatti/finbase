@@ -271,6 +271,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE forecast_run ADD COLUMN IF NOT EXISTS classification_version_id INTEGER",
             "ALTER TABLE forecast_run ALTER COLUMN forecast_config_id DROP NOT NULL",
             "ALTER TABLE forecast_business_rule ADD COLUMN IF NOT EXISTS identification_clauses JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE forecast_business_rule ADD COLUMN IF NOT EXISTS behavior_options JSONB NOT NULL DEFAULT '{}'::jsonb",
             """CREATE TABLE IF NOT EXISTS department_shared_cost (
               id SERIAL PRIMARY KEY,
               department_id INTEGER NOT NULL UNIQUE REFERENCES department(id) ON DELETE CASCADE,

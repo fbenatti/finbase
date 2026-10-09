@@ -2418,6 +2418,7 @@ export interface ForecastBusinessRule {
   identification_clauses?: ForecastIdentificationClause[];
   charge_type: string;
   behavior: string;
+  behavior_options?: Record<string, unknown>;
   reference_column?: string | null;
   reference_values: string[];
   value_column?: string | null;

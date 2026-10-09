@@ -73,6 +73,7 @@ class BusinessRuleIn(BaseModel):
     identification_clauses: list[IdentificationClauseIn] = []
     charge_type: str = "Usage"
     behavior: str = "RECURRING_MONTHLY"
+    behavior_options: dict[str, Any] = {}
     reference_column: str | None = None
     reference_values: list[str] = []
     value_column: str | None = None
@@ -664,8 +665,12 @@ async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncS
             raise HTTPException(422, "CHARGE_INTERVAL exige identificação ou escopo (ex.: cloud_origem=ibm-ti)")
     elif not has_identity:
         raise HTTPException(422, "Informe identification_clauses, identification_values ou escopo")
-    allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL", "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX"}
+    allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL", "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_VALIDITY"}
     if body.behavior not in allowed: raise HTTPException(422, "Comportamento de forecast inválido")
+    if body.behavior == "SOURCE_VALIDITY":
+        days = body.behavior_options.get("max_age_days")
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+            raise HTTPException(422, "SOURCE_VALIDITY exige max_age_days inteiro entre 1 e 365")
     if len(body.start_period) != 6 or not body.start_period.isdigit(): raise HTTPException(422, "start_period deve estar em YYYYMM")
     if body.end_period and (len(body.end_period) != 6 or not body.end_period.isdigit()): raise HTTPException(422, "end_period deve estar em YYYYMM")
     return config

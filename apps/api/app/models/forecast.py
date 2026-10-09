@@ -57,6 +57,7 @@ class ForecastBusinessRule(Base):
     identification_clauses = Column(JSON, nullable=False, default=list)
     charge_type = Column(String(40), nullable=False, default="Usage")
     behavior = Column(String(40), nullable=False, default="RECURRING_MONTHLY")
+    behavior_options = Column(JSON, nullable=False, default=dict)
     reference_column = Column(String(200), nullable=True)
     reference_values = Column(JSON, nullable=False, default=list)
     value_column = Column(String(200), nullable=True)
