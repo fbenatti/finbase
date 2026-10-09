@@ -317,6 +317,72 @@ class PivotDrillDownRequest(PivotRequest):
     offset: int = 0
 
 
+class PivotSourceDetailRequest(BaseModel):
+    destination_table_id: int
+    source_record_id: str
+
+
+@router.post("/pivot/source-detail")
+async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Resolve a Gold row's stable provenance key to its original Bronze row."""
+    from app.models.destination import SourceDestinationMapping
+
+    parts = req.source_record_id.split(":")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return {"available": False, "reason": "Este registro não possui uma referência de origem recuperável."}
+    connection_id, blob_id, row_offset = map(int, parts)
+    connection = await db.get(SourceConnection, connection_id)
+    blob = await db.get(IngestedBlob, blob_id)
+    if not connection or not blob or blob.connection_id != connection_id:
+        return {"available": False, "reason": "O arquivo de origem deste registro não está mais disponível."}
+    mappings = (await db.execute(select(SourceDestinationMapping).where(
+        SourceDestinationMapping.source_connection_id == connection_id,
+        SourceDestinationMapping.destination_table_id == req.destination_table_id,
+        SourceDestinationMapping.active.is_(True),
+    ).order_by(SourceDestinationMapping.priority, SourceDestinationMapping.id))).scalars().all()
+    bronze_code = connection.code
+    source_key = (connection.config_json or {}).get("source_key")
+    if source_key == "resource_graph":
+        from app.services.azure_source_registry import source_code as azure_source_code
+        bronze_code = azure_source_code(connection.code, source_key)
+
+    def read_origin_row() -> dict[str, Any] | None:
+        from app.services import iceberg_service as iceberg
+        batches = iceberg.read_bronze_batches(
+            bronze_code, blob_path=blob.blob_path, billing_period=blob.billing_period,
+            max_rows=row_offset + 1, batch_size=min(25_000, row_offset + 1),
+        )
+        remaining = row_offset
+        for batch in batches:
+            if remaining < len(batch):
+                return json.loads(batch.iloc[remaining].to_json(date_format="iso"))
+            remaining -= len(batch)
+        return None
+
+    origin_row = await asyncio.to_thread(read_origin_row)
+    if origin_row is None:
+        return {"available": False, "reason": "Não foi possível localizar a linha original no Bronze."}
+    active_pairs = []
+    matched_source_fields: set[str] = set()
+    for mapping in mappings:
+        if mapping.source_column in origin_row:
+            matched_source_fields.add(mapping.source_column)
+            active_pairs.append({
+                "source_key": mapping.source_column,
+                "source_value": origin_row[mapping.source_column],
+                "destination_key": mapping.destination_column,
+            })
+    excluded = {"_billing_period", "_blob_path", "_ingested_at", "_source_file", "source_record_id"}
+    unmatched = {name: value for name, value in origin_row.items() if name not in matched_source_fields and name not in excluded and not name.startswith("_")}
+    return {
+        "available": True,
+        "connection_name": connection.name,
+        "blob_path": blob.blob_path,
+        "pairs": active_pairs,
+        "source_unmatched": unmatched,
+    }
+
+
 class PivotViewCreate(BaseModel):
     name: str
     destination_table_id: int

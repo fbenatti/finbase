@@ -5,12 +5,12 @@ import {
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, ContentCopy, Delete, Download, FiberManualRecord, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
+import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
   deletePivotView, drillDownPivot, getPivotMetadata, getPivotViews, runPivot, runPivotUnion, savePivotView,
-  LakehouseSearchResult, searchPivotTable, formatApiError, FORECAST_MANUAL_PIVOT_ID,
+  LakehouseSearchResult, searchPivotTable, formatApiError, FORECAST_MANUAL_PIVOT_ID, getPivotSourceDetail, PivotSourceDetail,
 } from "../services/api";
 
 interface Props {
@@ -133,6 +133,9 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [drillPage, setDrillPage] = useState({ page: 0, pageSize: 100 });
   const [drillLoading, setDrillLoading] = useState(false);
   const [selectedDrillRow, setSelectedDrillRow] = useState<Record<string, unknown> | null>(null);
+  const [sourceDetail, setSourceDetail] = useState<PivotSourceDetail | null>(null);
+  const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
+  const [showSourceRelation, setShowSourceRelation] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResult, setSearchResult] = useState<LakehouseSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -456,7 +459,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         align: "center",
         headerAlign: "center",
         renderHeader: () => <OpenInFull fontSize="small" color="action" />,
-        renderCell: params => <IconButton size="small" color="primary" aria-label="Abrir decomposição da linha" title="Abrir decomposição da linha" onClick={event => { event.stopPropagation(); setSelectedDrillRow(params.row); }}><OpenInFull fontSize="small" /></IconButton>,
+        renderCell: params => <IconButton size="small" color="primary" aria-label="Abrir decomposição da linha" title="Abrir decomposição da linha" onClick={event => { event.stopPropagation(); openSelectedRow(params.row); }}><OpenInFull fontSize="small" /></IconButton>,
       },
       ...names.map(name => ({
         field: name,
@@ -481,12 +484,33 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       const entries = Array.isArray(parsed)
         ? parsed.map((item, index) => [String(index), item] as [string, unknown])
         : Object.entries(parsed as Record<string, unknown>).sort(([left], [right]) => columnNameCompare.compare(left, right));
-      return <Box component="ul" sx={{ pl: 2.5, my: 0.5, borderLeft: "1px solid", borderColor: "divider", listStyle: "none" }}>{entries.map(([name, child]) => <Box component="li" key={name} sx={{ position: "relative", py: 0.25, "&:before": { content: '""', position: "absolute", width: 7, height: 7, borderRadius: "50%", bgcolor: "primary.light", left: -16, top: 11 } }}><Typography component="span" variant="body2" fontWeight={650} sx={{ fontFamily: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace' }}>{name}: </Typography>{renderDetailValue(child)}</Box>)}</Box>;
+      return <Stack spacing={0.75} sx={{ pl: 1.25, my: 0.5, borderLeft: "2px solid #c7d2fe" }}>{entries.map(([name, child]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: "minmax(120px, 30%) minmax(0, 1fr)", gap: 1, alignItems: "start", px: 1, py: 0.75, bgcolor: "#f8faff", borderRadius: 1.5 }}><Typography variant="caption" sx={{ color: "#4338ca", fontWeight: 700, fontFamily: '"SFMono-Regular", Consolas, monospace', overflowWrap: "anywhere" }}>{name}</Typography><Box sx={{ minWidth: 0 }}>{renderDetailValue(child)}</Box></Box>)}</Stack>;
     }
-    if (parsed == null) return <Chip size="small" variant="outlined" label="null" sx={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }} />;
-    if (typeof parsed === "boolean") return <Chip size="small" color={parsed ? "success" : "default"} variant="outlined" label={String(parsed)} sx={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }} />;
-    if (typeof parsed === "number") return <Chip size="small" color="primary" variant="outlined" label={String(parsed)} sx={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }} />;
-    return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace', fontSize: 13, lineHeight: 1.7 }}>{String(parsed)}</Typography>;
+    if (parsed == null) return <Typography component="span" sx={{ color: "#94a3b8", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>null</Typography>;
+    if (typeof parsed === "boolean") return <Typography component="span" sx={{ color: parsed ? "#15803d" : "#be123c", fontWeight: 650, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>{String(parsed)}</Typography>;
+    if (typeof parsed === "number") return <Typography component="span" sx={{ color: "#0369a1", fontWeight: 650, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>{String(parsed)}</Typography>;
+    return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#047857", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13, lineHeight: 1.65 }}>{String(parsed)}</Typography>;
+  };
+
+  const openSelectedRow = (row: Record<string, unknown>) => {
+    const cleanRow = { ...row };
+    delete cleanRow.id;
+    setSelectedDrillRow(cleanRow);
+    setSourceDetail(null);
+    setShowSourceRelation(false);
+  };
+  const loadSourceRelation = async () => {
+    const sourceId = selectedDrillRow?.source_record_id;
+    if (!sourceId) {
+      setSourceDetail({ available: false, reason: "Este registro não possui source_record_id para localizar a origem." });
+      setShowSourceRelation(true);
+      return;
+    }
+    setShowSourceRelation(true);
+    setSourceDetailLoading(true);
+    try { setSourceDetail(await getPivotSourceDetail(tableId, String(sourceId))); }
+    catch (error: unknown) { setSourceDetail({ available: false, reason: formatApiError(error, "Não foi possível carregar o registro de origem.") }); }
+    finally { setSourceDetailLoading(false); }
   };
 
   const rowKeys = result?.row_keys || [];
@@ -707,25 +731,46 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>Campos em ordem alfabética · valores estruturados aparecem em níveis</Typography>
           </Box>
           <Stack direction="row" spacing={1}>
+            <Button startIcon={<CompareArrows />} variant={showSourceRelation ? "contained" : "outlined"} onClick={() => showSourceRelation ? setShowSourceRelation(false) : void loadSourceRelation()}>Ver relação com a origem</Button>
             <Button startIcon={<ContentCopy />} onClick={() => { if (selectedDrillRow) void navigator.clipboard?.writeText(JSON.stringify(selectedDrillRow, null, 2)); }}>Copiar JSON</Button>
             <IconButton aria-label="Fechar decomposição" onClick={() => setSelectedDrillRow(null)}><Close /></IconButton>
           </Stack>
         </Stack>
       </DialogTitle>
       <DialogContent sx={{ bgcolor: "#f5f7fb", p: { xs: 1.5, md: 4 } }}>
-        {selectedDrillRow && <Paper elevation={0} sx={{ maxWidth: 1200, mx: "auto", mt: 1, overflow: "hidden", borderRadius: 3, border: "1px solid #e2e8f0", boxShadow: "0 12px 36px rgba(15, 23, 42, 0.06)" }}>
-          <Stack direction="row" sx={{ px: 3, py: 1.75, bgcolor: "#f8fafc", borderBottom: 1, borderColor: "divider" }}>
-            <Typography variant="overline" sx={{ width: { xs: "38%", md: "30%" }, color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>CAMPO</Typography>
-            <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>VALOR</Typography>
-          </Stack>
-          {selectedRowEntries.map(([name, value], index) => <Stack key={name} direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.5, sm: 2 }} sx={{ px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
-            <Stack direction="row" alignItems="flex-start" spacing={1} sx={{ width: { xs: "100%", sm: "30%" }, minWidth: 0 }}>
-              <FiberManualRecord sx={{ fontSize: 9, color: "primary.main", mt: "6px", flexShrink: 0 }} />
-              <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif' }}>{name}</Typography>
+        {selectedDrillRow && <Stack spacing={2} sx={{ maxWidth: 1200, mx: "auto", mt: 1 }}>
+          {showSourceRelation && <Paper elevation={0} sx={{ borderRadius: 3, border: "1px solid #dbeafe", boxShadow: "0 10px 28px rgba(15,23,42,.045)", overflow: "hidden" }}>
+            <Stack direction="row" alignItems="center" spacing={1.5} sx={{ px: 3, py: 2, bgcolor: "#eff6ff", borderBottom: 1, borderColor: "#dbeafe" }}>
+              <CompareArrows color="primary" />
+              <Box><Typography variant="subtitle1" fontWeight={750} color="#1e3a8a">Relação com o registro de origem</Typography><Typography variant="caption" color="text.secondary">{sourceDetail?.connection_name || (sourceDetailLoading ? "Localizando conexão e arquivo..." : "Origem Bronze → linha Gold")}</Typography></Box>
             </Stack>
-            <Box sx={{ flex: 1, minWidth: 0 }}>{renderDetailValue(value)}</Box>
-          </Stack>)}
-        </Paper>}
+            {sourceDetailLoading && <Box sx={{ p: 3, display: "flex", alignItems: "center", gap: 1 }}><CircularProgress size={18} /><Typography variant="body2">Carregando linha original...</Typography></Box>}
+            {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ m: 2 }}>{sourceDetail.reason}</Alert>}
+            {!sourceDetailLoading && sourceDetail?.available && <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2.5 } }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 48px 1fr" }, gap: 1.5, alignItems: "start" }}>
+                <Box><Typography variant="overline" color="#0369a1" fontWeight={800}>ORIGEM · {sourceDetail.connection_name}</Typography><Typography variant="caption" display="block" color="text.secondary" noWrap title={sourceDetail.blob_path}>{sourceDetail.blob_path}</Typography></Box>
+                <Box sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", pt: 1 }}><CompareArrows color="action" /></Box>
+                <Box><Typography variant="overline" color="#6d28d9" fontWeight={800}>DESTINO · GOLD</Typography><Typography variant="caption" display="block" color="text.secondary">Campos ligados pelo mapeamento ativo</Typography></Box>
+              </Box>
+              {(sourceDetail.pairs || []).length > 0 ? <Stack spacing={0.75}>{sourceDetail.pairs?.map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", md: "minmax(0,1fr) 48px minmax(0,1fr)" }, gap: 1, alignItems: "stretch" }}>
+                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block">{pair.source_key}</Typography><Box>{renderDetailValue(sourceDetail.pairs?.[index].source_value)}</Box></Paper>
+                <Box sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#94a3b8" }}>→</Box>
+                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block">{pair.destination_key}</Typography><Box>{renderDetailValue(selectedDrillRow[pair.destination_key])}</Box></Paper>
+              </Box>)}</Stack> : <Alert severity="warning">Não há mapeamentos ativos para relacionar as colunas desta origem com o destino.</Alert>}
+              {Object.keys(sourceDetail.source_unmatched || {}).length > 0 && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: "#fde68a", bgcolor: "#fffbeb" }}><Typography variant="subtitle2" fontWeight={750} color="#92400e" mb={1}>Campos da origem sem correspondência no destino ({Object.keys(sourceDetail.source_unmatched || {}).length})</Typography><Stack spacing={0.75}>{Object.entries(sourceDetail.source_unmatched || {}).sort(([a], [b]) => columnNameCompare.compare(a, b)).map(([name, value]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: "minmax(140px, 30%) minmax(0,1fr)", gap: 1, alignItems: "start", p: 1, borderRadius: 1.5, bgcolor: "rgba(255,255,255,.8)" }}><Typography variant="caption" fontWeight={750} color="#a16207" sx={{ overflowWrap: "anywhere" }}>{name}</Typography><Box sx={{ minWidth: 0 }}>{renderDetailValue(value)}</Box></Box>)}</Stack></Paper>}
+            </Stack>}
+          </Paper>}
+          <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3, border: "1px solid #e2e8f0", boxShadow: "0 12px 36px rgba(15, 23, 42, 0.06)" }}>
+            <Stack direction="row" sx={{ px: 3, py: 1.75, bgcolor: "#f8fafc", borderBottom: 1, borderColor: "divider" }}>
+              <Typography variant="overline" sx={{ width: { xs: "38%", md: "30%" }, color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>CAMPO</Typography>
+              <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>VALOR</Typography>
+            </Stack>
+            {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
+              <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"Segoe UI", sans-serif', lineHeight: 1.7 }}>{name}</Typography>
+              <Box sx={{ minWidth: 0 }}>{renderDetailValue(value)}</Box>
+            </Box>)}
+          </Paper>
+        </Stack>}
       </DialogContent>
     </Dialog>
     <Dialog open={savedViewsOpen} onClose={() => setSavedViewsOpen(false)} fullWidth maxWidth="sm">
