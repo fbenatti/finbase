@@ -3874,6 +3874,7 @@ export interface DestinationAnalysis {
   periods: { period: string; count: number }[];
   analysis_only?: boolean;
   analysis_kind?: "forecast" | "shared_cost";
+  base_destination_id?: number;
 }
 
 export interface DestinationDataResult {

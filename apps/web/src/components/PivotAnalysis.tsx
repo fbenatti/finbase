@@ -605,7 +605,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     }
     return columns;
   }, [meta, sourceIds]);
-  const selectedSourceOptions = destinations.filter(d => d.id === tableId || (!destinations.some(item => item.id === tableId && item.analysis_kind === "shared_cost") && d.id === -Math.abs(tableId)));
+  const selectedDestination = destinations.find(item => item.id === tableId);
+  const selectedBaseId = selectedDestination?.base_destination_id || Math.abs(tableId);
+  const selectedSourceOptions = destinations.filter(d =>
+    d.id === selectedBaseId ||
+    ((d.analysis_kind === "forecast" || d.analysis_kind === "shared_cost") && d.base_destination_id === selectedBaseId)
+  );
 
   return <Box>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -624,7 +629,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             }
             return next;
           })} />)}
-          {sourceIds.length > 1 && <Typography variant="caption" color="text.secondary">Para separar realizado e forecast, adicione o campo <code>origem</code> em Linhas.</Typography>}
+          {sourceIds.length > 1 && <Typography variant="caption" color="text.secondary">Para separar as fontes, adicione o campo <code>origem</code> em Linhas.</Typography>}
           </Box>
         </Stack>
         <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">

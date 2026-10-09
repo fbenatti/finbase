@@ -3244,6 +3244,7 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
                     "periods": planning_period_list,
                     "analysis_only": True,
                     "analysis_kind": "forecast",
+                    "base_destination_id": int(tid),
                 })
         except Exception:
             pass
@@ -3276,6 +3277,7 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
                         "periods": [{"period": str(p["period"]), "count": p["cnt"]} for p in (shared_period_rows or [])],
                         "analysis_only": True,
                         "analysis_kind": "shared_cost",
+                        "base_destination_id": int(tid),
                     })
         except Exception:
             pass
