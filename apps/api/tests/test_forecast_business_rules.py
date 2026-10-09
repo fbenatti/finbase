@@ -50,11 +50,11 @@ def test_last_closed_month_uses_last_nonzero_closed_month():
     assert ctx["last_closed_month_total"] == 8_561_121.0
 
 
-def test_partial_current_month_can_seed_initial_lumpy_baseline():
-    index = pd.to_datetime(["2026-08-01"])
-    daily = pd.Series([100.0], index=index)
+def test_last_closed_month_is_zero_when_no_prior_nonzero_month():
+    index = pd.date_range("2026-08-01", periods=10, freq="D")
+    daily = pd.Series([100.0] * len(index), index=index)
     ctx = _build_series_context(daily, date(2026, 8, 18))
-    assert ctx["last_closed_month_total"] == 100.0
+    assert ctx["last_closed_month_total"] == 0.0
 
 
 def test_closed_month_without_series_rows_is_materialized_as_zero():
@@ -65,7 +65,7 @@ def test_closed_month_without_series_rows_is_materialized_as_zero():
     ctx = _build_series_context(closed, date(2026, 8, 31))
 
     assert float(closed[closed.index.month == 8].sum()) == 0.0
-    assert ctx["monthly_realized"]["202608"] == 0.0
+    assert ctx["last_closed_month_total"] == 0.0
 
 
 def test_open_month_without_rows_is_not_closed_before_cutoff():
@@ -75,50 +75,38 @@ def test_open_month_without_rows_is_not_closed_before_cutoff():
     closed = _close_missing_months(daily, date(2026, 8, 18))
     ctx = _build_series_context(closed, date(2026, 8, 18))
 
-    assert ctx["previous_month_realized"] == 3100.0
+    assert ctx["last_closed_month_total"] == 3100.0
 
 
-def test_recurring_monthly_stops_after_closed_zero_month():
-    index = pd.date_range("2026-07-01", "2026-08-31", freq="D")
-    daily = pd.Series([100.0 if day.month == 7 else 0.0 for day in index], index=index)
-    ctx = _build_series_context(daily, date(2026, 8, 31))
+def test_recurring_monthly_uses_last_nonzero_closed_month():
+    index = pd.date_range("2026-07-01", periods=31, freq="D")
+    daily = pd.Series([100.0] * len(index), index=index)
+    ctx = _build_series_context(daily, date(2026, 7, 31))
+    assert ctx["last_closed_month_total"] == 3100.0
     key_cols = ["cloud_origem", "servicename"]
     key_values = {"cloud_origem": "oci-prod", "servicename": "COMPUTE"}
-    output = pd.DataFrame([
-        {**key_values, "forecast_month": "202609", "tipo": "forecast", "forecast_value": 999.0},
-        {**key_values, "forecast_month": "202610", "tipo": "forecast", "forecast_value": 999.0},
-    ])
+    output = pd.DataFrame(
+        [
+            {**key_values, "forecast_month": "202608", "tipo": "forecast", "forecast_value": 999.0},
+            {**key_values, "forecast_month": "202609", "tipo": "forecast", "forecast_value": 999.0},
+        ]
+    )
     rule = _rule(
-        identification_column="servicename", identification_values=["COMPUTE"],
-        scope={"cloud_origem": "oci-prod"}, behavior="RECURRING_MONTHLY",
+        identification_column="servicename",
+        identification_values=["COMPUTE"],
+        scope={"cloud_origem": "oci-prod"},
+        behavior="RECURRING_MONTHLY",
     )
     applied = _apply_forecast_business_rules(
-        output, [rule], {_series_key(key_values, key_cols): ctx}, key_cols, date(2026, 9, 5),
+        output,
+        [rule],
+        {_series_key(key_values, key_cols): ctx},
+        key_cols,
+        date(2026, 8, 18),
     )
     assert rule.name in applied
-    assert output["forecast_value"].tolist() == [0.0, 0.0]
-
-
-def test_recurring_monthly_zeroes_month_after_empty_cutoff_month():
-    daily = pd.Series([100.0] * 31, index=pd.date_range("2026-07-01", periods=31, freq="D"))
-    daily = daily.reindex(pd.date_range("2026-07-01", "2026-08-31", freq="D"), fill_value=0.0)
-    daily = _close_missing_months(daily, date(2026, 8, 31))
-    ctx = _build_series_context(daily, date(2026, 8, 31))
-    key_cols = ["cloud_origem", "servicename"]
-    key_values = {"cloud_origem": "azure-4p", "servicename": "Microsoft.CognitiveServices"}
-    output = pd.DataFrame([
-        {**key_values, "forecast_month": "202609", "tipo": "forecast", "forecast_value": 999.0},
-    ])
-    rule = _rule(
-        identification_column="servicename", identification_values=["Microsoft.CognitiveServices"],
-        scope={"cloud_origem": "azure-4p"}, behavior="RECURRING_MONTHLY",
-    )
-
-    _apply_forecast_business_rules(
-        output, [rule], {_series_key(key_values, key_cols): ctx}, key_cols, date(2026, 9, 5),
-    )
-
-    assert output["forecast_value"].tolist() == [0.0]
+    assert output.loc[output["forecast_month"] == "202608", "forecast_value"].iloc[0] == 3100.0
+    assert output.loc[output["forecast_month"] == "202609", "forecast_value"].iloc[0] == 3100.0
 
 
 def test_recurring_forecast_loads_the_entire_previous_month_anchor():

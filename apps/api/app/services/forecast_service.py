@@ -222,29 +222,26 @@ def _build_series_context(daily: pd.Series, effective_cutoff: date) -> dict[str,
         if total != 0.0:
             last_closed_month_total = total
             break
-        cursor -= 1
+        cursor = cursor - 1
     current_month_realized = float(monthly.get(current_period, 0.0))
-    last_day = calendar.monthrange(effective_cutoff.year, effective_cutoff.month)[1]
-    current_month_fully_collected = effective_cutoff.day >= last_day
-    found_prior = False
-    cursor = previous_period
-    while cursor >= min_period:
-        if float(monthly.get(cursor, 0.0)) != 0.0:
-            found_prior = True
-            break
-        cursor -= 1
-    if last_closed_month_total == 0.0 and not found_prior and len(monthly) > 0:
-        month_daily = daily[daily.index.to_period("M") == current_period]
-        nonzero_days = int((month_daily != 0).sum())
-        month_fully_collected = current_month_fully_collected or nonzero_days <= 3
-        if current_month_realized != 0.0 and month_fully_collected:
-            # Keep the existing initial-baseline behavior for series with no
-            # prior month at all; an intervening zero month still closes them.
-            last_closed_month_total = current_month_realized
+    if last_closed_month_total == 0.0 and len(monthly) > 0:
+        found_prior = False
+        cursor = previous_period
+        while cursor >= min_period:
+            if float(monthly.get(cursor, 0.0)) != 0.0:
+                found_prior = True
+                break
+            cursor = cursor - 1
+        if not found_prior:
+            month_daily = daily[daily.index.to_period("M") == current_period]
+            nonzero_days = int((month_daily != 0).sum())
+            anchor_total = float(monthly.get(current_period, 0.0))
+            last_day = calendar.monthrange(effective_cutoff.year, effective_cutoff.month)[1]
+            month_fully_collected = effective_cutoff.day >= last_day or nonzero_days <= 3
+            if anchor_total != 0.0 and month_fully_collected:
+                last_closed_month_total = anchor_total
     return {
         "monthly_realized": monthly_realized,
-        "realized_month_totals": monthly_realized,
-        "previous_month_realized": float(monthly.get(previous_period, 0.0)),
         "last_closed_month_total": last_closed_month_total,
         "current_month_realized": current_month_realized,
         "current_key": current_key,
@@ -299,9 +296,9 @@ def _replicated_month_value(
     growth_rate: float,
     lumpy: bool = False,
 ) -> float | None:
-    offset = _month_offset(current_month_key, forecast_month)
     if last_closed_month_total <= 0:
-        return 0.0 if behavior in {"RECURRING_MONTHLY", "RECURRING_UNTIL_END"} and offset > 0 else None
+        return None
+    offset = _month_offset(current_month_key, forecast_month)
     if behavior == "REPEAT_NEXT_MONTH":
         if offset != 1:
             return None
@@ -432,16 +429,9 @@ def _apply_forecast_business_rules(
                 ctx = series_context.get(key)
                 if not ctx:
                     continue
-                target_month = str(row["forecast_month"])
-                target_offset = _month_offset(str(ctx["current_key"]), target_month)
-                if target_offset > 0:
-                    prior_period = (pd.Period(target_month, freq="M") - 1).strftime("%Y%m")
-                    if float(ctx["realized_month_totals"].get(prior_period, 0.0)) == 0.0:
-                        output.at[idx, "forecast_value"] = 0.0
-                        continue
                 replicated = _replicated_month_value(
                     behavior=behavior,
-                    forecast_month=target_month,
+                    forecast_month=str(row["forecast_month"]),
                     current_month_key=str(ctx["current_key"]),
                     last_closed_month_total=float(ctx["last_closed_month_total"]),
                     current_month_realized=float(ctx["current_month_realized"]),
