@@ -302,10 +302,10 @@ export function DepartmentTreeMultiPicker({
   return <Box>
     <Typography variant="caption" color="text.secondary">{label}</Typography>
     <Button variant="outlined" fullWidth onClick={(event) => { setExpanded(expandedBySelection()); setAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, justifyContent: "flex-start", textTransform: "none", textAlign: "left", borderRadius: "12px", color: "#111b4e", borderColor: "#dce2ee" }}>{display}</Button>
-    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => { setAnchor(null); setSearch(""); }} disablePortal PaperProps={{ sx: { width: 460, maxHeight: 560, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => { setAnchor(null); setSearch(""); }} PaperProps={{ sx: { width: "min(460px, calc(100vw - 32px))", maxHeight: "calc(100dvh - 32px)", borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>{allowMixedLevels ? "Navegue pela hierarquia e marque destinos em qualquer nível. O rateio fica no próprio nó selecionado." : "Navegue pela hierarquia e marque um ou mais níveis. Marcar um nível pai inclui seus descendentes."}</Typography>
       <Box sx={{ px: 1.5, pt: 1 }}><TextField autoFocus fullWidth size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou caminho completo" /></Box>
-      <List dense disablePadding sx={{ maxHeight: 390, overflow: "auto", mt: .5 }}>
+      <List dense disablePadding sx={{ maxHeight: "min(390px, calc(100dvh - 230px))", overflow: "auto", mt: .5 }}>
         {term ? matches.map((item) => <ListItemButton key={item.id} selected={selected.has(item.id)} onClick={() => toggleSelection(item)} sx={{ py: .5 }}><Checkbox size="small" checked={selected.has(item.id)} tabIndex={-1} sx={{ p: .5, mr: .75 }} /><ListItemText primary={item.name} secondary={item.path} primaryTypographyProps={{ variant: "body2", fontWeight: 600 }} secondaryTypographyProps={{ variant: "caption", noWrap: true }} /></ListItemButton>) : departments.filter((item) => item.active).map((item) => renderNode(item))}
         {term && matches.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>Nenhum nível encontrado.</Typography>}
       </List>
