@@ -423,10 +423,14 @@ def build_rateio_rows(
                         "cloud_origem": config.cloud_prefix,
                     })
 
-    # Closed for a donor = that donor already has Gold. Another project's
-    # billed month must not skip the condomínio's remaining forecast.
+    # Condominium overlays skip months already realized by their donor.
+    # Normal rateio also moves historical forecasts so the donor's forecast
+    # is offset in the cube even when that month already has actual costs.
     actual_donor, actual_leaves = accumulate_series(actual_rows, configs)
-    skip_forecast = {donor_id: set(periods) for donor_id, periods in actual_donor.items()}
+    skip_forecast = {
+        config.donor_id: set(actual_donor.get(config.donor_id, {}))
+        for config in configs if config.allocation_type != "rateio"
+    }
     emit(RATEIO_MEDIDA_ACTUAL, actual_rows)
     emit(RATEIO_MEDIDA_FORECAST, forecast_rows, skip_forecast, actual_leaves)
     if not rows:
