@@ -92,6 +92,14 @@ def _cancelled_http() -> HTTPException:
 
 async def _analysis_physical_name(db: AsyncSession, table_id: int) -> str | None:
     """Resolve regular destinations and forecast planning pseudo-destinations."""
+    if is_shared_cost_pivot_id(table_id):
+        base_id = shared_cost_base_destination_id(table_id)
+        row = (await db.execute(text(
+            "SELECT physical_name FROM destination_table WHERE id = :id AND active = true"
+        ), {"id": base_id})).first()
+        if row:
+            return str(row[0]).replace("-", "_").replace(".", "_") + "_planning"
+        return None
     row = (await db.execute(text(
         "SELECT physical_name FROM destination_table WHERE id = :id AND active = true"
     ), {"id": table_id})).first()
@@ -580,6 +588,21 @@ async def _layer_from(
 # Trino. It is exposed to the pivot through a synthetic pseudo-destination
 # resolved by ``_pivot_table_context`` and served by ``_run_forecast_manual_pivot``.
 FORECAST_MANUAL_PIVOT_ID = -1000000
+SHARED_COST_PIVOT_ID_OFFSET = 2_000_000
+
+
+def shared_cost_pivot_id(destination_id: int) -> int:
+    return -(SHARED_COST_PIVOT_ID_OFFSET + abs(int(destination_id)))
+
+
+def is_shared_cost_pivot_id(destination_id: int) -> bool:
+    return int(destination_id) <= -(SHARED_COST_PIVOT_ID_OFFSET + 1)
+
+
+def shared_cost_base_destination_id(destination_id: int) -> int:
+    return -int(destination_id) - SHARED_COST_PIVOT_ID_OFFSET
+
+
 _FORECAST_MANUAL_PIVOT_NAME = "forecast_manual_planning"
 _FORECAST_MANUAL_SCHEMA = {
     "period": "varchar",
