@@ -5,7 +5,7 @@ import {
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
+import { Add, Close, ContentCopy, Delete, Download, FiberManualRecord, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
@@ -447,23 +447,24 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       .sort(columnNameCompare.compare);
     const byName = new Map(schema.map(column => [column.name, column]));
     return [
-      ...names.map(name => ({
-      field: name,
-      headerName: name,
-      minWidth: 140,
-      flex: 1,
-      type: (byName.get(name)?.numeric ? "number" : "string") as GridColDef["type"],
-      } as GridColDef)),
       {
         field: "_detail",
-        headerName: "Decompor",
+        headerName: "",
         sortable: false,
         filterable: false,
-        width: 105,
+        width: 64,
         align: "center",
         headerAlign: "center",
-        renderCell: params => <IconButton size="small" aria-label="Abrir decomposição da linha" title="Abrir decomposição da linha" onClick={event => { event.stopPropagation(); setSelectedDrillRow(params.row); }}><OpenInFull fontSize="small" /></IconButton>,
+        renderHeader: () => <OpenInFull fontSize="small" color="action" />,
+        renderCell: params => <IconButton size="small" color="primary" aria-label="Abrir decomposição da linha" title="Abrir decomposição da linha" onClick={event => { event.stopPropagation(); setSelectedDrillRow(params.row); }}><OpenInFull fontSize="small" /></IconButton>,
       },
+      ...names.map(name => ({
+        field: name,
+        headerName: name,
+        minWidth: 140,
+        flex: 1,
+        type: (byName.get(name)?.numeric ? "number" : "string") as GridColDef["type"],
+      } as GridColDef)),
     ];
   }, [drill, meta]);
 
@@ -480,10 +481,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       const entries = Array.isArray(parsed)
         ? parsed.map((item, index) => [String(index), item] as [string, unknown])
         : Object.entries(parsed as Record<string, unknown>).sort(([left], [right]) => columnNameCompare.compare(left, right));
-      return <Box component="ul" sx={{ pl: 2.5, my: 0.5 }}>{entries.map(([name, child]) => <li key={name}><Typography component="span" variant="body2" fontWeight={600}>{name}: </Typography>{renderDetailValue(child)}</li>)}</Box>;
+      return <Box component="ul" sx={{ pl: 2.5, my: 0.5, borderLeft: "1px solid", borderColor: "divider", listStyle: "none" }}>{entries.map(([name, child]) => <Box component="li" key={name} sx={{ position: "relative", py: 0.25, "&:before": { content: '""', position: "absolute", width: 7, height: 7, borderRadius: "50%", bgcolor: "primary.light", left: -16, top: 11 } }}><Typography component="span" variant="body2" fontWeight={650} sx={{ fontFamily: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace' }}>{name}: </Typography>{renderDetailValue(child)}</Box>)}</Box>;
     }
-    if (parsed == null) return <Typography component="span" variant="body2" color="text.secondary">null</Typography>;
-    return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{String(parsed)}</Typography>;
+    if (parsed == null) return <Chip size="small" variant="outlined" label="null" sx={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }} />;
+    if (typeof parsed === "boolean") return <Chip size="small" color={parsed ? "success" : "default"} variant="outlined" label={String(parsed)} sx={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }} />;
+    if (typeof parsed === "number") return <Chip size="small" color="primary" variant="outlined" label={String(parsed)} sx={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }} />;
+    return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace', fontSize: 13, lineHeight: 1.7 }}>{String(parsed)}</Typography>;
   };
 
   const rowKeys = result?.row_keys || [];
@@ -697,11 +700,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </Box>
     </Drawer>
     <Dialog open={!!selectedDrillRow} onClose={() => setSelectedDrillRow(null)} fullScreen>
-      <DialogTitle sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <DialogTitle sx={{ borderBottom: 1, borderColor: "divider", px: { xs: 2, md: 4 }, py: 2.5, background: "linear-gradient(120deg, #f8fafc 0%, #eef4ff 100%)" }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="h5">Decomposição do registro</Typography>
-            <Typography variant="body2" color="text.secondary">Campos em ordem alfabética · valores JSON podem ser expandidos</Typography>
+            <Typography variant="h5" sx={{ fontWeight: 750, letterSpacing: "-0.03em", color: "#172554" }}>Decomposição do registro</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>Campos em ordem alfabética · valores estruturados aparecem em níveis</Typography>
           </Box>
           <Stack direction="row" spacing={1}>
             <Button startIcon={<ContentCopy />} onClick={() => { if (selectedDrillRow) void navigator.clipboard?.writeText(JSON.stringify(selectedDrillRow, null, 2)); }}>Copiar JSON</Button>
@@ -709,14 +712,17 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           </Stack>
         </Stack>
       </DialogTitle>
-      <DialogContent sx={{ bgcolor: "#f7f8fa", p: { xs: 1, md: 3 } }}>
-        {selectedDrillRow && <Paper variant="outlined" sx={{ maxWidth: 1200, mx: "auto", mt: 2, overflow: "hidden", borderRadius: 2 }}>
-          <Stack direction="row" sx={{ px: 2, py: 1.5, bgcolor: "#f8fafc", borderBottom: 1, borderColor: "divider" }}>
-            <Typography variant="subtitle2" sx={{ width: { xs: "38%", md: "30%" } }}>CHAVE</Typography>
-            <Typography variant="subtitle2">VALOR</Typography>
+      <DialogContent sx={{ bgcolor: "#f5f7fb", p: { xs: 1.5, md: 4 } }}>
+        {selectedDrillRow && <Paper elevation={0} sx={{ maxWidth: 1200, mx: "auto", mt: 1, overflow: "hidden", borderRadius: 3, border: "1px solid #e2e8f0", boxShadow: "0 12px 36px rgba(15, 23, 42, 0.06)" }}>
+          <Stack direction="row" sx={{ px: 3, py: 1.75, bgcolor: "#f8fafc", borderBottom: 1, borderColor: "divider" }}>
+            <Typography variant="overline" sx={{ width: { xs: "38%", md: "30%" }, color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>CAMPO</Typography>
+            <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>VALOR</Typography>
           </Stack>
-          {selectedRowEntries.map(([name, value], index) => <Stack key={name} direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ px: 2, py: 1.5, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfcfd" : "background.paper" }}>
-            <Typography variant="body2" fontWeight={700} sx={{ width: { xs: "100%", sm: "30%" }, overflowWrap: "anywhere", pt: 0.25 }}>{name}</Typography>
+          {selectedRowEntries.map(([name, value], index) => <Stack key={name} direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.5, sm: 2 }} sx={{ px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
+            <Stack direction="row" alignItems="flex-start" spacing={1} sx={{ width: { xs: "100%", sm: "30%" }, minWidth: 0 }}>
+              <FiberManualRecord sx={{ fontSize: 9, color: "primary.main", mt: "6px", flexShrink: 0 }} />
+              <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif' }}>{name}</Typography>
+            </Stack>
             <Box sx={{ flex: 1, minWidth: 0 }}>{renderDetailValue(value)}</Box>
           </Stack>)}
         </Paper>}
