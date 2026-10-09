@@ -364,16 +364,10 @@ def _side_select(gold: str, schema: dict[str, str], dims: list[str], measure_ali
         resolved = _resolve_column(schema, dim)
         if resolved:
             ref = f"{table_alias}.{_quote_ident(resolved)}" if table_alias else _quote_ident(resolved)
-            if (
-                key == "tipo"
-                and "rateio_kind" in schema
-                and "rateio_medida" in schema
-            ):
-                kind_ref = f"{table_alias}.{_quote_ident(schema['rateio_kind'])}" if table_alias else _quote_ident(schema["rateio_kind"])
+            if key == "tipo" and "rateio_medida" in schema:
                 measure_ref = f"{table_alias}.{_quote_ident(schema['rateio_medida'])}" if table_alias else _quote_ident(schema["rateio_medida"])
                 exprs.append(
-                    f"CASE WHEN lower(CAST({ref} AS VARCHAR)) = 'rateio' "
-                    f"AND lower(CAST({kind_ref} AS VARCHAR)) = 'rateio' "
+                    f"CASE WHEN lower(CAST({ref} AS VARCHAR)) = 'shared_cost' "
                     f"THEN CASE lower(CAST({measure_ref} AS VARCHAR)) "
                     f"WHEN 'realizado' THEN 'realizado' WHEN 'forecast' THEN 'forecast' "
                     f"ELSE 'rateio' END ELSE CAST({ref} AS VARCHAR) END AS {_quote_ident(dim)}"
