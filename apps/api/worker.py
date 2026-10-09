@@ -674,10 +674,15 @@ def consumer_main(worker_id: int):
                         rateio: dict = {}
                         run_scheduled_rateio = (not task_json.get("scheduled_pipeline")) or bool(task_json.get("shared_cost", False))
                         try:
-                            if not run_scheduled_rateio:
+                            allocation_types = None
+                            if task_json.get("scheduled_pipeline"):
+                                allocation_types = {"rateio"}
+                                if task_json.get("shared_cost", False):
+                                    allocation_types.add("shared_cost")
+                            if not run_scheduled_rateio and not task_json.get("scheduled_pipeline"):
                                 raise LookupError("rateio desabilitado no schedule")
                             from app.services.shared_cost import run_shared_cost_job_sync
-                            rateio = run_shared_cost_job_sync(s, allow_empty=True)
+                            rateio = run_shared_cost_job_sync(s, allow_empty=True, allocation_types=allocation_types)
                             if task_row:
                                 task_row.phase = (
                                     f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
@@ -1405,15 +1410,20 @@ def consumer_main(worker_id: int):
                         snapshot = result["snapshot"]
                         row = s.get(EtlTask, task_id)
                         if row:
+                            gold_task = None
+                            if result.get("refresh_gold"):
+                                from app.services.gold_materialization import enqueue_rule_materialization
+                                gold_task = enqueue_rule_materialization(s, source="rateio")
                             payload = dict(row.result_json or {})
                             payload["snapshot"] = snapshot
                             payload["planning_table"] = result.get("planning_table")
                             payload["rateio_rows"] = result.get("rows")
+                            payload["gold_task_id"] = gold_task.id if gold_task else None
                             row.result_json = payload
                             row.status = "COMPLETED"
                             row.phase = (
                                 f"{result.get('rows', 0)} linhas de rateio em {result.get('planning_table')} · "
-                                f"{len(snapshot['shared_nodes'])} custo(s) compartilhado(s)"
+                                f"{len(snapshot['shared_nodes'])} item(ns) de alocação"
                             )
                             row.processed_blobs = len(snapshot["shared_nodes"])
                             row.rows_destination = int(result.get("rows") or 0)

@@ -667,7 +667,12 @@ async def load_weight_aggregates(
     return _mapped_rows(actual_records), _mapped_rows(forecast_records)
 
 
-async def run_shared_cost_job(session: Any, *, allow_empty: bool = False) -> dict[str, Any]:
+async def run_shared_cost_job(
+    session: Any,
+    *,
+    allow_empty: bool = False,
+    allocation_types: set[str] | None = None,
+) -> dict[str, Any]:
     """Resolve configs, aggregate weights once, write tipo=rateio into planning."""
     from sqlalchemy.orm import selectinload
     from sqlalchemy import select
@@ -681,6 +686,8 @@ async def run_shared_cost_job(session: Any, *, allow_empty: bool = False) -> dic
             DepartmentSharedCost.enabled == True
         )
     ).scalars().all()
+    if allocation_types is not None:
+        configs = [config for config in configs if (getattr(config, "allocation_type", "shared_cost") or "shared_cost") in allocation_types]
     snapshot = snapshot_enabled_shared_costs(list(configs), departments)
     resolved = resolve_shared_costs(list(configs), departments)
     dest = session.get(DestinationTable, 1)
@@ -723,9 +730,15 @@ async def run_shared_cost_job(session: Any, *, allow_empty: bool = False) -> dic
         "rows": written,
         "planning_table": planning_table,
         "gold_table": gold_table,
+        "refresh_gold": any(item.allocation_type == "rateio" for item in resolved),
     }
 
 
-def run_shared_cost_job_sync(session: Any, *, allow_empty: bool = False) -> dict[str, Any]:
+def run_shared_cost_job_sync(
+    session: Any,
+    *,
+    allow_empty: bool = False,
+    allocation_types: set[str] | None = None,
+) -> dict[str, Any]:
     import asyncio
-    return asyncio.run(run_shared_cost_job(session, allow_empty=allow_empty))
+    return asyncio.run(run_shared_cost_job(session, allow_empty=allow_empty, allocation_types=allocation_types))

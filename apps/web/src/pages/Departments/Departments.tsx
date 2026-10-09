@@ -401,7 +401,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       (config) => config.department_id === dept.id && config.enabled,
     );
     const isShared = Boolean(allocationConfig);
-    const isConsumptionRateio = allocationConfig?.allocation_type === "consumption_rateio";
+    const isConsumptionRateio = allocationConfig?.allocation_type === "rateio";
 
     return (
       <Box key={dept.id}>
