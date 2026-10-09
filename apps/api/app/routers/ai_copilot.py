@@ -1264,7 +1264,7 @@ async def copilot_engagement_users(
                    MAX(period_days) AS credit_period_days
             FROM {COPILOT_USER_PERIOD_GOLD}
             WHERE {period_filter}
-        )
+        ),
         lic AS (
             SELECT 
                 lower(COALESCE(CAST("UserEmail" AS VARCHAR), '')) AS email,
