@@ -107,6 +107,7 @@ interface EngagementUser {
   business_license_cost_per_account_brl?: number;
   individual_credit_allowance?: number | null;
   individual_credit_balance?: number | null;
+  individual_credit_overage?: number;
   total_interactions: number;
   engagement_level: "high" | "low" | "zero" | "financial_only";
   consumption_signal?: string;
@@ -264,7 +265,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
   const [engagementError, setEngagementError] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [sortBy, setSortBy] = useState<keyof EngagementUser>("total_interactions");
+  const [sortBy, setSortBy] = useState<keyof EngagementUser>("individual_credit_overage");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [selectedUser, setSelectedUser] = useState<EngagementUser | null>(null);
@@ -596,15 +597,15 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                 <Box>🔴 Sem uso: 0 interações</Box>
               </Stack>
               <Typography variant="caption" display="block" sx={{ mt: 1.5 }} color="text.secondary">
-                Governança individual: franquia documentada pelo GitHub — Business 1.900 AI credits/mês/licença, Enterprise 3.900. Os créditos consumidos vêm do relatório real de AI Credits (ai_usage_report); consumo acima da franquia individual é sinalizado mesmo que o billing coletivo o cubra.
+                Franquia individual: 3.000 AI credits por usuário/mês. O consumo vem do relatório real de AI Credits (ai_usage_report), e o excedente individual é calculado acima desse limite.
                 {creditPeriod?.end ? ` Dados disponíveis até ${creditPeriod.end}.` : ""}
               </Typography>
             </Alert>
 
             {(poolBenchmark?.covered_consumption_above_standard || 0) > 0 && (
               <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-                Consumo coletivo acima da franquia contratual padrão: {compact(poolBenchmark?.covered_consumption_above_standard || 0)} créditos.
-                O dashboard não distribui essa diferença entre usuários até que a fonte informe a origem do crédito adicional.
+                Consumo acima do total de créditos individuais alocados: {compact(poolBenchmark?.covered_consumption_above_standard || 0)} créditos.
+                A tabela abaixo detalha o excedente individual de cada usuário.
               </Alert>
             )}
 
@@ -629,7 +630,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                       <TableCell onClick={() => handleSort("email")} sx={{ cursor: "pointer" }}>Desenvolvedor</TableCell>
                       <TableCell align="right" onClick={() => handleSort("total_credits")} sx={{ cursor: "pointer" }}>Créditos consumidos no mês</TableCell>
                       <TableCell align="right">Crédito individual</TableCell>
-                      <TableCell align="right">Excesso sobre limite</TableCell>
+                      <TableCell align="right" onClick={() => handleSort("individual_credit_overage")} sx={{ cursor: "pointer" }}>Excesso sobre limite</TableCell>
                       <TableCell align="right" onClick={() => handleSort("lines_accepted")} sx={{ cursor: "pointer" }}>Linhas Aceitas</TableCell>
                       <TableCell align="right" onClick={() => handleSort("total_interactions")} sx={{ cursor: "pointer" }}>Interações</TableCell>
                       <TableCell align="center">Avaliação</TableCell>
@@ -706,10 +707,13 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
 
                 <Paper elevation={0} sx={{ p: 2.5, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
                   <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="subtitle2" fontWeight={700} color="primary.main">Consumo financeiro no pool compartilhado</Typography>
+                    <Typography variant="subtitle2" fontWeight={700} color="primary.main">Consumo e franquia individual</Typography>
                   </Box>
                   <Typography variant="h4" fontWeight={800}>{compact(selectedUser.total_credits)} <Typography component="span" variant="body2">créditos de IA no mês</Typography></Typography>
-                  <Typography variant="caption" color="text.secondary">Não é possível inferir excedente individual: as licenças contribuem para uma franquia compartilhada.</Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">Franquia mensal: {num.format(userDetails?.summary.quota ?? selectedUser.individual_credit_allowance ?? 3000)} créditos</Typography>
+                  <Typography variant="caption" color={(userDetails?.summary.overage_credits ?? selectedUser.individual_credit_overage ?? 0) > 0 ? "error.main" : "success.main"}>
+                    Excesso: {compact(userDetails?.summary.overage_credits ?? selectedUser.individual_credit_overage ?? 0)} créditos
+                  </Typography>
                 </Paper>
 
                 <Paper elevation={0} sx={{ p: 2, border: "1px solid #e2e8f0", borderRadius: 2 }}>
@@ -774,7 +778,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                 (por token) — o consumo mensal de créditos passou a existir a partir daí; meses anteriores aparecem zerados.
                 Consumo = relatório real de AI Credits (ai_usage_report). O pool efetivo é inferido por
                 consumo menos o overage efetivamente faturado, incluindo créditos promocionais quando existirem;
-                a linha tracejada mostra somente a franquia contratada (licenças × 1.900 créditos).
+                a linha tracejada mostra o total de franquias individuais (usuários × 3.000 créditos).
               </Typography>
               <Plot
                 data={[
@@ -866,8 +870,8 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
             <Typography variant="caption" color="text.secondary" display="block" mb={2}>
               Custo por MM de tokens = créditos reais do modelo × preço de mercado do crédito (derivado do relatório de AI Credits:
               gross_amount ÷ ai_credits ≈ US$ 0,01/crédito) ÷ tokens do modelo (input+output+cache; "estimado" = linhas × 7 quando o
-              relatório não traz tokens). A Microsoft concedeu créditos extras até setembro/2026 — consumidores intensos usam o pool
-              compartilhado (créditos de quem não consome); o preço de mercado reflete o valor real do consumo extra.
+              relatório não traz tokens). Cada usuário recebe 3.000 créditos individuais por mês; o preço de mercado reflete o custo real
+              dos créditos consumidos.
             </Typography>
             <Box sx={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
