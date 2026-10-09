@@ -435,19 +435,53 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
         # A oportunidade de revogação é mensal por licença, portanto nunca deve
         # somar o custo de cada linha do snapshot.
         license_identity = "COALESCE(NULLIF(lower(CAST(\"UserEmail\" AS VARCHAR)), ''), NULLIF(lower(CAST(\"UserLogin\" AS VARCHAR)), ''))"
-        lic_sql = f"""
-        SELECT
-          COUNT(DISTINCT "UserEmail") AS total_licenses,
-          COUNT(DISTINCT "UserEmail") FILTER (WHERE lower(COALESCE(CAST("LicenseStatus" AS VARCHAR), 'active')) NOT IN ('revoked', 'cancelled', 'suspended')) AS active_licenses,
-          SUM(COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), TRY_CAST("listcost" AS DOUBLE), 100)) AS total_lic_cost,
-          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 60) AS inactive_30,
-          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 60 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 90) AS inactive_60,
-          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 90) AS inactive_90,
-          COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30) * 39.0 * 5.14 AS potential_savings
-        FROM {LIC_TABLE}
-        WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
-          AND {period_filter} AND {dept_sql}
-        """
+        if body.department_id or body.department_path:
+            # A Gold genérica contém as dimensões de organograma necessárias
+            # para restringir o resultado a uma diretoria/departamento.
+            lic_sql = f"""
+            SELECT
+              COUNT(DISTINCT "UserEmail") AS total_licenses,
+              COUNT(DISTINCT "UserEmail") FILTER (WHERE lower(COALESCE(CAST("LicenseStatus" AS VARCHAR), 'active')) NOT IN ('revoked', 'cancelled', 'suspended')) AS active_licenses,
+              SUM(COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), TRY_CAST("listcost" AS DOUBLE), 100)) AS total_lic_cost,
+              COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 60) AS inactive_30,
+              COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 60 AND TRY_CAST("DaysSinceLastActivity" AS INTEGER) < 90) AS inactive_60,
+              COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 90) AS inactive_90,
+              COUNT(DISTINCT {license_identity}) FILTER (WHERE TRY_CAST("DaysSinceLastActivity" AS INTEGER) >= 30) * 39.0 * 5.14 AS potential_savings
+            FROM {LIC_TABLE}
+            WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
+              AND {period_filter} AND {dept_sql}
+            """
+        else:
+            # Licenças Copilot têm sua própria Gold, atualizada diretamente da
+            # Bronze. A Silver genérica dest_licencas_ia pode ficar atrasada
+            # mesmo quando o snapshot Copilot já chegou (como ocorreu em prod).
+            # Use o snapshot específico no escopo global; mantenha a Gold genérica
+            # quando um filtro organizacional exigir as dimensões enriquecidas.
+            lic_sql = f"""
+            SELECT
+              COUNT(DISTINCT assignee_login) AS total_licenses,
+              COUNT(DISTINCT assignee_login) FILTER (
+                WHERE pending_cancellation_date IS NULL
+                   OR TRY_CAST(substr(pending_cancellation_date, 1, 10) AS DATE) > CURRENT_DATE
+              ) AS active_licenses,
+              CAST(0 AS DOUBLE) AS total_lic_cost,
+              COUNT(DISTINCT assignee_login) FILTER (
+                WHERE date_diff('day', TRY_CAST(substr(last_activity_at, 1, 10) AS DATE), CURRENT_DATE) >= 30
+                  AND date_diff('day', TRY_CAST(substr(last_activity_at, 1, 10) AS DATE), CURRENT_DATE) < 60
+              ) AS inactive_30,
+              COUNT(DISTINCT assignee_login) FILTER (
+                WHERE date_diff('day', TRY_CAST(substr(last_activity_at, 1, 10) AS DATE), CURRENT_DATE) >= 60
+                  AND date_diff('day', TRY_CAST(substr(last_activity_at, 1, 10) AS DATE), CURRENT_DATE) < 90
+              ) AS inactive_60,
+              COUNT(DISTINCT assignee_login) FILTER (
+                WHERE date_diff('day', TRY_CAST(substr(last_activity_at, 1, 10) AS DATE), CURRENT_DATE) >= 90
+              ) AS inactive_90,
+              COUNT(DISTINCT assignee_login) FILTER (
+                WHERE date_diff('day', TRY_CAST(substr(last_activity_at, 1, 10) AS DATE), CURRENT_DATE) >= 30
+              ) * 39.0 * 5.14 AS potential_savings
+            FROM {COPILOT_LICENSE_GOLD}
+            WHERE {period_filter} AND assignee_login IS NOT NULL AND assignee_login <> ''
+            """
 
         # Custo realizado em nuvem a partir da Gold pré-agregada do Copilot
         # (substitui a leitura do raw_azure_ti/dest_modelo_focus). ``realizado``
