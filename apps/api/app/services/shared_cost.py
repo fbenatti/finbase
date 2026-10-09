@@ -618,7 +618,7 @@ def _cloud_sql(prefixes: list[str], columns: dict[str, str]) -> str:
 
 def _mapped_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {"period": row.get("period"), "path": _row_hierarchy_path(row), "value": row.get("value")}
+        {"period": row.get("period"), "path": _row_hierarchy_path(row), "value": row.get("value"), "cloud_value": row.get("cloud_value")}
         for row in records
     ]
 
@@ -635,10 +635,12 @@ async def load_weight_aggregates(
 
     gold_period = _quote_ident(gold_columns["_billing_period"] if "_billing_period" in gold_columns else gold_columns["period"])
     gold_value = _quote_ident(gold_columns["realizado"])
+    gold_cloud_value = _quote_ident(gold_columns.get("realizado_cloud", gold_columns["realizado"]))
     actual_sql = f"""
       SELECT {gold_period} AS period,
              {_hierarchy_select_sql(gold_columns)},
-             SUM(COALESCE(TRY_CAST({gold_value} AS DOUBLE), 0)) AS value
+             SUM(COALESCE(TRY_CAST({gold_value} AS DOUBLE), 0)) AS value,
+             SUM(COALESCE(TRY_CAST({gold_cloud_value} AS DOUBLE), 0)) AS cloud_value
       FROM iceberg.silver.{gold_table}
       WHERE 1=1
         {_tipo_realizado_sql(gold_columns)}
@@ -647,11 +649,13 @@ async def load_weight_aggregates(
     """
     forecast_period = _quote_ident(planning_columns["period"])
     forecast_value = _quote_ident(planning_columns["realizado"])
+    forecast_cloud_value = _quote_ident(planning_columns.get("realizado_cloud", planning_columns["realizado"]))
     forecast_type = _quote_ident(planning_columns["tipo"])
     forecast_sql = f"""
       SELECT {forecast_period} AS period,
              {_hierarchy_select_sql(planning_columns)},
-             SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
+             SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value,
+             SUM(COALESCE(TRY_CAST({forecast_cloud_value} AS DOUBLE), 0)) AS cloud_value
       FROM iceberg.silver.{planning_table}
       WHERE lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
         {_cloud_sql(prefixes, planning_columns)}
@@ -664,6 +668,32 @@ async def load_weight_aggregates(
         logger.warning("Planning forecast aggregate skipped: %s", exc)
         forecast_records = []
     return _mapped_rows(actual_records), _mapped_rows(forecast_records)
+
+
+def build_allocation_rows(configs, actual_rows, forecast_rows):
+    """Keep condominium facts separate and carry both measures for normal rateio."""
+    rows = build_rateio_rows(configs, actual_rows, forecast_rows)
+    normal_configs = [config for config in configs if config.allocation_type == "rateio"]
+    if not normal_configs:
+        return rows
+    cloud_actual = [{**row, "value": row.get("cloud_value", row.get("value"))} for row in actual_rows]
+    cloud_forecast = [{**row, "value": row.get("cloud_value", row.get("value"))} for row in forecast_rows]
+    cloud_rows = build_rateio_rows(normal_configs, cloud_actual, cloud_forecast)
+
+    def key(row):
+        return (row["period"], row["tipo"], row["rateio_medida"], row["cloud_origem"],
+                *(row[f"organograma_nivel_{level}"] for level in range(1, 8)))
+
+    indexed = {key(row): row for row in rows}
+    for row in rows:
+        if row["tipo"] == SHARED_COST_TIPO:
+            row["realizado_cloud"] = 0.0
+    for row in cloud_rows:
+        row_key = key(row)
+        if row_key not in indexed:
+            indexed[row_key] = {**row, "realizado": 0.0}
+        indexed[row_key]["realizado_cloud"] = row["realizado"]
+    return list(indexed.values())
 
 
 async def run_shared_cost_job(
@@ -719,7 +749,7 @@ async def run_shared_cost_job(
     actual_rows, forecast_rows = await load_weight_aggregates(
         gold_table, planning_table, gold_schema, planning_schema, prefixes,
     )
-    rateio_rows = build_rateio_rows(resolved, actual_rows, forecast_rows)
+    rateio_rows = build_allocation_rows(resolved, actual_rows, forecast_rows)
     import pandas as pd
     rateio_df = pd.DataFrame(rateio_rows)
     replace_types = (
