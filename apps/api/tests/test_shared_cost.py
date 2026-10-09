@@ -27,6 +27,29 @@ def test_normal_allocation_conserves_billed_and_cloud_measures_independently():
     assert all("realizado_cloud" not in row for row in condominium)
 
 
+def test_normal_rateio_moves_forecast_in_realized_month_but_condominium_skips_it():
+    from app.services.shared_cost import ResolvedSharedCost, build_allocation_rows
+
+    config = ResolvedSharedCost(
+        donor_id=1, donor_path=["IBM", "Origem"], cloud_prefix="ibm",
+        mode="custom", donor_subtree={1}, target_leaves=[2],
+        leaf_paths={2: ["IBM", "Destino"]}, custom_targets=[([2], 80.0)],
+        allocation_type="rateio",
+    )
+    actual = [{"period": "202609", "path": config.donor_path, "value": 100, "cloud_value": 20}]
+    forecast = [{"period": "202609", "path": config.donor_path, "value": 50, "cloud_value": 10}]
+    rows = build_allocation_rows([config], actual, forecast)
+    projected = [row for row in rows if row["rateio_medida"] == "forecast"]
+    recipient = next(row for row in projected if row["organograma_nivel_2"] == "Destino")
+    assert recipient["realizado"] == 40
+    assert recipient["realizado_cloud"] == 8
+    assert sum(row["realizado"] for row in projected) == 0
+    assert sum(row["realizado_cloud"] for row in projected) == 0
+    assert 50 + sum(row["realizado"] for row in projected if row["organograma_nivel_2"] == "Origem") == 10
+    config.allocation_type = "shared_cost"
+    assert all(row["rateio_medida"] == "realizado" for row in build_allocation_rows([config], actual, forecast))
+
+
 def test_allocate_consumption_proportional():
     shares, residual = allocate_amount(
         100,
