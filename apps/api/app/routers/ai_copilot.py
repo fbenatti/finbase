@@ -53,6 +53,7 @@ TOKENS_PER_LINE = float(os.getenv("COPILOT_TOKENS_PER_LINE", "7"))
 # deriva o preço real do próprio relatório: gross_amount ÷ ai_credits ≈ US$ 0,01).
 COPILOT_CREDIT_PRICE_USD = float(os.getenv("COPILOT_CREDIT_PRICE_USD", "0.01"))
 COPILOT_USD_BRL = float(os.getenv("COPILOT_USD_BRL", "5.14"))
+COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE = 3000.0
 
 
 @router.get("/preflight")
@@ -522,22 +523,6 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
 
         logger.info(f"Executando overview otimizado de GitHub Copilot para periodo: {body.period}")
         overview_queries = [stats_sql, bronze_credits_sql, lic_sql, util_sql, cloud_sql]
-        # Pool real de créditos: soma das franquias mensais (total_monthly_quota)
-        # do relatório financeiro — não é licenças × constante.
-        quota_pool_sql = f"""
-        SELECT SUM(COALESCE(TRY_CAST(monthly_quota AS DOUBLE), 0)) AS pool
-        FROM (
-            SELECT
-                lower(assignee_login) AS user_login,
-                MAX(COALESCE(TRY_CAST(monthly_quota AS DOUBLE), 0)) AS monthly_quota
-            FROM {COPILOT_USAGE_GOLD}
-            WHERE {period_filter} AND source_kind = 'ai_usage_report'
-              AND assignee_login IS NOT NULL AND assignee_login <> ''
-            GROUP BY 1
-        )
-        """ if "monthly_quota" in overview_token_columns else None
-        if quota_pool_sql:
-            overview_queries.append(quota_pool_sql)
         # Projeção do mês corrente (realizado parcial + forecast residual do
         # próprio período). O próximo mês contém uma projeção mensal completa
         # e não pode ser usado como restante do mês selecionado.
@@ -559,14 +544,12 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
             *[_run_query(q, scope.trino_kwargs) for q in overview_queries]
         )
         adoption_rows, credits_rows, lic_rows, util_rows, cloud_rows = overview_results[:5]
-        pool_rows = overview_results[5] if quota_pool_sql else []
         projection_rows = overview_results[-1]
 
         a_row = adoption_rows[0] if adoption_rows else {}
         cr_row = credits_rows[0] if credits_rows else {}
         l_row = lic_rows[0] if lic_rows else {}
         u_row = util_rows[0] if util_rows else {}
-        pool_row = pool_rows[0] if pool_rows else {}
         proj_row = projection_rows[0] if projection_rows else {}
 
         # Mês corrente vs Mês anterior realizado
@@ -614,10 +597,8 @@ async def copilot_overview(body: CopilotDashboardRequest, request: Request, db: 
             processed_tokens = float((closed_token_rows[0] if closed_token_rows else {}).get("total_tokens") or 0)
         cost_per_million_tokens = (cost / processed_tokens * 1_000_000) if processed_tokens > 0 else None
 
-        # Pool de créditos: usa a soma real das franquias mensais do relatório
-        # (total_monthly_quota ≈ 1.900/licença Business); fallback licenças × 1.900.
-        real_pool = float(pool_row.get("pool") or 0)
-        credits_pool = real_pool if real_pool > 0 else active_licenses * 1900
+        # Cada usuário recebe 3.000 créditos individuais por mês.
+        credits_pool = active_licenses * COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE
         credits_utilization_pct = (total_credits / credits_pool * 100) if credits_pool > 0 else 0.0
 
         inactive_30 = int(l_row.get("inactive_30") or 0)
@@ -907,7 +888,7 @@ async def copilot_models(body: CopilotDashboardRequest, request: Request, db: As
             "definitions": {
                 "cost_per_million_tokens": "créditos reais do modelo × preço de mercado do crédito (gross_amount ÷ ai_credits do relatório) ÷ tokens do modelo (input+output+cache; estimado linhas×7 quando ausentes)",
                 "price_per_credit": "derivado do relatório financeiro de AI Credits (gross_amount ÷ ai_credits ≈ US$ 0,01); representa o preço de mercado do crédito extra",
-                "pool_note": "A Microsoft concedeu créditos extras até setembro/2026: o pool real (incluído + promocional) excede licenças × 1.900, e consumidores pesados usam o pool compartilhado — o custo por MM usa o preço de mercado do crédito para refletir o valor real.",
+                "pool_note": "Cada usuário recebe 3.000 créditos individuais por mês; créditos adicionais cobrados permanecem identificados pelo relatório financeiro.",
             },
         }
 
@@ -1076,7 +1057,7 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
                     "total_credits": 0.0,
                     "lines_accepted": float(r.get("lines_accepted") or 0),
                     "chat_turns": float(r.get("chat_turns") or 0),
-                    "included_credits_pool": int(r.get("active_users") or 0) * 1900,
+                    "included_credits_pool": int(r.get("active_users") or 0) * COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE,
                 }
 
         # Preenche com créditos reais em Milhões
@@ -1151,18 +1132,14 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
                     history_map[p]["active_licenses"] = gold_lic
                 history_map[p]["total_lic_cost"] = float(r.get("total_lic_cost") or 0)
 
-        # Ajusta licenças cumulativas e pools de créditos se active_licenses for 0 ou extrapolado.
-        # A franquia contratada (licenças × 1.900) não representa necessariamente
-        # todo o pool recebido: o relatório financeiro pode conter créditos
-        # promocionais. Como o mesmo relatório informa o overage efetivamente
-        # cobrado, ``consumo - overage`` é o pool efetivo mínimo que cobriu o
-        # consumo no mês. Expor ambos evita que o dashboard trate promoção como
-        # consumo indevidamente acima da franquia.
+        # Ajusta licenças cumulativas e pools de créditos pela franquia individual
+        # fixa de 3.000 por usuário/mês. O pool efetivo também considera os
+        # créditos adicionais cobertos e o overage faturado.
         for p, data in history_map.items():
             cumul = get_cumulative_licenses(p)
             if data["active_licenses"] == 0 and cumul > 0:
                 data["active_licenses"] = cumul
-            contracted_pool = max(data["active_licenses"], cumul) * 1900
+            contracted_pool = max(data["active_licenses"], cumul) * COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE
             total_credits = max(0.0, float(data.get("total_credits") or 0.0))
             overage_credits = min(total_credits, max(0.0, float(data.get("overage_credits") or 0.0)))
             covered_pool = max(contracted_pool, total_credits - overage_credits)
