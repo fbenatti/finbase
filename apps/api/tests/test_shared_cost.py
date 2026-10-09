@@ -1,6 +1,32 @@
 from app.services.shared_cost import allocate_amount, driver_name_for
 
 
+def test_normal_allocation_conserves_billed_and_cloud_measures_independently():
+    from app.services.shared_cost import ResolvedSharedCost, build_allocation_rows
+
+    config = ResolvedSharedCost(
+        donor_id=1, donor_path=["IBM", "Origem"], cloud_prefix="ibm",
+        mode="custom", donor_subtree={1}, target_leaves=[2],
+        leaf_paths={2: ["IBM", "Destino"]}, custom_targets=[([2], 100.0)],
+        allocation_type="rateio",
+    )
+    for billed, cloud in [(100.0, 20.0), (0.0, 20.0), (100.0, 0.0)]:
+        actual = [{"period": "202609", "path": config.donor_path,
+                   "value": billed, "cloud_value": cloud}]
+        rows = build_allocation_rows([config], actual, [])
+        receiver = next(row for row in rows if row["organograma_nivel_2"] == "Destino")
+        assert receiver["realizado"] == billed
+        assert receiver["realizado_cloud"] == cloud
+        assert sum(row["realizado"] for row in rows) == 0
+        assert sum(row["realizado_cloud"] for row in rows) == 0
+        assert {row["tipo"] for row in rows} == {"shared_cost"}
+
+    config.allocation_type = "shared_cost"
+    condominium = build_allocation_rows([config], actual, [])
+    assert {row["tipo"] for row in condominium} == {"rateio"}
+    assert all("realizado_cloud" not in row for row in condominium)
+
+
 def test_allocate_consumption_proportional():
     shares, residual = allocate_amount(
         100,
