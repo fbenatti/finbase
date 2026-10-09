@@ -2,6 +2,7 @@ from datetime import date
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from app.services.forecast_service import (
     _apply_forecast_business_rules,
@@ -342,7 +343,7 @@ def test_monthly_purchase_closes_current_month_with_five_charge_days_in_history(
         behavior_options={"current_month_policy": "ZERO_WHEN_REALIZED"},
     )
     _apply_forecast_business_rules(output, [rule], {_series_key(key_values, key_cols): ctx}, key_cols, date(2026, 10, 7))
-    assert output["forecast_value"].tolist() == [0.0, 117259.98]
+    assert output["forecast_value"].tolist() == pytest.approx([0.0, 117259.98])
 
 
 def test_monthly_policy_closes_first_charge_without_prior_anchor():
