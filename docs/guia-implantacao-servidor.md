@@ -60,6 +60,14 @@ containers e verifica Trino, worker e frontend. Se uma validação falhar, não
 rode reprocessamentos como tentativa de recuperação: consulte os logs e corrija
 o serviço com o fluxo operacional adequado.
 
+O helper atualiza o checkout **antes** de executar `deploy_vm.sh`, para carregar
+a versão nova do próprio script de implantação. O script prepara as imagens e
+aguarda a fila (`etl_task` com status `RUNNING` ou `QUEUED`) terminar antes de
+recriar containers. Isso evita interromper reclassificações longas. A espera é
+ativada por padrão; `OPENFINOPS_DEPLOY_WAIT_IDLE=false` é reservado à recuperação
+operacional de uma fila impedida de progredir e exige avaliar as tarefas afetadas.
+Não execute dois deploys em paralelo.
+
 Regras de negócio do Forecast são dados persistidos no PostgreSQL, não fazem
 parte do bundle de código. Quando uma alteração depender de uma regra nova ou
 ajustada, configure-a na tela visível de regras do Forecast após o deploy e
@@ -67,6 +75,13 @@ confirme que está ativa, com escopo e opções corretos. Não codifique a regra
 motor nem presuma que o deploy de imagem a criou. Neste rollout foi cadastrada
 na configuração 9 a regra ativa `Azure-4P - suspender após 30 dias sem dados`,
 com escopo `cloud_origem=azure-4p` e limite editável de 30 dias.
+
+Na correção de 09/10/2026, a regra 8 da configuração 9 foi versionada como
+`Compras recorrentes - zerar mês já realizado`, com
+`behavior_options.current_month_policy=ZERO_WHEN_REALIZED`. A identificação
+existente `chargecategory=Purchase` foi preservada. A configuração aparece no
+editor de regras no campo **Mês corrente**. O estado anterior da regra foi salvo
+em `/backups/scheduled/forecast-rule-8-before-month-closure-20261009.json` na VM.
 
 O deploy é somente de código/configuração. Não restaure banco, apague volumes,
 rode reprocessamentos ou altere dados de forecast/Gold como parte da publicação,
