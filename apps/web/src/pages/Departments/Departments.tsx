@@ -256,7 +256,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   };
 
   const saveDept = async () => {
-    if (sharedEnabled && sharedMode === "custom") {
+    if ((sharedEnabled || rateioEnabled) && sharedMode === "custom") {
       if (!sharedTargets.length || sharedTargets.some((target) => target.percent == null || !Number.isFinite(target.percent))) {
         setDeptDialogError("Informe um percentual para cada destino selecionado.");
         return;
@@ -898,7 +898,11 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                   control={
                     <Switch
                       checked={sharedEnabled}
-                      onChange={(e) => setSharedEnabled(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSharedEnabled(checked);
+                        if (checked) setRateioEnabled(false);
+                      }}
                       disabled={!sharedLoaded}
                     />
                   }
