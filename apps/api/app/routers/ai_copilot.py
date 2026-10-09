@@ -1718,6 +1718,11 @@ async def copilot_user_model_details(
         raw_invoice_credits = total_credits
 
         operational_credits = total_credits
+        individual_quota = None if is_billing_account else COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE
+        individual_overage = (
+            max(0.0, operational_credits - individual_quota)
+            if individual_quota is not None else 0.0
+        )
 
         return {
             "user_login": body.user_login,
@@ -1728,10 +1733,10 @@ async def copilot_user_model_details(
             "contractual_invoice_credits": raw_invoice_credits,
             "summary": {
                 "total_credits": operational_credits,
-                "quota": COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE,
-                "overage_credits": max(0.0, operational_credits - COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE),
-                "is_overage": operational_credits > COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE,
-                "overage_pct": max(0.0, (operational_credits - COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE) / COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE * 100),
+                "quota": individual_quota,
+                "overage_credits": individual_overage,
+                "is_overage": individual_overage > 0,
+                "overage_pct": individual_overage / individual_quota * 100 if individual_quota else None,
                 "total_lines_accepted": tot_lines,
                 "total_chat_acceptances": tot_chats,
                 "total_tokens": round(tot_tokens),
