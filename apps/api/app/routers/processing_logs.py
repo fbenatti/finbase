@@ -10,9 +10,10 @@ from sqlalchemy import String, cast, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.etl_task import EtlTask
 from app.models.processing_log import ProcessingLog
 from app.services.trino_service import execute as trino_execute
-from app.services.processing_logs import PROCESSING_LOG_CUBE
+from app.services.processing_logs import PROCESSING_LOG_CUBE, async_sync_etl_task_log
 
 router = APIRouter(prefix="/processing-logs", tags=["processing-logs"])
 logger = logging.getLogger(__name__)
@@ -91,6 +92,18 @@ async def list_processing_logs(
         filtered.order_by(ProcessingLog.started_at.desc().nullslast(), ProcessingLog.id.desc())
         .offset(offset).limit(limit)
     )).scalars().all()
+    task_ids = [row.etl_task_id for row in result if row.etl_task_id is not None]
+    if task_ids:
+        tasks = (await db.execute(select(EtlTask).where(EtlTask.id.in_(task_ids)))).scalars().all()
+        tasks_by_id = {task.id: task for task in tasks}
+        reconciled = False
+        for log in result:
+            task = tasks_by_id.get(log.etl_task_id)
+            if task and (log.status != task.status or log.finished_at != task.finished_at):
+                await async_sync_etl_task_log(db, task)
+                reconciled = True
+        if reconciled:
+            await db.commit()
     return {"items": [_serialize(row) for row in result], "total": total}
 
 
@@ -130,4 +143,9 @@ async def get_processing_log(log_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ProcessingLog, log_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Log de processamento não encontrado")
+    if row.etl_task_id is not None:
+        task = await db.get(EtlTask, row.etl_task_id)
+        if task and (row.status != task.status or row.finished_at != task.finished_at):
+            await async_sync_etl_task_log(db, task)
+            await db.commit()
     return _serialize(row, include_details=True)
