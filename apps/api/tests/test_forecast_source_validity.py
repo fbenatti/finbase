@@ -27,9 +27,9 @@ def _case(last_seen: date, *, evaluated_at: date = date(2026, 10, 2), active=Tru
     key_cols = ["cloud_origem", "servicename"]
     keys = {"cloud_origem": "azure-4p", "servicename": "PTU"}
     output = pd.DataFrame([
-        {**keys, "forecast_month": "202610", "tipo": "forecast", "forecast_value": 120.0},
-        {**keys, "forecast_month": "202611", "tipo": "forecast", "forecast_value": 120.0},
-        {**keys, "forecast_month": "202612", "tipo": "realizado", "forecast_value": 20.0},
+        {**keys, "forecast_month": "202610", "tipo": "forecast", "forecast_value": 120.0, "realizado": 120.0, "realizado_cloud": 120.0},
+        {**keys, "forecast_month": "202611", "tipo": "forecast", "forecast_value": 120.0, "realizado": 120.0, "realizado_cloud": 120.0},
+        {**keys, "forecast_month": "202612", "tipo": "realizado", "forecast_value": 20.0, "realizado": 20.0, "realizado_cloud": 20.0},
     ])
     context = {"last_observed_date": last_seen}
     summary = _apply_source_validity_rules(
@@ -45,6 +45,8 @@ def _case(last_seen: date, *, evaluated_at: date = date(2026, 10, 2), active=Tru
 def test_source_validity_suspends_after_configured_age_and_only_forecast_rows():
     output, summary = _case(date(2026, 9, 1))
     assert output["forecast_value"].tolist() == [0.0, 0.0, 20.0]
+    assert output["realizado"].tolist() == [0.0, 0.0, 20.0]
+    assert output["realizado_cloud"].tolist() == [0.0, 0.0, 20.0]
     assert "validade 30 dias" in summary[0]
     assert "idade avaliada 31 dias" in summary[0]
 
