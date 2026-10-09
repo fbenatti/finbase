@@ -927,30 +927,36 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
         if "source_kind" in history_token_columns:
             history_credit_measure_filter = "AND (source_kind = 'ai_usage_report' OR model = 'copilot_ai_credit')"
 
-        # 1. Licenças ativas da tabela Gold
-        lic_sql = f"""
-        SELECT
-          CAST("_billing_period" AS VARCHAR) AS period,
-          COUNT(DISTINCT "UserLogin") AS active_licenses,
-          SUM(COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), TRY_CAST("listcost" AS DOUBLE), 100)) AS total_lic_cost
-        FROM {LIC_TABLE}
-        WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
-          AND {year_filter} AND {dept_sql}
-          AND {history_period_cutoff}
-        GROUP BY 1
-        ORDER BY 1
-        """
-
-        # 2. Licenças cumulativas criadas a partir da Gold de assentos
-        bronze_lic_sql = f"""
-        SELECT 
-          (substr(created_at, 1, 4) || substr(created_at, 6, 2)) AS period,
-          COUNT(DISTINCT assignee_login) AS new_licenses
-        FROM {COPILOT_LICENSE_GOLD}
-        WHERE created_at IS NOT NULL AND length(created_at) >= 7
-        GROUP BY 1
-        ORDER BY 1
-        """
+        # 1. Snapshot mensal de licenças Copilot. No escopo global, usar a Gold
+        # própria do Copilot; a Silver genérica pode não ter sido enriquecida
+        # naquele mês. Com filtro organizacional, manter a tabela com organograma.
+        if body.department_id or body.department_path:
+            lic_sql = f"""
+            SELECT
+              CAST("_billing_period" AS VARCHAR) AS period,
+              COUNT(DISTINCT "UserLogin") AS active_licenses,
+              SUM(COALESCE(TRY_CAST("AllocatedLicenseCost" AS DOUBLE), TRY_CAST("listcost" AS DOUBLE), 100)) AS total_lic_cost
+            FROM {LIC_TABLE}
+            WHERE lower(CAST("Provider" AS VARCHAR)) = 'github'
+              AND {year_filter} AND {dept_sql}
+              AND {history_period_cutoff}
+            GROUP BY 1
+            ORDER BY 1
+            """
+        else:
+            lic_sql = f"""
+            SELECT
+              CAST(_billing_period AS VARCHAR) AS period,
+              COUNT(DISTINCT assignee_login) AS active_licenses,
+              CAST(0 AS DOUBLE) AS total_lic_cost
+            FROM {COPILOT_LICENSE_GOLD}
+            WHERE assignee_login IS NOT NULL AND assignee_login <> ''
+              AND (pending_cancellation_date IS NULL
+                   OR TRY_CAST(substr(pending_cancellation_date, 1, 10) AS DATE) > CURRENT_DATE)
+              AND {year_filter} AND {history_period_cutoff}
+            GROUP BY 1
+            ORDER BY 1
+            """
 
         # 3. Consumo de tokens e interações por período (dest_consumo_ia)
         cons_sql = f"""
@@ -1026,19 +1032,11 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
 
         logger.info("Executando consultas de histórico consolidado para GitHub Copilot")
         lic_rows = await _run_query(lic_sql, scope.trino_kwargs)
-        bronze_lic_rows = await _run_query(bronze_lic_sql, scope.trino_kwargs)
         cons_rows = await _run_query(cons_sql, scope.trino_kwargs)
         credits_hist_rows = await _run_query(bronze_credits_hist_sql, scope.trino_kwargs)
         cloud_rows = await _run_query(cloud_hist_sql, scope.trino_kwargs)
         cost_evol_rows = await _run_query(cost_evolution_sql, scope.trino_kwargs)
         cost_forecast_rows = await _run_query(cost_forecast_sql, scope.trino_kwargs)
-
-        # Mapa de criação cumulativa de licenças
-        created_by_period = {str(r.get("period") or ""): int(r.get("new_licenses") or 0) for r in bronze_lic_rows if r.get("period")}
-        all_created_periods = sorted(created_by_period.keys())
-
-        def get_cumulative_licenses(period_str: str) -> int:
-            return sum(created_by_period[p] for p in all_created_periods if p <= period_str)
 
         history_map: dict[str, dict[str, Any]] = {}
 
@@ -1132,14 +1130,10 @@ async def copilot_history(body: CopilotDashboardRequest, request: Request, db: A
                     history_map[p]["active_licenses"] = gold_lic
                 history_map[p]["total_lic_cost"] = float(r.get("total_lic_cost") or 0)
 
-        # Ajusta licenças cumulativas e pools de créditos pela franquia individual
-        # fixa de 3.000 por usuário/mês. O pool efetivo também considera os
-        # créditos adicionais cobertos e o overage faturado.
+        # Calcula o total de franquias individuais por snapshot mensal. O pool
+        # efetivo também considera créditos adicionais cobertos e overage faturado.
         for p, data in history_map.items():
-            cumul = get_cumulative_licenses(p)
-            if data["active_licenses"] == 0 and cumul > 0:
-                data["active_licenses"] = cumul
-            contracted_pool = max(data["active_licenses"], cumul) * COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE
+            contracted_pool = data["active_licenses"] * COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE
             total_credits = max(0.0, float(data.get("total_credits") or 0.0))
             overage_credits = min(total_credits, max(0.0, float(data.get("overage_credits") or 0.0)))
             covered_pool = max(contracted_pool, total_credits - overage_credits)
