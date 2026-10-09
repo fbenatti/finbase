@@ -1246,37 +1246,7 @@ async def copilot_engagement_users(
         scope_path = await _resolve_scope_path(db, body.department_id, body.department_path)
         period_filter = _period_filter(body.period, body.year)
         dept_sql = _dept_filter(scope_path)
-        # Franquia individual real (total_monthly_quota) vem do relatório
-        # financeiro já consolidado por usuário/período.
-        quota_available = True
-        quota_cte = f"""
-        ,
-        quota AS (
-            SELECT
-                lower(assignee_login) AS user_login,
-                MAX(COALESCE(TRY_CAST(monthly_quota AS DOUBLE), 0)) AS monthly_quota
-            FROM {COPILOT_USER_PERIOD_GOLD}
-            WHERE {period_filter}
-              AND assignee_login IS NOT NULL AND assignee_login <> ''
-            GROUP BY 1
-        )
-        """ if quota_available else ""
-        quota_join = """
-            LEFT JOIN quota q ON (
-                (people.user_login <> '' AND q.user_login = people.user_login) OR
-                (people.email <> '' AND q.user_login = people.email)
-            )
-        """ if quota_available else ""
-        quota_allowance_expr = (
-            "COALESCE(q.monthly_quota, "
-            "CASE WHEN people.license_sku LIKE '%business%' THEN 1900.0 "
-            "WHEN people.license_sku LIKE '%enterprise%' THEN 3900.0 "
-            "ELSE NULL END)"
-            if quota_available else
-            "CASE WHEN people.license_sku LIKE '%business%' THEN 1900.0 "
-            "WHEN people.license_sku LIKE '%enterprise%' THEN 3900.0 "
-            "ELSE NULL END"
-        )
+        quota_allowance_expr = str(COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE)
 
         sql = f"""
         WITH user_credits AS (
@@ -1295,7 +1265,6 @@ async def copilot_engagement_users(
             FROM {COPILOT_USER_PERIOD_GOLD}
             WHERE {period_filter}
         )
-        {quota_cte},
         lic AS (
             SELECT 
                 lower(COALESCE(CAST("UserEmail" AS VARCHAR), '')) AS email,
@@ -1377,7 +1346,6 @@ async def copilot_engagement_users(
                 (people.user_login <> '' AND people.user_login = uc.assignee_login) OR
                 (people.email <> '' AND people.email = uc.assignee_login)
             )
-            {quota_join}
         )
         SELECT m.*, cb.credit_period_start, cb.credit_period_end, cb.credit_period_days
         FROM merged m
@@ -1482,18 +1450,18 @@ async def copilot_engagement_users(
                 "individual_credit_balance": (
                     individual_allowance - credits if individual_allowance is not None else None
                 ),
-                "individual_credit_source": (
-                    "total_monthly_quota do relatório real de AI Credits (ai_usage_report)"
-                    if quota_available else
-                    "franquia documentada pelo GitHub (Business 1.900 / Enterprise 3.900 AI credits por mês)"
+                "individual_credit_overage": (
+                    max(0.0, credits - individual_allowance)
+                    if individual_allowance is not None else 0.0
                 ),
+                "individual_credit_source": "Franquia individual fixa de 3.000 AI credits por usuário/mês",
                 "average_credits_per_account": average_credits_per_account,
                 "credits_vs_pool_average": credits - average_credits_per_account,
                 "total_interactions": float(r.get("total_interactions") or 0),
                 "engagement_level": eng,
                 "consumption_signal": (
                     "alto_consumo_baixa_telemetria"
-                    if credits > 1900 and float(r.get("total_interactions") or 0) < 20
+                    if credits > COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE and float(r.get("total_interactions") or 0) < 20
                     else "normal"
                 ),
             })
@@ -1521,18 +1489,18 @@ async def copilot_engagement_users(
                 "average_credits_per_account": average_credits_per_account,
                 "contractual_standard_pool": contractual_standard_pool,
                 "covered_consumption_above_standard": covered_consumption_above_standard,
-                "description": "Benchmark estatístico: créditos consumidos no pool no período ÷ contas exibidas. Não representa franquia individual.",
+                "description": "Franquia contratada fixa de 3.000 créditos individuais por usuário/mês.",
             },
             "metrics_definition": {
                 "high": "Engajamento Alto: Total de Interações (Linhas Aceitas + Chats) >= 20 no mês",
                 "low": "Engajamento Baixo: Total de Interações entre 1 e 19 no mês",
                 "zero": "Sem Engajamento de IA: 0 interações no mês com licença ativa",
                 "financial_only": "Consumo financeiro confirmado, sem telemetria de adoção IDE na fonte de métricas.",
-                "financial_usage": "Créditos e custo vêm do relatório financeiro; a franquia é compartilhada no pool da entidade de billing, não por usuário.",
+                "financial_usage": "Créditos consumidos vêm do relatório financeiro; cada usuário recebe uma franquia individual mensal de 3.000 créditos.",
                 "inactive_30": "Inativo há mais de 30 dias na IDE",
                 "inactive_60": "Inativo há mais de 60 dias na IDE",
                 "inactive_90": "Inativo há mais de 90 dias na IDE",
-                "allowance_source": "Franquia documentada pelo GitHub (About billing for Copilot): Business = 1.900 AI credits/mês/licença; Enterprise = 3.900. Consumo exibido = relatório real de AI Credits (ai_usage_report), não é dado simulado.",
+                "allowance_source": "Franquia fixa de 3.000 AI credits por usuário/mês. Consumo exibido = relatório real de AI Credits (ai_usage_report).",
             },
         }
 
@@ -1749,8 +1717,6 @@ async def copilot_user_model_details(
         is_billing_account = (tot_lines + tot_chats == 0) and total_credits > 0
         raw_invoice_credits = total_credits
 
-        # A franquia é compartilhada pela entidade de billing. Consumo por
-        # usuário é observável, mas não permite inferir um excedente individual.
         operational_credits = total_credits
 
         return {
@@ -1762,10 +1728,10 @@ async def copilot_user_model_details(
             "contractual_invoice_credits": raw_invoice_credits,
             "summary": {
                 "total_credits": operational_credits,
-                "quota": None,
-                "overage_credits": None,
-                "is_overage": False,
-                "overage_pct": None,
+                "quota": COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE,
+                "overage_credits": max(0.0, operational_credits - COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE),
+                "is_overage": operational_credits > COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE,
+                "overage_pct": max(0.0, (operational_credits - COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE) / COPILOT_INDIVIDUAL_CREDIT_ALLOWANCE * 100),
                 "total_lines_accepted": tot_lines,
                 "total_chat_acceptances": tot_chats,
                 "total_tokens": round(tot_tokens),
