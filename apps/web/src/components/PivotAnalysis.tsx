@@ -135,7 +135,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [selectedDrillRow, setSelectedDrillRow] = useState<Record<string, unknown> | null>(null);
   const [sourceDetail, setSourceDetail] = useState<PivotSourceDetail | null>(null);
   const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
-  const [showSourceRelation, setShowSourceRelation] = useState(false);
+  const [relationDialogOpen, setRelationDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResult, setSearchResult] = useState<LakehouseSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -520,18 +520,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     delete cleanRow.id;
     setSelectedDrillRow(cleanRow);
     setSourceDetail(null);
-    setShowSourceRelation(false);
   };
   const loadSourceRelation = async () => {
-    const sourceId = selectedDrillRow?.source_record_id;
-    if (!sourceId) {
-      setSourceDetail({ available: false, reason: "Este registro não possui source_record_id para localizar a origem." });
-      setShowSourceRelation(true);
-      return;
-    }
-    setShowSourceRelation(true);
+    if (!selectedDrillRow) return;
+    setRelationDialogOpen(true);
     setSourceDetailLoading(true);
-    try { setSourceDetail(await getPivotSourceDetail(tableId, String(sourceId))); }
+    try { setSourceDetail(await getPivotSourceDetail(tableId, selectedDrillRow)); }
     catch (error: unknown) { setSourceDetail({ available: false, reason: formatApiError(error, "Não foi possível carregar o registro de origem.") }); }
     finally { setSourceDetailLoading(false); }
   };
@@ -754,7 +748,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>Campos em ordem alfabética · valores estruturados aparecem em níveis</Typography>
           </Box>
           <Stack direction="row" spacing={1}>
-            <Button startIcon={<CompareArrows />} variant={showSourceRelation ? "contained" : "outlined"} onClick={() => showSourceRelation ? setShowSourceRelation(false) : void loadSourceRelation()}>Ver relação com a origem</Button>
+            <Button startIcon={<CompareArrows />} variant="outlined" onClick={() => void loadSourceRelation()}>Ver relação com a origem</Button>
             <Button startIcon={<ContentCopy />} onClick={() => { if (selectedDrillRow) void navigator.clipboard?.writeText(JSON.stringify(selectedDrillRow, null, 2)); }}>Copiar JSON</Button>
             <IconButton aria-label="Fechar decomposição" onClick={() => setSelectedDrillRow(null)}><Close /></IconButton>
           </Stack>
@@ -762,27 +756,6 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </DialogTitle>
       <DialogContent sx={{ bgcolor: "#f5f7fb", p: { xs: 1.5, md: 4 } }}>
         {selectedDrillRow && <Stack spacing={2} sx={{ maxWidth: 1200, mx: "auto", mt: 1 }}>
-          {showSourceRelation && <Paper elevation={0} sx={{ borderRadius: 3, border: "1px solid #dbeafe", boxShadow: "0 10px 28px rgba(15,23,42,.045)", overflow: "hidden" }}>
-            <Stack direction="row" alignItems="center" spacing={1.5} sx={{ px: 3, py: 2, bgcolor: "#eff6ff", borderBottom: 1, borderColor: "#dbeafe" }}>
-              <CompareArrows color="primary" />
-              <Box><Typography variant="subtitle1" fontWeight={750} color="#1e3a8a">Relação com o registro de origem</Typography><Typography variant="caption" color="text.secondary">{sourceDetail?.connection_name || (sourceDetailLoading ? "Localizando conexão e arquivo..." : "Origem Bronze → linha Gold")}</Typography></Box>
-            </Stack>
-            {sourceDetailLoading && <Box sx={{ p: 3, display: "flex", alignItems: "center", gap: 1 }}><CircularProgress size={18} /><Typography variant="body2">Carregando linha original...</Typography></Box>}
-            {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ m: 2 }}>{sourceDetail.reason}</Alert>}
-            {!sourceDetailLoading && sourceDetail?.available && <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2.5 } }}>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 48px 1fr" }, gap: 1.5, alignItems: "start" }}>
-                <Box><Typography variant="overline" color="#0369a1" fontWeight={800}>ORIGEM · {sourceDetail.connection_name}</Typography><Typography variant="caption" display="block" color="text.secondary" noWrap title={sourceDetail.blob_path}>{sourceDetail.blob_path}</Typography></Box>
-                <Box sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", pt: 1 }}><CompareArrows color="action" /></Box>
-                <Box><Typography variant="overline" color="#6d28d9" fontWeight={800}>DESTINO · GOLD</Typography><Typography variant="caption" display="block" color="text.secondary">Campos ligados pelo mapeamento ativo</Typography></Box>
-              </Box>
-              {(sourceDetail.pairs || []).length > 0 ? <Stack spacing={0.75}>{sourceDetail.pairs?.map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", md: "minmax(0,1fr) 48px minmax(0,1fr)" }, gap: 1, alignItems: "stretch" }}>
-                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block">{pair.source_key}</Typography><Box>{renderDetailValue(sourceDetail.pairs?.[index].source_value)}</Box></Paper>
-                <Box sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#94a3b8" }}>→</Box>
-                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block">{pair.destination_key}</Typography><Box>{renderDetailValue(selectedDrillRow[pair.destination_key])}</Box></Paper>
-              </Box>)}</Stack> : <Alert severity="warning">Não há mapeamentos ativos para relacionar as colunas desta origem com o destino.</Alert>}
-              {Object.keys(sourceDetail.source_unmatched || {}).length > 0 && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: "#fde68a", bgcolor: "#fffbeb" }}><Typography variant="subtitle2" fontWeight={750} color="#92400e" mb={1}>Campos da origem sem correspondência no destino ({Object.keys(sourceDetail.source_unmatched || {}).length})</Typography><Stack spacing={0.75}>{Object.entries(sourceDetail.source_unmatched || {}).sort(([a], [b]) => columnNameCompare.compare(a, b)).map(([name, value]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: "minmax(140px, 30%) minmax(0,1fr)", gap: 1, alignItems: "start", p: 1, borderRadius: 1.5, bgcolor: "rgba(255,255,255,.8)" }}><Typography variant="caption" fontWeight={750} color="#a16207" sx={{ overflowWrap: "anywhere" }}>{name}</Typography><Box sx={{ minWidth: 0 }}>{renderDetailValue(value)}</Box></Box>)}</Stack></Paper>}
-            </Stack>}
-          </Paper>}
           <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3, border: "1px solid #e2e8f0", boxShadow: "0 12px 36px rgba(15, 23, 42, 0.06)" }}>
             <Stack direction="row" sx={{ px: 3, py: 1.75, bgcolor: "#f8fafc", borderBottom: 1, borderColor: "divider" }}>
               <Typography variant="overline" sx={{ width: { xs: "38%", md: "30%" }, color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>CAMPO</Typography>
@@ -798,6 +771,31 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           </Paper>
         </Stack>}
       </DialogContent>
+    </Dialog>
+    <Dialog open={relationDialogOpen} onClose={() => setRelationDialogOpen(false)} fullWidth maxWidth="lg">
+      <DialogTitle sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
+          <Box><Typography variant="h6" fontWeight={750}>Relação Bronze → Silver</Typography><Typography variant="body2" color="text.secondary">Correspondência direta pelo identificador persistido da linha</Typography></Box>
+          <IconButton aria-label="Fechar relação com a origem" onClick={() => setRelationDialogOpen(false)}><Close /></IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent sx={{ bgcolor: "#f8fafc", p: { xs: 1.5, md: 3 } }}>
+        {sourceDetailLoading && <Box sx={{ minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center", gap: 1.5 }}><CircularProgress size={22} /><Typography>Buscando a linha de origem na Bronze...</Typography></Box>}
+        {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ mt: 2 }}>{sourceDetail.reason}</Alert>}
+        {!sourceDetailLoading && sourceDetail?.available && <Stack spacing={2} sx={{ maxWidth: 1100, mx: "auto", mt: 1 }}>
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "white" }}><Typography variant="subtitle1" fontWeight={750}>{sourceDetail.connection_name}</Typography><Typography variant="caption" color="text.secondary">{sourceDetail.blob_path || "Arquivo Bronze identificado por source_record_id"}</Typography></Paper>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, alignItems: "center", gap: 1 }}>
+            <Typography variant="overline" color="#0369a1" fontWeight={800}>BRONZE · ORIGEM</Typography><CompareArrows sx={{ display: { xs: "none", md: "block" }, color: "#64748b", mx: "auto" }} /><Typography variant="overline" color="#6d28d9" fontWeight={800}>SILVER · DESTINO</Typography>
+          </Box>
+          {(sourceDetail.pairs || []).map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, gap: 1, alignItems: "stretch" }}>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block" mb={0.5}>{pair.source_key}</Typography>{renderDetailValue(pair.source_value)}</Paper>
+            <Typography sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#94a3b8", fontSize: 22 }}>→</Typography>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block" mb={0.5}>{pair.destination_key}</Typography>{renderDetailValue(selectedDrillRow?.[pair.destination_key])}</Paper>
+          </Box>)}
+          {Object.keys(sourceDetail.source_unmatched || {}).length > 0 && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "#fffbeb", borderColor: "#fde68a" }}><Typography variant="subtitle2" fontWeight={750} color="#92400e" mb={1}>Campos de origem sem correspondência ({Object.keys(sourceDetail.source_unmatched || {}).length})</Typography><Stack spacing={0.75}>{Object.entries(sourceDetail.source_unmatched || {}).sort(([a], [b]) => columnNameCompare.compare(a, b)).map(([name, value]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(160px, 30%) minmax(0,1fr)" }, gap: 1, p: 1, bgcolor: "white", borderRadius: 1.5 }}><Typography variant="caption" fontWeight={750} color="#a16207">{name}</Typography><Box>{renderDetailValue(value)}</Box></Box>)}</Stack></Paper>}
+        </Stack>}
+      </DialogContent>
+      <DialogActions><Button onClick={() => setRelationDialogOpen(false)}>Fechar</Button></DialogActions>
     </Dialog>
     <Dialog open={savedViewsOpen} onClose={() => setSavedViewsOpen(false)} fullWidth maxWidth="sm">
       <DialogTitle>Escolher visão salva</DialogTitle>

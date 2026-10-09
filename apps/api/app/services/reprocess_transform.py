@@ -103,6 +103,8 @@ def build_chunk_payload(
     *,
     records: list[dict[str, Any]],
     connection_id: int,
+    blob_id: int = 0,
+    row_offset: int = 0,
     connection_code: str,
     billing_period: str,
     brules: list[Any],
@@ -115,6 +117,8 @@ def build_chunk_payload(
     return {
         "records": records,
         "connection_id": connection_id,
+        "blob_id": blob_id,
+        "row_offset": row_offset,
         "connection_code": connection_code,
         "billing_period": str(billing_period),
         "brules": [serialize_business_rule(rule) for rule in brules],
@@ -150,6 +154,13 @@ def transform_reprocess_chunk(payload: dict[str, Any]) -> list[dict[str, Any]]:
     target["source_connection_id"] = payload["connection_id"]
     target["_billing_period"] = billing_period
     target["tipo"] = "realizado"
+    from app.services.clone_engine import assign_source_record_ids
+    target = assign_source_record_ids(
+        target,
+        connection_id=payload["connection_id"],
+        blob_id=payload["blob_id"],
+        row_offset=payload["row_offset"],
+    )
 
     if "TotalCostOnDemandBRL" in dest_col_names:
         def _num(col: str) -> pd.Series:

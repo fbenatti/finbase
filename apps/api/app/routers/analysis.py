@@ -319,21 +319,24 @@ class PivotDrillDownRequest(PivotRequest):
 
 class PivotSourceDetailRequest(BaseModel):
     destination_table_id: int
-    source_record_id: str
+    source_record_id: str | None = None
 
 
 @router.post("/pivot/source-detail")
 async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """Resolve a Gold row's stable provenance key to its original Bronze row."""
+    """Resolve a Silver row to its immutable Bronze source using provenance ID."""
     from app.models.destination import SourceDestinationMapping
 
-    parts = req.source_record_id.split(":")
-    if len(parts) != 3 or not all(part.isdigit() for part in parts):
-        return {"available": False, "reason": "Este registro não possui uma referência de origem recuperável."}
+    parts = (req.source_record_id or "").split(":")
+    has_record_pointer = len(parts) == 3 and all(part.isdigit() for part in parts)
+    if not has_record_pointer:
+        return {"available": False, "reason": "Esta linha ainda não tem source_record_id. Reprocesse a origem para gerar a linhagem."}
     connection_id, blob_id, row_offset = map(int, parts)
     connection = await db.get(SourceConnection, connection_id)
     blob = await db.get(IngestedBlob, blob_id)
-    if not connection or not blob or blob.connection_id != connection_id:
+    if not connection or connection_id is None:
+        return {"available": False, "reason": "A conexão de origem desta linha não existe mais."}
+    if not blob or blob.connection_id != connection_id:
         return {"available": False, "reason": "O arquivo de origem deste registro não está mais disponível."}
     mappings = (await db.execute(select(SourceDestinationMapping).where(
         SourceDestinationMapping.source_connection_id == connection_id,
@@ -361,15 +364,16 @@ async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = 
 
     origin_row = await asyncio.to_thread(read_origin_row)
     if origin_row is None:
-        return {"available": False, "reason": "Não foi possível localizar a linha original no Bronze."}
+        return {"available": False, "reason": "O source_record_id não encontrou a linha correspondente na Bronze."}
     active_pairs = []
     matched_source_fields: set[str] = set()
     for mapping in mappings:
-        if mapping.source_column in origin_row:
-            matched_source_fields.add(mapping.source_column)
+        source_key = next((name for name in origin_row if name.lower() == mapping.source_column.lower()), None)
+        if source_key:
+            matched_source_fields.add(source_key)
             active_pairs.append({
-                "source_key": mapping.source_column,
-                "source_value": origin_row[mapping.source_column],
+                "source_key": source_key,
+                "source_value": origin_row[source_key],
                 "destination_key": mapping.destination_column,
             })
     excluded = {"_billing_period", "_blob_path", "_ingested_at", "_source_file", "source_record_id"}
@@ -377,7 +381,7 @@ async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = 
     return {
         "available": True,
         "connection_name": connection.name,
-        "blob_path": blob.blob_path,
+        "blob_path": blob.blob_path if blob else origin_row.get("_blob_path"),
         "pairs": active_pairs,
         "source_unmatched": unmatched,
     }

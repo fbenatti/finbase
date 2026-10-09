@@ -1273,9 +1273,13 @@ def _process_blob_for_reprocess(
                 for chunk in source_batches:
                     if _check_cancelled(task_id):
                         return None
+                    chunk_row_offset = source_row_offset
+                    source_row_offset += len(chunk)
                     payload = build_chunk_payload(
                         records=chunk.to_dict(orient="records"),
                         connection_id=connection_id,
+                        blob_id=blob_id,
+                        row_offset=chunk_row_offset,
                         connection_code=connection_code,
                         billing_period=str(billing_period),
                         brules=brules,
@@ -1310,14 +1314,16 @@ def _process_blob_for_reprocess(
                 target["cloud_origem"] = connection_code
                 target["source_connection_id"] = connection_id
                 target["_billing_period"] = str(billing_period)
-                if clone_engine is not None:
-                    from app.services.clone_engine import assign_source_record_ids
-                    target = assign_source_record_ids(
-                        target,
-                        connection_id=connection_id,
-                        blob_id=blob_id,
-                        row_offset=chunk_row_offset,
-                    )
+                # Give every Silver record a stable pointer back to its
+                # immutable Bronze row, including sources without clone rules.
+                # Format: connection_id:ingested_blob_id:zero_based_row_offset.
+                from app.services.clone_engine import assign_source_record_ids
+                target = assign_source_record_ids(
+                    target,
+                    connection_id=connection_id,
+                    blob_id=blob_id,
+                    row_offset=chunk_row_offset,
+                )
                 # Gold facts are historical realized data. Keeping this explicit
                 # on every mapped batch prevents downstream Forecast from having
                 # to infer a null type after a future schema evolution.

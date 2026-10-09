@@ -4039,8 +4039,8 @@ export interface PivotSourceDetail {
   pairs?: Array<{ source_key: string; source_value: unknown; destination_key: string }>;
   source_unmatched?: Record<string, unknown>;
 }
-export async function getPivotSourceDetail(destination_table_id: number, source_record_id: string): Promise<PivotSourceDetail> {
-  return (await api.post("/analysis/pivot/source-detail", { destination_table_id, source_record_id })).data;
+export async function getPivotSourceDetail(destination_table_id: number, row: Record<string, unknown>): Promise<PivotSourceDetail> {
+  return (await api.post("/analysis/pivot/source-detail", { destination_table_id, source_record_id: row.source_record_id ?? null })).data;
 }
 export interface PivotRecordRequest {
   destination_table_id: number;
