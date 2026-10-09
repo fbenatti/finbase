@@ -192,6 +192,7 @@ def _queue_reclassification_schedule(schedule_row, session) -> list[int]:
                     rows_normalized=0, rows_destination=0, total_blobs=0, processed_blobs=0,
                     errors=[], phase=f"Agendado: reclassificar fonte {connection_id}, mês {period}",
                     result_json={"schedule_id": schedule_row.id, "scheduled_reprocess": True,
+                                 "scheduled_pipeline": True,
                                  "period_mode": cfg.get("period_mode", "selected"),
                                  "forecast_config_ids": cfg.get("forecast_config_ids", []),
                                  "accuracy": cfg.get("accuracy", True),

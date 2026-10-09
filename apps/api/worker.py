@@ -253,7 +253,7 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
         # source/month.  Only the final one may release the single full
         # forecast; otherwise each completed slice can enqueue another run.
         sibling_tasks = session.query(EtlTask).filter(
-            EtlTask.task_type == "reprocess",
+            EtlTask.task_type.in_(["reprocess", "reclassification"]),
             EtlTask.status.in_(["QUEUED", "RUNNING"]),
         ).all()
         if any(
@@ -1200,7 +1200,7 @@ def consumer_main(worker_id: int):
                                 # tarefa do grupo enfileira a Gold (visão completa
                                 # = realizado + forecast + rateio) na fila do worker.
                                 if succeeded:
-                                    if (terminal_task.result_json or {}).get("scheduled_pipeline"):
+                                    if (terminal_task.result_json or {}).get("scheduled_pipeline") or (terminal_task.result_json or {}).get("scheduled_reprocess"):
                                         scheduled_forecasts = _queue_scheduled_forecasts(task_id, terminal_task.result_json or {}, terminal_session)
                                         if scheduled_forecasts:
                                             terminal_task.phase = ((terminal_task.phase or "") + f" · Forecast(s) na fila: {len(scheduled_forecasts)}")[:200]
