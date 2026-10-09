@@ -179,7 +179,7 @@ interface UserModelDetailsResponse {
   contractual_invoice_credits?: number;
   summary: {
     total_credits: number;
-    quota: number;
+    quota: number | null;
     overage_credits: number;
     is_overage: boolean;
     overage_pct: number;
@@ -707,13 +707,21 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
 
                 <Paper elevation={0} sx={{ p: 2.5, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
                   <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="subtitle2" fontWeight={700} color="primary.main">Consumo e franquia individual</Typography>
+                    <Typography variant="subtitle2" fontWeight={700} color="primary.main">
+                      {userDetails?.is_billing_account ? "Créditos registrados na fatura" : "Consumo e franquia individual"}
+                    </Typography>
                   </Box>
                   <Typography variant="h4" fontWeight={800}>{compact(selectedUser.total_credits)} <Typography component="span" variant="body2">créditos de IA no mês</Typography></Typography>
-                  <Typography variant="caption" color="text.secondary" display="block">Franquia mensal: {num.format(userDetails?.summary.quota ?? selectedUser.individual_credit_allowance ?? 3000)} créditos</Typography>
-                  <Typography variant="caption" color={(userDetails?.summary.overage_credits ?? selectedUser.individual_credit_overage ?? 0) > 0 ? "error.main" : "success.main"}>
-                    Excesso: {compact(userDetails?.summary.overage_credits ?? selectedUser.individual_credit_overage ?? 0)} créditos
-                  </Typography>
+                  {userDetails?.is_billing_account ? (
+                    <Typography variant="caption" color="text.secondary">Rateio da fatura corporativa, sem atribuição de franquia ou excedente individual.</Typography>
+                  ) : (
+                    <>
+                      <Typography variant="caption" color="text.secondary" display="block">Franquia mensal: {num.format(userDetails?.summary.quota ?? selectedUser.individual_credit_allowance ?? 3000)} créditos</Typography>
+                      <Typography variant="caption" color={(userDetails?.summary.overage_credits ?? selectedUser.individual_credit_overage ?? 0) > 0 ? "error.main" : "success.main"}>
+                        Excesso: {compact(userDetails?.summary.overage_credits ?? selectedUser.individual_credit_overage ?? 0)} créditos
+                      </Typography>
+                    </>
+                  )}
                 </Paper>
 
                 <Paper elevation={0} sx={{ p: 2, border: "1px solid #e2e8f0", borderRadius: 2 }}>
