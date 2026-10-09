@@ -630,12 +630,7 @@ def _shared_cost_pivot_filters(
     rateio_type = names.get("tipo")
     if not rateio_type:
         raise HTTPException(status_code=422, detail="A tabela não possui a coluna tipo para filtrar custo compartilhado")
-    required = [PivotFilter(column=rateio_type, values=["rateio"], operator="IN")]
-    # Before rateio_kind was introduced, every tipo=rateio row was legacy
-    # shared cost, so old planning snapshots remain readable through this view.
-    if names.get("rateio_kind"):
-        required.append(PivotFilter(column=names["rateio_kind"], values=["shared_cost"], operator="IN"))
-    return [*filters, *required]
+    return [*filters, PivotFilter(column=rateio_type, values=["shared_cost"], operator="IN")]
 
 
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
@@ -3251,19 +3246,15 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
         except Exception:
             pass
 
-        # Shared-cost adjustments share the monthly planning table with
-        # forecast. Expose a separate pivot source that filters only the
-        # legacy shared_cost kind, keeping it distinct from the newer rateio.
+        # Rateio rows share the monthly planning table with forecast. Expose
+        # them separately so this pivot source stays independent of forecast.
         try:
             planning_schema = await _describe_layer_schema(planning_name, None, namespace=layers.detail_layer())
             columns = {name.lower(): name for name in planning_schema}
             period_col = columns.get("period")
             tipo_col = columns.get("tipo")
             if period_col and tipo_col:
-                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) = 'rateio'"
-                if columns.get("rateio_kind"):
-                    kind_col = _quote_ident(columns["rateio_kind"])
-                    where += f" AND lower(CAST({kind_col} AS VARCHAR)) = 'shared_cost'"
+                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) = 'shared_cost'"
                 shared_count = await trino_execute(
                     f"SELECT COUNT(*) AS cnt FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where}"
                 )
@@ -3278,7 +3269,7 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
                         "id": shared_cost_pivot_id(int(tid)),
                         "name": f"Custo compartilhado · {tname}",
                         "physical_name": planning_name,
-                        "description": "Ajustes de custo compartilhado (tipo legado shared_cost)",
+                        "description": "Linhas de rateio de consumo (tipo shared_cost)",
                         "row_count": shared_rows,
                         "periods": [{"period": str(p["period"]), "count": p["cnt"]} for p in (shared_period_rows or [])],
                         "analysis_only": True,
