@@ -385,7 +385,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
       <Stack direction="row" justifyContent="flex-end" sx={{ mb: 3 }}>
         <FormControl size="small" sx={{ minWidth: 220, bgcolor: "background.paper" }}>
           <InputLabel id="copilot-period-label">Período / Mês de Referência</InputLabel>
-          <Select labelId="copilot-period-label" value={period} onChange={(e) => setPeriod(e.target.value)}>
+          <Select labelId="copilot-period-label" label="Período / Mês de Referência" value={period} onChange={(e) => setPeriod(e.target.value)}>
             {AVAILABLE_PERIODS.map((p) => <MenuItem key={p.value} value={p.value}>{p.label}</MenuItem>)}
           </Select>
         </FormControl>
