@@ -676,6 +676,9 @@ async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncS
         raise HTTPException(422, "Informe identification_clauses, identification_values ou escopo")
     allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL", "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_VALIDITY"}
     if body.behavior not in allowed: raise HTTPException(422, "Comportamento de forecast inválido")
+    if body.behavior in {"RECURRING_MONTHLY", "RECURRING_UNTIL_END"}:
+        if body.behavior_options.get("current_month_policy", "AUTO") not in {"AUTO", "ZERO_WHEN_REALIZED", "DAILY_REMAINDER"}:
+            raise HTTPException(422, "Política do mês corrente inválida")
     if body.behavior == "SOURCE_VALIDITY":
         days = body.behavior_options.get("max_age_days")
         if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:

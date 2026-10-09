@@ -295,7 +295,17 @@ def _replicated_month_value(
     current_month_realized: float,
     growth_rate: float,
     lumpy: bool = False,
+    current_month_policy: str = "AUTO",
 ) -> float | None:
+    if behavior in {"RECURRING_MONTHLY", "RECURRING_UNTIL_END"} and forecast_month == current_month_key:
+        if current_month_policy == "ZERO_WHEN_REALIZED":
+            # Monthly charges already booked close this month's projection,
+            # independently of sparse-day detection or a prior-month anchor.
+            if current_month_realized != 0.0:
+                return 0.0
+            return last_closed_month_total if last_closed_month_total != 0.0 else None
+        if current_month_policy == "DAILY_REMAINDER":
+            return None
     if last_closed_month_total <= 0:
         return None
     offset = _month_offset(current_month_key, forecast_month)
@@ -437,6 +447,7 @@ def _apply_forecast_business_rules(
                     current_month_realized=float(ctx["current_month_realized"]),
                     growth_rate=growth_rate,
                     lumpy=bool(ctx.get("lumpy")),
+                    current_month_policy=str((getattr(rule, "behavior_options", None) or {}).get("current_month_policy", "AUTO")),
                 )
                 if replicated is not None:
                     output.at[idx, "forecast_value"] = replicated

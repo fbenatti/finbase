@@ -122,6 +122,7 @@ const emptyRule = {
   scopeText: "",
   priority: 10,
   active: true,
+  currentMonthPolicy: "AUTO",
 };
 
 export default function ForecastRuleDialog({ open, initial, config, meta, onClose, onSaved }: Props) {
@@ -148,6 +149,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
       reference_column: initial.reference_column || "",
       scopeText: formatScope(initial.scope || {}),
       maxAgeDays: Number(initial.behavior_options?.max_age_days ?? 30),
+      currentMonthPolicy: String(initial.behavior_options?.current_month_policy ?? "AUTO"),
     });
   }, [open, initial, config]);
 
@@ -184,7 +186,11 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
           .filter(Boolean),
         value_column: rule.value_column || config.measure_column,
         scope: parseScope(rule.scopeText || ""),
-        behavior_options: rule.behavior === "SOURCE_VALIDITY" ? { max_age_days: Number(rule.maxAgeDays || 30) } : {},
+        behavior_options: rule.behavior === "SOURCE_VALIDITY"
+          ? { max_age_days: Number(rule.maxAgeDays || 30) }
+          : ["RECURRING_MONTHLY", "RECURRING_UNTIL_END"].includes(rule.behavior)
+            ? { current_month_policy: rule.currentMonthPolicy || "AUTO" }
+            : {},
       });
       if (initial) await updateForecastBusinessRule(initial.id, payload);
       else await createForecastBusinessRule(config.id, payload);
@@ -427,6 +433,20 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
             )}
           </Stack>
 
+          {["RECURRING_MONTHLY", "RECURRING_UNTIL_END"].includes(rule.behavior) && (
+            <FormControl fullWidth>
+              <InputLabel>Mês corrente</InputLabel>
+              <Select label="Mês corrente" value={rule.currentMonthPolicy || "AUTO"}
+                onChange={(e) => setRule({ ...rule, currentMonthPolicy: e.target.value })}>
+                <MenuItem value="AUTO">Automático conforme o histórico de cobranças</MenuItem>
+                <MenuItem value="ZERO_WHEN_REALIZED">Zerar forecast quando já houver realizado no mês</MenuItem>
+                <MenuItem value="DAILY_REMAINDER">Projetar consumo diário dos dias restantes</MenuItem>
+              </Select>
+              <Typography variant="caption" color="text.secondary">
+                Para cobranças mensais já realizadas, zera a projeção adicional do mês. Os meses futuros seguem o valor mensal de referência.
+              </Typography>
+            </FormControl>
+          )}
           <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
             <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.startPeriod} sx={{ width: 186 }}>
               <TextField
