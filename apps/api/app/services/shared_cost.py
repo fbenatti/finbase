@@ -168,6 +168,7 @@ class ResolvedSharedCost:
     target_leaves: list[int]
     leaf_paths: dict[int, list[str]]
     custom_targets: list[tuple[list[int], float]] = field(default_factory=list)
+    allocation_type: str = "shared_cost"
 
 
 def same_cloud_leaf_ids(
@@ -289,6 +290,7 @@ def resolve_shared_costs(
             target_leaves=unique_leaves,
             leaf_paths=leaf_paths,
             custom_targets=custom_targets,
+            allocation_type=getattr(config, "allocation_type", "shared_cost") or "shared_cost",
         ))
     return resolved
 
@@ -304,6 +306,7 @@ def snapshot_enabled_shared_costs(
                 "department_id": item.donor_id,
                 "path": " > ".join(item.donor_path),
                 "mode": item.mode,
+                "allocation_type": item.allocation_type,
                 "cloud_prefix": item.cloud_prefix,
                 "projects": len(item.target_leaves),
             }
@@ -403,6 +406,7 @@ def build_rateio_rows(
                     **hierarchy_fields(config.donor_path),
                     "period": period,
                     "tipo": RATEIO_TIPO,
+                    "rateio_kind": config.allocation_type,
                     "realizado": -allocated,
                     "rateio_medida": medida,
                     "cloud_origem": config.cloud_prefix,
@@ -414,6 +418,7 @@ def build_rateio_rows(
                         **hierarchy_fields(config.leaf_paths[leaf_id]),
                         "period": period,
                         "tipo": RATEIO_TIPO,
+                        "rateio_kind": config.allocation_type,
                         "realizado": amount,
                         "rateio_medida": medida,
                         "cloud_origem": config.cloud_prefix,
@@ -432,6 +437,7 @@ def build_rateio_rows(
         key = (
             row["period"],
             row["rateio_medida"],
+            row.get("rateio_kind") or "shared_cost",
             tuple(row[f"organograma_nivel_{level}"] for level in range(1, 8)),
             row.get("cloud_origem") or "",
         )

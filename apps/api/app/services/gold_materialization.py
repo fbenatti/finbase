@@ -364,7 +364,22 @@ def _side_select(gold: str, schema: dict[str, str], dims: list[str], measure_ali
         resolved = _resolve_column(schema, dim)
         if resolved:
             ref = f"{table_alias}.{_quote_ident(resolved)}" if table_alias else _quote_ident(resolved)
-            exprs.append(f"CAST({ref} AS VARCHAR) AS {_quote_ident(dim)}")
+            if (
+                key == "tipo"
+                and "rateio_kind" in schema
+                and "rateio_medida" in schema
+            ):
+                kind_ref = f"{table_alias}.{_quote_ident(schema['rateio_kind'])}" if table_alias else _quote_ident(schema["rateio_kind"])
+                measure_ref = f"{table_alias}.{_quote_ident(schema['rateio_medida'])}" if table_alias else _quote_ident(schema["rateio_medida"])
+                exprs.append(
+                    f"CASE WHEN lower(CAST({ref} AS VARCHAR)) = 'rateio' "
+                    f"AND lower(CAST({kind_ref} AS VARCHAR)) = 'rateio' "
+                    f"THEN CASE lower(CAST({measure_ref} AS VARCHAR)) "
+                    f"WHEN 'realizado' THEN 'realizado' WHEN 'forecast' THEN 'forecast' "
+                    f"ELSE 'rateio' END ELSE CAST({ref} AS VARCHAR) END AS {_quote_ident(dim)}"
+                )
+            else:
+                exprs.append(f"CAST({ref} AS VARCHAR) AS {_quote_ident(dim)}")
         elif key in {"period", "_billing_period"} and period_physical.get(gold) and period_physical[gold] != dim:
             ref = f"{table_alias}.{_quote_ident(period_physical[gold])}" if table_alias else _quote_ident(period_physical[gold])
             exprs.append(f"CAST({ref} AS VARCHAR) AS {_quote_ident(dim)}")
