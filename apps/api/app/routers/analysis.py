@@ -2478,10 +2478,16 @@ async def _expected_view_core(
             period = str(row.get("period") or "")
             medida = str(row.get("rateio_medida") or "").lower()
             fact = {"period": row.get("period"), "driver": row.get("driver"), "value": row.get("value")}
-            if period in closed_periods:
-                if medida != RATEIO_MEDIDA_FORECAST:
-                    actual_rateio.append(fact)
-            elif medida != RATEIO_MEDIDA_ACTUAL:
+            # A medida calculada no rateio é a fonte da classificação. Um
+            # projeto destinatário pode não ter consumo próprio no mês e ainda
+            # assim receber rateio realizado.
+            if medida == RATEIO_MEDIDA_ACTUAL:
+                actual_rateio.append(fact)
+            elif medida == RATEIO_MEDIDA_FORECAST:
+                forecast_rateio.append(fact)
+            elif period in closed_periods:
+                actual_rateio.append(fact)
+            else:
                 forecast_rateio.append(fact)
         apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_actual_value")
         apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_forecast_value")

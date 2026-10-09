@@ -132,6 +132,23 @@ def test_expected_view_overlay_is_sum_of_rateio_rows():
     assert actual_by_driver["Proj X"] == 150
 
 
+def test_realized_rateio_marks_period_for_recipient_without_own_cost():
+    from app.services.shared_cost import apply_rateio_facts
+
+    by_period: dict[str, dict[str, Any]] = {}
+    actual_by_driver: dict[str, float] = {}
+    apply_rateio_facts(
+        [{"period": "202601", "driver": "CONDOMINIO TESTE", "value": 25.0}],
+        by_period,
+        actual_by_driver,
+        "shared_actual_value",
+    )
+
+    assert by_period["202601"]["actual_value"] == 0.0
+    assert by_period["202601"]["shared_actual_value"] == 25.0
+    assert by_period["202601"]["shared_received"] == 25.0
+
+
 def test_rateio_facts_split_received_and_given_in_the_same_period():
     from app.services.shared_cost import apply_rateio_facts
 

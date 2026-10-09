@@ -457,6 +457,11 @@ def apply_rateio_facts(
         if not period or abs(value) < 1e-12:
             continue
         current = by_period_facts.setdefault(period, {"period": period, "actual_value": None, "forecast_value": None})
+        if measure_key == "shared_actual_value" and current.get("actual_value") is None:
+            # Torna explícito o mês realizado para um destinatário sem custo
+            # próprio; a Visão Esperada usa actual_value != None para exibir
+            # recebido no realizado.
+            current["actual_value"] = 0.0
         current[measure_key] = float(current.get(measure_key) or 0) + value
         if measure_key.startswith("shared_"):
             if measure_key != "shared_value":
