@@ -240,12 +240,14 @@ export function DepartmentTreeMultiPicker({
   onChange,
   label = ORG.node,
   placeholder = ORG.selectNode,
+  allowMixedLevels = false,
 }: {
   departments: Department[];
   values: number[];
   onChange: (departmentIds: number[]) => void;
   label?: string;
   placeholder?: string;
+  allowMixedLevels?: boolean;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -264,6 +266,10 @@ export function DepartmentTreeMultiPicker({
     if (!item) return;
     if (selected.has(department.id)) {
       onChange(values.filter((id) => id !== department.id));
+      return;
+    }
+    if (allowMixedLevels) {
+      onChange([...values, department.id]);
       return;
     }
     // A selection represents one hierarchy level: allow several siblings,
