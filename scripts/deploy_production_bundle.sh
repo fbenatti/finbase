@@ -54,7 +54,7 @@ git bundle verify "$local_bundle"
 scp "$local_bundle" "$remote_host:$remote_bundle"
 
 ssh "$remote_host" \
-  "git -C '$remote_dir' bundle verify '$remote_bundle' >/dev/null && git -C '$remote_dir' remote set-url origin '$remote_bundle' && cd '$remote_dir' && scripts/deploy_vm.sh && test \"\$(git rev-parse HEAD)\" = '$target'"
+  "git -C '$remote_dir' bundle verify '$remote_bundle' >/dev/null && git -C '$remote_dir' remote set-url origin '$remote_bundle' && git -C '$remote_dir' fetch origin main:refs/remotes/origin/main && git -C '$remote_dir' merge --ff-only origin/main && cd '$remote_dir' && scripts/deploy_vm.sh && test \"\$(git rev-parse HEAD)\" = '$target'"
 
 ssh "$remote_host" \
   "cd '$remote_dir' && docker compose -f docker-compose.yml -f docker-compose.vm.yml ps && docker exec openfinops-api-1 python -c 'import requests; h=requests.get(\"http://127.0.0.1:8000/etl/worker-health\", timeout=10).json(); assert h.get(\"status\")==\"ok\", h; print(h)' && docker exec openfinops-api-1 python -c 'import requests; x=requests.get(\"http://trino:8080/v1/info\", timeout=10).json(); assert not x.get(\"starting\", True), x; print(\"Trino pronto\")' && docker exec openfinops-web-1 sh -c 'wget -qO- http://127.0.0.1/ | grep -qi \"<html\"'"
