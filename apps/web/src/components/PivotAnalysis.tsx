@@ -512,7 +512,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     const isNumeric = typeof parsed === "number";
     const label = isNull ? "null" : String(parsed);
     const color = isNull ? "#a47713" : isNumeric ? "#278344" : typeof parsed === "boolean" ? (parsed ? "#278344" : "#c62828") : "#666666";
-    return <Typography component="span" variant="body2" sx={{ color, fontWeight: 600, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{label}</Typography>;
+    return <Chip component="span" label={label} size="small" variant="outlined" sx={{ display: "inline-flex", verticalAlign: "middle", width: "fit-content", maxWidth: "100%", height: "auto", borderRadius: "999px", borderColor: "#93c5fd", bgcolor: "#eff6ff", color, fontWeight: 700, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", "& .MuiChip-label": { display: "block", px: 1, py: 0.35, whiteSpace: "inherit", overflowWrap: "anywhere" } }} />;
   };
   const renderBusinessRuleJson = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
@@ -816,7 +816,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
               <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>VALOR</Typography>
             </Stack>
             {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
-              <Chip label={name} size="small" variant="outlined" sx={{ justifySelf: "start", alignSelf: "start", maxWidth: "100%", height: "auto", borderColor: "#bae6fd", bgcolor: "#f0f9ff", color: "#0369a1", fontWeight: 700, fontFamily: '"Segoe UI", sans-serif', "& .MuiChip-label": { display: "block", whiteSpace: "normal", overflowWrap: "anywhere", px: 1, py: 0.45 } }} />
+              <Typography component="span" variant="body2" sx={{ minWidth: 0, color: "#64748b", fontWeight: 600, fontFamily: '"Segoe UI", sans-serif', overflowWrap: "anywhere" }}>{name}</Typography>
               <Box sx={{ minWidth: 0 }}>{renderDecomposedFieldValue(name, value)}</Box>
             </Box>)}
           </Paper>
