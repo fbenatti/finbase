@@ -60,11 +60,21 @@ containers e verifica Trino, worker e frontend. Se uma validação falhar, não
 rode reprocessamentos como tentativa de recuperação: consulte os logs e corrija
 o serviço com o fluxo operacional adequado.
 
+Regras de negócio do Forecast são dados persistidos no PostgreSQL, não fazem
+parte do bundle de código. Quando uma alteração depender de uma regra nova ou
+ajustada, configure-a na tela visível de regras do Forecast após o deploy e
+confirme que está ativa, com escopo e opções corretos. Não codifique a regra no
+motor nem presuma que o deploy de imagem a criou. Neste rollout foi cadastrada
+na configuração 9 a regra ativa `Azure-4P - suspender após 30 dias sem dados`,
+com escopo `cloud_origem=azure-4p` e limite editável de 30 dias.
+
 O deploy é somente de código/configuração. Não restaure banco, apague volumes,
 rode reprocessamentos ou altere dados de forecast/Gold como parte da publicação,
-a menos que isso seja solicitado separadamente. `scripts/sync_production.sh
-deploy` executa diretamente o script da VM, mas não transfere um bundle novo e
-por isso não deve ser usado para releases.
+a menos que isso seja solicitado separadamente. Uma regra de negócio necessária
+ao release é uma alteração de configuração separada, feita na UI de regras e
+validada no banco de produção. `scripts/sync_production.sh deploy` executa
+diretamente o script da VM, mas não transfere um bundle novo e por isso não deve
+ser usado para releases.
 
 ## Pré-requisitos no servidor
 
