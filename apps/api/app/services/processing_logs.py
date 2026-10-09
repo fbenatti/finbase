@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -444,7 +444,7 @@ def record_processing_event(
 
 
 def backfill_processing_logs(session: Session, *, limit: int | None = None) -> int:
-    """Idempotently register legacy task rows so existing history is queryable."""
+    """Register missing task logs and repair snapshots that fell out of sync."""
     existing_task_ids = select(ProcessingLog.etl_task_id).where(ProcessingLog.etl_task_id.is_not(None))
     query = select(EtlTask).where(~EtlTask.id.in_(existing_task_ids)).order_by(EtlTask.id)
     if limit:
@@ -452,8 +452,19 @@ def backfill_processing_logs(session: Session, *, limit: int | None = None) -> i
     rows = session.execute(query).scalars().all()
     for task in rows:
         sync_etl_task_log(session, task)
+    stale_query = (
+        select(EtlTask)
+        .join(ProcessingLog, ProcessingLog.etl_task_id == EtlTask.id)
+        .where(or_(ProcessingLog.status != EtlTask.status, ProcessingLog.finished_at != EtlTask.finished_at))
+        .order_by(EtlTask.id)
+    )
+    if limit:
+        stale_query = stale_query.limit(limit)
+    stale_rows = session.execute(stale_query).scalars().all()
+    for task in stale_rows:
+        sync_etl_task_log(session, task)
     forecast_count = backfill_forecast_runs(session)
-    return len(rows) + forecast_count
+    return len(rows) + len(stale_rows) + forecast_count
 
 
 def backfill_forecast_runs(session: Session) -> int:
