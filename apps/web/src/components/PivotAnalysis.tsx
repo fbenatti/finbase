@@ -5,7 +5,7 @@ import {
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, CompareArrows, ContentCopy, Delete, Download, FiberManualRecord, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
+import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
@@ -494,25 +494,43 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const renderBusinessRuleJson = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
     if (!parsed || typeof parsed !== "object") return renderDetailValue(value);
-    const source = JSON.stringify(parsed, null, 2);
-    const tokenPattern = /("(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],:])/g;
-    const segments: React.ReactNode[] = [];
-    let cursor = 0;
-    let match: RegExpExecArray | null;
-    while ((match = tokenPattern.exec(source))) {
-      if (match.index > cursor) segments.push(source.slice(cursor, match.index));
-      const token = match[0];
-      const next = source.slice(tokenPattern.lastIndex).trimStart();
-      const color = token.startsWith('"')
-        ? (next.startsWith(":") ? "#1d4ed8" : "#047857")
-        : token === "true" || token === "false" ? "#7c3aed"
-          : token === "null" ? "#94a3b8"
-            : /^-?\d/.test(token) ? "#0369a1" : "#64748b";
-      segments.push(<Box component="span" key={`${match.index}-${token}`} sx={{ color, fontWeight: token.startsWith('"') && next.startsWith(":") ? 700 : 500 }}>{token}</Box>);
-      cursor = tokenPattern.lastIndex;
-    }
-    if (cursor < source.length) segments.push(source.slice(cursor));
-    return <Box component="pre" sx={{ m: 0, p: 1.5, overflow: "auto", borderRadius: 1.5, border: "1px solid #e2e8f0", bgcolor: "#f8fafc", color: "#334155", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 12.5, lineHeight: 1.65, whiteSpace: "pre" }}>{segments}</Box>;
+    const palettes = [
+      { text: "#4338ca", border: "#c7d2fe", surface: "#f5f3ff" },
+      { text: "#0369a1", border: "#bae6fd", surface: "#f0f9ff" },
+      { text: "#b45309", border: "#fde68a", surface: "#fffbeb" },
+    ];
+    const renderValue = (item: unknown, depth = 0): React.ReactNode => {
+      const current = parseJsonValue(item);
+      const palette = palettes[depth % palettes.length];
+      if (current && typeof current === "object") {
+        const array = Array.isArray(current);
+        const entries = array
+          ? current.map((child, index) => [String(index), child] as [string, unknown])
+          : Object.entries(current as Record<string, unknown>).sort(([left], [right]) => columnNameCompare.compare(left, right));
+        if (!entries.length) return <Chip size="small" label={array ? "lista vazia" : "objeto vazio"} variant="outlined" sx={{ borderColor: palette.border, color: palette.text, bgcolor: palette.surface }} />;
+        return <Stack spacing={0.75} sx={{ pl: depth ? 1.25 : 0, borderLeft: depth ? `2px solid ${palette.border}` : "none" }}>
+          {entries.map(([name, child]) => {
+            const childValue = parseJsonValue(child);
+            const nested = childValue !== null && typeof childValue === "object";
+            const childEntries = nested ? (Array.isArray(childValue) ? childValue : Object.values(childValue as Record<string, unknown>)) : [];
+            return <Paper key={`${depth}-${name}`} variant="outlined" sx={{ overflow: "hidden", borderColor: nested ? palette.border : "#e2e8f0", borderRadius: 1.5, boxShadow: "none" }}>
+              {nested ? <>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", px: 1.25, py: 0.75, bgcolor: palette.surface }}>
+                  <Chip size="small" label={array ? `#${Number(name) + 1}` : name} sx={{ height: 24, maxWidth: "100%", bgcolor: "white", color: palette.text, border: `1px solid ${palette.border}`, fontWeight: 700, fontFamily: '"Segoe UI", sans-serif', "& .MuiChip-label": { overflowWrap: "anywhere" } }} />
+                  <Typography variant="caption" sx={{ color: "#64748b" }}>{Array.isArray(childValue) ? `${childEntries.length} ${childEntries.length === 1 ? "item" : "itens"}` : `${childEntries.length} ${childEntries.length === 1 ? "campo" : "campos"}`}</Typography>
+                </Box>
+                <Box sx={{ p: 1.25 }}>{renderValue(child, depth + 1)}</Box>
+              </> : <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(130px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 1.25 }, alignItems: "center", px: 1.25, py: 0.9, bgcolor: "#fff" }}>
+                <Chip size="small" label={array ? `#${Number(name) + 1}` : name} variant="outlined" sx={{ justifySelf: "start", height: 24, maxWidth: "100%", borderColor: palette.border, color: palette.text, bgcolor: palette.surface, fontWeight: 700, fontFamily: '"Segoe UI", sans-serif', "& .MuiChip-label": { overflowWrap: "anywhere" } }} />
+                <Box sx={{ minWidth: 0 }}>{renderDetailValue(child)}</Box>
+              </Box>}
+            </Paper>;
+          })}
+        </Stack>;
+      }
+      return renderDetailValue(current);
+    };
+    return <Box sx={{ p: 1.25, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#fff", boxShadow: "0 2px 8px rgba(15,23,42,.04)" }}>{renderValue(parsed)}</Box>;
   };
 
   const openSelectedRow = (row: Record<string, unknown>) => {
@@ -763,10 +781,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             </Stack>
             {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
               <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"Segoe UI", sans-serif', lineHeight: 1.7 }}>{name}</Typography>
-              <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0 }}>
-                <FiberManualRecord sx={{ color: "#9ca3af", fontSize: 8, mt: "7px", flex: "0 0 8px" }} />
-                <Box sx={{ minWidth: 0, flex: 1 }}>{name.toLowerCase() === "business_rule" ? renderBusinessRuleJson(value) : renderDetailValue(value)}</Box>
-              </Stack>
+              <Box sx={{ minWidth: 0 }}>{name.toLowerCase() === "business_rule" ? renderBusinessRuleJson(value) : renderDetailValue(value)}</Box>
             </Box>)}
           </Paper>
         </Stack>}
