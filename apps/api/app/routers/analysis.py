@@ -838,6 +838,8 @@ def _destination_id_for_origin(table_id: int, origin_value: str | None) -> int:
     label = origin_value.strip().lower()
     if label in {"forecast", "previsto", "planejado"}:
         return -abs(table_id) if table_id else table_id
+    if label in {"custo compartilhado", "shared_cost"}:
+        return shared_cost_pivot_id(table_id) if table_id else table_id
     if label in {"realizado", "actual", "gold"}:
         return abs(table_id)
     return table_id
@@ -1592,11 +1594,13 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
                 )
                 break
 
-    # Determine an origin label for each side. Planning pseudo-destinations
-    # (negative id, or a name ending in `_planning`) map to "forecast".
+    # Cost-sharing and forecast sources can both point at the planning table,
+    # but retain independent origin labels and filters in the union.
     origin_values: list[str] = []
     for table_id, safe_name, _schema in sides:
-        if table_id < 0 or safe_name.endswith("_planning"):
+        if is_shared_cost_pivot_id(table_id):
+            origin_values.append("Custo compartilhado")
+        elif table_id < 0 or safe_name.endswith("_planning"):
             origin_values.append("forecast")
         else:
             origin_values.append("realizado")
@@ -1670,6 +1674,8 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         extra_filters = list(side_filters(schema))
         if origin == "forecast" and "tipo" in schema:
             extra_filters.append(PivotFilter(column="tipo", values=["forecast", "forecast-manual"], operator="IN"))
+        elif origin == "Custo compartilhado":
+            extra_filters = _shared_cost_pivot_filters(_table_id, schema, extra_filters)
         filter_sql = _where_clause(extra_filters)
         layer_from = await _layer_from(db, _table_id, safe_name, schema)
         union_parts.append(
