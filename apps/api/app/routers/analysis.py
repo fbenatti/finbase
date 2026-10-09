@@ -619,6 +619,25 @@ _FORECAST_MANUAL_SCHEMA = {
 }
 
 
+def _shared_cost_pivot_filters(
+    destination_id: int,
+    schema: dict[str, str],
+    filters: list[PivotFilter],
+) -> list[PivotFilter]:
+    if not is_shared_cost_pivot_id(destination_id):
+        return filters
+    names = {name.lower(): name for name in schema}
+    rateio_type = names.get("tipo")
+    if not rateio_type:
+        raise HTTPException(status_code=422, detail="A tabela não possui a coluna tipo para filtrar custo compartilhado")
+    required = [PivotFilter(column=rateio_type, values=["rateio"], operator="IN")]
+    # Before rateio_kind was introduced, every tipo=rateio row was legacy
+    # shared cost, so old planning snapshots remain readable through this view.
+    if names.get("rateio_kind"):
+        required.append(PivotFilter(column=names["rateio_kind"], values=["shared_cost"], operator="IN"))
+    return [*filters, *required]
+
+
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
     if destination_table_id == FORECAST_MANUAL_PIVOT_ID:
         return _FORECAST_MANUAL_PIVOT_NAME, dict(_FORECAST_MANUAL_SCHEMA)
@@ -1478,12 +1497,13 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
     if req.destination_table_id == FORECAST_MANUAL_PIVOT_ID:
         return await _run_forecast_manual_pivot_core(req, db, trino_kwargs)
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
+    req.filters = _shared_cost_pivot_filters(req.destination_table_id, schema, req.filters)
     _canonicalize_request(req, schema)
     # Planning pseudo-destinations hold the monthly forecast snapshot (tipo
     # forecast/realizado/rateio). A single-table pivot over them should behave
     # like the union's forecast side: only the forecast rows, unless the user
     # already constrained tipo themselves.
-    if req.destination_table_id < 0 and "tipo" in schema and not any(f.column == "tipo" for f in req.filters):
+    if req.destination_table_id < 0 and not is_shared_cost_pivot_id(req.destination_table_id) and "tipo" in schema and not any(f.column == "tipo" for f in req.filters):
         req.filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
     rows, columns, measures = _validate_pivot_request(req, schema)
     req.filters, auto_period = await _inject_latest_period_filter(
