@@ -65,7 +65,8 @@ def test_closed_month_without_series_rows_is_materialized_as_zero():
     ctx = _build_series_context(closed, date(2026, 8, 31))
 
     assert float(closed[closed.index.month == 8].sum()) == 0.0
-    assert ctx["last_closed_month_total"] == 0.0
+    assert ctx["monthly_realized"]["202608"] == 0.0
+    assert ctx["last_closed_month_total"] == 3100.0
 
 
 def test_open_month_without_rows_is_not_closed_before_cutoff():

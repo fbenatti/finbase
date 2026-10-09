@@ -56,7 +56,7 @@ def test_source_validity_keeps_data_at_boundary_and_simulation_clock():
 
 
 def test_source_validity_uses_simulated_date_not_wall_clock():
-    output, _ = _case(date(2026, 7, 2), evaluated_at=date(2026, 8, 2))
+    output, _ = _case(date(2026, 7, 3), evaluated_at=date(2026, 8, 2))
     assert output["forecast_value"].tolist() == [120.0, 120.0, 20.0]
 
 
