@@ -1129,6 +1129,8 @@ export interface TaskStatus {
   rows_raw?: number;
   rows_normalized?: number;
   rows_destination: number;
+  forecast_total_series?: number;
+  forecast_processed_series?: number;
   current_blob: string | null;
   current_blob_size?: number;
   download_bytes?: number;

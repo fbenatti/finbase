@@ -41,6 +41,8 @@ export interface NotificationItem {
   total: number;
   processed: number;
   rows: number;
+  forecastTotalSeries: number;
+  forecastProcessedSeries: number;
   phase: string;
   current: string;
   scope: string;
@@ -138,6 +140,12 @@ function reprocessStageLabel(item: NotificationItem): string {
 }
 
 function progressFor(task: TaskStatus): number {
+  if (kindOf(task) === "forecast") {
+    const total = Number(task.forecast_total_series || 0);
+    const processed = Number(task.forecast_processed_series || 0);
+    if (task.status === "COMPLETED" || task.status === "FAILED" || task.status === "CANCELLED") return 100;
+    return total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 0;
+  }
   if (kindOf(task) === "backup") {
     const total = Number(task.total_download_bytes || 0);
     return total > 0 ? Math.min(99, Math.round((Number(task.downloaded_bytes_total || 0) / total) * 100)) : 0;
@@ -157,6 +165,20 @@ function progressFor(task: TaskStatus): number {
 }
 
 function progressCaption(task: TaskStatus): string {
+  if (kindOf(task) === "forecast") {
+    const rows = Number(task.rows_destination || 0).toLocaleString("pt-BR");
+    const total = Number(task.forecast_total_series || 0);
+    const processed = Number(task.forecast_processed_series || 0);
+    if (total > 0) return `${rows} linhas · ${processed}/${total} séries`;
+    if (task.status === "COMPLETED") {
+      return Number(task.rows_destination || 0) > 0
+        ? `${rows} linhas · total de séries indisponível`
+        : "0 linhas · nenhuma série projetada";
+    }
+    return Number(task.rows_destination || 0) > 0
+      ? `${rows} linhas · forecast em finalização`
+      : "Calculando séries do forecast";
+  }
   if (String(task.task_type || task.type || "") === "backup") {
     const bytes = Number(task.downloaded_bytes_total || 0);
     const elapsed = task.started_at ? formatElapsed(Date.now() - new Date(task.started_at).getTime()) : "calculando";
@@ -252,9 +274,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       title: titleFor(task, connections),
       status: task.status,
       progress: progressFor(task),
-      total: task.total_blobs || 0,
-      processed: task.processed_blobs || 0,
+      total: kindOf(task) === "forecast" ? Number(task.forecast_total_series || 0) : task.total_blobs || 0,
+      processed: kindOf(task) === "forecast" ? Number(task.forecast_processed_series || 0) : task.processed_blobs || 0,
       rows: task.rows_destination || 0,
+      forecastTotalSeries: Number(task.forecast_total_series || 0),
+      forecastProcessedSeries: Number(task.forecast_processed_series || 0),
       phase: task.phase || "",
       current: task.current_blob || "",
       scope: scopeFor(task, connections),
@@ -291,9 +315,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             title: titleFor(task, connections),
             status: task.status,
             progress: progressFor(task),
-            total: task.total_blobs || 0,
-            processed: task.processed_blobs || 0,
+            total: kindOf(task) === "forecast" ? Number(task.forecast_total_series || 0) : task.total_blobs || 0,
+            processed: kindOf(task) === "forecast" ? Number(task.forecast_processed_series || 0) : task.processed_blobs || 0,
             rows: task.rows_destination || 0,
+            forecastTotalSeries: Number(task.forecast_total_series || 0),
+            forecastProcessedSeries: Number(task.forecast_processed_series || 0),
             phase: task.phase || "",
             current: task.current_blob || "",
             scope: scopeFor(task, connections),
@@ -321,35 +347,51 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       const missing = itemsRef.current.filter(
         (i) => (i.status === "QUEUED" || i.status === "RUNNING") && !activeIds.has(i.id)
       );
-      const finalStatus = new Map<number, string>();
+      const finalTasks = new Map<number, TaskStatus>();
       if (missing.length > 0) {
         const finals = await Promise.all(
           missing.map((m) => getTaskStatus(m.id).catch(() => null))
         );
         missing.forEach((m, index) => {
-          finalStatus.set(m.id, finals[index]?.status || "COMPLETED");
+          if (finals[index]) finalTasks.set(m.id, finals[index]);
         });
       }
       setItems((prev) => {
         let next = [...prev];
         for (const m of missing) {
-          const status = finalStatus.get(m.id) || "COMPLETED";
+          const task = finalTasks.get(m.id);
+          if (!task) continue;
           const idx = next.findIndex((i) => i.id === m.id);
           if (idx >= 0) {
             const existing = next[idx];
-            if (!existing.read) {
-              const statusText = status === "COMPLETED" ? "concluído" : "finalizado";
+            const isTerminal = task.status !== "QUEUED" && task.status !== "RUNNING";
+            if (isTerminal && !existing.read) {
+              const statusText = task.status === "COMPLETED" ? "concluído" : "finalizado";
               enqueueSnackbar(
-                titleFor({ ...existing, status } as unknown as TaskStatus, connections) + " " + statusText,
-                status === "COMPLETED" ? "success" : "error"
+                titleFor(task, connections) + " " + statusText,
+                task.status === "COMPLETED" ? "success" : "error"
               );
             }
             next = next.map((i) =>
               i.id === m.id
                 ? {
                     ...i,
-                    status,
-                    progress: 100,
+                    kind: kindOf(task),
+                    title: titleFor(task, connections),
+                    status: task.status,
+                    progress: progressFor(task),
+                    total: kindOf(task) === "forecast" ? Number(task.forecast_total_series || 0) : task.total_blobs || 0,
+                    processed: kindOf(task) === "forecast" ? Number(task.forecast_processed_series || 0) : task.processed_blobs || 0,
+                    rows: task.rows_destination || 0,
+                    forecastTotalSeries: Number(task.forecast_total_series || 0),
+                    forecastProcessedSeries: Number(task.forecast_processed_series || 0),
+                    phase: task.phase || "",
+                    current: task.current_blob || "",
+                    scope: scopeFor(task, connections),
+                    bytesWritten: Number(task.downloaded_bytes_total || 0),
+                    totalBytes: Number(task.total_download_bytes || 0),
+                    startedAt: task.started_at ? new Date(task.started_at).getTime() : i.startedAt,
+                    connectorType: task.connector_type || i.connectorType,
                     read: false,
                   }
                 : i
@@ -540,7 +582,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       total_blobs: item.total,
                       processed_blobs: item.processed,
                       rows_destination: item.rows,
-                      task_type: item.kind === "backup" ? "backup" : undefined,
+                      forecast_total_series: item.forecastTotalSeries,
+                      forecast_processed_series: item.forecastProcessedSeries,
+                      task_type: item.kind === "backup" ? "backup" : item.kind === "forecast" ? "forecast" : undefined,
                       downloaded_bytes_total: item.bytesWritten,
                       started_at: new Date(item.startedAt).toISOString(),
                       total_download_bytes: item.totalBytes,

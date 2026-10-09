@@ -3397,13 +3397,28 @@ def _task_notification_metadata(db, task: EtlTask) -> dict:
             })
     destination = db.get(DestinationTable, task.destination_table_id) if task.destination_table_id else None
     result_json = task.result_json or {}
-    return {
+    metadata = {
         "connection_ids": connection_ids,
         "connections": sources,
         "billing_periods": list(task.billing_periods or []),
         "destination_table_name": destination.name if destination else None,
         "table": result_json.get("table") or (destination.name if destination else None),
     }
+    if task.task_type == "forecast":
+        try:
+            from app.models.forecast import ForecastRun
+            run_id = int(result_json.get("forecast_run_id") or 0)
+            run = db.get(ForecastRun, run_id) if run_id else None
+            if run:
+                metadata.update({
+                    "rows_destination": int(run.rows_written or 0),
+                    "forecast_total_series": int(run.total_series or 0),
+                    "forecast_processed_series": int(run.processed_series or 0),
+                    "phase": run.phase or task.phase or "",
+                })
+        except (TypeError, ValueError):
+            pass
+    return metadata
 
 
 def get_running_tasks() -> list[dict]:
