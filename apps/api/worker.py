@@ -1390,10 +1390,14 @@ def consumer_main(worker_id: int):
                         _maybe_recycle_reprocess_worker(failed=True)
 
                 elif task.task_type == "shared_cost":
+                    from app.services.processing_logs import sync_etl_task_log
+
                     task.status = "RUNNING"
                     task.phase = "Agregando Gold e forecast e gravando linhas de rateio"
+                    sync_etl_task_log(session, task)
                     session.commit()
                     session.close()
+                    s = None
                     try:
                         from app.services.shared_cost import run_shared_cost_job_sync
                         s = SyncSession()
@@ -1414,9 +1418,13 @@ def consumer_main(worker_id: int):
                             row.processed_blobs = len(snapshot["shared_nodes"])
                             row.rows_destination = int(result.get("rows") or 0)
                             row.finished_at = datetime.now(timezone.utc)
+                            sync_etl_task_log(s, row)
                             s.commit()
                         s.close()
+                        s = None
                     except Exception as exc:
+                        if s is not None:
+                            s.close()
                         s2 = SyncSession()
                         try:
                             t2 = s2.get(EtlTask, task_id)
@@ -1425,6 +1433,7 @@ def consumer_main(worker_id: int):
                                 t2.phase = f"Erro: {exc}"[:200]
                                 t2.current_blob = f"Erro: {exc}"[:500]
                                 t2.finished_at = datetime.now(timezone.utc)
+                                sync_etl_task_log(s2, t2)
                                 s2.commit()
                         finally:
                             s2.close()
