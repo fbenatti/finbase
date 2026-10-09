@@ -508,15 +508,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   };
   const renderDecomposedValue = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
-    if (parsed && typeof parsed === "object") return renderDetailValue(parsed);
     const isNull = parsed == null;
     const isNumeric = typeof parsed === "number";
     const label = isNull ? "null" : String(parsed);
-    const background = isNull ? "#fff7d6" : isNumeric ? "#e7f5e9" : "#eeeeee";
-    const color = isNull ? "#8a6d1d" : isNumeric ? "#276738" : "#505050";
-    return <Box sx={{ display: "inline-flex", alignItems: "center", maxWidth: "100%", minHeight: 30, px: 1.5, py: 0.45, bgcolor: background, borderRadius: "999px" }}>
-      <Typography variant="body2" sx={{ color, fontWeight: 500, lineHeight: 1.4, whiteSpace: "normal", overflowWrap: "anywhere" }}>{label}</Typography>
-    </Box>;
+    const color = isNull ? "#a47713" : isNumeric ? "#278344" : typeof parsed === "boolean" ? (parsed ? "#278344" : "#c62828") : "#666666";
+    return <Typography component="span" variant="body2" sx={{ color, fontWeight: 600, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{label}</Typography>;
   };
   const renderBusinessRuleJson = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
@@ -558,6 +554,13 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       return renderDetailValue(current);
     };
     return <Box sx={{ p: 1.25, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#fff", boxShadow: "0 2px 8px rgba(15,23,42,.04)" }}>{renderValue(parsed)}</Box>;
+  };
+  const renderDecomposedFieldValue = (name: string, value: unknown): React.ReactNode => {
+    const parsed = parseJsonValue(value);
+    if (name.toLowerCase() === "business_rule" || (parsed !== null && typeof parsed === "object")) {
+      return renderBusinessRuleJson(value);
+    }
+    return renderDecomposedValue(value);
   };
 
   const openSelectedRow = (row: Record<string, unknown>) => {
@@ -813,8 +816,8 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
               <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>VALOR</Typography>
             </Stack>
             {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
-              <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"Segoe UI", sans-serif', lineHeight: 1.7 }}>{name}</Typography>
-              <Box sx={{ minWidth: 0 }}>{name.toLowerCase() === "business_rule" ? renderBusinessRuleJson(value) : renderDecomposedValue(value)}</Box>
+              <Chip label={name} size="small" variant="outlined" sx={{ justifySelf: "start", alignSelf: "start", maxWidth: "100%", height: "auto", borderColor: "#bae6fd", bgcolor: "#f0f9ff", color: "#0369a1", fontWeight: 700, fontFamily: '"Segoe UI", sans-serif', "& .MuiChip-label": { display: "block", whiteSpace: "normal", overflowWrap: "anywhere", px: 1, py: 0.45 } }} />
+              <Box sx={{ minWidth: 0 }}>{renderDecomposedFieldValue(name, value)}</Box>
             </Box>)}
           </Paper>
         </Stack>}
