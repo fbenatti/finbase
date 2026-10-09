@@ -506,7 +506,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     if (typeof parsed === "number") return <Typography component="span" sx={{ color: "#0369a1", fontWeight: 650, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>{String(parsed)}</Typography>;
     return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#047857", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13, lineHeight: 1.65 }}>{String(parsed)}</Typography>;
   };
-  const renderRelationValue = (value: unknown): React.ReactNode => {
+  const renderDecomposedValue = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
     if (parsed && typeof parsed === "object") return renderDetailValue(parsed);
     const label = parsed == null ? "null" : String(parsed);
@@ -810,7 +810,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             </Stack>
             {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
               <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"Segoe UI", sans-serif', lineHeight: 1.7 }}>{name}</Typography>
-              <Box sx={{ minWidth: 0 }}>{name.toLowerCase() === "business_rule" ? renderBusinessRuleJson(value) : renderDetailValue(value)}</Box>
+              <Box sx={{ minWidth: 0 }}>{name.toLowerCase() === "business_rule" ? renderBusinessRuleJson(value) : renderDecomposedValue(value)}</Box>
             </Box>)}
           </Paper>
         </Stack>}
@@ -832,9 +832,9 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             <Typography variant="overline" color="#0369a1" fontWeight={800}>BRONZE · ORIGEM</Typography><CompareArrows sx={{ display: { xs: "none", md: "block" }, color: "#64748b", mx: "auto" }} /><Typography variant="overline" color="#6d28d9" fontWeight={800}>SILVER · DESTINO</Typography>
           </Box>
           {(sourceDetail.pairs || []).map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, gap: 1, alignItems: "stretch" }}>
-            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block" mb={0.5}>{pair.source_key}</Typography>{renderRelationValue(pair.source_value)}</Paper>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block" mb={0.5}>{pair.source_key}</Typography>{renderDetailValue(pair.source_value)}</Paper>
             <Typography sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#94a3b8", fontSize: 22 }}>→</Typography>
-            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block" mb={0.5}>{pair.destination_key}</Typography>{renderRelationValue(selectedRowValuesByLowerName.get(pair.destination_key.toLowerCase()))}</Paper>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block" mb={0.5}>{pair.destination_key}</Typography>{renderDetailValue(selectedRowValuesByLowerName.get(pair.destination_key.toLowerCase()))}</Paper>
           </Box>)}
           {Object.keys(sourceDetail.source_unmatched || {}).length > 0 && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "#fffbeb", borderColor: "#fde68a" }}><Typography variant="subtitle2" fontWeight={750} color="#92400e" mb={1}>Campos de origem sem correspondência ({Object.keys(sourceDetail.source_unmatched || {}).length})</Typography><Stack spacing={0.75}>{Object.entries(sourceDetail.source_unmatched || {}).sort(([a], [b]) => columnNameCompare.compare(a, b)).map(([name, value]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(160px, 30%) minmax(0,1fr)" }, gap: 1, p: 1, bgcolor: "white", borderRadius: 1.5 }}><Typography variant="caption" fontWeight={750} color="#a16207">{name}</Typography><Box>{renderDetailValue(value)}</Box></Box>)}</Stack></Paper>}
         </Stack>}
