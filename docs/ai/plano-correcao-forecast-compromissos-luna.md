@@ -1,4 +1,126 @@
-# Plano de correção do forecast de reservas e Savings Plans — execução pelo GPT Luna
+# Plano revisado: reverter regressão e controlar validade da fonte — GPT Luna
+
+## Revisão de 09/10/2026 após investigação do histórico Git
+
+**Esta revisão é o plano de execução vigente. Substitui a implementação extensa proposta nas seções 4–8 do diagnóstico original preservado abaixo.** Primeiro restaurar o comportamento das regras existentes e tratar a validade da fonte por regra visível. Não implementar MONTHLY_COMMITMENT, MIRROR_SOURCE_FORECAST ou uma ponte de linhagem para resolver esta regressão. Esses mecanismos seriam uma evolução independente, somente se problemas residuais forem demonstrados depois da restauração.
+
+O usuário levantou a hipótese de regressão após o patch que encerrava forecast sem realizado recente. A hipótese foi confirmada pelo diff, pelos snapshots reais e pela execução isolada das funções antes/depois, sem alterar o motor ou publicar dados.
+
+### R1. Commit responsável e evidências
+
+Commit **`7d63645aa8205c4e869d1229007a3ac73d87956a`**, de **08/10/2026 às 10:13:06 -03:00**, mensagem `Stop recurring forecasts after realized zero month`.
+
+Ele introduziu duas alterações financeiras gerais:
+
+1. `_replicated_month_value`: quando `last_closed_month_total <= 0`, passou de retornar `None` (preserva a previsão matemática existente) para retornar `0.0` nas recorrências futuras. Isso elimina estornos negativos legítimos.
+2. `_apply_forecast_business_rules`: passou a buscar o realizado no mês anterior a **cada mês projetado**, usando zero quando o período não existe. Isso encerra a recorrência porque o histórico não contém meses futuros.
+
+O teste `<= 0` já existia antes, mas retornava `None`: a previsão negativa continuava intacta. Portanto, **não trocar simplesmente `<= 0` por `== 0`** como correção principal. Isso faria a regra replicar uma base negativa mensal que anteriormente era preservada pelo modelo diário, alterando a semântica das regras que funcionavam.
+
+| Caso reproduzido em memória, três meses | Código anterior ao patch | Código atual |
+|---|---|---|
+| Return, base negativa -300 | [-300, -300, -300] | [0, 0, 0] |
+| Purchase, base positiva 100 | [100, 100, 100] | [100, 0, 0] |
+
+Comparação dos snapshots simulados de outubro, ambos com `simulated_as_of=2026-10-02` e cutoff 30/09:
+
+| SAPTDF, outubro | Run 381, antes do patch | Run 383, depois do patch |
+|---|---:|---:|
+| Purchase reserva | R$ 116.519,41 | R$ 116.519,41 |
+| Usage reserva | R$ 342.162,88 | R$ 342.162,88 |
+| Return reserva | -R$ 342.189,69 | R$ 0,00 |
+| Usage OnDemand | R$ 185.755,24 | R$ 185.755,24 |
+| Total | R$ 302.247,83 | R$ 644.437,52 |
+
+O aumento de **R$ 342.189,69** corresponde exatamente ao Return que foi zerado. Os dados/snapshots não registram o SHA executado, mas a cronologia e a alteração exata da função confirmam o mecanismo. Não presumir igualdade de todas as fontes entre dias de coleta.
+
+Savings Plan Azure TI, novembro: no run 380 anterior ao patch havia Purchase R$ 49.822,49, Return -R$ 61.265,77 e Usage R$ 61.228,14. No run 382 posterior, Purchase e Return ficam zero, enquanto Usage permanece em R$ 61.468,81. São execuções normais com cutoffs diferentes (06/10 e 07/10), por isso a pequena diferença de Usage não deve ser atribuída ao patch.
+
+Commit `e7b30f6b` de 08/10 às 10:06 criou `_close_missing_months`. Ele não adiciona meses à série: apenas atribui zero a dias que já estão no grid e cujo total mensal já era zero. Sua eficácia é limitada, mas não contém as duas condições responsáveis pela inflação. Não reverter em bloco vários patches sem evidência. `fb4a04fa`, de 01/10, alinha cutoffs por conexão e também deve ser preservado inicialmente.
+
+A projeção Purchase excessiva no mês aberto e a referência mensal antiga têm condições introduzidas antes de 08/10. Devem ficar registradas como problemas residuais, não como justificativa para ampliar a reversão da regressão confirmada.
+
+### R2. Ordem de execução da correção mínima
+
+**Passo 1 — restaurar o patch identificado.** Verificar se os dois arquivos alterados por `7d63645a` continuam sem mudanças posteriores de implementação. Se sim, executar `git revert --no-edit 7d63645a`, que cria o commit de reversão imediatamente. Se houver alterações posteriores/conflitos, restaurar somente as mudanças desse commit, preservando intervenções novas, e fazer commit imediatamente. Não reverter `7f2372c5` nem esta revisão documental.
+
+A reversão deve devolver `return None` para bases não positivas e remover a exigência de realizado do mês anterior a cada mês futuro. Restaurar também os testes alterados pelo patch, verificando que documentem a semântica anterior, sem eliminar cobertura útil de outros casos. Comparar diff do resultado com `git show 7d63645a`; uma reversão integral também restaura a pequena reorganização de contexto, não somente as duas linhas financeiras.
+
+**Passo 2 — validar restauração antes de qualquer evolução.** Reexecutar casos de Return negativo e horizonte positivo de 12 meses. Rodar os testes existentes de forecast/regras/cutoff/IBM/planning pertinentes. Executar simulado isolado de outubro sem publicar planning e comparar com run 381. Purchase e Usage de reserva devem permanecer compatíveis com a base escolhida; Return deve recuperar seu sinal e sua previsão matemática. Não exigir cancelamento perfeito onde já havia diferenças pequenas antes do patch: quantificar e registrar separadamente.
+
+**Passo 3 — tratar o problema original por uma regra explícita de validade.** Seguir R3–R5. A ausência da invoice é uma condição da fonte/escopo e não deve ser inferida pela presença de dados nos meses futuros da projeção.
+
+**Passo 4 — publicar somente depois da validação conjunta.** Gerar snapshot novo, registrar regras/versões e então publicar corrente. Preservar snapshots históricos, respeitar camada da planning e rateio. Regenerar simulados por nova execução, mantendo runs antigos auditáveis.
+
+Após **cada alteração de código**, fazer commit Git imediatamente. Preservar exclusões preexistentes em `backups/`. Não fazer commit indiscriminado do workspace.
+
+### R3. Validade da fonte e PTU: regra visível, sem caso chumbado
+
+Adicionar comportamento genérico **`SOURCE_VALIDITY`**, com rótulo “Interromper previsão sem dados recentes”, à **mesma aba Forecast → Regras**. Pode usar `behavior_options` JSON validado ou colunas explícitas, conforme menor alteração coerente com as migrações existentes. As condições e parâmetros devem ser salvos na regra e expostos em edição, grade, API e snapshot.
+
+Campos obrigatórios visíveis:
+
+* Escopo de origem/conexão e dimensões opcionais: usar o mecanismo de seleção da regra; para este incidente configurar `cloud_origem=azure-4p`, e, se o bloqueio for específico à PTU, serviço/subcategoria/projeto explicitamente na UI.
+* Unidade da validade: dias; valor inicial configurado **30**, sem constante financeira escondida.
+* Relógio de referência: data da execução; no simulado, `simulated_as_of`. Não comparar um simulado histórico com hoje.
+* Evidência de cobertura: data de cobertura da invoice/coleta bem-sucedida, ou coluna/período da fonte expressamente selecionados como fallback. Mostrar qual evidência foi usada e as limitações.
+* Ação quando idade **> 30 dias**: interromper a previsão do escopo, mantendo realizado e snapshots anteriores. Confirmar na UI que “30 dias” não dispara e “31 dias” dispara.
+* Ação para escopo com realizado zero em mês **confirmadamente completo**: encerrar forecast daquele escopo, se habilitada. Zero deve ser medido na medida configurada, não com `<= 0`; valores negativos válidos não são ausência.
+* Política de evidência ausente: alertar/bloquear run ou suspender escopo, conforme opção visível. Nunca inventar cobertura.
+
+Implementação genérica da validade não deve citar Azure, PTU, nomes de projetos nem IDs de regra no cálculo. O backend recebe escopo, limites e evidência da regra. Desativar a regra retira essa política.
+
+Aplicar a validade depois das regras de recorrência e ajustes, antes da publicação, ou garantir precedência terminal equivalente, documentada e visível: uma regra posterior de Purchase não pode ressuscitar o escopo suspenso. Respeitar vigência da regra e não afetar projeções de períodos anteriores à interrupção. A idade deve ser calculada para o momento de avaliação definido no contrato da execução; não presumir que todo mês futuro estará sem novas coletas.
+
+**Fonte atrasada e série ausente são condições diferentes.** Conexão ativa pode continuar enviando outros custos e parar apenas a invoice de Purchase; nesse caso o grupo de validade deve ser o fluxo/escopo da invoice declarado na regra. Se os dados de uma fonte terminam em julho, não avançar artificialmente seu cutoff até outubro para simular meses vazios. Avaliar a idade em relação à execução, mantendo o cutoff histórico intacto.
+
+Não usar somente `MAX(ChargePeriodStart)` como data de coleta sem deixar essa escolha explícita: uma compra no dia 2 pode cobrir o mês completo. Preferir cobertura do billing period e metadata de coleta completa quando disponível. Metadata financeira detalhada continua Iceberg, PostgreSQL guarda apenas controle.
+
+### R4. Evidência específica de Azure-4P e reaproveitamento da regra existente
+
+Consulta local confirmou `cloud_origem=azure-4p` com último `_billing_period=202607` e última data de cobrança parseada 02/07/2026. PTU `Azure AI Foundry Provisioned Throughput Reservation` em julho tem:
+
+* Purchase: **R$ 161.311,95639**.
+* Refund: **-R$ 161.311,95639**.
+* Total líquido: zero, com fatos positivos e negativos presentes.
+
+Não foram encontradas linhas de PTU Azure-4P nos snapshots 381/383 consultados. Portanto, não afirmar que reverter o patch necessariamente fará essa PTU reaparecer: reproduzir o caso na versão anterior e nas regras atuais.
+
+Já existe a regra visível **“Vivo Mais - encerrar reserva PTU Azure-4P estornada”**, id local 21, `CANCEL_ON_REFUND`, escopo cloud Azure-4P, projeto Vivo Mais, serviço Microsoft.Capacity, categoria Purchase, subcategoria PTU, início 202609. Ela é uma suspensão explícita da compra selecionada; não depende de achar Refund entre as dimensões do forecast. Verificar se escopo e vigência representam o cancelamento real antes de alterar. Seu início em setembro não alcança meses anteriores.
+
+Priorizar reutilizar essa regra para compromisso estornado confirmado. A regra SOURCE_VALIDITY trata a falta de invoice >30 dias. A opção “zero confirmado” cobre fontes/escopos com invoice completa cujo valor líquido é zero; não usar zero líquido de todo Azure para cancelar todas as reservas, pois Usage/Return sintéticos também se anulam normalmente.
+
+Se quiser disparar cancelamento automaticamente por Refund, evoluir um comportamento declarativo separado ou opção explícita de vínculo à compra, usando referência configurada. Não tratar todo Return sintético como refund de contrato. Para esta correção mínima, reaproveitar o cancelamento visível existente é suficiente quando o evento já foi confirmado.
+
+### R5. Arquivos e aceite da regra de validade
+
+Revisar `forecast.py` em models/router, migração Alembic, `forecast_service.py`, criação de snapshot no worker/router, `apps/web/src/services/api.ts`, `forecastConstants.ts`, `ForecastRuleDialog.tsx`, `ForecastRulesDataGrid.tsx` e ajuda de campos. Garantir create/read/update/duplicate e enum permitido, validação das colunas e tipos, seleção de escopo com AND correto e persistência das opções. Não substituir as regras de Purchase/Return que voltaram a funcionar após reversão.
+
+Exibir no resultado do run: regra aplicada, escopo, última cobertura conhecida, data avaliada, idade, limite, razão de suspensão e soma do forecast suprimido. Exibir diagnóstico mesmo quando não há série gerada, para que fonte histórica fora da janela apareça como suspensa e não suma silenciosamente. Snapshot precisa congelar parâmetros efetivos; não mutar regras durante o job.
+
+Testes de aceite, com cenários independentes:
+
+1. Return negativo de Azure TI continua negativo por 12 meses; Purchase mensal continua por 12 meses conforme regra original.
+2. Fonte/fluxo Azure-4P só com julho, execução em outubro, validade 30: suspende escopo selecionado sem afetar Azure TI.
+3. Validade 30: idade 30 conserva previsão; idade 31 suspende. Regra desativada não suspende.
+4. Fonte sem invoice não vira “zero confirmado”; invoice completa com zero habilita somente política explícita de zero.
+5. PTU Purchase+Refund julho cancela apenas compromisso/projeto selecionados, respeitando vigência da regra; outras reservas continuam.
+6. Usage+Return sintéticos que se anulam não são tratados como fonte inexistente ou contrato cancelado.
+7. Série negativa válida não é encerrada por valor negativo; mês futuro ausente não é classificado como realizado zero.
+8. Simulado histórico calcula idade com sua data simulada e usa cobertura disponível até ela; não usa hoje, coleta ou status futuro.
+9. Invoice mensal coberta até fim do mês não é declarada velha só porque compra ocorreu no dia 2; opção fallback mostra limitação.
+10. Regra visível é editável, duplicável e auditável; fonte retomada só libera projeção com evidência válida e sem reaproveitar base cancelada indevidamente.
+11. IBM por intervalo, Marketplace, PTU de outras origens, settlement e planning/rateio não regridem.
+
+Depois da restauração, medir separadamente a inflação residual de Purchase SAPTDF no mês aberto. Se persistir, apresentar evidência antes de implementar mudanças de calendário/compromisso. Isso não bloqueia a identificação e reversão da regressão de 08/10, mas impede declarar que todos os desvios foram resolvidos por ela.
+
+### R6. Prompt revisado para o GPT Luna
+
+“Execute a revisão R1–R5 de `docs/ai/plano-correcao-forecast-compromissos-luna.md`. Primeiro reverta o commit `7d63645a` que zerou Return negativo e interrompeu Purchase nos meses futuros; valide o comportamento restaurado. Depois trate invoice ausente >30 dias por regra SOURCE_VALIDITY visível na aba Forecast → Regras, com escopo e parâmetros persistidos, e reaproveite a regra de cancelamento de PTU existente quando adequada. Não implemente os novos motores de mensal/espelho do diagnóstico original para corrigir esta regressão. Não chumbe Azure-4P/PTU/projetos no motor. Faça commit imediatamente após cada alteração de código, preserve alterações preexistentes, valide snapshots e só publique após reconciliação. Documente problemas residuais separadamente.”
+
+---
+
+# Diagnóstico original preservado como referência técnica
 
 Data da investigação: 09/10/2026. Escopo: diagnóstico e plano; nenhuma correção no motor ou nas regras foi aplicada nesta investigação.
 
