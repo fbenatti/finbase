@@ -3239,7 +3239,44 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
                     "row_count": planning_rows,
                     "periods": planning_period_list,
                     "analysis_only": True,
+                    "analysis_kind": "forecast",
                 })
+        except Exception:
+            pass
+
+        # Shared-cost adjustments share the monthly planning table with
+        # forecast. Expose a separate pivot source that filters only the
+        # legacy shared_cost kind, keeping it distinct from the newer rateio.
+        try:
+            planning_schema = await _describe_layer_schema(planning_name, None, namespace=layers.detail_layer())
+            columns = {name.lower(): name for name in planning_schema}
+            period_col = columns.get("period")
+            tipo_col = columns.get("tipo")
+            if period_col and tipo_col:
+                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) = 'rateio'"
+                if columns.get("rateio_kind"):
+                    kind_col = _quote_ident(columns["rateio_kind"])
+                    where += f" AND lower(CAST({kind_col} AS VARCHAR)) = 'shared_cost'"
+                shared_count = await trino_execute(
+                    f"SELECT COUNT(*) AS cnt FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where}"
+                )
+                shared_rows = int((shared_count[0] or {}).get("cnt") or 0) if shared_count else 0
+                if shared_rows:
+                    shared_period_rows = await trino_execute(
+                        f"SELECT {_quote_ident(period_col)} AS period, COUNT(*) AS cnt "
+                        f"FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where} "
+                        f"GROUP BY 1 ORDER BY 1 DESC LIMIT 20"
+                    )
+                    result.append({
+                        "id": shared_cost_pivot_id(int(tid)),
+                        "name": f"Custo compartilhado · {tname}",
+                        "physical_name": planning_name,
+                        "description": "Ajustes de custo compartilhado (tipo legado shared_cost)",
+                        "row_count": shared_rows,
+                        "periods": [{"period": str(p["period"]), "count": p["cnt"]} for p in (shared_period_rows or [])],
+                        "analysis_only": True,
+                        "analysis_kind": "shared_cost",
+                    })
         except Exception:
             pass
 
