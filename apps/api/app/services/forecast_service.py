@@ -373,7 +373,7 @@ def _apply_forecast_business_rules(
         if not getattr(rule, "active", True):
             continue
         if str(getattr(rule, "behavior", "") or "") in {
-            "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX",
+            "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_VALIDITY",
         }:
             continue
         mask = output["tipo"].eq("forecast")
