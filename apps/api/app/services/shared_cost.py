@@ -10,6 +10,7 @@ from app.models.rules import Department, DepartmentSharedCost
 
 logger = logging.getLogger(__name__)
 RATEIO_TIPO = "rateio"
+SHARED_COST_TIPO = "shared_cost"
 RATEIO_MEDIDA_ACTUAL = "realizado"
 RATEIO_MEDIDA_FORECAST = "forecast"
 
@@ -405,8 +406,7 @@ def build_rateio_rows(
                 rows.append({
                     **hierarchy_fields(config.donor_path),
                     "period": period,
-                    "tipo": RATEIO_TIPO,
-                    "rateio_kind": config.allocation_type,
+                    "tipo": SHARED_COST_TIPO if config.allocation_type == "rateio" else RATEIO_TIPO,
                     "realizado": -allocated,
                     "rateio_medida": medida,
                     "cloud_origem": config.cloud_prefix,
@@ -417,8 +417,7 @@ def build_rateio_rows(
                     rows.append({
                         **hierarchy_fields(config.leaf_paths[leaf_id]),
                         "period": period,
-                        "tipo": RATEIO_TIPO,
-                        "rateio_kind": config.allocation_type,
+                        "tipo": SHARED_COST_TIPO if config.allocation_type == "rateio" else RATEIO_TIPO,
                         "realizado": amount,
                         "rateio_medida": medida,
                         "cloud_origem": config.cloud_prefix,
@@ -437,7 +436,7 @@ def build_rateio_rows(
         key = (
             row["period"],
             row["rateio_medida"],
-            row.get("rateio_kind") or "shared_cost",
+            row["tipo"],
             tuple(row[f"organograma_nivel_{level}"] for level in range(1, 8)),
             row.get("cloud_origem") or "",
         )

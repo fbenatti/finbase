@@ -2568,8 +2568,9 @@ def merge_planning_rateio(
     value_column: str = "realizado",
     *,
     preserve_types: tuple[str, ...] = ("realizado", "forecast"),
+    replace_types: tuple[str, ...] = ("rateio", "shared_cost"),
 ) -> int:
-    """Substitui as linhas ``tipo='rateio'`` preservando realizado e forecast.
+    """Substitui linhas de alocação preservando realizado e forecast.
 
     A leitura da tabela existente usa o **mesmo** resolvedor de camada da
     publicação (``lakehouse_layers.detail_layer``). Antes disso, a publicação
@@ -2613,7 +2614,8 @@ def merge_planning_rateio(
     if existing.empty:
         keep = existing
     elif "tipo" in existing.columns:
-        keep = existing[existing["tipo"].astype(str).str.lower() != "rateio"].copy()
+        replace_set = {str(value).lower() for value in replace_types}
+        keep = existing[~existing["tipo"].astype(str).str.lower().isin(replace_set)].copy()
     else:
         keep = existing.copy()
 
@@ -2623,7 +2625,7 @@ def merge_planning_rateio(
     # Sem rateio novo e sem rateio anterior não há nada a fazer: republicar
     # reescreveria a tabela inteira e poderia perder linhas se qualquer etapa
     # da escrita falhasse.
-    if rateio_df.empty and _type_counts(existing).get("rateio", 0) == 0:
+    if rateio_df.empty and not any(_type_counts(existing).get(tipo, 0) for tipo in replace_types):
         return 0
 
     frames = [frame for frame in (keep, rateio_df) if frame is not None and not frame.empty]
