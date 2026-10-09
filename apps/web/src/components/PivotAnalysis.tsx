@@ -509,9 +509,13 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const renderDecomposedValue = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
     if (parsed && typeof parsed === "object") return renderDetailValue(parsed);
-    const label = parsed == null ? "null" : String(parsed);
-    return <Box sx={{ display: "inline-flex", alignItems: "center", maxWidth: "100%", minHeight: 30, px: 1.5, py: 0.45, bgcolor: "#e9e9e9", borderRadius: "999px" }}>
-      <Typography variant="body2" sx={{ color: parsed == null ? "#777" : "#252525", fontWeight: 500, lineHeight: 1.4, whiteSpace: "normal", overflowWrap: "anywhere" }}>{label}</Typography>
+    const isNull = parsed == null;
+    const isNumeric = typeof parsed === "number";
+    const label = isNull ? "null" : String(parsed);
+    const background = isNull ? "#fff7d6" : isNumeric ? "#e7f5e9" : "#eeeeee";
+    const color = isNull ? "#8a6d1d" : isNumeric ? "#276738" : "#505050";
+    return <Box sx={{ display: "inline-flex", alignItems: "center", maxWidth: "100%", minHeight: 30, px: 1.5, py: 0.45, bgcolor: background, borderRadius: "999px" }}>
+      <Typography variant="body2" sx={{ color, fontWeight: 500, lineHeight: 1.4, whiteSpace: "normal", overflowWrap: "anywhere" }}>{label}</Typography>
     </Box>;
   };
   const renderBusinessRuleJson = (value: unknown): React.ReactNode => {
