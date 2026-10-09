@@ -5,7 +5,7 @@ import {
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
+import { Add, Close, CompareArrows, ContentCopy, Delete, Download, FiberManualRecord, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
@@ -491,6 +491,29 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     if (typeof parsed === "number") return <Typography component="span" sx={{ color: "#0369a1", fontWeight: 650, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>{String(parsed)}</Typography>;
     return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#047857", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13, lineHeight: 1.65 }}>{String(parsed)}</Typography>;
   };
+  const renderBusinessRuleJson = (value: unknown): React.ReactNode => {
+    const parsed = parseJsonValue(value);
+    if (!parsed || typeof parsed !== "object") return renderDetailValue(value);
+    const source = JSON.stringify(parsed, null, 2);
+    const tokenPattern = /("(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],:])/g;
+    const segments: React.ReactNode[] = [];
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    while ((match = tokenPattern.exec(source))) {
+      if (match.index > cursor) segments.push(source.slice(cursor, match.index));
+      const token = match[0];
+      const next = source.slice(tokenPattern.lastIndex).trimStart();
+      const color = token.startsWith('"')
+        ? (next.startsWith(":") ? "#1d4ed8" : "#047857")
+        : token === "true" || token === "false" ? "#7c3aed"
+          : token === "null" ? "#94a3b8"
+            : /^-?\d/.test(token) ? "#0369a1" : "#64748b";
+      segments.push(<Box component="span" key={`${match.index}-${token}`} sx={{ color, fontWeight: token.startsWith('"') && next.startsWith(":") ? 700 : 500 }}>{token}</Box>);
+      cursor = tokenPattern.lastIndex;
+    }
+    if (cursor < source.length) segments.push(source.slice(cursor));
+    return <Box component="pre" sx={{ m: 0, p: 1.5, overflow: "auto", borderRadius: 1.5, border: "1px solid #e2e8f0", bgcolor: "#f8fafc", color: "#334155", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 12.5, lineHeight: 1.65, whiteSpace: "pre" }}>{segments}</Box>;
+  };
 
   const openSelectedRow = (row: Record<string, unknown>) => {
     const cleanRow = { ...row };
@@ -767,7 +790,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             </Stack>
             {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
               <Typography variant="body2" fontWeight={650} sx={{ overflowWrap: "anywhere", pt: 0.1, color: "#334155", fontFamily: '"Segoe UI", sans-serif', lineHeight: 1.7 }}>{name}</Typography>
-              <Box sx={{ minWidth: 0 }}>{renderDetailValue(value)}</Box>
+              <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                <FiberManualRecord sx={{ color: "#9ca3af", fontSize: 8, mt: "7px", flex: "0 0 8px" }} />
+                <Box sx={{ minWidth: 0, flex: 1 }}>{name.toLowerCase() === "business_rule" ? renderBusinessRuleJson(value) : renderDetailValue(value)}</Box>
+              </Stack>
             </Box>)}
           </Paper>
         </Stack>}
