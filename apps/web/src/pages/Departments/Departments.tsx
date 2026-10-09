@@ -54,6 +54,7 @@ import {
   SharedCostConfig,
   SharedCostMode,
   SharedCostTarget,
+  AllocationType,
   formatApiError,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
@@ -109,6 +110,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
 
   // Shared cost (dentro do dialogo de departamento)
   const [sharedEnabled, setSharedEnabled] = useState(false);
+  const [rateioEnabled, setRateioEnabled] = useState(false);
   const [sharedMode, setSharedMode] = useState<SharedCostMode>("consumption");
   const [sharedTargets, setSharedTargets] = useState<SharedCostTarget[]>([]);
   const [sharedPicker, setSharedPicker] = useState<number | null>(null);
@@ -198,6 +200,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     setDeptForm({ ...emptyDeptForm, parent_id: parentId });
     setCustomFields([]);
     setSharedEnabled(false);
+    setRateioEnabled(false);
     setSharedMode("consumption");
     setSharedTargets([]);
     setSharedPercentInputs({});
@@ -228,6 +231,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         : [],
     );
     setSharedEnabled(false);
+    setRateioEnabled(false);
     setSharedMode("consumption");
     setSharedTargets([]);
     setSharedPercentInputs({});
@@ -237,7 +241,8 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     setDeptDialog(true);
     try {
       const config = await getDepartmentSharedCost(d.id);
-      setSharedEnabled(config.enabled);
+      setSharedEnabled(config.enabled && config.allocation_type !== "consumption_rateio");
+      setRateioEnabled(config.enabled && config.allocation_type === "consumption_rateio");
       setSharedMode(config.mode);
       setSharedTargets(config.targets || []);
       setSharedPercentInputs(Object.fromEntries((config.targets || []).map((target) => [target.department_id, target.percent == null ? "" : String(target.percent).replace(".", ",")])));
@@ -278,7 +283,8 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         ? await updateDepartment(editingDept.id, body)
         : await createDepartment(body);
       await upsertDepartmentSharedCost(saved.id, {
-        enabled: sharedEnabled,
+        enabled: sharedEnabled || rateioEnabled,
+        allocation_type: (rateioEnabled ? "consumption_rateio" : "shared_cost") as AllocationType,
         mode: sharedMode,
         targets:
           sharedMode === "consumption"
@@ -290,7 +296,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               })),
       });
       setDeptDialog(false);
-      setSuccess(sharedEnabled ? ORG.savedWithShared : ORG.saved);
+      setSuccess(sharedEnabled || rateioEnabled ? ORG.savedWithShared : ORG.saved);
       await load();
     } catch (e: unknown) {
       setDeptDialogError(
@@ -391,9 +397,11 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     forceExpanded: boolean,
   ) => {
     const isExpanded = forceExpanded || expanded.has(dept.id);
-    const isShared = sharedCosts.some(
+    const allocationConfig = sharedCosts.find(
       (config) => config.department_id === dept.id && config.enabled,
     );
+    const isShared = Boolean(allocationConfig);
+    const isConsumptionRateio = allocationConfig?.allocation_type === "consumption_rateio";
 
     return (
       <Box key={dept.id}>
@@ -407,13 +415,13 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             gap: 1,
             borderLeft: 4,
             borderColor: isShared
-              ? "#ED6C02"
+              ? isConsumptionRateio ? "#1976D2" : "#ED6C02"
               : depth === 0
                 ? "primary.main"
                 : depth === 1
                   ? "secondary.main"
                   : "grey.400",
-            bgcolor: isShared ? "#FFF4E5" : "background.paper",
+            bgcolor: isShared ? isConsumptionRateio ? "#EAF3FF" : "#FFF4E5" : "background.paper",
           }}
         >
           {dept.children.length > 0 ? (
@@ -426,14 +434,14 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
           {depth === 0 ? (
             <Business color="primary" />
           ) : (
-            <AccountTree color={isShared ? "warning" : "secondary"} />
+            <AccountTree color={isShared ? isConsumptionRateio ? "primary" : "warning" : "secondary"} />
           )}
           <Box sx={{ flexGrow: 1 }}>
             <Typography
               variant="body2"
               fontWeight={600}
               component="div"
-              color={isShared ? "warning.dark" : "inherit"}
+              color={isShared ? isConsumptionRateio ? "primary.main" : "warning.dark" : "inherit"}
             >
               {dept.name}
               {dept.parent_id && (
@@ -445,9 +453,9 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               )}
               {isShared && (
                 <Chip
-                  label="Custo compartilhado"
+                  label={isConsumptionRateio ? "Rateio de consumo" : "Custo compartilhado"}
                   size="small"
-                  color="warning"
+                  color={isConsumptionRateio ? "primary" : "warning"}
                   sx={{ ml: 1, height: 18, fontSize: "0.6rem" }}
                 />
               )}
@@ -896,10 +904,24 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                   }
                   label="Custo compartilhado"
                 />
-                {sharedEnabled && (
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={rateioEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setRateioEnabled(checked);
+                        if (checked) setSharedEnabled(false);
+                      }}
+                      disabled={!sharedLoaded}
+                    />
+                  }
+                  label="Rateio de consumo"
+                />
+                {(sharedEnabled || rateioEnabled) && (
                   <>
                     <FormControl>
-                      <FormLabel>Como ratear o custo</FormLabel>
+                      <FormLabel>{rateioEnabled ? "Como distribuir o consumo" : "Como ratear o custo"}</FormLabel>
                       <RadioGroup
                         value={sharedMode}
                         onChange={(event) =>
