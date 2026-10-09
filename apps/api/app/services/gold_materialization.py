@@ -1503,7 +1503,13 @@ def _baseline_hours(period: str) -> int:
     return _cal.monthrange(y, m)[1] * 24
 
 
-def enqueue_rule_materialization(session: Any, *, rule_ids: list[int] | None = None, source: str = "worker") -> Any | None:
+def enqueue_rule_materialization(
+    session: Any,
+    *,
+    rule_ids: list[int] | None = None,
+    source_tables: list[str] | None = None,
+    source: str = "worker",
+) -> Any | None:
     """Create a QUEUED ``gold_reprocess`` EtlTask for active rules (all or a subset).
 
     Used by the worker to chain the Gold materialization (visão completa =
@@ -1519,10 +1525,22 @@ def enqueue_rule_materialization(session: Any, *, rule_ids: list[int] | None = N
     from app.models.etl_task import EtlTask
     from app.models.gold_mart_rule import GoldMartRule
 
-    query = session.query(GoldMartRule).filter(GoldMartRule.active == True)  # noqa: E712
+    from sqlalchemy.orm import selectinload
+
+    query = session.query(GoldMartRule).options(selectinload(GoldMartRule.sources)).filter(GoldMartRule.active == True)  # noqa: E712
     if rule_ids:
         query = query.filter(GoldMartRule.id.in_(rule_ids))
     rules = query.all()
+    if source_tables:
+        wanted = {str(table).replace("-", "_").replace(".", "_").lower() for table in source_tables}
+        rules = [
+            rule for rule in rules
+            if any(
+                str(table).replace("-", "_").replace(".", "_").lower() in wanted
+                for item in (rule.sources or [])
+                for table in (list(item.gold_tables or []) or [item.gold_table])
+            )
+        ]
     if not rules:
         return None
     running = session.execute(

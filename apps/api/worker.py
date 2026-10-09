@@ -1413,7 +1413,11 @@ def consumer_main(worker_id: int):
                             gold_task = None
                             if result.get("refresh_gold"):
                                 from app.services.gold_materialization import enqueue_rule_materialization
-                                gold_task = enqueue_rule_materialization(s, source="rateio")
+                                gold_task = enqueue_rule_materialization(
+                                    s,
+                                    source_tables=[result.get("planning_table"), result.get("gold_table")],
+                                    source="rateio",
+                                )
                             payload = dict(row.result_json or {})
                             payload["snapshot"] = snapshot
                             payload["planning_table"] = result.get("planning_table")
