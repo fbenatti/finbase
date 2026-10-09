@@ -287,7 +287,15 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       setMeta(next);
       const dimensions = new Set(next.dimensions);
       const isForecastManual = tableId === FORECAST_MANUAL_PIVOT_ID;
+      const isSharedCostSource = destinations.some(item => item.id === tableId && item.analysis_kind === "shared_cost");
       const isPlanning = tableId < 0 && dimensions.has("period") && dimensions.has("tipo") && next.measures.includes("value");
+      if (isSharedCostSource) {
+        setRows(["organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4"].filter(name => dimensions.has(name)));
+        setCols(dimensions.has("period") ? ["period"] : []);
+        const measure = [initialMeasure, "realizado", next.default_measure].find(name => name && next.measures.includes(name));
+        setMeasures(measure ? [{ column: measure, aggregation: "SUM" }] : []);
+        return;
+      }
       if (isPlanning) {
         // Planning is a compact monthly table, not the detailed Gold fact.
         // Its useful default is immediately comparable realized × forecast.
@@ -597,6 +605,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     }
     return columns;
   }, [meta, sourceIds]);
+  const selectedSourceOptions = destinations.filter(d => d.id === tableId || (!destinations.some(item => item.id === tableId && item.analysis_kind === "shared_cost") && d.id === -Math.abs(tableId)));
 
   return <Box>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -606,7 +615,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{[...destinations.filter(d => d.id > 0), ...destinations.filter(d => d.id <= 0)].map(d => <MenuItem key={d.id} value={d.id}>{d.name}{d.id < 0 ? " · análise" : ""}</MenuItem>)}</Select></FormControl>
           <Box sx={{ display: "flex", alignItems: "center", gap: .5, flexWrap: "wrap" }}>
           <Typography variant="caption" color="text.secondary">Origem:</Typography>
-          {destinations.filter(d => d.id === tableId || d.id === -Math.abs(tableId)).map(d => <Chip key={d.id} label={d.id < 0 ? "Forecast" : "Realizado"} color={sourceIds.includes(d.id) ? "primary" : "default"} variant={sourceIds.includes(d.id) ? "filled" : "outlined"} onClick={() => setSourceIds(current => {
+          {selectedSourceOptions.map(d => <Chip key={d.id} label={d.analysis_kind === "shared_cost" ? "Custo compartilhado" : d.id < 0 ? "Forecast" : "Realizado"} color={sourceIds.includes(d.id) ? "primary" : "default"} variant={sourceIds.includes(d.id) ? "filled" : "outlined"} onClick={() => setSourceIds(current => {
             const next = current.includes(d.id) ? (current.length > 1 ? current.filter(id => id !== d.id) : current) : [...current, d.id];
             if (next.length < 2) {
               setRows(currentRows => currentRows.filter(name => !isOriginDim(name)));
