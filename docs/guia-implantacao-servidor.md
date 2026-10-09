@@ -34,54 +34,37 @@ receber somente commits intencionais; não use `scripts/sync_production.sh
 publish` quando houver arquivos locais não relacionados, pois esse comando faz
 `git add -A`.
 
-1. Confira a branch, o diff e o estado da árvore. Mantenha alterações de código
-   em commits próprios e nunca inclua exclusões ou arquivos operacionais alheios
-   ao release.
-2. Valide o build/testes exigidos pela alteração e confirme que `main` está à
-   frente de `origin/main` apenas pelos commits desejados.
-3. Publique os commits:
+O checkout da VM usa um bundle Git local como `origin` para receber releases
+incrementais; `git push origin main` sozinho atualiza o GitHub, mas não a VM.
+Use o script abaixo, que publica `main`, cria um bundle a partir do commit atual
+da VM, transfere o bundle por SSH/SCP, troca o `origin` remoto para esse bundle,
+executa o build/restart dos containers pelo script da VM e valida a revisão
+resultante:
 
-   ```bash
-   git push origin main
-   ```
+```bash
+scripts/deploy_production_bundle.sh
+```
 
-4. Antes de reconstruir, confira que o checkout remoto está limpo, confirme o
-   commit atual e verifique saúde dos serviços e espaço livre em `/mnt`:
+Antes de executar, confira a branch/diff e valide o build/testes exigidos pela
+alteração. O script publica apenas commits de `main`; alterações locais sem
+commit ficam de fora. Ele interrompe o deploy se o checkout da VM estiver sujo
+ou se o commit de produção não for ancestral da branch local. O host padrão é o
+alias SSH `finops-brsouth` e o checkout é
+`/mnt/openfinops-backups/openfinops`. Para um host/caminho alternativo, defina
+`OPENFINOPS_PROD_HOST` ou `OPENFINOPS_PROD_DIR` explicitamente.
 
-   ```bash
-   ssh finops-brsouth 'cd /mnt/openfinops-backups/openfinops && git status --short && git log -1 --oneline && docker compose -f docker-compose.yml -f docker-compose.vm.yml ps && df -h /mnt'
-   ```
-
-   Não continue se houver alterações no checkout remoto, serviço essencial
-   parado, ou espaço insuficiente para rebuild.
-
-5. Execute o script versionado da VM. Ele faz `git fetch origin main`,
-   fast-forward, garante `.env.production`, reconstrói e sobe os serviços com
-   Compose, instala/testa a configuração Nginx e recarrega o Nginx:
-
-   ```bash
-   ssh finops-brsouth 'cd /mnt/openfinops-backups/openfinops && scripts/deploy_vm.sh'
-   ```
-
-   O checkout esperado é `/mnt/openfinops-backups/openfinops`. O alias SSH
-   `finops-brsouth` é o ponto de acesso padrão; `OPENFINOPS_PROD_HOST` e
-   `OPENFINOPS_PROD_DIR` só devem ser usados quando um host/caminho alternativo
-   tiver sido explicitamente definido.
-
-6. Confirme que o commit remoto corresponde ao release e que todos os serviços
-   estão saudáveis. Verifique também o health do worker e os endpoints da API e
-   do frontend:
-
-   ```bash
-   ssh finops-brsouth 'cd /mnt/openfinops-backups/openfinops && git log -1 --oneline && docker compose -f docker-compose.yml -f docker-compose.vm.yml ps && docker exec openfinops-api-1 python -c "import requests; print(requests.get(\"http://127.0.0.1:8000/etl/worker-health\", timeout=10).json())" && docker exec openfinops-web-1 node -e "fetch(\"http://127.0.0.1:5173/api/connections/\").then(async r => console.log(r.status, (await r.json()).length))"'
-   ```
+O script da VM garante `.env.production`, reconstrói e sobe os serviços com
+Compose, instala/testa a configuração Nginx e recarrega o Nginx. Ao final, o
+script local exige que o commit remoto seja o esperado, mostra o estado dos
+containers e verifica Trino, worker e frontend. Se uma validação falhar, não
+rode reprocessamentos como tentativa de recuperação: consulte os logs e corrija
+o serviço com o fluxo operacional adequado.
 
 O deploy é somente de código/configuração. Não restaure banco, apague volumes,
 rode reprocessamentos ou altere dados de forecast/Gold como parte da publicação,
-a menos que isso seja solicitado separadamente. Para este procedimento, prefira
-o script da VM diretamente via SSH: `scripts/sync_production.sh deploy` também
-exige que a árvore local inteira esteja limpa, o que pode bloquear a publicação
-por arquivos locais fora do release.
+a menos que isso seja solicitado separadamente. `scripts/sync_production.sh
+deploy` executa diretamente o script da VM, mas não transfere um bundle novo e
+por isso não deve ser usado para releases.
 
 ## Pré-requisitos no servidor
 
