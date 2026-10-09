@@ -446,7 +446,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const drillColumns: GridColDef[] = useMemo(() => {
     const schema = meta?.columns || [];
     const names = (drill?.columns?.length ? drill.columns : schema.map(column => column.name))
-      .filter(name => name.toLowerCase() !== "origem")
+      .filter(name => !["origem", "source_blob_path", "source_row_offset"].includes(name.toLowerCase()))
       .sort(columnNameCompare.compare);
     const byName = new Map(schema.map(column => [column.name, column]));
     return [
