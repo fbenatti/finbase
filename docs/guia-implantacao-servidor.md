@@ -28,11 +28,31 @@ warehouse Iceberg estão saudáveis.
 
 ## Atualização de uma instalação já em produção
 
+### Regra de trabalho: DEV primeiro, PRD somente com autorização
+
+Toda solicitação de ajuste deve ser implementada e validada exclusivamente em
+DEV. Não publicar commits para PRD, executar deploy, alterar dados ou
+configurações de PRD, nem iniciar scripts que possam fazer essas ações como
+parte do desenvolvimento. Concluir o ajuste em DEV e deixar o resultado pronto
+para validação do usuário. A promoção para PRD só pode ocorrer quando o usuário
+declarar explicitamente que finalizou a validação e autorizar a subida. Essa
+autorização vale para a promoção solicitada; não é presumida por um pedido para
+implementar, corrigir, testar ou fazer commit.
+
+Enquanto aguarda essa autorização, commits e publicação em repositório remoto
+não devem acionar qualquer deploy automático para PRD. Se o fluxo de CI/CD do
+ambiente publicar automaticamente, interrompa antes da etapa de produção e
+ajuste o fluxo para manter o release pendente até a autorização explícita.
+
 Este é o procedimento padrão para publicar alterações de código no host
 `finops-brsouth`. Use a partir da raiz do repositório local. O deploy deve
 receber somente commits intencionais; não use `scripts/sync_production.sh
 publish` quando houver arquivos locais não relacionados, pois esse comando faz
 `git add -A`.
+
+As instruções abaixo são exclusivas da etapa de promoção para PRD, iniciada
+somente após a autorização explícita acima. Antes disso, não execute os comandos
+de publicação ou implantação descritos nesta seção.
 
 O checkout da VM usa um bundle Git local como `origin` para receber releases
 incrementais; `git push origin main` sozinho atualiza o GitHub, mas não a VM.

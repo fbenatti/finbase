@@ -135,6 +135,14 @@ As consultas usam Trino nas tabelas FOCUS detalhadas e planejamento da camada at
 
 ## 8. Plano de deploy em PRD
 
+> **Gate de release:** todo o desenvolvimento, commits e validação inicial
+> devem ocorrer exclusivamente em DEV. Este plano descreve uma promoção futura
+> e só pode ser iniciado depois que o usuário confirmar que terminou de validar
+> em DEV e autorizar explicitamente a subida para PRD. Um pedido de
+> implementação, correção, teste ou commit não autoriza publicação em PRD.
+> Commits e push para o repositório não podem disparar deploy automático em PRD
+> enquanto essa autorização não existir.
+
 ### Antes do deploy
 
 1. Revisar o diff completo `origin/main...HEAD`; os 126 commits locais no momento desta documentação incluem trabalho de preços Azure, forecast, regras, Savings e logs. Abrir PR somente com escopo aprovado.
