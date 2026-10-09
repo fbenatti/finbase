@@ -180,6 +180,15 @@ def _history_where(filters: dict[str, Any], search: str = "", search_fields: lis
 def _out(row):
     return {c.name: getattr(row, c.name) for c in row.__table__.columns}
 
+
+def _business_rule_snapshot(rule: ForecastBusinessRule) -> dict[str, Any]:
+    """JSON-safe, immutable rule contract attached when a run is queued."""
+    return {
+        column.name: getattr(rule, column.name)
+        for column in rule.__table__.columns
+        if column.name not in {"created_at", "updated_at"}
+    }
+
 def _config_snapshot(config: ForecastConfig, destination: DestinationTable) -> dict[str, Any]:
     """Persist only JSON-safe execution inputs; never depend on a live config."""
     return {
@@ -767,6 +776,13 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
     snapshot = _config_snapshot(config, destination)
     source_name = destination.physical_name
     snapshot.update(destination_physical_name=source_name, source_namespace=source_namespace)
+    active_rules = (await db.execute(
+        select(ForecastBusinessRule).where(
+            ForecastBusinessRule.forecast_config_id == config_id,
+            ForecastBusinessRule.active.is_(True),
+        ).order_by(ForecastBusinessRule.priority, ForecastBusinessRule.id)
+    )).scalars().all()
+    snapshot["business_rules"] = [_business_rule_snapshot(rule) for rule in active_rules]
     if simulated_date is not None:
         snapshot["simulated_as_of"] = simulated_date.isoformat()
     row = ForecastRun(

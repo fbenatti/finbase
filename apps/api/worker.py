@@ -582,6 +582,9 @@ def consumer_main(worker_id: int):
                         business_rules = s.query(ForecastBusinessRule).filter(ForecastBusinessRule.forecast_config_id == config_id, ForecastBusinessRule.active == True).all() if config else []
                         if not config or not run or not dest:
                             raise RuntimeError("Configuração de forecast inválida")
+                        frozen_rules = (run.config_snapshot or {}).get("business_rules")
+                        if frozen_rules is not None:
+                            business_rules = [SimpleNamespace(**rule) for rule in frozen_rules]
                         # Cancellation can race with the worker claiming the
                         # queue row. Re-check the run after loading both rows
                         # and never execute a cancelled forecast.
@@ -812,6 +815,14 @@ def consumer_main(worker_id: int):
                             "charge_end_column": config.charge_end_column,
                             "connection_allocation_rules": list(config.connection_allocation_rules or []),
                             "null_dimension_label": getattr(config, "null_dimension_label", "Não classificado") or "Não classificado",
+                            "business_rules": [
+                                {
+                                    column.name: getattr(rule, column.name)
+                                    for column in rule.__table__.columns
+                                    if column.name not in {"created_at", "updated_at"}
+                                }
+                                for rule in business_rules
+                            ],
                         }
                         processed = 0
                         failures: list[str] = []
