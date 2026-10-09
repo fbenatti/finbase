@@ -323,6 +323,44 @@ def test_recurring_monthly_zeroes_open_month_for_lumpy():
     ) == 0.0
 
 
+def test_monthly_purchase_closes_current_month_with_five_charge_days_in_history():
+    # Full September + October purchases exceed the old three-day heuristic.
+    daily = pd.Series(
+        [39000.0, 39000.0, 39259.98, 59189.06, 29594.53],
+        index=pd.to_datetime(["2026-09-01", "2026-09-05", "2026-09-15", "2026-10-01", "2026-10-05"]),
+    ).resample("D").sum()
+    ctx = _build_series_context(daily, date(2026, 10, 5))
+    ctx["lumpy"] = False
+    key_values = {"commitmentdiscounttype": "Reservation", "chargecategory": "Purchase"}
+    key_cols = list(key_values)
+    output = pd.DataFrame([
+        {**key_values, "forecast_month": month, "tipo": "forecast", "forecast_value": 329767.60}
+        for month in ["202610", "202611"]
+    ])
+    rule = _rule(
+        identification_column="chargecategory", identification_values=["Purchase"],
+        behavior_options={"current_month_policy": "ZERO_WHEN_REALIZED"},
+    )
+    _apply_forecast_business_rules(output, [rule], {_series_key(key_values, key_cols): ctx}, key_cols, date(2026, 10, 7))
+    assert output["forecast_value"].tolist() == [0.0, 117259.98]
+
+
+def test_monthly_policy_closes_first_charge_without_prior_anchor():
+    for realized in [88783.58, -88783.58]:
+        assert _replicated_month_value(
+            behavior="RECURRING_MONTHLY", forecast_month="202610", current_month_key="202610",
+            last_closed_month_total=0.0, current_month_realized=realized, growth_rate=0.0,
+            current_month_policy="ZERO_WHEN_REALIZED",
+        ) == 0.0
+
+
+def test_monthly_policy_projects_missing_charge_and_daily_policy_keeps_remaining():
+    args = dict(behavior="RECURRING_MONTHLY", forecast_month="202610", current_month_key="202610",
+                last_closed_month_total=117259.98, current_month_realized=0.0, growth_rate=0.0)
+    assert _replicated_month_value(**args, current_month_policy="ZERO_WHEN_REALIZED") == 117259.98
+    assert _replicated_month_value(**args, current_month_policy="DAILY_REMAINDER", lumpy=True) is None
+
+
 def test_rule_without_identification_or_scope_is_not_applied_globally():
     output = pd.DataFrame(
         [
