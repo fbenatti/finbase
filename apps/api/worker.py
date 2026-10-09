@@ -689,45 +689,6 @@ def consumer_main(worker_id: int):
                             if task_row:
                                 task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
                                 s.commit()
-                        # Sequência: forecast → rateio → Gold (visão completa =
-                        # realizado + forecast + rateio). A planning mudou, então a
-                        # Gold pré-agregada precisa ser materializada de novo; a
-                        # fila do worker executa em ordem de id (sequência real).
-                        gold_rule_ids = [int(x) for x in (task_json.get("gold_rule_ids") or []) if x]
-                        # Scheduled pipelines publish Gold only after forecast
-                        # and (when enabled) accuracy complete.  Manual
-                        # forecasts retain the historical immediate Gold
-                        # behavior.
-                        run_scheduled_gold = not task_json.get("scheduled_pipeline")
-                        try:
-                            if not run_scheduled_gold:
-                                raise LookupError("Gold desabilitada no schedule")
-                            from app.services.gold_materialization import enqueue_rule_materialization
-                            gold_task = enqueue_rule_materialization(
-                                s, rule_ids=gold_rule_ids, source="forecast",
-                            )
-                            if gold_task and task_row:
-                                task_row.phase = (
-                                    f"Forecast publicado · {rateio.get('rows', 0)} linhas de rateio"
-                                    f" · Gold enfileirada (task #{gold_task.id})"
-                                )
-                                s.commit()
-                        except LookupError:
-                            pass
-                        except Exception as gold_exc:
-                            if task_row:
-                                task_row.phase = f"Forecast publicado · Gold pendente: {gold_exc}"
-                                s.commit()
-                        if task_json.get("scheduled_pipeline") and not task_json.get("accuracy"):
-                            from app.services.gold_materialization import enqueue_rule_materialization
-                            gold_task = enqueue_rule_materialization(
-                                s,
-                                rule_ids=gold_rule_ids,
-                                source="scheduled_pipeline",
-                            )
-                            if gold_task and task_row:
-                                task_row.phase = f"Forecast publicado · Gold na fila (task #{gold_task.id})"[:200]
-                                s.commit()
                         s.close()
                     except Exception as exc:
                         import traceback
@@ -891,19 +852,6 @@ def consumer_main(worker_id: int):
                                 task_row.errors = failures
                             task_row.finished_at = datetime.now(timezone.utc)
                             s.commit()
-                        # The scheduled pipeline deliberately materializes
-                        # Gold after accuracy, so forecast never races or
-                        # implicitly triggers the final cube publication.
-                        if task_row and task_row.status == "COMPLETED" and task_json.get("scheduled_pipeline"):
-                            from app.services.gold_materialization import enqueue_rule_materialization
-                            gold_task = enqueue_rule_materialization(
-                                s,
-                                rule_ids=[int(x) for x in (task_json.get("gold_rule_ids") or []) if x],
-                                source="scheduled_pipeline",
-                            )
-                            if gold_task:
-                                task_row.phase = f"{task_row.phase} · Gold na fila (task #{gold_task.id})"[:200]
-                                s.commit()
                         s.close()
                     except Exception as exc:
                         import traceback
