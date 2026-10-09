@@ -511,8 +511,16 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     const isNull = parsed == null;
     const isNumeric = typeof parsed === "number";
     const label = isNull ? "null" : String(parsed);
-    const color = isNull ? "#a47713" : isNumeric ? "#278344" : typeof parsed === "boolean" ? (parsed ? "#278344" : "#c62828") : "#666666";
-    return <Chip component="span" label={label} size="small" variant="outlined" sx={{ display: "inline-flex", verticalAlign: "middle", width: "fit-content", maxWidth: "100%", height: "auto", borderRadius: "999px", borderColor: "#93c5fd", bgcolor: "#eff6ff", color, fontWeight: 700, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", "& .MuiChip-label": { display: "block", px: 1, py: 0.35, whiteSpace: "inherit", overflowWrap: "anywhere" } }} />;
+    const palette = isNull
+      ? { color: "#946c12", border: "#f3df9b", background: "#fff9e8" }
+      : isNumeric
+        ? { color: "#28754a", border: "#b9e3c9", background: "#effaf3" }
+        : typeof parsed === "boolean"
+          ? parsed
+            ? { color: "#28754a", border: "#b9e3c9", background: "#effaf3" }
+            : { color: "#b4233c", border: "#f2c2cb", background: "#fff1f3" }
+          : { color: "#596273", border: "#d9dee7", background: "#f5f6f8" };
+    return <Chip component="span" label={label} size="small" variant="outlined" sx={{ display: "inline-flex", verticalAlign: "middle", width: "fit-content", maxWidth: "100%", height: "auto", borderRadius: "999px", borderColor: palette.border, bgcolor: palette.background, color: palette.color, fontWeight: 650, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", "& .MuiChip-label": { display: "block", px: 1.1, py: 0.4, whiteSpace: "inherit", overflowWrap: "anywhere" } }} />;
   };
   const renderBusinessRuleJson = (value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
