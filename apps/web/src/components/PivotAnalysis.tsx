@@ -483,6 +483,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   }, [drill, meta]);
 
   const selectedRowEntries = useMemo(() => Object.entries(selectedDrillRow || {}).sort(([left], [right]) => columnNameCompare.compare(left, right)), [selectedDrillRow]);
+  const selectedRowValuesByLowerName = useMemo(
+    () => new Map(Object.entries(selectedDrillRow || {}).map(([name, value]) => [name.toLowerCase(), value])),
+    [selectedDrillRow],
+  );
   const parseJsonValue = (value: unknown): unknown => {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
@@ -822,7 +826,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           {(sourceDetail.pairs || []).map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, gap: 1, alignItems: "stretch" }}>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block" mb={0.5}>{pair.source_key}</Typography>{renderDetailValue(pair.source_value)}</Paper>
             <Typography sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#94a3b8", fontSize: 22 }}>→</Typography>
-            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block" mb={0.5}>{pair.destination_key}</Typography>{renderDetailValue(selectedDrillRow?.[pair.destination_key])}</Paper>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block" mb={0.5}>{pair.destination_key}</Typography>{renderDetailValue(selectedRowValuesByLowerName.get(pair.destination_key.toLowerCase()))}</Paper>
           </Box>)}
           {Object.keys(sourceDetail.source_unmatched || {}).length > 0 && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "#fffbeb", borderColor: "#fde68a" }}><Typography variant="subtitle2" fontWeight={750} color="#92400e" mb={1}>Campos de origem sem correspondência ({Object.keys(sourceDetail.source_unmatched || {}).length})</Typography><Stack spacing={0.75}>{Object.entries(sourceDetail.source_unmatched || {}).sort(([a], [b]) => columnNameCompare.compare(a, b)).map(([name, value]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(160px, 30%) minmax(0,1fr)" }, gap: 1, p: 1, bgcolor: "white", borderRadius: 1.5 }}><Typography variant="caption" fontWeight={750} color="#a16207">{name}</Typography><Box>{renderDetailValue(value)}</Box></Box>)}</Stack></Paper>}
         </Stack>}
