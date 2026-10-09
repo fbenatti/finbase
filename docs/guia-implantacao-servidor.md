@@ -26,6 +26,63 @@ próprio destino.
 Não inicie reprocessamentos antes de confirmar que o worker, o Trino e o
 warehouse Iceberg estão saudáveis.
 
+## Atualização de uma instalação já em produção
+
+Este é o procedimento padrão para publicar alterações de código no host
+`finops-brsouth`. Use a partir da raiz do repositório local. O deploy deve
+receber somente commits intencionais; não use `scripts/sync_production.sh
+publish` quando houver arquivos locais não relacionados, pois esse comando faz
+`git add -A`.
+
+1. Confira a branch, o diff e o estado da árvore. Mantenha alterações de código
+   em commits próprios e nunca inclua exclusões ou arquivos operacionais alheios
+   ao release.
+2. Valide o build/testes exigidos pela alteração e confirme que `main` está à
+   frente de `origin/main` apenas pelos commits desejados.
+3. Publique os commits:
+
+   ```bash
+   git push origin main
+   ```
+
+4. Antes de reconstruir, confira que o checkout remoto está limpo, confirme o
+   commit atual e verifique saúde dos serviços e espaço livre em `/mnt`:
+
+   ```bash
+   ssh finops-brsouth 'cd /mnt/openfinops-backups/openfinops && git status --short && git log -1 --oneline && docker compose -f docker-compose.yml -f docker-compose.vm.yml ps && df -h /mnt'
+   ```
+
+   Não continue se houver alterações no checkout remoto, serviço essencial
+   parado, ou espaço insuficiente para rebuild.
+
+5. Execute o script versionado da VM. Ele faz `git fetch origin main`,
+   fast-forward, garante `.env.production`, reconstrói e sobe os serviços com
+   Compose, instala/testa a configuração Nginx e recarrega o Nginx:
+
+   ```bash
+   ssh finops-brsouth 'cd /mnt/openfinops-backups/openfinops && scripts/deploy_vm.sh'
+   ```
+
+   O checkout esperado é `/mnt/openfinops-backups/openfinops`. O alias SSH
+   `finops-brsouth` é o ponto de acesso padrão; `OPENFINOPS_PROD_HOST` e
+   `OPENFINOPS_PROD_DIR` só devem ser usados quando um host/caminho alternativo
+   tiver sido explicitamente definido.
+
+6. Confirme que o commit remoto corresponde ao release e que todos os serviços
+   estão saudáveis. Verifique também o health do worker e os endpoints da API e
+   do frontend:
+
+   ```bash
+   ssh finops-brsouth 'cd /mnt/openfinops-backups/openfinops && git log -1 --oneline && docker compose -f docker-compose.yml -f docker-compose.vm.yml ps && docker exec openfinops-api-1 python -c "import requests; print(requests.get(\"http://127.0.0.1:8000/etl/worker-health\", timeout=10).json())" && docker exec openfinops-web-1 node -e "fetch(\"http://127.0.0.1:5173/api/connections/\").then(async r => console.log(r.status, (await r.json()).length))"'
+   ```
+
+O deploy é somente de código/configuração. Não restaure banco, apague volumes,
+rode reprocessamentos ou altere dados de forecast/Gold como parte da publicação,
+a menos que isso seja solicitado separadamente. Para este procedimento, prefira
+o script da VM diretamente via SSH: `scripts/sync_production.sh deploy` também
+exige que a árvore local inteira esteja limpa, o que pode bloquear a publicação
+por arquivos locais fora do release.
+
 ## Pré-requisitos no servidor
 
 O usuário remoto precisa ter acesso SSH e `sudo`.
