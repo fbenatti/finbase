@@ -185,6 +185,7 @@ class SharedCostTargetOut(BaseModel):
 
 class SharedCostUpsert(BaseModel):
     enabled: bool = False
+    allocation_type: str = "shared_cost"
     mode: str = "consumption"
     targets: list[SharedCostTargetIn] = []
 
@@ -192,6 +193,7 @@ class SharedCostUpsert(BaseModel):
 class SharedCostOut(BaseModel):
     department_id: int
     enabled: bool
+    allocation_type: str = "shared_cost"
     mode: str
     name: str | None = None
     path: str | None = None

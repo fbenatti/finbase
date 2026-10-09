@@ -1087,6 +1087,7 @@ def _shared_cost_out(config: DepartmentSharedCost, departments: dict[int, Depart
     return SharedCostOut(
         department_id=config.department_id,
         enabled=config.enabled,
+        allocation_type=config.allocation_type or "shared_cost",
         mode=config.mode,
         name=donor.name if donor else None,
         path=" > ".join(department_path(config.department_id, departments)) if donor else None,
@@ -1108,7 +1109,7 @@ async def get_shared_cost(dept_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Department not found")
     config = (await db.execute(select(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))).scalar_one_or_none()
     if not config:
-        return SharedCostOut(department_id=dept_id, enabled=False, mode="consumption", targets=[])
+        return SharedCostOut(department_id=dept_id, enabled=False, allocation_type="shared_cost", mode="consumption", targets=[])
     return _shared_cost_out(config, departments)
 
 
@@ -1119,6 +1120,9 @@ async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSess
     if not donor:
         raise HTTPException(status_code=404, detail="Department not found")
     mode = (data.mode or "consumption").lower()
+    allocation_type = (data.allocation_type or "shared_cost").strip().lower()
+    if allocation_type not in {"shared_cost", "consumption_rateio"}:
+        raise HTTPException(status_code=422, detail="Tipo de alocação inválido")
     if mode not in SHARED_COST_MODES:
         raise HTTPException(status_code=422, detail="Modo de rateio inválido")
     if data.enabled and mode != "consumption" and not data.targets:
@@ -1159,11 +1163,12 @@ async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSess
         raise HTTPException(status_code=422, detail="A soma dos percentuais não pode passar de 100%")
     config = (await db.execute(select(DepartmentSharedCost).where(DepartmentSharedCost.department_id == dept_id))).scalar_one_or_none()
     if not config:
-        config = DepartmentSharedCost(department_id=dept_id, enabled=data.enabled, mode=mode)
+        config = DepartmentSharedCost(department_id=dept_id, enabled=data.enabled, allocation_type=allocation_type, mode=mode)
         db.add(config)
         await db.flush()
     else:
         config.enabled = data.enabled
+        config.allocation_type = allocation_type
         config.mode = mode
         await db.execute(delete(DepartmentSharedCostTarget).where(DepartmentSharedCostTarget.config_id == config.id))
         await db.flush()

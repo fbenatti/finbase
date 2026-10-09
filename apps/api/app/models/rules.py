@@ -49,6 +49,7 @@ class DepartmentSharedCost(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     department_id = Column(Integer, ForeignKey("department.id", ondelete="CASCADE"), nullable=False, unique=True)
     enabled = Column(Boolean, nullable=False, default=False)
+    allocation_type = Column(String(40), nullable=False, default="shared_cost")
     mode = Column(String(20), nullable=False, default="consumption")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

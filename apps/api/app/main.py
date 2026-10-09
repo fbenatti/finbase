@@ -280,6 +280,7 @@ async def lifespan(app: FastAPI):
               created_at TIMESTAMPTZ DEFAULT now(),
               updated_at TIMESTAMPTZ DEFAULT now()
             )""",
+            "ALTER TABLE department_shared_cost ADD COLUMN IF NOT EXISTS allocation_type VARCHAR(40) NOT NULL DEFAULT 'shared_cost'",
             """CREATE TABLE IF NOT EXISTS department_shared_cost_target (
               id SERIAL PRIMARY KEY,
               config_id INTEGER NOT NULL REFERENCES department_shared_cost(id) ON DELETE CASCADE,
