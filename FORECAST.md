@@ -507,6 +507,16 @@ código, pois seus processos persistentes não acompanham o reload da API/Vite.
 Em DEV, a regra 8 da configuração 9 também foi atualizada para a versão 2 com
 `ZERO_WHEN_REALIZED` em 09/10/2026; o forecast 388 usava a versão 1, sem a opção.
 
+A validação completa em DEV foi publicada pelo agendamento Reprocessamento
+(4), selecionando Azure-TI / `202610`, forecast 9, rateio e cubo Gold 4:
+tarefa 8148 de reclassificação → tarefa 8149 / forecast 390 → Gold 8150,
+todas concluídas. Para SAPTDF, o cubo passou de R$ 470.452,45 para
+R$ 140.684,85 de forecast em outubro; Purchase ficou em zero, enquanto
+Purchase de novembro permaneceu em R$ 117.259,98. O total de outubro no cubo,
+incluindo realizado, forecast restante e rateio, ficou em R$ 282.035,60.
+Um forecast manual publica planning, mas o dashboard de cubos continua com a
+Gold anterior até sua materialização pelo workflow agendado.
+
 Em 09/10/2026 foi reproduzida a regressão de SAPTDF: compras de Reservation de
 R$ 88.783,58 em outubro geravam mais R$ 329.767,60 de forecast (`MEAN_7D`).
 O commit `3acdce04` havia condicionado o fechamento do mês à classificação
