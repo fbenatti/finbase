@@ -228,7 +228,15 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
                 row = rows[0] if rows else {}
                 checkpoint_id = int(row.get("checkpoint_id") or 0)
                 value = row.get("checkpoint_time")
-                checkpoint_time = datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+                if value:
+                    checkpoint_value = str(value).strip()
+                    if checkpoint_value.endswith(" UTC"):
+                        checkpoint_value = checkpoint_value[:-4] + "+00:00"
+                    checkpoint_time = datetime.fromisoformat(
+                        checkpoint_value.replace("Z", "+00:00")
+                    )
+                else:
+                    checkpoint_time = None
             except Exception as exc:
                 if _is_missing_processing_log_cube_error(exc):
                     full_refresh = True
