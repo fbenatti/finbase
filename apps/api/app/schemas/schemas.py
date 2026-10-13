@@ -308,6 +308,7 @@ class ClassificationRuleCreate(BaseModel):
 
 
 class ClassificationRuleUpdate(BaseModel):
+    connection_id: int | None = None
     name: str | None = None
     source_field: str | None = None
     pattern: str | None = None
