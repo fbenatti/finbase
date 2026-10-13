@@ -47,7 +47,7 @@ from app.services.expression_engine import (
 )
 from app.services import iceberg_service as iceberg
 from app.services.classification_field_values import enrich_from_dataframe
-from app.services.cloud_scope import rule_matches_cloud, rule_matches_destination
+from app.services.cloud_scope import rule_matches_cloud, rule_matches_connection, rule_matches_destination
 from app.services.contract_settlement import normalize_cloud_scope
 
 logger = logging.getLogger(__name__)
@@ -253,13 +253,14 @@ def _process_blob_sync(
                 ClassificationRule.active == True,
             ).order_by(ClassificationRule.priority, ClassificationRule.id)
         ).scalars().all()
-        # Classifications are scoped by cloud provider (and destination), not
-        # by source connection. ``connection_id`` remains legacy metadata on
-        # the rule and must not prevent an Azure rule created from one Azure
-        # source from classifying another Azure source.
+        # A classification without a connection_id is shared by provider and
+        # destination. When connection_id is set, preserve the source binding
+        # so a rule imported from one Azure environment cannot leak into the
+        # other Azure environment.
         is_focus_destination = physical_name.strip().lower() == "dest_modelo_focus"
         class_rules = [rule for rule in class_rules if
                        rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name) and
+                       rule_matches_connection(rule.connection_id, conn.id) and
                        rule_matches_destination(rule.destination_table_id, destination_id,
                                                 is_focus_destination=is_focus_destination)]
         for rule in rules:

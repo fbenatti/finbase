@@ -1877,15 +1877,14 @@ def _reprocess_destination_sync(
                         ),
                     ).order_by(ClassificationRule.priority, ClassificationRule.id)
                 ).scalars().all()
-                # Classifications are shared by provider, not by source
-                # connection.  A rule created from Azure-4P must also classify
-                # Azure-TI when its cloud_scope is Azure; connection_id is
-                # legacy metadata for these rules and must not narrow Gold.
+                # Rules without a connection binding are shared by provider;
+                # explicitly connection-bound rules retain their source scope.
                 if rule_matches_destination(
                     rule.destination_table_id,
                     destination_table_id,
                     is_focus_destination=is_focus_destination,
                 )
+                and rule_matches_connection(rule.connection_id, cid)
                 and rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name)
             ]
 
@@ -2690,7 +2689,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
     from app.models.rules import ClassificationRule, Department
     from app.models.source_connection import SourceConnection
     from app.services import iceberg_service as iceberg
-    from app.services.cloud_scope import rule_matches_cloud, rule_matches_destination
+    from app.services.cloud_scope import rule_matches_cloud, rule_matches_connection, rule_matches_destination
     from app.services.task_runner import _apply_classifications_sync, _check_cancelled
 
     # Reclassification reads existing nullable BIGINT fields back through
@@ -2753,7 +2752,8 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
             if not conn:
                 continue
             rules = [r for r in session.execute(select(ClassificationRule).where(ClassificationRule.active == True).order_by(ClassificationRule.priority, ClassificationRule.id)).scalars().all()
-                     if rule_matches_destination(r.destination_table_id, destination_table_id, is_focus_destination=is_focus)
+                     if rule_matches_connection(r.connection_id, cid)
+                     and rule_matches_destination(r.destination_table_id, destination_table_id, is_focus_destination=is_focus)
                      and rule_matches_cloud(r.cloud_scope, conn.cloud_scope, conn.cloud_name)]
             hierarchy_cache = {}
             for period in billing_periods:
