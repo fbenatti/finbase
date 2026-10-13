@@ -1,6 +1,7 @@
 """Shared persistence helpers for the canonical processing log."""
 
 import logging
+from pathlib import Path
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -79,7 +80,27 @@ async def _maintain_processing_log_cube_snapshots() -> bool:
                 response = await client.get(next_uri, headers=headers)
                 response.raise_for_status()
                 data = response.json()
+    _remove_orphan_checksum_sidecars(table.location())
     return True
+
+
+def _remove_orphan_checksum_sidecars(location: str) -> int:
+    """Remove Hadoop .crc sidecars left behind after Iceberg orphan cleanup."""
+    root = Path(location.removeprefix("file://"))
+    if not root.is_dir():
+        return 0
+    removed = 0
+    for sidecar in root.rglob(".*.crc"):
+        original = sidecar.with_name(sidecar.name[1:-4])
+        if not original.exists():
+            try:
+                sidecar.unlink()
+                removed += 1
+            except FileNotFoundError:
+                continue
+    if removed:
+        logger.info("Removed %d orphan checksum sidecars from %s", removed, root)
+    return removed
 
 
 async def _maybe_maintain_processing_log_cube_snapshots() -> None:
