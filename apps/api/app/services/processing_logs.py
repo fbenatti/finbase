@@ -290,10 +290,22 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
             from pyiceberg.io.pyarrow import pyarrow_to_schema
 
             staging = f"{PROCESSING_LOG_CUBE}_stg_{_time.time_ns()}"
+            catalog = iceberg._get_catalog()
             iceberg._ensure_namespace("gold")
             for column in ("started_at", "finished_at", "updated_at"):
                 frame[column] = pd.to_datetime(frame[column], utc=True).astype("datetime64[us, UTC]")
-            arrow = iceberg._df_to_arrow(frame)
+            try:
+                target_schema = catalog.load_table(("gold", PROCESSING_LOG_CUBE)).schema()
+            except Exception:
+                target_schema = None
+            arrow = iceberg._df_to_arrow(
+                frame,
+                column_types={
+                    "id": "BIGINT", "etl_task_id": "BIGINT",
+                    "rows_source": "BIGINT", "rows_destination": "BIGINT",
+                },
+                target_schema=target_schema,
+            )
             staged_table = iceberg._get_catalog().create_table(
                 ("gold", staging), schema=pyarrow_to_schema(arrow.schema),
             )
