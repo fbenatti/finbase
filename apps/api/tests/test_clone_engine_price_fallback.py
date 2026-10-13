@@ -49,6 +49,33 @@ def _reservation_row():
     }
 
 
+def test_usage_before_ondemand_batch_uses_month_wide_reference():
+    row = _reservation_row() | {"CommitmentDiscountType": "SavingsPlan", "source_pricing_model": "SavingsPlan"}
+    rule = _rule()
+    rule.conditions[1]["value"] = "SavingsPlan"
+    key = CloneEngine._reference_key(row, "source_meter_id")
+    engine = CloneEngine([rule], 1, period_prices={"202602": {key: 8.0}})
+
+    result, count = engine.apply(pd.DataFrame([row]), "202602")
+
+    assert count == 1
+    assert result.loc[~result.is_synthetic, "BilledCost"].iloc[0] == 16.0
+    assert result.loc[result.is_synthetic, "BilledCost"].iloc[0] == -16.0
+    assert result.loc[result.is_synthetic, "ondemand_reference_period"].iloc[0] == "202602"
+
+
+def test_future_month_reference_does_not_value_earlier_usage():
+    row = _reservation_row()
+    key = CloneEngine._reference_key(row, "source_meter_id")
+    engine = CloneEngine([_rule()], 1, period_prices={"202603": {key: 8.0}})
+
+    result, count = engine.apply(pd.DataFrame([row]), "202602")
+
+    assert count == 0
+    assert result.BilledCost.iloc[0] == 0
+    assert len(engine.pendencies) == 1
+
+
 def test_azure_ti_uses_shared_azure_reference_when_month_has_no_ondemand_row():
     engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0})
 

@@ -11,6 +11,52 @@ def _text(value: Any) -> str:
     return "" if value is None else str(value).strip().casefold()
 
 
+def load_azure_observed_prices(
+    execute: Callable[..., list[dict[str, Any]]],
+    *,
+    connection_code: str,
+    billing_period: str,
+    blob_paths: list[str],
+) -> dict[tuple[str, ...], float]:
+    """Read month-wide On-Demand references from the selected immutable input.
+
+    Usage can precede its only On-Demand observation by several batches or
+    blobs. Loading distinct keys first makes valuation independent of that
+    order, without loading the entire billing export into memory. Conflicting
+    observations are left to the existing batch resolver, rather than guessed.
+    """
+    if not re.fullmatch(r"azure-[a-zA-Z0-9_-]+", connection_code):
+        raise ValueError(f"Conexão Azure inválida para referência: {connection_code}")
+    if not blob_paths:
+        return {}
+    raw_table = "raw_" + connection_code.replace("-", "_")
+    period_sql = str(billing_period).replace("'", "''")
+    paths_sql = ",".join("'" + path.replace("'", "''") + "'" for path in sorted(set(blob_paths)))
+    rows = execute(f"""
+        SELECT DISTINCT meterid, billingaccountid, pricingcurrency, unitofmeasure,
+               productid, meterregion, try_cast(unitprice AS DOUBLE) AS unit_price
+        FROM iceberg.bronze.{raw_table}
+        WHERE _billing_period = '{period_sql}'
+          AND _blob_path IN ({paths_sql})
+          AND lower(trim(chargetype)) = 'usage'
+          AND lower(trim(pricingmodel)) = 'ondemand'
+          AND try_cast(unitprice AS DOUBLE) > 0
+    """, timeout_s=90)
+    candidates: dict[tuple[str, ...], set[float]] = {}
+    for row in rows:
+        meter = _text(row.get("meterid"))
+        if not meter:
+            continue
+        key = (connection_code.casefold(), meter, *(
+            _text(row.get(field)) for field in (
+                "billingaccountid", "pricingcurrency", "unitofmeasure",
+                "productid", "meterregion",
+            )
+        ))
+        candidates.setdefault(key, set()).add(float(row["unit_price"]))
+    return {key: next(iter(prices)) for key, prices in candidates.items() if len(prices) == 1}
+
+
 def load_azure_price_fallbacks(
     execute: Callable[..., list[dict[str, Any]]],
     *,

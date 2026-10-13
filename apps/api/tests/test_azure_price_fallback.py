@@ -1,4 +1,25 @@
-from app.services.azure_price_fallback import load_azure_price_fallbacks
+from app.services.azure_price_fallback import load_azure_price_fallbacks, load_azure_observed_prices
+
+
+def test_observed_prices_are_scoped_to_selected_month_and_blobs():
+    def execute(sql, *, timeout_s):
+        assert "_billing_period = '202602'" in sql
+        assert "_blob_path IN ('selected.csv')" in sql
+        return [{
+            "meterid": "Meter-1", "billingaccountid": "Account-1",
+            "pricingcurrency": "USD", "unitofmeasure": "1 Hour",
+            "productid": "Product-1", "meterregion": "BR South", "unit_price": .17303,
+        }]
+
+    prices = load_azure_observed_prices(execute, connection_code="azure-4p", billing_period="202602", blob_paths=["selected.csv"])
+    assert prices == {("azure-4p", "meter-1", "account-1", "usd", "1 hour", "product-1", "br south"): .17303}
+
+
+def test_conflicting_month_prices_are_not_guessed():
+    def execute(sql, *, timeout_s):
+        return [{"meterid": "meter-1", "unit_price": price} for price in (1.0, 2.0)]
+
+    assert load_azure_observed_prices(execute, connection_code="azure-4p", billing_period="202602", blob_paths=["selected.csv"]) == {}
 
 
 def test_price_sheet_fallback_uses_meter_when_product_ids_differ():

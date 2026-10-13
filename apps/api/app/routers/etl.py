@@ -1939,9 +1939,25 @@ def _reprocess_destination_sync(
             ).order_by(CloneRule.priority)).scalars().all()
             if clone_rules:
                 from app.services.clone_engine import CloneEngine
+                period_prices = {}
+                if conn.code.casefold().startswith("azure-"):
+                    from app.services.azure_price_fallback import load_azure_observed_prices
+                    from app.services.trino_service import execute_sync as _trino_execute_sync
+                    periods = sorted({str(p) for _, source_id, p, _ in all_blobs if source_id == cid and p})
+                    for period in periods:
+                        paths = [path for _, source_id, p, path in all_blobs if source_id == cid and str(p) == period]
+                        period_prices[period] = load_azure_observed_prices(
+                            _trino_execute_sync, connection_code=conn.code,
+                            billing_period=period, blob_paths=paths,
+                        )
+                        _append_reprocess_log(task_id, f"Referências On-Demand do mês preparadas: {conn.code}/{period}", details={
+                            "connection_id": cid, "billing_period": period,
+                            "observed_price_keys": len(period_prices[period]),
+                        })
                 clone_engines[cid] = CloneEngine(
                     clone_rules, destination_table_id, reference_prices=clone_reference_prices,
                     price_sheet_prices=clone_price_sheet_prices,
+                    period_prices=period_prices,
                 )
 
         # Close main session NOW — all ORM objects are detached but attributes remain accessible

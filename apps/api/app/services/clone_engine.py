@@ -83,12 +83,14 @@ class CloneEngine:
         self, rules: list[Any], destination_table_id: int,
         reference_prices: dict[tuple[str, str], float] | None = None,
         price_sheet_prices: dict[tuple[str, ...], Any] | None = None,
+        period_prices: dict[str, dict[tuple[str, ...], float]] | None = None,
     ):
         self.rules = sorted(rules, key=lambda r: r.priority)
         self.destination_table_id = destination_table_id
         self.prices: dict[tuple[str, str], tuple[str, float]] = {}
         self.reference_prices = reference_prices or {}
         self.price_sheet_prices = price_sheet_prices or {}
+        self.period_prices = period_prices or {}
         self.pendencies: list[dict[str, Any]] = []
 
     @staticmethod
@@ -165,6 +167,12 @@ class CloneEngine:
     def apply(self, frame: pd.DataFrame, period: str) -> tuple[pd.DataFrame, int]:
         if frame.empty or not period:
             return frame, 0
+        # Prime the whole selected month before processing its first Usage.
+        # Keep months separate so a future observation cannot value an earlier
+        # period when one reprocess request contains several months.
+        for key, price in self.period_prices.get(period, {}).items():
+            if key not in self.prices or period >= self.prices[key][0]:
+                self.prices[key] = (period, float(price))
         if "is_synthetic" not in frame.columns:
             frame["is_synthetic"] = False
         else:
