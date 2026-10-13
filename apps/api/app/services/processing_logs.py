@@ -291,6 +291,8 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
 
             staging = f"{PROCESSING_LOG_CUBE}_stg_{_time.time_ns()}"
             iceberg._ensure_namespace("gold")
+            for column in ("started_at", "finished_at", "updated_at"):
+                frame[column] = pd.to_datetime(frame[column], utc=True).astype("datetime64[us, UTC]")
             arrow = iceberg._df_to_arrow(frame)
             staged_table = iceberg._get_catalog().create_table(
                 ("gold", staging), schema=pyarrow_to_schema(arrow.schema),
