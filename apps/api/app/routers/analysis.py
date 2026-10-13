@@ -630,7 +630,10 @@ def _shared_cost_pivot_filters(
     rateio_type = names.get("tipo")
     if not rateio_type:
         raise HTTPException(status_code=422, detail="A tabela não possui a coluna tipo para filtrar custo compartilhado")
-    return [*filters, PivotFilter(column=rateio_type, values=["shared_cost"], operator="IN")]
+    # Planning snapshots written before the shared_cost tipo was introduced
+    # persisted these allocations as tipo=rateio. Keep them visible in the
+    # dedicated pivot source alongside snapshots using the newer value.
+    return [*filters, PivotFilter(column=rateio_type, values=["rateio", "shared_cost"], operator="IN")]
 
 
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
@@ -3257,7 +3260,10 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
             period_col = columns.get("period")
             tipo_col = columns.get("tipo")
             if period_col and tipo_col:
-                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) = 'shared_cost'"
+                # Older planning snapshots store shared-cost rows as
+                # tipo=rateio; newer ones use tipo=shared_cost. Expose either
+                # format as long as the table contains rows to analyze.
+                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) IN ('rateio', 'shared_cost')"
                 shared_count = await trino_execute(
                     f"SELECT COUNT(*) AS cnt FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where}"
                 )
