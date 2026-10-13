@@ -7,7 +7,8 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
-from sqlalchemy import or_, select, text
+import pandas as pd
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,8 @@ from app.models.processing_log import ProcessingLog
 PROCESSING_LOG_CUBE = "dest_dm_processing_logs"
 _SNAPSHOT_MAINTENANCE_INTERVAL_SECONDS = 15 * 60
 _last_snapshot_maintenance_attempt = 0.0
+_MAX_PROCESSING_LOG_SNAPSHOTS = 500
+_MAX_PROCESSING_LOG_DELETE_FILES = 10_000
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +53,7 @@ async def _maintain_processing_log_cube_snapshots() -> bool:
     statements = (
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} SET PROPERTIES "
         "delete_after_commit_enabled = true, max_previous_versions = 10",
+        f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} EXECUTE optimize",
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
         f"EXECUTE expire_snapshots(retention_threshold => '{retention}')",
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
@@ -92,6 +96,27 @@ async def _maybe_maintain_processing_log_cube_snapshots() -> None:
             logger.warning("A manutenção de snapshots do cubo de logs não foi concluída")
     except Exception:
         logger.warning("Falha ao expirar snapshots do cubo de logs", exc_info=True)
+
+
+def _processing_log_cube_needs_rebuild(expected_rows: int) -> bool:
+    """Detect snapshot/delete-file churn and compact the small serving table."""
+    from app.services.iceberg_service import _get_catalog
+
+    try:
+        table = _get_catalog().load_table(("gold", PROCESSING_LOG_CUBE))
+        snapshot = table.current_snapshot()
+        if snapshot is None:
+            return False
+        summary = snapshot.summary.additional_properties
+        current_rows = int(summary.get("total-records") or 0)
+        delete_files = int(summary.get("total-delete-files") or 0)
+        return (
+            len(table.snapshots()) > _MAX_PROCESSING_LOG_SNAPSHOTS
+            or delete_files > _MAX_PROCESSING_LOG_DELETE_FILES
+            or current_rows > max(expected_rows * 3, expected_rows + 10_000)
+        )
+    except Exception:
+        return False
 
 
 def _trino_literal(value: Any, type_name: str) -> str:
@@ -150,6 +175,7 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
     only when a user opens a row.
     """
     from app.database import SyncSession
+    from app.services import iceberg_service as iceberg
     from app.services.trino_service import execute
 
     session = SyncSession()
@@ -158,6 +184,16 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
         lock_acquired = bool(session.execute(text("SELECT pg_try_advisory_lock(734219405)")).scalar())
         if not lock_acquired:
             return {"rows_written": 0, "checkpoint": 0}
+        expected_rows = int(session.scalar(select(func.count()).select_from(ProcessingLog)) or 0)
+        needs_rebuild = _processing_log_cube_needs_rebuild(expected_rows)
+        if needs_rebuild:
+            logger.warning("Recriando cubo de logs após detectar excesso de snapshots/arquivos de delete")
+            full_refresh = True
+        else:
+            # Run maintenance before any Trino read of the target. The old
+            # order made maintenance unreachable when checkpoint reads timed
+            # out on a delete-file-heavy table.
+            await _maybe_maintain_processing_log_cube_snapshots()
         checkpoint_time: datetime | None = None
         checkpoint_id = 0
         if not full_refresh:
@@ -172,7 +208,6 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
                 checkpoint_id = int(row.get("checkpoint_id") or 0)
                 value = row.get("checkpoint_time")
                 checkpoint_time = datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
-                await _maybe_maintain_processing_log_cube_snapshots()
             except Exception as exc:
                 if _is_missing_processing_log_cube_error(exc):
                     full_refresh = True
@@ -244,6 +279,35 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
                 "phase": row.phase,
                 "updated_at": row.updated_at,
             })
+
+        if full_refresh and payload:
+            # Publish a clean snapshot from the PostgreSQL source of truth.
+            # Repeated MERGE operations against Iceberg create position-delete
+            # files and snapshots; a staged atomic replacement bounds both.
+            frame = pd.DataFrame(payload)
+            staging = iceberg.write_destination_staged(
+                PROCESSING_LOG_CUBE,
+                frame,
+                partition_col="process_type",
+                namespace="gold",
+                add_tipo=False,
+            )
+            try:
+                written = iceberg.replace_staged_cube(
+                    PROCESSING_LOG_CUBE,
+                    staging,
+                    namespace="gold",
+                    known_row_count=len(frame),
+                )
+            except Exception:
+                iceberg.cleanup_staged_table(staging, namespace="gold")
+                raise
+            try:
+                await _maintain_processing_log_cube_snapshots()
+            except Exception:
+                logger.exception("Falha ao compactar o cubo de logs após reconstruí-lo")
+            return {"rows_written": written, "checkpoint": max(item["id"] for item in payload)}
+
         for offset in range(0, len(payload), 100):
             batch = payload[offset:offset + 100]
             await _merge_processing_log_batch(batch, create=not table_exists)
