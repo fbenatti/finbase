@@ -311,12 +311,27 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
             )
             staged_table.append(arrow)
             try:
-                written = iceberg.replace_staged_cube(
-                    PROCESSING_LOG_CUBE,
-                    staging,
-                    namespace="gold",
-                    known_row_count=len(frame),
+                catalog = iceberg._get_catalog()
+                try:
+                    canonical = catalog.load_table(("gold", PROCESSING_LOG_CUBE))
+                    canonical_location = canonical.location()
+                except Exception:
+                    canonical_location = None
+                if canonical_location:
+                    # SQLCatalog.drop_table removes only the catalog entry.
+                    # Reusing the canonical location with fresh metadata makes
+                    # every old data/delete file an orphan, without scanning
+                    # hundreds of thousands of position deletes.
+                    catalog.drop_table(("gold", PROCESSING_LOG_CUBE))
+                canonical = catalog.create_table(
+                    ("gold", PROCESSING_LOG_CUBE),
+                    schema=staged_table.schema(),
+                    location=canonical_location,
+                    partition_spec=staged_table.spec(),
                 )
+                canonical.append(staged_table.scan().to_arrow())
+                written = len(frame)
+                iceberg.cleanup_staged_table(staging, namespace="gold")
             except Exception:
                 iceberg.cleanup_staged_table(staging, namespace="gold")
                 raise
