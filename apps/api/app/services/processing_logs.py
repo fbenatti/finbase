@@ -285,13 +285,18 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
             # Repeated MERGE operations against Iceberg create position-delete
             # files and snapshots; a staged atomic replacement bounds both.
             frame = pd.DataFrame(payload)
-            staging = iceberg.write_destination_staged(
-                PROCESSING_LOG_CUBE,
-                frame,
-                partition_col="process_type",
-                namespace="gold",
-                add_tipo=False,
+            import time as _time
+
+            import pyarrow as pa
+            from pyiceberg.io.pyarrow import pyarrow_to_schema
+
+            staging = f"{PROCESSING_LOG_CUBE}_stg_{_time.time_ns()}"
+            iceberg._ensure_namespace("gold")
+            arrow = pa.Table.from_pandas(frame, preserve_index=False)
+            staged_table = iceberg._get_catalog().create_table(
+                ("gold", staging), schema=pyarrow_to_schema(arrow.schema),
             )
+            staged_table.append(arrow)
             try:
                 written = iceberg.replace_staged_cube(
                     PROCESSING_LOG_CUBE,
