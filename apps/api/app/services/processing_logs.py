@@ -287,12 +287,11 @@ async def publish_processing_log_cube(*, full_refresh: bool = False) -> dict[str
             frame = pd.DataFrame(payload)
             import time as _time
 
-            import pyarrow as pa
             from pyiceberg.io.pyarrow import pyarrow_to_schema
 
             staging = f"{PROCESSING_LOG_CUBE}_stg_{_time.time_ns()}"
             iceberg._ensure_namespace("gold")
-            arrow = pa.Table.from_pandas(frame, preserve_index=False)
+            arrow = iceberg._df_to_arrow(frame)
             staged_table = iceberg._get_catalog().create_table(
                 ("gold", staging), schema=pyarrow_to_schema(arrow.schema),
             )
