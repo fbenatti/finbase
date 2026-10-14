@@ -70,6 +70,29 @@ PostgreSQL, Trino e Iceberg reais.
 | `scripts/verify_anomaly_retrospective.py` | plano real de reconstrução; `HISTORICAL_RUN` para 202608–202610; guardas de corte e de não publicar Planning |
 | `scripts/verify_anomaly_publication.py` | troca atômica da publicação corrente; falha preserva a anterior; uma corrente por configuração; ciclo de vida do caso sem duplicação |
 
+### 3.1 Defeito encontrado e corrigido na validação
+
+`GET /anomalies/metrics` respondia **500**:
+
+```text
+AttributeError: Neither 'count' object nor 'Comparator' object has an attribute 'select_from'
+```
+
+O helper `func_count(model)` montava `func.count().select_from(model)` e era
+envolto em `select(...)`, produzindo `select(func.count().select_from(...))` —
+forma inválida. Corrigido com `select(func.count()).select_from(Model)` e
+acrescentado o contador de publicações correntes. Verificado: `200`.
+
+Todos os endpoints de leitura foram testados em execução:
+
+```text
+200  /anomalies/configs          200  /anomalies/cases
+200  /anomalies/coverage         200  /anomalies/cases/summary
+200  /anomalies/runs             200  /anomalies/metrics
+200  /anomalies/notifications    404  /anomalies/cases/999      (inexistente)
+200  /anomalies/cases/999/events 404  /anomalies/cases/999/contributors
+```
+
 ## 4. Piloto manual
 
 O fluxo manual está implementado e verificado ponta a ponta:

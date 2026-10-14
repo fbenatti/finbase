@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit
@@ -492,24 +492,28 @@ async def metrics(
 ):
     """Indicadores de avaliação (plano §5.2)."""
     summary_payload = await workflow.case_summary(db)
+
+    async def count_runs(*conditions) -> int:
+        query = select(func.count()).select_from(AnomalyRun)
+        for condition in conditions:
+            query = query.where(condition)
+        return int((await db.execute(query)).scalar_one())
+
+    publications = (
+        await db.execute(
+            select(func.count())
+            .select_from(AnomalyPublication)
+            .where(AnomalyPublication.is_current.is_(True))
+        )
+    ).scalar_one()
+
     summary_payload["evaluation"] = {
-        "runs": (
-            await db.execute(select(func_count(AnomalyRun)))
-        ).scalar_one(),
-        "completed_runs": (
-            await db.execute(select(func_count(AnomalyRun)).where(AnomalyRun.status == "COMPLETED"))
-        ).scalar_one(),
-        "failed_runs": (
-            await db.execute(select(func_count(AnomalyRun)).where(AnomalyRun.status == "FAILED"))
-        ).scalar_one(),
+        "runs": await count_runs(),
+        "completed_runs": await count_runs(AnomalyRun.status == "COMPLETED"),
+        "failed_runs": await count_runs(AnomalyRun.status == "FAILED"),
+        "current_publications": int(publications),
     }
     return summary_payload
-
-
-def func_count(model):
-    from sqlalchemy import func
-
-    return func.count().select_from(model)
 
 
 @router.get("/cases/{case_id}")
