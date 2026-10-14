@@ -910,7 +910,8 @@ export default function Anomalies() {
         {selected && (
           <Box>
             {(() => {
-              const eventBeyondCutoff = Boolean(series?.analysis_data_end && selected.event_date > series.analysis_data_end);
+              const dataEnd = series?.analysis_data_end ?? series?.data_cutoff;
+              const eventBeyondCutoff = Boolean(dataEnd && selected.event_date > dataEnd);
               return <>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="h6">Caso #{selected.id}</Typography>
@@ -928,7 +929,7 @@ export default function Anomalies() {
             {busy && <LinearProgress sx={{ mb: 1 }} />}
 
             {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
-              Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {series?.analysis_data_end} (atraso de ingestão D-2). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
+              Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso de ingestão D-2). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
             </Alert>}
             {!eventBeyondCutoff && <CaseComparison kase={selected} currency={currency} />}
             {series && <ContextChart series={series} kase={selected} currency={currency} />}
