@@ -444,7 +444,11 @@ def assessment_id_of(detection: Any) -> str | None:
     from app.services.anomaly_runner import assessment_id_for
 
     return assessment_id_for(
-        detection.reference_id, detection.series_id, detection.event_date, detection.evaluation_grain
+        detection.reference_id,
+        detection.series_id,
+        detection.event_date,
+        detection.evaluation_grain,
+        detection.event_type,
     )
 
 

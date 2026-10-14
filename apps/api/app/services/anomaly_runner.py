@@ -118,8 +118,16 @@ class DetectionOutcome:
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
-def assessment_id_for(reference_id: str | None, series_id: str, event_date: str, grain: str) -> str:
-    raw = f"{reference_id or '-'}|{series_id}|{event_date}|{grain}"
+def assessment_id_for(
+    reference_id: str | None,
+    series_id: str,
+    event_date: str,
+    grain: str,
+    event_type: str = "",
+) -> str:
+    # Evento mensal e acumulado podem compartilhar série, referência, data e
+    # granularidade. O tipo faz parte da identidade para preservar ambos.
+    raw = f"{reference_id or '-'}|{series_id}|{event_date}|{grain}|{event_type}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
@@ -388,7 +396,11 @@ def to_assessment_rows(
     rows: list[dict[str, Any]] = []
     for detection in detections:
         assessment_id = assessment_id_for(
-            detection.reference_id, detection.series_id, detection.event_date, detection.evaluation_grain
+            detection.reference_id,
+            detection.series_id,
+            detection.event_date,
+            detection.evaluation_grain,
+            detection.event_type,
         )
         row: dict[str, Any] = {
             "tipo": ASSESSMENT_TIPO,
