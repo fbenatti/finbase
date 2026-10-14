@@ -556,37 +556,35 @@ export default function Anomalies() {
   );
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
-        <Typography variant="h5">Anomalias de custo cloud</Typography>
-        {busy && <CircularProgress size={18} />}
-        <Box sx={{ flexGrow: 1 }} />
-        <Tooltip title="Caixa de notificações">
-          <IconButton onClick={() => setInboxOpen(true)}>
-            <NotificationsIcon />
-            {unread > 0 && <Chip size="small" color="error" label={unread} sx={{ ml: -1, mt: -2 }} />}
-          </IconButton>
-        </Tooltip>
-        <Button size="small" startIcon={<RefreshIcon />}
-                onClick={() => { void loadAll(); void loadCases(); void loadExpected(); void loadQuality(); }}>
-          Atualizar
-        </Button>
-        {config && (
-          <>
-            <Chip
-              size="small"
-              color={config.enabled ? "success" : "default"}
-              label={config.enabled ? "Habilidada" : "Desabilitada"}
-            />
-            <Button size="small" onClick={toggleEnabled}>
-              {config.enabled ? "Desabilitar" : "Habilitar"}
-            </Button>
-            <Button size="small" startIcon={<PlayArrowIcon />} onClick={runNow} disabled={!config.enabled}>
-              Executar detecção
-            </Button>
-          </>
-        )}
-      </Stack>
+    <Box sx={{ p: { xs: 1.5, md: 3 }, maxWidth: 1600, mx: "auto", width: "100%", minWidth: 0, boxSizing: "border-box" }}>
+      <Box sx={{ display: "flex", alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between", gap: 2, mb: 2, flexWrap: "wrap", minWidth: 0 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography variant="h5">Anomalias de custo cloud</Typography>
+          {busy && <CircularProgress size={18} />}
+        </Stack>
+        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Tooltip title="Caixa de notificações">
+            <IconButton onClick={() => setInboxOpen(true)} aria-label="Caixa de notificações">
+              <NotificationsIcon />
+              {unread > 0 && <Chip size="small" color="error" label={unread} sx={{ ml: -1, mt: -2 }} />}
+            </IconButton>
+          </Tooltip>
+          <Button size="small" startIcon={<RefreshIcon />}
+                  onClick={() => { void loadAll(); void loadCases(); void loadExpected(); void loadQuality(); }}>
+            Atualizar
+          </Button>
+          {config && (
+            <>
+              <Chip size="small" color={config.enabled ? "success" : "default"}
+                    label={config.enabled ? "Habilitada" : "Desabilitada"} />
+              <Button size="small" onClick={toggleEnabled}>{config.enabled ? "Desabilitar" : "Habilitar"}</Button>
+              <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} onClick={runNow} disabled={!config.enabled}>
+                Executar detecção
+              </Button>
+            </>
+          )}
+        </Stack>
+      </Box>
 
       {config && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -598,7 +596,7 @@ export default function Anomalies() {
       )}
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{error}</Alert>}
 
-      <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 1 }}>
+      <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
         <Tab label="Visão geral" />
         <Tab label="Meus casos / fila FinOps" />
         <Tab label="Casos" />
@@ -680,7 +678,27 @@ export default function Anomalies() {
               {total} caso(s)
             </Typography>
           </Stack>
-          <Paper variant="outlined">
+          <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" } }}>
+            {cases.map((item) => (
+              <Paper key={item.id} variant="outlined" onClick={() => void openCase(item.id)}
+                     sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                  <Typography variant="subtitle2" fontWeight={700}>Caso #{item.id} · nota {item.score.toFixed(0)}</Typography>
+                  <Chip size="small" color={SEVERITY_COLOR[item.severity] ?? "default"} label={item.severity} />
+                </Stack>
+                <Typography variant="body2" sx={{ mt: 0.75, overflowWrap: "anywhere" }}>{item.event_family}</Typography>
+                <Typography variant="caption" color="text.secondary">{item.event_date} · {STATE_LABEL[item.state] ?? item.state}</Typography>
+                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 1, mt: 1.25 }}>
+                  <Box><Typography variant="caption" color="text.secondary">Observado</Typography><Typography variant="body2" fontWeight={650}>{money(item.observed_cloud, currency)}</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Esperado</Typography><Typography variant="body2" fontWeight={650}>{money(item.expected_cloud, currency)}</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Custo anômalo</Typography><Typography variant="body2" fontWeight={700} color="error.main">{money(item.anomalous_cost_cloud, currency)}</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Responsável / prazo</Typography><Typography variant="body2">{item.assignee_user_id ?? "Fila FinOps"} · {dt(item.due_at)}</Typography></Box>
+                </Box>
+              </Paper>
+            ))}
+            {cases.length === 0 && <Paper variant="outlined" sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">Nenhum caso encontrado com os filtros atuais.</Typography></Paper>}
+          </Stack>
+          <Paper variant="outlined" sx={{ display: { xs: "none", md: "block" }, overflowX: "auto" }}>
             <Table size="small">
               <TableHead>
                 <TableRow>
