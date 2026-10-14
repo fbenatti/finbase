@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -28,6 +28,12 @@ from app.services.anomaly_forecast_adapter import (  # noqa: E402
     load_contract,
     read_expectation,
 )
+from app.services.anomaly_calibration import (  # noqa: E402
+    build_daily_distribution,
+    calibrate_band,
+    evaluate_deviation,
+    weekday_profile,
+)
 from app.services.anomaly_reference import (  # noqa: E402
     FULL_MONTH,
     REMAINING_MONTH,
@@ -37,6 +43,8 @@ from app.services.anomaly_reference import (  # noqa: E402
     select_pre_event_reference,
     select_reference,
 )
+from app.services.forecast_service import gold_date_expr  # noqa: E402
+from app.services.trino_service import execute as trino_execute  # noqa: E402
 
 DSN = os.environ.get("DATABASE_URL", "postgresql+asyncpg://finops:finops@localhost:5433/finops")
 DEFAULT_CONFIG = {
@@ -108,6 +116,43 @@ async def main() -> int:
     print(f"\nlinhas de expectativa lidas do snapshot: {len(expectation)}")
 
     dimensions = [d for d in DEFAULT_CONFIG["dimensions"]] or _dimensions_from_run(runs[0])
+    # --- E3: distribuição por dia da semana e faixa -------------------------
+    as_of = latest.cutoff_date
+    observed = await _daily_observed(
+        source=f"iceberg.{latest.source_namespace}.{latest.destination_physical_name}",
+        type_column="tipo",
+        days=180,
+        as_of=as_of,
+        measure=latest.measure_column,
+    )
+    profile = weekday_profile(observed, as_of=as_of, weeks=8)
+    print(
+        f"\nperfil semanal: metodo={profile.method} semanas={profile.weeks_used} "
+        f"amostras={profile.sample_days}"
+    )
+    if profile.note:
+        print(f"   nota: {profile.note}")
+    print("   medianas por dia da semana (0=seg):",
+          {k: round(v, 2) for k, v in sorted(profile.medians.items())})
+
+    # Resíduos da granularidade DIÁRIA: observado menos a mediana do dia da semana.
+    residuals = []
+    for day, value in observed.items():
+        expected_day = profile.medians.get(day.weekday(), 0.0)
+        residuals.append(float(value) - float(expected_day))
+    band = calibrate_band(
+        residuals=residuals,
+        expected_cloud=sum(profile.medians.values()),
+        quantile=0.975,
+        tolerance_pct=0.15,
+    )
+    print(
+        f"faixa: metodo={band.method} amostra={band.sample_size}/{band.min_sample} "
+        f"offset_superior={band.upper_offset:,.2f} confianca={band.confidence}"
+    )
+    if band.note:
+        print(f"   nota: {band.note}")
+
     rows = build_reference_rows(
         latest,
         expectation,
@@ -115,6 +160,8 @@ async def main() -> int:
         reference_kind="PROSPECTIVE",
         target_start=(latest.cutoff_date.isoformat()),
         target_end=max(months) + "31",
+        weekday_profile=profile,
+        band=band,
     )
     print(f"linhas de referência compactas: {len(rows)} (séries × meses)")
 
@@ -143,6 +190,33 @@ async def main() -> int:
     if len(keys) != len(set(keys)):
         failures.append("referência não é única por série × mês")
 
+    # A distribuição diária precisa fechar exatamente com o valor mensal.
+    sample = max(rows, key=lambda r: r.predicted_cloud)
+    kind, cov_start, cov_end, covered = classify_coverage(sample.reference_month, latest.cutoff_date)
+    distribution = build_daily_distribution(
+        sample.predicted_cloud,
+        coverage_start=cov_start,
+        coverage_end=cov_end,
+        profile=profile,
+    )
+    print(
+        f"\ndistribuição do maior mês ({sample.reference_month}, "
+        f"{sample.predicted_cloud:,.2f} em {covered} dias): "
+        f"método={distribution.method} soma={distribution.total:,.2f}"
+    )
+    if abs(distribution.total - sample.predicted_cloud) > 1e-6:
+        failures.append("distribuição diária não reconcilia com o valor do forecast")
+
+    deviation = evaluate_deviation(
+        distribution.expected[cov_end] * 1.6,
+        expected_cloud=distribution.expected[cov_end],
+        band=band,
+    )
+    print(
+        f"   exemplo de dia ({cov_end}): desvio={deviation.delta_cloud:,.2f} "
+        f"custo_anômalo={deviation.anomalous_cost_cloud:,.2f} acima_da_faixa={deviation.above_band}"
+    )
+
     # Seleção para um evento dentro do horizonte.
     event = date.fromisoformat(latest.cutoff_date.isoformat())
     selection = select_reference(contracts, event_date=event)
@@ -169,6 +243,36 @@ async def main() -> int:
         return 1
     print("\nOK: adaptador e referência verificados em ambiente real.")
     return 0
+
+
+async def _daily_observed(*, source: str, type_column: str, days: int, as_of: date, measure: str) -> dict:
+    """Soma diária observada em `realizado_cloud`, com o parser do forecast.
+
+    Reutiliza `gold_date_expr` — a camada de anomalia não implementa um segundo
+    parser de datas. `_billing_period` só é usado para desambiguar MM/DD.
+    """
+    date_expr = gold_date_expr("chargeperiodstart", "_billing_period")
+    sql = f"""
+        WITH parsed AS (
+            SELECT {date_expr} AS day,
+                   COALESCE(TRY_CAST({measure} AS DOUBLE), 0) AS value
+              FROM {source}
+             WHERE ({type_column} = 'realizado' OR {type_column} IS NULL)
+        )
+        SELECT CAST(day AS VARCHAR) AS day, SUM(value) AS observed_cloud
+          FROM parsed
+         WHERE day IS NOT NULL AND day BETWEEN DATE '{as_of - timedelta(days=days)}' AND DATE '{as_of}'
+         GROUP BY 1
+         ORDER BY 1
+    """
+    rows = await trino_execute(sql, timeout_s=900)
+    out = {}
+    for row in rows:
+        try:
+            out[date.fromisoformat(str(row["day"])[:10])] = float(row["observed_cloud"] or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _dimensions_from_run(row: dict) -> list[str]:

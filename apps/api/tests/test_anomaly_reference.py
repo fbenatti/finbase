@@ -417,3 +417,78 @@ def test_generated_at_e_normalizado_com_timezone():
     assert built.generated_at is not None
     assert built.generated_at.tzinfo is not None
     assert built.generated_at.astimezone(timezone.utc).date() == date(2026, 10, 14)
+
+
+# ---------------------------------------------------------------------------
+# Integração com a calibração (E3)
+# ---------------------------------------------------------------------------
+def _profile(as_of=date(2026, 10, 12), weeks=8):
+    from datetime import timedelta
+
+    from app.services.anomaly_calibration import weekday_profile
+
+    series = {}
+    for offset in range(weeks * 7):
+        day = as_of - timedelta(days=offset)
+        series[day] = 100.0 if day.weekday() < 5 else 20.0
+    return weekday_profile(series, as_of=as_of, weeks=weeks)
+
+
+def test_referencia_carrega_pesos_semanais_e_normalizador():
+    from app.services.anomaly_reference import build_reference_rows
+
+    rows = build_reference_rows(
+        contract(), expectation_rows(), dimensions=DIMS,
+        reference_kind="PROSPECTIVE", target_start="2026-10-13", target_end="2026-11-30",
+        weekday_profile=_profile(as_of=date(2026, 10, 12)),
+    )
+    row = next(r for r in rows if r.reference_month == "202610")
+    assert row.distribution_method == "WEEKDAY_MEDIAN"
+    assert row.weekday_weights is not None
+    assert set(row.weekday_weights) == {"0", "1", "2", "3", "4", "5", "6"}
+    # O normalizador é a soma dos pesos do intervalo coberto, não o valor mensal.
+    assert row.normalizer != row.predicted_cloud
+    assert row.normalizer > 0
+
+    # A soma mensal continua exatamente igual ao snapshot do forecast.
+    total = sum(r.predicted_cloud for r in rows if r.reference_month == "202610")
+    assert total == pytest.approx(1250.0)
+
+
+def test_referencia_grava_faixa_diaria_escalada_para_o_mes():
+    from app.services.anomaly_calibration import calibrate_band
+    from app.services.anomaly_reference import build_reference_rows
+
+    band = calibrate_band(
+        residuals=[100.0] * 100, expected_cloud=1250.0, quantile=0.95, tolerance_pct=0.15
+    )
+    rows = build_reference_rows(
+        contract(), expectation_rows(), dimensions=DIMS,
+        reference_kind="PROSPECTIVE", target_start="2026-10-13", target_end="2026-11-30",
+        band=band,
+    )
+    row = next(r for r in rows if r.reference_month == "202610")
+    assert row.band_method == "HISTORICAL_QUANTILE"
+    assert row.daily_band_upper_offset == pytest.approx(band.upper_offset)
+    assert row.band_upper_cloud == pytest.approx(row.predicted_cloud + band.upper_offset * row.covered_days)
+    assert row.band_sample_size == 100
+    assert row.band_min_sample == 19
+
+
+def test_referencia_de_evento_mensal_nao_escala_a_faixa_por_dia():
+    from app.services.anomaly_calibration import calibrate_monthly_event_band
+    from app.services.anomaly_reference import build_reference_rows
+
+    band = calibrate_monthly_event_band(
+        residuals=[100.0, 200.0], expected_cloud=1250.0, tolerance_pct=0.15
+    )
+    rows = build_reference_rows(
+        contract(), expectation_rows(), dimensions=DIMS,
+        reference_kind="PROSPECTIVE", target_start="2026-10-13", target_end="2026-11-30",
+        band=band,
+    )
+    row = next(r for r in rows if r.reference_month == "202610")
+    assert row.band_method == "EXPLICIT_TOLERANCE"
+    assert row.band_upper_cloud == pytest.approx(row.predicted_cloud + band.upper_offset)
+    assert row.daily_band_upper_offset is None
+    assert row.band_confidence == "LOW"

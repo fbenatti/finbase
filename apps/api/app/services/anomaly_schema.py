@@ -86,6 +86,13 @@ REFERENCE_VALUE_COLUMNS: tuple[ColumnDef, ...] = (
     ("band_upper_cloud", "double"),
     ("band_method", "varchar"),
     ("band_confidence", "varchar"),
+    # Faixa aplicada a um único dia coberto (detector de consumo diário).
+    # A faixa do total do mês fica em band_lower_cloud / band_upper_cloud.
+    ("daily_band_lower_offset", "double"),
+    ("daily_band_upper_offset", "double"),
+    ("band_alpha", "double"),
+    ("band_sample_size", "bigint"),
+    ("band_min_sample", "bigint"),
     ("history_days", "bigint"),
     ("calibration_days", "bigint"),
     ("sample_size", "bigint"),

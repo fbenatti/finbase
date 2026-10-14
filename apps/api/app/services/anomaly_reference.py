@@ -33,6 +33,13 @@ from app.services.anomaly_forecast_adapter import (
     ForecastContract,
     parse_applied_rule_refs,
 )
+from app.services.anomaly_calibration import (
+    DAILY_GRAIN,
+    BandCalibration,
+    WeekdayProfile,
+    build_daily_distribution,
+    scale_band_to_coverage,
+)
 
 REFERENCE_KINDS = ("PROSPECTIVE", "RETROSPECTIVE", "UNAVAILABLE")
 
@@ -169,8 +176,13 @@ class ReferenceRow:
     band_upper_cloud: float | None
     band_method: str | None
     band_confidence: str
-    applied_rule_refs: list[dict[str, Any]]
-    dimensions: dict[str, Any]
+    daily_band_lower_offset: float | None = None
+    daily_band_upper_offset: float | None = None
+    band_alpha: float | None = None
+    band_sample_size: int = 0
+    band_min_sample: int = 0
+    applied_rule_refs: list[dict[str, Any]] = field(default_factory=list)
+    dimensions: dict[str, Any] = field(default_factory=dict)
     partial_reference: bool = False
     sample_size: int = 0
     history_days: int = 0
@@ -201,6 +213,11 @@ class ReferenceRow:
             "band_upper_cloud": self.band_upper_cloud,
             "band_method": self.band_method,
             "band_confidence": self.band_confidence,
+            "daily_band_lower_offset": self.daily_band_lower_offset,
+            "daily_band_upper_offset": self.daily_band_upper_offset,
+            "band_alpha": self.band_alpha,
+            "band_sample_size": self.band_sample_size,
+            "band_min_sample": self.band_min_sample,
             "applied_rule_refs": json.dumps(self.applied_rule_refs, ensure_ascii=False),
             "partial_reference": self.partial_reference,
             "sample_size": self.sample_size,
@@ -221,12 +238,20 @@ def build_reference_rows(
     target_end: str,
     history_days: int = 0,
     calibration_days: int = 0,
+    weekday_profile: WeekdayProfile | None = None,
+    band: BandCalibration | None = None,
 ) -> list[ReferenceRow]:
     """Uma linha por série × mês, com a soma preservada.
 
     A soma de ``predicted_cloud`` por mês é **exatamente** a soma do snapshot do
     forecast para aquele mês: a referência não redistribui nem divide o valor
     mensal (plano §2.3 — os 15 dias são horizonte, não divisão).
+
+    Quando ``weekday_profile`` é informado, a distribuição por dia da semana é
+    calculada sobre **todo o intervalo coberto** e o ``normalizer`` é a soma dos
+    pesos desse intervalo. Quando ``band`` é informado, a faixa é gravada: o
+    total do mês em ``band_lower_cloud``/``band_upper_cloud`` e o offset de um
+    único dia em ``daily_band_*_offset`` (granularidade diária).
     """
     if contract.cutoff_date is None:
         raise ReferenceUnavailable("CUTOFF_ABSENT", "forecast_run sem cutoff_date")
@@ -247,6 +272,32 @@ def build_reference_rows(
         values = {dim: row.get(dim) for dim in dimensions}
         series = series_id_for(dimensions, values)
         predicted = float(row.get("expected_cloud") or 0.0)
+
+        normalizer = predicted
+        distribution_method = "MONTHLY_TOTAL"
+        weights: dict[str, float] | None = None
+        if weekday_profile is not None and cov_start is not None and cov_end is not None:
+            distribution = build_daily_distribution(
+                predicted,
+                coverage_start=cov_start,
+                coverage_end=cov_end,
+                profile=weekday_profile,
+            )
+            normalizer = distribution.normalizer
+            distribution_method = distribution.method
+            weights = {str(day.weekday()): round(w, 8) for day, w in distribution.weights.items()}
+
+        band_fields: dict[str, Any] = {}
+        if band is not None:
+            if band.granularity == DAILY_GRAIN:
+                # Acumulado do mês: offset diário × dias cobertos.
+                monthly = scale_band_to_coverage(band, covered_days=covered)
+                band_fields = monthly.as_reference_fields(predicted)
+                band_fields["daily_band_lower_offset"] = band.lower_offset
+                band_fields["daily_band_upper_offset"] = band.upper_offset
+            else:
+                band_fields = band.as_reference_fields(predicted)
+
         rows.append(
             ReferenceRow(
                 reference_id=reference_id_for(contract.run_id, series, month),
@@ -267,13 +318,18 @@ def build_reference_rows(
                 predicted_cloud=predicted,
                 # Normalizador e pesos são preenchidos pela E3; aqui o valor
                 # mensal já é o normalizador trivial.
-                normalizer=predicted,
-                distribution_method="MONTHLY_TOTAL",
-                weekday_weights=None,
-                band_lower_cloud=None,
-                band_upper_cloud=None,
-                band_method=None,
-                band_confidence="UNAVAILABLE",
+                normalizer=normalizer,
+                distribution_method=distribution_method,
+                weekday_weights=weights,
+                band_lower_cloud=band_fields.get("band_lower_cloud"),
+                band_upper_cloud=band_fields.get("band_upper_cloud"),
+                band_method=band_fields.get("band_method"),
+                band_confidence=band_fields.get("band_confidence", "UNAVAILABLE"),
+                daily_band_lower_offset=band_fields.get("daily_band_lower_offset"),
+                daily_band_upper_offset=band_fields.get("daily_band_upper_offset"),
+                band_alpha=band_fields.get("band_alpha"),
+                band_sample_size=int(band_fields.get("band_sample_size") or 0),
+                band_min_sample=int(band_fields.get("band_min_sample") or 0),
                 applied_rule_refs=rules,
                 dimensions=values,
                 partial_reference=coverage_kind == REMAINING_MONTH,
