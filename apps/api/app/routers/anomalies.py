@@ -24,6 +24,7 @@ from app.database import get_db
 from app.models.anomaly import (
     AnomalyAction,
     AnomalyCase,
+    AnomalyCaseEvent,
     AnomalyConfig,
     AnomalyPublication,
     AnomalyRun,
@@ -692,6 +693,13 @@ async def get_case_series(
         await db.get(ForecastConfig, config.forecast_config_id) if config.forecast_config_id else None
     )
     dimensions = list(config.dimensions or (forecast.dimensions if forecast else []) or [])
+    scope_event = (await db.execute(
+        select(AnomalyCaseEvent).where(
+            AnomalyCaseEvent.case_id == case_id,
+            AnomalyCaseEvent.event_type.in_(("CASE_CREATED", "CASE_UPDATED", "CASE_REOPENED")),
+        ).order_by(AnomalyCaseEvent.id.desc()).limit(1)
+    )).scalars().first()
+    contributor_series = list((scope_event.payload or {}).get("contributor_series") or []) if scope_event else []
     try:
         return await read_case_series(
             case=case,
@@ -706,6 +714,7 @@ async def get_case_series(
             dimensions=dimensions,
             horizon_days=horizon_days,
             analysis_data_end=analysis_data_end,
+            contributor_series=contributor_series,
         )
     except Exception as exc:
         logger.warning("[anomaly] falha ao montar a série do caso %s: %s", case_id, exc)
