@@ -117,6 +117,8 @@ class AnomalyConfig(Base):
     history_days = Column(Integer, nullable=False, default=180, server_default=text("180"))
     calibration_days = Column(Integer, nullable=False, default=60, server_default=text("60"))
     horizon_days = Column(Integer, nullable=False, default=15, server_default=text("15"))
+    # Atraso operacional da fonte: 2 mantém o padrão atual D-2.
+    data_lag_days = Column(Integer, nullable=False, default=2, server_default=text("2"))
     first_run_days = Column(Integer, nullable=False, default=30, server_default=text("30"))
     reevaluation_days = Column(Integer, nullable=False, default=7, server_default=text("7"))
     bucket_days = Column(Integer, nullable=False, default=1, server_default=text("1"))

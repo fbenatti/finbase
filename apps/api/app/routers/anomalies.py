@@ -55,6 +55,7 @@ class ConfigUpdate(BaseModel):
     history_days: int | None = Field(default=None, ge=1, le=1095)
     calibration_days: int | None = Field(default=None, ge=1, le=365)
     horizon_days: int | None = Field(default=None, ge=1, le=92)
+    data_lag_days: int | None = Field(default=None, ge=0, le=30)
     first_run_days: int | None = Field(default=None, ge=1, le=366)
     reevaluation_days: int | None = Field(default=None, ge=1, le=90)
     family_keys: list[str] | None = None
@@ -207,6 +208,7 @@ async def list_configs(
             "history_days": row.history_days,
             "calibration_days": row.calibration_days,
             "horizon_days": row.horizon_days,
+            "data_lag_days": row.data_lag_days,
             "first_run_days": row.first_run_days,
             "reevaluation_days": row.reevaluation_days,
             "family_keys": row.family_keys,
@@ -342,6 +344,7 @@ async def enqueue_run(
             "horizon_days": config.horizon_days,
             "calibration_days": config.calibration_days,
             "history_days": config.history_days,
+            "data_lag_days": config.data_lag_days,
         },
     )
     db.add(run)
@@ -681,6 +684,9 @@ async def get_case_series(
             analysis_data_end = date.fromisoformat(str(published_run.evaluation_end)[:10])
         except ValueError:
             analysis_data_end = None
+    if analysis_data_end is None:
+        from datetime import timedelta
+        analysis_data_end = datetime.now(timezone.utc).date() - timedelta(days=int(config.data_lag_days or 0))
 
     forecast = (
         await db.get(ForecastConfig, config.forecast_config_id) if config.forecast_config_id else None

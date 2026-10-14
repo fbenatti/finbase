@@ -76,6 +76,7 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_config ALTER COLUMN history_days SET DEFAULT 180",
     "ALTER TABLE anomaly_config ALTER COLUMN calibration_days SET DEFAULT 60",
     "ALTER TABLE anomaly_config ALTER COLUMN horizon_days SET DEFAULT 15",
+    "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS data_lag_days integer NOT NULL DEFAULT 2",
     "ALTER TABLE anomaly_config ALTER COLUMN first_run_days SET DEFAULT 30",
     "ALTER TABLE anomaly_config ALTER COLUMN reevaluation_days SET DEFAULT 7",
     "ALTER TABLE anomaly_config ALTER COLUMN bucket_days SET DEFAULT 1",

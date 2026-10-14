@@ -463,12 +463,12 @@ def _horizon_end(contract: ForecastContract, horizon_days: int) -> date:
     return contract.cutoff_date + timedelta(days=max(1, int(horizon_days)))
 
 
-def _d2_data_end(detected_at: datetime) -> date:
-    """Último dia elegível quando as fontes cloud chegam com atraso D-2."""
+def _d2_data_end(detected_at: datetime, lag_days: int = 2) -> date:
+    """Último dia elegível após o atraso configurado da fonte cloud."""
     instant = detected_at
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
-    return instant.astimezone(timezone.utc).date() - timedelta(days=2)
+    return instant.astimezone(timezone.utc).date() - timedelta(days=max(0, int(lag_days)))
 
 
 async def build_outcome(
@@ -857,6 +857,7 @@ async def execute_detection(
             "materiality_by_currency": config_row.materiality_by_currency,
             "currency": config_row.currency,
             "horizon_days": config_row.horizon_days,
+            "data_lag_days": config_row.data_lag_days,
             "calibration_days": config_row.calibration_days,
             "history_days": config_row.history_days,
             "measure_column": config_row.measure_column or DEFAULT_MEASURE,
@@ -878,7 +879,8 @@ async def execute_detection(
             raise AnomalyRunError(
                 "nenhuma execução de forecast utilizável: a medida precisa existir no resultado"
             )
-        analysis_data_end = _d2_data_end(detected_at)
+        data_lag_days = int(config_row.data_lag_days or 0)
+        analysis_data_end = _d2_data_end(detected_at, data_lag_days)
         horizon_days = int(config_row.horizon_days or 15)
         # A prospectively valid reference must predate the last D-2 observation
         # and its horizon must include that observation. Selecting today's
@@ -892,7 +894,7 @@ async def execute_detection(
         ]
         if not eligible:
             raise AnomalyRunError(
-                "sem forecast prospectivo anterior que cubra o corte D-2 "
+                f"sem forecast prospectivo anterior que cubra o corte com atraso de {data_lag_days} dia(s) "
                 f"({analysis_data_end.isoformat()}); nenhuma anomalia foi avaliada"
             )
         contract = max(eligible, key=lambda c: (c.cutoff_date, c.run_id))

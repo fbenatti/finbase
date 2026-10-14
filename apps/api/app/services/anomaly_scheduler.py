@@ -102,6 +102,7 @@ def queue_detection_tasks(schedule_row: Any, session) -> list[int]:
                 "dimensions": list(config.dimensions or []),
                 "family_keys": list(config.family_keys or []),
                 "horizon_days": config.horizon_days,
+                "data_lag_days": config.data_lag_days,
                 "calibration_days": config.calibration_days,
                 "history_days": config.history_days,
             },
