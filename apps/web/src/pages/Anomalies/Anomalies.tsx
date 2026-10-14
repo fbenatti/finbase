@@ -75,130 +75,114 @@ const money = (value: number | null | undefined, currency = "BRL") =>
 const dt = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString("pt-BR") : "—";
 
-/** Série diária: observado, faixa esperada e área acima do limite superior. */
-function SeriesChart({ series }: { series: AnomalySeries }) {
-  const points = series.items.filter((point) => point.expected_cloud !== null);
-  if (points.length === 0) {
-    return (
-      <Alert severity="info">
-        {series.note ?? "Série diária indisponível para este caso."}
-      </Alert>
-    );
-  }
-  const values = points.flatMap((point) => [
-    point.expected_cloud, point.upper_cloud, point.lower_cloud,
-    point.observed_cloud ?? 0,
-  ]);
-  const max = Math.max(...values) * 1.1 || 1;
-  const min = 0;
-  const width = 760;
-  const height = 260;
-  const step = width / Math.max(1, points.length - 1);
-  const y = (value: number) => height - ((value - min) / (max - min || 1)) * height;
-  const x = (index: number) => index * step;
+const chartColors = { observed: "#263746", expected: "#64748b", band: "#dbeafe", limit: "#2583c5", anomaly: "#d14343", grid: "#e8edf3", axis: "#748094" };
 
-  const bandTop = points.map((point, index) => `${x(index)},${y(point.upper_cloud)}`).join(" ");
-  const bandBottom = points
-    .map((point, index) => `${x(index)},${y(point.lower_cloud)}`)
-    .reverse()
-    .join(" ");
-  const expectedPath = points.map((point, index) => `${x(index)},${y(point.expected_cloud)}`).join(" ");
-  const observed = points
-    .map((point, index) => (point.observed_cloud === null ? null : { index, point }))
-    .filter((item): item is { index: number; point: typeof points[number] } => item !== null);
-  const observedPath = observed
-    .map(({ index, point }) => `${x(index)},${y(point.observed_cloud ?? 0)}`)
-    .join(" ");
-  const anomalous = observed.filter(({ point }) => (point.anomalous_cost_cloud ?? 0) > 0);
+/** Série diária com escala, datas e lacunas reais preservadas. */
+function SeriesChart({ series, currency }: { series: AnomalySeries; currency: string }) {
+  const points = [...series.items].sort((a, b) => a.event_date.localeCompare(b.event_date));
+  if (!points.length) return <Alert severity="info">{series.note ?? "Série diária indisponível para este caso."}</Alert>;
+
+  const width = 880;
+  const height = 300;
+  const plot = { left: 76, right: 18, top: 18, bottom: 42 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = height - plot.top - plot.bottom;
+  const values = points.flatMap((point) => [point.expected_cloud, point.upper_cloud, point.lower_cloud, point.observed_cloud].filter((value): value is number => value !== null && Number.isFinite(value)));
+  const rawMin = Math.min(0, ...values);
+  const rawMax = Math.max(0, ...values);
+  const padding = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.12;
+  const min = rawMin - padding;
+  const max = rawMax + padding;
+  const y = (value: number) => plot.top + (max - value) / (max - min) * plotHeight;
+  const x = (index: number) => plot.left + index * plotWidth / Math.max(1, points.length - 1);
+  const segments = <T,>(select: (point: typeof points[number]) => number | null) => {
+    const result: Array<Array<{ index: number; value: number }>> = [];
+    points.forEach((point, index) => {
+      const value = select(point);
+      if (value === null || !Number.isFinite(value)) return;
+      const last = result[result.length - 1];
+      if (last && last[last.length - 1].index === index - 1) last.push({ index, value });
+      else result.push([{ index, value }]);
+    });
+    return result;
+  };
+  const bandSegments: Array<Array<{ index: number; point: typeof points[number] }>> = [];
+  points.forEach((point, index) => {
+    const last = bandSegments[bandSegments.length - 1];
+    if (last && last[last.length - 1].index === index - 1) last.push({ index, point });
+    else bandSegments.push([{ index, point }]);
+  });
+  const ticks = Array.from({ length: 5 }, (_, index) => min + (max - min) * index / 4);
+  const labelIndexes = points.length <= 8 ? points.map((_, index) => index) : Array.from(new Set([0, Math.round((points.length - 1) / 3), Math.round(2 * (points.length - 1) / 3), points.length - 1]));
 
   return (
-    <Box>
-      <svg width="100%" viewBox={`0 0 ${width} ${height + 30}`} role="img"
-           aria-label="Série diária: observado, faixa esperada e parte acima do limite">
-        <polygon points={`${bandTop} ${bandBottom}`} fill="rgba(33,150,243,0.15)" />
-        <polyline points={bandTop} fill="none" stroke="#1976d2" strokeDasharray="4 4" />
-        <polyline points={bandBottom} fill="none" stroke="#1976d2" strokeDasharray="4 4" />
-        <polyline points={expectedPath} fill="none" stroke="#607d8b" strokeDasharray="2 3" />
-        {observed.length > 1 && <polyline points={observedPath} fill="none" stroke="#263238" strokeWidth={2} />}
-        {observed.map(({ index, point }) => (
-          <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud ?? 0)} r={3.5}
-                  fill={(point.anomalous_cost_cloud ?? 0) > 0 ? "#d32f2f" : "#263238"} />
-        ))}
-        {anomalous.map(({ index, point }) => (
-          <rect key={`a-${point.event_date}`} x={x(index) - 4} y={y(point.observed_cloud ?? 0)}
-                width={8} height={Math.max(2, y(point.upper_cloud) - y(point.observed_cloud ?? 0))}
-                fill="rgba(211,47,47,0.45)" />
-        ))}
-        <text x={4} y={y(max) + 12} fontSize="11" fill="#1976d2">limite superior</text>
-        <text x={4} y={y(points[0].expected_cloud) - 6} fontSize="11" fill="#607d8b">esperado</text>
-        {points.map((point, index) => (
-          index % Math.ceil(points.length / 8) === 0 ? (
-            <text key={`x-${point.event_date}`} x={x(index)} y={height + 16} fontSize="10"
-                  fill="#607d8b" textAnchor="middle">{point.event_date.slice(5)}</text>
-          ) : null
-        ))}
-      </svg>
-      <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap">
-        <Chip size="small" label={`${points.length} dia(s)`} />
-        {series.data_cutoff && <Chip size="small" label={`corte ${series.data_cutoff}`} />}
-        {(series.distribution_methods ?? []).map((method) => (
-          <Chip key={method} size="small" variant="outlined" label={`distribuição ${method}`} />
-        ))}
-        {(series.band_methods ?? []).map((method) => (
-          <Chip key={method} size="small" variant="outlined" label={`faixa ${method}`} />
-        ))}
-        {(series.confidence ?? []).map((value) => (
-          <Chip key={value} size="small" label={`confiança ${value}`} />
-        ))}
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1} sx={{ mb: 1.5 }}>
+        <Box><Typography variant="subtitle1" fontWeight={700}>Custo cloud ao longo do tempo</Typography><Typography variant="caption" color="text.secondary">Consumo diário comparado à referência anterior ao evento</Typography></Box>
+        <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+          {[[chartColors.observed, "Observado"], [chartColors.expected, "Esperado"], [chartColors.band, "Faixa esperada"], [chartColors.anomaly, "Acima do limite"]].map(([color, label]) => <Stack key={label} direction="row" spacing={0.6} alignItems="center"><Box sx={{ width: 12, height: 3, bgcolor: color, borderRadius: 3 }} /><Typography variant="caption" color="text.secondary">{label}</Typography></Stack>)}
+        </Stack>
       </Stack>
-    </Box>
+      <Box sx={{ width: "100%", overflow: "hidden" }}>
+        <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Série diária de custo cloud observado, esperado e intervalo esperado" style={{ display: "block", fontFamily: "inherit" }}>
+          {ticks.map((tick) => <g key={tick}><line x1={plot.left} x2={width - plot.right} y1={y(tick)} y2={y(tick)} stroke={chartColors.grid} /><text x={plot.left - 10} y={y(tick) + 4} textAnchor="end" fontSize="11" fill={chartColors.axis}>{money(tick, currency)}</text></g>)}
+          {bandSegments.map((segment, index) => <polygon key={`band-${index}`} points={`${segment.map(({ index: i, point }) => `${x(i)},${y(point.upper_cloud)}`).join(" ")} ${[...segment].reverse().map(({ index: i, point }) => `${x(i)},${y(point.lower_cloud)}`).join(" ")}`} fill={chartColors.band} opacity={0.8} />)}
+          {segments((point) => point.expected_cloud).map((segment, index) => <polyline key={`expected-${index}`} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.expected} strokeWidth={2} strokeDasharray="5 5" />)}
+          {segments((point) => point.upper_cloud).map((segment, index) => <polyline key={`upper-${index}`} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.limit} strokeWidth={1.2} strokeDasharray="3 5" opacity={0.85} />)}
+          {segments((point) => point.observed_cloud).map((segment, index) => <polyline key={`observed-${index}`} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.observed} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />)}
+          {points.map((point, index) => point.observed_cloud === null ? null : <g key={point.event_date}><circle cx={x(index)} cy={y(point.observed_cloud)} r={point.anomalous_cost_cloud ? 5 : 3.5} fill={point.anomalous_cost_cloud ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · observado ${money(point.observed_cloud, currency)} · esperado ${money(point.expected_cloud, currency)} · anômalo ${money(point.anomalous_cost_cloud, currency)}`}</title></circle>{(point.anomalous_cost_cloud ?? 0) > 0 && <line x1={x(index)} x2={x(index)} y1={y(point.observed_cloud)} y2={y(point.upper_cloud)} stroke={chartColors.anomaly} strokeWidth={4} strokeLinecap="round" />}</g>)}
+          {labelIndexes.map((index) => <text key={points[index].event_date} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
+        </svg>
+      </Box>
+      <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
+        <Chip size="small" variant="outlined" label={`${points.length} dias no período`} />
+        {series.data_cutoff && <Chip size="small" variant="outlined" label={`Dados até ${series.data_cutoff}`} />}
+        {(series.distribution_methods ?? []).map((method) => <Chip key={method} size="small" variant="outlined" label={`Distribuição: ${method}`} />)}
+        {(series.band_methods ?? []).map((method) => <Chip key={method} size="small" variant="outlined" label={`Faixa: ${method}`} />)}
+      </Stack>
+    </Paper>
   );
 }
 
-/** Gráfico observado × faixa × área anômala (SVG, sem dependência extra). */
-function BandChart({ kase }: { kase: AnomalyCase }) {
-  const observed = kase.observed_cloud ?? 0;
-  const expected = kase.expected_cloud ?? 0;
+/** Comparação de um evento: uma escala de valor, sem sugerir série temporal. */
+function BandChart({ kase, currency }: { kase: AnomalyCase; currency: string }) {
+  const observed = kase.observed_cloud;
+  const expected = kase.expected_cloud;
   const upper = kase.upper_cloud ?? expected;
   const lower = kase.lower_cloud ?? expected;
-  const max = Math.max(observed, upper, expected) * 1.1 || 1;
-  const min = Math.min(lower, expected, observed) * 0.9;
-  const height = 220;
-  const width = 520;
-  const y = (value: number) => height - ((value - min) / (max - min || 1)) * height;
+  const values = [observed, expected, upper, lower].filter((value): value is number => value !== null && Number.isFinite(value));
+  if (observed === null || expected === null || upper === null || lower === null || values.length === 0) return <Alert severity="info">Valores insuficientes para comparar o evento à referência.</Alert>;
+  const rawMin = Math.min(0, ...values);
+  const rawMax = Math.max(0, ...values);
+  const padding = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.15;
+  const min = rawMin - padding;
+  const max = rawMax + padding;
+  const left = 54;
+  const right = 850;
+  const x = (value: number) => left + (value - min) / (max - min) * (right - left);
   const anomalous = Math.max(0, observed - upper);
-
+  const ticks = Array.from({ length: 5 }, (_, index) => min + (max - min) * index / 4);
   return (
-    <Box>
-      <svg width="100%" viewBox={`0 0 ${width} ${height + 28}`} role="img"
-           aria-label="Custo cloud observado, faixa esperada e parte acima do limite">
-        {/* faixa esperada */}
-        <rect x={0} y={y(upper)} width={width} height={Math.max(0, y(lower) - y(upper))}
-              fill="rgba(33,150,243,0.12)" />
-        <line x1={0} y1={y(upper)} x2={width} y2={y(upper)} stroke="#1976d2" strokeDasharray="4 4" />
-        <line x1={0} y1={y(lower)} x2={width} y2={y(lower)} stroke="#1976d2" strokeDasharray="4 4" />
-        {/* previsão central */}
-        <line x1={0} y1={y(expected)} x2={width} y2={y(expected)} stroke="#607d8b" strokeDasharray="2 3" />
-        {/* parte observada acima do limite superior */}
-        {anomalous > 0 && (
-          <rect x={width * 0.35} y={y(observed)} width={width * 0.3} height={y(upper) - y(observed)}
-                fill="rgba(244,67,54,0.35)" />
-        )}
-        {/* barra do observado */}
-        <rect x={width * 0.35} y={y(observed)} width={width * 0.3} height={height - y(observed)}
-              fill="#455a64" opacity={0.75} />
-        <text x={8} y={y(upper) - 4} fontSize="11" fill="#1976d2">limite superior {money(upper)}</text>
-        <text x={8} y={y(expected) - 4} fontSize="11" fill="#607d8b">esperado {money(expected)}</text>
-        <text x={8} y={height + 18} fontSize="11" fill="#455a64">observado {money(observed)}</text>
-      </svg>
-      <Stack direction="row" spacing={2} sx={{ mt: 1 }} flexWrap="wrap">
-        <Chip size="small" label={`desvio ${money(kase.delta_cloud)}`} />
-        <Chip size="small" color={anomalous > 0 ? "error" : "default"}
-              label={`custo anômalo ${money(anomalous)}`} />
-        <Chip size="small" label={`referência ${kase.reference_kind ?? "—"}`} />
-        <Chip size="small" label={`grão ${kase.evaluation_grain}`} />
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0" }}>
+      <Typography variant="subtitle1" fontWeight={700}>Comparação do evento</Typography>
+      <Typography variant="caption" color="text.secondary">Valor observado em relação à expectativa e à faixa de tolerância</Typography>
+      <Box sx={{ mt: 2 }}><svg width="100%" viewBox="0 0 880 176" role="img" aria-label="Comparação de custo observado com expectativa e faixa esperada" style={{ display: "block", fontFamily: "inherit" }}>
+        {ticks.map((tick) => <g key={tick}><line x1={x(tick)} x2={x(tick)} y1={22} y2={130} stroke={chartColors.grid} /><text x={x(tick)} y={153} textAnchor="middle" fontSize="11" fill={chartColors.axis}>{money(tick, currency)}</text></g>)}
+        <line x1={left} x2={right} y1={82} y2={82} stroke="#aeb8c5" strokeWidth={2} />
+        <line x1={x(lower)} x2={x(upper)} y1={82} y2={82} stroke={chartColors.limit} strokeWidth={18} strokeLinecap="round" opacity={0.28} />
+        <line x1={x(expected)} x2={x(expected)} y1={48} y2={116} stroke={chartColors.expected} strokeWidth={2} strokeDasharray="4 4" />
+        {anomalous > 0 && <line x1={x(upper)} x2={x(observed)} y1={82} y2={82} stroke={chartColors.anomaly} strokeWidth={7} strokeLinecap="round" />}
+        <circle cx={x(observed)} cy={82} r={8} fill={anomalous > 0 ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={3}><title>Observado: {money(observed, currency)}</title></circle>
+        <text x={x(lower)} y={43} textAnchor="middle" fontSize="11" fill={chartColors.limit}>Limite inferior</text><text x={x(upper)} y={43} textAnchor="middle" fontSize="11" fill={chartColors.limit}>Limite superior</text><text x={x(expected)} y={125} textAnchor="middle" fontSize="11" fill={chartColors.expected}>Esperado</text>
+      </svg></Box>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+        <Chip size="small" variant="outlined" label={`Observado ${money(observed, currency)}`} />
+        <Chip size="small" variant="outlined" label={`Esperado ${money(expected, currency)}`} />
+        <Chip size="small" color={anomalous > 0 ? "error" : "default"} label={`Custo anômalo ${money(anomalous, currency)}`} />
+        <Chip size="small" variant="outlined" label={`Referência ${kase.reference_kind ?? "—"}`} />
+        <Chip size="small" variant="outlined" label={`Grão ${kase.evaluation_grain}`} />
       </Stack>
-    </Box>
+    </Paper>
   );
 }
 
