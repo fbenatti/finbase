@@ -253,13 +253,48 @@ Suíte completa: **671 passaram**, 18 falhas **pré-existentes** (confirmado por
 execução de linha de base sem as alterações desta etapa: `test_etl_task_claim`,
 `test_shared_cost`, `test_gold_daily_consumption`).
 
+## 6.1 Imutabilidade no banco (F3)
+
+O listener do ORM cobre a aplicação; o **gatilho** cobre SQL textual:
+
+```sql
+CREATE OR REPLACE FUNCTION anomaly_case_event_immutable() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION
+        'anomaly_case_event é um histórico imutável: registre um novo evento '
+        '(tentativa de % na linha %)', TG_OP, COALESCE(OLD.id, 0);
+END; $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_anomaly_case_event_immutable
+    BEFORE UPDATE OR DELETE ON anomaly_case_event
+    FOR EACH ROW EXECUTE FUNCTION anomaly_case_event_immutable();
+```
+
+Casos **não** são apagados: o ciclo termina em `CLOSED`, nunca em `DELETE`. Por
+isso o gatilho pode bloquear o `DELETE` em cascata sem efeito colateral.
+
+Verificado em PostgreSQL real:
+
+```text
+gatilhos em anomaly_case_event: ['trg_anomaly_case_event_immutable']
+   UPDATE: bloqueado (mensagem correta)
+   DELETE: bloqueado (mensagem correta)
+```
+
+### 6.2 Defaults convergidos no banco
+
+`ADD COLUMN` em tabela existente não impõe NOT NULL nem default. A migração
+converge os defaults de todas as colunas NOT NULL que só tinham default do ORM
+(`series_dimensions`, `score`, `evaluation_grain`, `valid_days_streak`,
+`reopen_count`, `status`, `selected_models`, `is_current`, `payload`, ...), para
+que INSERT por SQL direto — script operacional, verificação, backfill — funcione
+sem depender do ORM.
+
 ## 7. Limitações declaradas
 
-- Os endpoints `/anomalies` ainda não existem; esta etapa entrega persistência,
-  contrato e permissões. O CRUD e as transições via HTTP são E7.
 - As tabelas Iceberg são criadas na primeira publicação (E6), não no startup:
   criar tabela vazia em produção antes de existir dado publicável tornaria a
   publicação "corrente" indistinguível de uma tabela vazia.
-- `anomaly_case_event` bloqueia mutação no ORM e no `flush`; um `UPDATE` por SQL
-  textual ainda seria aceito pelo banco. O bloqueio definitivo (trigger) será
-  avaliado junto do endurecimento de RBAC em E10.
+- O gatilho bloqueia mutação de `anomaly_case_event` inclusive em cascata. Se um
+  dia for necessário apagar um caso inteiro, será preciso desabilitar o gatilho
+  explicitamente — decisão consciente, não acidente.

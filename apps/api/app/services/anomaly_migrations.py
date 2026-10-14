@@ -93,6 +93,56 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_case ALTER COLUMN anomalous_cost_cloud SET DEFAULT 0",
     "ALTER TABLE anomaly_case ALTER COLUMN reason_codes SET DEFAULT '[]'::jsonb",
     "ALTER TABLE anomaly_case ALTER COLUMN applied_rule_refs SET DEFAULT '[]'::jsonb",
+    # Convergência dos NOT NULL que só tinham default do ORM: sem isso um INSERT
+    # por SQL direto (script operacional, verificação, backfill) falha. Mesmo
+    # tratamento já dado a `family_keys`.
+    "ALTER TABLE anomaly_case ALTER COLUMN series_dimensions SET DEFAULT '{}'::jsonb",
+    "ALTER TABLE anomaly_case_event ALTER COLUMN payload SET DEFAULT '{}'::jsonb",
+    "ALTER TABLE anomaly_case_event ALTER COLUMN case_version SET DEFAULT 1",
+    "ALTER TABLE anomaly_case ALTER COLUMN evaluation_grain SET DEFAULT 'DAY'",
+    "ALTER TABLE anomaly_case ALTER COLUMN data_quality SET DEFAULT 'OK'",
+    "ALTER TABLE anomaly_case ALTER COLUMN score SET DEFAULT 0",
+    "ALTER TABLE anomaly_case ALTER COLUMN valid_days_streak SET DEFAULT 0",
+    "ALTER TABLE anomaly_case ALTER COLUMN reopen_count SET DEFAULT 0",
+    "ALTER TABLE anomaly_case ALTER COLUMN first_detected_at SET DEFAULT now()",
+    "ALTER TABLE anomaly_case ALTER COLUMN state_changed_at SET DEFAULT now()",
+    "ALTER TABLE anomaly_run ALTER COLUMN status SET DEFAULT 'QUEUED'",
+    "ALTER TABLE anomaly_run ALTER COLUMN trigger_type SET DEFAULT 'MANUAL'",
+    "ALTER TABLE anomaly_run ALTER COLUMN config_version SET DEFAULT 1",
+    "ALTER TABLE anomaly_run ALTER COLUMN total_series SET DEFAULT 0",
+    "ALTER TABLE anomaly_run ALTER COLUMN processed_series SET DEFAULT 0",
+    "ALTER TABLE anomaly_run ALTER COLUMN rows_written SET DEFAULT 0",
+    "ALTER TABLE anomaly_run ALTER COLUMN cases_created SET DEFAULT 0",
+    "ALTER TABLE anomaly_run ALTER COLUMN cases_updated SET DEFAULT 0",
+    "ALTER TABLE anomaly_run ALTER COLUMN notifications_created SET DEFAULT 0",
+    "ALTER TABLE anomaly_run ALTER COLUMN selected_models SET DEFAULT '{}'::jsonb",
+    "ALTER TABLE anomaly_publication ALTER COLUMN row_count SET DEFAULT 0",
+    "ALTER TABLE anomaly_publication ALTER COLUMN series_count SET DEFAULT 0",
+    "ALTER TABLE anomaly_publication ALTER COLUMN reference_count SET DEFAULT 0",
+    "ALTER TABLE anomaly_publication ALTER COLUMN is_current SET DEFAULT true",
+    "ALTER TABLE anomaly_action ALTER COLUMN action_type SET DEFAULT 'CORRECTIVE'",
+    "ALTER TABLE anomaly_action ALTER COLUMN status SET DEFAULT 'PLANNED'",
+    "ALTER TABLE anomaly_action ALTER COLUMN mandatory SET DEFAULT true",
+    "ALTER TABLE anomaly_notification ALTER COLUMN is_finops_queue SET DEFAULT false",
+    "ALTER TABLE anomaly_notification ALTER COLUMN severity SET DEFAULT 'LOW'",
+    # Histórico imutável também no banco: o listener do ORM cobre a aplicação,
+    # o gatilho cobre SQL textual. Casos não são apagados — o ciclo termina em
+    # CLOSED, nunca em DELETE.
+    """
+    CREATE OR REPLACE FUNCTION anomaly_case_event_immutable() RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION
+            'anomaly_case_event é um histórico imutável: registre um novo evento '
+            '(tentativa de % na linha %)', TG_OP, COALESCE(OLD.id, 0);
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS trg_anomaly_case_event_immutable ON anomaly_case_event",
+    """
+    CREATE TRIGGER trg_anomaly_case_event_immutable
+        BEFORE UPDATE OR DELETE ON anomaly_case_event
+        FOR EACH ROW EXECUTE FUNCTION anomaly_case_event_immutable()
+    """,
     # Correção de dados estreita: materialidade vazia passa a ter o default de
     # 100 na moeda declarada pela configuração. Idempotente.
     """UPDATE anomaly_config

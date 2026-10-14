@@ -107,6 +107,58 @@ async def main() -> int:
         for row in not_null_without_default:
             print("   ", row[0])
 
+    # --- gatilho de imutabilidade do histórico --------------------------
+    async with engine.begin() as conn:
+        triggers = [
+            row[0]
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT tgname FROM pg_trigger "
+                        "WHERE tgrelid = 'anomaly_case_event'::regclass AND NOT tgisinternal"
+                    )
+                )
+            ).fetchall()
+        ]
+    print(f"gatilhos em anomaly_case_event: {triggers}")
+    if "trg_anomaly_case_event_immutable" not in triggers:
+        failures.append("gatilho de imutabilidade ausente em anomaly_case_event")
+
+    for operation, statement in (
+        ("UPDATE", "UPDATE anomaly_case_event SET note = 'alterado'"),
+        ("DELETE", "DELETE FROM anomaly_case_event"),
+    ):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "INSERT INTO anomaly_case (case_key, series_id, series_dimensions, "
+                        "event_family, event_type, event_date, period) VALUES "
+                        "('probe-imutavel', 's', '{}'::json, 'f', 'DAILY_CONSUMPTION', "
+                        "'2026-10-10', '202610')"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO anomaly_case_event (case_id, event_type) "
+                        "SELECT id, 'CREATED' FROM anomaly_case WHERE case_key = 'probe-imutavel'"
+                    )
+                )
+                await conn.execute(text(statement))
+            failures.append(f"{operation} em anomaly_case_event NÃO foi bloqueado pelo gatilho")
+        except Exception as exc:  # esperado
+            blocked = "imutável" in str(exc)
+            print(f"   {operation}: bloqueado ({'mensagem correta' if blocked else exc})")
+            if not blocked:
+                failures.append(f"{operation} falhou por outro motivo: {exc}")
+        finally:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "DELETE FROM anomaly_case WHERE case_key = 'probe-imutavel'"
+                    )
+                )
+
     await engine.dispose()
     if failures:
         print("\nFALHAS:")

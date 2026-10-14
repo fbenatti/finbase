@@ -236,3 +236,36 @@ def test_execucao_guarda_o_contrato_de_referencia(engine):
         "reference_table", "assessment_table", "gold_table", "evaluation_start", "evaluation_end",
     ):
         assert required in columns, f"anomaly_run sem a coluna {required}"
+
+
+def test_migracao_declara_gatilho_de_imutabilidade():
+    """O histórico é imutável no ORM e no banco (F3)."""
+    from app.services.anomaly_migrations import ANOMALY_MIGRATION_STATEMENTS
+
+    joined = "\n".join(ANOMALY_MIGRATION_STATEMENTS)
+    assert "anomaly_case_event_immutable" in joined
+    assert "CREATE TRIGGER trg_anomaly_case_event_immutable" in joined
+    assert "BEFORE UPDATE OR DELETE ON anomaly_case_event" in joined
+    assert "DROP TRIGGER IF EXISTS trg_anomaly_case_event_immutable" in joined
+
+
+def test_migracao_converge_defaults_dos_not_null():
+    """Colunas NOT NULL com default só do ORM precisam de default no banco."""
+    from app.services.anomaly_migrations import ANOMALY_MIGRATION_STATEMENTS
+
+    joined = "\n".join(ANOMALY_MIGRATION_STATEMENTS)
+    for column in (
+        "anomaly_case.series_dimensions",
+        "anomaly_case.score",
+        "anomaly_case.evaluation_grain",
+        "anomaly_case.valid_days_streak",
+        "anomaly_case.reopen_count",
+        "anomaly_run.status",
+        "anomaly_run.selected_models",
+        "anomaly_publication.is_current",
+        "anomaly_action.status",
+        "anomaly_notification.is_finops_queue",
+        "anomaly_case_event.payload",
+    ):
+        table, name = column.split(".")
+        assert f"ALTER TABLE {table} ALTER COLUMN {name} SET DEFAULT" in joined, column
