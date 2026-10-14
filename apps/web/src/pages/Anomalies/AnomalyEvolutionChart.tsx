@@ -22,6 +22,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
   const [historyDays, setHistoryDays] = useState(14);
   const [selectedDay, setSelectedDay] = useState(kase.event_date);
   const monthly = series.evaluation_grain === "MONTHLY_EVENT" || kase.evaluation_grain === "MONTHLY_EVENT";
+  const currencySymbol = new Intl.NumberFormat("pt-BR", { style: "currency", currency }).formatToParts(0).find((part) => part.type === "currency")?.value ?? currency;
   const dataEnd = series.analysis_data_end ?? series.data_cutoff ?? kase.event_date;
   const points = useMemo(() => {
     // Defesa para publicações antigas: a mesma data nunca ocupa várias barras.
@@ -45,7 +46,6 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
     money(point.delta_cloud, currency), money(point.anomalous_cost_cloud, currency), money(point.upper_cloud, currency),
     point.forecast_run_id == null ? "sem referência" : `#${point.forecast_run_id}`,
   ]);
-  const hover = "<b>%{customdata[0]}</b><br>Realizado: %{customdata[1]}<br>Forecast: %{customdata[2]}<br>Desvio: %{customdata[3]}<br>Acima do limite: %{customdata[4]}<br>Limite tolerado: %{customdata[5]}<br>Forecast %{customdata[6]}<extra></extra>";
   const positiveStack = (point: AnomalySeriesPoint) => point.observed_cloud != null && point.observed_cloud >= 0 && point.expected_cloud != null && point.expected_cloud >= 0;
   const firstExcess = points.find((point) => point.above_band && point.event_date <= dataEnd);
   const reference = series.reference;
@@ -65,12 +65,15 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
 
     {warnings.map((warning) => <Alert severity="warning" key={warning} sx={{ mt: 2 }}>{warning}</Alert>)}
 
+    {monthly && reference && reference.coverage_kind !== "FULL_MONTH" && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+      Saldo registrado no forecast em {dateLabel(reference.data_cutoff)}: {money(reference.monthly_forecast_cloud, currency)}. A expectativa total anterior à compra não foi preservada nesta referência.
+    </Typography>}
     <Box sx={{ mt: 2.5, mb: .5 }}>
       <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: ".06em" }}>
         {monthly ? "Acumulado em" : selectedDay > dataEnd ? "Projeção para" : "Comparação em"} {dateLabel(selectedDay)}
       </Typography>
       <Typography variant="body1" sx={{ fontWeight: 600, mt: .25 }}>
-        {actual == null ? `Forecast de ${money(expected, currency)} · realizado ainda indisponível.`
+        {!focus ? "A data deste evento está fora do período elegível para análise." : actual == null ? `Forecast de ${money(expected, currency)} · realizado ainda indisponível.`
           : !canCompare ? `Realizado de ${money(actual, currency)} · sem forecast comparável nesta data.`
             : <>{money(actual, currency)} realizados para {money(expected, currency)} previstos
               {delta != null && delta > 0 && <Box component="span" sx={{ color: "#cf4141" }}> · +{money(delta, currency)}{deltaPct == null ? "" : ` (+${deltaPct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%)`}</Box>}
@@ -95,19 +98,19 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
         data={[
           { type: "scatter", mode: "lines", x, y: points.map((point) => point.lower_cloud), line: { width: 0 }, hoverinfo: "skip", showlegend: false, connectgaps: false },
           { type: "scatter", mode: "lines", name: "Faixa tolerada", x, y: points.map((point) => point.upper_cloud), line: { width: 0 }, fill: "tonexty", fillcolor: colors.band, hoverinfo: "skip", showlegend: false, connectgaps: false },
-          { type: "bar", name: "Histórico sem forecast", x, y: points.map((point) => point.expected_cloud == null ? point.observed_cloud : null), marker: { color: colors.history }, customdata: tooltip, hovertemplate: hover, showlegend: points.some((point) => point.expected_cloud == null && point.observed_cloud != null) },
-          { type: "bar", name: "Realizado até o forecast", x, y: points.map((point) => point.expected_cloud == null ? null : positiveStack(point) ? Math.min(point.observed_cloud!, point.expected_cloud!) : point.observed_cloud), marker: { color: colors.actual }, customdata: tooltip, hovertemplate: hover },
-          { type: "bar", name: "Desvio sobre o forecast", x, y: points.map((point) => positiveStack(point) ? Math.max(0, point.observed_cloud! - point.expected_cloud!) : null), marker: { color: colors.excess }, customdata: tooltip, hovertemplate: hover },
-          { type: "scatter", mode: "lines", name: "Forecast", x, y: points.map((point) => point.expected_cloud), line: { color: colors.forecast, dash: "dash", width: 2.5 }, customdata: tooltip, hovertemplate: hover, connectgaps: false },
-          { type: "scatter", mode: "lines", name: "Limite tolerado", x, y: points.map((point) => point.upper_cloud), line: { color: "#9aafd3", dash: "dot", width: 1 }, customdata: tooltip, hovertemplate: hover, connectgaps: false },
+          { type: "bar", name: "Histórico sem forecast", x, y: points.map((point) => point.expected_cloud == null ? point.observed_cloud : null), marker: { color: colors.history }, customdata: tooltip, hovertemplate: "Realizado: %{customdata[1]}<extra></extra>", showlegend: points.some((point) => point.expected_cloud == null && point.observed_cloud != null) },
+          { type: "bar", name: "Realizado até o forecast", x, y: points.map((point) => point.expected_cloud == null ? null : positiveStack(point) ? Math.min(point.observed_cloud!, point.expected_cloud!) : point.observed_cloud), marker: { color: colors.actual }, customdata: tooltip, hovertemplate: "Realizado: %{customdata[1]}<extra></extra>", showlegend: comparable.length > 0 },
+          { type: "bar", name: "Desvio sobre o forecast", x, y: points.map((point) => positiveStack(point) ? Math.max(0, point.observed_cloud! - point.expected_cloud!) : null), marker: { color: colors.excess }, customdata: tooltip, hovertemplate: "Desvio: %{customdata[3]}<br>Acima da faixa: %{customdata[4]}<extra></extra>", showlegend: comparable.length > 0 },
+          { type: "scatter", mode: "lines", name: "Forecast", x, y: points.map((point) => point.expected_cloud), line: { color: colors.forecast, dash: "dash", width: 2.5 }, customdata: tooltip, hovertemplate: "Forecast: %{customdata[2]}<br>Execução %{customdata[6]}<extra></extra>", showlegend: comparable.length > 0, connectgaps: false },
+          { type: "scatter", mode: "lines", name: "Limite tolerado", x, y: points.map((point) => point.upper_cloud), line: { color: "#9aafd3", dash: "dot", width: 1 }, customdata: tooltip, hovertemplate: "Limite tolerado: %{customdata[5]}<extra></extra>", showlegend: comparable.length > 0, connectgaps: false },
         ]}
         layout={{
           autosize: true, height: 410, barmode: "relative", bargap: .25,
           margin: { l: 72, r: 18, t: 50, b: 85 },
           paper_bgcolor: "transparent", plot_bgcolor: "transparent",
           font: { family: "inherit", color: "#64748b", size: 11 },
-          xaxis: { type: "date", range: x.length ? [`${x[0]}T00:00:00Z`, `${dayOffset(x[x.length - 1], 1)}T00:00:00Z`] : undefined, tickformat: "%d/%m", nticks: 9, showgrid: false, zeroline: false, fixedrange: true },
-          yaxis: { rangemode: "tozero", tickprefix: `${currency} `, tickformat: ",.0f", gridcolor: "#e8edf3", zerolinecolor: "#cbd5e1", fixedrange: true },
+          xaxis: { type: "date", range: x.length ? [`${dayOffset(x[0], -1)}T12:00:00Z`, `${x[x.length - 1]}T12:00:00Z`] : undefined, tickformat: "%d/%m", hoverformat: "%d/%m/%Y", nticks: 9, showgrid: false, zeroline: false, fixedrange: true },
+          yaxis: { rangemode: "tozero", tickprefix: `${currencySymbol} `, tickformat: ",.0f", gridcolor: "#e8edf3", zerolinecolor: "#cbd5e1", fixedrange: true },
           hovermode: "x unified", separators: ",.", showlegend: true,
           legend: { orientation: "h", y: -.22, x: 0, font: { size: 11 }, traceorder: "normal" },
           shapes: [
@@ -116,7 +119,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
             ...(kase.event_date <= dataEnd ? [{ type: "line" as const, xref: "x" as const, yref: "paper" as const, x0: kase.event_date, x1: kase.event_date, y0: 0, y1: 1, line: { color: "#d64c4c", width: 1, dash: "dot" as const } }] : []),
           ],
           annotations: [
-            { x: kase.event_date, y: 1.04, xref: "x", yref: "paper", text: `Detecção · ${dateLabel(kase.event_date)}`, showarrow: false, xanchor: "right", font: { color: "#c83f3f", size: 11 } },
+            ...(kase.event_date <= dataEnd ? [{ x: kase.event_date, y: 1.04, xref: "x" as const, yref: "paper" as const, text: `Detecção · ${dateLabel(kase.event_date)}`, showarrow: false, xanchor: "right" as const, font: { color: "#c83f3f", size: 11 } }] : []),
             ...(future.length ? [{ x: future[Math.floor(future.length / 2)].event_date, y: 1.04, xref: "x" as const, yref: "paper" as const, text: "Forecast →", showarrow: false, font: { color: colors.forecast, size: 12 } }] : []),
           ],
         }}
@@ -137,7 +140,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
     </Stack>
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block", lineHeight: 1.6 }}>
       {monthly ? "Barras nas datas de cobrança; acumulado reiniciado a cada mês. " : "Barras cinza mostram o histórico anterior à cobertura do forecast. "}
-      Vermelho é o desvio positivo; custo anômalo considera somente a parcela acima do limite tolerado. Dias sem coleta ficam vazios.
+      {comparable.length > 0 ? "Vermelho é o desvio positivo; custo anômalo considera somente a parcela acima do limite tolerado." : "Sem referência completa, o gráfico mostra o realizado sem quantificar desvio."} Dias sem coleta ficam vazios.
       {future.length > 0 && " A área azul mostra a projeção, sem criar realizado futuro."} Clique em uma data para ver os valores.
       {reference && <> Referência congelada com corte em {dateLabel(reference.data_cutoff)}.</>}
     </Typography>

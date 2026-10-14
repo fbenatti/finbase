@@ -307,6 +307,8 @@ async def read_case_series(
     forecast_ends = [str(row.get("target_end") or row.get("coverage_end") or "")[:10] for row in forecast_rows]
     forecast_ends = [date.fromisoformat(value) for value in forecast_ends if value]
     forecast_end = min(max(forecast_ends), requested_end) if forecast_ends else data_end
+    if monthly and frozen and frozen.get("coverage_kind") != "FULL_MONTH":
+        forecast_end = data_end
     display_end = max(data_end, forecast_end)
     series_dimensions = dict(getattr(case, "series_dimensions", None) or {})
     observed_by_day: dict[date, float] = {}

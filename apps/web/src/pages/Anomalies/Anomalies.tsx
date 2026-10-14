@@ -732,7 +732,7 @@ export default function Anomalies() {
       )}
 
       <Drawer anchor="right" open={Boolean(selected)} onClose={() => setSelected(null)}
-              PaperProps={{ sx: { width: "min(1100px, 96vw)", p: 2 } }}>
+              PaperProps={{ sx: { width: "min(1100px, 96vw)", p: 2, top: { xs: 56, sm: 64 }, height: { xs: "calc(100dvh - 56px)", sm: "calc(100dvh - 64px)" }, overflowX: "hidden" } }}>
         {selected && (
           <Box>
             {(() => {
@@ -740,17 +740,17 @@ export default function Anomalies() {
               const eventBeyondCutoff = Boolean(dataEnd && selected.event_date > dataEnd);
               return <>
             <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="h6">Caso #{selected.id}</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>Caso #{selected.id}</Typography>
               <Chip size="small" color={SEVERITY_COLOR[selected.severity] ?? "default"}
-                    label={`${selected.severity} · nota ${selected.score.toFixed(0)}`} />
+                    label={`${({ LOW: "Baixa", MEDIUM: "Média", HIGH: "Alta", CRITICAL: "Crítica" } as Record<string, string>)[selected.severity] ?? selected.severity} · nota ${selected.score.toFixed(0)}`} />
               <Chip size="small" label={STATE_LABEL[selected.state] ?? selected.state} />
-              <Chip size="small" label={`confiança ${selected.confidence}`} />
+              <Chip size="small" label={`Confiança ${({ HIGH: "alta", MEDIUM: "média", LOW: "baixa", UNAVAILABLE: "indisponível" } as Record<string, string>)[selected.confidence] ?? selected.confidence}`} />
               <Box sx={{ flexGrow: 1 }} />
-              <IconButton onClick={() => setSelected(null)}><CloseIcon /></IconButton>
+              <IconButton aria-label="Fechar caso" onClick={() => setSelected(null)}><CloseIcon /></IconButton>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {selected.event_family} · {selected.event_date} · competência de origem{" "}
-              {selected.source_billing_period ?? "—"} · período {selected.period}
+              {[selected.series_dimensions.cloud_origem, selected.series_dimensions.subaccountname, selected.series_dimensions.servicesubcategory ?? selected.series_dimensions.servicename].filter(Boolean).join(" · ")}
+              {" · "}Cobrança em {new Date(`${selected.event_date}T00:00:00Z`).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
             </Typography>
             {busy && <LinearProgress sx={{ mb: 1 }} />}
 
