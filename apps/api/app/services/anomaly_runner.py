@@ -485,6 +485,30 @@ def _d2_data_end(detected_at: datetime, lag_days: int = 2) -> date:
     return instant.astimezone(timezone.utc).date() - timedelta(days=max(0, int(lag_days)))
 
 
+def _contracts_by_evaluation_day(
+    contracts: Sequence[ForecastContract],
+    *,
+    start: date,
+    end: date,
+    horizon_days: int,
+) -> dict[int, tuple[ForecastContract, set[date]]]:
+    """Atribui cada dia à previsão mais recente que o cobria antes do evento."""
+    selected: dict[int, tuple[ForecastContract, set[date]]] = {}
+    cursor = start
+    while cursor <= end:
+        candidates = [
+            contract for contract in contracts
+            if contract.cutoff_date is not None
+            and contract.cutoff_date < cursor
+            and contract.cutoff_date + timedelta(days=horizon_days) >= cursor
+        ]
+        if candidates:
+            contract = max(candidates, key=lambda item: (item.cutoff_date, item.run_id))
+            selected.setdefault(contract.run_id, (contract, set()))[1].add(cursor)
+        cursor += timedelta(days=1)
+    return selected
+
+
 async def build_outcome(
     *,
     config: Mapping[str, Any],
