@@ -217,16 +217,20 @@ async def read_case_series(
         ),
         timeout_s=180,
     )
-    if not reference_rows:
-        return {
-            "items": [],
-            "months": months,
-            "note": "sem linhas de referência para a série do caso na publicação corrente",
-        }
-
     cutoff = _cutoff_of(publication)
     effective_data_end = analysis_data_end or (datetime.now(timezone.utc).date() - timedelta(days=2))
     horizon_end = min(cutoff + timedelta(days=max(1, int(horizon_days))), effective_data_end)
+    raw_event_date = getattr(case, "event_date", None)
+    if isinstance(raw_event_date, date):
+        event_day = raw_event_date
+    else:
+        try:
+            event_day = date.fromisoformat(str(raw_event_date)[:10])
+        except (TypeError, ValueError):
+            event_day = cutoff
+    context_start = event_day - timedelta(days=30)
+    context_end = min(event_day + timedelta(days=15), effective_data_end)
+
     covered_days: list[date] = []
     for row in reference_rows:
         start = row.get("coverage_start")
@@ -238,24 +242,21 @@ async def read_case_series(
         while cursor <= last:
             covered_days.append(cursor)
             cursor += timedelta(days=1)
-    if not covered_days:
-        return {"items": [], "months": months, "note": "referência sem intervalo coberto"}
-
     # O detalhe do caso também precisa explicar o desvio com o realizado que o
     # precedeu e o que veio depois. Esta janela é contexto observado, não uma
     # nova referência nem uma reconstrução de forecast.
-    raw_event_date = getattr(case, "event_date", None)
-    if isinstance(raw_event_date, date):
-        event_day = raw_event_date
-    else:
-        try:
-            event_day = date.fromisoformat(str(raw_event_date)[:10])
-        except (TypeError, ValueError):
-            event_day = min(covered_days)
-    context_start = event_day - timedelta(days=30)
-    context_end = min(event_day + timedelta(days=15), effective_data_end)
-
     series_dimensions = dict(getattr(case, "series_dimensions", None) or {})
+    query_start = min([context_start, *covered_days])
+    query_end = min(max([context_end, *covered_days]), effective_data_end)
+    if query_end < query_start:
+        return {
+            "items": [], "context_items": [], "months": months,
+            "context_start": context_start.isoformat(),
+            "context_end": context_end.isoformat(),
+            "context_event_date": event_day.isoformat(),
+            "analysis_data_end": effective_data_end.isoformat(),
+            "note": "evento posterior ao corte de dados D-2",
+        }
     sql = observed_daily_sql(
         source_namespace=source_namespace,
         table=source_table,
@@ -264,8 +265,8 @@ async def read_case_series(
         type_column=type_column,
         measure_column=measure_column,
         dimensions=list(dimensions),
-        start=min(min(covered_days), context_start),
-        end=min(max(max(covered_days), context_end), effective_data_end),
+        start=query_start,
+        end=query_end,
     )
     series_filter = _dimension_filter(series_dimensions)
     if series_filter:
@@ -287,7 +288,7 @@ async def read_case_series(
         observed_by_day,
         horizon_end=horizon_end,
         weekday_medians=profile.medians if not profile.is_fallback else None,
-    )
+    ) if covered_days and reference_rows else []
     context_items = []
     context_day = context_start
     while context_day <= context_end:
@@ -314,6 +315,11 @@ async def read_case_series(
         "distribution_methods": sorted({str(item["distribution_method"]) for item in items}),
         "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in reference_rows}),
         "confidence": sorted({str(row.get("band_confidence") or "UNAVAILABLE") for row in reference_rows}),
+        "note": (
+            "sem linhas de referência na publicação corrente"
+            if not reference_rows
+            else "referência sem intervalo coberto" if not covered_days else None
+        ),
     }
 
 
