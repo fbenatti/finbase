@@ -179,13 +179,19 @@ export type AnomalySeriesPoint = {
   reference_kind: string | null;
   coverage_kind: string | null;
   distribution_method: string;
-  expected_cloud: number;
-  lower_cloud: number;
-  upper_cloud: number;
+  expected_cloud: number | null;
+  lower_cloud: number | null;
+  upper_cloud: number | null;
   observed_cloud: number | null;
   delta_cloud: number | null;
   anomalous_cost_cloud: number | null;
   above_band: boolean | null;
+  comparison_supported?: boolean;
+  is_future?: boolean;
+  raw_observed_cloud?: number | null;
+  forecast_run_id?: number | null;
+  forecast_cutoff?: string | null;
+  phase?: "HISTORY" | "COMPARISON" | "FORECAST";
 };
 
 export type AnomalySeries = {
@@ -202,6 +208,19 @@ export type AnomalySeries = {
   data_cutoff?: string;
   analysis_data_end?: string;
   horizon_end?: string;
+  forecast_start?: string | null;
+  forecast_end?: string;
+  evaluation_grain?: string;
+  warnings?: string[];
+  reference?: {
+    reference_id: string;
+    forecast_run_id: number | null;
+    data_cutoff: string;
+    generated_at: string | null;
+    reference_kind: string;
+    coverage_kind: string;
+    monthly_forecast_cloud: number | null;
+  } | null;
   reference_table?: string;
   series_dimensions?: Record<string, string | null>;
   distribution_methods?: string[];

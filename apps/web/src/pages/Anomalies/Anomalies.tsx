@@ -14,6 +14,7 @@ import {
   MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs,
   TextField, Tooltip, Typography,
 } from "@mui/material";
+import AnomalyEvolutionChart from "./AnomalyEvolutionChart";
 import CloseIcon from "@mui/icons-material/Close";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -74,210 +75,6 @@ const money = (value: number | null | undefined, currency = "BRL") =>
 
 const dt = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString("pt-BR") : "—";
-
-const chartColors = { observed: "#263746", expected: "#64748b", band: "#dbeafe", limit: "#2583c5", anomaly: "#d14343", grid: "#e8edf3", axis: "#748094" };
-
-/** Contexto histórico de realizado para tornar o desvio comparável antes/depois. */
-function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase: AnomalyCase; currency: string }) {
-  const points = [...(series.context_items ?? [])].sort((a, b) => a.event_date.localeCompare(b.event_date));
-  if (!points.length) return null;
-  const before = points.filter((point) => point.event_date < (series.context_event_date ?? kase.event_date) && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
-  const eventDate = series.context_event_date ?? kase.event_date;
-  // Inclui o próprio dia que disparou o caso: o período posterior pode ainda
-  // não ter recebido uma nova carga, mas o evento já permite a comparação.
-  const after = points.filter((point) => point.event_date >= eventDate && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
-  const median = (values: number[]) => {
-    const sorted = [...values].sort((a, b) => a - b);
-    if (!sorted.length) return null;
-    const middle = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-  };
-  const beforeMedian = median(before);
-  const afterMedian = median(after);
-  const changePct = beforeMedian !== null && beforeMedian !== 0 && afterMedian !== null
-    ? ((afterMedian - beforeMedian) / Math.abs(beforeMedian)) * 100
-    : null;
-  const width = 880;
-  const height = 276;
-  const plot = { left: 76, right: 18, top: 24, bottom: 42 };
-  const plotWidth = width - plot.left - plot.right;
-  const plotHeight = height - plot.top - plot.bottom;
-  const values = points.map((point) => point.observed_cloud).filter((value): value is number => value !== null && Number.isFinite(value));
-  if (values.length === 0) return <Alert severity="info" sx={{ mt: 2 }}>Ainda não há dias observados nesta janela. A ausência de linha não significa consumo zero.</Alert>;
-  const rawMin = Math.min(0, ...values);
-  const rawMax = Math.max(0, ...values);
-  const padding = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.14;
-  const min = rawMin - padding;
-  const max = rawMax + padding;
-  const y = (value: number) => plot.top + (max - value) / (max - min) * plotHeight;
-  const x = (index: number) => plot.left + index * plotWidth / Math.max(1, points.length - 1);
-  const eventIndex = points.findIndex((point) => point.is_event_day || point.event_date === (series.context_event_date ?? kase.event_date));
-  const ticks = Array.from({ length: 5 }, (_, index) => min + (max - min) * index / 4);
-  const segments: Array<Array<{ index: number; value: number }>> = [];
-  points.forEach((point, index) => {
-    if (point.observed_cloud === null) return;
-    const last = segments[segments.length - 1];
-    if (last && last[last.length - 1].index === index - 1) last.push({ index, value: point.observed_cloud });
-    else segments.push([{ index, value: point.observed_cloud }]);
-  });
-  const labelIndexes = [0, Math.round((points.length - 1) * 0.33), Math.round((points.length - 1) * 0.66), points.length - 1];
-  return (
-    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0", mb: 2 }}>
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} spacing={1} sx={{ mb: 1 }}>
-        <Box><Typography variant="subtitle1" fontWeight={700}>Realizado antes e depois da detecção</Typography><Typography variant="caption" color="text.secondary">Até 30 dias anteriores e observações seguintes disponíveis; dados analisados até {series.analysis_data_end ?? series.data_cutoff ?? "o corte configurado"}</Typography></Box>
-        <Stack direction="row" spacing={1}>
-          <Chip size="small" variant="outlined" label={`Antes · n=${before.length} · ${beforeMedian === null ? "—" : money(beforeMedian, currency)}`} />
-          <Chip size="small" color={changePct !== null && changePct > 0 ? "error" : "info"} variant="outlined" label={`Evento + depois · n=${after.length} · ${afterMedian === null ? "—" : money(afterMedian, currency)}${changePct === null ? "" : ` (${changePct > 0 ? "+" : ""}${changePct.toFixed(1)}%)`}`} />
-        </Stack>
-      </Stack>
-      <Box sx={{ width: "100%", overflow: "hidden" }}><svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Custo cloud realizado nos 30 dias anteriores e 15 posteriores à anomalia" style={{ display: "block", fontFamily: "inherit" }}>
-        {ticks.map((tick) => <g key={tick}><line x1={plot.left} x2={width - plot.right} y1={y(tick)} y2={y(tick)} stroke={chartColors.grid} /><text x={plot.left - 10} y={y(tick) + 4} textAnchor="end" fontSize="11" fill={chartColors.axis}>{money(tick, currency)}</text></g>)}
-        {eventIndex >= 0 && <><line x1={x(eventIndex)} x2={x(eventIndex)} y1={plot.top} y2={height - plot.bottom} stroke={chartColors.anomaly} strokeWidth={2} strokeDasharray="5 5" /><text x={Math.min(x(eventIndex) + 8, width - 150)} y={plot.top + 12} fontSize="11" fontWeight="700" fill={chartColors.anomaly}>Detecção · {points[eventIndex].event_date}</text></>}
-        {beforeMedian !== null && <line x1={plot.left} x2={eventIndex >= 0 ? x(eventIndex) : width - plot.right} y1={y(beforeMedian)} y2={y(beforeMedian)} stroke={chartColors.expected} strokeWidth={1.5} strokeDasharray="4 5" opacity={0.8} />}
-        {segments.map((segment, index) => <polyline key={index} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.observed} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />)}
-        {points.map((point, index) => point.observed_cloud === null ? null : <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud)} r={point.is_event_day ? 6 : 3} fill={point.is_event_day ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · realizado ${money(point.observed_cloud, currency)}`}</title></circle>)}
-        {labelIndexes.map((index) => <text key={index} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
-      </svg></Box>
-      <Typography variant="caption" color="text.secondary">Dias sem registro são lacunas, não zero. A mediana anterior dá contexto do patamar recente; o percentual compara esse patamar com o evento e as observações posteriores já disponíveis até o corte configurado.</Typography>
-    </Paper>
-  );
-}
-
-/** Série diária com escala, datas e lacunas reais preservadas. */
-function SeriesChart({ series, currency }: { series: AnomalySeries; currency: string }) {
-  const points = [...series.items].sort((a, b) => a.event_date.localeCompare(b.event_date));
-  if (!points.length) return <Alert severity="info">{series.note ?? "Série diária indisponível para este caso."}</Alert>;
-
-  const width = 880;
-  const height = 300;
-  const plot = { left: 76, right: 18, top: 18, bottom: 42 };
-  const plotWidth = width - plot.left - plot.right;
-  const plotHeight = height - plot.top - plot.bottom;
-  const values = points.flatMap((point) => [point.expected_cloud, point.upper_cloud, point.lower_cloud, point.observed_cloud].filter((value): value is number => value !== null && Number.isFinite(value)));
-  const rawMin = Math.min(0, ...values);
-  const rawMax = Math.max(0, ...values);
-  const padding = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.12;
-  const min = rawMin - padding;
-  const max = rawMax + padding;
-  const y = (value: number) => plot.top + (max - value) / (max - min) * plotHeight;
-  const x = (index: number) => plot.left + index * plotWidth / Math.max(1, points.length - 1);
-  const segments = <T,>(select: (point: typeof points[number]) => number | null) => {
-    const result: Array<Array<{ index: number; value: number }>> = [];
-    points.forEach((point, index) => {
-      const value = select(point);
-      if (value === null || !Number.isFinite(value)) return;
-      const last = result[result.length - 1];
-      if (last && last[last.length - 1].index === index - 1) last.push({ index, value });
-      else result.push([{ index, value }]);
-    });
-    return result;
-  };
-  const bandSegments: Array<Array<{ index: number; point: typeof points[number] }>> = [];
-  points.forEach((point, index) => {
-    const last = bandSegments[bandSegments.length - 1];
-    if (last && last[last.length - 1].index === index - 1) last.push({ index, point });
-    else bandSegments.push([{ index, point }]);
-  });
-  const ticks = Array.from({ length: 5 }, (_, index) => min + (max - min) * index / 4);
-  const labelIndexes = points.length <= 8 ? points.map((_, index) => index) : Array.from(new Set([0, Math.round((points.length - 1) / 3), Math.round(2 * (points.length - 1) / 3), points.length - 1]));
-
-  return (
-    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0" }}>
-      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1} sx={{ mb: 1.5 }}>
-        <Box><Typography variant="subtitle1" fontWeight={700}>Custo cloud ao longo do tempo</Typography><Typography variant="caption" color="text.secondary">Consumo diário comparado à referência anterior ao evento</Typography></Box>
-        <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-          {[[chartColors.observed, "Observado"], [chartColors.expected, "Esperado"], [chartColors.band, "Faixa esperada"], [chartColors.anomaly, "Acima do limite"]].map(([color, label]) => <Stack key={label} direction="row" spacing={0.6} alignItems="center"><Box sx={{ width: 12, height: 3, bgcolor: color, borderRadius: 3 }} /><Typography variant="caption" color="text.secondary">{label}</Typography></Stack>)}
-        </Stack>
-      </Stack>
-      <Box sx={{ width: "100%", overflow: "hidden" }}>
-        <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Série diária de custo cloud observado, esperado e intervalo esperado" style={{ display: "block", fontFamily: "inherit" }}>
-          {ticks.map((tick) => <g key={tick}><line x1={plot.left} x2={width - plot.right} y1={y(tick)} y2={y(tick)} stroke={chartColors.grid} /><text x={plot.left - 10} y={y(tick) + 4} textAnchor="end" fontSize="11" fill={chartColors.axis}>{money(tick, currency)}</text></g>)}
-          {bandSegments.map((segment, index) => <polygon key={`band-${index}`} points={`${segment.map(({ index: i, point }) => `${x(i)},${y(point.upper_cloud)}`).join(" ")} ${[...segment].reverse().map(({ index: i, point }) => `${x(i)},${y(point.lower_cloud)}`).join(" ")}`} fill={chartColors.band} opacity={0.8} />)}
-          {segments((point) => point.expected_cloud).map((segment, index) => <polyline key={`expected-${index}`} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.expected} strokeWidth={2} strokeDasharray="5 5" />)}
-          {segments((point) => point.upper_cloud).map((segment, index) => <polyline key={`upper-${index}`} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.limit} strokeWidth={1.2} strokeDasharray="3 5" opacity={0.85} />)}
-          {segments((point) => point.observed_cloud).map((segment, index) => <polyline key={`observed-${index}`} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.observed} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />)}
-          {points.map((point, index) => point.observed_cloud === null ? null : <g key={point.event_date}><circle cx={x(index)} cy={y(point.observed_cloud)} r={point.anomalous_cost_cloud ? 5 : 3.5} fill={point.anomalous_cost_cloud ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · observado ${money(point.observed_cloud, currency)} · esperado ${money(point.expected_cloud, currency)} · anômalo ${money(point.anomalous_cost_cloud, currency)}`}</title></circle>{(point.anomalous_cost_cloud ?? 0) > 0 && <line x1={x(index)} x2={x(index)} y1={y(point.observed_cloud)} y2={y(point.upper_cloud)} stroke={chartColors.anomaly} strokeWidth={4} strokeLinecap="round" />}</g>)}
-          {labelIndexes.map((index) => <text key={points[index].event_date} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
-        </svg>
-      </Box>
-      <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
-        <Chip size="small" variant="outlined" label={`${points.length} dias no período`} />
-        {series.data_cutoff && <Chip size="small" variant="outlined" label={`Dados até ${series.data_cutoff}`} />}
-        {(series.distribution_methods ?? []).map((method) => <Chip key={method} size="small" variant="outlined" label={`Distribuição: ${method}`} />)}
-        {(series.band_methods ?? []).map((method) => <Chip key={method} size="small" variant="outlined" label={`Faixa: ${method}`} />)}
-      </Stack>
-    </Paper>
-  );
-}
-
-/** Comparação de um evento: uma escala de valor, sem sugerir série temporal. */
-function BandChart({ kase, currency }: { kase: AnomalyCase; currency: string }) {
-  const observed = kase.observed_cloud;
-  const expected = kase.expected_cloud;
-  const upper = kase.upper_cloud ?? expected;
-  const lower = kase.lower_cloud ?? expected;
-  const values = [observed, expected, upper, lower].filter((value): value is number => value !== null && Number.isFinite(value));
-  if (observed === null || expected === null || upper === null || lower === null || values.length === 0) return <Alert severity="info">Valores insuficientes para comparar o evento à referência.</Alert>;
-  const rawMin = Math.min(0, ...values);
-  const rawMax = Math.max(0, ...values);
-  const padding = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.15;
-  const min = rawMin - padding;
-  const max = rawMax + padding;
-  const left = 54;
-  const right = 850;
-  const x = (value: number) => left + (value - min) / (max - min) * (right - left);
-  const anomalous = Math.max(0, observed - upper);
-  const ticks = Array.from({ length: 5 }, (_, index) => min + (max - min) * index / 4);
-  return (
-    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0" }}>
-      <Typography variant="subtitle1" fontWeight={700}>Comparação do evento</Typography>
-      <Typography variant="caption" color="text.secondary">Valor observado em relação à expectativa e à faixa de tolerância</Typography>
-      <Box sx={{ mt: 2 }}><svg width="100%" viewBox="0 0 880 176" role="img" aria-label="Comparação de custo observado com expectativa e faixa esperada" style={{ display: "block", fontFamily: "inherit" }}>
-        {ticks.map((tick) => <g key={tick}><line x1={x(tick)} x2={x(tick)} y1={22} y2={130} stroke={chartColors.grid} /><text x={x(tick)} y={153} textAnchor="middle" fontSize="11" fill={chartColors.axis}>{money(tick, currency)}</text></g>)}
-        <line x1={left} x2={right} y1={82} y2={82} stroke="#aeb8c5" strokeWidth={2} />
-        <line x1={x(lower)} x2={x(upper)} y1={82} y2={82} stroke={chartColors.limit} strokeWidth={18} strokeLinecap="round" opacity={0.28} />
-        <line x1={x(expected)} x2={x(expected)} y1={48} y2={116} stroke={chartColors.expected} strokeWidth={2} strokeDasharray="4 4" />
-        {anomalous > 0 && <line x1={x(upper)} x2={x(observed)} y1={82} y2={82} stroke={chartColors.anomaly} strokeWidth={7} strokeLinecap="round" />}
-        <circle cx={x(observed)} cy={82} r={8} fill={anomalous > 0 ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={3}><title>Observado: {money(observed, currency)}</title></circle>
-        <text x={x(lower)} y={43} textAnchor="middle" fontSize="11" fill={chartColors.limit}>Limite inferior</text><text x={x(upper)} y={43} textAnchor="middle" fontSize="11" fill={chartColors.limit}>Limite superior</text><text x={x(expected)} y={125} textAnchor="middle" fontSize="11" fill={chartColors.expected}>Esperado</text>
-      </svg></Box>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-        <Chip size="small" variant="outlined" label={`Observado ${money(observed, currency)}`} />
-        <Chip size="small" variant="outlined" label={`Esperado ${money(expected, currency)}`} />
-        <Chip size="small" color={anomalous > 0 ? "error" : "default"} label={`Custo anômalo ${money(anomalous, currency)}`} />
-        <Chip size="small" variant="outlined" label={`Referência ${kase.reference_kind ?? "—"}`} />
-        <Chip size="small" variant="outlined" label={`Grão ${kase.evaluation_grain}`} />
-      </Stack>
-    </Paper>
-  );
-}
-
-function CaseComparison({ kase, currency }: { kase: AnomalyCase; currency: string }) {
-  const observed = kase.observed_cloud;
-  const expected = kase.expected_cloud;
-  const upper = kase.upper_cloud;
-  const delta = kase.delta_cloud ?? (observed !== null && expected !== null ? observed - expected : null);
-  const anomalous = kase.anomalous_cost_cloud;
-  const values = [
-    { label: "Esperado antes do evento", value: expected, color: "#64748b" },
-    { label: "Realizado cloud", value: observed, color: "#263746" },
-    { label: "Desvio vs. esperado", value: delta, color: (delta ?? 0) > 0 ? "#d14343" : "#16825d" },
-    { label: "Acima da faixa tolerada", value: anomalous, color: (anomalous ?? 0) > 0 ? "#d14343" : "#16825d" },
-  ];
-  return (
-    <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2.5, borderColor: "#e5eaf0" }}>
-      <Typography variant="subtitle1" fontWeight={700}>O desvio em uma olhada</Typography>
-      <Typography variant="caption" color="text.secondary">Comparação do custo cloud observado com a referência congelada antes do evento</Typography>
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: 1.5, mt: 1.5 }}>
-        {values.map((item) => <Box key={item.label} sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f7f9fc", borderTop: `3px solid ${item.color}`, minWidth: 0 }}>
-          <Typography variant="caption" color="text.secondary">{item.label}</Typography>
-          <Typography variant="h6" sx={{ color: item.color, fontWeight: 700, overflowWrap: "anywhere" }}>{money(item.value, currency)}</Typography>
-        </Box>)}
-      </Box>
-      {upper !== null && <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>Limite superior esperado: {money(upper, currency)}. O custo anômalo é somente a parcela acima desse limite.</Typography>}
-    </Paper>
-  );
-}
 
 function StepPanel({ kase }: { kase: AnomalyCase }) {
   const steps = (kase.steps ?? []).filter((step) => "etapa" in step);
@@ -960,16 +757,8 @@ export default function Anomalies() {
             {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
               Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso configurado da fonte: {config?.data_lag_days ?? 2} dia(s)). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
             </Alert>}
-            {!eventBeyondCutoff && <CaseComparison kase={selected} currency={currency} />}
-            {series && <ContextChart series={series} kase={selected} currency={currency} />}
-            {eventBeyondCutoff ? null : series && series.items.length > 0 ? (
-              <SeriesChart series={series} currency={currency} />
-            ) : (
-              <>
-                {series?.note && <Alert severity="info" sx={{ mb: 1 }}>{series.note}</Alert>}
-                <BandChart kase={selected} currency={currency} />
-              </>
-            )}
+            {series ? <AnomalyEvolutionChart key={selected.id} series={series} kase={selected} currency={currency} />
+              : <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress size={28} /><Typography color="text.secondary" sx={{ mt: 1 }}>Carregando realizado e forecast…</Typography></Box>}
             <Divider sx={{ my: 2 }} />
             <StepPanel kase={selected} />
 
