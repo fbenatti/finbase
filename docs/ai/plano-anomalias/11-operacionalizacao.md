@@ -198,6 +198,75 @@ cd apps/api
 
 ---
 
+## 7.1 Teste ao vivo da automação (F1 ligado de verdade)
+
+Sequência executada no ambiente de DEV com o **agendador e o worker reais**:
+
+```text
+18:00:00  agendamento anomaly_detection dispara (cron */2) → tarefa 8487
+18:05:36  worker reiniciado assume a tarefa (o processo antigo não conhecia o
+          task_type: foi preciso reiniciar) → COMPLETED em ~70s
+          anomaly_run 10: trigger=SCHEDULED forecast_run=399 corte=2026-10-12
+          10.903 séries · 914 linhas · cases_created=1
+          caso #14: ASSIGNED · HIGH · nota 89 · responsável=6
+          regra de roteamento=azure-ti-financeiro · prazo 24h
+          notificação ASSIGNMENT → usuário 6
+```
+
+Ciclo completo do caso #14 pela API, com histórico auditado de 11 eventos:
+
+```text
+ASSIGNED → acknowledge → INVESTIGATING → update_investigation → decide
+        → (beco sem saída corrigido) → cancel_remediation → DECIDED
+        → start_remediation → IN_REMEDIATION → start_verification → VERIFYING
+        → validate_result → RETROSPECTIVE → record_retrospective → close → CLOSED
+```
+
+Com decisão, causa (`MISCONFIGURATION`), evidências, aprendizado, medida
+preventiva e resultado de verificação gravados. O conflito de versão respondeu
+**409** com a mensagem correta.
+
+Reprocessamento com o caso encerrado (disparo automático às 18:08):
+
+```text
+anomaly_run 11: cases_created=0 cases_updated=0
+caso #14 permaneceu CLOSED na versão 11, mesmo custo anômalo
+evento REPROCESSING_IGNORED: "caso encerrado não reabre por simples repetição
+do processamento"
+```
+
+Monitor de prazos (mesmo código que o APScheduler chama):
+
+```text
+janela de 48h   → {'due_soon': 2, 'overdue': 0}
+prazo vencido   → {'due_soon': 0, 'overdue': 2}
+3ª execução     → {'due_soon': 0, 'overdue': 0}   ← deduplicação
+
+notificações: #3 ASSIGNMENT → usuário 6
+              #4 DUE_SOON   → usuário 6     #5 DUE_SOON  → fila FinOps
+              #6 OVERDUE    → usuário 6     #7 OVERDUE   → fila FinOps
+```
+
+Detecção manual via `POST /anomalies/configs/11/run` gerou o caso #15, também
+roteado para o usuário 6 (`azure-ti-financeiro`), com prazo de 24h.
+
+### 7.1.1 Dois defeitos encontrados **ao vivo** e corrigidos
+
+| # | Defeito | Sintoma observado | Correção |
+|---:|---|---|---|
+| A7-1 | Roteamento nunca era chamado na criação do caso | todo caso em `NEW`, sem responsável e sem notificação | `apply_detection_to_case` resolve o roteamento e nasce `ASSIGNED` ou na fila |
+| A1-1 | `decide(CONFIRMED_ACTION)` saltava direto para `IN_REMEDIATION` | caso #14 **preso**: `start_remediation`, `start_verification`, `validate_result`, `record_retrospective` e `close` todos recusados | a decisão para em `DECIDED`; `start_remediation` exige ação e marca `remediation_started_at` |
+
+Nenhum teste hermético pegava os dois: o primeiro porque a função estava correta
+e simplesmente não era chamada; o segundo porque só se revela ao percorrer a
+sequência completa de comandos.
+
+### 7.1.2 Nota operacional
+
+O worker é um processo **persistente**: depois de adicionar um `task_type` novo,
+reiniciar o worker é obrigatório. O processo antigo ignorou a tarefa agendada por
+5 minutos até o restart — o sintoma é "tarefa `QUEUED` que ninguém pega".
+
 ## 8. Limitações remanescentes
 
 1. **Faixa por granularidade de série** — a calibração usa os resíduos da própria
@@ -216,3 +285,9 @@ cd apps/api
 5. **Vencimento de prazos** depende do agendador ativo; em ambientes onde o
    scheduler está desligado, `GET /anomalies/cases?overdue_only=true` continua
    mostrando o vencimento no dashboard.
+6. **Cadência da detecção** ficou em `0 * * * *` (horária) para observação do
+   piloto. Para produção, `0 6 * * *` (diária) é o padrão do plano.
+7. **Exclusão de caso para limpeza** exige desabilitar o gatilho
+   explicitamente — foi o que fiz para recriar o caso de teste. Isso é
+   intencional (histórico imutável), mas significa que limpeza de dados de teste
+   é uma operação consciente.

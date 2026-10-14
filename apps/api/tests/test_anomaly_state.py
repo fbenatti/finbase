@@ -163,7 +163,9 @@ def test_decide_rejeita_causa_fora_do_vocabulario():
         ("DATA_ISSUE", "RETROSPECTIVE"),
         ("CONFIRMED_ACCEPTED", "RETROSPECTIVE"),
         ("LOW_PRIORITY_NO_ACTION", "RETROSPECTIVE"),
-        ("CONFIRMED_ACTION", "IN_REMEDIATION"),
+        # CONFIRMED_ACTION para em DECIDED: start_remediation exige ação e marca
+        # remediation_started_at (sem salto direto, que criava beco sem saída).
+        ("CONFIRMED_ACTION", "DECIDED"),
     ],
 )
 def test_decisao_escolhe_o_caminho_do_caso(decision, expected_state):
@@ -323,3 +325,26 @@ def test_versao_ausente_nao_bloqueia():
 def test_comando_desconhecido_e_erro_de_estado():
     with pytest.raises(AnomalyStateError, match="Comando desconhecido"):
         validate_transition(case(state="NEW"), "teleport", {})
+
+
+def test_confirmado_com_acao_nao_pula_a_remediacao():
+    """Regressão do beco sem saída encontrado no teste ao vivo.
+
+    O caso ia para IN_REMEDIATION sem `remediation_started_at`, e
+    `start_verification` exige esse campo: nenhum comando era aceito.
+    """
+    payload = {"decision": "CONFIRMED_ACTION", "cause_category": "MISCONFIGURATION",
+               "note": "confirmado", "evidence": ["billing"]}
+    current = case(state="INVESTIGATING")
+    assert resolve_next_state(current, "decide", payload) == "DECIDED"
+
+    # Em DECIDED, start_remediation exige ação e é o que marca a remediação.
+    decided = case(state="DECIDED", decision="CONFIRMED_ACTION")
+    with pytest.raises(AnomalyValidationError, match="ação corretiva"):
+        validate_transition(decided, "start_remediation", {}, actions_total=0)
+    transition = validate_transition(decided, "start_remediation", {}, actions_total=1)
+    assert transition.to_state == "IN_REMEDIATION"
+
+    # Só a partir de IN_REMEDIATION com `remediation_started_at` a verificação abre.
+    in_remediation = case(state="IN_REMEDIATION", remediation_started_at="2026-10-14T18:00:00Z")
+    validate_transition(in_remediation, "start_verification", {}, mandatory_actions_open=0)

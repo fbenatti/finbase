@@ -30,9 +30,11 @@ from app.models.anomaly import (
     AnomalyAction,
     AnomalyCase,
     AnomalyCaseEvent,
+    AnomalyConfig,
     AnomalyPublication,
     AnomalyRun,
 )
+from app.services.anomaly_workflow import assign_case, enqueue_case, resolve_routing
 from app.services.anomaly_detector import (
     CREATE,
     EXPECTED_ONLY,
@@ -231,6 +233,31 @@ class CaseOutcome:
     previous_severity: str | None = None
 
 
+#: Resultado do roteamento antes de tocar no banco.
+ROUTE_ASSIGNED = "ASSIGNED"
+ROUTE_QUEUE = "FINOPS_QUEUE"
+
+
+def routing_decision(match: Any) -> tuple[str, int | None, list[str]]:
+    """Decide entre atribuir e enfileirar a partir do casamento de regras.
+
+    Função pura: ambíguo ou sem regra vai para a fila FinOps — nunca uma escolha
+    arbitrária (plano §3.3).
+    """
+    notes: list[str] = []
+    if getattr(match, "ambiguous", False):
+        notes.append(
+            "roteamento ambíguo entre " + ", ".join(match.candidates or []) + ": fila FinOps"
+        )
+        return ROUTE_QUEUE, None, notes
+    if getattr(match, "assignee_user_id", None) is None:
+        notes.append("nenhuma regra de roteamento aplicável: fila FinOps")
+        return ROUTE_QUEUE, None, notes
+    if match.rule_id:
+        notes.append(f"roteado pela regra {match.rule_id} (especificidade {match.specificity})")
+    return ROUTE_ASSIGNED, int(match.assignee_user_id), notes
+
+
 def case_identity(detection: Any) -> str:
     return detection.case_key or case_key_for(
         detection.series_id, detection.event_family, detection.event_type, period=detection.period
@@ -307,16 +334,45 @@ async def apply_detection_to_case(
         )
         session.add(case)
         await session.flush()
+
+        # Roteamento (plano §3.3): o caso nasce com responsável OU na fila FinOps.
+        # Sem isso, "caso tem responsável ou fila explícita" não se cumpre.
+        placement_config = (
+            await session.get(AnomalyConfig, anomaly_config_id) if anomaly_config_id else None
+        )
+        routing_rules = list(getattr(placement_config, "routing_rules", None) or [])
+        match = resolve_routing(routing_rules, detection.series_dimensions)
+        route, assignee_user_id, notes = routing_decision(match)
+        if route == ROUTE_ASSIGNED and assignee_user_id is not None:
+            await assign_case(
+                session,
+                case=case,
+                assignee_user_id=assignee_user_id,
+                routing_rule_id=match.rule_id,
+            )
+            case.state = "ASSIGNED"
+            case.state_changed_at = datetime.now(timezone.utc)
+            state_note = "; ".join(notes)
+        else:
+            await enqueue_case(session, case=case, reason="; ".join(notes))
+            state_note = "; ".join(notes)
+
         await _append_event(
             session,
             case_id=case.id,
             event_type="CASE_CREATED",
             command="create",
             from_state=None,
-            to_state="NEW",
+            to_state=case.state,
             case_version=1,
             note=decision.reason,
-            payload={"assessment_id": case.current_assessment_id, "reference_id": detection.reference_id},
+            payload={
+                "assessment_id": case.current_assessment_id,
+                "reference_id": detection.reference_id,
+                "routing": route,
+                "routing_note": state_note,
+                "assignee_user_id": case.assignee_user_id,
+            },
         )
         return CaseOutcome(
             action=decision.action,

@@ -126,14 +126,22 @@ class Transition:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def resolve_state(self, case: Any, payload: Mapping[str, Any]) -> str:
-        """Destino efetivo: a decisão pode escolher o caminho (plano §3.5)."""
+        """Destino efetivo: a decisão pode escolher o caminho (plano §3.5).
+
+        ``CONFIRMED_ACTION`` para em ``DECIDED`` — e não salta direto para
+        ``IN_REMEDIATION``. O plano descreve o caminho "criar ação → remediação →
+        verificação", e é ``start_remediation`` que exige ao menos uma ação
+        cadastrada e marca ``remediation_started_at``.
+
+        O salto direto criava um beco sem saída: o caso entrava em
+        ``IN_REMEDIATION`` sem ``remediation_started_at``, e ``start_verification``
+        exige esse campo — nenhum comando era aceito dali para frente.
+        """
         resolved = self.to_state
         if resolved == "@by_decision":
             decision = payload.get("decision")
             if decision in DECISIONS_WITHOUT_REMEDIATION:
                 return "RETROSPECTIVE"
-            if decision == "CONFIRMED_ACTION":
-                return "IN_REMEDIATION"
             return "DECIDED"
         return resolved
 

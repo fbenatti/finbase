@@ -410,3 +410,48 @@ async def test_build_outcome_avalia_series_e_reconcilia():
     assert months == {"202610"}
     assert outcome.expectation_totals["202610"] == pytest.approx(3_100.0)
     assert outcome.reference_totals["202610"] == pytest.approx(3_100.0)
+
+
+# ---------------------------------------------------------------------------
+# Roteamento na criação do caso (plano §3.3)
+# ---------------------------------------------------------------------------
+def test_roteamento_com_regra_especifica_atribui():
+    from app.services.anomaly_release import ROUTE_ASSIGNED, routing_decision
+    from app.services.anomaly_workflow import resolve_routing
+
+    match = resolve_routing(
+        [{"id": "r1", "when": {"cloud_origem": "azure-ti"}, "assignee_user_id": 6}],
+        {"cloud_origem": "azure-ti", "servicename": "X"},
+    )
+    route, assignee, notes = routing_decision(match)
+    assert route == ROUTE_ASSIGNED
+    assert assignee == 6
+    assert any("r1" in note for note in notes)
+
+
+def test_roteamento_sem_regra_vai_para_a_fila():
+    from app.services.anomaly_release import ROUTE_QUEUE, routing_decision
+    from app.services.anomaly_workflow import resolve_routing
+
+    match = resolve_routing([], {"cloud_origem": "oci"})
+    route, assignee, notes = routing_decision(match)
+    assert route == ROUTE_QUEUE
+    assert assignee is None
+    assert any("fila FinOps" in note for note in notes)
+
+
+def test_roteamento_ambiguo_vai_para_a_fila():
+    from app.services.anomaly_release import ROUTE_QUEUE, routing_decision
+    from app.services.anomaly_workflow import resolve_routing
+
+    match = resolve_routing(
+        [
+            {"id": "a", "when": {"cloud_origem": "x"}, "assignee_user_id": 1},
+            {"id": "b", "when": {"cloud_origem": "x"}, "assignee_user_id": 2},
+        ],
+        {"cloud_origem": "x"},
+    )
+    route, assignee, notes = routing_decision(match)
+    assert route == ROUTE_QUEUE
+    assert assignee is None
+    assert any("ambíguo" in note for note in notes)

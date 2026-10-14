@@ -102,7 +102,19 @@ Transições são **comandos explícitos**; `status` nunca é editado livremente
 | `DATA_ISSUE` | `RETROSPECTIVE` |
 | `CONFIRMED_ACCEPTED` | `RETROSPECTIVE` |
 | `LOW_PRIORITY_NO_ACTION` | `RETROSPECTIVE` |
-| `CONFIRMED_ACTION` | `IN_REMEDIATION` |
+| `CONFIRMED_ACTION` | `DECIDED` → `start_remediation` → `IN_REMEDIATION` |
+
+> **Achado A1-1 (encontrado no teste ao vivo) — o salto direto criava beco sem saída.**
+> A primeira versão levava `CONFIRMED_ACTION` direto para `IN_REMEDIATION`, sem
+> nunca passar por `DECIDED`. Como só `start_remediation` marca
+> `remediation_started_at`, e `start_verification` exige esse campo, o caso ficava
+> **preso**: nenhum comando era aceito dali para frente. O teste ao vivo do caso
+> #14 parou exatamente aí (`start_remediation`, `start_verification`,
+> `validate_result`, `record_retrospective` e `close` recusados).
+> Corrigido: a decisão para em `DECIDED` e é `start_remediation` — que exige ao
+> menos uma ação corretiva cadastrada — que avança para `IN_REMEDIATION`,
+> marcando a data. É o caminho que o plano descreve ("criar ação → remediação →
+> verificação") e preserva a guarda de ação obrigatória.
 
 Baixa prioridade não é contada como falso positivo e ganho aceito não é erro do
 detector — por isso ambos seguem para retrospectiva com justificativa, e não

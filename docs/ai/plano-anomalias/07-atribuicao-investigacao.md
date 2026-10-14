@@ -56,6 +56,21 @@ Teste garante que **todo** comando do workflow tem escopo e que não há escopo
 **Nunca inferir usuário de texto livre em tags** (`test_nao_infere_usuario_de_texto_livre_em_tags`):
 uma tag `owner=joao.silva` não vira responsável. Só regra explícita atribui.
 
+### 2.0 O roteamento é aplicado **na criação do caso**
+
+> **Achado A7-1 (encontrado no teste ao vivo) — o roteamento existia mas nunca era chamado.**
+> `resolve_routing`, `assign_case` e `enqueue_case` estavam implementados e
+> testados, mas `apply_detection_to_case` criava o caso em `NEW` sem consultar as
+> regras: **todo caso caía sem responsável**, e nenhuma notificação de atribuição
+> era gerada. O aceite "caso tem responsável ou fila explícita" não se cumpria na
+> prática.
+> Corrigido: a criação resolve o roteamento e o caso nasce `ASSIGNED` (com prazo
+> por severidade e notificação) ou na fila FinOps, gravando a decisão no evento
+> `CASE_CREATED` (`routing`, `routing_note`, `assignee_user_id`).
+
+`routing_decision(match)` é a decisão pura: regra que casa → `ASSIGNED`; sem
+regra ou **ambíguo** → `FINOPS_QUEUE`.
+
 `assign_case` calcula o prazo de ciência:
 
 ```text
