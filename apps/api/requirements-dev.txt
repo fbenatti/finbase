@@ -1,0 +1,13 @@
+# Dependências de teste e desenvolvimento.
+#
+# A suíte roda a partir de apps/api:
+#     cd apps/api && ../../.venv/bin/python -m pytest tests/ -q --no-header
+#
+# `pytest` e `pytest-asyncio` não estavam declarados em nenhum lugar: a suíte só
+# rodava porque estavam instalados ad hoc no .venv local. Declarar aqui mantém a
+# imagem de produção enxuta e torna o ambiente de teste reproduzível.
+pytest>=8.0
+pytest-asyncio>=0.23
+# Testes de banco assíncrono (opcional): quando instalado, permite exercitar
+# funções de sessão assíncrona contra SQLite em memória.
+# aiosqlite>=0.20

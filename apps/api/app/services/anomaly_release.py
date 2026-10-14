@@ -464,7 +464,21 @@ async def finish_run(
     notifications_created: int = 0,
     error: str | None = None,
     errors: Sequence[Any] = (),
+    contract: Any | None = None,
+    reference_table: str | None = None,
+    assessment_table: str | None = None,
+    gold_table: str | None = None,
+    generated_at: datetime | None = None,
+    horizon_end: Any | None = None,
+    total_series: int = 0,
+    processed_series: int = 0,
 ) -> None:
+    """Fecha a execução e grava o contrato de referência usado.
+
+    O `anomaly_run` é o registro de auditoria da execução: guardar aqui o
+    `forecast_run_id`, o corte, o tipo de referência e as tabelas publicadas
+    torna o resultado rastreável mesmo depois que a configuração mudar.
+    """
     if run_id is None:
         return
     run = await session.get(AnomalyRun, run_id)
@@ -478,6 +492,29 @@ async def finish_run(
     run.notifications_created = notifications_created
     run.error = error
     run.errors = list(errors)
+    if total_series:
+        run.total_series = int(total_series)
+    if processed_series:
+        run.processed_series = int(processed_series)
+    if contract is not None:
+        run.forecast_run_id = int(getattr(contract, "run_id", 0) or 0) or run.forecast_run_id
+        run.forecast_config_version = getattr(contract, "config_version", None)
+        run.source_snapshot_id = getattr(contract, "source_snapshot_id", None)
+        cutoff = getattr(contract, "cutoff_date", None)
+        if cutoff is not None:
+            run.data_cutoff = cutoff.isoformat()
+            run.target_start = cutoff.isoformat()
+        run.reference_kind = getattr(contract, "reference_kind", None)
+    if reference_table:
+        run.reference_table = reference_table
+    if assessment_table:
+        run.assessment_table = assessment_table
+    if gold_table:
+        run.gold_table = gold_table
+    if generated_at is not None:
+        run.generated_at = generated_at
+    if horizon_end is not None:
+        run.target_end = horizon_end.isoformat() if hasattr(horizon_end, "isoformat") else str(horizon_end)
     if status in ("COMPLETED", "FAILED", "CANCELLED", "COMPLETED_WITH_ERRORS"):
         run.finished_at = datetime.now(timezone.utc)
     await session.flush()

@@ -56,13 +56,13 @@ def test_sql_de_avaliacoes_filtra_status_periodo_e_pagina():
     assert 'FROM iceberg.silver."dest_modelo_focus_anomalies"' in sql
     assert f"'{EXPECTED_EVENT_STATUS}'" in sql
     assert "'202610'" in sql
-    assert "LIMIT 25 OFFSET 50" in sql
+    assert "OFFSET 50 LIMIT 25" in sql
     assert "ORDER BY CAST(event_date AS VARCHAR) DESC" in sql
 
 
 def test_sql_de_avaliacoes_respeita_o_teto_da_pagina():
     sql = assessments_sql(namespace="silver", table="t", statuses=["OPEN"], limit=9999, offset=-5)
-    assert "LIMIT 200 OFFSET 0" in sql
+    assert "LIMIT 200" in sql
 
 
 def test_sql_de_avaliacoes_filtra_por_codigo_de_razao():

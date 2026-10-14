@@ -328,3 +328,85 @@ def test_colecao_de_referencia_tem_colunas_de_faixa():
 
 def test_publication_error_existe_para_falha_de_publicacao():
     assert issubclass(PublicationError, RuntimeError)
+
+
+# ---------------------------------------------------------------------------
+# Caminho completo de avaliação (sem Trino/PostgreSQL)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_build_outcome_avalia_series_e_reconcilia():
+    """Exercita o caminho real do runner: referência, detecção e reconciliação.
+
+    Regressão do defeito encontrado no piloto (`ForecastContract` sem
+    `reference_kind`), que só aparecia com dados reais.
+    """
+    from datetime import date
+
+    from app.services.anomaly_forecast_adapter import contract_from_run_row
+    from app.services.anomaly_runner import build_outcome, reconcile, validate_assessments
+
+    row = {
+        "id": 399,
+        "result_table": "result_run_399",
+        "status": "COMPLETED",
+        "trigger_type": "SCHEDULED_REPROCESS",
+        "forecast_config_id": 9,
+        "config_version": 21,
+        "cutoff_date": "2026-10-12",
+        "finished_at": "2026-10-14T01:00:00-03:00",
+        "started_at": "2026-10-14T01:00:00-03:00",
+        "destination_physical_name": "dest_modelo_focus",
+        "source_snapshot_id": None,
+        "config_snapshot": {"measure_column": "realizado", "dimensions": ["cloud_origem", "servicename"]},
+        "error_metrics": {},
+    }
+    contract = contract_from_run_row(
+        row,
+        available_columns=("realizado_cloud",),
+        fallback={"measure_column": "realizado_cloud", "source_namespace": "silver",
+                  "dimensions": ["cloud_origem", "servicename"]},
+    )
+    contract.reference_kind = "PROSPECTIVE"
+
+    dimensions = ["cloud_origem", "servicename"]
+    expectation = [
+        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202610",
+         "expected_cloud": 3_100.0},
+        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202611",
+         "expected_cloud": 6_000.0},
+    ]
+    # Série observada: outubro muito acima do esperado, novembro não observado.
+    observed = [
+        {"cloud_origem": "gcp-4p", "servicename": "Compute",
+         "event_date": date(2026, 10, day), "observed_cloud": 4_000.0,
+         "source_billing_period": "202610"}
+        for day in range(13, 32)
+    ]
+
+    outcome = await build_outcome(
+        config={
+            "profile": "BALANCED", "currency": "BRL",
+            "materiality_by_currency": {"BRL": 100.0},
+            "horizon_days": 15, "calibration_days": 60, "history_days": 180,
+            "dimensions": dimensions,
+        },
+        contract=contract,
+        expectation=expectation,
+        observed=observed,
+        dimensions=dimensions,
+        family_keys=["cloud_origem", "servicename"],
+        detected_at=datetime(2026, 10, 14, tzinfo=timezone.utc),
+    )
+
+    assert outcome.contract is contract
+    assert outcome.series_count == 1
+    assert outcome.reference_rows, "a referência deveria ter linhas"
+    # Reconciliação com o snapshot do forecast, mês a mês.
+    reconcile(outcome.expectation_totals, outcome.reference_totals)
+    validate_assessments(outcome.assessments)
+
+    # Só outubro está no horizonte de 15 dias a partir do corte.
+    months = {row.reference_month for row in outcome.reference_rows}
+    assert months == {"202610"}
+    assert outcome.expectation_totals["202610"] == pytest.approx(3_100.0)
+    assert outcome.reference_totals["202610"] == pytest.approx(3_100.0)

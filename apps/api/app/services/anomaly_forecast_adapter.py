@@ -113,6 +113,9 @@ class ForecastContract:
     applied_rule_refs: list[AppliedRuleRef] = field(default_factory=list)
     contract_source: str = "RUN_COLUMNS"
     rule_source: str = "NONE"
+    #: Como a referência se relaciona com o evento avaliado (E2):
+    #: PROSPECTIVE | RETROSPECTIVE | UNAVAILABLE.
+    reference_kind: str = "PROSPECTIVE"
     #: Verdadeiro quando foi preciso usar as regras ATUAIS (não congeladas).
     declares_current_rules: bool = False
     #: Verdadeiro quando a fonte pode conter revisões posteriores ao corte.
@@ -147,6 +150,7 @@ class ForecastContract:
             "measure_column": self.measure_column,
             "contract_source": self.contract_source,
             "rule_source": self.rule_source,
+            "reference_kind": self.reference_kind,
             "declares_current_rules": self.declares_current_rules,
             "declares_late_revisions": self.declares_late_revisions,
             "applied_rule_refs": [rule.as_dict() for rule in self.applied_rule_refs],

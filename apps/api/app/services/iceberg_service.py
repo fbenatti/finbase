@@ -1520,6 +1520,27 @@ def _merge_staged_into_canonical_table(
         return -1
 
 
+def _downcast_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Converte colunas de data/hora para ``datetime64[us]`` preservando UTC.
+
+    O Iceberg não aceita precisão de nanossegundos. O pandas produz
+    ``datetime64[ns]`` por padrão, então toda escrita precisa descer para
+    microssegundos — que é exatamente o ``timestamp(6) with time zone`` do
+    contrato. Sem isso a publicação falha com
+    "Iceberg does not yet support 'ns' timestamp precision".
+    """
+    for column in df.columns:
+        series = df[column]
+        if not pd.api.types.is_datetime64_any_dtype(series):
+            continue
+        try:
+            as_utc = pd.to_datetime(series, utc=True, errors="coerce")
+            df[column] = as_utc.astype("datetime64[us, UTC]")
+        except (TypeError, ValueError):
+            continue
+    return df
+
+
 def publish_dataframe_atomic(
     namespace: str,
     physical_name: str,
@@ -1542,11 +1563,15 @@ def publish_dataframe_atomic(
     if df is None or df.empty:
         return {"table": safe_name, "namespace": namespace, "staging": None, "rows": 0}
 
+    import time
+
     from pyiceberg.expressions import AlwaysTrue
 
     timestamp = time.time_ns()
     staging = f"{safe_name}_stg_{timestamp}"
-    arrow_table = _df_to_arrow(df, column_types=column_types or {})
+    arrow_table = _df_to_arrow(
+        _downcast_datetime_columns(df.copy()), column_types=column_types or {}
+    )
     cat = _get_catalog()
     staging_tid = _table_id(namespace, staging)
     try:

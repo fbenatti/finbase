@@ -89,10 +89,13 @@ def assessments_sql(
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     size = max(1, min(int(limit), 200))
     skip = max(0, int(offset))
+    # A gramática do Trino é `OFFSET n LIMIT m` (nesta ordem). `LIMIT n OFFSET m`
+    # falha com "mismatched input 'OFFSET'".
+    pagination = f"OFFSET {skip} LIMIT {size}" if skip else f"LIMIT {size}"
     return (
         f"SELECT {_projection()} FROM iceberg.{namespace}.{_quote(table)}{clause} "
         f"ORDER BY CAST(event_date AS VARCHAR) DESC, assessment_id "
-        f"LIMIT {size} OFFSET {skip}"
+        f"{pagination}"
     )
 
 

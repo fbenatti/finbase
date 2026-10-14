@@ -240,6 +240,7 @@ def build_reference_rows(
     calibration_days: int = 0,
     weekday_profile: WeekdayProfile | None = None,
     band: BandCalibration | None = None,
+    horizon_days: int | None = None,
 ) -> list[ReferenceRow]:
     """Uma linha por série × mês, com a soma preservada.
 
@@ -260,6 +261,10 @@ def build_reference_rows(
 
     rules = [rule.as_dict() for rule in contract.applied_rule_refs]
     cutoff = contract.cutoff_date
+    # "A referência guarda uma linha por forecast × série × mês **alcançado pelo
+    # horizonte**" (plano §4.2): com o horizonte informado, meses cujo primeiro
+    # dia coberto está depois do fim do horizonte ficam de fora.
+    horizon_end = cutoff + timedelta(days=int(horizon_days)) if horizon_days else None
     rows: list[ReferenceRow] = []
     for row in expectation_rows:
         month = str(row.get("forecast_month") or "")
@@ -268,6 +273,8 @@ def build_reference_rows(
         coverage_kind, cov_start, cov_end, covered = classify_coverage(month, cutoff)
         if coverage_kind == ELAPSED_MONTH:
             # Mês já transcorrido no corte não pertence ao horizonte.
+            continue
+        if horizon_end is not None and cov_start is not None and cov_start > horizon_end:
             continue
         values = {dim: row.get(dim) for dim in dimensions}
         series = series_id_for(dimensions, values)

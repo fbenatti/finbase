@@ -80,7 +80,12 @@ from app.services.anomaly_release import (
     finish_run,
     publish_iceberg,
 )
-from app.services.anomaly_schema import ASSESSMENT_TIPO, SERIES_DIMENSIONS
+from app.services.anomaly_schema import (
+    ASSESSMENT_TABLE,
+    ASSESSMENT_TIPO,
+    REFERENCE_TABLE,
+    SERIES_DIMENSIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -509,16 +514,22 @@ async def build_outcome(
     for key, expected_rows in expectation_by_series.items():
         sample = expected_rows[0]
         series_observed = grouped.get(key, [])
-        if not series_observed:
-            continue
+        # A referência cobre TODA série esperada pelo forecast, mesmo sem
+        # observação nesta janela: ela descreve a expectativa, e é isso que faz a
+        # reconciliação fechar com o snapshot mês a mês. A detecção, essa sim, só
+        # roda onde há observado.
         observed_by_day = {
             row["event_date"]: float(row.get("observed_cloud") or 0.0) for row in series_observed
         }
-        as_of = max(observed_by_day)
-        weekly = weekday_profile(observed_by_day, as_of=as_of, weeks=reader_weekday_weeks)
+        as_of = max(observed_by_day) if observed_by_day else contract.cutoff_date
+        weekly = (
+            weekday_profile(observed_by_day, as_of=as_of, weeks=reader_weekday_weeks)
+            if observed_by_day
+            else global_weekly
+        )
         if weekly.is_fallback:
             weekly = global_weekly
-        complete = has_complete_daily_calibration(
+        complete = bool(observed_by_day) and has_complete_daily_calibration(
             observed_by_day, as_of=as_of, calibration_days=calibration_days
         )
         residuals = [
@@ -547,9 +558,13 @@ async def build_outcome(
             calibration_days=calibration_days,
             weekday_profile=weekly,
             band=band,
+            horizon_days=horizon_days,
         )
         reference_rows.extend(rows)
         outcome.series_count += 1
+
+        if not series_observed:
+            continue
 
         series = _detect_series(
             series_observed=series_observed,
@@ -827,6 +842,10 @@ async def execute_detection(
                 "nenhuma execução de forecast utilizável: a medida precisa existir no resultado"
             )
         contract = max(usable, key=lambda c: (c.cutoff_date, c.run_id))
+        # A execução avalia os dias POSTERIORES ao próprio corte: por construção a
+        # referência é prospectiva. Reconstrução histórica (E5) marca
+        # RETROSPECTIVE explicitamente.
+        contract.reference_kind = "PROSPECTIVE"
         if _aborted(should_abort):
             await finish_run(session, run_id=run_id, status="CANCELLED", phase="Cancelado pelo usuário")
             await session.commit()
@@ -928,6 +947,13 @@ async def execute_detection(
             rows_written=published["assessment"]["rows"],
             cases_created=created,
             cases_updated=updated,
+            contract=contract,
+            reference_table=reference_table,
+            assessment_table=assessment_table,
+            generated_at=detected_at,
+            horizon_end=horizon_end,
+            total_series=outcome.series_count,
+            processed_series=outcome.series_count,
         )
         await session.commit()
 
