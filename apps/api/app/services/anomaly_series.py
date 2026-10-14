@@ -25,7 +25,6 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_observed import observed_daily_sql
-from app.services.anomaly_calibration import weekday_profile
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
@@ -58,7 +57,8 @@ def reference_series_sql(
         f"SELECT reference_month, coverage_kind, coverage_start, coverage_end, covered_days, "
         f"predicted_cloud, weekday_weights, normalizer, distribution_method, "
         f"daily_band_lower_offset, daily_band_upper_offset, band_method, band_confidence, "
-        f"reference_id, reference_kind, data_cutoff, series_id "
+        f"reference_id, reference_kind, data_cutoff, series_id, forecast_run_id, generated_at, "
+        f"target_start, target_end, band_lower_cloud, band_upper_cloud "
         f"FROM iceberg.{namespace}.{_quote(reference_table)} "
         f"WHERE series_id = {_lit(series_id)} "
         f"AND CAST(reference_month AS VARCHAR) IN ({quoted_months}) "
@@ -92,13 +92,16 @@ def derive_daily_points(
     *,
     horizon_end: date,
     weekday_medians: Mapping[int, float] | None = None,
+    frozen_reference_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Uma linha por dia coberto, com esperado, faixa e custo anômalo.
 
     Função pura: recebe a referência e o observado já lidos, o que a torna
     testável sem Trino.
     """
-    points: list[dict[str, Any]] = []
+    by_day: dict[str, tuple[tuple, dict[str, Any]]] = {}
+    frozen = next((row for row in reference_rows if row.get("reference_id") == frozen_reference_id), None)
+    frozen_run = frozen.get("forecast_run_id") if frozen else None
     for row in reference_rows:
         start = row.get("coverage_start")
         end = row.get("coverage_end")
@@ -114,6 +117,13 @@ def derive_daily_points(
         upper_offset = float(row.get("daily_band_upper_offset") or 0.0)
         lower_offset = float(row.get("daily_band_lower_offset") or 0.0)
         covered = max(1, int(row.get("covered_days") or 1))
+        cutoff = str(row.get("data_cutoff") or "")[:10]
+        target_end = str(row.get("target_end") or "")[:10]
+        frozen_row = bool(frozen_reference_id and (
+            row.get("reference_id") == frozen_reference_id
+            or (frozen_run is not None and row.get("forecast_run_id") == frozen_run)
+        ))
+        rank = (frozen_row, cutoff, int(row.get("forecast_run_id") or 0), str(row.get("reference_id") or ""))
 
         # Normaliza sobre TODO o intervalo coberto pela projeção (plano §2.3), e
         # não apenas sobre a janela exibida: o recorte do horizonte não pode
@@ -131,8 +141,16 @@ def derive_daily_points(
         while cursor <= last:
             if cursor > horizon_end:
                 break
+            day = cursor.isoformat()
+            if (cutoff and day <= cutoff) or (target_end and day > target_end):
+                cursor += timedelta(days=1)
+                continue
             raw_weight = weights.get(cursor.weekday())
             historical_fallback = float((weekday_medians or {}).get(cursor.weekday(), 0.0))
+            # O normalizador preservado permite recuperar a mediana original.
+            # Recalibrar usando o histórico atual absorvia o próprio aumento.
+            if row.get("distribution_method") == "WEEKDAY_MEDIAN" and raw_weight is not None and row.get("normalizer"):
+                historical_fallback = raw_weight * float(row["normalizer"])
             if predicted <= 0 and historical_fallback > 0:
                 expected = historical_fallback
                 method = "HISTORICAL_BASELINE_ZERO_FORECAST"
@@ -144,14 +162,18 @@ def derive_daily_points(
                 method = str(row.get("distribution_method") or "WEEKDAY_MEDIAN")
             observed = observed_by_day.get(cursor)
             upper = expected + upper_offset
-            points.append(
-                {
-                    "event_date": cursor.isoformat(),
+            point = {
+                    "event_date": day,
                     "weekday": cursor.weekday(),
                     "reference_month": row.get("reference_month"),
                     "reference_id": row.get("reference_id"),
                     "reference_kind": row.get("reference_kind"),
                     "coverage_kind": row.get("coverage_kind"),
+                    "forecast_run_id": row.get("forecast_run_id"),
+                    "forecast_cutoff": cutoff or None,
+                    "monthly_forecast_cloud": predicted,
+                    "monthly_lower_cloud": row.get("band_lower_cloud"),
+                    "monthly_upper_cloud": row.get("band_upper_cloud"),
                     "distribution_method": method,
                     "expected_cloud": round(expected, 4),
                     "lower_cloud": round(max(0.0, expected - lower_offset), 4),
@@ -163,10 +185,10 @@ def derive_daily_points(
                     ),
                     "above_band": None if observed is None else float(observed) > upper,
                 }
-            )
+            if day not in by_day or rank > by_day[day][0]:
+                by_day[day] = (rank, point)
             cursor += timedelta(days=1)
-    points.sort(key=lambda item: item["event_date"])
-    return points
+    return [by_day[day][1] for day in sorted(by_day)]
 
 
 def _dimension_filter(dimensions: Mapping[str, Any]) -> str | None:
