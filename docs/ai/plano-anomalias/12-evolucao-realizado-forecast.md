@@ -77,5 +77,12 @@ humana ou encerramento desse caso.
   preservado até 26/out; nenhum observado futuro.
 - Compras com saldo restante: comparação indisponível explícita, acumulado apenas
   nas datas de cobrança e sem previsão diária artificial.
-- Reprocessamento da configuração 11 para gravar a procedência de contribuintes
-  nos casos existentes: execução 22 (registrar resultado abaixo).
+- Reprocessamento da configuração 11 concluído: execução 22, forecast 397,
+  55.162 avaliações, 41 atualizações e nenhum caso novo.
+- Caso 17 após publicação: duas séries contribuintes; realizado de 1.153,6556
+  reconcilia com a avaliação, forecast de 725,8735 e limite superior de 802,2421
+  reconciliam dentro do arredondamento. Desvio diário de 427,7821 e parcela acima
+  da faixa de 351,4135. O impacto do episódio não substitui o valor da data.
+- Validação visual em largura de 1.066 px e na largura normal do navegador:
+  gráfico único, sem sobreposição com workflow/rodapé, forecast futuro visível.
+  A altura do contêiner é explícita para preservar o fluxo após redimensionamento.
