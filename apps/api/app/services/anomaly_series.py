@@ -51,8 +51,10 @@ def reference_series_sql(
     reference_table: str,
     series_id: str,
     months: Sequence[str],
+    series_ids: Sequence[str] = (),
 ) -> str:
     quoted_months = ", ".join(_lit(month) for month in months)
+    series_filter = ("series_id IN (" + ", ".join(_lit(value) for value in series_ids) + ")") if series_ids else f"series_id = {_lit(series_id)}"
     return (
         f"SELECT reference_month, coverage_kind, coverage_start, coverage_end, covered_days, "
         f"predicted_cloud, weekday_weights, normalizer, distribution_method, "
@@ -60,7 +62,7 @@ def reference_series_sql(
         f"reference_id, reference_kind, data_cutoff, series_id, forecast_run_id, generated_at, "
         f"target_start, target_end, band_lower_cloud, band_upper_cloud "
         f"FROM iceberg.{namespace}.{_quote(reference_table)} "
-        f"WHERE series_id = {_lit(series_id)} "
+        f"WHERE {series_filter} "
         f"AND CAST(reference_month AS VARCHAR) IN ({quoted_months}) "
         f"ORDER BY reference_month"
     )
@@ -202,6 +204,29 @@ def _dimension_filter(dimensions: Mapping[str, Any]) -> str | None:
     return " AND ".join(clauses) if clauses else None
 
 
+def aggregate_reference_points(points_by_series: Sequence[Sequence[Mapping[str, Any]]]) -> list[dict[str, Any]]:
+    """Soma referências do mesmo conjunto de séries que originou o caso.
+
+    Uma previsão incompleta não pode parecer um forecast completo menor.
+    """
+    by_day: dict[str, list[Mapping[str, Any]]] = {}
+    for points in points_by_series:
+        for point in points:
+            by_day.setdefault(point["event_date"], []).append(point)
+    result = []
+    for day, points in sorted(by_day.items()):
+        if len(points) != len(points_by_series):
+            continue
+        merged = dict(points[0])
+        for column in ("expected_cloud", "lower_cloud", "upper_cloud", "monthly_forecast_cloud", "monthly_lower_cloud", "monthly_upper_cloud"):
+            values = [point.get(column) for point in points]
+            merged[column] = sum(values) if all(value is not None for value in values) else None
+        merged["coverage_kind"] = "FULL_MONTH" if all(point.get("coverage_kind") == "FULL_MONTH" for point in points) else "REMAINING_MONTH"
+        merged["contributor_series_count"] = len(points)
+        result.append(merged)
+    return result
+
+
 def compose_case_timeline(
     reference_points: Sequence[Mapping[str, Any]],
     observed_by_day: Mapping[date, float],
@@ -272,6 +297,7 @@ async def read_case_series(
     dimensions: Sequence[str],
     horizon_days: int = DEFAULT_HORIZON_DAYS,
     analysis_data_end: date | None = None,
+    contributor_series: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Uma única linha do tempo: realizado até o cutoff e forecast além dele."""
     cutoff = _cutoff_of(publication)
@@ -285,12 +311,14 @@ async def read_case_series(
     context_start = event_day.replace(day=1) if monthly else event_day - timedelta(days=30)
     requested_end = data_end + timedelta(days=max(1, int(horizon_days)))
     months = _months_for(context_start, max(1, (requested_end - context_start).days))
+    members = list(contributor_series) or [{"series_id": str(case.series_id), "dimensions": dict(getattr(case, "series_dimensions", None) or {})}]
     rows = await trino_execute(
         reference_series_sql(
             namespace=reference_namespace,
             reference_table=publication.reference_table,
             series_id=str(case.series_id),
             months=months,
+            series_ids=[str(member["series_id"]) for member in members],
         ), timeout_s=180,
     )
     frozen_id = getattr(case, "current_reference_id", None)
@@ -319,9 +347,10 @@ async def read_case_series(
             type_column=type_column, measure_column=measure_column,
             dimensions=list(dimensions), start=context_start, end=data_end,
         )
-        series_filter = _dimension_filter(series_dimensions)
-        if series_filter:
-            sql = f"SELECT * FROM ({sql}) AS series WHERE {series_filter}"
+        filters = [_dimension_filter(member["dimensions"]) for member in members]
+        filters = [f"({value})" for value in filters if value]
+        if filters:
+            sql = f"SELECT * FROM ({sql}) AS series WHERE " + " OR ".join(filters)
         for row in await trino_execute(sql, timeout_s=600):
             try:
                 day = date.fromisoformat(str(row.get("event_date"))[:10])
@@ -330,7 +359,16 @@ async def read_case_series(
             value = row.get("observed_cloud")
             if day <= data_end and value is not None:
                 observed_by_day[day] = observed_by_day.get(day, 0.0) + float(value)
-    reference_points = derive_daily_points(rows, {}, horizon_end=display_end, frozen_reference_id=frozen_id)
+    points_by_series = []
+    for member in members:
+        member_rows = [row for row in rows if row.get("series_id") == member["series_id"]]
+        # Legacy test/adapter rows can omit series_id when only one series is read.
+        if len(members) == 1 and not member_rows:
+            member_rows = rows
+        member_frozen = next((row for row in member_rows if frozen and row.get("forecast_run_id") == frozen.get("forecast_run_id")), None)
+        points_by_series.append(derive_daily_points(member_rows, {}, horizon_end=display_end,
+                               frozen_reference_id=member_frozen.get("reference_id") if member_frozen else None))
+    reference_points = aggregate_reference_points(points_by_series)
     # A previsão futura continua a referência congelada do episódio. Referências
     # mais novas não podem absorver o desvio do caso em andamento.
     if frozen:
@@ -349,7 +387,7 @@ async def read_case_series(
         "reference_id": frozen.get("reference_id"), "forecast_run_id": frozen.get("forecast_run_id"),
         "data_cutoff": frozen.get("data_cutoff"), "generated_at": frozen.get("generated_at"),
         "reference_kind": frozen.get("reference_kind"), "coverage_kind": frozen.get("coverage_kind"),
-        "monthly_forecast_cloud": frozen.get("predicted_cloud"),
+        "monthly_forecast_cloud": sum(float(row.get("predicted_cloud") or 0) for row in forecast_rows if str(row.get("reference_month")) == event_day.strftime("%Y%m")),
     }
     return {
         "items": items,
@@ -362,6 +400,7 @@ async def read_case_series(
         "forecast_start": comparable[0]["event_date"] if comparable else None,
         "evaluation_grain": "MONTHLY_EVENT" if monthly else "DAILY",
         "reference": reference, "warnings": warnings,
+        "contributor_series_count": len(members), "scope_verified": bool(contributor_series),
         "reference_table": publication.reference_table, "series_dimensions": series_dimensions,
         "distribution_methods": sorted({str(point.get("distribution_method")) for point in comparable}),
         "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in forecast_rows}),
