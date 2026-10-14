@@ -456,8 +456,11 @@ export function ClassificationRulesTab() {
     try {
       const cloud = cloudOverride ?? cloudFilter;
       const destId = destOverride === undefined ? (selectedDestId === "" ? undefined : (selectedDestId as number)) : (destOverride === "" ? undefined : (destOverride as number));
+      const { sort, ...paginationAndFilters } = query;
       const data = await getClassificationsGrid({
-        ...query,
+        ...paginationAndFilters,
+        sort_field: sort?.field,
+        sort_direction: sort?.direction,
         search: search.trim() || undefined,
         destination_table_id: destId,
         cloud,
