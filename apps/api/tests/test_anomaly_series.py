@@ -266,3 +266,28 @@ def test_api_separa_horizonte_forecast_do_cutoff_realizado(monkeypatch):
     assert all(point["observed_cloud"] is None and point["expected_cloud"] == 100 for point in future)
     assert "DATE '2026-10-12'" in calls[1]
     assert '"realizado_cloud"' in calls[1]
+
+
+def test_agregado_usa_todas_as_series_e_nao_publica_forecast_parcial():
+    from app.services.anomaly_series import aggregate_reference_points
+    left = derive_daily_points([reference(predicted_cloud=1900)], {}, horizon_end=date(2026, 10, 15))
+    right = derive_daily_points([reference(reference_id="second", predicted_cloud=3800)], {}, horizon_end=date(2026, 10, 14))
+    result = aggregate_reference_points([left, right])
+    assert [point["event_date"] for point in result] == ["2026-10-13", "2026-10-14"]
+    assert result[0]["expected_cloud"] == pytest.approx(left[0]["expected_cloud"] + right[0]["expected_cloud"])
+    assert result[0]["upper_cloud"] == pytest.approx(left[0]["upper_cloud"] + right[0]["upper_cloud"])
+    assert result[0]["contributor_series_count"] == 2
+
+
+def test_procedencia_do_caso_preserva_membros_sem_copiar_valores_financeiros():
+    from types import SimpleNamespace
+    from app.services.anomaly_release import contributor_series_for
+    detection = SimpleNamespace(series_id="a", series_dimensions={"account": "A"}, contributors=[
+        {"series_id": "a", "dimensions": {"account": "A"}, "observed_cloud": 500},
+        {"series_id": "b", "dimensions": {"account": "B"}, "observed_cloud": 200},
+        {"series_id": "b", "dimensions": {"account": "B"}, "observed_cloud": 200},
+    ])
+    assert contributor_series_for(detection) == [
+        {"series_id": "a", "dimensions": {"account": "A"}},
+        {"series_id": "b", "dimensions": {"account": "B"}},
+    ]
