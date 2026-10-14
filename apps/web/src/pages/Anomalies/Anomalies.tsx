@@ -749,7 +749,7 @@ export default function Anomalies() {
               <IconButton aria-label="Fechar caso" onClick={() => setSelected(null)}><CloseIcon /></IconButton>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {[selected.series_dimensions.cloud_origem, selected.series_dimensions.subaccountname, selected.series_dimensions.servicesubcategory ?? selected.series_dimensions.servicename].filter(Boolean).join(" · ")}
+              {[selected.series_dimensions.cloud_origem, (series?.contributor_series_count ?? 1) > 1 ? `${series?.contributor_series_count} séries agregadas` : selected.series_dimensions.subaccountname, selected.series_dimensions.servicesubcategory ?? selected.series_dimensions.servicename].filter(Boolean).join(" · ")}
               {" · "}Cobrança em {new Date(`${selected.event_date}T00:00:00Z`).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
             </Typography>
             {busy && <LinearProgress sx={{ mb: 1 }} />}

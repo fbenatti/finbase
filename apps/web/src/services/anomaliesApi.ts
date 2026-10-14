@@ -212,6 +212,7 @@ export type AnomalySeries = {
   forecast_end?: string;
   evaluation_grain?: string;
   contributor_series_count?: number;
+  contributor_series?: Array<{ series_id: string; dimensions: Record<string, string | null> }>;
   scope_verified?: boolean;
   warnings?: string[];
   reference?: {

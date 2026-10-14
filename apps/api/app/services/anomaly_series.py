@@ -403,6 +403,7 @@ async def read_case_series(
         "evaluation_grain": "MONTHLY_EVENT" if monthly else "DAILY",
         "reference": reference, "warnings": warnings,
         "contributor_series_count": len(members), "scope_verified": bool(contributor_series),
+        "contributor_series": members,
         "reference_table": publication.reference_table, "series_dimensions": series_dimensions,
         "distribution_methods": sorted({str(point.get("distribution_method")) for point in comparable}),
         "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in forecast_rows}),

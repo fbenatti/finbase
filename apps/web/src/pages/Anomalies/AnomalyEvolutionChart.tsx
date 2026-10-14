@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Alert, Box, Button, Chip, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography,
+  Alert, Box, Button, Chip, Paper, Stack, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import Plot from "@/components/Plot";
@@ -133,7 +133,9 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
     </Box> : <Alert severity="info" sx={{ mt: 2 }}>Não há dados disponíveis para desenhar esta série.</Alert>}
 
     <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1} alignItems="center" sx={{ mt: .5 }}>
-      {(series.contributor_series_count ?? 1) > 1 && <Chip size="small" variant="outlined" label={`${series.contributor_series_count} séries contribuintes`} />}
+      {(series.contributor_series_count ?? 1) > 1 && <Tooltip title={<Box sx={{ whiteSpace: "pre-line" }}>{(series.contributor_series ?? []).map((member) => [member.dimensions.subaccountname, member.dimensions.centro_custo, member.dimensions.organograma_nivel_5].filter(Boolean).join(" · ")).join("\n")}</Box>}>
+        <Chip size="small" variant="outlined" label={`${series.contributor_series_count} séries contribuintes`} />
+      </Tooltip>}
       <Chip size="small" variant="outlined" label={`Realizado até ${dateLabel(dataEnd)}`} />
       {future.length > 0 && <Chip size="small" variant="outlined" sx={{ color: colors.forecast, borderColor: "#c7d7fa" }} label={`Forecast até ${dateLabel(future[future.length - 1].event_date)}`} />}
       {firstExcess && <Chip size="small" variant="outlined" label={`Primeiro excesso na janela: ${dateLabel(firstExcess.event_date)}`} />}
