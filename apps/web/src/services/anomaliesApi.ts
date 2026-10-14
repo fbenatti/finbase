@@ -16,6 +16,7 @@ export type AnomalyConfig = {
   history_days: number;
   calibration_days: number;
   horizon_days: number;
+  data_lag_days: number;
   family_keys: string[];
   routing_rules: unknown[];
   sla_hours: Record<string, number>;

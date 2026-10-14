@@ -124,7 +124,7 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
   return (
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0", mb: 2 }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} spacing={1} sx={{ mb: 1 }}>
-        <Box><Typography variant="subtitle1" fontWeight={700}>Realizado antes e depois da detecção</Typography><Typography variant="caption" color="text.secondary">Até 30 dias anteriores e observações seguintes disponíveis; dados analisados até {series.analysis_data_end ?? "o corte D-2"}</Typography></Box>
+        <Box><Typography variant="subtitle1" fontWeight={700}>Realizado antes e depois da detecção</Typography><Typography variant="caption" color="text.secondary">Até 30 dias anteriores e observações seguintes disponíveis; dados analisados até {series.analysis_data_end ?? series.data_cutoff ?? "o corte configurado"}</Typography></Box>
         <Stack direction="row" spacing={1}>
           <Chip size="small" variant="outlined" label={`Antes · n=${before.length} · ${beforeMedian === null ? "—" : money(beforeMedian, currency)}`} />
           <Chip size="small" color={changePct !== null && changePct > 0 ? "error" : "info"} variant="outlined" label={`Evento + depois · n=${after.length} · ${afterMedian === null ? "—" : money(afterMedian, currency)}${changePct === null ? "" : ` (${changePct > 0 ? "+" : ""}${changePct.toFixed(1)}%)`}`} />
@@ -138,7 +138,7 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
         {points.map((point, index) => point.observed_cloud === null ? null : <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud)} r={point.is_event_day ? 6 : 3} fill={point.is_event_day ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · realizado ${money(point.observed_cloud, currency)}`}</title></circle>)}
         {labelIndexes.map((index) => <text key={index} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
       </svg></Box>
-      <Typography variant="caption" color="text.secondary">Dias sem registro são lacunas, não zero. A mediana anterior dá contexto do patamar recente; o percentual compara esse patamar com o evento e as observações posteriores já disponíveis até o corte D-2.</Typography>
+      <Typography variant="caption" color="text.secondary">Dias sem registro são lacunas, não zero. A mediana anterior dá contexto do patamar recente; o percentual compara esse patamar com o evento e as observações posteriores já disponíveis até o corte configurado.</Typography>
     </Paper>
   );
 }
@@ -382,9 +382,14 @@ export default function Anomalies() {
   const [stateFilter, setStateFilter] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [queueOnly, setQueueOnly] = useState(false);
+  const [dataLagDraft, setDataLagDraft] = useState("2");
 
   const config = configs[0];
   const currency = config?.currency ?? "BRL";
+
+  useEffect(() => {
+    if (config) setDataLagDraft(String(config.data_lag_days ?? 2));
+  }, [config?.id, config?.version, config?.data_lag_days]);
 
   const loadAll = useCallback(async () => {
     setBusy(true);
@@ -570,6 +575,24 @@ export default function Anomalies() {
     }
   };
 
+  const saveDataLag = async () => {
+    if (!config) return;
+    const days = Number(dataLagDraft);
+    if (!Number.isInteger(days) || days < 0 || days > 30) {
+      setError("O atraso precisa ser um número inteiro entre 0 e 30 dias.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateAnomalyConfig(config.id, { data_lag_days: days });
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao salvar atraso da fonte");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runNow = async () => {
     if (!config) return;
     setBusy(true);
@@ -624,9 +647,15 @@ export default function Anomalies() {
           Medida <strong>{config.measure_column}</strong> · moeda <strong>{config.currency}</strong> ·
           perfil {config.profile} · quantil {(config.daily_quantile * 100).toFixed(1)}% · materialidade{" "}
           {money(config.materiality_by_currency?.[config.currency] ?? 100, config.currency)} · janela{" "}
-          {config.history_days}d (calibração {config.calibration_days}d) · horizonte {config.horizon_days}d
+          {config.history_days}d (calibração {config.calibration_days}d) · horizonte {config.horizon_days}d · atraso da fonte {config.data_lag_days}d
         </Typography>
       )}
+      {config && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+        <TextField size="small" type="number" label="Atraso da fonte (dias)" value={dataLagDraft}
+          inputProps={{ min: 0, max: 30, step: 1 }} onChange={(event) => setDataLagDraft(event.target.value)} sx={{ width: 210 }} />
+        <Button size="small" variant="outlined" onClick={saveDataLag} disabled={busy || Number(dataLagDraft) === config.data_lag_days}>Salvar atraso</Button>
+        <Typography variant="caption" color="text.secondary">0 = até hoje; 2 = padrão atual D-2</Typography>
+      </Stack>}
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{error}</Alert>}
 
       <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
@@ -929,7 +958,7 @@ export default function Anomalies() {
             {busy && <LinearProgress sx={{ mb: 1 }} />}
 
             {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
-              Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso de ingestão D-2). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
+              Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso configurado da fonte: {config?.data_lag_days ?? 2} dia(s)). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
             </Alert>}
             {!eventBeyondCutoff && <CaseComparison kase={selected} currency={currency} />}
             {series && <ContextChart series={series} kase={selected} currency={currency} />}

@@ -9,7 +9,7 @@ Listagem: paginação padrão 50, máximo 200; ordenação por nota ou data.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -685,7 +685,6 @@ async def get_case_series(
         except ValueError:
             analysis_data_end = None
     if analysis_data_end is None:
-        from datetime import timedelta
         analysis_data_end = datetime.now(timezone.utc).date() - timedelta(days=int(config.data_lag_days or 0))
 
     forecast = (
