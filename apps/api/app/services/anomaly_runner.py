@@ -335,8 +335,17 @@ def ref_month_total(reference: Any) -> float:
 
 
 def _daily_expected(reference: Any, day: date, weekly: Any) -> float:
-    """Parcela diária da referência, coerente com a distribuição publicada."""
+    """Parcela diária prevista, com baseline histórico se o restante zerou."""
     total = ref_month_total(reference)
+    if total <= 0:
+        # O restante mensal zerado pode significar que a recorrência já foi
+        # realizada. Para séries diárias com histórico confiável, usar o padrão
+        # anterior ao corte evita tratar qualquer resíduo como um pico.
+        if weekly and not weekly.is_fallback:
+            historical = float(weekly.medians.get(day.weekday(), 0.0))
+            if historical > 0:
+                return historical
+        return 0.0
     if not weekly or not weekly.medians:
         days = max(1, int(getattr(reference, "covered_days", 1) or 1))
         return total / days
@@ -531,19 +540,25 @@ async def build_outcome(
         observed_by_day = {
             row["event_date"]: float(row.get("observed_cloud") or 0.0) for row in series_observed
         }
-        as_of = max(observed_by_day) if observed_by_day else contract.cutoff_date
+        # Somente o histórico disponível no corte pode definir a distribuição
+        # e a tolerância. Os dias avaliados ficam fora da calibração.
+        history_by_day = {
+            day: value for day, value in observed_by_day.items()
+            if day <= contract.cutoff_date
+        }
+        as_of = contract.cutoff_date
         weekly = (
-            weekday_profile(observed_by_day, as_of=as_of, weeks=reader_weekday_weeks)
-            if observed_by_day
+            weekday_profile(history_by_day, as_of=as_of, weeks=reader_weekday_weeks)
+            if history_by_day
             else global_weekly
         )
         if weekly.is_fallback:
             weekly = global_weekly
-        complete = bool(observed_by_day) and has_complete_daily_calibration(
-            observed_by_day, as_of=as_of, calibration_days=calibration_days
+        complete = bool(history_by_day) and has_complete_daily_calibration(
+            history_by_day, as_of=as_of, calibration_days=calibration_days
         )
         residuals = [
-            value - weekly.medians.get(day.weekday(), 0.0) for day, value in observed_by_day.items()
+            value - weekly.medians.get(day.weekday(), 0.0) for day, value in history_by_day.items()
         ]
         band = calibrate_band(
             residuals=residuals,
@@ -704,7 +719,19 @@ def _detect_series(
         complete_calibration=complete,
         applied_rule_refs=applied_rule_refs,
     )
-    return [detection] if detection is not None else []
+    if detection is None:
+        return []
+    if any(
+        ref_month_total(reference) <= 0
+        and weekly
+        and not weekly.is_fallback
+        and weekly.medians.get(point.event_date.weekday(), 0.0) > 0
+        for reference in reference_rows
+        for point in points
+        if point.reference_id == reference.reference_id
+    ):
+        detection.reason_codes.append("HISTORICAL_BASELINE_ZERO_FORECAST")
+    return [detection]
 
 
 def _evaluate_monthly_rows(
