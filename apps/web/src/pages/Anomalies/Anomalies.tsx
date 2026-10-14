@@ -20,12 +20,14 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type {
   AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalySeries, CaseSummary,
+  ExpectedEventFamily, QualityBucket,
 } from "../../services/anomaliesApi";
 import {
   createAnomalyAction, enqueueAnomalyRun, getAnomalyCase, getAnomalyCaseEvents,
-  getAnomalyCaseSeries, getAnomalyMetrics, listAnomalyCases, listAnomalyConfigs,
-  listAnomalyNotifications, readAnomalyNotification, transitionAnomalyCase,
-  updateAnomalyAction, updateAnomalyConfig,
+  getAnomalyCaseSeries, getAnomalyMetrics, getExpectedEvents, getQuality,
+  listAnomalyCases, listAnomalyConfigs, listAnomalyNotifications,
+  readAnomalyNotification, transitionAnomalyCase, updateAnomalyAction,
+  updateAnomalyConfig,
 } from "../../services/anomaliesApi";
 
 const STATE_LABEL: Record<string, string> = {
@@ -251,6 +253,8 @@ function StepPanel({ kase }: { kase: AnomalyCase }) {
   );
 }
 
+type ExpectedEventFamiliesResult = { items: ExpectedEventFamily[]; total: number; note?: string };
+
 type TransitionForm = {
   command: string;
   decision: string;
@@ -288,6 +292,10 @@ export default function Anomalies() {
   const [selected, setSelected] = useState<AnomalyCase | null>(null);
   const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
   const [series, setSeries] = useState<AnomalySeries | null>(null);
+  const [expectedEvents, setExpectedEvents] = useState<ExpectedEventFamiliesResult>({ items: [], total: 0 });
+  const [quality, setQuality] = useState<QualityBucket[]>([]);
+  const [qualityNote, setQualityNote] = useState<string | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<AnomalyNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -321,6 +329,33 @@ export default function Anomalies() {
     }
   }, []);
 
+  const loadExpected = useCallback(async () => {
+    try {
+      setExpectedEvents(await getExpectedEvents({ limit: 200 }));
+      setRemoteError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Falha ao listar eventos esperados";
+      setExpectedEvents({ items: [], total: 0, note: message.includes("409")
+        ? "Nenhuma publicação corrente: execute a detecção para gerar avaliações."
+        : message });
+      setRemoteError(null);
+    }
+  }, []);
+
+  const loadQuality = useCallback(async () => {
+    try {
+      const payload = await getQuality({ limit: 200 });
+      setQuality(payload.items);
+      setQualityNote(payload.note ?? null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Falha ao listar qualidade";
+      setQuality([]);
+      setQualityNote(message.includes("409")
+        ? "Nenhuma publicação corrente: execute a detecção para gerar avaliações."
+        : message);
+    }
+  }, []);
+
   const loadCases = useCallback(async () => {
     setBusy(true);
     try {
@@ -345,6 +380,11 @@ export default function Anomalies() {
   useEffect(() => {
     void loadCases();
   }, [loadCases]);
+
+  useEffect(() => {
+    if (tab === 3) void loadExpected();
+    if (tab === 4) void loadQuality();
+  }, [tab, loadExpected, loadQuality]);
 
   const openCase = async (id: number) => {
     setBusy(true);
@@ -466,16 +506,8 @@ export default function Anomalies() {
     }
   };
 
-  const expectedCases = useMemo(
-    () => cases.filter((item) => item.event_type === "MONTHLY_EVENT" && item.anomalous_cost_cloud === 0),
-    [cases],
-  );
   const retrospectiveCases = useMemo(
     () => cases.filter((item) => item.state === "RETROSPECTIVE" || item.state === "CLOSED"),
-    [cases],
-  );
-  const qualityCases = useMemo(
-    () => cases.filter((item) => item.data_quality !== "OK" || item.reference_kind === "RETROSPECTIVE"),
     [cases],
   );
 
@@ -491,7 +523,8 @@ export default function Anomalies() {
             {unread > 0 && <Chip size="small" color="error" label={unread} sx={{ ml: -1, mt: -2 }} />}
           </IconButton>
         </Tooltip>
-        <Button size="small" startIcon={<RefreshIcon />} onClick={() => { void loadAll(); void loadCases(); }}>
+        <Button size="small" startIcon={<RefreshIcon />}
+                onClick={() => { void loadAll(); void loadCases(); void loadExpected(); void loadQuality(); }}>
           Atualizar
         </Button>
         {config && (
@@ -660,9 +693,47 @@ export default function Anomalies() {
           <Typography variant="subtitle2" gutterBottom>
             Eventos esperados reconhecidos (permanecem na tabela analítica, sem workflow)
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {expectedCases.length} evento(s) mensal(is) reconhecido(s) como esperados nesta listagem.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {expectedEvents.total} avaliação(ões) de evento esperado na publicação corrente
+            {expectedEvents.note ? ` · ${expectedEvents.note}` : ""}
           </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Família (recorrência)</TableCell>
+                <TableCell align="right">Ocorrências</TableCell>
+                <TableCell align="right">Séries</TableCell>
+                <TableCell align="right">Esperado</TableCell>
+                <TableCell align="right">Observado</TableCell>
+                <TableCell align="right">Desvio</TableCell>
+                <TableCell>Meses</TableCell>
+                <TableCell>Confiança</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {expectedEvents.items.map((item) => (
+                <TableRow key={item.family}>
+                  <TableCell>{item.family}</TableCell>
+                  <TableCell align="right">{item.occurrences}</TableCell>
+                  <TableCell align="right">{item.series_count}</TableCell>
+                  <TableCell align="right">{money(item.expected_cloud, currency)}</TableCell>
+                  <TableCell align="right">{money(item.observed_cloud, currency)}</TableCell>
+                  <TableCell align="right">{money(item.delta_cloud, currency)}</TableCell>
+                  <TableCell>{item.months.join(", ")}</TableCell>
+                  <TableCell>{item.confidence.join(", ") || "—"}</TableCell>
+                </TableRow>
+              ))}
+              {expectedEvents.items.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8}>
+                    <Typography variant="body2" color="text.secondary">
+                      Nenhum evento esperado publicado.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </Paper>
       )}
 
@@ -670,20 +741,41 @@ export default function Anomalies() {
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>Qualidade dos dados</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Dados parciais, referências reconstruídas e ausência de coleta. Dado parcial nunca
-            confirma recuperação nem encerra caso.
+            Dados parciais, referências reconstruídas, tolerância explícita e ausência de coleta.
+            Dado parcial nunca confirma recuperação nem encerra caso.
+            {qualityNote ? ` ${qualityNote}` : ""}
           </Typography>
-          {qualityCases.map((item) => (
-            <Stack key={item.id} direction="row" spacing={1} sx={{ mb: 0.5 }} flexWrap="wrap">
-              <Chip size="small" label={`#${item.id}`} />
-              <Chip size="small" label={`qualidade ${item.data_quality}`} />
-              <Chip size="small" label={`referência ${item.reference_kind ?? "—"}`} />
-              {item.reason_codes.map((code) => <Chip key={code} size="small" variant="outlined" label={code} />)}
-            </Stack>
-          ))}
-          {qualityCases.length === 0 && (
-            <Typography variant="body2" color="text.secondary">Nenhum caso com limitação declarada.</Typography>
-          )}
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Código</TableCell>
+                <TableCell align="right">Avaliações</TableCell>
+                <TableCell align="right">Custo anômalo</TableCell>
+                <TableCell>Períodos</TableCell>
+                <TableCell>Status</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {quality.map((bucket) => (
+                <TableRow key={bucket.reason_code}>
+                  <TableCell>{bucket.reason_code}</TableCell>
+                  <TableCell align="right">{bucket.count}</TableCell>
+                  <TableCell align="right">{money(bucket.anomalous_cost_cloud, currency)}</TableCell>
+                  <TableCell>{bucket.periods.join(", ") || "—"}</TableCell>
+                  <TableCell>{bucket.statuses.join(", ") || "—"}</TableCell>
+                </TableRow>
+              ))}
+              {quality.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <Typography variant="body2" color="text.secondary">
+                      Nenhuma limitação declarada nas avaliações publicadas.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </Paper>
       )}
 

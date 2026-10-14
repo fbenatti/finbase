@@ -214,8 +214,14 @@ def test_03_reserva_mensal_esperada_nao_abre_caso():
     decision = resolve_episode(detection=result)
     assert decision.action == EXPECTED_ONLY
     assert decision.anomalous_cost_cloud == 0.0
-    # E permanece na tabela analítica: nenhuma linha de caso é gerada.
-    assert assessment_rows([result]) == []
+
+    # Permanece na tabela analítica com status de evento esperado, sem caso.
+    rows = assessment_rows([result])
+    assert len(rows) == 1
+    assert rows[0]["assessment_status"] == "EXPECTED_EVENT"
+    assert rows[0]["anomalous_cost_cloud"] == 0.0
+    assert rows[0]["case_id"] is None
+    assert rows[0]["is_financial_additive"] is False
 
 
 # ---------------------------------------------------------------------------

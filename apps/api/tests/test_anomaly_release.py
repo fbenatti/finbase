@@ -245,16 +245,22 @@ def test_avaliacao_com_id_duplicado_e_rejeitada():
         validate_assessments(rows + rows)
 
 
-def test_evento_esperado_nao_gera_linha_de_avaliacao():
+def test_evento_esperado_permanece_na_tabela_analitica_sem_caso():
+    """O plano exige que eventos esperados fiquem na analítica, sem workflow."""
     rows = to_assessment_rows(
-        [detection(assessment_status="EXPECTED_EVENT", expected_only=True)],
+        [detection(assessment_status="EXPECTED_EVENT", expected_only=True, anomalous_cost_cloud=0.0)],
         dimensions=["cloud_origem"],
         detected_at=datetime(2026, 10, 14, tzinfo=timezone.utc),
         forecast_run_id=399,
         evaluation_start=date(2026, 10, 12),
         evaluation_end=date(2026, 10, 27),
     )
-    assert rows == []
+    assert len(rows) == 1
+    assert rows[0]["assessment_status"] == "EXPECTED_EVENT"
+    assert rows[0]["anomalous_cost_cloud"] == 0.0
+    assert rows[0]["case_id"] is None
+    assert rows[0]["is_financial_additive"] is False
+    validate_assessments(rows)
 
 
 def test_assessment_id_e_deterministico():

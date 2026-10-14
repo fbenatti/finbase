@@ -207,6 +207,47 @@ export async function getAnomalyCaseSeries(id: number, horizonDays = 15): Promis
   return data;
 }
 
+export type ExpectedEventFamily = {
+  family: string;
+  occurrences: number;
+  series_count: number;
+  expected_cloud: number;
+  observed_cloud: number;
+  delta_cloud: number;
+  months: string[];
+  last_event_date: string | null;
+  confidence: string[];
+  reason_codes: string[];
+};
+
+export type QualityBucket = {
+  reason_code: string;
+  count: number;
+  anomalous_cost_cloud: number;
+  periods: string[];
+  statuses: string[];
+};
+
+export async function getExpectedEvents(params: Record<string, unknown> = {}) {
+  const { data } = await api.get("/anomalies/expected-events", { params });
+  return data as {
+    items: ExpectedEventFamily[];
+    total: number;
+    note?: string;
+    assessment_table?: string;
+  };
+}
+
+export async function getQuality(params: Record<string, unknown> = {}) {
+  const { data } = await api.get("/anomalies/quality", { params });
+  return data as {
+    items: QualityBucket[];
+    sampled?: number;
+    note?: string;
+    assessment_table?: string;
+  };
+}
+
 export async function getAnomalyContributors(id: number) {
   const { data } = await api.get(`/anomalies/cases/${id}/contributors`);
   return data as { items: Array<Record<string, unknown>>; note?: string };

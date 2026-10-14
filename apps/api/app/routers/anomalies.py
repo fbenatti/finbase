@@ -564,6 +564,88 @@ async def get_case_events(
     }
 
 
+async def _publication_or_409(db: AsyncSession, config_id: int):
+    from app.services.anomaly_release import current_publication
+
+    publication = await current_publication(db, config_id)
+    if publication is None:
+        raise HTTPException(409, "Sem publicação corrente para esta configuração")
+    return publication
+
+
+async def _resolve_config(db: AsyncSession, config_id: int | None) -> AnomalyConfig:
+    if config_id is not None:
+        config = await db.get(AnomalyConfig, config_id)
+        if config is None:
+            raise HTTPException(404, "Configuração não encontrada")
+        return config
+    config = (
+        await db.execute(select(AnomalyConfig).order_by(AnomalyConfig.id).limit(1))
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(404, "Nenhuma configuração de anomalia cadastrada")
+    return config
+
+
+@router.get("/expected-events")
+async def expected_events(
+    config_id: int | None = None,
+    period: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "read")),
+):
+    """Recorrências reconhecidas como esperadas (plano §5.2, visão 4).
+
+    Elas permanecem na tabela analítica e **não** abrem workflow.
+    """
+    from app.services.anomaly_queries import read_expected_events
+
+    size, skip = _page(limit, offset)
+    config = await _resolve_config(db, config_id)
+    publication = await _publication_or_409(db, config.id)
+    try:
+        return await read_expected_events(
+            namespace=config.source_namespace,
+            table=publication.assessment_table,
+            period=period,
+            limit=size,
+            offset=skip,
+        )
+    except Exception as exc:
+        logger.warning("[anomaly] falha ao listar eventos esperados: %s", exc)
+        raise HTTPException(503, f"Falha ao consultar o Iceberg: {exc}") from exc
+
+
+@router.get("/quality")
+async def quality(
+    config_id: int | None = None,
+    period: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "read")),
+):
+    """Qualidade: dados parciais, referências incompatíveis e tolerâncias."""
+    from app.services.anomaly_queries import read_quality
+
+    size, skip = _page(limit, offset)
+    config = await _resolve_config(db, config_id)
+    publication = await _publication_or_409(db, config.id)
+    try:
+        return await read_quality(
+            namespace=config.source_namespace,
+            table=publication.assessment_table,
+            period=period,
+            limit=size,
+            offset=skip,
+        )
+    except Exception as exc:
+        logger.warning("[anomaly] falha ao listar qualidade: %s", exc)
+        raise HTTPException(503, f"Falha ao consultar o Iceberg: {exc}") from exc
+
+
 @router.get("/cases/{case_id}/series")
 async def get_case_series(
     case_id: int,

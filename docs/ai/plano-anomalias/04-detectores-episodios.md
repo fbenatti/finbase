@@ -113,6 +113,11 @@ demais 72 h), configuráveis por `anomaly_config.sla_hours`.
 
 ## 3. Status da avaliação
 
+Eventos reconhecidos como esperados **são publicados** com
+`assessment_status = EXPECTED_EVENT`, custo anômalo zero e `case_id` nulo: o
+plano exige que permaneçam na tabela analítica, sem abrir workflow. Eles são
+expostos em `GET /anomalies/expected-events` (F4).
+
 | Status | Significado | Abre workflow? |
 |---|---|---|
 | `OPEN` | anomalia confirmada pela faixa e materialidade | sim |

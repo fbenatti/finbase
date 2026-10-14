@@ -363,11 +363,14 @@ def to_assessment_rows(
     evaluation_start: date,
     evaluation_end: date,
 ) -> list[dict[str, Any]]:
-    """Converte detecções em linhas da tabela de avaliação (plano §4.3)."""
+    """Converte detecções em linhas da tabela de avaliação (plano §4.3).
+
+    Eventos reconhecidos como **esperados** também são publicados
+    (`assessment_status = EXPECTED_EVENT`, custo anômalo zero, sem caso): o plano
+    exige que eles permaneçam na tabela analítica, sem abrir workflow.
+    """
     rows: list[dict[str, Any]] = []
     for detection in detections:
-        if detection.assessment_status in (EXPECTED_ONLY,) or detection.expected_only:
-            continue
         assessment_id = assessment_id_for(
             detection.reference_id, detection.series_id, detection.event_date, detection.evaluation_grain
         )

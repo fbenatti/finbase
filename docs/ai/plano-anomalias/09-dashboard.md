@@ -35,8 +35,8 @@ encerramento*.
 | **Visão geral** | KPIs do plano §5.2: novos, abertos, vencidos, encerrados, sem responsável, custo anômalo observado, tempo até ciência e resolução, classificados, famílias reincidentes; distribuição por estado e decisões; notas declarando que falsos negativos não são estimados e que aceitação não é falso positivo |
 | **Meus casos / fila FinOps** | lista com filtros por estado, severidade e "somente fila FinOps" |
 | **Casos** | mesma lista, ciclo completo de estados |
-| **Eventos esperados** | recorrências reconhecidas (permanecem na tabela analítica) |
-| **Qualidade** | dados parciais, referências reconstruídas, `reason_codes` |
+| **Eventos esperados** | `GET /anomalies/expected-events`: recorrências agrupadas por família, com ocorrências, séries, valores esperado/observado/desvio, meses e confiança (F4) |
+| **Qualidade** | `GET /anomalies/quality`: contagem e custo anômalo por código de razão (`PARTIAL_DATA`, `REFERENCE_UNAVAILABLE`, `EXPLICIT_TOLERANCE`, `UNIFORM_FALLBACK`, `FORECAST_RULE_MISMATCH`, ...) (F4) |
 | **Retrospectiva** | causa, decisão, aprendizado e medida preventiva por caso |
 
 ## 3. Gráfico (plano §5.1)
@@ -123,6 +123,6 @@ série derivada: 31 dias; soma esperada=31.000,00 (forecast 31.000,00)
   leitura em lote por publicação.
 - Sem biblioteca de gráficos no projeto (não há `recharts`/`echarts`), o desenho
   é SVG próprio; a interatividade é limitada a tooltip/legenda.
-- A aba "Eventos esperados" filtra a listagem corrente; uma consulta dedicada à
-  tabela analítica de eventos esperados depende do endpoint de avaliações (não
-  implementado nesta rodada).
+- As consultas de eventos esperados e qualidade são leituras sob demanda no
+  Trino (amostra de 200 avaliações por consulta, refinável por período); não há
+  cache nem agregação materializada.
