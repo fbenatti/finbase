@@ -90,6 +90,8 @@ class AnomalyConfig(Base):
     period_column = Column(String(200), nullable=True)
     type_column = Column(String(200), nullable=True, default="tipo", server_default="tipo")
     dimensions = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    # Dimensões que definem "o mesmo gasto" ao consolidar contribuintes.
+    family_keys = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     # Colunas de contexto financeiro, apenas como procedência.
     connection_column = Column(String(200), nullable=True, default="cloud_origem")
     connection_id_column = Column(String(200), nullable=True, default="source_connection_id")

@@ -891,6 +891,70 @@ def consumer_main(worker_id: int):
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
+                elif task.task_type == "anomaly_detection":
+                    # Gestão de anomalias (E6): monta a referência compacta a
+                    # partir do snapshot do forecast, avalia o realizado_cloud
+                    # observado, consolida episódios e publica de forma atômica.
+                    task.status = "RUNNING"
+                    task.phase = "Carregando execuções do forecast"
+                    from app.services.processing_logs import sync_etl_task_log
+                    sync_etl_task_log(session, task)
+                    session.commit()
+                    session.close()
+                    anomaly_config_id = task.destination_table_id
+                    anomaly_run_id = (task.result_json or {}).get("anomaly_run_id")
+                    try:
+                        from app.database import run_async_isolated
+                        from app.services.anomaly_runner import execute_detection
+                        s = SyncSession()
+
+                        def anomaly_progress(done, total, name):
+                            current = s.get(EtlTask, task_id)
+                            if current:
+                                current.processed_blobs = done
+                                current.total_blobs = total
+                                current.phase = name
+                                s.commit()
+
+                        result = run_async_isolated(
+                            execute_detection(
+                                anomaly_config_id,
+                                run_id=anomaly_run_id,
+                                progress=anomaly_progress,
+                                should_abort=lambda: _is_etl_task_cancelled(task_id),
+                            )
+                        )
+                        task_row = s.get(EtlTask, task_id)
+                        if task_row:
+                            if task_row.status == "CANCELLED" or result.get("status") == "CANCELLED":
+                                task_row.status = "CANCELLED"
+                                task_row.phase = "Cancelado pelo usuário"
+                            else:
+                                task_row.status = "COMPLETED"
+                                task_row.phase = "Detecção publicada"
+                                task_row.rows_destination = int(result.get("assessment_rows") or 0)
+                                task_row.current_blob = (
+                                    f"{result.get('cases_created', 0)} caso(s) novo(s), "
+                                    f"{result.get('cases_updated', 0)} atualizado(s)"
+                                )
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            sync_etl_task_log(s, task_row)
+                            s.commit()
+                        s.close()
+                    except Exception as exc:
+                        s = SyncSession()
+                        task_row = s.get(EtlTask, task_id)
+                        if task_row:
+                            task_row.status = "FAILED"
+                            task_row.phase = f"Falha na detecção: {exc}"[:200]
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            task_row.errors = list(task_row.errors or []) + [str(exc)]
+                            sync_etl_task_log(s, task_row)
+                            s.commit()
+                        s.close()
+                        logger.exception("anomaly_detection falhou: %s", exc)
+                    continue
+
                 elif task.task_type in ("ai_cost_relationship_reprocess", "gold_reprocess"):
                     task.status = "RUNNING"
                     task.phase = "Agregando cubos Gold e publicando as tabelas Gold"

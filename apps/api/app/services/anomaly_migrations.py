@@ -61,6 +61,11 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_config ALTER COLUMN source_namespace SET DEFAULT 'silver'",
     "ALTER TABLE anomaly_config ALTER COLUMN type_column SET DEFAULT 'tipo'",
     "ALTER TABLE anomaly_config ALTER COLUMN dimensions SET DEFAULT '[]'::jsonb",
+    "ALTER TABLE anomaly_config ALTER COLUMN family_keys SET DEFAULT '[]'::jsonb",
+    # `ADD COLUMN` em tabela existente não pode impor NOT NULL. Normaliza as
+    # linhas antigas e converge a restrição — idempotente.
+    "UPDATE anomaly_config SET family_keys = '[]'::jsonb WHERE family_keys IS NULL",
+    "ALTER TABLE anomaly_config ALTER COLUMN family_keys SET NOT NULL",
     "ALTER TABLE anomaly_config ALTER COLUMN profile SET DEFAULT 'BALANCED'",
     "ALTER TABLE anomaly_config ALTER COLUMN daily_quantile SET DEFAULT 0.975",
     "ALTER TABLE anomaly_config ALTER COLUMN min_relative_deviation SET DEFAULT 0.20",

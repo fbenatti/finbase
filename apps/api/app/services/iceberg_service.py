@@ -1520,6 +1520,63 @@ def _merge_staged_into_canonical_table(
         return -1
 
 
+def publish_dataframe_atomic(
+    namespace: str,
+    physical_name: str,
+    df: pd.DataFrame,
+    *,
+    column_types: dict[str, str] | None = None,
+    known_row_count: int | None = None,
+) -> dict[str, Any]:
+    """Grava um DataFrame em staging e publica atomicamente na tabela canônica.
+
+    Mesmo contrato de consistência das demais publicações do lakehouse: o
+    staging é criado, e só depois de um commit atômico (``DELETE`` + ``append``)
+    a tabela canônica muda. Falha antes do commit deixa a publicação anterior
+    intacta; o staging é removido no caminho de erro.
+
+    Retorna ``{"table", "namespace", "staging", "rows"}``.
+    """
+    safe_name = str(physical_name).replace("-", "_").replace(".", "_")
+    _ensure_namespace(namespace)
+    if df is None or df.empty:
+        return {"table": safe_name, "namespace": namespace, "staging": None, "rows": 0}
+
+    from pyiceberg.expressions import AlwaysTrue
+
+    timestamp = time.time_ns()
+    staging = f"{safe_name}_stg_{timestamp}"
+    arrow_table = _df_to_arrow(df, column_types=column_types or {})
+    cat = _get_catalog()
+    staging_tid = _table_id(namespace, staging)
+    try:
+        from pyiceberg.io.pyarrow import pyarrow_to_schema
+
+        table = cat.create_table(staging_tid, schema=pyarrow_to_schema(arrow_table.schema))
+        table.append(arrow_table)
+        rows = int(arrow_table.num_rows)
+        _merge_staged_into_canonical_table(
+            safe_name,
+            staging,
+            namespace=namespace,
+            delete_filter=AlwaysTrue(),
+            known_row_count=rows,
+        )
+    except Exception:
+        try:
+            cleanup_staged_table(staging, namespace=namespace)
+        except Exception:  # limpeza é melhor esforço
+            logger.warning("Falha ao limpar staging %s.%s", namespace, staging, exc_info=True)
+        raise
+    logger.info("Publicados %d registros em %s.%s", known_row_count or arrow_table.num_rows, namespace, safe_name)
+    return {
+        "table": safe_name,
+        "namespace": namespace,
+        "staging": staging,
+        "rows": int(known_row_count or arrow_table.num_rows),
+    }
+
+
 def swap_staged_table(physical_name: str, temp_safe_name: str, namespace: str = layers.GOLD,
                       known_row_count: int | None = None) -> int:
     """Replace a final table from staging without promoting its staging path.
