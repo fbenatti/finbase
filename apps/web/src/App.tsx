@@ -34,6 +34,7 @@ const Admin = lazy(() => import("./pages/Admin/Admin"));
 const SsoProviders = lazy(() => import("./pages/Admin/SsoProviders"));
 const Audit = lazy(() => import("./pages/Admin/Audit"));
 const Ideas = lazy(() => import("./pages/Ideas/Ideas"));
+const Anomalies = lazy(() => import("./pages/Anomalies/Anomalies"));
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -100,6 +101,7 @@ function App() {
         <Route path="reprocess" element={<Reprocess />} />
         <Route path="forecast" element={<Forecast />} />
         <Route path="forecast-accuracy" element={<ForecastAccuracy />} />
+        <Route path="anomalies" element={<Anomalies />} />
         <Route path="savings" element={<Savings />} />
         <Route path="forecast/history/:runId" element={<ForecastHistory />} />
         <Route path="reprocess/shared-cost/history/:runId" element={<SharedCostHistory />} />

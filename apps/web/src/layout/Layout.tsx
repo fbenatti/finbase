@@ -41,6 +41,7 @@ import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForPath } from "../auth/moduleMap";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
@@ -78,6 +79,7 @@ const menuGroups = [
     background: "#f5f3ff",
     items: [
       { path: "/forecast", label: "Forecast", icon: <ForecastIcon /> },
+      { path: "/anomalies", label: "Anomalias", icon: <WarningAmberIcon /> },
       { path: "/financial-planning", label: "Financeiro", icon: <AccountBalanceIcon /> },
       { path: "/governance", label: "Governança", icon: <RuleIcon /> },
     ],

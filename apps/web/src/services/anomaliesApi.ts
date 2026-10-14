@@ -1,0 +1,203 @@
+import { api } from "./api";
+
+export type AnomalyConfig = {
+  id: number;
+  name: string;
+  description: string | null;
+  forecast_config_id: number | null;
+  measure_column: string;
+  currency: string;
+  profile: string;
+  daily_quantile: number;
+  min_relative_deviation: number;
+  investigate_score: number;
+  monthly_tolerance_pct: number;
+  materiality_by_currency: Record<string, number>;
+  history_days: number;
+  calibration_days: number;
+  horizon_days: number;
+  family_keys: string[];
+  routing_rules: unknown[];
+  sla_hours: Record<string, number>;
+  notification_enabled: boolean;
+  enabled: boolean;
+  version: number;
+  source_namespace: string;
+  destination_physical_name: string;
+};
+
+export type AnomalyCase = {
+  id: number;
+  case_key: string;
+  state: string;
+  severity: string;
+  score: number;
+  confidence: string;
+  event_type: string;
+  event_family: string;
+  event_date: string;
+  period: string;
+  source_billing_period: string | null;
+  series_id: string;
+  series_dimensions: Record<string, string | null>;
+  observed_cloud: number | null;
+  expected_cloud: number | null;
+  lower_cloud: number | null;
+  upper_cloud: number | null;
+  delta_cloud: number | null;
+  anomalous_cost_cloud: number;
+  evaluation_grain: string;
+  current_reference_id: string | null;
+  current_assessment_id: string | null;
+  reference_kind: string | null;
+  reason_codes: string[];
+  applied_rule_refs: Array<{ name: string; status: string; detail?: string | null }>;
+  data_quality: string;
+  assignee_user_id: number | null;
+  routing_rule_id: string | null;
+  due_at: string | null;
+  acknowledged_at: string | null;
+  investigation_started_at: string | null;
+  cause_category: string | null;
+  cause_hypothesis: string | null;
+  decision: string | null;
+  decision_note: string | null;
+  decided_at: string | null;
+  remediation_started_at: string | null;
+  verification_started_at: string | null;
+  verification_succeeded_at: string | null;
+  valid_days_streak: number;
+  retrospective_at: string | null;
+  learning: string | null;
+  preventive_measure: string | null;
+  no_preventive_measure_reason: string | null;
+  closed_at: string | null;
+  reopen_count: number;
+  case_version: number;
+  first_detected_at: string | null;
+  steps?: Array<Record<string, unknown>>;
+  actions?: AnomalyAction[];
+};
+
+export type AnomalyAction = {
+  id: number;
+  case_id: number;
+  action_type: string;
+  description: string;
+  owner_user_id: number | null;
+  status: string;
+  due_at: string | null;
+  executed_at: string | null;
+  evidence: string | null;
+  external_reference: string | null;
+  mandatory: boolean;
+};
+
+export type AnomalyNotification = {
+  id: number;
+  case_id: number;
+  kind: string;
+  title: string;
+  body: string | null;
+  severity: string;
+  is_finops_queue: boolean;
+  recipient_user_id: number | null;
+  created_at: string | null;
+  read_at: string | null;
+  acknowledged_at: string | null;
+};
+
+export type CaseSummary = {
+  total: number;
+  by_state: Record<string, number>;
+  by_severity: Record<string, number>;
+  decisions: Record<string, number>;
+  new: number;
+  open: number;
+  overdue: number;
+  closed: number;
+  unassigned: number;
+  anomalous_cost_cloud: number;
+  median_acknowledgement_hours: number | null;
+  median_resolution_hours: number | null;
+  classified: number;
+  recurrence_families: number;
+  notes: string[];
+};
+
+export async function listAnomalyConfigs(): Promise<AnomalyConfig[]> {
+  const { data } = await api.get("/anomalies/configs");
+  return data;
+}
+
+export async function updateAnomalyConfig(id: number, payload: Record<string, unknown>) {
+  const { data } = await api.put(`/anomalies/configs/${id}`, payload);
+  return data;
+}
+
+export async function enqueueAnomalyRun(id: number) {
+  const { data } = await api.post(`/anomalies/configs/${id}/run`, { trigger_type: "MANUAL" });
+  return data;
+}
+
+export async function listAnomalyRuns(limit = 20) {
+  const { data } = await api.get("/anomalies/runs", { params: { limit } });
+  return data;
+}
+
+export async function getAnomalyCoverage() {
+  const { data } = await api.get("/anomalies/coverage");
+  return data;
+}
+
+export async function getAnomalyMetrics(): Promise<CaseSummary> {
+  const { data } = await api.get("/anomalies/metrics");
+  return data;
+}
+
+export async function listAnomalyCases(params: Record<string, unknown>) {
+  const { data } = await api.get("/anomalies/cases", { params });
+  return data as { items: AnomalyCase[]; total: number; limit: number; offset: number };
+}
+
+export async function getAnomalyCase(id: number): Promise<AnomalyCase> {
+  const { data } = await api.get(`/anomalies/cases/${id}`);
+  return data;
+}
+
+export async function getAnomalyCaseEvents(id: number) {
+  const { data } = await api.get(`/anomalies/cases/${id}/events`);
+  return data as { items: Array<Record<string, unknown>> };
+}
+
+export async function getAnomalyContributors(id: number) {
+  const { data } = await api.get(`/anomalies/cases/${id}/contributors`);
+  return data as { items: Array<Record<string, unknown>>; note?: string };
+}
+
+export async function transitionAnomalyCase(id: number, payload: Record<string, unknown>) {
+  const { data } = await api.post(`/anomalies/cases/${id}/transition`, payload);
+  return data as AnomalyCase;
+}
+
+export async function createAnomalyAction(caseId: number, payload: Record<string, unknown>) {
+  const { data } = await api.post(`/anomalies/cases/${caseId}/actions`, payload);
+  return data as AnomalyAction;
+}
+
+export async function updateAnomalyAction(actionId: number, payload: Record<string, unknown>) {
+  const { data } = await api.put(`/anomalies/actions/${actionId}`, payload);
+  return data as AnomalyAction;
+}
+
+export async function listAnomalyNotifications(params: Record<string, unknown>) {
+  const { data } = await api.get("/anomalies/notifications", { params });
+  return data as { items: AnomalyNotification[]; total: number; unread: number };
+}
+
+export async function readAnomalyNotification(id: number, acknowledge = false) {
+  const { data } = await api.post(`/anomalies/notifications/${id}/read`, null, {
+    params: { acknowledge },
+  });
+  return data;
+}
