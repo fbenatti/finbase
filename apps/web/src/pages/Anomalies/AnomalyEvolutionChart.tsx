@@ -93,7 +93,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       </Box>)}
     </Box>
 
-    {points.length > 0 ? <Box sx={{ mt: 1, width: "100%" }} aria-label="Gráfico único de realizado e forecast com desvio empilhado">
+    {points.length > 0 ? <Box sx={{ mt: 1, width: "100%", height: 410, minHeight: 410, minWidth: 0 }} aria-label="Gráfico único de realizado e forecast com desvio empilhado">
       <Plot
         data={[
           { type: "scatter", mode: "lines", x, y: points.map((point) => point.lower_cloud), line: { width: 0 }, hoverinfo: "skip", showlegend: false, connectgaps: false },
@@ -128,7 +128,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
           if (points.some((point) => point.event_date === day)) setSelectedDay(day);
         }}
         config={{ displayModeBar: false, responsive: true, locale: "pt-BR" }}
-        style={{ width: "100%" }} useResizeHandler
+        style={{ width: "100%", height: "100%" }} useResizeHandler
       />
     </Box> : <Alert severity="info" sx={{ mt: 2 }}>Não há dados disponíveis para desenhar esta série.</Alert>}
 
