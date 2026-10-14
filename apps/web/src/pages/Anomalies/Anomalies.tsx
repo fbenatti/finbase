@@ -124,7 +124,7 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
   return (
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0", mb: 2 }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} spacing={1} sx={{ mb: 1 }}>
-        <Box><Typography variant="subtitle1" fontWeight={700}>Realizado antes e depois da detecção</Typography><Typography variant="caption" color="text.secondary">30 dias anteriores vs. dia do evento e até 15 dias seguintes; linha vertical marca a detecção</Typography></Box>
+        <Box><Typography variant="subtitle1" fontWeight={700}>Realizado antes e depois da detecção</Typography><Typography variant="caption" color="text.secondary">Até 30 dias anteriores e observações seguintes disponíveis; dados analisados até {series.analysis_data_end ?? "o corte D-2"}</Typography></Box>
         <Stack direction="row" spacing={1}>
           <Chip size="small" variant="outlined" label={`Antes · n=${before.length} · ${beforeMedian === null ? "—" : money(beforeMedian, currency)}`} />
           <Chip size="small" color={changePct !== null && changePct > 0 ? "error" : "info"} variant="outlined" label={`Evento + depois · n=${after.length} · ${afterMedian === null ? "—" : money(afterMedian, currency)}${changePct === null ? "" : ` (${changePct > 0 ? "+" : ""}${changePct.toFixed(1)}%)`}`} />
@@ -138,7 +138,7 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
         {points.map((point, index) => point.observed_cloud === null ? null : <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud)} r={point.is_event_day ? 6 : 3} fill={point.is_event_day ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · realizado ${money(point.observed_cloud, currency)}`}</title></circle>)}
         {labelIndexes.map((index) => <text key={index} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
       </svg></Box>
-      <Typography variant="caption" color="text.secondary">Dias sem registro foram mantidos como lacunas, não como zero. A mediana anterior dá contexto histórico e não substitui a faixa estatística do detector; o percentual compara a mediana anterior com a mediana do dia do evento e das observações posteriores disponíveis.</Typography>
+      <Typography variant="caption" color="text.secondary">Dias sem registro são lacunas, não zero. A mediana anterior dá contexto do patamar recente; o percentual compara esse patamar com o evento e as observações posteriores já disponíveis até o corte D-2.</Typography>
     </Paper>
   );
 }
@@ -248,6 +248,33 @@ function BandChart({ kase, currency }: { kase: AnomalyCase; currency: string }) 
         <Chip size="small" variant="outlined" label={`Referência ${kase.reference_kind ?? "—"}`} />
         <Chip size="small" variant="outlined" label={`Grão ${kase.evaluation_grain}`} />
       </Stack>
+    </Paper>
+  );
+}
+
+function CaseComparison({ kase, currency }: { kase: AnomalyCase; currency: string }) {
+  const observed = kase.observed_cloud;
+  const expected = kase.expected_cloud;
+  const upper = kase.upper_cloud;
+  const delta = kase.delta_cloud ?? (observed !== null && expected !== null ? observed - expected : null);
+  const anomalous = kase.anomalous_cost_cloud;
+  const values = [
+    { label: "Esperado antes do evento", value: expected, color: "#64748b" },
+    { label: "Realizado cloud", value: observed, color: "#263746" },
+    { label: "Desvio vs. esperado", value: delta, color: (delta ?? 0) > 0 ? "#d14343" : "#16825d" },
+    { label: "Acima da faixa tolerada", value: anomalous, color: (anomalous ?? 0) > 0 ? "#d14343" : "#16825d" },
+  ];
+  return (
+    <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2.5, borderColor: "#e5eaf0" }}>
+      <Typography variant="subtitle1" fontWeight={700}>O desvio em uma olhada</Typography>
+      <Typography variant="caption" color="text.secondary">Comparação do custo cloud observado com a referência congelada antes do evento</Typography>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: 1.5, mt: 1.5 }}>
+        {values.map((item) => <Box key={item.label} sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f7f9fc", borderTop: `3px solid ${item.color}`, minWidth: 0 }}>
+          <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+          <Typography variant="h6" sx={{ color: item.color, fontWeight: 700, overflowWrap: "anywhere" }}>{money(item.value, currency)}</Typography>
+        </Box>)}
+      </Box>
+      {upper !== null && <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>Limite superior esperado: {money(upper, currency)}. O custo anômalo é somente a parcela acima desse limite.</Typography>}
     </Paper>
   );
 }
@@ -882,6 +909,9 @@ export default function Anomalies() {
               PaperProps={{ sx: { width: "min(1100px, 96vw)", p: 2 } }}>
         {selected && (
           <Box>
+            {(() => {
+              const eventBeyondCutoff = Boolean(series?.analysis_data_end && selected.event_date > series.analysis_data_end);
+              return <>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="h6">Caso #{selected.id}</Typography>
               <Chip size="small" color={SEVERITY_COLOR[selected.severity] ?? "default"}
@@ -897,8 +927,12 @@ export default function Anomalies() {
             </Typography>
             {busy && <LinearProgress sx={{ mb: 1 }} />}
 
+            {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
+              Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {series?.analysis_data_end} (atraso de ingestão D-2). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
+            </Alert>}
+            {!eventBeyondCutoff && <CaseComparison kase={selected} currency={currency} />}
             {series && <ContextChart series={series} kase={selected} currency={currency} />}
-            {series && series.items.length > 0 ? (
+            {eventBeyondCutoff ? null : series && series.items.length > 0 ? (
               <SeriesChart series={series} currency={currency} />
             ) : (
               <>
@@ -1060,6 +1094,8 @@ export default function Anomalies() {
                 ))}
               </TableBody>
             </Table>
+              </>;
+            })()}
           </Box>
         )}
       </Drawer>

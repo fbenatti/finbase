@@ -199,6 +199,7 @@ export type AnomalySeries = {
   context_event_date?: string;
   months?: string[];
   data_cutoff?: string;
+  analysis_data_end?: string;
   horizon_end?: string;
   reference_table?: string;
   series_dimensions?: Record<string, string | null>;
