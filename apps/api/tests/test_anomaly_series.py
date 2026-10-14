@@ -181,3 +181,88 @@ def test_cutoff_da_publicacao_com_fallback():
     assert _cutoff_of(SimpleNamespace(data_cutoff="2026-10-12", generated_at=None)) == date(2026, 10, 12)
     generated = SimpleNamespace(data_cutoff=None, generated_at=None)
     assert _cutoff_of(generated) == date.today()
+
+
+def test_referencias_sobrepostas_nao_repetem_datas_e_respeitam_o_corte():
+    old = reference(reference_id="old", forecast_run_id=1, data_cutoff="2026-10-05",
+                    coverage_start="2026-10-06", covered_days=26, predicted_cloud=2600, weekday_weights=None)
+    new = reference(reference_id="new", forecast_run_id=2, data_cutoff="2026-10-11",
+                    coverage_start="2026-10-12", covered_days=20, predicted_cloud=4000, weekday_weights=None)
+    points = derive_daily_points([new, old], {}, horizon_end=date(2026, 10, 14))
+    assert len(points) == len({point["event_date"] for point in points}) == 9
+    by_date = {point["event_date"]: point for point in points}
+    assert by_date["2026-10-11"]["expected_cloud"] == 100
+    assert by_date["2026-10-12"]["expected_cloud"] == 200
+
+
+def test_referencia_congelada_nao_absorve_aumento_do_novo_forecast():
+    old = reference(reference_id="frozen", forecast_run_id=1, data_cutoff="2026-10-11",
+                    coverage_start="2026-10-12", covered_days=20, predicted_cloud=2000, weekday_weights=None)
+    new = reference(reference_id="new", forecast_run_id=2, data_cutoff="2026-10-12",
+                    coverage_start="2026-10-13", covered_days=19, predicted_cloud=19000, weekday_weights=None)
+    points = derive_daily_points([old, new], {}, horizon_end=date(2026, 10, 20), frozen_reference_id="frozen")
+    assert all(point["reference_id"] == "frozen" and point["expected_cloud"] == 100 for point in points)
+
+
+def test_zero_restante_diario_recupera_baseline_congelado_sem_dados_posteriores():
+    points = derive_daily_points([reference(predicted_cloud=0, weekday_weights={str(day): .1 for day in range(7)}, normalizer=1200)],
+                                 {}, horizon_end=date(2026, 10, 13), weekday_medians={1: 9999})
+    assert points[0]["expected_cloud"] == 120
+    assert points[0]["distribution_method"] == "HISTORICAL_BASELINE_ZERO_FORECAST"
+
+
+def test_timeline_nao_inventa_realizado_futuro_e_preserva_lacunas():
+    from app.services.anomaly_series import compose_case_timeline
+    reference_points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 17))
+    points = compose_case_timeline(reference_points, {date(2026, 10, 13): 500, date(2026, 10, 16): 999},
+                                  start=date(2026, 10, 12), end=date(2026, 10, 17), data_end=date(2026, 10, 14))
+    assert points[0]["observed_cloud"] is None and points[0]["expected_cloud"] is None
+    assert points[2]["observed_cloud"] is None  # dia sem coleta não é zero
+    assert all(point["observed_cloud"] is None for point in points if point["is_future"])
+    assert all(point["expected_cloud"] is not None for point in points if point["is_future"])
+
+
+def test_compra_mensal_nao_vira_consumo_diario_nem_compara_saldo_zero():
+    from app.services.anomaly_series import compose_case_timeline
+    references = derive_daily_points([reference(predicted_cloud=0)], {}, horizon_end=date(2026, 10, 15))
+    points = compose_case_timeline(references, {date(2026, 10, 1): 30000, date(2026, 10, 13): 30000},
+                                  start=date(2026, 10, 1), end=date(2026, 10, 15), data_end=date(2026, 10, 14), monthly=True)
+    assert points[12]["observed_cloud"] == 60000
+    assert points[12]["expected_cloud"] is None
+    assert points[12]["anomalous_cost_cloud"] is None
+    assert points[11]["observed_cloud"] is None
+
+
+def test_api_separa_horizonte_forecast_do_cutoff_realizado(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    import app.services.anomaly_series as service
+    frozen = reference(reference_id="frozen", forecast_run_id=397, data_cutoff="2026-10-11",
+                       coverage_start="2026-10-12", covered_days=20, predicted_cloud=2000,
+                       weekday_weights=None, target_end="2026-10-26")
+    calls = []
+
+    async def query(sql, **_kwargs):
+        calls.append(sql)
+        return [frozen] if "SELECT reference_month" in sql else [
+            {"event_date": "2026-10-12", "observed_cloud": 500},
+            {"event_date": "2026-10-13", "observed_cloud": 999},
+        ]
+
+    monkeypatch.setattr(service, "trino_execute", query)
+    result = asyncio.run(service.read_case_series(
+        case=SimpleNamespace(series_id="s", period="202610", event_date="2026-10-12",
+                             current_reference_id="frozen", evaluation_grain="DAILY", series_dimensions={"cloud_origem": "gcp"}),
+        publication=SimpleNamespace(data_cutoff="2026-10-11", reference_table="ref"),
+        reference_namespace="silver", source_namespace="silver", source_table="focus",
+        date_column="chargeperiodstart", period_column="_billing_period", type_column="tipo",
+        measure_column="realizado_cloud", dimensions=["cloud_origem"], analysis_data_end=date(2026, 10, 12),
+    ))
+    assert result["forecast_end"] == "2026-10-26"
+    assert result["analysis_data_end"] == "2026-10-12"
+    assert len(result["items"]) == len({point["event_date"] for point in result["items"]})
+    future = [point for point in result["items"] if point["is_future"]]
+    assert len(future) == 14
+    assert all(point["observed_cloud"] is None and point["expected_cloud"] == 100 for point in future)
+    assert "DATE '2026-10-12'" in calls[1]
+    assert '"realizado_cloud"' in calls[1]
