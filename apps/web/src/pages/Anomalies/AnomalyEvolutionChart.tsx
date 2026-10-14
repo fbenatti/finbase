@@ -119,7 +119,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
             ...(kase.event_date <= dataEnd ? [{ type: "line" as const, xref: "x" as const, yref: "paper" as const, x0: kase.event_date, x1: kase.event_date, y0: 0, y1: 1, line: { color: "#d64c4c", width: 1, dash: "dot" as const } }] : []),
           ],
           annotations: [
-            ...(kase.event_date <= dataEnd ? [{ x: kase.event_date, y: 1.04, xref: "x" as const, yref: "paper" as const, text: `Detecção · ${dateLabel(kase.event_date)}`, showarrow: false, xanchor: "right" as const, font: { color: "#c83f3f", size: 11 } }] : []),
+            ...(kase.event_date <= dataEnd ? [{ x: kase.event_date, y: 1.04, xref: "x" as const, yref: "paper" as const, text: `Avaliação · ${dateLabel(kase.event_date)}`, showarrow: false, xanchor: "right" as const, font: { color: "#c83f3f", size: 11 } }] : []),
             ...(future.length ? [{ x: future[Math.floor(future.length / 2)].event_date, y: 1.04, xref: "x" as const, yref: "paper" as const, text: "Forecast →", showarrow: false, font: { color: colors.forecast, size: 12 } }] : []),
           ],
         }}
@@ -133,6 +133,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
     </Box> : <Alert severity="info" sx={{ mt: 2 }}>Não há dados disponíveis para desenhar esta série.</Alert>}
 
     <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1} alignItems="center" sx={{ mt: .5 }}>
+      {(series.contributor_series_count ?? 1) > 1 && <Chip size="small" variant="outlined" label={`${series.contributor_series_count} séries contribuintes`} />}
       <Chip size="small" variant="outlined" label={`Realizado até ${dateLabel(dataEnd)}`} />
       {future.length > 0 && <Chip size="small" variant="outlined" sx={{ color: colors.forecast, borderColor: "#c7d7fa" }} label={`Forecast até ${dateLabel(future[future.length - 1].event_date)}`} />}
       {firstExcess && <Chip size="small" variant="outlined" label={`Primeiro excesso na janela: ${dateLabel(firstExcess.event_date)}`} />}
@@ -142,6 +143,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       {monthly ? "Barras nas datas de cobrança; acumulado reiniciado a cada mês. " : "Barras cinza mostram o histórico anterior à cobertura do forecast. "}
       {comparable.length > 0 ? "Vermelho é o desvio positivo; custo anômalo considera somente a parcela acima do limite tolerado." : "Sem referência completa, o gráfico mostra o realizado sem quantificar desvio."} Dias sem coleta ficam vazios.
       {future.length > 0 && " A área azul mostra a projeção, sem criar realizado futuro."} Clique em uma data para ver os valores.
+      {(series.contributor_series_count ?? 1) > 1 && " Realizado e forecast somam o mesmo conjunto de séries do caso."}
       {reference && <> Referência congelada com corte em {dateLabel(reference.data_cutoff)}.</>}
     </Typography>
   </Paper>;
