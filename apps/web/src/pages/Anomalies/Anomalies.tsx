@@ -82,7 +82,10 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
   const points = [...(series.context_items ?? [])].sort((a, b) => a.event_date.localeCompare(b.event_date));
   if (!points.length) return null;
   const before = points.filter((point) => point.event_date < (series.context_event_date ?? kase.event_date) && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
-  const after = points.filter((point) => point.event_date > (series.context_event_date ?? kase.event_date) && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
+  const eventDate = series.context_event_date ?? kase.event_date;
+  // Inclui o próprio dia que disparou o caso: o período posterior pode ainda
+  // não ter recebido uma nova carga, mas o evento já permite a comparação.
+  const after = points.filter((point) => point.event_date >= eventDate && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
   const median = (values: number[]) => {
     const sorted = [...values].sort((a, b) => a - b);
     if (!sorted.length) return null;
@@ -91,6 +94,9 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
   };
   const beforeMedian = median(before);
   const afterMedian = median(after);
+  const changePct = beforeMedian !== null && beforeMedian !== 0 && afterMedian !== null
+    ? ((afterMedian - beforeMedian) / Math.abs(beforeMedian)) * 100
+    : null;
   const width = 880;
   const height = 276;
   const plot = { left: 76, right: 18, top: 24, bottom: 42 };
@@ -118,10 +124,10 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
   return (
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0", mb: 2 }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} spacing={1} sx={{ mb: 1 }}>
-        <Box><Typography variant="subtitle1" fontWeight={700}>O que mudou ao redor da detecção?</Typography><Typography variant="caption" color="text.secondary">Realizado diário · 30 dias antes e 15 dias depois · linha vertical marca o evento</Typography></Box>
+        <Box><Typography variant="subtitle1" fontWeight={700}>Realizado antes e depois da detecção</Typography><Typography variant="caption" color="text.secondary">30 dias anteriores vs. dia do evento e até 15 dias seguintes; linha vertical marca a detecção</Typography></Box>
         <Stack direction="row" spacing={1}>
-          <Chip size="small" variant="outlined" label={`Mediana antes ${beforeMedian === null ? "—" : money(beforeMedian, currency)}`} />
-          <Chip size="small" color={afterMedian !== null && beforeMedian !== null && afterMedian > beforeMedian ? "error" : "default"} variant="outlined" label={`Mediana depois ${afterMedian === null ? "—" : money(afterMedian, currency)}`} />
+          <Chip size="small" variant="outlined" label={`Antes · n=${before.length} · ${beforeMedian === null ? "—" : money(beforeMedian, currency)}`} />
+          <Chip size="small" color={changePct !== null && changePct > 0 ? "error" : "info"} variant="outlined" label={`Evento + depois · n=${after.length} · ${afterMedian === null ? "—" : money(afterMedian, currency)}${changePct === null ? "" : ` (${changePct > 0 ? "+" : ""}${changePct.toFixed(1)}%)`}`} />
         </Stack>
       </Stack>
       <Box sx={{ width: "100%", overflow: "hidden" }}><svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Custo cloud realizado nos 30 dias anteriores e 15 posteriores à anomalia" style={{ display: "block", fontFamily: "inherit" }}>
@@ -132,7 +138,7 @@ function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase:
         {points.map((point, index) => point.observed_cloud === null ? null : <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud)} r={point.is_event_day ? 6 : 3} fill={point.is_event_day ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · realizado ${money(point.observed_cloud, currency)}`}</title></circle>)}
         {labelIndexes.map((index) => <text key={index} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
       </svg></Box>
-      <Typography variant="caption" color="text.secondary">Dias sem registro foram mantidos como lacunas, não como zero. A linha tracejada é a mediana do realizado anterior; ela dá contexto histórico e não substitui a faixa estatística do detector.</Typography>
+      <Typography variant="caption" color="text.secondary">Dias sem registro foram mantidos como lacunas, não como zero. A mediana anterior dá contexto histórico e não substitui a faixa estatística do detector; o percentual compara a mediana anterior com a mediana do dia do evento e das observações posteriores disponíveis.</Typography>
     </Paper>
   );
 }
