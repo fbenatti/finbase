@@ -49,7 +49,9 @@ from app.services.anomaly_calibration import (
 )
 from app.services.anomaly_composition import assert_anomaly_rows_not_additive
 from app.services.anomaly_detector import (
+    ASSESSMENT_CANDIDATE,
     EVENT_DAILY,
+    ASSESSMENT_OPEN,
     MonthlyEvent,
     SeriesPoint,
     case_key_for,
@@ -612,10 +614,21 @@ async def build_outcome(
         for detection in series:
             detected_by_family.setdefault(family, []).append(detection)
 
-    # Consolidação por família: nunca duplica impacto.
+    # Consolidação por família: nunca duplica impacto. Avaliações abaixo do
+    # perfil e eventos esperados continuam na tabela analítica, mas não podem
+    # ser somados às séries que realmente cruzaram o limite: isso inflava
+    # observado/esperado e criava casos sem custo acima da faixa.
     consolidated: list[Any] = []
     for family, family_detections in detected_by_family.items():
-        merged = consolidate_family(family_detections)
+        actionable = [
+            detection for detection in family_detections
+            if detection.assessment_status in (ASSESSMENT_OPEN, ASSESSMENT_CANDIDATE)
+            and not detection.expected_only
+        ]
+        consolidated.extend(
+            detection for detection in family_detections if detection not in actionable
+        )
+        merged = consolidate_family(actionable)
         if merged is not None:
             consolidated.append(merged)
 
