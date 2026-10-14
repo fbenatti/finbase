@@ -202,6 +202,62 @@ def _dimension_filter(dimensions: Mapping[str, Any]) -> str | None:
     return " AND ".join(clauses) if clauses else None
 
 
+def compose_case_timeline(
+    reference_points: Sequence[Mapping[str, Any]],
+    observed_by_day: Mapping[date, float],
+    *,
+    start: date,
+    end: date,
+    data_end: date,
+    monthly: bool = False,
+) -> list[dict[str, Any]]:
+    """Une histórico, comparação e projeção sem inventar realizado futuro.
+
+    Compras usam acumulado em datas de eventos. Saldo restante mensal não é
+    apresentado como expectativa completa anterior à compra.
+    """
+    references = {point["event_date"]: point for point in reference_points}
+    items: list[dict[str, Any]] = []
+    monthly_total: dict[str, float] = {}
+    cursor = start
+    while cursor <= end:
+        day = cursor.isoformat()
+        month = day[:7]
+        raw_observed = observed_by_day.get(cursor) if cursor <= data_end else None
+        observed = raw_observed
+        if monthly and raw_observed is not None:
+            monthly_total[month] = monthly_total.get(month, 0.0) + raw_observed
+            observed = monthly_total[month]
+        point = dict(references.get(day) or {})
+        expected = point.get("expected_cloud")
+        lower = point.get("lower_cloud")
+        upper = point.get("upper_cloud")
+        if monthly:
+            supported = point.get("coverage_kind") == "FULL_MONTH"
+            expected = point.get("monthly_forecast_cloud") if supported else None
+            lower = point.get("monthly_lower_cloud") if supported else None
+            upper = point.get("monthly_upper_cloud") if supported else None
+        supported = expected is not None and upper is not None
+        point.update({
+            "event_date": day,
+            "weekday": cursor.weekday(),
+            "expected_cloud": expected,
+            "lower_cloud": lower,
+            "upper_cloud": upper,
+            "observed_cloud": observed,
+            "raw_observed_cloud": raw_observed,
+            "delta_cloud": observed - expected if supported and observed is not None else None,
+            "anomalous_cost_cloud": max(0.0, observed - upper) if supported and observed is not None else None,
+            "above_band": observed > upper if supported and observed is not None else None,
+            "comparison_supported": supported,
+            "is_future": cursor > data_end,
+            "phase": "FORECAST" if cursor > data_end else "COMPARISON" if supported else "HISTORY",
+        })
+        items.append(point)
+        cursor += timedelta(days=1)
+    return items
+
+
 async def read_case_series(
     *,
     case: Any,
@@ -217,131 +273,98 @@ async def read_case_series(
     horizon_days: int = DEFAULT_HORIZON_DAYS,
     analysis_data_end: date | None = None,
 ) -> dict[str, Any]:
-    """Série diária do caso: referência + observado, sem persistir a grade."""
-    months = sorted(
-        {
-            str(getattr(case, "period", "") or ""),
-            *_months_for(
-                _cutoff_of(publication), horizon_days
-            ),
-        }
-        - {""}
-    )
-    if not months:
-        months = [str(getattr(case, "period", "") or "")] if getattr(case, "period", None) else []
-
-    reference_rows = await trino_execute(
+    """Uma única linha do tempo: realizado até o cutoff e forecast além dele."""
+    cutoff = _cutoff_of(publication)
+    data_end = analysis_data_end or (datetime.now(timezone.utc).date() - timedelta(days=2))
+    raw_day = getattr(case, "event_date", None)
+    try:
+        event_day = date.fromisoformat(str(raw_day)[:10])
+    except (ValueError, TypeError):
+        event_day = cutoff
+    monthly = str(getattr(case, "evaluation_grain", "")) == "MONTHLY_EVENT"
+    context_start = event_day.replace(day=1) if monthly else event_day - timedelta(days=30)
+    requested_end = data_end + timedelta(days=max(1, int(horizon_days)))
+    months = _months_for(context_start, max(1, (requested_end - context_start).days))
+    rows = await trino_execute(
         reference_series_sql(
             namespace=reference_namespace,
             reference_table=publication.reference_table,
             series_id=str(case.series_id),
             months=months,
-        ),
-        timeout_s=180,
+        ), timeout_s=180,
     )
-    cutoff = _cutoff_of(publication)
-    effective_data_end = analysis_data_end or (datetime.now(timezone.utc).date() - timedelta(days=2))
-    horizon_end = min(cutoff + timedelta(days=max(1, int(horizon_days))), effective_data_end)
-    raw_event_date = getattr(case, "event_date", None)
-    if isinstance(raw_event_date, date):
-        event_day = raw_event_date
-    else:
-        try:
-            event_day = date.fromisoformat(str(raw_event_date)[:10])
-        except (TypeError, ValueError):
-            event_day = cutoff
-    context_start = event_day - timedelta(days=30)
-    context_end = min(event_day + timedelta(days=15), effective_data_end)
-
-    covered_days: list[date] = []
-    for row in reference_rows:
-        start = row.get("coverage_start")
-        end = row.get("coverage_end")
-        if not start or not end:
-            continue
-        cursor = date.fromisoformat(str(start)[:10])
-        last = min(date.fromisoformat(str(end)[:10]), horizon_end)
-        while cursor <= last:
-            covered_days.append(cursor)
-            cursor += timedelta(days=1)
-    # O detalhe do caso também precisa explicar o desvio com o realizado que o
-    # precedeu e o que veio depois. Esta janela é contexto observado, não uma
-    # nova referência nem uma reconstrução de forecast.
+    frozen_id = getattr(case, "current_reference_id", None)
+    frozen = next((row for row in rows if row.get("reference_id") == frozen_id), None)
+    warnings: list[str] = []
+    if frozen_id and frozen is None:
+        warnings.append("A referência original do caso não está na publicação atual. O forecast não foi substituído por uma referência posterior.")
+        rows = []
+    elif frozen is None and rows:
+        eligible = [row for row in rows if str(row.get("data_cutoff") or "")[:10] < event_day.isoformat()]
+        frozen = max(eligible, key=lambda row: (str(row.get("data_cutoff") or ""), int(row.get("forecast_run_id") or 0))) if eligible else None
+        frozen_id = frozen.get("reference_id") if frozen else None
+    forecast_rows = [row for row in rows if frozen and row.get("forecast_run_id") == frozen.get("forecast_run_id")]
+    forecast_ends = [str(row.get("target_end") or row.get("coverage_end") or "")[:10] for row in forecast_rows]
+    forecast_ends = [date.fromisoformat(value) for value in forecast_ends if value]
+    forecast_end = min(max(forecast_ends), requested_end) if forecast_ends else data_end
+    display_end = max(data_end, forecast_end)
     series_dimensions = dict(getattr(case, "series_dimensions", None) or {})
-    query_start = min([context_start, *covered_days])
-    query_end = min(max([context_end, *covered_days]), effective_data_end)
-    if query_end < query_start:
-        return {
-            "items": [], "context_items": [], "months": months,
-            "context_start": context_start.isoformat(),
-            "context_end": context_end.isoformat(),
-            "context_event_date": event_day.isoformat(),
-            "analysis_data_end": effective_data_end.isoformat(),
-            "note": "evento posterior ao corte de dados D-2",
-        }
-    sql = observed_daily_sql(
-        source_namespace=source_namespace,
-        table=source_table,
-        date_column=date_column,
-        period_column=period_column,
-        type_column=type_column,
-        measure_column=measure_column,
-        dimensions=list(dimensions),
-        start=query_start,
-        end=query_end,
-    )
-    series_filter = _dimension_filter(series_dimensions)
-    if series_filter:
-        sql = f"SELECT * FROM ({sql}) AS series WHERE {series_filter}"
-
-    observed_rows = await trino_execute(sql, timeout_s=600)
     observed_by_day: dict[date, float] = {}
-    for row in observed_rows:
-        try:
-            day = date.fromisoformat(str(row.get("event_date"))[:10])
-        except (TypeError, ValueError):
-            continue
-        observed_by_day[day] = observed_by_day.get(day, 0.0) + float(row.get("observed_cloud") or 0.0)
-
-    historical = {day: value for day, value in observed_by_day.items() if day <= cutoff}
-    profile = weekday_profile(historical, as_of=cutoff, weeks=8)
-    items = derive_daily_points(
-        reference_rows,
-        observed_by_day,
-        horizon_end=horizon_end,
-        weekday_medians=profile.medians if not profile.is_fallback else None,
-    ) if covered_days and reference_rows else []
-    context_items = []
-    context_day = context_start
-    while context_day <= context_end:
-        context_items.append(
-            {
-                "event_date": context_day.isoformat(),
-                "observed_cloud": observed_by_day.get(context_day),
-                "is_event_day": context_day == event_day,
-            }
+    if context_start <= data_end:
+        sql = observed_daily_sql(
+            source_namespace=source_namespace, table=source_table,
+            date_column=date_column, period_column=period_column,
+            type_column=type_column, measure_column=measure_column,
+            dimensions=list(dimensions), start=context_start, end=data_end,
         )
-        context_day += timedelta(days=1)
+        series_filter = _dimension_filter(series_dimensions)
+        if series_filter:
+            sql = f"SELECT * FROM ({sql}) AS series WHERE {series_filter}"
+        for row in await trino_execute(sql, timeout_s=600):
+            try:
+                day = date.fromisoformat(str(row.get("event_date"))[:10])
+            except (ValueError, TypeError):
+                continue
+            value = row.get("observed_cloud")
+            if day <= data_end and value is not None:
+                observed_by_day[day] = observed_by_day.get(day, 0.0) + float(value)
+    reference_points = derive_daily_points(rows, {}, horizon_end=display_end, frozen_reference_id=frozen_id)
+    # A previsão futura continua a referência congelada do episódio. Referências
+    # mais novas não podem absorver o desvio do caso em andamento.
+    if frozen:
+        reference_points = [point for point in reference_points if point["event_date"] <= data_end.isoformat()
+                            or point.get("forecast_run_id") == frozen.get("forecast_run_id")]
+    items = compose_case_timeline(reference_points, observed_by_day, start=context_start,
+                                 end=display_end, data_end=data_end, monthly=monthly)
+    if monthly and frozen and frozen.get("coverage_kind") != "FULL_MONTH":
+        warnings.append("Este forecast contém o saldo restante do mês, não a expectativa mensal congelada antes da compra. A comparação desta compra está indisponível; o saldo não foi distribuído como consumo diário nem usado como zero esperado.")
+    if event_day > data_end:
+        warnings.append(f"O evento é posterior ao cutoff de dados ({data_end.isoformat()}).")
+    if not rows and not warnings:
+        warnings.append("Não há referência de forecast disponível para esta série.")
+    comparable = [point for point in items if point["comparison_supported"]]
+    reference = None if not frozen else {
+        "reference_id": frozen.get("reference_id"), "forecast_run_id": frozen.get("forecast_run_id"),
+        "data_cutoff": frozen.get("data_cutoff"), "generated_at": frozen.get("generated_at"),
+        "reference_kind": frozen.get("reference_kind"), "coverage_kind": frozen.get("coverage_kind"),
+        "monthly_forecast_cloud": frozen.get("predicted_cloud"),
+    }
     return {
         "items": items,
-        "context_items": context_items,
-        "context_start": context_start.isoformat(),
-        "context_end": context_end.isoformat(),
-        "context_event_date": event_day.isoformat(),
-        "analysis_data_end": effective_data_end.isoformat(),
-        "months": months,
-        "data_cutoff": cutoff.isoformat(),
-        "horizon_end": horizon_end.isoformat(),
-        "reference_table": publication.reference_table,
-        "series_dimensions": series_dimensions,
-        "distribution_methods": sorted({str(item["distribution_method"]) for item in items}),
-        "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in reference_rows}),
-        "confidence": sorted({str(row.get("band_confidence") or "UNAVAILABLE") for row in reference_rows}),
-        "note": (
-            "sem linhas de referência na publicação corrente"
-            if not reference_rows
-            else "referência sem intervalo coberto" if not covered_days else None
-        ),
+        "context_items": [{"event_date": day.isoformat(), "observed_cloud": value, "is_event_day": day == event_day}
+                          for day, value in sorted(observed_by_day.items())],
+        "context_start": context_start.isoformat(), "context_end": data_end.isoformat(),
+        "context_event_date": event_day.isoformat(), "analysis_data_end": data_end.isoformat(),
+        "months": months, "data_cutoff": str(frozen.get("data_cutoff")) if frozen else cutoff.isoformat(),
+        "horizon_end": display_end.isoformat(), "forecast_end": forecast_end.isoformat(),
+        "forecast_start": comparable[0]["event_date"] if comparable else None,
+        "evaluation_grain": "MONTHLY_EVENT" if monthly else "DAILY",
+        "reference": reference, "warnings": warnings,
+        "reference_table": publication.reference_table, "series_dimensions": series_dimensions,
+        "distribution_methods": sorted({str(point.get("distribution_method")) for point in comparable}),
+        "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in forecast_rows}),
+        "confidence": sorted({str(row.get("band_confidence") or "UNAVAILABLE") for row in forecast_rows}),
+        "note": " ".join(warnings) if warnings else None,
     }
 
 
