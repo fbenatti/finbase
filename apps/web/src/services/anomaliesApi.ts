@@ -189,6 +189,14 @@ export type AnomalySeriesPoint = {
 
 export type AnomalySeries = {
   items: AnomalySeriesPoint[];
+  context_items?: Array<{
+    event_date: string;
+    observed_cloud: number | null;
+    is_event_day: boolean;
+  }>;
+  context_start?: string;
+  context_end?: string;
+  context_event_date?: string;
   months?: string[];
   data_cutoff?: string;
   horizon_end?: string;

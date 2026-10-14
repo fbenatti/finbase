@@ -77,6 +77,66 @@ const dt = (value: string | null | undefined) =>
 
 const chartColors = { observed: "#263746", expected: "#64748b", band: "#dbeafe", limit: "#2583c5", anomaly: "#d14343", grid: "#e8edf3", axis: "#748094" };
 
+/** Contexto histórico de realizado para tornar o desvio comparável antes/depois. */
+function ContextChart({ series, kase, currency }: { series: AnomalySeries; kase: AnomalyCase; currency: string }) {
+  const points = [...(series.context_items ?? [])].sort((a, b) => a.event_date.localeCompare(b.event_date));
+  if (!points.length) return null;
+  const before = points.filter((point) => point.event_date < (series.context_event_date ?? kase.event_date) && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
+  const after = points.filter((point) => point.event_date > (series.context_event_date ?? kase.event_date) && point.observed_cloud !== null).map((point) => point.observed_cloud as number);
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    if (!sorted.length) return null;
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  };
+  const beforeMedian = median(before);
+  const afterMedian = median(after);
+  const width = 880;
+  const height = 276;
+  const plot = { left: 76, right: 18, top: 24, bottom: 42 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = height - plot.top - plot.bottom;
+  const values = points.map((point) => point.observed_cloud).filter((value): value is number => value !== null && Number.isFinite(value));
+  if (values.length === 0) return <Alert severity="info" sx={{ mt: 2 }}>Ainda não há dias observados nesta janela. A ausência de linha não significa consumo zero.</Alert>;
+  const rawMin = Math.min(0, ...values);
+  const rawMax = Math.max(0, ...values);
+  const padding = (rawMax - rawMin || Math.abs(rawMax) || 1) * 0.14;
+  const min = rawMin - padding;
+  const max = rawMax + padding;
+  const y = (value: number) => plot.top + (max - value) / (max - min) * plotHeight;
+  const x = (index: number) => plot.left + index * plotWidth / Math.max(1, points.length - 1);
+  const eventIndex = points.findIndex((point) => point.is_event_day || point.event_date === (series.context_event_date ?? kase.event_date));
+  const ticks = Array.from({ length: 5 }, (_, index) => min + (max - min) * index / 4);
+  const segments: Array<Array<{ index: number; value: number }>> = [];
+  points.forEach((point, index) => {
+    if (point.observed_cloud === null) return;
+    const last = segments[segments.length - 1];
+    if (last && last[last.length - 1].index === index - 1) last.push({ index, value: point.observed_cloud });
+    else segments.push([{ index, value: point.observed_cloud }]);
+  });
+  const labelIndexes = [0, Math.round((points.length - 1) * 0.33), Math.round((points.length - 1) * 0.66), points.length - 1];
+  return (
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 2.5, borderColor: "#e5eaf0", mb: 2 }}>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} spacing={1} sx={{ mb: 1 }}>
+        <Box><Typography variant="subtitle1" fontWeight={700}>O que mudou ao redor da detecção?</Typography><Typography variant="caption" color="text.secondary">Realizado diário · 30 dias antes e 15 dias depois · linha vertical marca o evento</Typography></Box>
+        <Stack direction="row" spacing={1}>
+          <Chip size="small" variant="outlined" label={`Mediana antes ${beforeMedian === null ? "—" : money(beforeMedian, currency)}`} />
+          <Chip size="small" color={afterMedian !== null && beforeMedian !== null && afterMedian > beforeMedian ? "error" : "default"} variant="outlined" label={`Mediana depois ${afterMedian === null ? "—" : money(afterMedian, currency)}`} />
+        </Stack>
+      </Stack>
+      <Box sx={{ width: "100%", overflow: "hidden" }}><svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Custo cloud realizado nos 30 dias anteriores e 15 posteriores à anomalia" style={{ display: "block", fontFamily: "inherit" }}>
+        {ticks.map((tick) => <g key={tick}><line x1={plot.left} x2={width - plot.right} y1={y(tick)} y2={y(tick)} stroke={chartColors.grid} /><text x={plot.left - 10} y={y(tick) + 4} textAnchor="end" fontSize="11" fill={chartColors.axis}>{money(tick, currency)}</text></g>)}
+        {eventIndex >= 0 && <><line x1={x(eventIndex)} x2={x(eventIndex)} y1={plot.top} y2={height - plot.bottom} stroke={chartColors.anomaly} strokeWidth={2} strokeDasharray="5 5" /><text x={Math.min(x(eventIndex) + 8, width - 150)} y={plot.top + 12} fontSize="11" fontWeight="700" fill={chartColors.anomaly}>Detecção · {points[eventIndex].event_date}</text></>}
+        {beforeMedian !== null && <line x1={plot.left} x2={eventIndex >= 0 ? x(eventIndex) : width - plot.right} y1={y(beforeMedian)} y2={y(beforeMedian)} stroke={chartColors.expected} strokeWidth={1.5} strokeDasharray="4 5" opacity={0.8} />}
+        {segments.map((segment, index) => <polyline key={index} points={segment.map(({ index: i, value }) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke={chartColors.observed} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />)}
+        {points.map((point, index) => point.observed_cloud === null ? null : <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud)} r={point.is_event_day ? 6 : 3} fill={point.is_event_day ? chartColors.anomaly : chartColors.observed} stroke="white" strokeWidth={1.5}><title>{`${point.event_date} · realizado ${money(point.observed_cloud, currency)}`}</title></circle>)}
+        {labelIndexes.map((index) => <text key={index} x={x(index)} y={height - 12} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fontSize="11" fill={chartColors.axis}>{new Date(`${points[index].event_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</text>)}
+      </svg></Box>
+      <Typography variant="caption" color="text.secondary">Dias sem registro foram mantidos como lacunas, não como zero. A linha tracejada é a mediana do realizado anterior; ela dá contexto histórico e não substitui a faixa estatística do detector.</Typography>
+    </Paper>
+  );
+}
+
 /** Série diária com escala, datas e lacunas reais preservadas. */
 function SeriesChart({ series, currency }: { series: AnomalySeries; currency: string }) {
   const points = [...series.items].sort((a, b) => a.event_date.localeCompare(b.event_date));
@@ -813,12 +873,13 @@ export default function Anomalies() {
             </Typography>
             {busy && <LinearProgress sx={{ mb: 1 }} />}
 
+            {series && <ContextChart series={series} kase={selected} currency={currency} />}
             {series && series.items.length > 0 ? (
-              <SeriesChart series={series} />
+              <SeriesChart series={series} currency={currency} />
             ) : (
               <>
                 {series?.note && <Alert severity="info" sx={{ mb: 1 }}>{series.note}</Alert>}
-                <BandChart kase={selected} />
+                <BandChart kase={selected} currency={currency} />
               </>
             )}
             <Divider sx={{ my: 2 }} />
