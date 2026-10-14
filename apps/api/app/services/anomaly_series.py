@@ -233,6 +233,20 @@ async def read_case_series(
     if not covered_days:
         return {"items": [], "months": months, "note": "referência sem intervalo coberto"}
 
+    # O detalhe do caso também precisa explicar o desvio com o realizado que o
+    # precedeu e o que veio depois. Esta janela é contexto observado, não uma
+    # nova referência nem uma reconstrução de forecast.
+    raw_event_date = getattr(case, "event_date", None)
+    if isinstance(raw_event_date, date):
+        event_day = raw_event_date
+    else:
+        try:
+            event_day = date.fromisoformat(str(raw_event_date)[:10])
+        except (TypeError, ValueError):
+            event_day = min(covered_days)
+    context_start = event_day - timedelta(days=30)
+    context_end = event_day + timedelta(days=15)
+
     series_dimensions = dict(getattr(case, "series_dimensions", None) or {})
     sql = observed_daily_sql(
         source_namespace=source_namespace,
@@ -242,8 +256,8 @@ async def read_case_series(
         type_column=type_column,
         measure_column=measure_column,
         dimensions=list(dimensions),
-        start=min(covered_days),
-        end=max(covered_days),
+        start=min(min(covered_days), context_start),
+        end=max(max(covered_days), context_end),
     )
     series_filter = _dimension_filter(series_dimensions)
     if series_filter:
@@ -259,8 +273,23 @@ async def read_case_series(
         observed_by_day[day] = observed_by_day.get(day, 0.0) + float(row.get("observed_cloud") or 0.0)
 
     items = derive_daily_points(reference_rows, observed_by_day, horizon_end=horizon_end)
+    context_items = []
+    context_day = context_start
+    while context_day <= context_end:
+        context_items.append(
+            {
+                "event_date": context_day.isoformat(),
+                "observed_cloud": observed_by_day.get(context_day),
+                "is_event_day": context_day == event_day,
+            }
+        )
+        context_day += timedelta(days=1)
     return {
         "items": items,
+        "context_items": context_items,
+        "context_start": context_start.isoformat(),
+        "context_end": context_end.isoformat(),
+        "context_event_date": event_day.isoformat(),
         "months": months,
         "data_cutoff": cutoff.isoformat(),
         "horizon_end": horizon_end.isoformat(),
