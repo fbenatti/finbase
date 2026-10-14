@@ -184,10 +184,40 @@ Verificado em execução: **17 endpoints** publicados e respondendo
 
 ---
 
+## 7.1 Agendamento (F1)
+
+Dois agendamentos próprios, editáveis na tela de agendamentos:
+
+| `schedule_type` | Cron padrão | Ativo por padrão | O que faz |
+|---|---|---|---|
+| `anomaly_detection` | `0 6 * * *` | **não** | enfileira `anomaly_detection` para cada configuração **habilitada** |
+| `anomaly_sla` | `*/30 * * * *` | **sim** | emite `DUE_SOON` (janela configurável, padrão 4 h) e `OVERDUE` |
+
+A detecção nasce **inativa** porque o plano exige piloto manual antes de
+automatizar. O monitor de prazos nasce ativo porque só produz notificação
+interna — é o requisito do §3.3 ("vencimento aparece no dashboard e gera
+notificação interna à fila FinOps") e não escreve dado nem toca a cloud.
+
+Garantias verificadas em ambiente real (`scripts/verify_anomaly_scheduler.py`):
+
+```text
+configuração desabilitada → tarefas=[]
+configuração habilitada   → tarefas=[8486]
+   tarefa 8486: run=7 trigger=SCHEDULED status=QUEUED config=11
+segunda chamada (não deve duplicar) → tarefas=[]
+seleção inexistente → tarefas=[]
+monitor de prazos: {'due_soon': 0, 'overdue': 0}
+```
+
+"Uma execução por configuração" é respeitado: se já existe `anomaly_run` em
+`QUEUED`/`RUNNING`, a configuração é pulada.
+
 ## 8. Testes
 
 ```text
 apps/api/tests/test_anomaly_workflow.py   20 testes
+apps/api/tests/test_anomaly_scheduler.py  11 testes
+apps/api/scripts/verify_anomaly_scheduler.py  PostgreSQL real (rollback ao final)
 ```
 
 Suíte completa: **861 passaram**, 18 falhas pré-existentes.

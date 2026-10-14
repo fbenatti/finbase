@@ -564,6 +564,27 @@ async def lifespan(app: FastAPI):
                    json_build_object('retention_days', 30), 'backup'
             WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'backup')
         """)
+        # Agendamentos da gestão de anomalias (F1). Idempotentes e editáveis.
+        # A detecção nasce INATIVA (piloto manual antes de automatizar); o
+        # monitor de prazos nasce ativo porque só emite notificação interna.
+        await _execute_migration(conn, """
+            INSERT INTO scheduled_task
+              (name, connection_id, connection_ids, destination_reprocess,
+               cron_expression, timezone, active, config_json, schedule_type)
+            SELECT 'Detecção de anomalias', NULL, '[]'::jsonb, FALSE,
+                   '0 6 * * *', 'America/Sao_Paulo', FALSE,
+                   json_build_object('anomaly_config_ids', '[]'::json), 'anomaly_detection'
+            WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'anomaly_detection')
+        """)
+        await _execute_migration(conn, """
+            INSERT INTO scheduled_task
+              (name, connection_id, connection_ids, destination_reprocess,
+               cron_expression, timezone, active, config_json, schedule_type)
+            SELECT 'Prazos de anomalias (SLA)', NULL, '[]'::jsonb, FALSE,
+                   '*/30 * * * *', 'America/Sao_Paulo', TRUE,
+                   json_build_object('due_soon_hours', 4), 'anomaly_sla'
+            WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'anomaly_sla')
+        """)
         await _execute_migration(conn, """
             INSERT INTO scheduled_task
               (name, connection_id, connection_ids, destination_reprocess,

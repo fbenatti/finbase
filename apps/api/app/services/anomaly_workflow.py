@@ -261,6 +261,58 @@ async def notify_severity_increase(
     )
 
 
+async def notify_due_soon(
+    session: AsyncSession, *, horizon_hours: int = 4, limit: int = 200
+) -> int:
+    """Avisa sobre prazos de ciência a vencer na janela `[agora, agora + horas]`.
+
+    Só considera casos abertos e ainda não confirmados. A deduplicação por caso +
+    evento garante uma única notificação por caso, por mais que o agendador rode.
+    """
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(hours=max(1, int(horizon_hours)))
+    rows = (
+        await session.execute(
+            select(AnomalyCase)
+            .where(
+                AnomalyCase.due_at.is_not(None),
+                AnomalyCase.due_at >= now,
+                AnomalyCase.due_at <= horizon,
+                AnomalyCase.acknowledged_at.is_(None),
+                AnomalyCase.state.in_(OPEN_STATES),
+            )
+            .limit(limit)
+        )
+    ).scalars().all()
+    created = 0
+    for case in rows:
+        notification = await notify_case(
+            session,
+            case=case,
+            kind=KIND_DUE_SOON,
+            title=f"Caso #{case.id}: prazo de ciência a vencer",
+            body=(
+                f"{case.event_family} — vence em "
+                f"{case.due_at.isoformat() if case.due_at else '?'} ({case.severity})"
+            ),
+            recipient_user_id=case.assignee_user_id,
+        )
+        if notification is not None:
+            created += 1
+        if case.assignee_user_id is not None:
+            queue_copy = await notify_case(
+                session,
+                case=case,
+                kind=KIND_DUE_SOON,
+                title=f"Caso #{case.id}: prazo de ciência a vencer (fila)",
+                body=case.event_family,
+                recipient_user_id=None,
+                is_finops_queue=True,
+            )
+            created += 1 if queue_copy else 0
+    return created
+
+
 async def expire_overdue_notifications(session: AsyncSession, *, limit: int = 200) -> int:
     """Vencimento de prazo gera notificação interna à fila FinOps."""
     now = datetime.now(timezone.utc)

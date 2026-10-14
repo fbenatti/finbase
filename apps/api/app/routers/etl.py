@@ -3751,7 +3751,7 @@ async def create_schedule(body: ScheduledTaskCreate, db: AsyncSession = Depends(
         croniter(body.cron_expression)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid cron expression: {body.cron_expression}")
-    if body.schedule_type not in {"backup", "collection", "reprocess"}:
+    if body.schedule_type not in {"backup", "collection", "reprocess", "anomaly_detection", "anomaly_sla"}:
         raise HTTPException(status_code=422, detail="Tipo de schedule inválido")
     if body.schedule_type != "backup" and not (body.connection_ids or body.connection_id):
         raise HTTPException(status_code=422, detail="Selecione ao menos uma conexão")
@@ -3789,7 +3789,7 @@ async def update_schedule(schedule_id: int, body: ScheduledTaskUpdate, db: Async
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     update_data = body.model_dump(exclude_unset=True)
-    if "schedule_type" in update_data and update_data["schedule_type"] not in {"backup", "collection", "reprocess"}:
+    if "schedule_type" in update_data and update_data["schedule_type"] not in {"backup", "collection", "reprocess", "anomaly_detection", "anomaly_sla"}:
         raise HTTPException(status_code=422, detail="Tipo de schedule inválido")
     if update_data.get("schedule_type") == "backup":
         update_data["connection_id"] = None
