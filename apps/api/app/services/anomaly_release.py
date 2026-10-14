@@ -264,6 +264,16 @@ def case_identity(detection: Any) -> str:
     )
 
 
+def contributor_series_for(detection: Any) -> list[dict[str, Any]]:
+    """Preserva o escopo do caso sem copiar valores financeiros para o PG."""
+    members = {detection.series_id: dict(detection.series_dimensions)}
+    for contributor in detection.contributors:
+        if contributor.get("series_id") and contributor.get("dimensions"):
+            members[str(contributor["series_id"])] = dict(contributor["dimensions"])
+    return [{"series_id": series_id, "dimensions": dimensions}
+            for series_id, dimensions in sorted(members.items())]
+
+
 async def apply_detection_to_case(
     session: AsyncSession,
     *,
@@ -369,6 +379,7 @@ async def apply_detection_to_case(
             payload={
                 "assessment_id": case.current_assessment_id,
                 "reference_id": detection.reference_id,
+                "contributor_series": contributor_series_for(detection),
                 "routing": route,
                 "routing_note": state_note,
                 "assignee_user_id": case.assignee_user_id,
@@ -426,6 +437,7 @@ async def apply_detection_to_case(
         payload={
             "assessment_id": assessment_id_of(detection),
             "reference_id": detection.reference_id,
+            "contributor_series": contributor_series_for(detection),
             "represerved_reference": existing.current_reference_id,
         },
     )
