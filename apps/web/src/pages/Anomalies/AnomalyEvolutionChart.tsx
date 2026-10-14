@@ -73,7 +73,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
         {monthly ? "Acumulado em" : selectedDay > dataEnd ? "Projeção para" : "Comparação em"} {dateLabel(selectedDay)}
       </Typography>
       <Typography variant="body1" sx={{ fontWeight: 600, mt: .25 }}>
-        {!focus ? "A data deste evento está fora do período elegível para análise." : actual == null ? `Forecast de ${money(expected, currency)} · realizado ainda indisponível.`
+        {!focus ? "A data deste evento está fora do período elegível para análise." : actual == null && expected == null ? "Não há realizado nem forecast comparável nesta data." : actual == null ? `Forecast de ${money(expected, currency)} · realizado ainda indisponível.`
           : !canCompare ? `Realizado de ${money(actual, currency)} · sem forecast comparável nesta data.`
             : <>{money(actual, currency)} realizados para {money(expected, currency)} previstos
               {delta != null && delta > 0 && <Box component="span" sx={{ color: "#cf4141" }}> · +{money(delta, currency)}{deltaPct == null ? "" : ` (+${deltaPct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%)`}</Box>}
