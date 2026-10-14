@@ -382,6 +382,8 @@ async def read_case_series(
         warnings.append(f"O evento é posterior ao cutoff de dados ({data_end.isoformat()}).")
     if not rows and not warnings:
         warnings.append("Não há referência de forecast disponível para esta série.")
+    if not contributor_series:
+        warnings.append("Esta avaliação antiga não preservou as séries contribuintes. O gráfico está limitado à série representativa; reprocessar a detecção permite reconciliar o escopo completo.")
     comparable = [point for point in items if point["comparison_supported"]]
     reference = None if not frozen else {
         "reference_id": frozen.get("reference_id"), "forecast_run_id": frozen.get("forecast_run_id"),
