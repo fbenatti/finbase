@@ -454,6 +454,14 @@ def _horizon_end(contract: ForecastContract, horizon_days: int) -> date:
     return contract.cutoff_date + timedelta(days=max(1, int(horizon_days)))
 
 
+def _d2_data_end(detected_at: datetime) -> date:
+    """Último dia elegível quando as fontes cloud chegam com atraso D-2."""
+    instant = detected_at
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(timezone.utc).date() - timedelta(days=2)
+
+
 async def build_outcome(
     *,
     config: Mapping[str, Any],
@@ -464,6 +472,7 @@ async def build_outcome(
     family_keys: Sequence[str],
     detected_at: datetime,
     reader_weekday_weeks: int = 8,
+    analysis_data_end: date | None = None,
 ) -> DetectionOutcome:
     """Monta a referência e as avaliações (sem publicar).
 
@@ -484,6 +493,7 @@ async def build_outcome(
 
     months = horizon_months(contract.cutoff_date, horizon_days)
     horizon_end = _horizon_end(contract, horizon_days)
+    evaluation_end = min(horizon_end, analysis_data_end) if analysis_data_end else horizon_end
     outcome = DetectionOutcome(contract=contract)
     if not explicit:
         outcome.warnings.append(
@@ -580,7 +590,7 @@ async def build_outcome(
             calibration_days=calibration_days,
             complete=complete,
             window_days=window_days,
-            horizon_end=horizon_end,
+            horizon_end=evaluation_end,
             applied_rule_refs=rule_refs,
         )
         detections.extend(series)
@@ -602,7 +612,7 @@ async def build_outcome(
         detected_at=detected_at,
         forecast_run_id=contract.run_id,
         evaluation_start=contract.cutoff_date,
-        evaluation_end=horizon_end,
+        evaluation_end=evaluation_end,
     )
 
     for month in months:
@@ -841,7 +851,24 @@ async def execute_detection(
             raise AnomalyRunError(
                 "nenhuma execução de forecast utilizável: a medida precisa existir no resultado"
             )
-        contract = max(usable, key=lambda c: (c.cutoff_date, c.run_id))
+        analysis_data_end = _d2_data_end(detected_at)
+        horizon_days = int(config_row.horizon_days or 15)
+        # A prospectively valid reference must predate the last D-2 observation
+        # and its horizon must include that observation. Selecting today's
+        # latest forecast can otherwise compare a day with a forecast already
+        # informed by that day's realized value.
+        eligible = [
+            candidate for candidate in usable
+            if candidate.cutoff_date is not None
+            and candidate.cutoff_date < analysis_data_end
+            and candidate.cutoff_date + timedelta(days=horizon_days) >= analysis_data_end
+        ]
+        if not eligible:
+            raise AnomalyRunError(
+                "sem forecast prospectivo anterior que cubra o corte D-2 "
+                f"({analysis_data_end.isoformat()}); nenhuma anomalia foi avaliada"
+            )
+        contract = max(eligible, key=lambda c: (c.cutoff_date, c.run_id))
         # A execução avalia os dias POSTERIORES ao próprio corte: por construção a
         # referência é prospectiva. Reconstrução histórica (E5) marca
         # RETROSPECTIVE explicitamente.
@@ -851,7 +878,6 @@ async def execute_detection(
             await session.commit()
             return {"status": "CANCELLED"}
 
-        horizon_days = int(config_row.horizon_days or 15)
         months = horizon_months(contract.cutoff_date, horizon_days)
         horizon_end = contract.cutoff_date + timedelta(days=horizon_days)
         history_days = int(config_row.history_days or 180)
@@ -869,7 +895,7 @@ async def execute_detection(
             measure_column=config_row.measure_column,
             dimensions=dimensions,
             start=observed_start,
-            end=horizon_end,
+            end=min(horizon_end, analysis_data_end),
         )
         if _aborted(should_abort):
             await finish_run(session, run_id=run_id, status="CANCELLED", phase="Cancelado pelo usuário")
@@ -885,6 +911,7 @@ async def execute_detection(
             dimensions=dimensions,
             family_keys=family_keys,
             detected_at=detected_at,
+            analysis_data_end=analysis_data_end,
         )
         validate_assessments(outcome.assessments)
         reconcile(outcome.expectation_totals, outcome.reference_totals)
@@ -952,6 +979,7 @@ async def execute_detection(
             assessment_table=assessment_table,
             generated_at=detected_at,
             horizon_end=horizon_end,
+            evaluation_end=min(horizon_end, analysis_data_end),
             total_series=outcome.series_count,
             processed_series=outcome.series_count,
         )
@@ -961,6 +989,7 @@ async def execute_detection(
             "status": "COMPLETED",
             "forecast_run_id": contract.run_id,
             "data_cutoff": contract.cutoff_date.isoformat(),
+            "evaluation_end": min(horizon_end, analysis_data_end).isoformat(),
             "reference_kind": contract.reference_kind,
             "reference_table": reference_table,
             "assessment_table": assessment_table,

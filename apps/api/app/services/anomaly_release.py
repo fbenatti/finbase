@@ -526,6 +526,7 @@ async def finish_run(
     gold_table: str | None = None,
     generated_at: datetime | None = None,
     horizon_end: Any | None = None,
+    evaluation_end: Any | None = None,
     total_series: int = 0,
     processed_series: int = 0,
 ) -> None:
@@ -571,6 +572,8 @@ async def finish_run(
         run.generated_at = generated_at
     if horizon_end is not None:
         run.target_end = horizon_end.isoformat() if hasattr(horizon_end, "isoformat") else str(horizon_end)
+    if evaluation_end is not None:
+        run.evaluation_end = evaluation_end.isoformat() if hasattr(evaluation_end, "isoformat") else str(evaluation_end)
     if status in ("COMPLETED", "FAILED", "CANCELLED", "COMPLETED_WITH_ERRORS"):
         run.finished_at = datetime.now(timezone.utc)
     await session.flush()
