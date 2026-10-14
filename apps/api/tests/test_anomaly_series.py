@@ -1,0 +1,183 @@
+"""Testes da série diária derivada da referência compacta (F2)."""
+from datetime import date
+
+import pytest
+
+from app.services.anomaly_series import (
+    _cutoff_of,
+    _months_for,
+    _weekday_weights,
+    derive_daily_points,
+    observed_daily_sql,
+    reference_series_sql,
+)
+
+# Peso por dia da semana (0=segunda) já normalizado sobre o intervalo coberto.
+WEIGHTS = {"0": 0.18, "1": 0.18, "2": 0.18, "3": 0.18, "4": 0.18, "5": 0.05, "6": 0.05}
+
+
+def reference(**overrides):
+    base = {
+        "reference_id": "ref-1",
+        "reference_month": "202610",
+        "reference_kind": "PROSPECTIVE",
+        "coverage_kind": "REMAINING_MONTH",
+        "coverage_start": "2026-10-13",
+        "coverage_end": "2026-10-31",
+        "covered_days": 19,
+        "predicted_cloud": 1900.0,
+        "weekday_weights": WEIGHTS,
+        "normalizer": 100.0,
+        "distribution_method": "WEEKDAY_MEDIAN",
+        "daily_band_lower_offset": 50.0,
+        "daily_band_upper_offset": 200.0,
+        "band_method": "HISTORICAL_QUANTILE",
+        "band_confidence": "HIGH",
+    }
+    base.update(overrides)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Derivação
+# ---------------------------------------------------------------------------
+def test_um_ponto_por_dia_coberto():
+    points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 31))
+    assert len(points) == 19
+    assert points[0]["event_date"] == "2026-10-13"
+    assert points[-1]["event_date"] == "2026-10-31"
+
+
+def test_esperado_diario_usa_o_peso_do_dia_da_semana():
+    points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 31))
+    by_date = {point["event_date"]: point for point in points}
+    # Normalizado sobre os 19 dias cobertos: 14 dias úteis × 0,18 + 5 de fim de
+    # semana × 0,05 = 2,77. Terça = 1900 × 0,18 / 2,77; sábado = 1900 × 0,05 / 2,77.
+    assert by_date["2026-10-13"]["expected_cloud"] == pytest.approx(1900 * 0.18 / 2.77)
+    assert by_date["2026-10-17"]["expected_cloud"] == pytest.approx(1900 * 0.05 / 2.77)
+    assert by_date["2026-10-13"]["expected_cloud"] > by_date["2026-10-17"]["expected_cloud"]
+    assert by_date["2026-10-17"]["weekday"] == 5
+
+
+def test_soma_dos_dias_reconcilia_com_o_valor_do_mes():
+    points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 31))
+    # A soma da distribuição completa é exatamente o valor do forecast.
+    total = sum(point["expected_cloud"] for point in points)
+    assert total == pytest.approx(1900.0, abs=0.05)
+
+
+def test_faixa_aplicada_por_dia():
+    points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 31))
+    for point in points:
+        assert point["upper_cloud"] == pytest.approx(point["expected_cloud"] + 200.0)
+        assert point["lower_cloud"] == pytest.approx(max(0.0, point["expected_cloud"] - 50.0))
+
+
+def test_custo_anomalo_so_existe_acima_do_limite():
+    # Primeiro derivamos o esperado, depois observamos em cima dele.
+    baseline = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 31))
+    expected = {point["event_date"]: point["expected_cloud"] for point in baseline}
+    observed = {
+        date(2026, 10, 13): expected["2026-10-13"],                    # exatamente o esperado
+        date(2026, 10, 14): expected["2026-10-14"] + 100.0,            # dentro da faixa (200)
+        date(2026, 10, 15): expected["2026-10-15"] + 500.0,            # acima do limite
+    }
+    points = derive_daily_points([reference()], observed, horizon_end=date(2026, 10, 31))
+    by_date = {point["event_date"]: point for point in points}
+    assert by_date["2026-10-13"]["anomalous_cost_cloud"] == 0.0
+    assert by_date["2026-10-13"]["above_band"] is False
+    assert by_date["2026-10-14"]["anomalous_cost_cloud"] == 0.0
+    assert by_date["2026-10-15"]["above_band"] is True
+    assert by_date["2026-10-15"]["anomalous_cost_cloud"] == pytest.approx(300.0)
+
+
+def test_dia_sem_observacao_fica_nulo_e_nao_vira_zero():
+    points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 31))
+    for point in points:
+        assert point["observed_cloud"] is None
+        assert point["anomalous_cost_cloud"] is None
+        assert point["above_band"] is None
+
+
+def test_horizonte_recorta_a_cobertura():
+    points = derive_daily_points([reference()], {}, horizon_end=date(2026, 10, 20))
+    assert points[-1]["event_date"] == "2026-10-20"
+    assert len(points) == 8  # 13 a 20 de outubro
+
+
+def test_sem_pesos_usa_fallback_uniforme_identificado():
+    points = derive_daily_points(
+        [reference(weekday_weights=None, covered_days=19)], {}, horizon_end=date(2026, 10, 31)
+    )
+    assert points[0]["distribution_method"] == "UNIFORM_FALLBACK"
+    assert points[0]["expected_cloud"] == pytest.approx(1900.0 / 19)
+
+
+def test_referencia_sem_cobertura_e_ignorada():
+    points = derive_daily_points(
+        [reference(coverage_start=None, coverage_end=None)], {}, horizon_end=date(2026, 10, 31)
+    )
+    assert points == []
+
+
+def test_dois_meses_em_ordem_cronologica():
+    rows = [
+        reference(reference_month="202611", coverage_start="2026-11-01", coverage_end="2026-11-02", covered_days=2, predicted_cloud=200.0),
+        reference(reference_month="202610", coverage_start="2026-10-30", coverage_end="2026-10-31", covered_days=2, predicted_cloud=200.0),
+    ]
+    points = derive_daily_points(rows, {}, horizon_end=date(2026, 11, 2))
+    assert [point["event_date"] for point in points] == [
+        "2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02",
+    ]
+
+
+def test_pesos_aceitam_json_em_texto():
+    assert _weekday_weights('{"5": 0.25, "6": 0.1}') == {5: 0.25, 6: 0.1}
+    assert _weekday_weights(None) == {}
+    assert _weekday_weights("não é json") == {}
+    assert _weekday_weights({"x": "y"}) == {}
+
+
+# ---------------------------------------------------------------------------
+# SQL
+# ---------------------------------------------------------------------------
+def test_sql_da_referencia_filtra_serie_e_meses():
+    sql = reference_series_sql(
+        namespace="silver",
+        reference_table="dest_modelo_focus_anomaly_reference",
+        series_id="abc123",
+        months=["202610", "202611"],
+    )
+    assert 'FROM iceberg.silver."dest_modelo_focus_anomaly_reference"' in sql
+    assert "series_id = 'abc123'" in sql
+    assert "'202610'" in sql and "'202611'" in sql
+    assert "weekday_weights" in sql and "daily_band_upper_offset" in sql
+
+
+def test_sql_do_observado_le_realizado_cloud_por_dia():
+    sql = observed_daily_sql(
+        source_namespace="silver",
+        table="dest_modelo_focus",
+        date_column="chargeperiodstart",
+        period_column="_billing_period",
+        type_column="tipo",
+        measure_column="realizado_cloud",
+        dimensions=["cloud_origem", "servicename"],
+        start=date(2026, 10, 13),
+        end=date(2026, 10, 31),
+    )
+    assert '"realizado_cloud"' in sql
+    assert "day BETWEEN DATE '2026-10-13' AND DATE '2026-10-31'" in sql
+
+
+def test_meses_do_horizonte():
+    assert _months_for(date(2026, 10, 12), 15) == ["202610"]
+    assert _months_for(date(2026, 10, 25), 15) == ["202610", "202611"]
+
+
+def test_cutoff_da_publicacao_com_fallback():
+    from types import SimpleNamespace
+
+    assert _cutoff_of(SimpleNamespace(data_cutoff="2026-10-12", generated_at=None)) == date(2026, 10, 12)
+    generated = SimpleNamespace(data_cutoff=None, generated_at=None)
+    assert _cutoff_of(generated) == date.today()

@@ -90,12 +90,37 @@ GET /anomalies/configs        → 200
 GET /anomalies/cases/summary  → 200
 ```
 
-## 8. Limitações declaradas
+## 7.1 Série diária (F2)
 
-- O gráfico mostra o **escalar consolidado do caso** (observado/esperado/faixa),
-  não a grade diária completa: a série diária é derivada da referência compacta
-  e a API de série detalhada ainda não expõe os 15 pontos. O contrato de
-  distribuição existe (E3) e a leitura por dia é a próxima extensão.
+`GET /anomalies/cases/{id}/series?horizon_days=15` deriva a grade diária da
+referência compacta, **sem persistir** nada e sem copiar valores para o
+PostgreSQL:
+
+```text
+esperado_dia  = previsto_mês × peso[dia da semana] / Σ pesos do intervalo coberto
+limite_sup    = esperado_dia + offset diário da faixa
+custo_anômalo = max(0, observado_dia − limite_sup)
+```
+
+O gráfico diário (`SeriesChart`) desenha a faixa (polígono), a previsão central
+(tracejada), a linha observada com marcadores e as barras vermelhas dos dias
+acima do limite. Quando a série não existe, o gráfico cai para os escalares do
+caso.
+
+Verificado em Trino real (`scripts/verify_anomaly_series.py`):
+
+```text
+fonte: silver.dest_modelo_focus dimensões=18
+série escolhida: {'cloud_origem': 'azure-ti', 'servicename': 'Microsoft.Compute'}
+linhas observadas por dia (1ª a 13/10): 13
+série derivada: 31 dias; soma esperada=31.000,00 (forecast 31.000,00)
+   dia útil médio=1.210,94  fim de semana médio=484,38
+```
+
+## 8. Limitações declaradas
+- A série é lida por dia a partir da fonte observada; cada abertura de caso faz
+  uma consulta no Trino (não há cache). Para listas grandes, o ideal é uma
+  leitura em lote por publicação.
 - Sem biblioteca de gráficos no projeto (não há `recharts`/`echarts`), o desenho
   é SVG próprio; a interatividade é limitada a tooltip/legenda.
 - A aba "Eventos esperados" filtra a listagem corrente; uma consulta dedicada à

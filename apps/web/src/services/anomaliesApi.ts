@@ -170,6 +170,43 @@ export async function getAnomalyCaseEvents(id: number) {
   return data as { items: Array<Record<string, unknown>> };
 }
 
+export type AnomalySeriesPoint = {
+  event_date: string;
+  weekday: number;
+  reference_month: string | null;
+  reference_id: string | null;
+  reference_kind: string | null;
+  coverage_kind: string | null;
+  distribution_method: string;
+  expected_cloud: number;
+  lower_cloud: number;
+  upper_cloud: number;
+  observed_cloud: number | null;
+  delta_cloud: number | null;
+  anomalous_cost_cloud: number | null;
+  above_band: boolean | null;
+};
+
+export type AnomalySeries = {
+  items: AnomalySeriesPoint[];
+  months?: string[];
+  data_cutoff?: string;
+  horizon_end?: string;
+  reference_table?: string;
+  series_dimensions?: Record<string, string | null>;
+  distribution_methods?: string[];
+  band_methods?: string[];
+  confidence?: string[];
+  note?: string;
+};
+
+export async function getAnomalyCaseSeries(id: number, horizonDays = 15): Promise<AnomalySeries> {
+  const { data } = await api.get(`/anomalies/cases/${id}/series`, {
+    params: { horizon_days: horizonDays },
+  });
+  return data;
+}
+
 export async function getAnomalyContributors(id: number) {
   const { data } = await api.get(`/anomalies/cases/${id}/contributors`);
   return data as { items: Array<Record<string, unknown>>; note?: string };

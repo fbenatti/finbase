@@ -564,6 +564,57 @@ async def get_case_events(
     }
 
 
+@router.get("/cases/{case_id}/series")
+async def get_case_series(
+    case_id: int,
+    horizon_days: int = Query(default=15, ge=1, le=92),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "read")),
+):
+    """Série diária do caso: observado × faixa × custo anômalo (plano §5.1).
+
+    A grade de 15 dias é **derivada** da referência compacta; nada é copiado
+    para o PostgreSQL.
+    """
+    from app.services.anomaly_release import current_publication
+    from app.services.anomaly_series import read_case_series
+    from app.models.forecast import ForecastConfig
+
+    case = await db.get(AnomalyCase, case_id)
+    if case is None:
+        raise HTTPException(404, "Caso não encontrado")
+    if not case.anomaly_config_id:
+        raise HTTPException(409, "Caso sem configuração de anomalia associada")
+    config = await db.get(AnomalyConfig, case.anomaly_config_id)
+    if config is None:
+        raise HTTPException(409, "Configuração de anomalia do caso não existe mais")
+    publication = await current_publication(db, case.anomaly_config_id)
+    if publication is None:
+        return {"items": [], "note": "sem publicação corrente para esta configuração"}
+
+    forecast = (
+        await db.get(ForecastConfig, config.forecast_config_id) if config.forecast_config_id else None
+    )
+    dimensions = list(config.dimensions or (forecast.dimensions if forecast else []) or [])
+    try:
+        return await read_case_series(
+            case=case,
+            publication=publication,
+            reference_namespace=config.source_namespace,
+            source_namespace=config.source_namespace,
+            source_table=config.destination_physical_name,
+            date_column=config.date_column,
+            period_column=config.period_column,
+            type_column=config.type_column,
+            measure_column=config.measure_column,
+            dimensions=dimensions,
+            horizon_days=horizon_days,
+        )
+    except Exception as exc:
+        logger.warning("[anomaly] falha ao montar a série do caso %s: %s", case_id, exc)
+        raise HTTPException(503, f"Falha ao consultar a série: {exc}") from exc
+
+
 @router.get("/cases/{case_id}/contributors")
 async def get_contributors(
     case_id: int,

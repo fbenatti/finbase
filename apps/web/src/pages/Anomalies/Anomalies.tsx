@@ -19,12 +19,13 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type {
-  AnomalyCase, AnomalyConfig, AnomalyNotification, CaseSummary,
+  AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalySeries, CaseSummary,
 } from "../../services/anomaliesApi";
 import {
   createAnomalyAction, enqueueAnomalyRun, getAnomalyCase, getAnomalyCaseEvents,
-  getAnomalyMetrics, listAnomalyCases, listAnomalyConfigs, listAnomalyNotifications,
-  readAnomalyNotification, transitionAnomalyCase, updateAnomalyAction, updateAnomalyConfig,
+  getAnomalyCaseSeries, getAnomalyMetrics, listAnomalyCases, listAnomalyConfigs,
+  listAnomalyNotifications, readAnomalyNotification, transitionAnomalyCase,
+  updateAnomalyAction, updateAnomalyConfig,
 } from "../../services/anomaliesApi";
 
 const STATE_LABEL: Record<string, string> = {
@@ -71,6 +72,86 @@ const money = (value: number | null | undefined, currency = "BRL") =>
 
 const dt = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString("pt-BR") : "—";
+
+/** Série diária: observado, faixa esperada e área acima do limite superior. */
+function SeriesChart({ series }: { series: AnomalySeries }) {
+  const points = series.items.filter((point) => point.expected_cloud !== null);
+  if (points.length === 0) {
+    return (
+      <Alert severity="info">
+        {series.note ?? "Série diária indisponível para este caso."}
+      </Alert>
+    );
+  }
+  const values = points.flatMap((point) => [
+    point.expected_cloud, point.upper_cloud, point.lower_cloud,
+    point.observed_cloud ?? 0,
+  ]);
+  const max = Math.max(...values) * 1.1 || 1;
+  const min = 0;
+  const width = 760;
+  const height = 260;
+  const step = width / Math.max(1, points.length - 1);
+  const y = (value: number) => height - ((value - min) / (max - min || 1)) * height;
+  const x = (index: number) => index * step;
+
+  const bandTop = points.map((point, index) => `${x(index)},${y(point.upper_cloud)}`).join(" ");
+  const bandBottom = points
+    .map((point, index) => `${x(index)},${y(point.lower_cloud)}`)
+    .reverse()
+    .join(" ");
+  const expectedPath = points.map((point, index) => `${x(index)},${y(point.expected_cloud)}`).join(" ");
+  const observed = points
+    .map((point, index) => (point.observed_cloud === null ? null : { index, point }))
+    .filter((item): item is { index: number; point: typeof points[number] } => item !== null);
+  const observedPath = observed
+    .map(({ index, point }) => `${x(index)},${y(point.observed_cloud ?? 0)}`)
+    .join(" ");
+  const anomalous = observed.filter(({ point }) => (point.anomalous_cost_cloud ?? 0) > 0);
+
+  return (
+    <Box>
+      <svg width="100%" viewBox={`0 0 ${width} ${height + 30}`} role="img"
+           aria-label="Série diária: observado, faixa esperada e parte acima do limite">
+        <polygon points={`${bandTop} ${bandBottom}`} fill="rgba(33,150,243,0.15)" />
+        <polyline points={bandTop} fill="none" stroke="#1976d2" strokeDasharray="4 4" />
+        <polyline points={bandBottom} fill="none" stroke="#1976d2" strokeDasharray="4 4" />
+        <polyline points={expectedPath} fill="none" stroke="#607d8b" strokeDasharray="2 3" />
+        {observed.length > 1 && <polyline points={observedPath} fill="none" stroke="#263238" strokeWidth={2} />}
+        {observed.map(({ index, point }) => (
+          <circle key={point.event_date} cx={x(index)} cy={y(point.observed_cloud ?? 0)} r={3.5}
+                  fill={(point.anomalous_cost_cloud ?? 0) > 0 ? "#d32f2f" : "#263238"} />
+        ))}
+        {anomalous.map(({ index, point }) => (
+          <rect key={`a-${point.event_date}`} x={x(index) - 4} y={y(point.observed_cloud ?? 0)}
+                width={8} height={Math.max(2, y(point.upper_cloud) - y(point.observed_cloud ?? 0))}
+                fill="rgba(211,47,47,0.45)" />
+        ))}
+        <text x={4} y={y(max) + 12} fontSize="11" fill="#1976d2">limite superior</text>
+        <text x={4} y={y(points[0].expected_cloud) - 6} fontSize="11" fill="#607d8b">esperado</text>
+        {points.map((point, index) => (
+          index % Math.ceil(points.length / 8) === 0 ? (
+            <text key={`x-${point.event_date}`} x={x(index)} y={height + 16} fontSize="10"
+                  fill="#607d8b" textAnchor="middle">{point.event_date.slice(5)}</text>
+          ) : null
+        ))}
+      </svg>
+      <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap">
+        <Chip size="small" label={`${points.length} dia(s)`} />
+        {series.data_cutoff && <Chip size="small" label={`corte ${series.data_cutoff}`} />}
+        {(series.distribution_methods ?? []).map((method) => (
+          <Chip key={method} size="small" variant="outlined" label={`distribuição ${method}`} />
+        ))}
+        {(series.band_methods ?? []).map((method) => (
+          <Chip key={method} size="small" variant="outlined" label={`faixa ${method}`} />
+        ))}
+        {(series.confidence ?? []).map((value) => (
+          <Chip key={value} size="small" label={`confiança ${value}`} />
+        ))}
+      </Stack>
+    </Box>
+  );
+}
 
 /** Gráfico observado × faixa × área anômala (SVG, sem dependência extra). */
 function BandChart({ kase }: { kase: AnomalyCase }) {
@@ -206,6 +287,7 @@ export default function Anomalies() {
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<AnomalyCase | null>(null);
   const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
+  const [series, setSeries] = useState<AnomalySeries | null>(null);
   const [notifications, setNotifications] = useState<AnomalyNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -271,6 +353,12 @@ export default function Anomalies() {
       setSelected(detail);
       setEvents(eventPage.items);
       setForm(EMPTY_FORM);
+      setSeries(null);
+      try {
+        setSeries(await getAnomalyCaseSeries(id));
+      } catch {
+        setSeries({ items: [], note: "Série diária indisponível para este caso." });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao abrir o caso");
     } finally {
@@ -649,7 +737,14 @@ export default function Anomalies() {
             </Typography>
             {busy && <LinearProgress sx={{ mb: 1 }} />}
 
-            <BandChart kase={selected} />
+            {series && series.items.length > 0 ? (
+              <SeriesChart series={series} />
+            ) : (
+              <>
+                {series?.note && <Alert severity="info" sx={{ mb: 1 }}>{series.note}</Alert>}
+                <BandChart kase={selected} />
+              </>
+            )}
             <Divider sx={{ my: 2 }} />
             <StepPanel kase={selected} />
 
