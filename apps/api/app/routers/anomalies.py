@@ -9,7 +9,7 @@ Listagem: paginação padrão 50, máximo 200; ordenação por nota ou data.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -674,6 +674,14 @@ async def get_case_series(
     if publication is None:
         return {"items": [], "note": "sem publicação corrente para esta configuração"}
 
+    published_run = await db.get(AnomalyRun, publication.run_id) if publication.run_id else None
+    analysis_data_end = None
+    if published_run and published_run.evaluation_end:
+        try:
+            analysis_data_end = date.fromisoformat(str(published_run.evaluation_end)[:10])
+        except ValueError:
+            analysis_data_end = None
+
     forecast = (
         await db.get(ForecastConfig, config.forecast_config_id) if config.forecast_config_id else None
     )
@@ -691,6 +699,7 @@ async def get_case_series(
             measure_column=config.measure_column,
             dimensions=dimensions,
             horizon_days=horizon_days,
+            analysis_data_end=analysis_data_end,
         )
     except Exception as exc:
         logger.warning("[anomaly] falha ao montar a série do caso %s: %s", case_id, exc)

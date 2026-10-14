@@ -21,10 +21,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_observed import observed_daily_sql
+from app.services.anomaly_calibration import weekday_profile
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ def derive_daily_points(
     observed_by_day: Mapping[date, float],
     *,
     horizon_end: date,
+    weekday_medians: Mapping[int, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Uma linha por dia coberto, com esperado, faixa e custo anômalo.
 
@@ -130,7 +132,11 @@ def derive_daily_points(
             if cursor > horizon_end:
                 break
             raw_weight = weights.get(cursor.weekday())
-            if raw_weight is None or denominator <= 0:
+            historical_fallback = float((weekday_medians or {}).get(cursor.weekday(), 0.0))
+            if predicted <= 0 and historical_fallback > 0:
+                expected = historical_fallback
+                method = "HISTORICAL_BASELINE_ZERO_FORECAST"
+            elif raw_weight is None or denominator <= 0:
                 expected = predicted / covered
                 method = "UNIFORM_FALLBACK"
             else:
@@ -187,6 +193,7 @@ async def read_case_series(
     measure_column: str,
     dimensions: Sequence[str],
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    analysis_data_end: date | None = None,
 ) -> dict[str, Any]:
     """Série diária do caso: referência + observado, sem persistir a grade."""
     months = sorted(
@@ -218,7 +225,8 @@ async def read_case_series(
         }
 
     cutoff = _cutoff_of(publication)
-    horizon_end = cutoff + timedelta(days=max(1, int(horizon_days)))
+    effective_data_end = analysis_data_end or (datetime.now(timezone.utc).date() - timedelta(days=2))
+    horizon_end = min(cutoff + timedelta(days=max(1, int(horizon_days))), effective_data_end)
     covered_days: list[date] = []
     for row in reference_rows:
         start = row.get("coverage_start")
@@ -245,7 +253,7 @@ async def read_case_series(
         except (TypeError, ValueError):
             event_day = min(covered_days)
     context_start = event_day - timedelta(days=30)
-    context_end = event_day + timedelta(days=15)
+    context_end = min(event_day + timedelta(days=15), effective_data_end)
 
     series_dimensions = dict(getattr(case, "series_dimensions", None) or {})
     sql = observed_daily_sql(
@@ -257,7 +265,7 @@ async def read_case_series(
         measure_column=measure_column,
         dimensions=list(dimensions),
         start=min(min(covered_days), context_start),
-        end=max(max(covered_days), context_end),
+        end=min(max(max(covered_days), context_end), effective_data_end),
     )
     series_filter = _dimension_filter(series_dimensions)
     if series_filter:
@@ -272,7 +280,14 @@ async def read_case_series(
             continue
         observed_by_day[day] = observed_by_day.get(day, 0.0) + float(row.get("observed_cloud") or 0.0)
 
-    items = derive_daily_points(reference_rows, observed_by_day, horizon_end=horizon_end)
+    historical = {day: value for day, value in observed_by_day.items() if day <= cutoff}
+    profile = weekday_profile(historical, as_of=cutoff, weeks=8)
+    items = derive_daily_points(
+        reference_rows,
+        observed_by_day,
+        horizon_end=horizon_end,
+        weekday_medians=profile.medians if not profile.is_fallback else None,
+    )
     context_items = []
     context_day = context_start
     while context_day <= context_end:
@@ -290,6 +305,7 @@ async def read_case_series(
         "context_start": context_start.isoformat(),
         "context_end": context_end.isoformat(),
         "context_event_date": event_day.isoformat(),
+        "analysis_data_end": effective_data_end.isoformat(),
         "months": months,
         "data_cutoff": cutoff.isoformat(),
         "horizon_end": horizon_end.isoformat(),
