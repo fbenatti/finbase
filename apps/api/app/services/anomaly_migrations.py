@@ -91,6 +91,7 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_run ALTER COLUMN config_snapshot SET DEFAULT '{}'::jsonb",
     "ALTER TABLE anomaly_run ALTER COLUMN errors SET DEFAULT '[]'::jsonb",
     "ALTER TABLE anomaly_case ALTER COLUMN state SET DEFAULT 'NEW'",
+    "ALTER TABLE anomaly_case ALTER COLUMN event_family TYPE text USING event_family::text",
     "ALTER TABLE anomaly_case ALTER COLUMN severity SET DEFAULT 'LOW'",
     "ALTER TABLE anomaly_case ALTER COLUMN confidence SET DEFAULT 'UNAVAILABLE'",
     "ALTER TABLE anomaly_case ALTER COLUMN case_version SET DEFAULT 1",

@@ -246,7 +246,7 @@ class AnomalyCase(Base):
     )
     series_id = Column(String(120), nullable=False, index=True)
     series_dimensions = Column(JSON, nullable=False, default=dict)
-    event_family = Column(String(200), nullable=False)
+    event_family = Column(Text, nullable=False)
     # DAILY_CONSUMPTION | MONTHLY_EVENT | MONTHLY_ACCUMULATED
     event_type = Column(String(30), nullable=False)
     event_date = Column(String(10), nullable=False, index=True)
