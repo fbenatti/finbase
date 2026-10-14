@@ -37,8 +37,8 @@ realizado_cloud esperado antes desse evento
 | E4 | [04-detectores-episodios.md](04-detectores-episodios.md) | Detector diário, evento mensal, acumulado, nota e agrupamento em episódios |
 | E5 | [05-retrospectiva-dados.md](05-retrospectiva-dados.md) | Reconstrução histórica em lotes |
 | E6 | [06-worker-publicacao.md](06-worker-publicacao.md) | Worker, publicação consistente e composição com Planning |
-| E7 | `07-atribuicao-investigacao.md` | Roteamento, fila FinOps, notificações, investigação e decisão |
-| E8 | `08-remediacao-verificacao.md` | Ações, verificação de três dias válidos, retrospectiva e encerramento |
+| E7/E8 | [07-atribuicao-investigacao.md](07-atribuicao-investigacao.md) | Roteamento, fila FinOps, notificações, investigação e decisão |
+| E8 | ver [07-atribuicao-investigacao.md](07-atribuicao-investigacao.md) | Ações, verificação de três dias válidos, retrospectiva e encerramento |
 | E9 | `09-dashboard.md` | Gráfico observado/faixa/área anômala, painel de etapas, KPIs |
 | E10 | `10-validacao-ativacao.md` | Os 18 testes obrigatórios, regressões e piloto |
 
@@ -60,3 +60,4 @@ tabelas reais do catálogo antes de criá-las.
 | E4 | 2026-10-14 | Detectores diário/mensal/acumulado, nota e severidade, status de avaliação e consolidação de episódios | 57 testes novos; nenhuma regressão na suíte | Detector é puro: leitura observada e persistência são E6 |
 | E5 | 2026-10-14 | Reconstrução histórica em lotes, preferência por execução histórica, limitações declaradas e guarda de não publicar Planning | 22 testes novos; plano real encontrou referências históricas para 202608–202610 | Reconstrução roda uma execução por mês; publicação corrente é E6 |
 | E6 | 2026-10-14 | task_type anomaly_detection, publicação atômica, composição com Planning e ciclo de vida dos casos | 21 testes novos; PostgreSQL real: falha preserva a publicação, reprocessamento não duplica caso | Notificações são E7; Iceberg e PostgreSQL não formam transação distribuída |
+| E7/E8 | 2026-10-14 | Workflow completo por comandos explícitos: roteamento, fila FinOps, caixa de notificações, decisão, ações, verificação de três dias válidos e encerramento auditado | 20 testes novos; 17 endpoints publicados e respondendo | Agendador de vencimento e reavaliação automática da verificação pendentes |
