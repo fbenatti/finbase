@@ -22,6 +22,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Text,
     event,
     func,
     text,
