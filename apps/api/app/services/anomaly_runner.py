@@ -883,6 +883,8 @@ async def execute_detection(
             "currency": config_row.currency,
             "horizon_days": config_row.horizon_days,
             "data_lag_days": config_row.data_lag_days,
+            "first_run_days": config_row.first_run_days,
+            "reevaluation_days": config_row.reevaluation_days,
             "calibration_days": config_row.calibration_days,
             "history_days": config_row.history_days,
             "measure_column": config_row.measure_column or DEFAULT_MEASURE,
@@ -907,38 +909,52 @@ async def execute_detection(
         data_lag_days = int(config_row.data_lag_days if config_row.data_lag_days is not None else 2)
         analysis_data_end = _d2_data_end(detected_at, data_lag_days)
         horizon_days = int(config_row.horizon_days or 15)
-        # A prospectively valid reference must predate the last D-2 observation
-        # and its horizon must include that observation. Selecting today's
-        # latest forecast can otherwise compare a day with a forecast already
-        # informed by that day's realized value.
-        eligible = [
-            candidate for candidate in usable
-            if candidate.cutoff_date is not None
-            and candidate.cutoff_date < analysis_data_end
-            and candidate.cutoff_date + timedelta(days=horizon_days) >= analysis_data_end
-        ]
-        if not eligible:
+        publication = await current_publication(session, config_id)
+        window_days = int(
+            config_row.reevaluation_days if publication is not None
+            else config_row.first_run_days
+        )
+        evaluation_start = analysis_data_end - timedelta(days=max(1, window_days) - 1)
+        # Cada dia elegível usa o forecast mais recente cujo corte o antecede e
+        # cujo horizonte o cobre. Isso preserva o antes/depois ao longo da
+        # janela configurada, sem comparar vários dias com uma única previsão.
+        contracts_by_run = _contracts_by_evaluation_day(
+            usable,
+            start=evaluation_start,
+            end=analysis_data_end,
+            horizon_days=horizon_days,
+        )
+        if not contracts_by_run:
             raise AnomalyRunError(
-                f"sem forecast prospectivo anterior que cubra o corte com atraso de {data_lag_days} dia(s) "
-                f"({analysis_data_end.isoformat()}); nenhuma anomalia foi avaliada"
+                f"nenhum forecast prospectivo cobre a janela {evaluation_start.isoformat()}–"
+                f"{analysis_data_end.isoformat()} com atraso de {data_lag_days} dia(s); "
+                "nenhuma anomalia foi avaliada"
             )
-        contract = max(eligible, key=lambda c: (c.cutoff_date, c.run_id))
-        # A execução avalia os dias POSTERIORES ao próprio corte: por construção a
-        # referência é prospectiva. Reconstrução histórica (E5) marca
-        # RETROSPECTIVE explicitamente.
-        contract.reference_kind = "PROSPECTIVE"
+        selected_contracts = sorted(
+            contracts_by_run.values(), key=lambda item: (item[0].cutoff_date, item[0].run_id)
+        )
+        contract = selected_contracts[-1][0]
+        covered_days = set().union(*(days for _, days in selected_contracts))
+        uncovered_days = (analysis_data_end - evaluation_start).days + 1 - len(covered_days)
+        for selected_contract, _ in selected_contracts:
+            # O cutoff sempre antecede cada dia atribuído a esta referência.
+            selected_contract.reference_kind = "PROSPECTIVE"
         if _aborted(should_abort):
             await finish_run(session, run_id=run_id, status="CANCELLED", phase="Cancelado pelo usuário")
             await session.commit()
             return {"status": "CANCELLED"}
 
-        months = horizon_months(contract.cutoff_date, horizon_days)
-        horizon_end = contract.cutoff_date + timedelta(days=horizon_days)
         history_days = int(config_row.history_days or 180)
-        observed_start = contract.cutoff_date - timedelta(days=history_days)
+        observed_start = min(
+            selected_contract.cutoff_date - timedelta(days=history_days)
+            for selected_contract, _ in selected_contracts
+        )
+        horizon_end = max(
+            selected_contract.cutoff_date + timedelta(days=horizon_days)
+            for selected_contract, _ in selected_contracts
+        )
 
-        report(2, 6, "Lendo expectativa do snapshot do forecast")
-        expectation = await read_expectation(contract, months=months)
+        report(2, 6, f"Carregando {len(selected_contracts)} referências do forecast")
         report(3, 6, "Lendo consumo observado (realizado_cloud)")
         observed = await read_daily_observed(
             source_namespace=contract.source_namespace,
@@ -949,26 +965,52 @@ async def execute_detection(
             measure_column=config_row.measure_column,
             dimensions=dimensions,
             start=observed_start,
-            end=min(horizon_end, analysis_data_end),
+            end=analysis_data_end,
         )
         if _aborted(should_abort):
             await finish_run(session, run_id=run_id, status="CANCELLED", phase="Cancelado pelo usuário")
             await session.commit()
             return {"status": "CANCELLED"}
 
-        report(4, 6, "Avaliando séries e consolidando episódios")
-        outcome = await build_outcome(
-            config=config_map,
-            contract=contract,
-            expectation=expectation,
-            observed=observed,
-            dimensions=dimensions,
-            family_keys=family_keys,
-            detected_at=detected_at,
-            analysis_data_end=analysis_data_end,
-        )
+        report(4, 6, "Avaliando eventos com seus forecasts anteriores")
+        outcome = DetectionOutcome(contract=contract)
+        for selected_contract, event_days in selected_contracts:
+            if _aborted(should_abort):
+                await finish_run(session, run_id=run_id, status="CANCELLED", phase="Cancelado pelo usuário")
+                await session.commit()
+                return {"status": "CANCELLED"}
+            months = horizon_months(selected_contract.cutoff_date, horizon_days)
+            expectation = await read_expectation(selected_contract, months=months)
+            # Mantém todo o histórico pré-corte para calibrar; dos dias avaliados,
+            # inclui apenas os atribuídos a este snapshot, evitando duplicação.
+            selected_observed = [
+                row for row in observed
+                if row["event_date"] <= selected_contract.cutoff_date
+                or row["event_date"] in event_days
+            ]
+            local_end = max(event_days)
+            part = await build_outcome(
+                config=config_map,
+                contract=selected_contract,
+                expectation=expectation,
+                observed=selected_observed,
+                dimensions=dimensions,
+                family_keys=family_keys,
+                detected_at=detected_at,
+                analysis_data_end=local_end,
+            )
+            validate_assessments(part.assessments)
+            reconcile(part.expectation_totals, part.reference_totals)
+            outcome.reference_rows.extend(part.reference_rows)
+            outcome.assessments.extend(part.assessments)
+            outcome.detections.extend(part.detections)
+            outcome.series_count += part.series_count
+            outcome.warnings.extend(part.warnings)
+        if uncovered_days:
+            outcome.warnings.append(
+                f"{uncovered_days} dia(s) da janela não tinham forecast prospectivo compatível"
+            )
         validate_assessments(outcome.assessments)
-        reconcile(outcome.expectation_totals, outcome.reference_totals)
 
         # Os casos são resolvidos ANTES da publicação do Iceberg, na mesma
         # transação: a linha publicada já carrega `case_id`. Se a publicação
