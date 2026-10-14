@@ -685,7 +685,8 @@ async def get_case_series(
         except ValueError:
             analysis_data_end = None
     if analysis_data_end is None:
-        analysis_data_end = datetime.now(timezone.utc).date() - timedelta(days=int(config.data_lag_days or 0))
+        lag_days = int(config.data_lag_days if config.data_lag_days is not None else 2)
+        analysis_data_end = datetime.now(timezone.utc).date() - timedelta(days=lag_days)
 
     forecast = (
         await db.get(ForecastConfig, config.forecast_config_id) if config.forecast_config_id else None

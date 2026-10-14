@@ -879,7 +879,7 @@ async def execute_detection(
             raise AnomalyRunError(
                 "nenhuma execução de forecast utilizável: a medida precisa existir no resultado"
             )
-        data_lag_days = int(config_row.data_lag_days or 0)
+        data_lag_days = int(config_row.data_lag_days if config_row.data_lag_days is not None else 2)
         analysis_data_end = _d2_data_end(detected_at, data_lag_days)
         horizon_days = int(config_row.horizon_days or 15)
         # A prospectively valid reference must predate the last D-2 observation
