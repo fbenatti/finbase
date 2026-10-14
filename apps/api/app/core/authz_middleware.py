@@ -53,6 +53,11 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/groups", "groups"),
     ("/roles", "roles"),
     ("/ideas", "ideas"),
+    # Comandos do workflow de anomalia são POST `/anomalies/cases/{id}/transition`
+    # e caem em UPDATE_POST_MARKERS ("/transition") => ação `update`. O escopo
+    # específico (assign/investigate/decide/close) é exigido por
+    # Depends(require("anomalies", "update", <escopo>)) no router.
+    ("/anomalies", "anomalies"),
 ]
 
 PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health", "/etl/worker-health")

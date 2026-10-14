@@ -167,6 +167,10 @@ async def lifespan(app: FastAPI):
         from app.models.audit_log import AuditLog  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         from app.models.gold_manifest import GoldManifest  # noqa: F401
+        from app.models.anomaly import (  # noqa: F401
+            AnomalyConfig, AnomalyRun, AnomalyPublication,
+            AnomalyCase, AnomalyCaseEvent, AnomalyAction, AnomalyNotification,
+        )
         await conn.run_sync(Base.metadata.create_all)
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
@@ -903,6 +907,12 @@ async def lifespan(app: FastAPI):
             "DROP TABLE IF EXISTS project",
         ):
             await _execute_migration(conn, statement)
+        # Gestão de anomalias de custo cloud (E1): tabelas de controle e
+        # workflow. A migração é idempotente e deriva a evolução do metadata,
+        # e a configuração inicial nasce DESABILITADA.
+        from app.services.anomaly_migrations import migrate_anomalies
+        await migrate_anomalies(conn)
+
         # Backfill the canonical provider slug for legacy rows that only have a
         # free-text cloud_name, so rule matching keeps working without a
         # re-import. Unknown/free-text names are left NULL (match only the

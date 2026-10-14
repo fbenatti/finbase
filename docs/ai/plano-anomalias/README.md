@@ -31,7 +31,7 @@ realizado_cloud esperado antes desse evento
 | Etapa | Documento | Conteúdo |
 |---|---|---|
 | E0 | [00-contrato-cloud.md](00-contrato-cloud.md) | Auditoria da origem, moeda, filtros, datas UTC, regras aplicadas e cardinalidade de `realizado_cloud` |
-| E1 | `01-persistencia-estados.md` | Modelos PostgreSQL, schemas Iceberg, máquina de estados, permissões |
+| E1 | [01-persistencia-estados.md](01-persistencia-estados.md) | Modelos PostgreSQL, schemas Iceberg, máquina de estados, permissões |
 | E2 | `02-referencia-forecast.md` | Adaptador de snapshots, seleção prospectiva/retrospectiva, `applied_rule_refs` |
 | E3 | `03-distribuicao-faixa.md` | Referência compacta de 15 dias, pesos semanais, calibração, perfis e materialidade |
 | E4 | `04-detectores-episodios.md` | Detector diário, evento mensal, acumulado, nota e agrupamento em episódios |
@@ -54,3 +54,4 @@ tabelas reais do catálogo antes de criá-las.
 | Etapa | Data | Entrega | Testes | Limitações |
 |---|---|---|---|---|
 | E0 | 2026-10-14 | `00-contrato-cloud.md` — auditoria completa com medições reais | Medições executadas via Trino (cardinalidade, parsing de datas, moeda, medidas) | `applied_rule_refs` ainda não existe no motor de forecast (escopo E2); `realizado_cloud` ausente no cubo Gold |
+| E1 | 2026-10-14 | 7 tabelas PostgreSQL, máquina de estados, contrato Iceberg, permissões, configuração inicial desabilitada | 56 testes novos; migração idempotente verificada em PostgreSQL real; suíte completa sem regressão | Endpoints HTTP são E7; tabelas Iceberg criadas na primeira publicação (E6) |

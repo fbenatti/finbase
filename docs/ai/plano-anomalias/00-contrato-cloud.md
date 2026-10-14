@@ -218,14 +218,28 @@ cadastradas, **12 ativas** (id 23 e id 14 estão `active = false`).
 | 21 | Vivo Mais — encerrar reserva PTU Azure-4P estornada | `CANCEL_ON_REFUND` | 35 | ✔ | — |
 | 9 | Refund cancela compromisso | `CANCEL_ON_REFUND` | 40 | ✔ | — |
 
-> **Achado A0-3 — "regra cadastrada" ≠ "regra aplicada".**
-> O motor não expõe hoje um registro de quais regras **encontraram a série**,
-> respeitaram a vigência e influenciaram a projeção. O `config_snapshot` do
-> `forecast_run` congela a definição das regras, não a decisão de aplicação.
-> A E2 deve produzir `applied_rule_refs` com essa distinção
-> (`MATCHED_AND_APPLIED` / `MATCHED_OUT_OF_WINDOW` / `SERIES_NOT_FOUND` /
-> `OUT_OF_DIMENSIONS`), reaproveitando os avisos já emitidos pelo motor
-> ("não aplicada: campo fora das dimensões").
+> **Achado A0-3 — "regra cadastrada" ≠ "regra aplicada", e o rastro é texto livre.**
+> O motor emite avisos textuais em
+> `forecast_run.error_metrics["business_rules"]` (gravados no caminho normal,
+> `worker.py:644-651`; o caminho de acurácia grava `{}`):
+>
+> ```text
+> "{nome da regra}"
+> "{nome} (não aplicada: campo fora das dimensões)"
+> "{nome} (não aplicada: sem identificação/escopo)"
+> "{nome} (sem séries correspondentes)"
+> "{nome} (não aplicada: comportamento desconhecido)"
+> "validade: <detalhes com contagens e idades>"
+> ```
+>
+> Não há id de regra, versão, registro por série nem valor antes/depois. O
+> `config_snapshot` do `forecast_run` congela a **definição** das regras (e, em
+> DEV, não congela `growth_rate`, `model_mode`, `enabled_windows`,
+> `recent_weight` nem `minimum_daily_points`).
+> A E2 deve produzir `applied_rule_refs` estruturado com a distinção
+> `MATCHED_AND_APPLIED` / `MATCHED_OUT_OF_WINDOW` /
+> `MATCHED_OUT_OF_DIMENSIONS` / `SERIES_NOT_FOUND` / `RULE_INACTIVE`,
+> reaproveitando essa sinalização em vez de reimplementar casamento de regras.
 
 Regras de comportamento preservadas (contrato do plano §2.4):
 
@@ -320,6 +334,32 @@ REMAINING_MONTH  -> projeção cobre somente o restante do mês a partir do cuto
 > compra**, não o restante corrente.
 
 Teste dedicado: E10 caso 5.
+
+### 3.5 O que o snapshot do forecast NÃO preserva
+
+> **Achado A0-6 — o motor emite apenas linhas mensais e não guarda a série de entrada.**
+> `forecast.result_run_{id}` contém **somente** `tipo = 'forecast'`, com a coluna
+> `forecast_month`. O realizado do mês-âncora é deliberadamente **não** emitido
+> (`forecast_service.py:1694-1699`), e `realizado_cloud` nos snapshots de dupla
+> medida é espelho da projeção (`forecast_service.py:142`), não a observação.
+> **Não existe projeção diária** em nenhum artefato do motor; a única taxa
+> diária do produto é derivada na leitura (`forecast_total / dias_do_mês`,
+> `routers/forecast.py:1905`).
+>
+> Consequências diretas para a camada de anomalia:
+>
+> 1. O observado **tem de** ser reconsultado na fonte realizada
+>    (`silver.dest_modelo_focus`), com o mesmo contrato de agregação do motor
+>    (`_fetch_period_records`, `gold_date_expr`, filtro de tipo).
+> 2. A distribuição diária prevista por dia da semana (plano §2.3) é
+>    construída **pela camada de referência** a partir do valor mensal do
+>    snapshot + pesos históricos de `realizado_cloud`. Isso **não** é um segundo
+>    motor de recorrência: nenhuma regra de negócio é reimplementada.
+> 3. `source_snapshot_id` existe em `forecast_run` mas **nunca foi gravado**
+>    (0 de 386 runs em DEV). A camada de anomalia grava o seu próprio
+>    `source_snapshot_id`, sem depender desse campo.
+> 4. `applied_rule_refs` estruturado precisa ser derivado dos avisos textuais
+>    (§2.4) e do `config_snapshot` congelado.
 
 ---
 
