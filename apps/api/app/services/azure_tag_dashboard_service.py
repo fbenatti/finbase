@@ -397,7 +397,7 @@ class AzureTagDashboardService:
         tag_keys = await self._tag_keys()
         tag_mappings = await self._tag_mappings()
         rows, blob = await self._latest_inventory(connection)
-        aggregates = self._inventory_aggregates(rows, tag_keys)
+        aggregates = self._inventory_aggregates(rows, tag_keys, tag_mappings)
         subscription_ids = set(aggregates)
         if rows:
             names_from_inventory = {
@@ -467,7 +467,7 @@ class AzureTagDashboardService:
                 supported, reason = False, "Banco SQL master não aceita tags no Azure."
             else:
                 reason = str(row.get("tag_support_reason") or "") or None
-            tag_status, missing = _managed_tag_status(row.get("tags"), tag_keys)
+            tag_status, missing = _managed_tag_status(row.get("tags"), tag_keys, mappings)
             is_rg = resource_type.casefold() == RESOURCE_GROUP_TYPE
             resource_key = str(row.get("resource_id") or "").strip().casefold()
             if not resource_key:
@@ -480,9 +480,10 @@ class AzureTagDashboardService:
                 except (TypeError, ValueError):
                     actual_tags = {}
             actual_tags = actual_tags if isinstance(actual_tags, dict) else {}
-            actual_normalized = {str(key).casefold(): str(value).strip() for key, value in actual_tags.items()}
-            matching_tags = [key for key, value in expected["tags"].items()
-                             if actual_normalized.get(key.casefold()) == value]
+            canonical_actual, original_keys = _canonical_tag_values(actual_tags, tag_keys, mappings)
+            matching_tags = [original_keys[key] for key, value in expected["tags"].items()
+                             if canonical_actual.get(key) == value and key in original_keys]
+            managed_tag_keys = [original_keys[key] for key in tag_keys if key in original_keys]
             resources.append({
                 **row,
                 "tags": actual_tags,
@@ -495,6 +496,7 @@ class AzureTagDashboardService:
                 "expected_tags_source": expected["source"],
                 "expected_tags_ambiguous": expected["ambiguous"],
                 "matching_tags": matching_tags,
+                "managed_tag_keys": managed_tag_keys,
             })
         return {
             "subscription_id": subscription_id,
