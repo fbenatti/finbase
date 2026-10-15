@@ -1634,8 +1634,12 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
                                      req.rows, req.sort_rows, req.sort_columns)
         result["origin_column"] = origin_name
         result["origin_values"] = ["realizado" if item >= 0 else "forecast" for item in other_ids] + ["forecast"]
-        result["tables"] = [{"id": item, "physical_name": _FORECAST_MANUAL_PIVOT_NAME if item == FORECAST_MANUAL_PIVOT_ID else None,
-                             "origin": "forecast"} for item in req.destination_table_ids]
+        result["tables"] = [{
+            "id": item,
+            "physical_name": _FORECAST_MANUAL_PIVOT_NAME if item == FORECAST_MANUAL_PIVOT_ID
+            else await _analysis_physical_name(db, item),
+            "origin": "forecast" if item < 0 else "realizado",
+        } for item in req.destination_table_ids]
         result["period_auto_applied"] = "Períodos futuros sem realizado na Gold e mês corrente"
         return result
 
