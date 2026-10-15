@@ -3,7 +3,7 @@ import { Box, Button, ButtonBase, Chip, Paper, Stack, Typography } from "@mui/ma
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import AnomalyEvolutionChart from "./AnomalyEvolutionChart";
 import type { AnomalyCase, AnomalySeries } from "../../services/anomaliesApi";
-import { dimensionValue, filterMembers, scopeBranches, scopeTimeline, type ScopeFilter } from "./anomalyInvestigationModel";
+import { detailScopeChain, dimensionValue, filterMembers, observedScopeBranches, scopeBranches, scopeTimeline, type ScopeFilter } from "./anomalyInvestigationModel";
 
 const money = (value: number | null | undefined, currency: string) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency });
 const pct = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
@@ -16,13 +16,20 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
 }) {
   const [filters, setFilters] = useState<ScopeFilter[]>([]);
   const all = series.contributor_breakdown ?? [];
-  const members = filterMembers(all, filters);
+  const memberFields = new Set(all.flatMap(member => Object.keys(member.dimensions)));
+  const forecastFilters = filters.filter(filter => memberFields.has(filter.field));
+  const members = filterMembers(all, forecastFilters);
   const timeline = useMemo(() => filters.length ? scopeTimeline(members) : series.items, [series, filters, members]);
   const focus = timeline.find(point => point.event_date === kase.event_date);
   const actual = focus?.observed_cloud ?? null, expected = focus?.expected_cloud ?? null;
   const delta = actual != null && expected != null ? actual - expected : null;
   const relative = delta != null && expected != null && expected > 0 ? delta / expected * 100 : null;
-  const { dimension, groups } = scopeBranches(members, filters);
+  const hierarchy = detailScopeChain(series.detail_dimensions);
+  const forecastBranches = scopeBranches(members, forecastFilters);
+  const sourceBranches = observedScopeBranches(series.detail_items ?? [], filters, hierarchy);
+  const sourceOnly = forecastBranches.groups.length === 0 && sourceBranches.groups.length > 0;
+  const dimension = forecastBranches.groups.length ? forecastBranches.dimension : sourceBranches.dimension;
+  const groups = forecastBranches.groups.length ? forecastBranches.groups : sourceBranches.groups;
   const paths = (all.length ? all : [{ dimensions: kase.series_dimensions }]).map(member => orgPath(member.dimensions));
   const common = paths[0]?.filter((_, index) => paths.every(parts => parts.slice(0, index + 1).join("\0") === paths[0].slice(0, index + 1).join("\0"))) ?? [];
   const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Escopo do caso";
@@ -33,6 +40,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const leading = groups.find(group => group.delta != null && group.delta > 0);
   const positiveTotal = groups.reduce((sum, group) => sum + Math.max(0, group.delta ?? 0), 0);
   const share = (value: number) => positiveTotal > 0 ? Math.max(0, value) / positiveTotal * 100 : 0;
+  const forecastScopeLabel = forecastFilters.length ? forecastFilters[forecastFilters.length - 1].value : common[common.length - 1] ?? "total do caso";
   const selectedSeries: AnomalySeries = { ...series, items: timeline,
     contributor_series: members.map(member => ({ series_id: member.series_id, dimensions: member.dimensions })),
     contributor_series_count: members.length || series.contributor_series_count };
@@ -68,10 +76,10 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
 
     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>
       <Typography sx={{ fontWeight: 750, fontSize: 17 }}>De onde veio o desvio?</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Abra um ramo para acompanhar somente aquele projeto ou conta.</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Siga o caminho até o serviço e SKU que concentram o consumo.</Typography>
       <Stack direction="row" gap={.75} flexWrap="wrap" alignItems="center" sx={{ my: 1.5 }}>
         <Chip size="small" label="Total do caso" color={filters.length ? "default" : "primary"} onClick={() => setFilters([])} />
-        {filters.map((filter, index) => <Box key={filter.field} sx={{ display: "flex", alignItems: "center", gap: .75 }}><Typography color="text.secondary">›</Typography><Chip size="small" label={filter.value} color={index === filters.length - 1 ? "primary" : "default"} onClick={() => setFilters(filters.slice(0, index + 1))} /></Box>)}
+        {filters.map((filter, index) => <Box key={filter.field} sx={{ display: "flex", alignItems: "center", gap: .75 }}><Typography color="text.secondary">›</Typography><Chip size="small" label={`${hierarchy.find(item => item.field === filter.field)?.label ?? filter.field}: ${filter.value}`} color={index === filters.length - 1 ? "primary" : "default"} onClick={() => setFilters(filters.slice(0, index + 1))} /></Box>)}
       </Stack>
       {common.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>{common.join(" › ")}</Typography>}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(160px,.7fr) 2fr" }, gap: { xs: 1.5, md: 3 }, alignItems: "center" }}>
@@ -83,14 +91,14 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Box>
         <Box sx={{ pl: { xs: 1.5, md: 2.5 }, borderLeft: "2px solid #dce5ef", minWidth: 0 }}>
           {dimension && <Typography variant="overline" color="text.secondary">{dimension.label}</Typography>}
-          {groups.map((group, index) => <ButtonBase key={group.value} disabled={!safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #dce5ef", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#dce5ef", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#f5f8fd", borderColor: "#8caee1" } }}>
+          {groups.map((group, index) => <ButtonBase key={group.value} disabled={sourceOnly ? !(series.detail_items?.length) : !safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #dce5ef", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#dce5ef", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#f5f8fd", borderColor: "#8caee1" } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="start" spacing={1}>
               <Typography variant="body2" fontWeight={750}>{group.value}</Typography>
-              <Typography fontWeight={800} sx={{ color: group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</Typography>
+              <Typography fontWeight={800} sx={{ color: sourceOnly ? "#315e91" : group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{sourceOnly ? money(group.actual, currency) : <>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</>}</Typography>
             </Stack>
-            <Typography variant="caption" color="text.secondary">Previsto {money(group.expected, currency)} → realizado {money(group.actual, currency)}</Typography>
-            <Box sx={{ height: 5, bgcolor: "#edf1f6", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
-            <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
+            <Typography variant="caption" color="text.secondary">{sourceOnly ? "Custo observado na data do evento" : <>Previsto {money(group.expected, currency)} → realizado {money(group.actual, currency)}</>}</Typography>
+            <Box sx={{ height: 5, bgcolor: "#edf1f6", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${sourceOnly ? Math.min(100, Math.abs(group.actual ?? 0) / Math.max(1, Math.abs(actual ?? 0)) * 100) : share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
+            <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
           </ButtonBase>)}
           {!groups.length && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
             <Typography variant="body2" fontWeight={700}>{dimensionValue(member, "subaccountname")}</Typography>
@@ -101,7 +109,8 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Box>
       </Box>
     </Paper>
-    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Evolução · {filters.length ? label : "total do caso"}</Typography>
+    {filters.some(filter => !memberFields.has(filter.field)) && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>O custo detalhado é observado na data do evento. Forecast e linha do tempo continuam no nível {forecastScopeLabel}, a granularidade que a previsão sustenta.</Typography>}
+    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Evolução · {forecastScopeLabel}</Typography>
     <AnomalyEvolutionChart key={`${kase.id}-${JSON.stringify(filters)}`} series={selectedSeries} kase={kase} currency={currency} />
   </Box>;
 }
