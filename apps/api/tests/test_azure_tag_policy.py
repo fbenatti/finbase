@@ -1,7 +1,7 @@
 import json
 
 from app.models.rules import ClassificationRule, Department
-from app.routers.azure_tag_policy import _definition, build_script
+from app.routers.azure_tag_policy import _definition, _tag_drift_condition, build_script
 from app.services.azure_tag_policy_service import (
     AzureTagPolicyService,
     SCOPE_RESOURCE,
@@ -34,7 +34,7 @@ def test_resource_group_selector_applies_to_rg_and_children():
     terms = [{"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-terra"]}]
     rg = service._selector(terms, "resource_group")
     resource = service._selector(terms, "resource")
-    assert rg["allOf"][0] == {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+    assert rg["allOf"][0] == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
     assert rg["allOf"][1] == {"field": "name", "equals": "rg-terra"}
     assert resource["allOf"][1] == {"value": "[resourceGroup().name]", "equals": "rg-terra"}
 
@@ -286,7 +286,7 @@ def test_tag_mapping_uses_global_key_and_focus_field_value():
     assert items[0]["tags"] == {"projeto": "Terra Brasil", "area": "Financeiro"}
 
 
-def test_deployment_script_uses_identity_rbac_and_test_suffix():
+def test_deployment_script_uses_identity_rbac_and_stable_names():
     script = build_script([{
         "tenant_id": "11111111-1111-1111-1111-111111111111", "connection_code": "azure-ti", "connection_name": "Azure TI", "department_name": "Terra Brasil",
         "deployment_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
@@ -298,7 +298,9 @@ def test_deployment_script_uses_identity_rbac_and_test_suffix():
     assert "--mi-system-assigned" in script
     assert 'role "Tag Contributor"' in script
     assert "az policy remediation create" in script
-    assert "test-terra-brasil" in script
+    assert "test-terra-brasil" not in script
+    assert "resolve_existing_target" in script
+    assert "openfinopsContentHash" in script
     assert "ensure_tenant" not in script
     assert "--query tenantId" not in script
     assert 'az policy remediation create --name "$name" --subscription "$subscription"' in script
@@ -355,7 +357,7 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     assert "trigger-scan --resource" not in script
     assert "grep -q" not in script
     assert "|| true" not in script
-    assert "continue" not in script
+    assert "Há $matches assignments OpenFinops candidatos" in script
     assert "az policy definition delete" not in script
     assert "az policy assignment delete" not in script
     assert "az policy remediation delete" not in script
@@ -439,7 +441,7 @@ def test_rg_assignment_does_not_embed_other_rg_exclusions():
     assert service._previous_overlap_reason(assigned, prisma) == "assignment_scope_disjoint"
     selector = service._selector(assigned["terms"], "resource_group", omit_rg_scope=True)
     effective = service._effective(selector, [])
-    assert effective == {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+        assert effective == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
     assert "PCCAGENTLESSSCANRESOURCEGROUP" not in json.dumps(effective)
 
 
@@ -469,8 +471,8 @@ def test_rg_assignment_scope_omits_rg_name_from_selector():
     ]
     rg = service._selector(terms, "resource_group", omit_rg_scope=True)
     resource = service._selector(terms, "resource", omit_rg_scope=True)
-    assert rg == {"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
-    assert resource == {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"}
+    assert rg == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
+    assert resource == {"field": "type", "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"}
 
 
 def test_deployment_script_uses_resource_group_assignment_scope():
