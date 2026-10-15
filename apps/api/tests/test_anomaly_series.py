@@ -334,3 +334,23 @@ def test_contribuintes_preservam_organograma_e_reconciliam_desvio(monkeypatch):
         assert selected_day["observed_cloud"] == row["observed_cloud"]
         assert selected_day["expected_cloud"] == row["expected_cloud"]
         assert all(point["observed_cloud"] is None for point in row["items"] if point["is_future"])
+
+
+def test_drilldown_resolve_apenas_dimensoes_disponiveis_e_nao_duplica_grao_forecast():
+    from app.services.anomaly_series import resolve_detail_dimensions, detailed_event_sql
+    dims = resolve_detail_dimensions(
+        ["SubscriptionName", "ResourceGroupName", "ServiceName", "SkuMeter", "ResourceId"],
+        ["servicename"],
+    )
+    assert [(item["key"], item["column"]) for item in dims] == [
+        ("subscription", "SubscriptionName"), ("resource_group", "ResourceGroupName"), ("sku", "SkuMeter")
+    ]
+    sql = detailed_event_sql(source_namespace="silver", source_table="dest_modelo_focus",
+        date_column="chargeperiodstart", period_column="_billing_period", type_column="tipo",
+        measure_column="realizado_cloud", dimensions=["servicename"], detail_dimensions=dims,
+        member_filters=["\"servicename\" = 'Compute'"], event_day=date(2026, 10, 12))
+    assert '"SubscriptionName" AS "subscription"' in sql
+    assert '"ResourceGroupName" AS "resource_group"' in sql
+    assert '"SkuMeter" AS "sku"' in sql
+    assert '"ResourceId"' not in sql
+    assert "DATE '2026-10-12'" in sql and "realizado_cloud" in sql
