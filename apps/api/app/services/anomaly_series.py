@@ -19,8 +19,10 @@ Nada é copiado para o PostgreSQL: a leitura é feita no Iceberg/Trino por
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
@@ -29,6 +31,8 @@ from app.services.forecast_service import gold_date_expr
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
+_DETAIL_SCHEMA_CACHE: dict[tuple[str, str], tuple[float, list[str]]] = {}
+_DETAIL_SCHEMA_TTL_SECONDS = 300
 
 # Drilldown adicional, apenas quando a coluna existe na fonte configurada.
 # O forecast continua sendo comparável somente no grão de suas séries.
@@ -86,6 +90,20 @@ def detailed_event_sql(*, source_namespace: str, source_table: str, date_column:
          ORDER BY ABS(SUM(value)) DESC
          LIMIT 500
     """
+
+
+async def _read_detail_schema(source_namespace: str, source_table: str) -> list[str]:
+    key = (source_namespace, source_table)
+    cached = _DETAIL_SCHEMA_CACHE.get(key)
+    if cached and time.monotonic() - cached[0] < _DETAIL_SCHEMA_TTL_SECONDS:
+        return cached[1]
+    rows = await trino_execute(
+        f"DESCRIBE iceberg.{source_namespace}.{_quote(source_table)}", timeout_s=30
+    )
+    columns = [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
+               for row in rows]
+    _DETAIL_SCHEMA_CACHE[key] = (time.monotonic(), columns)
+    return columns
 
 #: Horizonte usado quando o caso não tem publicação com corte conhecido.
 DEFAULT_HORIZON_DAYS = 15
