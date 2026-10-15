@@ -156,3 +156,32 @@ parciais); build frontend aprovado. No navegador, o caso 17 abre em 427,78 de de
 selecionar SEM PROJETO DEFINIDO filtra para 186,64, previsto 313,28 e observado 499,92,
 inclusive no gráfico. Retornar ao total restaura a comparação agregada. Layout
 validado nas larguras normal e 1.066 px.
+
+## Drilldown até as dimensões de consumo da cloud
+
+A investigação agora continua da contribuição que sustenta o desvio até as
+dimensões disponíveis na tabela observada: assinatura/subconta, ID da assinatura,
+resource group, projeto GCP, serviço, categoria, SKU/medidor e região. A API
+resolve os nomes físicos por schema e retorna somente os campos existentes; não
+pressupõe que Azure e GCP tenham as mesmas colunas. As linhas são filtradas para
+as séries do caso e o dia avaliado, agregadas por dimensões e limitadas aos 500
+maiores grupos para manter a navegação manejável.
+
+O organograma e os ramos derivados das séries de forecast mostram previsto,
+realizado e desvio. Dimensões mais finas que o grão da série são exibidas como
+custo observado na data do evento. A interface declara que não há forecast nesse
+grão e mantém o forecast/gráfico no escopo comparável; não reparte a previsão do
+projeto entre recursos, serviços ou SKUs sem uma referência que sustente isso.
+No último nível, os detalhes observados continuam visíveis, ordenados por valor.
+O caminho selecionado deixa explícito o nível usado no cálculo do desvio.
+
+Limitação operacional: os detalhes por recurso dependem de as colunas estarem
+presentes e corretamente mapeadas na origem configurada e de a consulta Trino
+conseguir lê-las. Caso contrário, a decomposição termina no último nível com
+dados; não infere assinatura, resource group ou SKU por tags/texto livre.
+
+Validação: testes focados da consulta cobrem resolução de schema, escaping de
+identificadores, escopo nas séries do caso e filtro pela data do evento. A tela
+do caso 17 foi conferida no browser para preservar o desvio agregado e a navegação
+por projeto. A confirmação de quais dimensões finas estão disponíveis no payload
+real dessa origem continua dependente de validar a resposta Trino da implantação.
