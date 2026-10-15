@@ -19,17 +19,66 @@ from app.models.source_connection import SourceConnection
 logger = logging.getLogger("openfinops.azure_tag_dashboard")
 RESOURCE_GROUP_TYPE = "microsoft.resources/subscriptions/resourcegroups"
 SQL_DATABASE_TYPE = "microsoft.sql/servers/databases"
-def _managed_tag_status(tags: Any, tag_keys: list[str]) -> tuple[str, list[str]]:
-    if not tag_keys:
-        return "not_assessed", []
+def _tag_token(value: Any) -> str:
+    return "".join(character for character in str(value or "").casefold() if character.isalnum())
+
+
+def _tag_alias_index(tag_keys: list[str], mappings: list[dict[str, str]] | None = None) -> dict[str, str]:
+    """Map configured tag names and their Silver field names to a canonical tag key."""
+    aliases: dict[str, str | None] = {}
+    fields_by_key = {
+        str(mapping.get("tag_key") or "").casefold(): str(mapping.get("focus_field") or "")
+        for mapping in (mappings or [])
+    }
+    for key in tag_keys:
+        key = str(key or "").strip()
+        if not key:
+            continue
+        candidates = {_tag_token(key)}
+        focus_field = fields_by_key.get(key.casefold())
+        if focus_field:
+            candidates.add(_tag_token(focus_field))
+        # Azure inventories commonly use singular and plural variants, e.g.
+        # centro_de_custo for the configured centro-de-custos key.
+        for candidate in tuple(candidates):
+            if candidate.endswith("s"):
+                candidates.add(candidate[:-1])
+            else:
+                candidates.add(candidate + "s")
+        for candidate in candidates:
+            if candidate in aliases and aliases[candidate] != key:
+                aliases[candidate] = None
+            else:
+                aliases[candidate] = key
+    return {alias: key for alias, key in aliases.items() if key is not None}
+
+
+def _canonical_tag_values(tags: Any, tag_keys: list[str],
+                          mappings: list[dict[str, str]] | None = None) -> tuple[dict[str, str], dict[str, str]]:
     if isinstance(tags, str):
         try:
             tags = json.loads(tags)
         except (TypeError, ValueError):
             tags = {}
     values = tags if isinstance(tags, dict) else {}
-    normalized = {str(key).casefold(): str(value).strip() for key, value in values.items()}
-    missing = [key for key in tag_keys if not normalized.get(key.casefold())]
+    aliases = _tag_alias_index(tag_keys, mappings)
+    canonical: dict[str, str] = {}
+    originals: dict[str, str] = {}
+    for key, value in values.items():
+        canonical_key = aliases.get(_tag_token(key))
+        if canonical_key:
+            # Preserve the first explicit match when multiple aliases coexist.
+            canonical.setdefault(canonical_key, str(value).strip())
+            originals.setdefault(canonical_key, str(key))
+    return canonical, originals
+
+
+def _managed_tag_status(tags: Any, tag_keys: list[str],
+                        mappings: list[dict[str, str]] | None = None) -> tuple[str, list[str]]:
+    if not tag_keys:
+        return "not_assessed", []
+    normalized, _originals = _canonical_tag_values(tags, tag_keys, mappings)
+    missing = [key for key in tag_keys if not normalized.get(key)]
     if not missing:
         return "complete", []
     if len(missing) == len(tag_keys):
@@ -111,7 +160,8 @@ class AzureTagDashboardService:
             return {}
 
     @staticmethod
-    def _inventory_aggregates(rows: list[dict[str, Any]], tag_keys: list[str]) -> dict[str, list[dict[str, Any]]]:
+    def _inventory_aggregates(rows: list[dict[str, Any]], tag_keys: list[str],
+                              mappings: list[dict[str, str]] | None = None) -> dict[str, list[dict[str, Any]]]:
         grouped: dict[str, dict[tuple, dict[str, Any]]] = {}
         for row in rows:
             subscription_id = str(row.get("subscription_id") or "").strip()
@@ -126,7 +176,7 @@ class AzureTagDashboardService:
                 taggable = taggable.casefold() == "true" if taggable.casefold() in {"true", "false"} else None
             if not isinstance(taggable, bool):
                 taggable = False if is_master else None
-            status, _missing = _managed_tag_status(row.get("tags"), tag_keys)
+            status, _missing = _managed_tag_status(row.get("tags"), tag_keys, mappings)
             key = (resource_type.casefold(), is_rg, is_master, taggable)
             by_type = grouped.setdefault(subscription_id.casefold(), {})
             aggregate = by_type.setdefault(key, {
