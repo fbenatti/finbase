@@ -420,9 +420,6 @@ METADATAEOF
 
 # === Tenant de recursos 78879b00-f0e9-486c-836f-56f314e47e7f ===
 # O Azure CLI alterna somente a subscription; não valida nem solicita login por tenant.
-resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' All
-ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-rg-4ae7870f6635}"
-ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-rg-4ae7870f6635}"
 EXPECTED_SUBSCRIPTION=63dbc6fc-93d8-4ac1-9745-253f6b502240
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
@@ -431,6 +428,9 @@ if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
 fi
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 [[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }
+resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' All
+ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-rg-4ae7870f6635}"
+ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-rg-4ae7870f6635}"
 ensure_definition "$ACTIVE_POLICY_NAME" All "$POLICIES_DIR/of-def-2-52-rg-4ae7870f6635-rules.json" "$POLICIES_DIR/of-def-2-52-rg-4ae7870f6635-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 0b79e49909a4ec3f363308860e08fef357b28c004d30c106c29dd7d54fd2c684
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
@@ -444,9 +444,6 @@ else
   error "Assignment $ACTIVE_ASSIGNMENT_NAME não encontrado após ensure_assignment."; exit 1
 fi
 
-resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' Indexed
-ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-0b1846c1728f}"
-ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-0b1846c1728f}"
 EXPECTED_SUBSCRIPTION=63dbc6fc-93d8-4ac1-9745-253f6b502240
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
@@ -455,6 +452,9 @@ if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
 fi
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 [[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }
+resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' Indexed
+ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-0b1846c1728f}"
+ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-0b1846c1728f}"
 ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
