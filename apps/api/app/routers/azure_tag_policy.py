@@ -129,8 +129,14 @@ async def export_policy(
             raise HTTPException(status_code=404, detail="Tenant Azure não encontrado")
     if subscription_id and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}", subscription_id):
         raise HTTPException(status_code=422, detail="subscription_id deve ser um GUID válido")
-    policies = [doc for tenant in tenants
-                if (doc := await service.generate_tenant_policy(tenant["connection_id"], department_id, subscription_id))]
+    policies = []
+    try:
+        for tenant in tenants:
+            doc = await service.generate_tenant_policy(tenant["connection_id"], department_id, subscription_id)
+            if doc:
+                policies.append(doc)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if subscription_id and not any(subscription_id.casefold() in {sid.casefold() for sid in doc.get("deployment_subscriptions", [])}
                                    for doc in policies):
         raise HTTPException(status_code=400, detail="Subscription não encontrada ou sem políticas Azure exportáveis para esta conexão")
