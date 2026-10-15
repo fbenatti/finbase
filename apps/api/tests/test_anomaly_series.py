@@ -329,3 +329,8 @@ def test_contribuintes_preservam_organograma_e_reconciliam_desvio(monkeypatch):
     for key in ("observed_cloud", "expected_cloud", "delta_cloud"):
         assert sum(row[key] for row in rows) == pytest.approx(event[key])
     assert rows[1]["dimensions"]["organograma_nivel_5"] == "Sem projeto"
+    for row in rows:
+        selected_day = next(point for point in row["items"] if point["event_date"] == row["event_date"])
+        assert selected_day["observed_cloud"] == row["observed_cloud"]
+        assert selected_day["expected_cloud"] == row["expected_cloud"]
+        assert all(point["observed_cloud"] is None for point in row["items"] if point["is_future"])
