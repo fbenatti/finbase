@@ -1741,6 +1741,11 @@ export async function getAzureTenants(): Promise<AzureTenant[]> {
   return data;
 }
 
+export async function getAzurePolicySubscriptions(connectionId: number): Promise<AzurePolicySubscription[]> {
+  const { data } = await api.get("/azure-tag-policy/subscriptions", { params: { connection_id: connectionId } });
+  return data.subscriptions;
+}
+
 export async function getAzureTagMappings(): Promise<{
   mappings: AzureTagMapping[];
   focus_fields: string[];
@@ -1769,11 +1774,13 @@ export async function exportAzureTagPolicy(
   fmt: "json" | "script" | "both" = "both",
   departmentId?: number,
   planOnly = false,
+  subscriptionId?: string,
 ): Promise<AzureTagPolicyExport> {
   const params: Record<string, string | number | boolean> = { fmt };
   if (connectionId !== undefined) params.connection_id = connectionId;
   if (departmentId !== undefined) params.department_id = departmentId;
   if (planOnly) params.plan_only = true;
+  if (subscriptionId) params.subscription_id = subscriptionId;
   const { data } = await api.get("/azure-tag-policy/export", { params });
   return data;
 }
