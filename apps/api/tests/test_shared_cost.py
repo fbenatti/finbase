@@ -40,6 +40,17 @@ def test_allocation_uses_source_cloud_even_when_organogram_filter_is_stale():
         assert sum(row["realizado_cloud"] for row in source_rows) == 0
 
 
+def test_expected_view_uses_provider_scope_when_organogram_filter_is_stale():
+    from app.models.rules import Department
+    from app.routers.analysis import _expected_view_cloud_filter
+
+    selected = Department(name="Networking", cloud_filter="GCP-TI")
+    scope = ["Consumo Cloud", "Showback", "GCP", "DIR INFRA", "Networking"]
+    clause = _expected_view_cloud_filter(scope, selected, {"cloud_origem": "cloud_origem"})
+    assert "gcp%" in clause
+    assert "gcp-ti%" not in clause
+
+
 def test_normal_allocation_conserves_billed_and_cloud_measures_independently():
     from app.services.shared_cost import ResolvedSharedCost, build_allocation_rows
 
