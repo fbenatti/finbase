@@ -580,8 +580,8 @@ if [[ "$1 $2" == "account show" ]]; then
   [[ "$*" == *"--query id"* ]] && printf '%s\\n' "$EXPECTED_SUBSCRIPTION"
   exit 0
 fi
-if [[ "$1 $2" == "policy assignment list" ]]; then exit 0; fi
-if [[ "$1 $2" == "policy definition show" || "$1 $2" == "policy assignment show" ]]; then
+if [[ "$1 $2 $3" == "policy assignment list" ]]; then exit 0; fi
+if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy assignment show" ]]; then
   echo 'ResourceNotFound' >&2
   exit 1
 fi
