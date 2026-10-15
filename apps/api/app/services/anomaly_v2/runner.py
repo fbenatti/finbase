@@ -17,7 +17,7 @@ from app.services.anomaly_v2.gates import apply_gates, cloud_load_quality
 from app.services.anomaly_v2.hierarchy import consolidate_alerts
 from app.services.anomaly_v2.readiness import clouds_advanced, max_day_by_cloud, readiness_fingerprint
 from app.services.anomaly_v2.scoring import score_signal
-from app.services.anomaly_v2.schema import SIGNAL_TABLE, SILVER_NS, ddl_statements
+from app.services.anomaly_v2.schema import SIGNAL_COLUMNS, SIGNAL_TABLE, SILVER_NS, ddl_statements
 from app.services.anomaly_v2.scope import display_scope
 from app.services.trino_service import execute as trino_execute
 
@@ -49,7 +49,13 @@ async def _publish_signals(run_id: int, rows: list[dict[str, Any]]) -> int:
     import app.services.iceberg_service as iceberg_service
 
     df = pd.DataFrame(rows)
-    iceberg_service.publish_dataframe_atomic(SILVER_NS, SIGNAL_TABLE, df)
+    # Coluna toda nula vira string no pandas; a tabela já é double.
+    iceberg_service.publish_dataframe_atomic(
+        SILVER_NS,
+        SIGNAL_TABLE,
+        df,
+        column_types=dict(SIGNAL_COLUMNS),
+    )
     return len(rows)
 
 
@@ -100,6 +106,8 @@ async def execute_detection_v2(
     async with async_session() as session:
         if run_id:
             run_row = await session.get(AnomalyRun, run_id)
+            if run_row is not None and run_row.status == "CANCELLED":
+                return {"status": "CANCELLED"}
             if run_row is not None:
                 run_row.status = "RUNNING"
                 run_row.phase = "Motor v2"
@@ -110,6 +118,9 @@ async def execute_detection_v2(
         if not bool(config_row.enabled):
             raise AnomalyV2RunError("configuração desabilitada")
         config = _config_from_row(config_row)
+        # Não segurar transação/lock de linha durante minutos de Trino: isso
+        # trava o cancelamento, o progresso do worker e as migrações da API.
+        await session.commit()
         lag = int(config_row.data_lag_days or 2)
         as_of = _analysis_end(detected_at, lag)
         history_days = int(config.get("history_days") or 90)
@@ -164,7 +175,7 @@ async def execute_detection_v2(
             return skipped
 
         if should_abort and should_abort():
-            raise AnomalyV2RunError("abortado")
+            return await _finish_cancelled(session, run_id)
 
         report(2, 8, "Agregado diário incremental")
         daily_build = await build_daily_aggregate(config, as_of=as_of, lookback_days=history_days)
@@ -193,15 +204,20 @@ async def execute_detection_v2(
 
         report(5, 8, "Detectando desvios")
         all_signals: list[dict[str, Any]] = []
-        scope_ids = {str(r["scope_id"]) for r in history}
-        for sid in scope_ids:
+        rows_by_scope: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in history:
+            rows_by_scope[str(row["scope_id"])].append(row)
+        ledger_by_scope: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for entry in ledger:
+            ledger_by_scope[str(entry.get("scope_id"))].append(entry)
+        for sid, scope_rows in rows_by_scope.items():
             if should_abort and should_abort():
-                break
+                return await _finish_cancelled(session, run_id)
             profile = profiles.get(sid, {"cost_nature": "CONTINUOUS", "history_days": 0})
-            scope_ledger = [e for e in ledger if str(e.get("scope_id")) == sid]
+            scope_ledger = ledger_by_scope.get(sid, [])
             raw = run_detectors_for_scope(
                 scope_id=sid,
-                daily=history,
+                daily=scope_rows,
                 profile=profile,
                 as_of=as_of,
                 materiality=mat_daily,
@@ -234,6 +250,9 @@ async def execute_detection_v2(
                 gated["model_version"] = MODEL_VERSION
                 gated["reason_codes"] = ",".join(gated.get("reason_codes") or [])
                 all_signals.append(gated)
+
+        if should_abort and should_abort():
+            return await _finish_cancelled(session, run_id)
 
         report(6, 8, "Consolidando incidentes")
         alerts = [s for s in all_signals if s.get("tier") == TIER_ALERT]
@@ -300,7 +319,10 @@ async def execute_detection_v2(
         }
         if run_id:
             run = await session.get(AnomalyRun, run_id)
-            if run:
+            if run is not None and run.status == "CANCELLED":
+                await session.commit()
+                return {"status": "CANCELLED"}
+            if run is not None:
                 snap = dict(run.config_snapshot or {})
                 snap["readiness_fingerprint"] = fingerprint
                 snap["v2_summary"] = result
@@ -313,6 +335,20 @@ async def execute_detection_v2(
                 run.cases_created = int(result.get("cases_created") or 0)
         await session.commit()
         return result
+
+
+async def _finish_cancelled(session, run_id: int | None) -> dict[str, Any]:
+    from app.models.anomaly import AnomalyRun
+
+    if run_id:
+        run = await session.get(AnomalyRun, run_id)
+        if run is not None and run.status in ("QUEUED", "RUNNING"):
+            run.status = "CANCELLED"
+            run.phase = "Cancelado pelo usuário"
+            run.finished_at = datetime.now(timezone.utc)
+            run.error = None
+    await session.commit()
+    return {"status": "CANCELLED"}
 
 
 async def _apply_return_engine(session, *, history: list[dict[str, Any]], as_of: date) -> int:
@@ -331,6 +367,9 @@ async def _apply_return_engine(session, *, history: list[dict[str, Any]], as_of:
         )
     ).scalars().all()
     updated = 0
+    rows_by_scope: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in history:
+        rows_by_scope[str(row.get("scope_id"))].append(row)
     for case in rows:
         start_s = case.episode_start or case.event_date
         try:
@@ -346,7 +385,7 @@ async def _apply_return_engine(session, *, history: list[dict[str, Any]], as_of:
             )
         ).scalar_one_or_none() is not None
         ret = evaluate_return(
-            daily=history,
+            daily=rows_by_scope.get(str(case.series_id), []),
             scope_id=case.series_id,
             episode_start=start,
             as_of=as_of,
@@ -405,6 +444,7 @@ async def _sync_cases(
         routing = resolve_routing(config_row.routing_rules or [], meta)
         reason_raw = leader.get("reason_codes") or ""
         reasons = reason_raw if isinstance(reason_raw, list) else [c for c in str(reason_raw).split(",") if c]
+        returned = str(leader.get("deviation_status") or "") == "AUTOCORRIGIDO"
         case = AnomalyCase(
             case_key=case_key,
             anomaly_config_id=config_id,
@@ -414,7 +454,7 @@ async def _sync_cases(
             event_type=event_type,
             event_date=str(leader.get("day") or as_of.isoformat())[:10],
             period=as_of.strftime("%Y%m"),
-            state="NEW",
+            state="CLOSED" if returned else "NEW",
             severity=str(leader.get("severity") or "MEDIUM"),
             score=float(leader.get("score") or 0),
             confidence=str(leader.get("confidence") or "MEDIUM"),
@@ -433,7 +473,7 @@ async def _sync_cases(
             service_name=disp.get("service_name"),
             region=disp.get("region"),
             detector=event_type,
-            deviation_status="EM_DESVIO",
+            deviation_status=str(leader.get("deviation_status") or "EM_DESVIO"),
             projected_month_impact=float(leader.get("projected_month_impact") or 0),
             impact_to_date=max(0.0, float(leader.get("delta") or 0)),
             explanation=explain_signal(
@@ -443,10 +483,13 @@ async def _sync_cases(
             ),
             suggested_owner_id=routing.assignee_user_id,
             routing_rule_id=routing.rule_id,
-            episode_start=str(leader.get("day") or as_of.isoformat())[:10],
+            episode_start=str(leader.get("episode_start") or leader.get("day") or as_of.isoformat())[:10],
+            episode_end=str(leader.get("episode_end") or "")[:10] or None,
+            closed_at=detected_at if returned else None,
         )
         session.add(case)
         await session.flush()
-        await enqueue_case(session, case=case, reason="Novo desvio v2")
+        if not returned:
+            await enqueue_case(session, case=case, reason="Novo desvio v2")
         created += 1
     return created

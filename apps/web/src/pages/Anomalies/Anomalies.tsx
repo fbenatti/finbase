@@ -402,7 +402,11 @@ export default function Anomalies() {
   };
 
   const retrospectiveCases = useMemo(
-    () => cases.filter((item) => item.state === "RETROSPECTIVE" || item.state === "CLOSED"),
+    () => cases.filter((item) =>
+      item.state === "RETROSPECTIVE"
+      || item.state === "CLOSED"
+      || item.deviation_status === "AUTOCORRIGIDO"
+      || item.deviation_status === "CORRIGIDO_COM_ACAO"),
     [cases],
   );
 
@@ -663,12 +667,14 @@ export default function Anomalies() {
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>Retrospectiva</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Causas, decisões e aprendizados registrados. Não se atribui economia causal não comprovada.
+            Casos encerrados, com aprendizado registrado, ou cujo custo voltou à faixa sozinho.
+            Voltar ao normal não é economia comprovada: o custo já incorrido continua visível e nenhuma causa é inventada.
           </Typography>
           <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>#</TableCell>
+                <TableCell>Situação</TableCell>
                 <TableCell>Causa</TableCell>
                 <TableCell>Decisão</TableCell>
                 <TableCell>Aprendizado</TableCell>
@@ -679,6 +685,7 @@ export default function Anomalies() {
               {retrospectiveCases.map((item) => (
                 <TableRow key={item.id}>
                   <TableCell>#{item.id}</TableCell>
+                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" ? "Voltou ao normal" : item.deviation_status === "CORRIGIDO_COM_ACAO" ? "Corrigido com ação" : STATE_LABEL[item.state] ?? item.state}</TableCell>
                   <TableCell>{item.cause_category ? CAUSE_LABEL[item.cause_category] ?? item.cause_category : "—"}</TableCell>
                   <TableCell>{item.decision ? DECISION_LABEL[item.decision] ?? item.decision : "—"}</TableCell>
                   <TableCell>{item.learning ?? "—"}</TableCell>

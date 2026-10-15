@@ -47,9 +47,11 @@ def classify_scopes(
         history_days = (as_of - first_seen.get(sid, as_of)).days + 1
 
         charge = str(rows[0].get("chargecategory") or rows[0].get("charge_category") or "").lower()
-        commitment = str(rows[0].get("commitmentdiscounttype") or rows[0].get("commitment_type") or "")
+        commitment = str(rows[0].get("commitmentdiscounttype") or rows[0].get("commitment_type") or "").strip().lower()
+        # OnDemand não é reserva. Tratar como compromisso zera o histórico contínuo.
+        is_commitment = commitment not in {"", "ondemand", "on-demand", "on demand", "none", "payg"}
 
-        if charge == "purchase" or commitment or sid in commitment_scope_ids:
+        if charge == "purchase" or is_commitment or sid in commitment_scope_ids:
             nature = NATURE_COMMITMENT
         elif history_days < NEW_HISTORY_DAYS:
             nature = NATURE_NEW

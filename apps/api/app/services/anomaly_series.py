@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import statistics
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
@@ -405,6 +406,87 @@ def apply_case_evaluation_snapshot(items: list[dict[str, Any]], case: Any) -> bo
     return True
 
 
+def reconcile_forecast_with_history(items: list[dict[str, Any]], event_day: date) -> str | None:
+    """Substitui forecast vazio ou incompatível pela mediana do próprio realizado.
+
+    Um esperado perto de zero com histórico recorrente (reserva, data flow, OCPU)
+    não é desvio. A faixa passa a ser o histórico do escopo.
+    """
+    event_key = event_day.isoformat()
+    event = next((item for item in items if item.get("event_date") == event_key), None)
+    prior = [
+        float(item["observed_cloud"])
+        for item in items
+        if str(item.get("event_date") or "") < event_key and float(item.get("observed_cloud") or 0) > 0
+    ]
+    if event is None or len(prior) < 3:
+        return None
+    observed = event.get("observed_cloud")
+    if observed is None:
+        return None
+    observed = float(observed)
+    expected = event.get("expected_cloud")
+    median = float(statistics.median(prior))
+    if median <= 0:
+        return None
+    forecast_missing = expected in (None, 0) or float(expected) <= 0
+    forecast_far_below_history = (
+        expected not in (None, 0)
+        and observed > float(expected) * 8
+        and median > float(expected) * 3
+    )
+    points_missing_forecast = [
+        item for item in items
+        if item.get("observed_cloud") is not None and item.get("expected_cloud") in (None, 0)
+    ]
+    chart_empty = len(points_missing_forecast) >= max(3, len(items) // 2)
+    if not forecast_missing and not forecast_far_below_history and not chart_empty:
+        return None
+    if not forecast_missing and not forecast_far_below_history:
+        # Há comparação no dia do evento; só completa a linha onde o forecast não existe.
+        for item in points_missing_forecast:
+            item["expected_cloud"] = round(median, 4)
+            item["comparison_supported"] = True
+            item["reference_kind"] = "OWN_BASELINE"
+        return "Parte da série não tinha forecast. A linha pontilhada usa a mediana do realizado deste escopo, sem tratar isso como economia."
+    mad = statistics.median([abs(value - median) for value in prior]) or max(median * 0.1, 1.0)
+    band = 1.4826 * mad * 3
+    upper = median + band
+    event.update({
+        "expected_cloud": round(median, 4),
+        "lower_cloud": round(max(0.0, median - band), 4),
+        "upper_cloud": round(upper, 4),
+        "delta_cloud": round(observed - median, 4),
+        "anomalous_cost_cloud": round(max(0.0, observed - upper), 4),
+        "above_band": observed > upper,
+        "comparison_supported": True,
+        "reference_kind": "OWN_BASELINE",
+        "phase": "OWN_BASELINE",
+    })
+    for item in items:
+        if item.get("expected_cloud") in (None, 0):
+            item["expected_cloud"] = round(median, 4)
+            item["upper_cloud"] = round(upper, 4)
+            item["comparison_supported"] = True
+            item["reference_kind"] = "OWN_BASELINE"
+    return (
+        "O forecast deste escopo não acompanha o histórico (esperado zerado ou muito abaixo do realizado recorrente). "
+        "A faixa passou a ser a mediana do próprio custo, não uma previsão externa."
+    )
+
+
+def returned_to_baseline(items: list[dict[str, Any]], event_day: date) -> bool:
+    after = [
+        item for item in items
+        if str(item.get("event_date") or "") > event_day.isoformat()
+        and item.get("observed_cloud") is not None
+        and item.get("above_band") is not None
+    ]
+    if len(after) < 3:
+        return False
+    return all(item.get("above_band") is False for item in after[-3:])
+
+
 async def read_case_series(
     *,
     case: Any,
@@ -431,7 +513,8 @@ async def read_case_series(
     except (ValueError, TypeError):
         event_day = cutoff
     monthly = str(getattr(case, "evaluation_grain", "")) == "MONTHLY_EVENT"
-    context_start = event_day.replace(day=1) if monthly else event_day - timedelta(days=30)
+    # Reservas e eventos mensais precisam dos meses anteriores; 30 dias escondem o padrão.
+    context_start = event_day - timedelta(days=120 if monthly else 45)
     requested_end = data_end + timedelta(days=max(1, int(horizon_days)))
     months = _months_for(context_start, max(1, (requested_end - context_start).days))
     members = list(contributor_series) or [{"series_id": str(case.series_id), "dimensions": dict(getattr(case, "series_dimensions", None) or {})}]
@@ -576,6 +659,15 @@ async def read_case_series(
             warnings.append("Este forecast contém o saldo restante do mês, não a expectativa mensal congelada antes da compra. A comparação desta compra está indisponível; o saldo não foi distribuído como consumo diário nem usado como zero esperado.")
     if event_day > data_end:
         warnings.append(f"O evento é posterior ao cutoff de dados ({data_end.isoformat()}).")
+    history_note = reconcile_forecast_with_history(items, event_day)
+    if history_note:
+        warnings.append(history_note)
+    healed = returned_to_baseline(items, event_day)
+    if healed:
+        warnings.append(
+            "Depois do dia do evento o custo voltou à faixa por pelo menos 3 dias. "
+            "Isso entra como desvio autocorrigido, sem economia causal atribuída."
+        )
     if not rows and not warnings:
         warnings.append("Não há referência de forecast disponível para esta série.")
     if not contributor_series:
@@ -598,6 +690,7 @@ async def read_case_series(
         "forecast_start": comparable[0]["event_date"] if comparable else None,
         "evaluation_grain": "MONTHLY_EVENT" if monthly else "DAILY",
         "reference": reference, "warnings": warnings,
+        "returned_to_baseline": healed,
         "contributor_series_count": len(members), "scope_verified": bool(contributor_series),
         "contributor_series": members,
         "contributor_breakdown": contributor_breakdown,

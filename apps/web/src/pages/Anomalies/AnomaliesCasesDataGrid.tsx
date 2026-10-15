@@ -22,7 +22,12 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
     },
     { field: "score", headerName: "Nota", width: 80 },
     { field: "state", headerName: "Estado", width: 120 },
-    { field: "cloud", headerName: "Nuvem", width: 110 },
+    {
+      field: "cloud",
+      headerName: "Nuvem",
+      width: 110,
+      valueGetter: (_, row) => row.cloud || row.series_dimensions?.cloud_origem || "",
+    },
     { field: "subaccount_name", headerName: "Subaccount", flex: 1, minWidth: 140 },
     { field: "resource_group", headerName: "RG", flex: 1, minWidth: 120 },
     { field: "service_name", headerName: "Serviço", flex: 1, minWidth: 140 },

@@ -127,6 +127,15 @@ async def _require_scope(db: AsyncSession, user: User, scope: str) -> None:
         raise HTTPException(403, f"Sem permissão para o comando ({scope}).")
 
 
+def _dim(case: AnomalyCase, *keys: str) -> str | None:
+    raw = case.series_dimensions if isinstance(case.series_dimensions, dict) else {}
+    for key in keys:
+        value = raw.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
 def _case_out(case: AnomalyCase) -> dict[str, Any]:
     return {
         "id": case.id,
@@ -177,11 +186,11 @@ def _case_out(case: AnomalyCase) -> dict[str, Any]:
         "reopen_count": case.reopen_count,
         "parent_case_id": case.parent_case_id,
         "case_version": case.case_version,
-        "cloud": getattr(case, "cloud", None),
-        "subaccount_name": getattr(case, "subaccount_name", None),
-        "resource_group": getattr(case, "resource_group", None),
-        "service_name": getattr(case, "service_name", None),
-        "region": getattr(case, "region", None),
+        "cloud": getattr(case, "cloud", None) or _dim(case, "cloud_origem", "cloud"),
+        "subaccount_name": getattr(case, "subaccount_name", None) or _dim(case, "subaccountname", "subaccount_name"),
+        "resource_group": getattr(case, "resource_group", None) or _dim(case, "resource_group", "source_resource_group_name", "resourcegroupname"),
+        "service_name": getattr(case, "service_name", None) or _dim(case, "servicename", "service_name"),
+        "region": getattr(case, "region", None) or _dim(case, "region", "regionname"),
         "detector": getattr(case, "detector", None),
         "deviation_status": getattr(case, "deviation_status", None),
         "suggested_owner_id": getattr(case, "suggested_owner_id", None),
@@ -340,7 +349,13 @@ async def enqueue_run(
         )
     ).scalars().first()
     if running is not None:
-        raise HTTPException(409, f"Já existe execução em andamento (run {running.id})")
+        task = await db.get(EtlTask, running.source_etl_task_id) if running.source_etl_task_id else None
+        if task is not None and task.status in ("QUEUED", "RUNNING"):
+            raise HTTPException(409, f"Já existe execução em andamento (run {running.id})")
+        running.status = "CANCELLED"
+        running.phase = "Cancelado pelo usuário"
+        running.finished_at = datetime.now(timezone.utc)
+        await db.flush()
 
     run = AnomalyRun(
         anomaly_config_id=config_id,
@@ -625,10 +640,17 @@ async def expected_events(
     Elas permanecem na tabela analítica e **não** abrem workflow.
     """
     from app.services.anomaly_queries import read_expected_events
+    from app.services.anomaly_release import current_publication
 
     size, skip = _page(limit, offset)
     config = await _resolve_config(db, config_id)
-    publication = await _publication_or_409(db, config.id)
+    publication = await current_publication(db, config.id)
+    if publication is None:
+        return {
+            "items": [],
+            "total": 0,
+            "note": "Motor v2 não usa a publicação antiga de eventos esperados. A recorrência fica fora da fila na própria detecção.",
+        }
     try:
         return await read_expected_events(
             namespace=config.source_namespace,
@@ -653,10 +675,17 @@ async def quality(
 ):
     """Qualidade: dados parciais, referências incompatíveis e tolerâncias."""
     from app.services.anomaly_queries import read_quality
+    from app.services.anomaly_release import current_publication
 
     size, skip = _page(limit, offset)
     config = await _resolve_config(db, config_id)
-    publication = await _publication_or_409(db, config.id)
+    publication = await current_publication(db, config.id)
+    if publication is None:
+        return {
+            "items": [],
+            "sampled": 0,
+            "note": "Motor v2 não publica a tabela antiga de qualidade. A saúde do modelo usa os casos e o status do desvio.",
+        }
     try:
         return await read_quality(
             namespace=config.source_namespace,
@@ -694,6 +723,16 @@ async def get_case_series(
     config = await db.get(AnomalyConfig, case.anomaly_config_id)
     if config is None:
         raise HTTPException(409, "Configuração de anomalia do caso não existe mais")
+    if (case.reference_kind or "") == "V2_BASELINE":
+        from app.services.anomaly_v2.case_series import read_v2_case_series
+
+        lag_days = int(config.data_lag_days if config.data_lag_days is not None else 2)
+        as_of = datetime.now(timezone.utc).date() - timedelta(days=lag_days)
+        try:
+            return await read_v2_case_series(case, config, as_of=as_of)
+        except Exception as exc:
+            logger.warning("[anomaly] falha ao montar a série v2 do caso %s: %s", case_id, exc)
+            raise HTTPException(503, f"Falha ao consultar a série: {exc}") from exc
     publication = await current_publication(db, case.anomaly_config_id)
     if publication is None:
         return {"items": [], "note": "sem publicação corrente para esta configuração"}

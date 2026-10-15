@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_v2.baseline import expected_for_day
+from app.services.anomaly_v2.return_engine import DEVIATION_ACTIVE, DEVIATION_AUTO_FIXED
 from app.services.anomaly_v2.classifier import (
     NATURE_COMMITMENT,
     NATURE_CONTINUOUS,
@@ -90,11 +91,23 @@ def run_detectors_for_scope(
             hit = detect_commitment_day(
                 scope_id=scope_id, day=as_of, observed=obs, ledger_entries=ledger_entries
             )
-            if hit:
-                hit["scope_id"] = scope_id
-                hit["day"] = as_of.isoformat()
-                signals.append(hit)
-        return signals
+            if hit and hit.get("tier") == TIER_ALERT:
+                expected = float(hit.get("expected") or 0)
+                upper = expected * 1.15
+                delta = obs - expected
+                if delta >= materiality and obs > upper:
+                    hit.update({
+                        "scope_id": scope_id,
+                        "day": as_of.isoformat(),
+                        "upper": upper,
+                        "lower": expected * 0.85,
+                        "delta": delta,
+                        "pct_delta": _pct_delta(obs, expected),
+                        "deviation_status": DEVIATION_ACTIVE,
+                    })
+                    signals.append(hit)
+                    return signals
+        # Sem calendário de reserva, o mesmo dia segue a faixa do próprio histórico.
 
     if nature == NATURE_NEW:
         obs = by_day.get(as_of.isoformat(), 0.0)
@@ -134,7 +147,7 @@ def run_detectors_for_scope(
             prev_months.append(partial)
         expected_acc = sum(prev_months) / len(prev_months) if prev_months else 0.0
         delta = acc - expected_acc
-        if delta >= materiality and _pct_delta(acc, expected_acc) >= min_pct:
+        if expected_acc > 0 and delta >= materiality and _pct_delta(acc, expected_acc) >= min_pct:
             tier = TIER_ALERT if delta >= materiality * 2 else TIER_WATCH
             signals.append(
                 {
@@ -150,31 +163,84 @@ def run_detectors_for_scope(
             )
         return signals
 
-    # Continuous: spike on evaluation day
-    obs = by_day.get(as_of.isoformat(), 0.0)
-    expected, lower, upper, mad = expected_for_day(daily, target=as_of)
-    delta = obs - upper
-    if delta <= 0:
-        return signals
-    pct = _pct_delta(obs, expected)
-    if obs < materiality or pct < min_pct:
-        tier = TIER_WATCH
-    else:
-        tier = TIER_ALERT
-    z = delta / max(mad * 1.4826, 1e-6) if mad else 0.0
-    signals.append(
-        {
-            "scope_id": scope_id,
-            "day": as_of.isoformat(),
-            "detector": DET_SPIKE,
-            "tier": tier,
-            "expected": expected,
-            "lower": lower,
-            "upper": upper,
-            "observed": obs,
-            "delta": obs - expected,
-            "pct_delta": pct,
-            "z_robust": z,
-        }
+    scope_daily = [row for row in daily if str(row.get("scope_id")) == scope_id]
+    episode = continuous_episode(
+        scope_daily,
+        as_of=as_of,
+        materiality=materiality,
+        min_pct=min_pct,
     )
+    if episode is None:
+        return signals
+    signals.append(episode)
     return signals
+
+
+def continuous_episode(
+    scope_daily: Sequence[Mapping[str, Any]],
+    *,
+    as_of: date,
+    materiality: float,
+    min_pct: float,
+) -> dict[str, Any] | None:
+    """Um episódio por escopo: aberto se ainda desvia, fechado se voltou sozinho.
+
+    A faixa usa só o histórico deste escopo. Um pico que já voltou ao normal
+    não permanece como caso crítico em aberto.
+    """
+    by_day: dict[str, float] = {}
+    scope_id = ""
+    for row in scope_daily:
+        scope_id = scope_id or str(row.get("scope_id") or "")
+        day_s = str(row.get("day") or "")[:10]
+        by_day[day_s] = by_day.get(day_s, 0.0) + float(row.get("cost_cloud") or 0)
+
+    window_start = as_of - timedelta(days=45)
+    active: dict[str, Any] | None = None
+    quiet = 0
+    latest_closed: dict[str, Any] | None = None
+
+    cursor = window_start
+    while cursor <= as_of:
+        obs = by_day.get(cursor.isoformat(), 0.0)
+        expected, lower, upper, mad = expected_for_day(scope_daily, target=cursor)
+        pct = _pct_delta(obs, expected)
+        hot = obs > upper and obs >= materiality and pct >= min_pct
+        if hot:
+            quiet = 0
+            delta = obs - expected
+            z = (obs - upper) / max(mad * 1.4826, 1e-6) if mad else 0.0
+            peak = {
+                "scope_id": scope_id,
+                "day": cursor.isoformat(),
+                "detector": DET_SPIKE,
+                "tier": TIER_ALERT,
+                "expected": expected,
+                "lower": lower,
+                "upper": upper,
+                "observed": obs,
+                "delta": delta,
+                "pct_delta": pct,
+                "z_robust": z,
+                "episode_start": cursor.isoformat(),
+                "deviation_status": DEVIATION_ACTIVE,
+            }
+            if active is None or obs >= float(active.get("observed") or 0):
+                if active is not None:
+                    peak["episode_start"] = active["episode_start"]
+                active = peak
+        elif active is not None:
+            quiet += 1
+            if quiet >= 3:
+                active["deviation_status"] = DEVIATION_AUTO_FIXED
+                active["episode_end"] = (cursor - timedelta(days=2)).isoformat()
+                latest_closed = active
+                active = None
+                quiet = 0
+        cursor += timedelta(days=1)
+
+    if active is not None:
+        return active
+    if latest_closed is not None and str(latest_closed.get("episode_end") or "") >= window_start.isoformat():
+        return latest_closed
+    return None

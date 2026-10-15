@@ -4,7 +4,7 @@ from datetime import date
 from app.services.anomaly_v2.baseline import expected_for_day
 from app.services.anomaly_v2.classifier import NATURE_COMMITMENT, NATURE_NEW, classify_scopes
 from app.services.anomaly_v2.commitment_ledger import build_ledger_from_rows
-from app.services.anomaly_v2.detectors import detect_commitment_day
+from app.services.anomaly_v2.detectors import continuous_episode, detect_commitment_day
 from app.services.anomaly_v2.gates import apply_gates
 from app.services.anomaly_v2.scope import scope_id_for
 
@@ -22,7 +22,13 @@ def test_classify_commitment():
     assert profiles["a"]["cost_nature"] == NATURE_COMMITMENT
 
 
-def test_classify_new_spend():
+def test_ondemand_usage_is_not_commitment():
+    rows = [
+        {"scope_id": "d", "day": f"2026-09-{day:02d}", "cost_cloud": 100.0, "chargecategory": "Usage", "commitmentdiscounttype": "OnDemand"}
+        for day in range(1, 21)
+    ]
+    profiles = classify_scopes(rows, as_of=date(2026, 9, 20))
+    assert profiles["d"]["cost_nature"] != NATURE_COMMITMENT
     rows = [{"scope_id": "b", "day": "2026-10-10", "cost_cloud": 50.0, "chargecategory": "Usage"}]
     profiles = classify_scopes(rows, as_of=date(2026, 10, 10))
     assert profiles["b"]["cost_nature"] == NATURE_NEW
@@ -76,3 +82,35 @@ def test_baseline_expected():
     expected, lower, upper, _mad = expected_for_day(daily, target=date(2026, 10, 15))
     assert expected > 0
     assert upper >= expected >= lower
+
+
+def test_spike_that_returns_is_not_an_open_case():
+    rows = []
+    for day in range(1, 21):
+        rows.append({"scope_id": "s", "day": f"2026-09-{day:02d}", "cost_cloud": 100.0})
+    rows.append({"scope_id": "s", "day": "2026-09-21", "cost_cloud": 5000.0})
+    for day in range(22, 29):
+        rows.append({"scope_id": "s", "day": f"2026-09-{day:02d}", "cost_cloud": 100.0})
+    episode = continuous_episode(rows, as_of=date(2026, 9, 28), materiality=50, min_pct=0.2)
+    assert episode is not None
+    assert episode["deviation_status"] == "AUTOCORRIGIDO"
+    assert episode["day"] == "2026-09-21"
+
+
+def test_breakdown_keeps_organogram_and_subscription_path():
+    from app.services.anomaly_v2.case_series import breakdown_from_rows
+
+    specs = [
+        ("organograma_nivel_1", "organograma_nivel_1", "Organograma · nível 1"),
+        ("subaccountname", "subaccountname", "Assinatura / subconta"),
+        ("resourcename", "resource_name", "Recurso"),
+    ]
+    rows = [
+        {"organograma_nivel_1": "TI", "subaccountname": "Aura", "resource_name": "disk-a", "observed_cloud": 300},
+        {"organograma_nivel_1": "TI", "subaccountname": "Aura", "resource_name": "disk-b", "observed_cloud": 120},
+    ]
+    dimensions, items, common = breakdown_from_rows(rows, specs)
+    assert [item["key"] for item in dimensions] == ["organograma_nivel_1", "subaccountname", "resource_name"]
+    assert common == {"organograma_nivel_1": "TI", "subaccountname": "Aura"}
+    assert len(items) == 2
+    assert {item["dimensions"]["resource_name"] for item in items} == {"disk-a", "disk-b"}

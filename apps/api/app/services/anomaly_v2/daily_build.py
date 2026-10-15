@@ -23,6 +23,45 @@ def _lit(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+async def table_columns(namespace: str, table: str) -> set[str]:
+    rows = await trino_execute(
+        "SELECT column_name FROM iceberg.information_schema.columns "
+        f"WHERE table_schema = '{namespace}' AND table_name = '{table}'",
+        timeout_s=60,
+    )
+    return {str(row.get("column_name") or "").lower() for row in rows}
+
+
+def _varchar_coalesce(columns: set[str], candidates: tuple[str, ...]) -> str:
+    present = [name for name in candidates if name.lower() in columns]
+    if not present:
+        return "CAST('' AS VARCHAR)"
+    casts = [f"CAST({_quote(name)} AS VARCHAR)" for name in present]
+    if len(casts) == 1:
+        return casts[0]
+    return "COALESCE(" + ", ".join([*casts, "''"]) + ")"
+
+
+def billing_periods_for(start: date, end: date) -> list[str]:
+    months: list[str] = []
+    cursor = (start.replace(day=1) - timedelta(days=1)).replace(day=1)
+    while cursor <= end:
+        months.append(cursor.strftime("%Y%m"))
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return months
+
+
+def billing_period_filter(
+    period_column: str | None, start: date, end: date, periods: list[str] | None = None
+) -> str:
+    """Poda de partição: a silver é particionada pelo período de faturamento."""
+    if not period_column:
+        return "TRUE"
+    months = periods or billing_periods_for(start, end)
+    values = ", ".join(_lit(month) for month in months)
+    return f"CAST({_quote(period_column)} AS VARCHAR) IN ({values})"
+
+
 def daily_aggregate_sql(
     *,
     source_namespace: str,
@@ -33,6 +72,9 @@ def daily_aggregate_sql(
     measure_column: str,
     start: date,
     end: date,
+    columns: set[str] | None = None,
+    billing_periods: list[str] | None = None,
+    row_filter: str = "TRUE",
 ) -> str:
     date_expr = gold_date_expr(date_column, period_column)
     type_filter = (
@@ -40,35 +82,32 @@ def daily_aggregate_sql(
         if type_column
         else "TRUE"
     )
-    rg_expr = (
-        "COALESCE("
-        "CAST(\"source_resource_group_name\" AS VARCHAR), "
-        "CAST(\"resourcegroupname\" AS VARCHAR), "
-        "CAST(\"resource_group_name\" AS VARCHAR), "
-        "''"
-        ")"
+    available = columns or set()
+    rg_expr = _varchar_coalesce(
+        available,
+        ("source_resource_group_name", "resourcegroupname", "resource_group_name", "resourcegroup"),
     )
-    region_expr = (
-        "COALESCE(CAST(\"regionname\" AS VARCHAR), CAST(\"location\" AS VARCHAR), '')"
-    )
+    region_expr = _varchar_coalesce(available, ("regionname", "region", "location"))
     return f"""
         WITH parsed AS (
             SELECT CAST("cloud_origem" AS VARCHAR) AS cloud_origem,
                    CAST("subaccountname" AS VARCHAR) AS subaccountname,
                    {rg_expr} AS resource_group,
                    CAST("servicename" AS VARCHAR) AS servicename,
-                   CAST("servicesubcategory" AS VARCHAR) AS servicesubcategory,
-                   CAST("chargecategory" AS VARCHAR) AS chargecategory,
-                   CAST("pricingcategory" AS VARCHAR) AS pricingcategory,
-                   CAST("commitmentdiscounttype" AS VARCHAR) AS commitmentdiscounttype,
+                   {_varchar_coalesce(available, ("servicesubcategory",))} AS servicesubcategory,
+                   {_varchar_coalesce(available, ("chargecategory",))} AS chargecategory,
+                   {_varchar_coalesce(available, ("pricingcategory",))} AS pricingcategory,
+                   {_varchar_coalesce(available, ("commitmentdiscounttype",))} AS commitmentdiscounttype,
                    {region_expr} AS region,
-                   CAST("billingcurrency" AS VARCHAR) AS currency,
+                   {_varchar_coalesce(available, ("billingcurrency", "currency"))} AS currency,
                    {date_expr} AS day,
                    COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS cost_cloud,
-                   COALESCE(TRY_CAST("pricingquantity" AS DOUBLE), 0) AS pricing_quantity,
-                   COALESCE(TRY_CAST("resourceid" AS VARCHAR), '') AS resource_id
+                   {("COALESCE(TRY_CAST(" + _quote("pricingquantity") + " AS DOUBLE), 0)" if "pricingquantity" in available else "CAST(0 AS DOUBLE)")} AS pricing_quantity,
+                   {_varchar_coalesce(available, ("resourceid", "resource_id"))} AS resource_id
               FROM iceberg.{source_namespace}.{_quote(table)}
              WHERE {type_filter}
+               AND {billing_period_filter(period_column, start, end, billing_periods)}
+               AND {row_filter}
         ),
         scoped AS (
             SELECT day,
@@ -77,7 +116,7 @@ def daily_aggregate_sql(
                    commitmentdiscounttype, region, currency,
                    SUM(cost_cloud) AS cost_cloud,
                    SUM(pricing_quantity) AS pricing_quantity,
-                   COUNT(DISTINCT resource_id) AS resource_count,
+                   approx_distinct(resource_id) AS resource_count,
                    COUNT(*) AS row_count
               FROM parsed
              WHERE day IS NOT NULL
@@ -102,6 +141,10 @@ async def build_daily_aggregate(
     """Lê o silver no intervalo e devolve linhas com scope_id (para publicação)."""
     start = as_of - timedelta(days=max(INCREMENTAL_DAYS, lookback_days) - 1)
     incremental_start = as_of - timedelta(days=INCREMENTAL_DAYS - 1)
+    columns = await table_columns(
+        str(config.get("source_namespace") or "silver"),
+        str(config["destination_physical_name"]),
+    )
     sql = daily_aggregate_sql(
         source_namespace=str(config.get("source_namespace") or "silver"),
         table=str(config["destination_physical_name"]),
@@ -111,6 +154,7 @@ async def build_daily_aggregate(
         measure_column=str(config.get("measure_column") or "realizado_cloud"),
         start=incremental_start,
         end=as_of,
+        columns=columns,
     )
     rows = await trino_execute(sql, timeout_s=900)
     loaded_at = datetime.now(timezone.utc).isoformat()
@@ -163,26 +207,40 @@ async def load_daily_history(
 ) -> list[dict[str, Any]]:
     """Carrega histórico para detecção (pode usar cache Iceberg quando publicado)."""
     start = as_of - timedelta(days=max(1, history_days) - 1)
-    sql = daily_aggregate_sql(
-        source_namespace=str(config.get("source_namespace") or "silver"),
-        table=str(config["destination_physical_name"]),
-        date_column=str(config["date_column"]),
-        period_column=config.get("period_column"),
-        type_column=config.get("type_column"),
-        measure_column=str(config.get("measure_column") or "realizado_cloud"),
-        start=start,
-        end=as_of,
+    columns = await table_columns(
+        str(config.get("source_namespace") or "silver"),
+        str(config["destination_physical_name"]),
     )
-    rows = await trino_execute(sql, timeout_s=1200)
-    result: list[dict[str, Any]] = []
-    for row in rows:
-        scope_vals = scope_values_from_row(row)
-        result.append(
-            {
-                "day": str(row.get("day") or "")[:10],
-                "scope_id": scope_id_for(scope_vals),
-                **scope_vals,
-                "cost_cloud": float(row.get("cost_cloud") or 0.0),
-            }
+    period_column = config.get("period_column")
+    # Uma consulta por mês de faturamento: a janela inteira de uma vez estoura a
+    # memória do worker do Trino.
+    batches: list[list[str] | None] = (
+        [[month] for month in billing_periods_for(start, as_of)] if period_column else [None]
+    )
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for batch in batches:
+        sql = daily_aggregate_sql(
+            source_namespace=str(config.get("source_namespace") or "silver"),
+            table=str(config["destination_physical_name"]),
+            date_column=str(config["date_column"]),
+            period_column=period_column,
+            type_column=config.get("type_column"),
+            measure_column=str(config.get("measure_column") or "realizado_cloud"),
+            start=start,
+            end=as_of,
+            columns=columns,
+            billing_periods=batch,
         )
-    return result
+        rows = await trino_execute(sql, timeout_s=1200)
+        for row in rows:
+            scope_vals = scope_values_from_row(row)
+            day = str(row.get("day") or "")[:10]
+            sid = scope_id_for(scope_vals)
+            cost = float(row.get("cost_cloud") or 0.0)
+            existing = merged.get((day, sid))
+            if existing is None:
+                merged[(day, sid)] = {"day": day, "scope_id": sid, **scope_vals, "cost_cloud": cost}
+            else:
+                existing["cost_cloud"] += cost
+        logger.info("[anomaly_v2] histórico período %s: %s linhas", batch, len(rows))
+    return list(merged.values())

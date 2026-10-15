@@ -21,8 +21,18 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const members = filterMembers(all, forecastFilters);
   const timeline = useMemo(() => filters.length ? scopeTimeline(members) : series.items, [series, filters, members]);
   const focus = timeline.find(point => point.event_date === kase.event_date);
-  const actual = focus?.observed_cloud ?? null, expected = focus?.expected_cloud ?? null;
-  const delta = actual != null && expected != null ? actual - expected : null;
+  const monthlyCase = kase.detector === "MONTHLY_ACCUMULATED" || kase.event_type === "MONTHLY_ACCUMULATED";
+  const actual = monthlyCase ? kase.observed_cloud : focus?.observed_cloud ?? null;
+  const expected = monthlyCase ? kase.expected_cloud : focus?.expected_cloud ?? null;
+  const delta = monthlyCase ? kase.delta_cloud : actual != null && expected != null ? actual - expected : null;
+  const withinBand = !monthlyCase && focus?.above_band === false && delta != null;
+  const headline = delta == null
+    ? "Custo sem comparação"
+    : withinBand
+      ? `${money(Math.abs(delta), currency)} em relação à mediana, dentro da faixa`
+      : delta > 0
+        ? `${money(delta, currency)} ${monthlyCase ? "acima da média dos meses anteriores" : "acima da faixa"}`
+        : `${money(Math.abs(delta), currency)} ${delta < 0 ? "abaixo da referência" : "de desvio"}`;
   const relative = delta != null && expected != null && expected > 0 ? delta / expected * 100 : null;
   const hierarchy = detailScopeChain(series.detail_dimensions);
   const detailItems = series.detail_items ?? [];
@@ -54,22 +64,22 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
 
   return <Box>
     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3, borderColor: "#dce5ef", background: "linear-gradient(120deg,#fff,#f7faff)" }}>
-      <Typography variant="overline" color="text.secondary">O que aconteceu · {day(kase.event_date)}</Typography>
-      <Typography sx={{ mt: .5, fontSize: { xs: 25, sm: 30 }, lineHeight: 1.2, fontWeight: 800, letterSpacing: "-.03em", color: delta != null && delta > 0 ? "#c53d4b" : "#203047" }}>
-        {delta == null ? "Custo sem forecast comparável" : delta > 0 ? `${money(delta, currency)} acima do forecast` : `${money(Math.abs(delta), currency)} ${delta < 0 ? "abaixo do forecast" : "de desvio"}`}
+      <Typography variant="overline" color="text.secondary">{monthlyCase ? "Acumulado do mês até" : "O que aconteceu"} · {day(kase.event_date)}</Typography>
+      <Typography sx={{ mt: .5, fontSize: { xs: 25, sm: 30 }, lineHeight: 1.2, fontWeight: 800, letterSpacing: "-.03em", color: delta != null && delta > 0 && !withinBand ? "#c53d4b" : "#203047" }}>
+        {headline}
       </Typography>
       <Typography sx={{ mt: 1, fontWeight: 600, color: "#34445a" }}>{label}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>
-        Previsto <strong>{money(expected, currency)}</strong> → realizado <strong>{money(actual, currency)}</strong>{relative != null && ` · ${relative > 0 ? "+" : ""}${pct(relative)}`}
+        {monthlyCase ? "Média dos meses anteriores" : "Mediana recente"} <strong>{money(expected, currency)}</strong> → realizado <strong>{money(actual, currency)}</strong>{relative != null && ` · ${relative > 0 ? "+" : ""}${pct(relative)}`}
       </Typography>
-      {expected != null && actual != null && expected >= 0 && actual > 0 && <Box sx={{ mt: 1.5 }}>
+      {expected != null && actual != null && expected >= 0 && actual > 0 && delta != null && delta > 1 && !withinBand && <Box sx={{ mt: 1.5 }}>
         <Box sx={{ height: 10, borderRadius: 2, overflow: "hidden", display: "flex", bgcolor: "#e6edf6" }} aria-label="Composição do realizado entre forecast e desvio">
           <Box sx={{ width: `${Math.min(100, expected / actual * 100)}%`, bgcolor: "#4e81c5" }} />
           {delta != null && delta > 0 && <Box sx={{ flex: 1, bgcolor: "#db525e" }} />}
         </Box>
         <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="#4e81c5">Previsto</Typography><Typography variant="caption" color="#c53d4b">Desvio positivo</Typography></Stack>
       </Box>}
-      {excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} {excessDays.length === 1 ? "dia" : "dias"} acima da faixa até {day(kase.event_date)}</Typography>}
+      {!monthlyCase && focus?.above_band && excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} {excessDays.length === 1 ? "dia" : "dias"} acima da faixa até {day(kase.event_date)}</Typography>}
       {latest && latest.event_date > kase.event_date && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .75 }}>Último dado ({day(latest.event_date)}): {money(latest.observed_cloud, currency)}{latest.above_band === true ? " · acima da faixa" : latest.above_band === false ? " · não supera o limite de alerta" : " · sem comparação disponível"}</Typography>}
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e2e8f0" }}>
         <Box>
@@ -154,8 +164,8 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
             })}
             {selectedDetailItems.length > 20 && <Typography variant="caption" color="text.secondary">Exibindo os 20 maiores detalhes de {selectedDetailItems.length} itens.</Typography>}
           </Stack>}
-          {!groups.length && !rawDetailSelected && series.detail_dimensions?.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1 }}>A origem desta avaliação não disponibilizou dimensões abaixo do forecast. O drilldown termina aqui para não atribuir um desvio fictício a resource groups ou SKUs.</Typography>}
-          {!all.length && <Typography variant="body2" color="text.secondary">A decomposição exige as séries contribuintes desta avaliação. O total continua disponível abaixo.</Typography>}
+          {!groups.length && !rawDetailSelected && series.detail_dimensions?.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1 }}>{monthlyCase ? "A comparação é o total do mês deste escopo. Não há abertura por resource group ou SKU nesta avaliação." : "A origem desta avaliação não disponibilizou dimensões abaixo do escopo do caso."}</Typography>}
+          {!all.length && !monthlyCase && <Typography variant="body2" color="text.secondary">A decomposição exige as séries contribuintes desta avaliação. O total continua disponível abaixo.</Typography>}
         </Box>
       </Box>
     </Paper>

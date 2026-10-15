@@ -36,6 +36,7 @@ def commitment_source_sql(
     measure_column: str,
     start: date,
     end: date,
+    columns: set[str] | None = None,
 ) -> str:
     date_expr = gold_date_expr(date_column, period_column)
     type_filter = (
@@ -43,19 +44,24 @@ def commitment_source_sql(
         if type_column
         else "TRUE"
     )
+    available = columns or set()
+    from app.services.anomaly_v2.daily_build import _varchar_coalesce, billing_period_filter
+
+    charge_expr = _varchar_coalesce(available, ("chargecategory",))
     return f"""
         SELECT {date_expr} AS day,
                CAST("cloud_origem" AS VARCHAR) AS cloud_origem,
                CAST("subaccountname" AS VARCHAR) AS subaccountname,
                CAST("servicename" AS VARCHAR) AS servicename,
-               CAST("chargecategory" AS VARCHAR) AS chargecategory,
-               CAST("commitmentdiscounttype" AS VARCHAR) AS commitmentdiscounttype,
-               COALESCE(CAST("resourceid" AS VARCHAR), '') AS resource_id,
-               COALESCE(CAST("resourcename" AS VARCHAR), '') AS resource_name,
+               {charge_expr} AS chargecategory,
+               {_varchar_coalesce(available, ("commitmentdiscounttype",))} AS commitmentdiscounttype,
+               {_varchar_coalesce(available, ("resourceid", "resource_id"))} AS resource_id,
+               {_varchar_coalesce(available, ("resourcename", "resource_name"))} AS resource_name,
                COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS cost_cloud
           FROM iceberg.{source_namespace}.{_quote(table)}
          WHERE {type_filter}
-           AND LOWER(COALESCE(CAST("chargecategory" AS VARCHAR), '')) = 'purchase'
+           AND {billing_period_filter(period_column, start, end)}
+           AND LOWER(COALESCE({charge_expr}, '')) = 'purchase'
            AND {date_expr} BETWEEN DATE {_lit(start.isoformat())} AND DATE {_lit(end.isoformat())}
            AND COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) > 0
     """
@@ -121,7 +127,13 @@ async def refresh_commitment_ledger(
 ) -> dict[str, Any]:
     from datetime import timedelta
 
+    from app.services.anomaly_v2.daily_build import table_columns
+
     start = as_of - timedelta(days=history_days)
+    columns = await table_columns(
+        str(config.get("source_namespace") or "silver"),
+        str(config["destination_physical_name"]),
+    )
     sql = commitment_source_sql(
         source_namespace=str(config.get("source_namespace") or "silver"),
         table=str(config["destination_physical_name"]),
@@ -131,6 +143,7 @@ async def refresh_commitment_ledger(
         measure_column=str(config.get("measure_column") or "realizado_cloud"),
         start=start,
         end=as_of,
+        columns=columns,
     )
     rows = await trino_execute(sql, timeout_s=900)
     parsed = [

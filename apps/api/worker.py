@@ -974,7 +974,8 @@ def consumer_main(worker_id: int):
 
                         s = SyncSession()
                         config_row = s.get(AnomalyConfig, anomaly_config_id)
-                        use_v2 = getattr(config_row, "detection_engine", "v2") == "v2"
+                        engine = getattr(config_row, "detection_engine", None) or "v2"
+                        use_v2 = engine == "v2"
 
                         def anomaly_progress(done, total, name):
                             current = s.get(EtlTask, task_id)
@@ -1020,15 +1021,34 @@ def consumer_main(worker_id: int):
                     except Exception as exc:
                         s = SyncSession()
                         task_row = s.get(EtlTask, task_id)
+                        cancelled = bool(task_row and task_row.status == "CANCELLED") or "abortado" in str(exc).lower()
                         if task_row:
-                            task_row.status = "FAILED"
-                            task_row.phase = f"Falha na detecção: {exc}"[:200]
+                            if cancelled:
+                                task_row.status = "CANCELLED"
+                                task_row.phase = "Cancelado pelo usuário"
+                            else:
+                                task_row.status = "FAILED"
+                                task_row.phase = f"Falha na detecção: {exc}"[:200]
+                                task_row.errors = list(task_row.errors or []) + [str(exc)]
                             task_row.finished_at = datetime.now(timezone.utc)
-                            task_row.errors = list(task_row.errors or []) + [str(exc)]
                             sync_etl_task_log(s, task_row)
-                            s.commit()
+                        if anomaly_run_id:
+                            from app.models.anomaly import AnomalyRun
+                            run_row = s.get(AnomalyRun, anomaly_run_id)
+                            if run_row is not None and run_row.status in ("QUEUED", "RUNNING"):
+                                if cancelled:
+                                    run_row.status = "CANCELLED"
+                                    run_row.phase = "Cancelado pelo usuário"
+                                    run_row.error = None
+                                else:
+                                    run_row.status = "FAILED"
+                                    run_row.phase = f"Falha na detecção: {exc}"[:200]
+                                    run_row.error = str(exc)[:2000]
+                                run_row.finished_at = datetime.now(timezone.utc)
+                        s.commit()
                         s.close()
-                        logger.exception("anomaly_detection falhou: %s", exc)
+                        if not cancelled:
+                            logger.exception("anomaly_detection falhou: %s", exc)
                     continue
 
                 elif task.task_type in ("ai_cost_relationship_reprocess", "gold_reprocess"):

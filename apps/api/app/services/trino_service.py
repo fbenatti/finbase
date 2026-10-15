@@ -45,6 +45,10 @@ _RETRYABLE_MARKERS = (
     # answers the statement endpoint with an HTML/empty page. Transient.
     "resposta inválida do coordinator",
     "invalid response from coordinator",
+    # Worker restarted mid-query: the coordinator loses the remote task.
+    "unexpected response from http",
+    "server refused connection",
+    "no nodes available",
 )
 
 

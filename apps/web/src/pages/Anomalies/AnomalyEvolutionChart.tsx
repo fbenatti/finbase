@@ -9,8 +9,12 @@ import type { AnomalyCase, AnomalySeries, AnomalySeriesPoint } from "../../servi
 const colors = { actual: "#149683", history: "#94a3b8", excess: "#ed5959", forecast: "#306ce5", band: "rgba(48,108,229,0.09)" };
 const money = (value: number | null | undefined, currency: string) => value == null ? "—"
   : value.toLocaleString("pt-BR", { style: "currency", currency, maximumFractionDigits: 2 });
-const dateLabel = (day: string) => new Date(`${day.slice(0, 10)}T00:00:00Z`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" });
-const dayOffset = (day: string, offset: number) => {
+const dateLabel = (day: string | null | undefined) => {
+  if (!day) return "—";
+  return new Date(`${day.slice(0, 10)}T00:00:00Z`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" });
+};
+const dayOffset = (day: string | null | undefined, offset: number) => {
+  if (!day) return "";
   const value = new Date(`${day.slice(0, 10)}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + offset);
   return value.toISOString().slice(0, 10);
@@ -138,7 +142,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       {comparable.length > 0 ? "Vermelho é o desvio positivo; custo anômalo considera somente a parcela acima do limite tolerado." : "Sem referência completa, o gráfico mostra o realizado sem quantificar desvio."} Dias sem coleta ficam vazios.
       {future.length > 0 && " A área azul mostra a projeção, sem criar realizado futuro."} Clique em uma data para ver os valores.
       {(series.contributor_series_count ?? 1) > 1 && " Realizado e forecast somam o mesmo conjunto de séries do caso."}
-      {reference && <> Referência congelada com corte em {dateLabel(reference.data_cutoff)}.</>}
+      {reference?.data_cutoff && <> Referência congelada com corte em {dateLabel(reference.data_cutoff)}.</>}
     </Typography>
     </AccordionDetails></Accordion>
   </Paper>;

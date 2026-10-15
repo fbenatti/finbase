@@ -77,6 +77,7 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_config ALTER COLUMN calibration_days SET DEFAULT 60",
     "ALTER TABLE anomaly_config ALTER COLUMN horizon_days SET DEFAULT 15",
     "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS detection_engine varchar(10) NOT NULL DEFAULT 'v2'",
+    "UPDATE anomaly_config SET detection_engine = 'v2' WHERE detection_engine IS NULL OR detection_engine = ''",
     "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS materiality_monthly double precision",
     "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS severity_tiers jsonb",
     "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS data_lag_days integer NOT NULL DEFAULT 2",
@@ -93,6 +94,13 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS impact_to_date double precision",
     "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS explanation jsonb",
     "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS suggested_owner_id integer",
+    """UPDATE anomaly_case
+          SET cloud = COALESCE(NULLIF(cloud, ''), series_dimensions::jsonb->>'cloud_origem'),
+              subaccount_name = COALESCE(NULLIF(subaccount_name, ''), series_dimensions::jsonb->>'subaccountname'),
+              service_name = COALESCE(NULLIF(service_name, ''), series_dimensions::jsonb->>'servicename'),
+              region = COALESCE(NULLIF(region, ''), series_dimensions::jsonb->>'regionname')
+        WHERE series_dimensions IS NOT NULL
+          AND (cloud IS NULL OR subaccount_name IS NULL OR service_name IS NULL)""",
     "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS ack_due_at timestamptz",
     "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS resolution_due_at timestamptz",
     "UPDATE anomaly_config SET data_lag_days = 2 WHERE data_lag_days IS NULL",
