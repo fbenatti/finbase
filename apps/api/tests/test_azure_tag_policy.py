@@ -41,7 +41,7 @@ def test_resource_group_selector_applies_to_rg_and_children():
     assert rg["allOf"][1] == {"field": "name", "equals": "rg-terra"}
     assert resource["allOf"][1]["not"]["allOf"] == [
         {"field": "type", "equals": "Microsoft.Sql/servers/databases"},
-        {"field": "name", "equals": "master"},
+        {"field": "name", "like": "*/master"},
     ]
     assert resource["allOf"][2] == {"value": "[resourceGroup().name]", "equals": "rg-terra"}
 
@@ -617,7 +617,7 @@ def test_rg_assignment_scope_omits_rg_name_from_selector():
     resource = service._selector(terms, "resource", omit_rg_scope=True)
     assert rg == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
     assert resource["allOf"][0] == {"field": "type", "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"}
-    assert resource["allOf"][1]["not"]["allOf"][1] == {"field": "name", "equals": "master"}
+    assert resource["allOf"][1]["not"]["allOf"][1] == {"field": "name", "like": "*/master"}
 
 
 def test_deployment_script_uses_resource_group_assignment_scope():
