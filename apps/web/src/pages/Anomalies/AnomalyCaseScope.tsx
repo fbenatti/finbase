@@ -55,7 +55,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Box>
         <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="#4e81c5">Previsto</Typography><Typography variant="caption" color="#c53d4b">Desvio positivo</Typography></Stack>
       </Box>}
-      {excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} dias acima da faixa até {day(kase.event_date)}</Typography>}
+      {excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} {excessDays.length === 1 ? "dia" : "dias"} acima da faixa até {day(kase.event_date)}</Typography>}
       {latest && latest.event_date > kase.event_date && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .75 }}>Último dado ({day(latest.event_date)}): {money(latest.observed_cloud, currency)}{latest.above_band === true ? " · acima da faixa" : latest.above_band === false ? " · não supera o limite de alerta" : " · sem comparação disponível"}</Typography>}
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e2e8f0" }}>
         <Box>
