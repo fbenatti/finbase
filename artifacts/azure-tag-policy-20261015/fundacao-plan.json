@@ -134,7 +134,7 @@
                         },
                         {
                           "field": "name",
-                          "equals": "master"
+                          "like": "*/master"
                         }
                       ]
                     }
@@ -157,7 +157,7 @@
                           },
                           {
                             "field": "name",
-                            "equals": "master"
+                            "like": "*/master"
                           }
                         ]
                       }
@@ -194,7 +194,7 @@
                     },
                     {
                       "field": "name",
-                      "equals": "master"
+                      "like": "*/master"
                     }
                   ]
                 }
@@ -329,7 +329,7 @@
                       },
                       {
                         "field": "name",
-                        "equals": "master"
+                        "like": "*/master"
                       }
                     ]
                   }
@@ -352,7 +352,7 @@
                         },
                         {
                           "field": "name",
-                          "equals": "master"
+                          "like": "*/master"
                         }
                       ]
                     }
@@ -389,7 +389,7 @@
                   },
                   {
                     "field": "name",
-                    "equals": "master"
+                    "like": "*/master"
                   }
                 ]
               }

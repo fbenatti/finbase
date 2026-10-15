@@ -4,6 +4,7 @@ set -euo pipefail
 LOCATION="${LOCATION:-eastus2}"
 PLAN_ONLY="true"
 WAIT_FOR_REMEDIATION="${WAIT_FOR_REMEDIATION:-false}"
+SKIP_REMEDIATION="${SKIP_REMEDIATION:-false}"
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-5}"
 RETRY_DELAY_SECONDS="${RETRY_DELAY_SECONDS:-5}"
 REMEDIATION_SEQ=0
@@ -270,7 +271,7 @@ METADATAEOF
 # Assignment: subscription; alvo efetivo: subscription completa
 # Exceções de maior prioridade excluídas desta policy:
 # - #78 Classifica → Prisma → projeto Prisma
-cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" <<'POLICYEOF'
+cat > "$POLICIES_DIR/of-def-2-52-resource-c97292d2f4f0-rules.json" <<'POLICYEOF'
 {
   "if": {
     "allOf": [
@@ -291,7 +292,7 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" <<'POLICYEOF'
                     },
                     {
                       "field": "name",
-                      "equals": "master"
+                      "like": "*/master"
                     }
                   ]
                 }
@@ -314,7 +315,7 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" <<'POLICYEOF'
                       },
                       {
                         "field": "name",
-                        "equals": "master"
+                        "like": "*/master"
                       }
                     ]
                   }
@@ -406,7 +407,7 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" <<'POLICYEOF'
   }
 }
 POLICYEOF
-cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" <<'METADATAEOF'
+cat > "$POLICIES_DIR/of-def-2-52-resource-c97292d2f4f0-metadata.json" <<'METADATAEOF'
 {
   "category": "OpenFinops",
   "version": "2.0",
@@ -414,8 +415,8 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" <<'METADAT
   "openfinopsExclusions": "#78 Classifica → Prisma → Prisma",
   "openfinopsRuleId": "52",
   "openfinopsLayer": "resource",
-  "openfinopsIdentityKey": "0b1846c1728f",
-  "openfinopsContentHash": "15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3"
+  "openfinopsIdentityKey": "c97292d2f4f0",
+  "openfinopsContentHash": "350fcdabc653b32b90104baffdccb9662e8c2d05a762aa248a8181f6d2c9be1e"
 }
 METADATAEOF
 
@@ -440,7 +441,11 @@ if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscript
     if PRINCIPAL_ID=$(resolve_assignment_principal "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240); then :; else PRINCIPAL_ID=""; fi
   fi
   ensure_tag_contributor "$PRINCIPAL_ID" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240
-  ensure_remediation "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240
+  if [[ "$SKIP_REMEDIATION" == "true" ]]; then
+    if plan; then action CREATE "Trigger scan para $scope (sem nova remediation em SKIP_REMEDIATION)"; else run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi
+  else
+    ensure_remediation "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240
+  fi
 else
   error "Assignment $ACTIVE_ASSIGNMENT_NAME não encontrado após ensure_assignment."; exit 1
 fi
@@ -454,9 +459,9 @@ fi
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 [[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }
 resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' Indexed
-ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-0b1846c1728f}"
-ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-0b1846c1728f}"
-ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3 category=OpenFinops version=2.0 'openfinopsSourceRule=#52 Classifica → fundacao telefonica' 'openfinopsExclusions=#78 Classifica → Prisma → Prisma' openfinopsRuleId=52 openfinopsLayer=resource openfinopsIdentityKey=0b1846c1728f openfinopsContentHash=15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3
+ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-c97292d2f4f0}"
+ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-c97292d2f4f0}"
+ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-c97292d2f4f0-rules.json" "$POLICIES_DIR/of-def-2-52-resource-c97292d2f4f0-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 350fcdabc653b32b90104baffdccb9662e8c2d05a762aa248a8181f6d2c9be1e category=OpenFinops version=2.0 'openfinopsSourceRule=#52 Classifica → fundacao telefonica' 'openfinopsExclusions=#78 Classifica → Prisma → Prisma' openfinopsRuleId=52 openfinopsLayer=resource openfinopsIdentityKey=c97292d2f4f0 openfinopsContentHash=350fcdabc653b32b90104baffdccb9662e8c2d05a762aa248a8181f6d2c9be1e
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
   PRINCIPAL_ID=""
@@ -464,7 +469,11 @@ if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscript
     if PRINCIPAL_ID=$(resolve_assignment_principal "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240); then :; else PRINCIPAL_ID=""; fi
   fi
   ensure_tag_contributor "$PRINCIPAL_ID" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240
-  ensure_remediation "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240
+  if [[ "$SKIP_REMEDIATION" == "true" ]]; then
+    if plan; then action CREATE "Trigger scan para $scope (sem nova remediation em SKIP_REMEDIATION)"; else run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi
+  else
+    ensure_remediation "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240
+  fi
 else
   error "Assignment $ACTIVE_ASSIGNMENT_NAME não encontrado após ensure_assignment."; exit 1
 fi
