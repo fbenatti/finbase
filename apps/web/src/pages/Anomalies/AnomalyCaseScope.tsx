@@ -88,16 +88,24 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         {filters.map((filter, index) => <Box key={filter.field} sx={{ display: "flex", alignItems: "center", gap: .75 }}><Typography color="text.secondary">›</Typography><Chip size="small" label={`${hierarchy.find(item => item.field === filter.field)?.label ?? filter.field}: ${filter.value}`} color={index === filters.length - 1 ? "primary" : "default"} onClick={() => setFilters(filters.slice(0, index + 1))} /></Box>)}
       </Stack>
       {lineageNodes.length > 0 && <Box sx={{ mb: 1.5 }}>
-        <Typography variant="caption" fontWeight={700} color="text.secondary">CAMINHO DO GASTO · ORGANOGRAMA ATÉ O GRÃO DISPONÍVEL</Typography>
-        <Stack direction="row" alignItems="stretch" gap={.75} sx={{ mt: .75, overflowX: "auto", pb: .5 }}>
-          {lineageNodes.map((node, index) => <Box key={node.field} sx={{ display: "flex", alignItems: "center", gap: .75, flexShrink: 0 }}>
-            {index > 0 && <ArrowForwardIcon sx={{ fontSize: 15, color: "#99a9bf" }} />}
-            <Box sx={{ minWidth: 110, maxWidth: 220, px: 1.1, py: .75, border: "1px solid #dce5ef", borderRadius: 1.5, bgcolor: index >= lineageNodes.length - 2 ? "#f3efff" : "#f7f9fc" }}>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.2 }}>{node.label}</Typography>
-              <Typography variant="body2" fontWeight={750} sx={{ mt: .25, overflowWrap: "anywhere" }}>{node.value}</Typography>
-            </Box>
-          </Box>)}
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+          <Typography variant="caption" fontWeight={700} color="text.secondary">CAMINHO DO GASTO</Typography>
+          <Chip size="small" variant="outlined" label={filters.length ? `Forecast no nível: ${forecastScopeLabel}` : "Forecast e desvio neste ramo"} sx={{ maxWidth: "70%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
         </Stack>
+        <Box sx={{ mt: 1, pl: 1.5, position: "relative", "&:before": { content: '""', position: "absolute", left: 5, top: 10, bottom: 10, width: 2, bgcolor: "#dce5ef" } }}>
+          {lineageNodes.map((node, index) => {
+            const terminal = index === lineageNodes.length - 1;
+            return <Stack key={node.field} direction="row" alignItems="stretch" gap={1.25} sx={{ position: "relative", mb: index === lineageNodes.length - 1 ? 0 : .75 }}>
+              <Box sx={{ zIndex: 1, flex: "0 0 10px", width: 10, height: 10, mt: 1.5, ml: -.25, borderRadius: "50%", border: "2px solid", borderColor: terminal ? "#536fb2" : "#aab8ca", bgcolor: terminal ? "#536fb2" : "#fff" }} />
+              <Box sx={{ minWidth: 0, flex: 1, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 1, rowGap: .25, px: 1.25, py: .8, border: "1px solid", borderColor: terminal ? "#cbd5f0" : "#e4eaf1", borderRadius: 1.5, bgcolor: terminal ? "#f2f4fc" : "#fff" }}>
+                <Typography variant="caption" color="text.secondary" sx={{ minWidth: { xs: 96, sm: 128 } }}>{node.label}</Typography>
+                <Typography variant="body2" fontWeight={terminal ? 750 : 600} sx={{ minWidth: 0, flex: 1, overflowWrap: "anywhere", color: terminal ? "#344878" : "#26364a" }}>{node.value}</Typography>
+                {terminal && <Chip size="small" color="primary" variant="outlined" label="grão avaliado" sx={{ height: 21 }} />}
+              </Box>
+            </Stack>;
+          })}
+        </Box>
+        {!groups.length && !rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 3, mt: .75 }}>A comparação do desvio termina no ramo destacado; o detalhamento abaixo representa custo observado e não divide o forecast por SKU.</Typography>}
       </Box>}
       {detailItems.length > 0 && actual != null && (() => {
         const detailTotal = detailItems.reduce((sum, item) => sum + (item.observed_cloud ?? 0), 0);
@@ -146,22 +154,6 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
             })}
             {selectedDetailItems.length > 20 && <Typography variant="caption" color="text.secondary">Exibindo os 20 maiores detalhes de {selectedDetailItems.length} itens.</Typography>}
           </Stack>}
-          {!groups.length && !rawDetailSelected && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
-            <Stack direction="row" flexWrap="wrap" gap={.75} alignItems="center">
-              {[
-                ["Assinatura", member.dimensions.subaccountname],
-                ["Resource group", member.dimensions.resource_group ?? member.dimensions.resourcegroupname],
-                ["Serviço", member.dimensions.servicename],
-                ["SKU / categoria", member.dimensions.sku ?? member.dimensions.skumeter ?? member.dimensions.servicesubcategory],
-                ["Centro de custo", member.dimensions.centro_custo],
-              ].filter((entry): entry is [string, string] => Boolean(entry[1])).map(([name, value], index) => <Box key={`${name}-${value}`} sx={{ display: "flex", alignItems: "center", gap: .75 }}>
-                {index > 0 && <Typography color="text.disabled">›</Typography>}
-                <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}><Typography component="span" variant="caption" color="text.secondary">{name}: </Typography><strong>{value}</strong></Typography>
-              </Box>)}
-              {!member.dimensions.subaccountname && !member.dimensions.servicename && !member.dimensions.servicesubcategory && <Typography variant="body2" color="text.secondary">Detalhes de assinatura, serviço e SKU não disponíveis neste grão.</Typography>}
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .5 }}>{member.dimensions.commitmentdiscounttype || "Modalidade não informada"} · desvio calculado no grão do forecast deste ramo.</Typography>
-          </Box>)}
           {!groups.length && !rawDetailSelected && series.detail_dimensions?.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1 }}>A origem desta avaliação não disponibilizou dimensões abaixo do forecast. O drilldown termina aqui para não atribuir um desvio fictício a resource groups ou SKUs.</Typography>}
           {!all.length && <Typography variant="body2" color="text.secondary">A decomposição exige as séries contribuintes desta avaliação. O total continua disponível abaixo.</Typography>}
         </Box>
