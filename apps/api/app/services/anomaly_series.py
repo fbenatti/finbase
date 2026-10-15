@@ -340,6 +340,7 @@ async def read_case_series(
     display_end = max(data_end, forecast_end)
     series_dimensions = dict(getattr(case, "series_dimensions", None) or {})
     observed_by_day: dict[date, float] = {}
+    observed_by_member: list[dict[date, float]] = [{} for _ in members]
     if context_start <= data_end:
         sql = observed_daily_sql(
             source_namespace=source_namespace, table=source_table,
@@ -359,6 +360,11 @@ async def read_case_series(
             value = row.get("observed_cloud")
             if day <= data_end and value is not None:
                 observed_by_day[day] = observed_by_day.get(day, 0.0) + float(value)
+                for index, member in enumerate(members):
+                    if all(row.get(key) == dimension for key, dimension in member["dimensions"].items()):
+                        member_days = observed_by_member[index]
+                        member_days[day] = member_days.get(day, 0.0) + float(value)
+                        break
     points_by_series = []
     for member in members:
         member_rows = [row for row in rows if row.get("series_id") == member["series_id"]]
@@ -376,6 +382,14 @@ async def read_case_series(
                             or point.get("forecast_run_id") == frozen.get("forecast_run_id")]
     items = compose_case_timeline(reference_points, observed_by_day, start=context_start,
                                  end=display_end, data_end=data_end, monthly=monthly)
+    contributor_breakdown = []
+    for index, member in enumerate(members):
+        timeline = compose_case_timeline(points_by_series[index], observed_by_member[index],
+                                         start=context_start, end=display_end, data_end=data_end, monthly=monthly)
+        event_point = next((point for point in timeline if point["event_date"] == event_day.isoformat()), {})
+        contributor_breakdown.append({**member, "event_date": event_day.isoformat(),
+                                      **{key: event_point.get(key) for key in
+                                         ("observed_cloud", "expected_cloud", "delta_cloud")}})
     if monthly and frozen and frozen.get("coverage_kind") != "FULL_MONTH":
         warnings.append("Este forecast contém o saldo restante do mês, não a expectativa mensal congelada antes da compra. A comparação desta compra está indisponível; o saldo não foi distribuído como consumo diário nem usado como zero esperado.")
     if event_day > data_end:
@@ -404,6 +418,7 @@ async def read_case_series(
         "reference": reference, "warnings": warnings,
         "contributor_series_count": len(members), "scope_verified": bool(contributor_series),
         "contributor_series": members,
+        "contributor_breakdown": contributor_breakdown,
         "reference_table": publication.reference_table, "series_dimensions": series_dimensions,
         "distribution_methods": sorted({str(point.get("distribution_method")) for point in comparable}),
         "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in forecast_rows}),
