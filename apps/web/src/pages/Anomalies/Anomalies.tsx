@@ -14,7 +14,6 @@ import {
   MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs,
   TextField, Tooltip, Typography,
 } from "@mui/material";
-import AnomalyEvolutionChart from "./AnomalyEvolutionChart";
 import AnomalyCaseScope from "./AnomalyCaseScope";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import CloseIcon from "@mui/icons-material/Close";
@@ -758,10 +757,8 @@ export default function Anomalies() {
             {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
               Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso configurado da fonte: {config?.data_lag_days ?? 2} dia(s)). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
             </Alert>}
-            {series && <AnomalyCaseScope kase={selected} series={series} currency={currency} />}
-            {series ? <AnomalyEvolutionChart key={selected.id} series={series} kase={selected} currency={currency} />
+            {series ? <AnomalyCaseScope key={selected.id} kase={selected} series={series} currency={currency} />
               : <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress size={28} /><Typography color="text.secondary" sx={{ mt: 1 }}>Carregando realizado e forecast…</Typography></Box>}
-            {series && <AnomalyCaseScope kase={selected} series={series} currency={currency} breakdown />}
             <Accordion sx={{ mt: 2 }} disableGutters>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>Acompanhamento e etapas do caso</AccordionSummary>
               <AccordionDetails><StepPanel kase={selected} /></AccordionDetails>
