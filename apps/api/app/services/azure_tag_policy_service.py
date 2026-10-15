@@ -687,8 +687,10 @@ class AzureTagPolicyService:
     @staticmethod
     def _target_matches_terms(target: dict, terms: list[dict]) -> bool:
         """Match an Azure Resource Graph row to the ARM dimensions of a rule."""
+        resource_type = str(target.get("resource_type") or "")
+        is_resource_group = resource_type.casefold() == AZURE_POLICY_RESOURCE_GROUP_TYPE.casefold()
         values_by_field = {
-            "name": str(target.get("resource_group_name") or ""),
+            "name": str(target.get("resource_group_name") or "") if is_resource_group else str(target.get("resource_name") or ""),
             "id": str(target.get("resource_id") or ""),
             "type": str(target.get("resource_type") or ""),
             "location": str(target.get("location") or ""),
@@ -696,7 +698,10 @@ class AzureTagPolicyService:
         for term in terms:
             if term.get("scope") == SCOPE_SUBSCRIPTION:
                 continue
-            actual = values_by_field.get(str(term.get("field") or ""), "")
+            if term.get("scope") == SCOPE_RG:
+                actual = str(target.get("resource_group_name") or "")
+            else:
+                actual = values_by_field.get(str(term.get("field") or ""), "")
             if not actual:
                 return False
             operator = term.get("operator")
@@ -813,8 +818,8 @@ class AzureTagPolicyService:
             headers = await arm_headers(dict(conn.config_json or {}))
             query = """resourcecontainers
 | where type =~ 'microsoft.resources/subscriptions/resourcegroups'
-| project subscription_id = subscriptionId, resource_group_name = name, resource_id = id, resource_type = type
-| union (resources | project subscription_id = subscriptionId, resource_group_name = resourceGroup, resource_id = id, resource_type = type)"""
+| project subscription_id = subscriptionId, resource_group_name = name, resource_name = name, resource_id = id, resource_type = type, location = tostring(location)
+| union (resources | project subscription_id = subscriptionId, resource_group_name = resourceGroup, resource_name = name, resource_id = id, resource_type = type, location = tostring(location))"""
             rows: list[dict] = []
             token = None
             async with httpx.AsyncClient() as client:
@@ -857,13 +862,17 @@ class AzureTagPolicyService:
         catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
 
         azure_target_rows: list[dict] = []
+        azure_catalog_ids: set[str] = set()
         if subscription_id:
-            configured_ids = {str(sid).strip().casefold()
-                              for sid in ((conn.config_json or {}).get("subscription_ids") or [])
-                              if UUID_RE.match(str(sid).strip())}
-            allowed_ids = {sid.casefold() for ids in catalog.values() for sid in ids} | configured_ids
-            allowed_ids.update(self._gold_subscription_id(row).casefold() for row in gold_rows)
-            if subscription_id.casefold() not in allowed_ids:
+            azure_catalog, discovered_ids, catalog_error = await self._subscription_catalog(conn)
+            azure_catalog_ids = {sid.casefold() for sid in discovered_ids}
+            for name, ids in azure_catalog.items():
+                catalog.setdefault(name, []).extend(ids)
+            catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
+            if catalog_error:
+                diagnostics.append({"status": "blocked", "reason": catalog_error, "subscription_id": subscription_id})
+                return None
+            if subscription_id.casefold() not in azure_catalog_ids:
                 diagnostics.append({"status": "blocked", "reason": "Subscription não encontrada no catálogo acessível da conexão",
                                     "subscription_id": subscription_id})
                 return None
@@ -873,6 +882,7 @@ class AzureTagPolicyService:
                 inventory_error = str(exc)
             if inventory_error:
                 diagnostics.append({"status": "blocked", "reason": inventory_error, "subscription_id": subscription_id})
+                return None
 
         compiled: list[dict] = []
         for rule in rules:
