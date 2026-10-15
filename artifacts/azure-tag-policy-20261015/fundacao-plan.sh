@@ -35,8 +35,9 @@ resolve_existing_target() {
   if (( matches == 1 )); then info "Reutilizando assignment $RESOLVED_ASSIGNMENT_NAME e definition $RESOLVED_POLICY_NAME"; fi
 }
 ensure_definition() {
-  local name="$1" mode="$2" rules="$3" metadata="$4" display="$5" description="$6" expected_hash="$7"
+  local name="$1" mode="$2" rules="$3" metadata_file="$4" display="$5" description="$6" expected_hash="$7"
   local category current_hash lookup_output lookup_status definition_exists=0
+  shift 7; local -a metadata_args=("$@")
   if lookup_output=$(az policy definition show --name "$name" --only-show-errors 2>&1); then definition_exists=1; else lookup_status=$?; [[ "$lookup_output" =~ (ResourceNotFound|NotFound|not\ found|does\ not\ exist) ]] || { error "Falha consultando definition $name (az exit $lookup_status): $lookup_output"; exit 1; }; fi
   if (( definition_exists )); then
     category=$(az policy definition show --name "$name" --query "metadata.category" -o tsv --only-show-errors)
@@ -44,10 +45,10 @@ ensure_definition() {
     current_hash=$(az policy definition show --name "$name" --query "metadata.openfinopsContentHash" -o tsv --only-show-errors)
     if [[ "$current_hash" == "$expected_hash" ]]; then action UNCHANGED "Definition $name"; return; fi
     action UPDATE "Definition OpenFinops $name"
-    plan || run_mutation az policy definition update --name "$name" --mode "$mode" --rules "@$rules" --metadata "@$metadata" --display-name "$display" --description "$description" --only-show-errors
+    plan || run_mutation az policy definition update --name "$name" --mode "$mode" --rules "@$rules" --metadata "${metadata_args[@]}" --display-name "$display" --description "$description" --only-show-errors
   else
     action CREATE "Definition OpenFinops $name"
-    plan || run_mutation az policy definition create --name "$name" --mode "$mode" --rules "@$rules" --metadata "@$metadata" --display-name "$display" --description "$description" --only-show-errors
+    plan || run_mutation az policy definition create --name "$name" --mode "$mode" --rules "@$rules" --metadata "${metadata_args[@]}" --display-name "$display" --description "$description" --only-show-errors
   fi
 }
 ensure_assignment() {
@@ -431,7 +432,7 @@ CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' All
 ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-rg-4ae7870f6635}"
 ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-rg-4ae7870f6635}"
-ensure_definition "$ACTIVE_POLICY_NAME" All "$POLICIES_DIR/of-def-2-52-rg-4ae7870f6635-rules.json" "$POLICIES_DIR/of-def-2-52-rg-4ae7870f6635-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 0b79e49909a4ec3f363308860e08fef357b28c004d30c106c29dd7d54fd2c684
+ensure_definition "$ACTIVE_POLICY_NAME" All "$POLICIES_DIR/of-def-2-52-rg-4ae7870f6635-rules.json" "$POLICIES_DIR/of-def-2-52-rg-4ae7870f6635-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 0b79e49909a4ec3f363308860e08fef357b28c004d30c106c29dd7d54fd2c684 category=OpenFinops version=2.0 'openfinopsSourceRule=#52 Classifica → fundacao telefonica' 'openfinopsExclusions=#78 Classifica → Prisma → Prisma' openfinopsRuleId=52 openfinopsLayer=rg openfinopsIdentityKey=4ae7870f6635 openfinopsContentHash=0b79e49909a4ec3f363308860e08fef357b28c004d30c106c29dd7d54fd2c684
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
   PRINCIPAL_ID=""
@@ -455,7 +456,7 @@ CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' Indexed
 ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-0b1846c1728f}"
 ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-0b1846c1728f}"
-ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3
+ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3 category=OpenFinops version=2.0 'openfinopsSourceRule=#52 Classifica → fundacao telefonica' 'openfinopsExclusions=#78 Classifica → Prisma → Prisma' openfinopsRuleId=52 openfinopsLayer=resource openfinopsIdentityKey=0b1846c1728f openfinopsContentHash=15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
   PRINCIPAL_ID=""
