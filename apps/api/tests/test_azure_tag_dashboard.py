@@ -164,3 +164,47 @@ def test_subscription_resources_filters_in_bronze_and_uses_snapshot_name():
         "projeto": "Terra", "diretoria": "TI", "centro-de-custos": "CC1",
     }
     assert result["resources"][0]["matching_tags"] == ["projeto", "diretoria", "centro-de-custos"]
+
+
+def test_silver_expectations_prefer_resource_evidence_and_use_unique_group_fallback(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    connection = SimpleNamespace(id=2, code="azure-ti")
+    resource_id = "/subscriptions/sub-a/resourcegroups/rg-a/providers/microsoft.compute/virtualmachines/vm-a"
+    inventory = [
+        {"resource_id": resource_id, "resource_name": "vm-a", "resource_group": "rg-a",
+         "resource_type": "microsoft.compute/virtualmachines"},
+        {"resource_id": "/subscriptions/sub-a/resourcegroups/rg-b/providers/microsoft.compute/virtualmachines/vm-b",
+         "resource_name": "vm-b", "resource_group": "rg-b",
+         "resource_type": "microsoft.compute/virtualmachines"},
+    ]
+    mappings = [
+        {"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
+        {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+        {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
+    ]
+
+    async def fake_execute(query, timeout_s=60):
+        assert "source_connection_id AS bigint) = 2" in query
+        assert "'rg-a'" in query and "'rg-b'" in query
+        return [
+            {"resource_id": resource_id, "resource_group": "rg-a", "tag_value_0": "Terra",
+             "tag_value_1": "DIR TI", "tag_value_2": "CC1", "evidence_count": 5},
+            {"resource_id": "", "resource_group": "rg-b", "tag_value_0": "Prisma",
+             "tag_value_1": "DIR Segurança", "tag_value_2": "CC2", "evidence_count": 3},
+        ]
+
+    monkeypatch.setattr("app.services.trino_service.execute", fake_execute)
+    service = AzureTagDashboardService(db=object())
+    result = asyncio.run(service._silver_expected_tags(connection, "sub-a", inventory, mappings))
+
+    assert result[resource_id] == {
+        "tags": {"projeto": "Terra", "diretoria": "DIR TI", "centro-de-custos": "CC1"},
+        "source": "resource", "ambiguous": False,
+    }
+    vm_b = inventory[1]["resource_id"]
+    assert result[vm_b] == {
+        "tags": {"projeto": "Prisma", "diretoria": "DIR Segurança", "centro-de-custos": "CC2"},
+        "source": "resource_group", "ambiguous": False,
+    }
