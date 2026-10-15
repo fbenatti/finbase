@@ -361,8 +361,8 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     assert "grep -q" not in script
     assert "|| true" not in script
     assert "Há $matches assignments OpenFinops candidatos" in script
-    assert "contains(policyDefinitionId" in script
-    assert "contains(properties.policyDefinitionId" not in script
+    assert 'az rest --method get' in script
+    assert "contains(properties.policyDefinitionId" in script
     assert "az policy definition delete" not in script
     assert "az policy assignment delete" not in script
     assert "az policy remediation delete" not in script
@@ -582,7 +582,7 @@ if [[ "$1 $2" == "account show" ]]; then
   [[ "$*" == *"--query id"* ]] && printf '%s\\n' "$EXPECTED_SUBSCRIPTION"
   exit 0
 fi
-if [[ "$1 $2 $3" == "policy assignment list" ]]; then exit 0; fi
+if [[ "$1" == "rest" ]]; then exit 0; fi
 if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy assignment show" ]]; then
   echo 'ResourceNotFound' >&2
   exit 1
