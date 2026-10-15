@@ -226,7 +226,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         'resolve_existing_target() {',
         '  local scope="$1" source_rule="$2" mode="$3" rows assignment definition category existing_rule existing_mode matches=0',
         '  RESOLVED_ASSIGNMENT_NAME=""; RESOLVED_POLICY_NAME=""',
-        '  rows=$(az policy assignment list --scope "$scope" --query "[?contains(properties.policyDefinitionId, \`openfinops\`)].[name,properties.policyDefinitionId]" -o tsv --only-show-errors) || { error "Falha ao listar assignments em $scope"; exit 1; }',
+        '  rows=$(az policy assignment list --scope "$scope" --query "[?contains(policyDefinitionId, \`openfinops\`)].[name,policyDefinitionId]" -o tsv --only-show-errors) || { error "Falha ao listar assignments em $scope"; exit 1; }',
         '  while IFS=$\'\\t\' read -r assignment definition; do',
         '    [[ -n "$assignment" && -n "$definition" ]] || continue',
         '    category=$(az policy definition show --id "$definition" --query "metadata.category" -o tsv --only-show-errors) || { error "Falha ao consultar definition $definition; interrompendo para evitar falso resultado de inexistência."; exit 1; }',
