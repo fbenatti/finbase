@@ -444,6 +444,9 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     "name": name,
                     "mode": mode,
                     "policy": policy,
+                    "metadata_args": " ".join(
+                        shlex.quote(f"{key}={value}") for key, value in policy["metadata"].items()
+                    ),
                     "rules_filename": rules_filename,
                     "metadata_filename": metadata_filename,
                 })
@@ -468,6 +471,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 name = job["name"]
                 policy = job["policy"]
                 scope = job["scope"]
+                metadata_cli_args = job["metadata_args"]
                 assignment = f"of-asg-{tenant.get('connection_id') or 0}-{job['source_rule'].split(' ', 1)[0].lstrip('#')}-{job['kind']}-{job['identity_key']}"
                 lines += [
                     f"EXPECTED_SUBSCRIPTION={q(subscription_id)}",
