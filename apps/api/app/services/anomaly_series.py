@@ -77,8 +77,10 @@ def detailed_event_sql(*, source_namespace: str, source_table: str, date_column:
                        member_filters: Sequence[str], event_day: date) -> str:
     dim_select = [_quote(name) for name in dimensions]
     dim_aliases = [f"{item.get('expression') or _quote(str(item['column']))} AS {_quote(item['key'])}" for item in detail_dimensions]
-    # Present only hierarchy fields whose source columns exist.
-    projection = ", ".join([*dim_select, *dim_aliases])
+    # The CTE renames fine-grained columns; the outer query must use those
+    # aliases instead of referring to physical source names that are out of scope.
+    source_projection = ", ".join([*dim_select, *dim_aliases])
+    output_projection = ", ".join([*dim_select, *(_quote(str(item['key'])) for item in detail_dimensions)])
     group_columns = ", ".join(str(index + 1) for index in range(len(dim_select) + len(dim_aliases)))
     date_expr = gold_date_expr(date_column, period_column)
     type_filter = f"({_quote(type_column)} = 'realizado' OR {_quote(type_column)} IS NULL)" if type_column else "TRUE"
@@ -86,14 +88,13 @@ def detailed_event_sql(*, source_namespace: str, source_table: str, date_column:
     scope = "(" + " OR ".join(f"({value})" for value in filters) + ")" if filters else "FALSE"
     return f"""
         WITH parsed AS (
-            SELECT {projection}, {date_expr} AS day,
+            SELECT {source_projection}, {date_expr} AS day,
                    COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS value
              FROM iceberg.{source_namespace}.{_quote(source_table)}
-             WHERE {type_filter} AND {scope}
+             WHERE {type_filter} AND {scope} AND {date_expr} = DATE {_lit(event_day.isoformat())}
         )
-        SELECT {projection}, SUM(value) AS observed_cloud
+        SELECT {output_projection}, SUM(value) AS observed_cloud
           FROM parsed
-         WHERE day = DATE {_lit(event_day.isoformat())}
          GROUP BY {group_columns}
          ORDER BY ABS(SUM(value)) DESC
          LIMIT 500
