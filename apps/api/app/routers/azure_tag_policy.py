@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import base64
 from hashlib import sha256
 
 from pydantic import BaseModel, Field
@@ -101,6 +102,7 @@ async def list_tenants(db: AsyncSession = Depends(get_db)):
 async def export_policy(
     connection_id: int | None = Query(None, description="Optional: a single Azure connection/tenant"),
     department_id: int | None = Query(None, description="Optional: compile only one organizational project"),
+    subscription_id: str | None = Query(None, description="Optional: restrict export to one accessible subscription"),
     plan_only: bool = Query(False, description="Generate the script with PLAN_ONLY=true by default"),
     fmt: str = Query("json", description="Output format: json | script | both"),
     db: AsyncSession = Depends(get_db),
@@ -115,8 +117,13 @@ async def export_policy(
         tenants = [tenant for tenant in tenants if tenant["connection_id"] == connection_id]
         if not tenants:
             raise HTTPException(status_code=404, detail="Tenant Azure não encontrado")
+    if subscription_id and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}", subscription_id):
+        raise HTTPException(status_code=422, detail="subscription_id deve ser um GUID válido")
     policies = [doc for tenant in tenants
-                if (doc := await service.generate_tenant_policy(tenant["connection_id"], department_id))]
+                if (doc := await service.generate_tenant_policy(tenant["connection_id"], department_id, subscription_id))]
+    if subscription_id and not any(subscription_id.casefold() in {sid.casefold() for sid in doc.get("deployment_subscriptions", [])}
+                                   for doc in policies):
+        raise HTTPException(status_code=400, detail="Subscription não encontrada ou sem políticas Azure exportáveis para esta conexão")
     script = build_script(policies, plan_only=plan_only) if fmt in {"script", "both"} else ""
     if fmt == "script":
         return PlainTextResponse(script, media_type="text/x-shellscript")
@@ -125,7 +132,8 @@ async def export_policy(
 
 def _definition(
     display_name: str, description: str, condition: dict, tags: dict[str, str], mode: str,
-    source_rule: str, exclusions: list[dict],
+    source_rule: str, exclusions: list[dict], *, rule_id: int | None = None,
+    layer: str | None = None, identity_key: str | None = None,
 ) -> dict:
     operations = [{"operation": "addOrReplace", "field": f"tags['{key}']", "value": value}
                   for key, value in _collapse_tag_keys(tags).items() if value]
@@ -137,8 +145,11 @@ def _definition(
             "category": "OpenFinops", "version": "2.0",
             "openfinopsSourceRule": source_rule,
             "openfinopsExclusions": _exclusion_summary(exclusions),
+            **({"openfinopsRuleId": str(rule_id)} if rule_id is not None else {}),
+            **({"openfinopsLayer": layer} if layer else {}),
+            **({"openfinopsIdentityKey": identity_key} if identity_key else {}),
         },
-        "policyRule": {"if": condition, "then": {"effect": "modify", "details": {
+        "policyRule": {"if": _tag_drift_condition(condition, tags), "then": {"effect": "modify", "details": {
             "conflictEffect": "audit", "roleDefinitionIds": [TAG_CONTRIBUTOR_ROLE], "operations": operations,
         }}},
     }
@@ -152,6 +163,24 @@ def _definition(
     }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     definition["metadata"]["openfinopsContentHash"] = sha256(content.encode("utf-8")).hexdigest()
     return definition
+
+
+def _tag_drift_condition(region: dict, tags: dict[str, str]) -> dict:
+    """Only select resources missing at least one exact, case-sensitive tag value."""
+    drift: list[dict] = []
+    for key, value in _collapse_tag_keys(tags).items():
+        if not value:
+            continue
+        encoded = base64.b64encode(str(value).encode("utf-8")).decode("ascii")
+        escaped_key = str(key).replace("'", "''")
+        observed = f"[base64(string(field('tags[''{escaped_key}'']')))]"
+        drift.append({"anyOf": [
+            {"field": f"tags['{key}']", "exists": "false"},
+            {"value": observed, "notMatch": encoded},
+        ]})
+    if not drift:
+        return region
+    return {"allOf": [region, {"anyOf": drift}]}
 
 
 def _assignment_scope(subscription_id: str, item: dict) -> str:
@@ -289,7 +318,16 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         jobs: dict[str, list[dict]] = {}
         for index, (kind, mode, item) in enumerate(items, 1):
             subscriptions = item.get("scope_subscriptions") or []
-            name = f"openfinops-{kind}-{code}{test_suffix}-{index}"
+            identity_key = ""
+            if subscriptions:
+                scope_for_identity = _assignment_scope(subscriptions[0], item)
+                identity_payload = json.dumps({
+                    "connection_id": tenant.get("connection_id"), "rule_id": item.get("rule_id"),
+                    "kind": kind, "scope": scope_for_identity,
+                    "selector": item.get("base_selector", item.get("condition")),
+                }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                identity_key = sha256(identity_payload.encode("utf-8")).hexdigest()[:16]
+            name = f"ofp-{kind}-{item.get('rule_id', index)}-{identity_key or index}"
             if not subscriptions:
                 lines += [f"# SKIPPED {name}: no observed Gold subscription or explicit subscription GUID for this rule.", ""]
                 continue
@@ -321,6 +359,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 ),
                 item["condition"], item.get("tags", {}), mode,
                 f"#{item.get('rule_id')} {item.get('rule_name')}", exclusions,
+                rule_id=item.get("rule_id"), layer=kind, identity_key=identity_key,
             )
             rules_filename = f"{name}-rules.json"
             metadata_filename = f"{name}-metadata.json"
@@ -338,6 +377,8 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     "subscription_id": subscription_id,
                     "scope": scope,
                     "assignment_suffix": assignment_suffix,
+                    "identity_key": identity_key,
+                    "source_rule": f"#{item.get('rule_id')} {item.get('rule_name')}",
                     "name": name,
                     "mode": mode,
                     "policy": policy,
@@ -365,9 +406,11 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 name = job["name"]
                 policy = job["policy"]
                 scope = job["scope"]
-                suffix = job["assignment_suffix"]
-                assignment = f"{name}-{suffix}-{slugify(subscription_id)[:8]}" if suffix else f"{name}-{slugify(subscription_id)[:8]}"
+                assignment = f"ofa-{job['identity_key']}"
                 lines += [
+                    f"resolve_existing_target {q(scope)} {q(job['source_rule'])} {q(job['mode'])}",
+                    f"ACTIVE_ASSIGNMENT_NAME=\"${{RESOLVED_ASSIGNMENT_NAME:-{assignment}}}\"",
+                    f"ACTIVE_POLICY_NAME=\"${{RESOLVED_POLICY_NAME:-{name}}}\"",
                     f"EXPECTED_SUBSCRIPTION={q(subscription_id)}",
                     'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
                     'if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then',
@@ -378,17 +421,17 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     '[[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }',
                 ]
                 lines += [
-                    f"ensure_definition {q(name)} {q(job['mode'])} \"$POLICIES_DIR/{job['rules_filename']}\" \"$POLICIES_DIR/{job['metadata_filename']}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])}",
-                    f"ensure_assignment {q(assignment)} {q(scope)} {q(name)}",
-                    f"if az policy assignment show --name {q(assignment)} --scope {q(scope)} --only-show-errors >/dev/null 2>&1 || plan; then",
+                    f"ensure_definition \"$ACTIVE_POLICY_NAME\" {q(job['mode'])} \"$POLICIES_DIR/{job['rules_filename']}\" \"$POLICIES_DIR/{job['metadata_filename']}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])}",
+                    f"ensure_assignment \"$ACTIVE_ASSIGNMENT_NAME\" {q(scope)} \"$ACTIVE_POLICY_NAME\"",
+                    f"if az policy assignment show --name \"$ACTIVE_ASSIGNMENT_NAME\" --scope {q(scope)} --only-show-errors >/dev/null 2>&1 || plan; then",
                     '  PRINCIPAL_ID=""',
                     f"  if az policy assignment show --name {q(assignment)} --scope {q(scope)} --only-show-errors >/dev/null 2>&1; then",
-                    f"    if PRINCIPAL_ID=$(resolve_assignment_principal {q(assignment)} {q(scope)}); then :; else PRINCIPAL_ID=\"\"; fi",
+                    f"    if PRINCIPAL_ID=$(resolve_assignment_principal \"$ACTIVE_ASSIGNMENT_NAME\" {q(scope)}); then :; else PRINCIPAL_ID=\"\"; fi",
                     '  fi',
                     f"  ensure_tag_contributor \"$PRINCIPAL_ID\" {q(scope)}",
-                    f"  ensure_remediation {q(assignment)} {q(scope)}",
+                    f"  ensure_remediation \"$ACTIVE_ASSIGNMENT_NAME\" {q(scope)}",
                     'else',
-                    f"  error \"Assignment {assignment} não encontrado após ensure_assignment.\"; exit 1",
+                    '  error "Assignment $ACTIVE_ASSIGNMENT_NAME não encontrado após ensure_assignment."; exit 1',
                     'fi',
                     "",
                 ]
