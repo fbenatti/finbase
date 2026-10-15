@@ -262,6 +262,16 @@ class AzureTagPolicyService:
             return catalog, sorted(set(ids)), message
         return catalog, sorted(set(ids)), None
 
+    async def list_subscriptions(self, connection_id: int) -> list[dict[str, str]]:
+        conn = await self.db.get(SourceConnection, connection_id)
+        if not conn or conn.connector_type != "azure_blob":
+            raise ValueError("Conexão Azure não encontrada")
+        catalog, ids, error = await self._subscription_catalog(conn)
+        if error:
+            raise RuntimeError(error)
+        name_by_id = {sid.casefold(): name for name, values in catalog.items() for sid in values}
+        return [{"subscription_id": sid, "name": name_by_id.get(sid.casefold(), sid)} for sid in ids]
+
     async def _gold_evidence(self, conn: SourceConnection, mappings: list[dict[str, str]]) -> tuple[list[dict], str | None]:
         """Return the concrete Azure targets classified in the latest Gold period.
 
