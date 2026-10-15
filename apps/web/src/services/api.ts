@@ -1697,6 +1697,7 @@ export interface AzureTenantPolicy {
   rule_count: number;
   department_id?: number | null;
   department_name?: string | null;
+  selected_subscription_id?: string | null;
   tag_mappings?: Array<{ tag_key: string; focus_field: string }>;
   deployment_subscriptions?: string[];
   subscription_tenants?: Record<string, string>;
@@ -1710,6 +1711,7 @@ export interface AzureTenantPolicy {
       rule_id?: number;
       rule_name?: string;
       value?: string;
+      subscription_id?: string;
     }>;
   };
   subscriptions?: Array<{
