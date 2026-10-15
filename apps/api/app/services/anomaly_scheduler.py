@@ -159,13 +159,6 @@ def builtin_schedules() -> list[dict[str, Any]]:
     """Agendamentos padrão da feature (idempotentes, editáveis)."""
     return [
         {
-            "name": "Detecção de anomalias",
-            "cron": "0 6 * * *",
-            "active": False,
-            "schedule_type": DETECTION_SCHEDULE_TYPE,
-            "config": {"anomaly_config_ids": []},
-        },
-        {
             "name": "Prazos de anomalias (SLA)",
             "cron": "*/30 * * * *",
             "active": True,

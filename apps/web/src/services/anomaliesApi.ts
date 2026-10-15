@@ -25,6 +25,18 @@ export type AnomalyConfig = {
   version: number;
   source_namespace: string;
   destination_physical_name: string;
+  detection_engine?: string;
+  materiality_monthly?: number | null;
+};
+
+export type ImpactSummary = {
+  detected: number;
+  by_deviation_status: Record<string, number>;
+  incurred_excess_cost: number;
+  projected_saving_monthly: number;
+  projected_saving_annual: number;
+  open_exposure_monthly: number;
+  open_exposure_annual: number;
 };
 
 export type AnomalyCase = {
@@ -55,6 +67,17 @@ export type AnomalyCase = {
   applied_rule_refs: Array<{ name: string; status: string; detail?: string | null }>;
   data_quality: string;
   assignee_user_id: number | null;
+  suggested_owner_id?: number | null;
+  cloud?: string | null;
+  subaccount_name?: string | null;
+  resource_group?: string | null;
+  service_name?: string | null;
+  region?: string | null;
+  detector?: string | null;
+  deviation_status?: string | null;
+  projected_month_impact?: number | null;
+  impact_to_date?: number | null;
+  explanation?: Array<Record<string, unknown>> | null;
   routing_rule_id: string | null;
   due_at: string | null;
   acknowledged_at: string | null;
@@ -309,6 +332,16 @@ export async function createAnomalyAction(caseId: number, payload: Record<string
 export async function updateAnomalyAction(actionId: number, payload: Record<string, unknown>) {
   const { data } = await api.put(`/anomalies/actions/${actionId}`, payload);
   return data as AnomalyAction;
+}
+
+export async function getAnomalyImpactSummary(configId?: number) {
+  const { data } = await api.get("/anomalies/impact/summary", { params: configId ? { config_id: configId } : {} });
+  return data as ImpactSummary;
+}
+
+export async function getAnomalyHealth() {
+  const { data } = await api.get("/anomalies/health");
+  return data as Record<string, unknown>;
 }
 
 export async function listAnomalyNotifications(params: Record<string, unknown>) {

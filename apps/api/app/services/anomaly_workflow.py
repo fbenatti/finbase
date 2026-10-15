@@ -671,6 +671,7 @@ def case_query(
     period: str | None = None,
     config_id: int | None = None,
     overdue_only: bool = False,
+    unassigned_only: bool = False,
 ) -> Select:
     query = select(AnomalyCase)
     if states:
@@ -686,10 +687,23 @@ def case_query(
     if config_id is not None:
         query = query.where(AnomalyCase.anomaly_config_id == config_id)
     if overdue_only:
+        now = datetime.now(timezone.utc)
         query = query.where(
-            AnomalyCase.due_at.is_not(None),
-            AnomalyCase.due_at < datetime.now(timezone.utc),
+            AnomalyCase.state != "CLOSED",
             AnomalyCase.acknowledged_at.is_(None),
+            (
+                (AnomalyCase.ack_due_at.is_not(None) & (AnomalyCase.ack_due_at < now))
+                | (
+                    AnomalyCase.ack_due_at.is_(None)
+                    & AnomalyCase.due_at.is_not(None)
+                    & (AnomalyCase.due_at < now)
+                )
+            ),
+        )
+    if unassigned_only:
+        query = query.where(
+            AnomalyCase.assignee_user_id.is_(None),
+            AnomalyCase.state != "CLOSED",
         )
     return query
 

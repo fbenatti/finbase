@@ -78,12 +78,11 @@ def test_tipos_de_agendamento_registrados():
 
 def test_agendamentos_padrao():
     schedules = {item["schedule_type"]: item for item in builtin_schedules()}
-    # Detecção nasce INATIVA: piloto manual antes de automatizar.
-    assert schedules[DETECTION_SCHEDULE_TYPE]["active"] is False
+    # Detecção não tem agendamento próprio: dispara pelo pipeline de coleta.
+    assert DETECTION_SCHEDULE_TYPE not in schedules
     # Monitor de prazos nasce ativo: só emite notificação interna.
     assert schedules[SLA_SCHEDULE_TYPE]["active"] is True
     assert schedules[SLA_SCHEDULE_TYPE]["config"]["due_soon_hours"] == DEFAULT_DUE_SOON_HOURS
-    assert schedules[DETECTION_SCHEDULE_TYPE]["config"]["anomaly_config_ids"] == []
 
 
 def test_config_ids_aceita_lista_e_ignora_lixo():

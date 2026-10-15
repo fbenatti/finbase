@@ -133,6 +133,9 @@ class AnomalyConfig(Base):
         server_default=text("""'{"CRITICAL": 4, "HIGH": 24, "DEFAULT": 72}'"""),
     )
     notification_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    detection_engine = Column(String(10), nullable=False, default="v2", server_default="v2")
+    materiality_monthly = Column(Float, nullable=True)
+    severity_tiers = Column(JSON, nullable=True)
 
     # Configuração inicial nasce DESABILITADA (E1).
     enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
@@ -281,12 +284,31 @@ class AnomalyCase(Base):
     applied_rule_refs = Column(JSON, nullable=False, default=list)
     data_quality = Column(String(30), nullable=False, default="OK")
 
+    # --- Escopo achatado (motor v2) ---
+    cloud = Column(String(120), nullable=True, index=True)
+    subaccount_name = Column(String(300), nullable=True)
+    resource_group = Column(String(300), nullable=True)
+    service_name = Column(String(300), nullable=True)
+    region = Column(String(120), nullable=True)
+    detector = Column(String(40), nullable=True)
+    deviation_status = Column(String(40), nullable=True, index=True)
+    episode_start = Column(String(10), nullable=True)
+    episode_end = Column(String(10), nullable=True)
+    projected_month_impact = Column(Float, nullable=True)
+    impact_to_date = Column(Float, nullable=True)
+    explanation = Column(JSON, nullable=True)
+
     # --- Atribuição (plano §3.3) ---
+    suggested_owner_id = Column(
+        Integer, ForeignKey("user_account.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     assignee_user_id = Column(
         Integer, ForeignKey("user_account.id", ondelete="SET NULL"), nullable=True, index=True
     )
     routing_rule_id = Column(String(120), nullable=True)
     due_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    ack_due_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_due_at = Column(DateTime(timezone=True), nullable=True)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
     acknowledged_by_id = Column(Integer, ForeignKey("user_account.id", ondelete="SET NULL"), nullable=True)
 

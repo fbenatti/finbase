@@ -307,6 +307,68 @@ def _queue_scheduled_forecasts(source_task_id: int, task_json: dict, session) ->
     return queued
 
 
+def _queue_scheduled_anomaly_detection(source_task_id: int, task_json: dict, session) -> list[int]:
+    """Enfileira detecção de anomalias ao fim do pipeline de coleta, se habilitado."""
+    if not task_json.get("scheduled_pipeline"):
+        return []
+    schedule_id = task_json.get("schedule_id")
+    if schedule_id is None:
+        return []
+    from app.models.scheduled_task import ScheduledTask
+    from app.models.anomaly import AnomalyConfig, AnomalyRun
+
+    schedule = session.get(ScheduledTask, int(schedule_id))
+    if schedule is None:
+        return []
+    cfg = schedule.config_json or {}
+    if not cfg.get("anomaly_after_pipeline"):
+        return []
+    pending = session.query(EtlTask).filter(
+        EtlTask.task_type == "anomaly_detection",
+        EtlTask.status.in_(["QUEUED", "RUNNING"]),
+    ).all()
+    if any(
+        isinstance(row.result_json, dict)
+        and row.result_json.get("schedule_id") == schedule_id
+        for row in pending
+    ):
+        return []
+    config = (
+        session.query(AnomalyConfig)
+        .filter(AnomalyConfig.enabled.is_(True))
+        .order_by(AnomalyConfig.id.asc())
+        .first()
+    )
+    if config is None:
+        return []
+    run = AnomalyRun(
+        anomaly_config_id=config.id,
+        config_version=config.version,
+        trigger_type="SCHEDULED",
+        status="QUEUED",
+        phase="Na fila (pipeline de coleta)",
+        config_snapshot={"schedule_id": schedule_id, "source_etl_task_id": source_task_id},
+    )
+    session.add(run)
+    session.flush()
+    task = EtlTask(
+        destination_table_id=config.id,
+        task_type="anomaly_detection",
+        status="QUEUED",
+        phase="Detecção após coleta",
+        result_json={
+            "anomaly_run_id": run.id,
+            "schedule_id": schedule_id,
+            "scheduled_pipeline": True,
+            "source_etl_task_id": source_task_id,
+        },
+    )
+    session.add(task)
+    session.flush()
+    run.source_etl_task_id = task.id
+    return [task.id]
+
+
 def _queue_scheduled_accuracy(forecast_task_id: int, task_json: dict, session) -> None:
     if not task_json.get("scheduled_pipeline") or not task_json.get("accuracy"):
         return
@@ -670,6 +732,7 @@ def consumer_main(worker_id: int):
                         s.commit()
                         if task_json.get("scheduled_pipeline"):
                             _queue_scheduled_accuracy(task_id, task_json, s)
+                            _queue_scheduled_anomaly_detection(task_id, task_json, s)
                             s.commit()
                         rateio: dict = {}
                         run_scheduled_rateio = (not task_json.get("scheduled_pipeline")) or bool(task_json.get("shared_cost", False))
@@ -905,8 +968,13 @@ def consumer_main(worker_id: int):
                     anomaly_run_id = (task.result_json or {}).get("anomaly_run_id")
                     try:
                         from app.database import run_async_isolated
+                        from app.models.anomaly import AnomalyConfig
                         from app.services.anomaly_runner import execute_detection
+                        from app.services.anomaly_v2.runner import execute_detection_v2
+
                         s = SyncSession()
+                        config_row = s.get(AnomalyConfig, anomaly_config_id)
+                        use_v2 = getattr(config_row, "detection_engine", "v2") == "v2"
 
                         def anomaly_progress(done, total, name):
                             current = s.get(EtlTask, task_id)
@@ -916,8 +984,9 @@ def consumer_main(worker_id: int):
                                 current.phase = name
                                 s.commit()
 
+                        runner = execute_detection_v2 if use_v2 else execute_detection
                         result = run_async_isolated(
-                            execute_detection(
+                            runner(
                                 anomaly_config_id,
                                 run_id=anomaly_run_id,
                                 progress=anomaly_progress,
@@ -929,10 +998,17 @@ def consumer_main(worker_id: int):
                             if task_row.status == "CANCELLED" or result.get("status") == "CANCELLED":
                                 task_row.status = "CANCELLED"
                                 task_row.phase = "Cancelado pelo usuário"
+                            elif result.get("status") == "SKIPPED_NO_NEW_DATA":
+                                task_row.status = "COMPLETED"
+                                task_row.phase = "Sem dado novo (idempotente)"
+                                task_row.rows_destination = 0
+                                task_row.current_blob = "SKIPPED_NO_NEW_DATA"
                             else:
                                 task_row.status = "COMPLETED"
                                 task_row.phase = "Detecção publicada"
-                                task_row.rows_destination = int(result.get("assessment_rows") or 0)
+                                task_row.rows_destination = int(
+                                    result.get("assessment_rows") or result.get("rows_written") or 0
+                                )
                                 task_row.current_blob = (
                                     f"{result.get('cases_created', 0)} caso(s) novo(s), "
                                     f"{result.get('cases_updated', 0)} atualizado(s)"
@@ -1270,9 +1346,34 @@ def consumer_main(worker_id: int):
                                 # = realizado + forecast + rateio) na fila do worker.
                                 if succeeded:
                                     if (terminal_task.result_json or {}).get("scheduled_pipeline") or (terminal_task.result_json or {}).get("scheduled_reprocess"):
-                                        scheduled_forecasts = _queue_scheduled_forecasts(task_id, terminal_task.result_json or {}, terminal_session)
+                                        payload_json = terminal_task.result_json or {}
+                                        scheduled_forecasts = _queue_scheduled_forecasts(task_id, payload_json, terminal_session)
                                         if scheduled_forecasts:
                                             terminal_task.phase = ((terminal_task.phase or "") + f" · Forecast(s) na fila: {len(scheduled_forecasts)}")[:200]
+                                        else:
+                                            from app.models.scheduled_task import ScheduledTask
+
+                                            schedule_id = payload_json.get("schedule_id")
+                                            sched = (
+                                                terminal_session.get(ScheduledTask, int(schedule_id))
+                                                if schedule_id is not None
+                                                else None
+                                            )
+                                            sched_cfg = dict(sched.config_json or {}) if sched else {}
+                                            forecast_ids = [
+                                                int(x)
+                                                for x in (sched_cfg.get("forecast_config_ids") or payload_json.get("forecast_config_ids") or [])
+                                                if x
+                                            ]
+                                            if not forecast_ids and sched_cfg.get("anomaly_after_pipeline"):
+                                                queued_anomaly = _queue_scheduled_anomaly_detection(
+                                                    task_id, payload_json, terminal_session
+                                                )
+                                                if queued_anomaly:
+                                                    terminal_task.phase = (
+                                                        (terminal_task.phase or "")
+                                                        + f" · Detecção na fila: {len(queued_anomaly)}"
+                                                    )[:200]
                                     payload = terminal_task.result_json or {}
                                     group = payload.get("reprocess_group_id") or payload.get("queue_group")
                                     position = payload.get("queue_position")

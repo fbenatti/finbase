@@ -64,6 +64,9 @@ class ConfigUpdate(BaseModel):
     sla_hours: dict[str, int] | None = None
     notification_enabled: bool | None = None
     enabled: bool | None = None
+    detection_engine: Literal["v1", "v2"] | None = None
+    materiality_monthly: float | None = Field(default=None, ge=0)
+    severity_tiers: dict[str, float] | None = None
 
 
 class TransitionRequest(BaseModel):
@@ -174,6 +177,21 @@ def _case_out(case: AnomalyCase) -> dict[str, Any]:
         "reopen_count": case.reopen_count,
         "parent_case_id": case.parent_case_id,
         "case_version": case.case_version,
+        "cloud": getattr(case, "cloud", None),
+        "subaccount_name": getattr(case, "subaccount_name", None),
+        "resource_group": getattr(case, "resource_group", None),
+        "service_name": getattr(case, "service_name", None),
+        "region": getattr(case, "region", None),
+        "detector": getattr(case, "detector", None),
+        "deviation_status": getattr(case, "deviation_status", None),
+        "suggested_owner_id": getattr(case, "suggested_owner_id", None),
+        "projected_month_impact": getattr(case, "projected_month_impact", None),
+        "impact_to_date": getattr(case, "impact_to_date", None),
+        "explanation": getattr(case, "explanation", None),
+        "episode_start": getattr(case, "episode_start", None),
+        "episode_end": getattr(case, "episode_end", None),
+        "ack_due_at": _iso(getattr(case, "ack_due_at", None)),
+        "resolution_due_at": _iso(getattr(case, "resolution_due_at", None)),
         "first_detected_at": _iso(case.first_detected_at),
         "last_evaluated_at": _iso(case.last_evaluated_at),
     }
@@ -455,6 +473,7 @@ async def list_cases(
     assignee_user_id: int | None = None,
     queue_only: bool = False,
     overdue_only: bool = False,
+    unassigned_only: bool = False,
     period: str | None = None,
     config_id: int | None = None,
     order_by: Literal["score", "due"] = "score",
@@ -476,6 +495,7 @@ async def list_cases(
         overdue_only=overdue_only,
         period=period,
         config_id=config_id,
+        unassigned_only=unassigned_only,
     )
     return {"items": [_case_out(case) for case in rows], "total": total, "limit": size, "offset": skip}
 
@@ -930,3 +950,112 @@ async def read_notification(
         "read_at": _iso(notification.read_at),
         "acknowledged_at": _iso(notification.acknowledged_at),
     }
+
+
+@router.get("/cases/{case_id}/explanation")
+async def case_explanation(
+    case_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "read")),
+):
+    case = await db.get(AnomalyCase, case_id)
+    if case is None:
+        raise HTTPException(404, "Caso não encontrado")
+    if case.explanation:
+        return {"case_id": case_id, "checks": case.explanation}
+    from app.services.anomaly_v2.explanation import explain_signal
+
+    config = await db.get(AnomalyConfig, case.anomaly_config_id) if case.anomaly_config_id else None
+    materiality = 100.0
+    min_pct = 0.2
+    if config:
+        materiality = float((config.materiality_by_currency or {}).get(config.currency, 100))
+        min_pct = float(config.min_relative_deviation or 0.2)
+    signal = {
+        "delta": case.delta_cloud,
+        "pct_delta": (case.delta_cloud or 0) / max(case.expected_cloud or 1, 1),
+        "detector": case.detector or case.event_type,
+        "reason_codes": case.reason_codes or [],
+    }
+    return {"case_id": case_id, "checks": explain_signal(signal, materiality=materiality, min_pct=min_pct)}
+
+
+@router.get("/impact/summary")
+async def impact_summary(
+    config_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "read")),
+):
+    base = select(AnomalyCase)
+    if config_id is not None:
+        base = base.where(AnomalyCase.anomaly_config_id == config_id)
+    rows = (await db.execute(base)).scalars().all()
+    by_status: dict[str, int] = {}
+    incurred = saving_m = saving_y = exposure_m = exposure_y = 0.0
+    for case in rows:
+        status = getattr(case, "deviation_status", None) or case.state
+        by_status[str(status)] = by_status.get(str(status), 0) + 1
+        incurred += float(getattr(case, "impact_to_date", None) or case.anomalous_cost_cloud or 0)
+        if str(getattr(case, "deviation_status", "")) in ("AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"):
+            saving_m += float(getattr(case, "projected_month_impact", 0) or 0)
+            saving_y += saving_m * 12
+        if str(getattr(case, "deviation_status", "")) in ("EM_DESVIO", "ACEITO", "REINCIDENTE"):
+            exposure_m += float(getattr(case, "projected_month_impact", 0) or 0)
+            exposure_y += exposure_m * 12
+    return {
+        "detected": len(rows),
+        "by_deviation_status": by_status,
+        "incurred_excess_cost": round(incurred, 2),
+        "projected_saving_monthly": round(saving_m, 2),
+        "projected_saving_annual": round(saving_y, 2),
+        "open_exposure_monthly": round(exposure_m, 2),
+        "open_exposure_annual": round(exposure_y, 2),
+    }
+
+
+@router.get("/health")
+async def anomaly_health(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "read")),
+):
+    last_run = (
+        await db.execute(select(AnomalyRun).order_by(AnomalyRun.id.desc()).limit(1))
+    ).scalar_one_or_none()
+    config = (await db.execute(select(AnomalyConfig).limit(1))).scalar_one_or_none()
+    v2_summary = {}
+    if last_run and isinstance(last_run.config_snapshot, dict):
+        v2_summary = last_run.config_snapshot.get("v2_summary") or {}
+    return {
+        "engine": getattr(config, "detection_engine", "v2") if config else "v2",
+        "config_enabled": bool(config.enabled) if config else False,
+        "last_run_status": last_run.status if last_run else None,
+        "last_run_finished_at": _iso(last_run.finished_at) if last_run else None,
+        "v2_summary": v2_summary,
+    }
+
+
+@router.post("/configs/{config_id}/simulate")
+async def simulate_detection(
+    config_id: int,
+    days: int = Query(default=30, ge=7, le=90),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require("anomalies", "create")),
+):
+    from app.services.anomaly_v2.backtest import backtest_date_range, run_backtest
+    from app.services.anomaly_v2.daily_build import load_daily_history
+    from app.services.anomaly_v2.runner import _analysis_end, _config_from_row
+
+    config_row = await db.get(AnomalyConfig, config_id)
+    if config_row is None:
+        raise HTTPException(404, "Configuração não encontrada")
+    config = _config_from_row(config_row)
+    as_of = _analysis_end(datetime.now(timezone.utc), int(config_row.data_lag_days or 2))
+    history = await load_daily_history(config, as_of=as_of, history_days=days)
+
+    def evaluate(day: date):
+        return []
+
+    report = run_backtest(days=backtest_date_range(as_of, history_days=days), evaluate_day=evaluate)
+    report["note"] = "Simulação estrutural; conecte evaluate ao motor para contagem real."
+    report["history_rows"] = len(history)
+    return report

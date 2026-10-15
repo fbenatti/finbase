@@ -15,6 +15,9 @@ import {
   TextField, Tooltip, Typography,
 } from "@mui/material";
 import AnomalyCaseScope from "./AnomalyCaseScope";
+import AnomaliesCasesDataGrid from "./AnomaliesCasesDataGrid";
+import AnomaliesImpactTab from "./AnomaliesImpactTab";
+import AnomaliesSettingsTab from "./AnomaliesSettingsTab";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import CloseIcon from "@mui/icons-material/Close";
 import NotificationsIcon from "@mui/icons-material/Notifications";
@@ -180,14 +183,10 @@ export default function Anomalies() {
   const [stateFilter, setStateFilter] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [queueOnly, setQueueOnly] = useState(false);
-  const [dataLagDraft, setDataLagDraft] = useState("2");
+  const [myCasesOnly, setMyCasesOnly] = useState(false);
 
   const config = configs[0];
   const currency = config?.currency ?? "BRL";
-
-  useEffect(() => {
-    if (config) setDataLagDraft(String(config.data_lag_days ?? 2));
-  }, [config?.id, config?.version, config?.data_lag_days]);
 
   const loadAll = useCallback(async () => {
     setBusy(true);
@@ -243,6 +242,14 @@ export default function Anomalies() {
       if (stateFilter) params.state = [stateFilter];
       if (severityFilter) params.severity = [severityFilter];
       if (queueOnly) params.queue_only = true;
+      if (stateFilter === "__overdue__") {
+        params.overdue_only = true;
+        delete params.state;
+      }
+      if (stateFilter === "__unassigned__") {
+        params.unassigned_only = true;
+        delete params.state;
+      }
       const page = await listAnomalyCases(params);
       setCases(page.items);
       setTotal(page.total);
@@ -265,6 +272,14 @@ export default function Anomalies() {
     if (tab === 3) void loadExpected();
     if (tab === 4) void loadQuality();
   }, [tab, loadExpected, loadQuality]);
+
+  const openCasesFilter = (filter: "" | "overdue" | "unassigned" | "open") => {
+    setTab(2);
+    if (filter === "overdue") setStateFilter("__overdue__");
+    else if (filter === "unassigned") setStateFilter("__unassigned__");
+    else if (filter === "open") setStateFilter("");
+    else setStateFilter("");
+  };
 
   const openCase = async (id: number) => {
     setBusy(true);
@@ -373,24 +388,6 @@ export default function Anomalies() {
     }
   };
 
-  const saveDataLag = async () => {
-    if (!config) return;
-    const days = Number(dataLagDraft);
-    if (!Number.isInteger(days) || days < 0 || days > 30) {
-      setError("O atraso precisa ser um número inteiro entre 0 e 30 dias.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await updateAnomalyConfig(config.id, { data_lag_days: days });
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao salvar atraso da fonte");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const runNow = async () => {
     if (!config) return;
     setBusy(true);
@@ -440,29 +437,16 @@ export default function Anomalies() {
         </Stack>
       </Box>
 
-      {config && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          Medida <strong>{config.measure_column}</strong> · moeda <strong>{config.currency}</strong> ·
-          perfil {config.profile} · quantil {(config.daily_quantile * 100).toFixed(1)}% · materialidade{" "}
-          {money(config.materiality_by_currency?.[config.currency] ?? 100, config.currency)} · janela{" "}
-          {config.history_days}d (calibração {config.calibration_days}d) · horizonte {config.horizon_days}d · atraso da fonte {config.data_lag_days}d
-        </Typography>
-      )}
-      {config && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-        <TextField size="small" type="number" label="Atraso da fonte (dias)" value={dataLagDraft}
-          inputProps={{ min: 0, max: 30, step: 1 }} onChange={(event) => setDataLagDraft(event.target.value)} sx={{ width: 210 }} />
-        <Button size="small" variant="outlined" onClick={saveDataLag} disabled={busy || Number(dataLagDraft) === config.data_lag_days}>Salvar atraso</Button>
-        <Typography variant="caption" color="text.secondary">0 = até hoje; 2 = padrão atual D-2</Typography>
-      </Stack>}
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{error}</Alert>}
 
       <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
         <Tab label="Visão geral" />
-        <Tab label="Meus casos / fila FinOps" />
+        <Tab label="Impacto" />
         <Tab label="Casos" />
         <Tab label="Eventos esperados" />
-        <Tab label="Qualidade" />
+        <Tab label="Saúde do modelo" />
         <Tab label="Retrospectiva" />
+        <Tab label="Configurações" />
       </Tabs>
 
       {tab === 0 && summary && (
@@ -480,9 +464,21 @@ export default function Anomalies() {
               { label: "Classificados", value: summary.classified },
               { label: "Famílias reincidentes", value: summary.recurrence_families },
             ].map((item) => (
-              <Paper key={item.label} variant="outlined" sx={{ p: 1.5, minWidth: 150 }}>
+              <Paper
+                key={item.label}
+                variant="outlined"
+                sx={{ p: 1.5, minWidth: 150, cursor: ["Abertos", "Vencidos", "Sem responsável"].includes(item.label) ? "pointer" : "default" }}
+                onClick={() => {
+                  if (item.label === "Abertos") openCasesFilter("open");
+                  if (item.label === "Vencidos") openCasesFilter("overdue");
+                  if (item.label === "Sem responsável") openCasesFilter("unassigned");
+                }}
+              >
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
                 <Typography variant="h6">{item.value}</Typography>
+                {item.label === "Vencidos" && (
+                  <Typography variant="caption" color="text.secondary">Prazo de ciência sem confirmação</Typography>
+                )}
               </Paper>
             ))}
           </Stack>
@@ -511,7 +507,9 @@ export default function Anomalies() {
         </Box>
       )}
 
-      {(tab === 1 || tab === 2) && (
+      {tab === 1 && <AnomaliesImpactTab currency={currency} />}
+
+      {tab === 2 && (
         <Box>
           <Stack direction="row" spacing={2} sx={{ mb: 1 }} flexWrap="wrap">
             <TextField select size="small" label="Estado" value={stateFilter}
@@ -528,12 +526,14 @@ export default function Anomalies() {
                 <MenuItem key={severity} value={severity}>{severity}</MenuItem>
               ))}
             </TextField>
-            {tab === 1 && (
-              <Button size="small" variant={queueOnly ? "contained" : "outlined"}
-                      onClick={() => setQueueOnly((value) => !value)}>
-                Somente fila FinOps
-              </Button>
-            )}
+            <Button size="small" variant={queueOnly ? "contained" : "outlined"}
+                    onClick={() => setQueueOnly((value) => !value)}>
+              Fila FinOps
+            </Button>
+            <Button size="small" variant={myCasesOnly ? "contained" : "outlined"}
+                    onClick={() => setMyCasesOnly((value) => !value)}>
+              Meus casos
+            </Button>
             <Typography variant="body2" sx={{ alignSelf: "center" }}>
               {total} caso(s)
             </Typography>
@@ -558,56 +558,14 @@ export default function Anomalies() {
             ))}
             {cases.length === 0 && <Paper variant="outlined" sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">Nenhum caso encontrado com os filtros atuais.</Typography></Paper>}
           </Stack>
-          <Paper variant="outlined" sx={{ display: { xs: "none", md: "block" }, overflowX: "auto" }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>#</TableCell>
-                  <TableCell>Nota</TableCell>
-                  <TableCell>Severidade</TableCell>
-                  <TableCell>Estado</TableCell>
-                  <TableCell>Evento</TableCell>
-                  <TableCell>Data</TableCell>
-                  <TableCell align="right">Observado</TableCell>
-                  <TableCell align="right">Esperado</TableCell>
-                  <TableCell align="right">Custo anômalo</TableCell>
-                  <TableCell>Responsável</TableCell>
-                  <TableCell>Prazo</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {cases.map((item) => (
-                  <TableRow key={item.id} hover sx={{ cursor: "pointer" }}
-                            onClick={() => void openCase(item.id)}>
-                    <TableCell>{item.id}</TableCell>
-                    <TableCell>{item.score.toFixed(0)}</TableCell>
-                    <TableCell>
-                      <Chip size="small" color={SEVERITY_COLOR[item.severity] ?? "default"}
-                            label={item.severity} />
-                    </TableCell>
-                    <TableCell>{STATE_LABEL[item.state] ?? item.state}</TableCell>
-                    <TableCell>{item.event_family}</TableCell>
-                    <TableCell>{item.event_date}</TableCell>
-                    <TableCell align="right">{money(item.observed_cloud, currency)}</TableCell>
-                    <TableCell align="right">{money(item.expected_cloud, currency)}</TableCell>
-                    <TableCell align="right">{money(item.anomalous_cost_cloud, currency)}</TableCell>
-                    <TableCell>{item.assignee_user_id ?? "fila FinOps"}</TableCell>
-                    <TableCell>{dt(item.due_at)}</TableCell>
-                  </TableRow>
-                ))}
-                {cases.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={11}>
-                      <Typography variant="body2" color="text.secondary">
-                        Nenhum caso. Habilite a configuração e execute a detecção.
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </Paper>
+          <Box sx={{ display: { xs: "none", md: "block" } }}>
+            <AnomaliesCasesDataGrid cases={cases} currency={currency} onOpen={(id) => void openCase(id)} />
+          </Box>
         </Box>
+      )}
+
+      {tab === 6 && config && (
+        <AnomaliesSettingsTab config={config} onSaved={() => void loadAll()} busy={busy} setBusy={setBusy} />
       )}
 
       {tab === 3 && (
@@ -661,7 +619,7 @@ export default function Anomalies() {
 
       {tab === 4 && (
         <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>Qualidade dos dados</Typography>
+          <Typography variant="subtitle2" gutterBottom>Saúde do modelo</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Dados parciais, referências reconstruídas, tolerância explícita e ausência de coleta.
             Dado parcial nunca confirma recuperação nem encerra caso.
@@ -768,8 +726,13 @@ export default function Anomalies() {
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>Critérios do detector e regras aplicadas</AccordionSummary>
             <AccordionDetails>
             <Typography variant="body2" sx={{ mb: 1 }}>Prioridade: {selected.score.toFixed(0)}/100 · Confiança: {selected.confidence} · Qualidade: {selected.data_quality}</Typography>
+            {(selected.explanation?.length ? selected.explanation : []).map((check, index) => (
+              <Typography key={index} variant="body2" sx={{ mb: 0.5 }}>
+                {String(check.explicacao ?? check.criterio)}
+              </Typography>
+            ))}
             <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
-              {selected.reason_codes.map((code) => (
+              {(!selected.explanation?.length ? selected.reason_codes : []).map((code) => (
                 <Chip key={code} size="small" variant="outlined" label={code} />
               ))}
               {selected.applied_rule_refs.map((rule, index) => (

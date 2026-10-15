@@ -42,6 +42,7 @@ interface SchedForm {
   accuracy: boolean;
   shared_cost: boolean;
   backup_layers: ("bronze" | "silver" | "gold")[];
+  anomaly_after_pipeline: boolean;
 }
 
 const EMPTY_FORM: SchedForm = {
@@ -53,6 +54,7 @@ const EMPTY_FORM: SchedForm = {
   destination_table_ids: [], period_mode: "all", billing_periods: "",
   forecast_config_ids: [], gold_rule_ids: [], accuracy: true, shared_cost: false,
   backup_layers: ["bronze"],
+  anomaly_after_pipeline: false,
 };
 
 export default function SchedulesPanel({ connections }: { connections: SourceConnection[] }) {
@@ -134,6 +136,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
       backup_layers: Array.isArray(cfg.backup_layers) && cfg.backup_layers.length
         ? cfg.backup_layers.filter((layer): layer is "bronze" | "silver" | "gold" => ["bronze", "silver", "gold"].includes(String(layer)))
         : ["bronze"],
+      anomaly_after_pipeline: Boolean(cfg.anomaly_after_pipeline),
     });
     setDialogOpen(true);
   };
@@ -166,6 +169,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
           accuracy: form.accuracy,
           shared_cost: form.shared_cost,
           backup_layers: form.backup_layers.length ? form.backup_layers : ["bronze"],
+          anomaly_after_pipeline: form.anomaly_after_pipeline,
         },
       };
       if (editing) {
@@ -421,6 +425,12 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                 </Box>
               </Box>
               {form.schedule_type === "collection" && <FormControlLabel control={<Switch checked={form.forecast_after_ingestion} onChange={e => setForm({ ...form, forecast_after_ingestion: e.target.checked })} />} label="Executar Forecast após ingestão e reprocessamento" />}
+              {(form.schedule_type === "collection" || form.schedule_type === "reprocess") && (
+                <FormControlLabel
+                  control={<Switch checked={form.anomaly_after_pipeline} onChange={e => setForm({ ...form, anomaly_after_pipeline: e.target.checked })} />}
+                  label="Executar detecção de anomalias ao final do pipeline"
+                />
+              )}
               {form.schedule_type === "reprocess" && <>
                 <FormControl size="small"><InputLabel>Períodos</InputLabel><Select value={form.period_mode} label="Períodos" onChange={e => setForm({ ...form, period_mode: e.target.value as "selected" | "all" })}><MenuItem value="all">Todos disponíveis</MenuItem><MenuItem value="selected">Selecionados</MenuItem></Select></FormControl>
                 {form.period_mode === "selected" && <TextField label="Períodos (YYYYMM)" value={form.billing_periods} onChange={e => setForm({ ...form, billing_periods: e.target.value })} helperText="Ex.: 202601, 202602, 202603" />}

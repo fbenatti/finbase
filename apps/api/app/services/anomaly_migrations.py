@@ -76,7 +76,25 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE anomaly_config ALTER COLUMN history_days SET DEFAULT 180",
     "ALTER TABLE anomaly_config ALTER COLUMN calibration_days SET DEFAULT 60",
     "ALTER TABLE anomaly_config ALTER COLUMN horizon_days SET DEFAULT 15",
+    "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS detection_engine varchar(10) NOT NULL DEFAULT 'v2'",
+    "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS materiality_monthly double precision",
+    "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS severity_tiers jsonb",
     "ALTER TABLE anomaly_config ADD COLUMN IF NOT EXISTS data_lag_days integer NOT NULL DEFAULT 2",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS cloud varchar(120)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS subaccount_name varchar(300)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS resource_group varchar(300)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS service_name varchar(300)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS region varchar(120)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS detector varchar(40)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS deviation_status varchar(40)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS episode_start varchar(10)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS episode_end varchar(10)",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS projected_month_impact double precision",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS impact_to_date double precision",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS explanation jsonb",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS suggested_owner_id integer",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS ack_due_at timestamptz",
+    "ALTER TABLE anomaly_case ADD COLUMN IF NOT EXISTS resolution_due_at timestamptz",
     "UPDATE anomaly_config SET data_lag_days = 2 WHERE data_lag_days IS NULL",
     "ALTER TABLE anomaly_config ALTER COLUMN data_lag_days SET DEFAULT 2",
     "ALTER TABLE anomaly_config ALTER COLUMN data_lag_days SET NOT NULL",
@@ -150,6 +168,12 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     """,
     # Correção de dados estreita: materialidade vazia passa a ter o default de
     # 100 na moeda declarada pela configuração. Idempotente.
+    "UPDATE scheduled_task SET active = false WHERE schedule_type = 'anomaly_detection'",
+    """UPDATE scheduled_task
+          SET config_json = (
+                COALESCE(config_json::jsonb, '{}'::jsonb) || '{"anomaly_after_pipeline": true}'::jsonb
+              )::json
+        WHERE name = 'Coleta Diária Cloud' AND schedule_type = 'collection'""",
     """UPDATE anomaly_config
           SET materiality_by_currency = jsonb_build_object(currency, 100.0)
         WHERE materiality_by_currency IS NULL
