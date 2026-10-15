@@ -598,7 +598,8 @@ def _cloud_sql(prefixes: list[str], columns: dict[str, str]) -> str:
 
 def _mapped_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {"period": row.get("period"), "path": _row_hierarchy_path(row), "value": row.get("value"), "cloud_value": row.get("cloud_value")}
+        {"period": row.get("period"), "path": _row_hierarchy_path(row), "value": row.get("value"),
+         "cloud_value": row.get("cloud_value"), "cloud": str(row.get("cloud") or "").lower()}
         for row in records
     ]
 
@@ -616,30 +617,34 @@ async def load_weight_aggregates(
     gold_period = _quote_ident(gold_columns["_billing_period"] if "_billing_period" in gold_columns else gold_columns["period"])
     gold_value = _quote_ident(gold_columns["realizado"])
     gold_cloud_value = _quote_ident(gold_columns.get("realizado_cloud", gold_columns["realizado"]))
+    gold_origin = _quote_ident(gold_columns["cloud_origem"]) if "cloud_origem" in gold_columns else "CAST(NULL AS VARCHAR)"
     actual_sql = f"""
       SELECT {gold_period} AS period,
              {_hierarchy_select_sql(gold_columns)},
+             lower(CAST({gold_origin} AS VARCHAR)) AS cloud,
              SUM(COALESCE(TRY_CAST({gold_value} AS DOUBLE), 0)) AS value,
              SUM(COALESCE(TRY_CAST({gold_cloud_value} AS DOUBLE), 0)) AS cloud_value
       FROM iceberg.silver.{gold_table}
       WHERE 1=1
         {_tipo_realizado_sql(gold_columns)}
         {_cloud_sql(prefixes, gold_columns)}
-      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
     """
     forecast_period = _quote_ident(planning_columns["period"])
     forecast_value = _quote_ident(planning_columns["realizado"])
     forecast_cloud_value = _quote_ident(planning_columns.get("realizado_cloud", planning_columns["realizado"]))
+    forecast_origin = _quote_ident(planning_columns["cloud_origem"]) if "cloud_origem" in planning_columns else "CAST(NULL AS VARCHAR)"
     forecast_type = _quote_ident(planning_columns["tipo"])
     forecast_sql = f"""
       SELECT {forecast_period} AS period,
              {_hierarchy_select_sql(planning_columns)},
+             lower(CAST({forecast_origin} AS VARCHAR)) AS cloud,
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value,
              SUM(COALESCE(TRY_CAST({forecast_cloud_value} AS DOUBLE), 0)) AS cloud_value
       FROM iceberg.silver.{planning_table}
       WHERE lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
         {_cloud_sql(prefixes, planning_columns)}
-      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+      GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
     """
     actual_records = await trino_execute(actual_sql, timeout_s=300)
     try:
@@ -650,7 +655,7 @@ async def load_weight_aggregates(
     return _mapped_rows(actual_records), _mapped_rows(forecast_records)
 
 
-def build_allocation_rows(configs, actual_rows, forecast_rows):
+def _build_allocation_rows_for_cloud(configs, actual_rows, forecast_rows):
     """Keep condominium facts separate and carry both measures for normal rateio."""
     rows = build_rateio_rows(configs, actual_rows, forecast_rows)
     normal_configs = [config for config in configs if config.allocation_type == "rateio"]
@@ -674,6 +679,26 @@ def build_allocation_rows(configs, actual_rows, forecast_rows):
             indexed[row_key] = {**row, "realizado": 0.0}
         indexed[row_key]["realizado_cloud"] = row["realizado"]
     return list(indexed.values())
+
+
+def build_allocation_rows(configs, actual_rows, forecast_rows):
+    """Allocate each recorded source cloud separately and retain its identity."""
+    clouds = {str(row.get("cloud") or "").lower() for row in [*actual_rows, *forecast_rows]}
+    if not clouds or clouds == {""}:
+        return _build_allocation_rows_for_cloud(configs, actual_rows, forecast_rows)
+    rows: list[dict[str, Any]] = []
+    for cloud in sorted(clouds):
+        source_configs = [
+            replace(config, cloud_prefix=cloud)
+            for config in configs
+            if cloud and cloud.startswith(config.cloud_prefix.lower())
+        ]
+        if not source_configs:
+            continue
+        source_actual = [row for row in actual_rows if str(row.get("cloud") or "").lower() == cloud]
+        source_forecast = [row for row in forecast_rows if str(row.get("cloud") or "").lower() == cloud]
+        rows.extend(_build_allocation_rows_for_cloud(source_configs, source_actual, source_forecast))
+    return rows
 
 
 async def run_shared_cost_job(
