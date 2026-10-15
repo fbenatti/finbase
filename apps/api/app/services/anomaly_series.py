@@ -25,6 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_observed import observed_daily_sql
+from app.services.forecast_service import gold_date_expr
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
