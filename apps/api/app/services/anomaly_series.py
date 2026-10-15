@@ -413,6 +413,7 @@ async def read_case_series(
     contributor_series: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Uma única linha do tempo: realizado até o cutoff e forecast além dele."""
+    request_started = time.monotonic()
     cutoff = _cutoff_of(publication)
     data_end = analysis_data_end or (datetime.now(timezone.utc).date() - timedelta(days=2))
     raw_day = getattr(case, "event_date", None)
@@ -450,6 +451,7 @@ async def read_case_series(
     if event_day <= data_end and contributor_series:
         schema_task = asyncio.create_task(_read_detail_schema(source_namespace, source_table))
     query_results = await asyncio.gather(reference_task, observed_task, schema_task, return_exceptions=True)
+    parallel_queries_ms = round((time.monotonic() - request_started) * 1000)
     for result in query_results[:2]:
         if isinstance(result, BaseException):
             raise result
@@ -514,6 +516,7 @@ async def read_case_series(
     # O custo real pode ter granularidade mais fina que o forecast. Isso localiza
     # o recurso no dia do evento, mas não inventa forecast/desvio nesse nível.
     if event_day <= data_end and contributor_series and schema_rows:
+        detail_started = time.monotonic()
         try:
             source_columns = [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
                               for row in schema_rows]
@@ -536,6 +539,13 @@ async def read_case_series(
                 } for row in detail_rows]
         except Exception as exc:
             logger.warning("[anomaly] decomposição fina indisponível para o caso %s: %s", getattr(case, "id", None), exc)
+        finally:
+            logger.info("[anomaly] case_series case=%s parallel_queries_ms=%s detail_query_ms=%s rows=%s dimensions=%s",
+                        getattr(case, "id", None), parallel_queries_ms,
+                        round((time.monotonic() - detail_started) * 1000), len(detail_items), len(detail_dimensions))
+    else:
+        logger.info("[anomaly] case_series case=%s parallel_queries_ms=%s detail_query_ms=0 rows=0 dimensions=0",
+                    getattr(case, "id", None), parallel_queries_ms)
     contributor_breakdown = []
     for index, member in enumerate(members):
         timeline = compose_case_timeline(points_by_series[index], observed_by_member[index],
