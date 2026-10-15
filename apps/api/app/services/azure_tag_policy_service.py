@@ -942,7 +942,18 @@ class AzureTagPolicyService:
                     else:
                         overlapping.append(entry)
                 exclusion_item = {**item, "target": target}
+                diagnostics_before_exclusions = len(diagnostics)
                 rule_exclusions = self._prior_rule_exclusions(exclusion_item, rules, departments, catalog, mappings, diagnostics)
+                unresolved_precedence = [entry for entry in diagnostics[diagnostics_before_exclusions:]
+                                         if entry.get("status") == "blocked"]
+                if unresolved_precedence:
+                    diagnostics.append({
+                        "rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                        "reason": "Policy não exportada: não foi possível resolver com segurança uma restrição de precedência",
+                        "blocked_by_rule_ids": sorted({entry.get("rule_id") for entry in unresolved_precedence
+                                                        if entry.get("rule_id") is not None}),
+                    })
+                    continue
                 known_ids = {entry["rule_id"] for entry in overlapping}
                 rule_exclusions = [entry for entry in rule_exclusions if entry["rule_id"] not in known_ids]
                 overlapping.extend(rule_exclusions)
