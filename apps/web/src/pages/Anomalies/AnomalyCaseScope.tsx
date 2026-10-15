@@ -42,7 +42,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const leading = groups.find(group => group.delta != null && group.delta > 0);
   const positiveTotal = groups.reduce((sum, group) => sum + Math.max(0, group.delta ?? 0), 0);
   const share = (value: number) => positiveTotal > 0 ? Math.max(0, value) / positiveTotal * 100 : 0;
-  const forecastScopeLabel = forecastFilters.length ? forecastFilters[forecastFilters.length - 1].value : common[common.length - 1] ?? "total do caso";
+  const forecastScopeLabel = forecastFilters.length ? forecastFilters[forecastFilters.length - 1].value : "total do caso";
   const rawDetailSelected = filters.some(filter => !memberFields.has(filter.field));
   const selectedDetailItems = (series.detail_items ?? []).filter(item => filters.every(filter => dimensionValue({ dimensions: item.dimensions } as typeof all[number], filter.field) === filter.value));
   const selectedSeries: AnomalySeries = { ...series, items: timeline,
@@ -106,7 +106,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
             <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
           </ButtonBase>)}
           {!groups.length && rawDetailSelected && selectedDetailItems.length > 0 && <Stack spacing={.75} sx={{ mt: 1 }}>
-            {selectedDetailItems.slice(0, 20).map((item, index) => <Box key={`${item.series_id}-${index}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
+            {selectedDetailItems.slice(0, 20).map((item, index) => <Box key={`${index}-${item.dimensions.sku_name ?? item.dimensions.sku ?? "detail"}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
               <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{[item.dimensions.subscriptionname, item.dimensions.source_resource_group_name, item.dimensions.resourcegroupname, item.dimensions.servicename, item.dimensions.servicesubcategory, item.dimensions.sku_name, item.dimensions.sku].find(Boolean) ?? "Consumo sem dimensão descritiva"}</Typography><Typography variant="caption" color="text.secondary">{[item.dimensions.subscriptionname, item.dimensions.resourcegroupname ?? item.dimensions.source_resource_group_name, item.dimensions.servicename, item.dimensions.sku_name ?? item.dimensions.sku].filter(Boolean).join(" · ")}</Typography></Box>
               <Typography variant="body2" fontWeight={750} sx={{ whiteSpace: "nowrap" }}>{money(item.observed_cloud, currency)}</Typography>
             </Box>)}
