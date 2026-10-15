@@ -220,6 +220,7 @@ export type AnomalySeries = {
     observed_cloud: number | null;
     expected_cloud: number | null;
     delta_cloud: number | null;
+    items?: AnomalySeriesPoint[];
   }>;
   scope_verified?: boolean;
   warnings?: string[];
