@@ -7,7 +7,7 @@ import { dimensionValue, filterMembers, scopeBranches, scopeTimeline, type Scope
 
 const money = (value: number | null | undefined, currency: string) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency });
 const pct = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
-const day = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" });
+const day = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" }).replace(/\.$/, "");
 const orgPath = (dimensions: Record<string, string | null>) => Array.from({ length: 7 }, (_, i) => dimensions[`organograma_nivel_${i + 1}`]).filter((value): value is string => Boolean(value));
 const branchColors = ["#db525e", "#e59051", "#9b719e", "#6299b1"];
 
@@ -27,6 +27,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const common = paths[0]?.filter((_, index) => paths.every(parts => parts.slice(0, index + 1).join("\0") === paths[0].slice(0, index + 1).join("\0"))) ?? [];
   const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Escopo do caso";
   const excessDays = timeline.filter(point => point.event_date <= kase.event_date && point.above_band);
+  const latest = [...timeline].reverse().find(point => point.observed_cloud != null && point.event_date <= (series.analysis_data_end ?? kase.event_date));
   const rootPoint = series.items.find(point => point.event_date === kase.event_date);
   const rootDelta = rootPoint?.delta_cloud;
   const leading = groups.find(group => group.delta != null && group.delta > 0);
@@ -54,11 +55,12 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Box>
         <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="#4e81c5">Previsto</Typography><Typography variant="caption" color="#c53d4b">Desvio positivo</Typography></Stack>
       </Box>}
-      {excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Acima da faixa tolerada em {excessDays.length} dia(s) observado(s) na janela até a avaliação; primeiro em {day(excessDays[0].event_date)}.</Typography>}
+      {excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} dias acima da faixa até {day(kase.event_date)}</Typography>}
+      {latest && latest.event_date > kase.event_date && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .75 }}>Último dado ({day(latest.event_date)}): {money(latest.observed_cloud, currency)}{latest.above_band === true ? " · acima da faixa" : latest.above_band === false ? " · dentro da faixa" : " · sem comparação disponível"}</Typography>}
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e2e8f0" }}>
         <Box>
           <Typography variant="body2" fontWeight={700}>Investigue primeiro {leading ? leading.value : label}</Typography>
-          <Typography variant="caption" color="text.secondary">{leading ? `${pct(share(leading.delta ?? 0))} dos aumentos deste nível · ` : ""}{kase.cause_hypothesis || "Confirme se houve mudança planejada. A causa ainda precisa ser validada."}</Typography>
+          <Typography variant="caption" color="text.secondary">{leading ? `${pct(share(leading.delta ?? 0))} dos aumentos · ` : ""}{kase.cause_hypothesis || "Confirme com a área se a mudança foi planejada."}</Typography>
         </Box>
         <Button variant="contained" size="small" sx={{ flexShrink: 0 }} onClick={() => document.getElementById("anomaly-investigation")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Registrar investigação</Button>
       </Stack>
