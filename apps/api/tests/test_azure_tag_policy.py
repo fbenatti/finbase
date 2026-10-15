@@ -94,7 +94,8 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
             return connection
 
     service = AzureTagPolicyService(db=FakeDB())
-    rule = _rule(id=52, priority=90, department_id=10)
+    rule = _rule(id=52, priority=90, department_id=10,
+                 conditions=[{"field": "SubAccountName", "operator": "=", "values": ["Fundação"]}])
     department = Department(id=10, name="Fundação Telefônica", parent_id=None, centro_custo="29TN161700")
 
     async def load_departments():
