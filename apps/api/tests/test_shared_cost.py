@@ -1,6 +1,45 @@
 from app.services.shared_cost import allocate_amount, driver_name_for
 
 
+def test_allocation_uses_source_cloud_even_when_organogram_filter_is_stale():
+    from types import SimpleNamespace
+
+    from app.models.rules import Department
+    from app.services.shared_cost import build_allocation_rows, resolve_shared_costs
+
+    departments = {
+        1: Department(id=1, name="Consumo Cloud", active=True),
+        2: Department(id=2, parent_id=1, name="Showback", active=True),
+        3: Department(id=3, parent_id=2, name="GCP", active=True),
+        4: Department(id=4, parent_id=3, name="DIR INFRA", cloud_filter="GCP-TI", active=True),
+        5: Department(id=5, parent_id=4, name="Networking", active=True),
+        6: Department(id=6, parent_id=3, name="DIR DADOS", active=True),
+        7: Department(id=7, parent_id=6, name="Projeto", active=True),
+    }
+    config = SimpleNamespace(
+        enabled=True, department_id=5, mode="custom", allocation_type="rateio",
+        targets=[SimpleNamespace(target_department_id=7, percent=100.0)],
+    )
+    resolved = resolve_shared_costs([config], departments)
+    assert len(resolved) == 1
+    assert resolved[0].cloud_prefix == "gcp"
+    actual = [
+        {"period": "202609", "path": resolved[0].donor_path,
+         "cloud": "gcp-ttech", "value": 100.0, "cloud_value": 20.0},
+        {"period": "202609", "path": resolved[0].donor_path,
+         "cloud": "gcp-ti", "value": 30.0, "cloud_value": 6.0},
+    ]
+    rows = build_allocation_rows(resolved, actual, [])
+    for cloud, billed, consumption in [("gcp-ttech", 100.0, 20.0), ("gcp-ti", 30.0, 6.0)]:
+        source_rows = [row for row in rows if row["cloud_origem"] == cloud]
+        assert len(source_rows) == 2
+        receiver = next(row for row in source_rows if row["organograma_nivel_5"] == "Projeto")
+        assert receiver["realizado"] == billed
+        assert receiver["realizado_cloud"] == consumption
+        assert sum(row["realizado"] for row in source_rows) == 0
+        assert sum(row["realizado_cloud"] for row in source_rows) == 0
+
+
 def test_normal_allocation_conserves_billed_and_cloud_measures_independently():
     from app.services.shared_cost import ResolvedSharedCost, build_allocation_rows
 
