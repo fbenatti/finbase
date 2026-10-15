@@ -10,11 +10,13 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert, Box, Button, Chip, CircularProgress, Divider, Drawer, IconButton, LinearProgress,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, CircularProgress, Divider, Drawer, IconButton, LinearProgress,
   MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs,
   TextField, Tooltip, Typography,
 } from "@mui/material";
 import AnomalyEvolutionChart from "./AnomalyEvolutionChart";
+import AnomalyCaseScope from "./AnomalyCaseScope";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import CloseIcon from "@mui/icons-material/Close";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -742,9 +744,8 @@ export default function Anomalies() {
             <Stack direction="row" alignItems="center" spacing={1}>
               <Typography variant="h6" sx={{ fontWeight: 700 }}>Caso #{selected.id}</Typography>
               <Chip size="small" color={SEVERITY_COLOR[selected.severity] ?? "default"}
-                    label={`${({ LOW: "Baixa", MEDIUM: "Média", HIGH: "Alta", CRITICAL: "Crítica" } as Record<string, string>)[selected.severity] ?? selected.severity} · nota ${selected.score.toFixed(0)}`} />
+                    label={`${({ LOW: "Baixa", MEDIUM: "Média", HIGH: "Alta", CRITICAL: "Crítica" } as Record<string, string>)[selected.severity] ?? selected.severity}`} />
               <Chip size="small" label={STATE_LABEL[selected.state] ?? selected.state} />
-              <Chip size="small" label={`Confiança ${({ HIGH: "alta", MEDIUM: "média", LOW: "baixa", UNAVAILABLE: "indisponível" } as Record<string, string>)[selected.confidence] ?? selected.confidence}`} />
               <Box sx={{ flexGrow: 1 }} />
               <IconButton aria-label="Fechar caso" onClick={() => setSelected(null)}><CloseIcon /></IconButton>
             </Stack>
@@ -757,12 +758,19 @@ export default function Anomalies() {
             {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
               Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso configurado da fonte: {config?.data_lag_days ?? 2} dia(s)). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
             </Alert>}
+            {series && <AnomalyCaseScope kase={selected} series={series} currency={currency} />}
             {series ? <AnomalyEvolutionChart key={selected.id} series={series} kase={selected} currency={currency} />
               : <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress size={28} /><Typography color="text.secondary" sx={{ mt: 1 }}>Carregando realizado e forecast…</Typography></Box>}
-            <Divider sx={{ my: 2 }} />
-            <StepPanel kase={selected} />
+            {series && <AnomalyCaseScope kase={selected} series={series} currency={currency} breakdown />}
+            <Accordion sx={{ mt: 2 }} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>Acompanhamento e etapas do caso</AccordionSummary>
+              <AccordionDetails><StepPanel kase={selected} /></AccordionDetails>
+            </Accordion>
 
-            <Divider sx={{ my: 2 }} />
+            <Accordion disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>Critérios do detector e regras aplicadas</AccordionSummary>
+            <AccordionDetails>
+            <Typography variant="body2" sx={{ mb: 1 }}>Prioridade: {selected.score.toFixed(0)}/100 · Confiança: {selected.confidence} · Qualidade: {selected.data_quality}</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
               {selected.reason_codes.map((code) => (
                 <Chip key={code} size="small" variant="outlined" label={code} />
@@ -773,9 +781,11 @@ export default function Anomalies() {
                 </Tooltip>
               ))}
             </Stack>
+            </AccordionDetails></Accordion>
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" gutterBottom>Ações (remediação)</Typography>
+            <Accordion disableGutters defaultExpanded={Boolean(selected.actions?.length)}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>Ações corretivas ({selected.actions?.length ?? 0})</AccordionSummary>
+            <AccordionDetails>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -819,17 +829,19 @@ export default function Anomalies() {
                          onChange={(event) => setForm({ ...form, action_description: event.target.value })} />
               <Button variant="outlined" onClick={addAction}>Adicionar</Button>
             </Stack>
+            </AccordionDetails></Accordion>
 
             <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" gutterBottom>Comando do workflow</Typography>
+            <Typography id="anomaly-investigation" variant="h6" gutterBottom sx={{ scrollMarginTop: 16 }}>Tratar este desvio</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Confirme com a área indicada se houve uma mudança planejada. Registre a investigação antes de decidir a ação.</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
-              <TextField select size="small" label="Comando" value={form.command}
+              <TextField select size="small" label="O que fazer" value={form.command}
                          onChange={(event) => setForm({ ...form, command: event.target.value })}
                          sx={{ minWidth: 220 }}>
                 {["assign", "acknowledge", "return_to_queue", "start_investigation", "update_investigation",
                   "decide", "redecide", "start_remediation", "cancel_remediation", "start_verification",
                   "fail_verification", "validate_result", "record_retrospective", "close", "reopen"]
-                  .map((command) => <MenuItem key={command} value={command}>{command}</MenuItem>)}
+                  .map((command) => <MenuItem key={command} value={command}>{({ assign: "Atribuir responsável", acknowledge: "Confirmar ciência", return_to_queue: "Devolver à fila FinOps", start_investigation: "Iniciar investigação", update_investigation: "Registrar investigação", decide: "Registrar decisão", redecide: "Revisar decisão", start_remediation: "Iniciar correção", cancel_remediation: "Cancelar correção", start_verification: "Verificar resultado", fail_verification: "Registrar falha na verificação", validate_result: "Validar resultado", record_retrospective: "Registrar aprendizado", close: "Encerrar caso", reopen: "Reabrir caso" } as Record<string, string>)[command]}</MenuItem>)}
               </TextField>
               {form.command === "assign" && (
                 <TextField size="small" label="Responsável (user id)" value={form.assignee_user_id}
@@ -886,11 +898,12 @@ export default function Anomalies() {
               </>
             )}
             <Button variant="contained" onClick={submitCommand} disabled={busy}>
-              Aplicar comando
+              Salvar ação
             </Button>
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" gutterBottom>Histórico de eventos</Typography>
+            <Accordion sx={{ mt: 2 }} disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>Histórico e auditoria</AccordionSummary>
+            <AccordionDetails>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -913,6 +926,7 @@ export default function Anomalies() {
                 ))}
               </TableBody>
             </Table>
+            </AccordionDetails></Accordion>
               </>;
             })()}
           </Box>
