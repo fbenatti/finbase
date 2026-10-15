@@ -370,6 +370,22 @@ async def discover_scope(config: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+async def discover_subscriptions(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """List accessible subscriptions without scanning resource counts via ARG."""
+    headers = await arm_headers(config)
+    url = "https://management.azure.com/subscriptions"
+    async with httpx.AsyncClient() as client:
+        values = await get_json(client, url, headers, params={"api-version": "2022-12-01"})
+    return [
+        {
+            "subscription_id": str(item.get("subscriptionId") or ""),
+            "subscription_name": str(item.get("displayName") or item.get("subscriptionId") or ""),
+        }
+        for item in values
+        if item.get("subscriptionId") and str(item.get("state") or "Enabled").casefold() == "enabled"
+    ]
+
+
 def run_resource_graph_collection(
     session,
     connection_id: int,
