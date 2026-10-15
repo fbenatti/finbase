@@ -11,10 +11,12 @@ export const scopeChain = [
 ];
 export const detailScopeChain = (details: Array<{ key: string; label: string }> = []) => {
   const base = [
+    { field: "cloud_origem", label: "Cloud / conexão" },
     ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: `Organograma · nível ${index + 1}` })),
     { field: "subaccountname", label: "Assinatura / subconta" }, { field: "centro_custo", label: "Centro de custo" },
     { field: "servicename", label: "Serviço" }, { field: "servicesubcategory", label: "Categoria do serviço" },
-    { field: "pricingcategory", label: "Categoria de preço" }, { field: "commitmentdiscounttype", label: "Modalidade" },
+    { field: "skumeter", label: "SKU / medidor" }, { field: "pricingcategory", label: "Categoria de preço" },
+    { field: "commitmentdiscounttype", label: "Modalidade" },
   ];
   const custom = details.map(item => ({ field: item.key, label: item.label }));
   const all = [...base.slice(0, 7), ...custom.filter(item => !base.some(candidate => candidate.field === item.field)), ...base.slice(7)];
@@ -24,10 +26,10 @@ export const filterMembers = (members: Member[], filters: ScopeFilter[]) => memb
 export function totalMetric(members: Member[], key: "observed_cloud" | "expected_cloud" | "delta_cloud") {
   return members.length && members.every(member => member[key] != null) ? members.reduce((sum, member) => sum + member[key]!, 0) : null;
 }
-export function scopeBranches(members: Member[], filters: ScopeFilter[]) {
-  const start = filters.length ? scopeChain.findIndex(item => item.field === filters[filters.length - 1].field) + 1 : 0;
+export function scopeBranches(members: Member[], filters: ScopeFilter[], chain = scopeChain) {
+  const start = filters.length ? chain.findIndex(item => item.field === filters[filters.length - 1].field) + 1 : 0;
   // Shared ancestors stay in the breadcrumb. Branch at the first distinct value.
-  const dimension = scopeChain.slice(start).find(item => new Set(members.map(member => dimensionValue(member, item.field))).size > 1);
+  const dimension = chain.slice(start).find(item => new Set(members.map(member => dimensionValue(member, item.field))).size > 1);
   if (!dimension) return { dimension: null, groups: [] };
   const groups = [...new Set(members.map(member => dimensionValue(member, dimension.field)))].map(value => {
     const children = members.filter(member => dimensionValue(member, dimension.field) === value);
