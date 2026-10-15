@@ -1685,6 +1685,8 @@ export interface AzurePolicyPlanItem {
     department_name?: string;
     observed?: { resource_group_name?: string; resource_id?: string };
   }>;
+  department_name?: string;
+  layer?: "resource_groups" | "resources";
   scope_tenant_id?: string;
 }
 
@@ -1716,6 +1718,11 @@ export interface AzureTenantPolicy {
       rule_id: number;
       rule_name: string;
       priority: number;
+      department_name?: string;
+      layer?: "resource_groups" | "resources";
+      tags?: Record<string, string>;
+      assignment_scope_kind?: "subscription" | "resource_group";
+      assignment_resource_group?: string | null;
       evidence_count: number;
       observed?: { resource_group_name?: string; resource_id?: string };
       exclusions?: Array<{
