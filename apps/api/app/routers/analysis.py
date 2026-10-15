@@ -2184,17 +2184,13 @@ def _expected_view_cloud_filter(
     selected: Department | None,
     columns: dict[str, str],
 ) -> str:
-    """Push provider scope into Trino when the selected node is a cloud subtree."""
+    """Scope by provider branch without relying on a department's saved filter."""
     if "cloud_origem" not in columns:
         return ""
-    prefix = (selected.cloud_filter.strip().lower() if selected and selected.cloud_filter else "")
-    if "mongo" in prefix:
-        # cloud_origem real é mongodb-atlas-pro/enterprise; filtros legados como
-        # "Atlas-MongoDB" não são prefixo válido e escondiam todo o gasto do nó.
+    prefix = ""
+    if any("mongo" in part.lower() for part in scope_path):
         prefix = "mongodb"
-    if not prefix and any("mongo" in part.lower() for part in scope_path):
-        prefix = "mongodb"
-    if not prefix and len(scope_path) >= 3 and scope_path[1] in _CLOUD_BRANCHES and scope_path[2] in _CLOUD_PROVIDERS:
+    elif len(scope_path) >= 3 and scope_path[1] in _CLOUD_BRANCHES and scope_path[2] in _CLOUD_PROVIDERS:
         prefix = _PROVIDER_CLOUD_PREFIX.get(scope_path[2], scope_path[2].lower())
     if not prefix:
         return ""
