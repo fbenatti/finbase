@@ -19,7 +19,10 @@ export const detailScopeChain = (details: Array<{ key: string; label: string }> 
     { field: "commitmentdiscounttype", label: "Modalidade" },
   ];
   const custom = details.map(item => ({ field: item.key, label: item.label }));
-  const all = [...base.slice(0, 7), ...custom.filter(item => !base.some(candidate => candidate.field === item.field)), ...base.slice(7)];
+  const unseen = custom.filter(item => !base.some(candidate => candidate.field === item.field));
+  const infrastructure = unseen.filter(item => ["subscription", "subscription_id", "resource_group", "gcp_project", "region"].includes(item.field));
+  const serviceDetails = unseen.filter(item => !infrastructure.includes(item));
+  const all = [...base.slice(0, 10), ...infrastructure, ...base.slice(10, 13), ...serviceDetails, ...base.slice(13)];
   return all.filter((item, index) => all.findIndex(candidate => candidate.field === item.field) === index);
 };
 export const filterMembers = (members: Member[], filters: ScopeFilter[]) => members.filter(member => filters.every(filter => dimensionValue(member, filter.field) === filter.value));
