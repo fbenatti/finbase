@@ -197,7 +197,9 @@ No caso 58, a comparação restaurada é: observado **R$ 2.447,53**, esperado **
 
 A leitura do detalhe foi reorganizada como uma trilha visual da nuvem e conexão, níveis do organograma, projeto, assinatura, serviço e categoria/SKU. O objetivo é localizar o ramo que explica o desvio, seguindo o padrão de decomposição hierárquica do dashboard v2. A cada ramo os valores de contribuição são acumulados uma única vez; a árvore não deve apresentar a decomposição como forecast por recurso, porque o forecast continua no grão configurado da série.
 
-O drilldown tenta ler dimensões adicionais da mesma fonte `realizado_cloud`, incluindo `ResourceGroupName`, `ResourceId` e `ResourceName`; para Azure, pode extrair o resource group do caminho de um `ResourceId`. Isso é enriquecimento dimensional, sem trocar a medida financeira. No payload atual do caso 58 não vieram dimensões após serviço/categoria. Portanto, os níveis Resource Group e Recurso não estão demonstrados para esse caso. O ETL/source projection precisa preservar esses campos para que a interface os exiba; não se deve inventar valores nem usar outra tabela de custo para preencher o desvio.
+O drilldown lê dimensões adicionais da mesma fonte `realizado_cloud`, incluindo `ResourceGroupName`, `ResourceId` e `ResourceName`; para Azure, pode extrair o resource group do caminho de um `ResourceId`. Dois erros impediam essa leitura: a projeção externa do SQL usava nomes físicos que já tinham sido renomeados no CTE, e a lista de colunas retornada pelo cache era tratada como objetos. Ambos foram corrigidos. O filtro da data do evento também foi empurrado para a leitura de origem.
+
+No caso 58, a origem agora retorna o resource group `rg-plyt-brsouth-prod`, a região `BR South`, o recurso e dois IDs de recurso, com custos de R$ 815,84 e R$ 407,92. A soma detalhada é R$ 1.223,77, apenas 50% do observado da avaliação (R$ 2.447,53). A tela exibe essa cobertura e avisa que os itens não representam o total do caso. O valor restante não deve ser atribuído a esses recursos até a divergência entre o snapshot da avaliação e o escopo dimensional ser reconciliada.
 
 ## Latência
 
@@ -205,4 +207,4 @@ As leituras do forecast, realizado e schema são concorrentes. Os filtros de mem
 
 ## Limite e validação
 
-A implementação organiza os níveis efetivamente retornados pela origem; ela não materializa resource groups ausentes em `dest_modelo_focus` ou na configuração de origem. A cobertura de dimensões finas deve ser validada no schema/dados da conexão Azure usada pelo caso. Testes atuais cobrem o snapshot mensal, extração do resource group por ResourceId e montagem da hierarquia; build frontend e suíte do serviço de série passaram. A disponibilidade de ResourceId/RG no caso 58 segue como lacuna de dados a investigar.
+A implementação organiza os níveis efetivamente retornados pela origem; não apresenta forecast em grão de recurso porque a previsão continua no grão da série. Testes cobrem o snapshot mensal, SQL de decomposição, extração do resource group por ResourceId e montagem da hierarquia. Suíte da série backend, testes da decomposição frontend e build passaram. Permanece pendente investigar por que o escopo detalhado só reconcilia metade do observado congelado no caso 58 antes de considerar essa decomposição completa.
