@@ -367,8 +367,10 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     "kind": kind, "scope": scope_for_identity,
                     "selector": item.get("base_selector", item.get("condition")),
                 }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                identity_key = sha256(identity_payload.encode("utf-8")).hexdigest()[:16]
-            name = f"ofp-{kind}-{item.get('rule_id', index)}-{identity_key or index}"
+                identity_key = sha256(identity_payload.encode("utf-8")).hexdigest()[:12]
+            connection_identity = str(tenant.get("connection_id") or "0")
+            rule_identity = str(item.get("rule_id", index))
+            name = f"of-def-{connection_identity}-{rule_identity}-{kind}-{identity_key or index}"
             if not subscriptions:
                 lines += [f"# SKIPPED {name}: no observed Gold subscription or explicit subscription GUID for this rule.", ""]
                 continue
@@ -417,6 +419,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 jobs.setdefault(home, []).append({
                     "subscription_id": subscription_id,
                     "scope": scope,
+                    "kind": kind,
                     "assignment_suffix": assignment_suffix,
                     "identity_key": identity_key,
                     "source_rule": f"#{item.get('rule_id')} {item.get('rule_name')}",
@@ -447,7 +450,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 name = job["name"]
                 policy = job["policy"]
                 scope = job["scope"]
-                assignment = f"ofa-{job['identity_key']}"
+                assignment = f"of-asg-{tenant.get('connection_id') or 0}-{job['source_rule'].split(' ', 1)[0].lstrip('#')}-{job['kind']}-{job['identity_key']}"
                 lines += [
                     f"resolve_existing_target {q(scope)} {q(job['source_rule'])} {q(job['mode'])}",
                     f"ACTIVE_ASSIGNMENT_NAME=\"${{RESOLVED_ASSIGNMENT_NAME:-{assignment}}}\"",
