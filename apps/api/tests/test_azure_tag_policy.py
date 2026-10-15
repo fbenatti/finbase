@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 
 from app.models.rules import ClassificationRule, Department
 from app.routers import azure_tag_policy as azure_tag_policy_router
@@ -78,6 +79,73 @@ def test_export_returns_explanation_instead_of_400_when_subscription_has_no_poli
     assert payload["tenants"][0]["selected_subscription_id"] == subscription
     assert payload["deployment_script"] == ""
     assert "Sem alvos ARM atuais" in payload["tenants"][0]["coverage"]["diagnostics"][0]["reason"]
+
+
+def test_explicit_subscription_filter_is_not_overwritten_by_gold_rows(monkeypatch):
+    selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
+    other = "71cc41f4-8e37-4c60-abbb-b9003b91c554"
+    connection = SimpleNamespace(
+        id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
+        config_json={"tenant_id": "78879b00-f0e9-486c-836f-56f314e47e7f"},
+    )
+
+    class FakeDB:
+        async def get(self, *_args):
+            return connection
+
+    service = AzureTagPolicyService(db=FakeDB())
+    rule = _rule(id=52, priority=90, department_id=10)
+    department = Department(id=10, name="Fundação Telefônica", parent_id=None, centro_custo="29TN161700")
+
+    async def load_departments():
+        return {10: department}
+
+    async def load_rules(_conn):
+        return [rule]
+
+    async def tag_mappings():
+        return [{"tag_key": "projeto", "focus_field": "organograma_nivel_1"}]
+
+    async def home_tenants(_conn):
+        return {selected: connection.config_json["tenant_id"], other: connection.config_json["tenant_id"]}
+
+    async def gold_evidence(_conn, _mappings):
+        return ([{
+            "rule_id": 52, "subscription_id": other, "subscription_name": "other",
+            "resource_group_name": "rg-other", "evidence_count": 7,
+        }], None)
+
+    async def subscription_catalog(_conn):
+        return ({"fundacao": [selected], "production": [other]}, [selected, other], None)
+
+    async def azure_targets(_conn, subscription):
+        return ([{
+            "subscription_id": subscription,
+            "resource_group_name": "rg-selected",
+            "resource_name": "rg-selected",
+            "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
+            "resource_id": f"/subscriptions/{subscription}/resourceGroups/rg-selected",
+        }], None)
+
+    monkeypatch.setattr(service, "_load_departments", load_departments)
+    monkeypatch.setattr(service, "_load_classification_rules", load_rules)
+    monkeypatch.setattr(service, "_tag_mappings", tag_mappings)
+    monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
+    monkeypatch.setattr(service, "_gold_evidence", gold_evidence)
+    monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
+    monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
+    monkeypatch.setattr(service, "_translate_conditions", lambda *_args, **_kwargs: [
+        {"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["rg-"]},
+    ])
+
+    result = asyncio.run(service.generate_tenant_policy(2, subscription_id=selected))
+
+    assert result["selected_subscription_id"] == selected
+    assert result["deployment_subscriptions"] == [selected]
+    assert all(
+        item["scope_subscriptions"] == [selected]
+        for layer in result["layers"].values() for item in layer
+    )
 
 
 def _rule(**values):
