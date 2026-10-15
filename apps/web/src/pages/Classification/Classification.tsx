@@ -13,8 +13,8 @@ import {
   getDepartments, Department,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
-  getAzureTenants, exportAzureTagPolicy, downloadText, getAzureTagMappings, createAzureTagMapping, updateAzureTagMapping,
-  AzureTenant, AzureTenantPolicy, AzureTagMapping,
+  getAzureTenants, getAzurePolicySubscriptions, exportAzureTagPolicy, downloadText, getAzureTagMappings, createAzureTagMapping, updateAzureTagMapping,
+  AzureTenant, AzurePolicySubscription, AzureTenantPolicy, AzureTagMapping,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
@@ -857,6 +857,8 @@ export function TagsTab() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
   const [selectedDepartment, setSelectedDepartment] = useState<number | "">("");
+  const [selectedSubscription, setSelectedSubscription] = useState("");
+  const [policySubscriptions, setPolicySubscriptions] = useState<AzurePolicySubscription[]>([]);
   const [planOnly, setPlanOnly] = useState(false);
   const [rows, setRows] = useState<AzureTenantPolicy[]>([]);
   const [script, setScript] = useState("");
@@ -875,6 +877,15 @@ export function TagsTab() {
     getDepartments(false).then(setDepartments).catch(() => setDepartments([]));
   }, []);
 
+  useEffect(() => {
+    setSelectedSubscription("");
+    setPolicySubscriptions([]);
+    if (selectedTenant === "") return;
+    getAzurePolicySubscriptions(selectedTenant as number)
+      .then(setPolicySubscriptions)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível listar as subscriptions Azure"));
+  }, [selectedTenant]);
+
   const projectOptions = useMemo(
     () => [...flattenDepartments(departments)].sort((left, right) =>
       left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" }),
@@ -889,7 +900,8 @@ export function TagsTab() {
       setSuccess("");
       const connId = selectedTenant === "" ? undefined : (selectedTenant as number);
       const departmentId = selectedDepartment === "" ? undefined : (selectedDepartment as number);
-      const result = await exportAzureTagPolicy(connId, "both", departmentId, planOnly);
+      const result = await exportAzureTagPolicy(connId, "both", departmentId, planOnly,
+        selectedSubscription || undefined);
       setRows(result.tenants);
       setScript(result.deployment_script);
       setSelectedJsonTenantIndex(0);
@@ -964,6 +976,22 @@ export function TagsTab() {
             {tenants.map((t) => (
               <MenuItem key={t.connection_id} value={t.connection_id}>
                 {t.name} ({t.code})
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl sx={{ minWidth: 340 }} size="small" disabled={selectedTenant === "" || policySubscriptions.length === 0}>
+          <InputLabel>Limitar a subscription</InputLabel>
+          <Select
+            value={selectedSubscription}
+            label="Limitar a subscription"
+            onChange={(e) => setSelectedSubscription(String(e.target.value))}
+          >
+            <MenuItem value="">Subscriptions comprovadas pelas regras</MenuItem>
+            {policySubscriptions.map((subscription) => (
+              <MenuItem key={subscription.subscription_id} value={subscription.subscription_id}>
+                {subscription.name} ({subscription.subscription_id})
               </MenuItem>
             ))}
           </Select>
