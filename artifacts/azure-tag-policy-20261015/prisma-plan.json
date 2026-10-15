@@ -120,6 +120,20 @@
                 "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
               },
               {
+                "not": {
+                  "allOf": [
+                    {
+                      "field": "type",
+                      "equals": "Microsoft.Sql/servers/databases"
+                    },
+                    {
+                      "field": "name",
+                      "equals": "master"
+                    }
+                  ]
+                }
+              },
+              {
                 "anyOf": [
                   {
                     "value": "[resourceGroup().name]",
@@ -138,6 +152,20 @@
               {
                 "field": "type",
                 "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+              },
+              {
+                "not": {
+                  "allOf": [
+                    {
+                      "field": "type",
+                      "equals": "Microsoft.Sql/servers/databases"
+                    },
+                    {
+                      "field": "name",
+                      "equals": "master"
+                    }
+                  ]
+                }
               },
               {
                 "anyOf": [
@@ -257,6 +285,20 @@
               "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
             },
             {
+              "not": {
+                "allOf": [
+                  {
+                    "field": "type",
+                    "equals": "Microsoft.Sql/servers/databases"
+                  },
+                  {
+                    "field": "name",
+                    "equals": "master"
+                  }
+                ]
+              }
+            },
+            {
               "anyOf": [
                 {
                   "value": "[resourceGroup().name]",
@@ -275,6 +317,20 @@
             {
               "field": "type",
               "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+            },
+            {
+              "not": {
+                "allOf": [
+                  {
+                    "field": "type",
+                    "equals": "Microsoft.Sql/servers/databases"
+                  },
+                  {
+                    "field": "name",
+                    "equals": "master"
+                  }
+                ]
+              }
             },
             {
               "anyOf": [

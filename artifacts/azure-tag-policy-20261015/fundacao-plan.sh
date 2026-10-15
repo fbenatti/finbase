@@ -261,15 +261,33 @@ METADATAEOF
 # Assignment: subscription; alvo efetivo: subscription completa
 # Exceções de maior prioridade excluídas desta policy:
 # - #78 Classifica → Prisma → projeto Prisma
-cat > "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-rules.json" <<'POLICYEOF'
+cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" <<'POLICYEOF'
 {
   "if": {
     "allOf": [
       {
         "allOf": [
           {
-            "field": "type",
-            "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+            "allOf": [
+              {
+                "field": "type",
+                "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+              },
+              {
+                "not": {
+                  "allOf": [
+                    {
+                      "field": "type",
+                      "equals": "Microsoft.Sql/servers/databases"
+                    },
+                    {
+                      "field": "name",
+                      "equals": "master"
+                    }
+                  ]
+                }
+              }
+            ]
           },
           {
             "not": {
@@ -277,6 +295,20 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-rules.json" <<'POLICYEOF'
                 {
                   "field": "type",
                   "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                },
+                {
+                  "not": {
+                    "allOf": [
+                      {
+                        "field": "type",
+                        "equals": "Microsoft.Sql/servers/databases"
+                      },
+                      {
+                        "field": "name",
+                        "equals": "master"
+                      }
+                    ]
+                  }
                 },
                 {
                   "anyOf": [
@@ -365,7 +397,7 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-rules.json" <<'POLICYEOF'
   }
 }
 POLICYEOF
-cat > "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-metadata.json" <<'METADATAEOF'
+cat > "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" <<'METADATAEOF'
 {
   "category": "OpenFinops",
   "version": "2.0",
@@ -373,8 +405,8 @@ cat > "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-metadata.json" <<'METADAT
   "openfinopsExclusions": "#78 Classifica → Prisma → Prisma",
   "openfinopsRuleId": "52",
   "openfinopsLayer": "resource",
-  "openfinopsIdentityKey": "cf416fd30f70",
-  "openfinopsContentHash": "030d4f8d45ff636ae2b1e27c16c2a3669dc92edb5c36a466dcba4a62802f532c"
+  "openfinopsIdentityKey": "0b1846c1728f",
+  "openfinopsContentHash": "15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3"
 }
 METADATAEOF
 
@@ -405,8 +437,8 @@ else
 fi
 
 resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#52 Classifica → fundacao telefonica' Indexed
-ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-cf416fd30f70}"
-ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-cf416fd30f70}"
+ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-52-resource-0b1846c1728f}"
+ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-52-resource-0b1846c1728f}"
 EXPECTED_SUBSCRIPTION=63dbc6fc-93d8-4ac1-9745-253f6b502240
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
@@ -415,7 +447,7 @@ if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
 fi
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 [[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }
-ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-rules.json" "$POLICIES_DIR/of-def-2-52-resource-cf416fd30f70-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 030d4f8d45ff636ae2b1e27c16c2a3669dc92edb5c36a466dcba4a62802f532c
+ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-rules.json" "$POLICIES_DIR/of-def-2-52-resource-0b1846c1728f-metadata.json" 'OpenFinops - Classifica → fundacao telefonica' 'Regra de origem #52 (Classifica → fundacao telefonica). Exceções de maior prioridade: #78 Classifica → Prisma → Prisma.' 15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
   PRINCIPAL_ID=""

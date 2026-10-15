@@ -14,9 +14,9 @@ Leitura de ARM/Policy Insights feita com Azure CLI autenticada e subscription ex
 
 ## Plano emitido
 
-Os dois scripts PLAN e os dois scripts de aplicação são restritos ao GUID acima. Fundação (#52) inclui exclusão por seletor dos dois padrões Prisma. Prisma (#78) só seleciona `PCCAGENTLESSSCANRESOURCEGROUP` e `dig-security-rg`. As definitions mantêm `addOrReplace`, `conflictEffect=audit` e só selecionam tags ausentes/divergentes. Os scripts de aplicação não foram executados.
+Os dois scripts PLAN e os dois scripts de aplicação são restritos ao GUID acima. Fundação (#52) inclui exclusão por seletor dos dois padrões Prisma. Prisma (#78) só seleciona `PCCAGENTLESSSCANRESOURCEGROUP` e `dig-security-rg`. Todas as policies de recursos excluem explicitamente `Microsoft.Sql/servers/databases` com nome `master`. As definitions mantêm `addOrReplace`, `conflictEffect=audit` e só selecionam tags ausentes/divergentes. Os scripts de aplicação não foram executados.
 
-Os PLANs foram executados com Azure CLI em contexto local temporário para a subscription alvo, restaurado ao final. Fundação confirmou a reutilização dos assignments `openfinops-rg-azure-ti-test-fundacao-telefonica-1-63dbc6fc` e `openfinops-resource-azure-ti-test-fundacao-telefonica-2-63dbc6fc`; ambos mantêm a managed identity e o RBAC Tag Contributor existente. As definitions antigas seriam atualizadas nos mesmos nomes. Prisma não tem assignments candidatos: o plano propõe `of-def-2-78-rg-7750aa7cbe85`, `of-asg-2-78-rg-7750aa7cbe85`, `of-def-2-78-resource-2e95eba82233` e `of-asg-2-78-resource-2e95eba82233`. Nenhuma dessas alterações foi submetida ao Azure.
+Os PLANs foram executados com Azure CLI em contexto local temporário para a subscription alvo, restaurado ao final. Fundação confirmou a reutilização dos assignments `openfinops-rg-azure-ti-test-fundacao-telefonica-1-63dbc6fc` e `openfinops-resource-azure-ti-test-fundacao-telefonica-2-63dbc6fc`; ambos mantêm a managed identity e o RBAC Tag Contributor existente. As definitions antigas seriam atualizadas nos mesmos nomes. Prisma não tem assignments candidatos: o plano propõe `of-def-2-78-rg-7750aa7cbe85`, `of-asg-2-78-rg-7750aa7cbe85`, `of-def-2-78-resource-f85c8ff0874e` e `of-asg-2-78-resource-f85c8ff0874e`. Nenhuma dessas alterações foi submetida ao Azure.
 
 ## Depois desta implementação
 

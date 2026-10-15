@@ -251,7 +251,7 @@ METADATAEOF
 # Assignment: subscription; alvo efetivo: PCCAGENTLESSSCANRESOURCEGROUP · dig-security-rg
 # Exceções de maior prioridade excluídas desta policy:
 # - Nenhuma
-cat > "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-rules.json" <<'POLICYEOF'
+cat > "$POLICIES_DIR/of-def-2-78-resource-f85c8ff0874e-rules.json" <<'POLICYEOF'
 {
   "if": {
     "allOf": [
@@ -260,6 +260,20 @@ cat > "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-rules.json" <<'POLICYEOF'
           {
             "field": "type",
             "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+          },
+          {
+            "not": {
+              "allOf": [
+                {
+                  "field": "type",
+                  "equals": "Microsoft.Sql/servers/databases"
+                },
+                {
+                  "field": "name",
+                  "equals": "master"
+                }
+              ]
+            }
           },
           {
             "anyOf": [
@@ -345,7 +359,7 @@ cat > "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-rules.json" <<'POLICYEOF'
   }
 }
 POLICYEOF
-cat > "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-metadata.json" <<'METADATAEOF'
+cat > "$POLICIES_DIR/of-def-2-78-resource-f85c8ff0874e-metadata.json" <<'METADATAEOF'
 {
   "category": "OpenFinops",
   "version": "2.0",
@@ -353,8 +367,8 @@ cat > "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-metadata.json" <<'METADAT
   "openfinopsExclusions": "Nenhuma",
   "openfinopsRuleId": "78",
   "openfinopsLayer": "resource",
-  "openfinopsIdentityKey": "2e95eba82233",
-  "openfinopsContentHash": "3507e03403e86f42222c5f680bff7b2a0b151c5e33d79fc520546a5b255caec0"
+  "openfinopsIdentityKey": "f85c8ff0874e",
+  "openfinopsContentHash": "69951975673171eea1635475dc0d91c6136feacfb4b65e5c8cb03d158a5b3cf1"
 }
 METADATAEOF
 
@@ -385,8 +399,8 @@ else
 fi
 
 resolve_existing_target /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 '#78 Classifica → Prisma' Indexed
-ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-78-resource-2e95eba82233}"
-ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-78-resource-2e95eba82233}"
+ACTIVE_ASSIGNMENT_NAME="${RESOLVED_ASSIGNMENT_NAME:-of-asg-2-78-resource-f85c8ff0874e}"
+ACTIVE_POLICY_NAME="${RESOLVED_POLICY_NAME:-of-def-2-78-resource-f85c8ff0874e}"
 EXPECTED_SUBSCRIPTION=63dbc6fc-93d8-4ac1-9745-253f6b502240
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
@@ -395,7 +409,7 @@ if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
 fi
 CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)
 [[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }
-ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-rules.json" "$POLICIES_DIR/of-def-2-78-resource-2e95eba82233-metadata.json" 'OpenFinops - Classifica → Prisma' 'Regra de origem #78 (Classifica → Prisma). Exceções de maior prioridade: Nenhuma.' 3507e03403e86f42222c5f680bff7b2a0b151c5e33d79fc520546a5b255caec0
+ensure_definition "$ACTIVE_POLICY_NAME" Indexed "$POLICIES_DIR/of-def-2-78-resource-f85c8ff0874e-rules.json" "$POLICIES_DIR/of-def-2-78-resource-f85c8ff0874e-metadata.json" 'OpenFinops - Classifica → Prisma' 'Regra de origem #78 (Classifica → Prisma). Exceções de maior prioridade: Nenhuma.' 69951975673171eea1635475dc0d91c6136feacfb4b65e5c8cb03d158a5b3cf1
 ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 "$ACTIVE_POLICY_NAME"
 if az policy assignment show --name "$ACTIVE_ASSIGNMENT_NAME" --scope /subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240 --only-show-errors >/dev/null 2>&1 || plan; then
   PRINCIPAL_ID=""

@@ -120,8 +120,26 @@
           "condition": {
             "allOf": [
               {
-                "field": "type",
-                "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                "allOf": [
+                  {
+                    "field": "type",
+                    "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                  },
+                  {
+                    "not": {
+                      "allOf": [
+                        {
+                          "field": "type",
+                          "equals": "Microsoft.Sql/servers/databases"
+                        },
+                        {
+                          "field": "name",
+                          "equals": "master"
+                        }
+                      ]
+                    }
+                  }
+                ]
               },
               {
                 "not": {
@@ -129,6 +147,20 @@
                     {
                       "field": "type",
                       "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                    },
+                    {
+                      "not": {
+                        "allOf": [
+                          {
+                            "field": "type",
+                            "equals": "Microsoft.Sql/servers/databases"
+                          },
+                          {
+                            "field": "name",
+                            "equals": "master"
+                          }
+                        ]
+                      }
                     },
                     {
                       "anyOf": [
@@ -148,8 +180,26 @@
             ]
           },
           "base_selector": {
-            "field": "type",
-            "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+            "allOf": [
+              {
+                "field": "type",
+                "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+              },
+              {
+                "not": {
+                  "allOf": [
+                    {
+                      "field": "type",
+                      "equals": "Microsoft.Sql/servers/databases"
+                    },
+                    {
+                      "field": "name",
+                      "equals": "master"
+                    }
+                  ]
+                }
+              }
+            ]
           },
           "scope_subscriptions": [
             "63dbc6fc-93d8-4ac1-9745-253f6b502240"
@@ -265,8 +315,26 @@
         "condition": {
           "allOf": [
             {
-              "field": "type",
-              "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+              "allOf": [
+                {
+                  "field": "type",
+                  "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                },
+                {
+                  "not": {
+                    "allOf": [
+                      {
+                        "field": "type",
+                        "equals": "Microsoft.Sql/servers/databases"
+                      },
+                      {
+                        "field": "name",
+                        "equals": "master"
+                      }
+                    ]
+                  }
+                }
+              ]
             },
             {
               "not": {
@@ -274,6 +342,20 @@
                   {
                     "field": "type",
                     "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                  },
+                  {
+                    "not": {
+                      "allOf": [
+                        {
+                          "field": "type",
+                          "equals": "Microsoft.Sql/servers/databases"
+                        },
+                        {
+                          "field": "name",
+                          "equals": "master"
+                        }
+                      ]
+                    }
                   },
                   {
                     "anyOf": [
@@ -293,8 +375,26 @@
           ]
         },
         "base_selector": {
-          "field": "type",
-          "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+          "allOf": [
+            {
+              "field": "type",
+              "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+            },
+            {
+              "not": {
+                "allOf": [
+                  {
+                    "field": "type",
+                    "equals": "Microsoft.Sql/servers/databases"
+                  },
+                  {
+                    "field": "name",
+                    "equals": "master"
+                  }
+                ]
+              }
+            }
+          ]
         },
         "scope_subscriptions": [
           "63dbc6fc-93d8-4ac1-9745-253f6b502240"
