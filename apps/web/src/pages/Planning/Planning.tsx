@@ -158,6 +158,7 @@ export default function Planning({
     [years, setYears] = useState<number[]>([currentYear]),
     [departments, setDepartments] = useState<Department[]>([]),
     [rows, setRows] = useState<PlanningRow[]>([]),
+    [dirtyDepartmentIds, setDirtyDepartmentIds] = useState<Set<number>>(new Set()),
     [versions, setVersions] = useState<PlanningVersion[]>([]),
     [timeline, setTimeline] = useState<PlanningVersion[]>([]),
     [snapshotId, setSnapshotId] = useState(""),
@@ -219,6 +220,7 @@ export default function Planning({
         getPlanningYears(type),
       ]);
       setRows(grid.rows);
+      setDirtyDepartmentIds(new Set());
       setIndividualLines(grid.individual_lines || []);
       setVersions(history);
       setTimeline(events);
@@ -414,6 +416,7 @@ export default function Planning({
         ? [...previous, updated]
         : previous.map((row, i) => (i === index ? updated : row));
     });
+    setDirtyDepartmentIds((previous) => new Set(previous).add(edit.department_id));
     setEdit(null);
   };
   const startPublish = (action: PublishAction, restore?: number) => {
@@ -473,20 +476,26 @@ export default function Planning({
           defenseRequest?.id,
           selectedMissing.length ? selectedMissing : undefined,
         );
-      else if (publishAction === "save")
+      else if (publishAction === "save") {
+        if (!dirtyDepartmentIds.size) {
+          setError("Edite ao menos um projeto antes de publicar.");
+          return;
+        }
         await savePlanningGrid(
           type,
           year,
-          scopedRows.map((row) => ({
-            entity_type: "department",
-            department_id: row.department_id,
-            department_levels: [],
-            values: row.values,
-          })),
+          scopedRows
+            .filter((row) => dirtyDepartmentIds.has(row.department_id))
+            .map((row) => ({
+              entity_type: "department",
+              department_id: row.department_id,
+              department_levels: [],
+              values: row.values,
+            })),
           scopedPublication,
           defenseOptions,
         );
-      else if (publishAction === "restore" && restoreId)
+      } else if (publishAction === "restore" && restoreId)
         await restorePlanningVersion(type, year, restoreId, scopedPublication);
       setMessage(
         isDefense
