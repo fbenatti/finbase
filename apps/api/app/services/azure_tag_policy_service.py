@@ -782,7 +782,7 @@ class AzureTagPolicyService:
                 mapping["tag_key"]: self._hierarchy(department, departments).get(mapping["focus_field"], "")
                 for mapping in mappings
             })
-            current_tags = _collapse_tag_keys(item["tags"])
+            current_tags = {key.casefold(): value for key, value in _collapse_tag_keys(item["tags"]).items()}
             if earlier_tags and all(current_tags.get(key.casefold()) == value for key, value in earlier_tags.items()):
                 continue
             selector = self._selector(terms, item["target"])
