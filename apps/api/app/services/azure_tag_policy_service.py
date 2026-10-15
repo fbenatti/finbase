@@ -336,7 +336,7 @@ class AzureTagPolicyService:
         return selected
 
     @staticmethod
-    def _gold_subscription_id(row: dict) -> str:
+    def _evidence_subscription_id(row: dict) -> str:
         value = str(row.get("subscription_id") or "").strip()
         return value if UUID_RE.match(value) else ""
 
@@ -361,8 +361,8 @@ class AzureTagPolicyService:
         """Turn Silver evidence or current Azure inventory into scoped targets.
 
         Classification ``~`` (contains) is kept for RG name, resource id/name,
-        type, SKU and location. Silver evidence helps select subscriptions when
-        an assignment. SubAccountName stays a GUID list with ``equals``; contains
+        type, SKU and location. Silver evidence helps select subscriptions when deciding
+        whether an assignment should be generated. SubAccountName stays a GUID list with ``equals``; contains
         is never used for subscriptions. Exact ``=`` RG or Resource ID rules
         still pin the observed ARM literal.
         """
@@ -385,7 +385,7 @@ class AzureTagPolicyService:
         resource_contains = level == SCOPE_RESOURCE and _keeps_contains(terms, SCOPE_RESOURCE)
         grouped: dict[tuple, dict] = {}
         for row in evidence:
-            subscription_id = self._gold_subscription_id(row)
+            subscription_id = self._evidence_subscription_id(row)
             if not subscription_id:
                 continue
             tag_values = tuple(str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings)))
@@ -869,7 +869,7 @@ class AzureTagPolicyService:
                 evidence_by_rule[int(row.get("rule_id"))].append(row)
             except (TypeError, ValueError):
                 continue
-            gold_subscription_id = self._gold_subscription_id(row)
+            gold_subscription_id = self._evidence_subscription_id(row)
             subscription_name = str(row.get("subscription_name") or "").strip().casefold()
             if gold_subscription_id and subscription_name:
                 catalog[subscription_name].append(gold_subscription_id)
@@ -907,7 +907,7 @@ class AzureTagPolicyService:
                 rule_evidence = evidence_by_rule.get(rule.id, [])
                 if subscription_id:
                     rule_evidence = [row for row in rule_evidence
-                                     if self._gold_subscription_id(row).casefold() == subscription_id.casefold()]
+                                     if self._evidence_subscription_id(row).casefold() == subscription_id.casefold()]
                     if not rule_evidence and not any(d.get("status") == "blocked" and d.get("subscription_id") == subscription_id
                                                      for d in diagnostics):
                         scope = next((term["scope"] for term in terms if term["scope"] in {SCOPE_RESOURCE, SCOPE_RG}), None)
