@@ -1598,12 +1598,15 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
             regular_result = await _run_pivot_union_core(PivotUnionRequest(destination_table_ids=other_ids, **common), db, trino_kwargs)
             regular_origin = None
 
-        manual_dimensions = [name for name in dimensions if name != origin_name and name in _FORECAST_MANUAL_SCHEMA]
-        manual_filters = [item for item in req.filters if item.column in _FORECAST_MANUAL_SCHEMA]
+        manual_dimensions = [name for name in dimensions if name != origin_name and
+                             (name in _FORECAST_MANUAL_SCHEMA or name.lower() in _PERIOD_NAMES_LOWER)]
+        manual_axis = lambda name: "period" if name.lower() in _PERIOD_NAMES_LOWER else name
+        manual_filters = [item.model_copy(update={"column": manual_axis(item.column)}) for item in req.filters
+                          if item.column in _FORECAST_MANUAL_SCHEMA or item.column.lower() in _PERIOD_NAMES_LOWER]
         manual_measures = [PivotMeasure(column="value", aggregation="SUM", label="SUM value")]
         manual_req = PivotRequest(destination_table_id=FORECAST_MANUAL_PIVOT_ID,
-                                  rows=[name for name in regular_rows if name in manual_dimensions],
-                                  columns=[name for name in regular_columns if name in manual_dimensions],
+                                  rows=[manual_axis(name) for name in regular_rows if name in manual_dimensions],
+                                  columns=[manual_axis(name) for name in regular_columns if name in manual_dimensions],
                                   measures=manual_measures, filters=manual_filters,
                                   include_totals=False, row_limit=req.row_limit, column_limit=req.column_limit)
         manual_result = await _run_forecast_manual_pivot_core(manual_req, db, trino_kwargs)
@@ -1614,7 +1617,11 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         def add_result(result: dict[str, Any], source_rows: list[str], source_columns: list[str], origin: str | None) -> None:
             for cell in result.get("cells", []):
                 source_values = dict(zip([*source_rows, *source_columns], [*cell["row"], *cell["column"]]))
-                key = tuple((origin if name == origin_name else source_values.get(name)) for name in dimensions)
+                if "period" in source_values:
+                    for name in dimensions:
+                        if name.lower() in _PERIOD_NAMES_LOWER:
+                            source_values.setdefault(name, source_values["period"])
+                key = tuple((origin if name == origin_name and origin is not None else source_values.get(name)) for name in dimensions)
                 values = merged.setdefault(key, [0.0] * len(req.measures))
                 for index, value in enumerate(cell.get("values", [])):
                     if index < len(values) and req.measures[index].aggregation in {"SUM", "COUNT"}:
