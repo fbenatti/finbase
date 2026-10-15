@@ -25,7 +25,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const delta = actual != null && expected != null ? actual - expected : null;
   const relative = delta != null && expected != null && expected > 0 ? delta / expected * 100 : null;
   const hierarchy = detailScopeChain(series.detail_dimensions);
-  const forecastBranches = scopeBranches(members, forecastFilters);
+  const forecastBranches = scopeBranches(members, forecastFilters, hierarchy);
   const sourceBranches = observedScopeBranches(series.detail_items ?? [], filters, hierarchy);
   const sourceOnly = forecastBranches.groups.length === 0 && sourceBranches.groups.length > 0;
   const dimension = forecastBranches.groups.length ? forecastBranches.dimension : sourceBranches.dimension;
