@@ -508,6 +508,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 ]
     lines += [
         'if plan; then echo "[INFO] PLAN_ONLY concluído; nenhuma alteração Azure foi submetida."',
+        'elif [[ "$SKIP_REMEDIATION" == "true" ]]; then echo "[INFO] Definitions/assignments processados; nenhuma remediation nova foi criada e a avaliação foi submetida."',
         'else echo "[INFO] OpenFinops tag policy deployment submitted; confira o estado de cada remediation."; fi',
     ]
     return "\n".join(lines) + "\n"
