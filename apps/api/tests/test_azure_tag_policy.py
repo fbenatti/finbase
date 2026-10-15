@@ -1,3 +1,4 @@
+import base64
 import json
 
 from app.models.rules import ClassificationRule, Department
@@ -420,6 +421,38 @@ def test_policy_definition_has_stable_content_hash():
     assert len(first["metadata"]["openfinopsContentHash"]) == 64
 
 
+def test_tag_drift_condition_only_selects_missing_or_exact_value_mismatch():
+    region = {"field": "type", "equals": "Microsoft.Compute/virtualMachines"}
+    condition = _tag_drift_condition(region, {
+        "projeto": "Fundação Telefonica",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+    })
+    assert condition["allOf"][0] == region
+    drift = condition["allOf"][1]["anyOf"]
+    assert drift[0]["anyOf"][0] == {"field": "tags['projeto']", "exists": "false"}
+    assert drift[0]["anyOf"][1]["notMatch"] == base64.b64encode("Fundação Telefonica".encode()).decode()
+    assert drift[0]["anyOf"][1]["value"] == "[base64(string(field('tags[''projeto'']')))]"
+    assert drift[1]["anyOf"][0]["field"] == "tags['diretoria']"
+
+
+def test_tag_drift_condition_escapes_apostrophes_in_dynamic_field():
+    condition = _tag_drift_condition({"field": "type", "equals": "T"}, {"owner's team": "Vivo's"})
+    encoded_field = condition["allOf"][1]["anyOf"][0]["anyOf"][1]["value"]
+    assert encoded_field == "[base64(string(field('tags[''owner''s team'']')))]"
+
+
+def test_definition_uses_drift_condition_and_keeps_modify_operations():
+    policy = _definition("OpenFinops", "Regra", {"field": "name", "equals": "rg"},
+                         {"projeto": "Terra"}, "All", "#1 Regra", [])
+    policy_rule = policy["policyRule"]
+    assert policy_rule["if"]["allOf"][0] == {"field": "name", "equals": "rg"}
+    assert policy_rule["if"]["allOf"][1]["anyOf"][0]["anyOf"][0]["exists"] == "false"
+    assert policy_rule["then"]["effect"] == "modify"
+    assert policy_rule["then"]["details"]["operations"] == [
+        {"operation": "addOrReplace", "field": "tags['projeto']", "value": "Terra"},
+    ]
+
+
 def test_rg_assignment_does_not_embed_other_rg_exclusions():
     service = AzureTagPolicyService(db=None)
     assigned = {
@@ -481,7 +514,7 @@ def test_deployment_script_uses_resource_group_assignment_scope():
         "connection_code": "azure-ti", "connection_name": "Azure TI",
         "layers": {"resource_groups": [{
             "rule_id": 21, "rule_name": "Terra Brasil", "tags": {"projeto": "Terra"},
-            "condition": {"field": "type", "equals": "Microsoft.Resources/resourceGroups"},
+            "condition": {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"},
             "scope_subscriptions": [subscription],
             "assignment_scope_kind": "resource_group",
             "assignment_resource_group": "rg-terra",
