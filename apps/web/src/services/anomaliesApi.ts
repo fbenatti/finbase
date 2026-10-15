@@ -222,6 +222,8 @@ export type AnomalySeries = {
     delta_cloud: number | null;
     items?: AnomalySeriesPoint[];
   }>;
+  detail_dimensions?: Array<{ key: string; label: string }>;
+  detail_items?: Array<{ dimensions: Record<string, string | null>; observed_cloud: number | null }>;
   scope_verified?: boolean;
   warnings?: string[];
   reference?: {
