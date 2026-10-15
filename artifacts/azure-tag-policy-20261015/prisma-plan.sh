@@ -36,8 +36,9 @@ resolve_existing_target() {
 }
 ensure_definition() {
   local name="$1" mode="$2" rules="$3" metadata="$4" display="$5" description="$6" expected_hash="$7"
-  local category current_hash
-  if az policy definition show --name "$name" --only-show-errors >/dev/null 2>&1; then
+  local category current_hash lookup_output lookup_status definition_exists=0
+  if lookup_output=$(az policy definition show --name "$name" --only-show-errors 2>&1); then definition_exists=1; else lookup_status=$?; [[ "$lookup_output" =~ (ResourceNotFound|NotFound|not\ found|does\ not\ exist) ]] || { error "Falha consultando definition $name (az exit $lookup_status): $lookup_output"; exit 1; }; fi
+  if (( definition_exists )); then
     category=$(az policy definition show --name "$name" --query "metadata.category" -o tsv --only-show-errors)
     [[ "$category" == "OpenFinops" ]] || { action ABORT "Definition $name pertence a outra categoria ($category)."; exit 1; }
     current_hash=$(az policy definition show --name "$name" --query "metadata.openfinopsContentHash" -o tsv --only-show-errors)
@@ -77,17 +78,24 @@ resolve_assignment_principal() {
 }
 ensure_tag_contributor() {
   local principal_id="$1" scope="$2" attempt=1
-  local rbac_id
+  local rbac_id create_succeeded=0
   [[ -n "$principal_id" && "$principal_id" != "null" ]] || { plan && { action CREATE "RBAC Tag Contributor em $scope (managed identity pendente)"; return; }; error "Managed identity não foi criada para o assignment."; exit 1; }
-  rbac_id=$(az role assignment list --assignee-object-id "$principal_id" --role "Tag Contributor" --scope "$scope" --query "[0].id" -o tsv --only-show-errors)
+  rbac_id=$(az role assignment list --assignee-object-id "$principal_id" --role "Tag Contributor" --scope "$scope" --query "[0].id" -o tsv --only-show-errors) || { error "Falha ao consultar RBAC Tag Contributor em $scope"; exit 1; }
   if [[ -n "$rbac_id" && "$rbac_id" != "null" ]]; then action UNCHANGED "RBAC Tag Contributor em $scope"; return; fi
   action CREATE "RBAC Tag Contributor em $scope"
   plan && return
   while (( attempt <= RETRY_ATTEMPTS )); do
-    if az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role "Tag Contributor" --scope "$scope" --only-show-errors; then return; fi
+    if az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role "Tag Contributor" --scope "$scope" --only-show-errors; then create_succeeded=1; break; fi
     warn "RBAC ainda não disponível (tentativa $attempt/$RETRY_ATTEMPTS); aguardando propagação da identidade."; sleep "$RETRY_DELAY_SECONDS"; ((attempt++))
   done
-  error "Não foi possível conceder Tag Contributor após $RETRY_ATTEMPTS tentativa(s)."; exit 1
+  (( create_succeeded )) || { error "Não foi possível conceder Tag Contributor após $RETRY_ATTEMPTS tentativa(s)."; exit 1; }
+  attempt=1
+  while (( attempt <= RETRY_ATTEMPTS )); do
+    rbac_id=$(az role assignment list --assignee-object-id "$principal_id" --role "Tag Contributor" --scope "$scope" --query "[0].id" -o tsv --only-show-errors) || { error "Falha ao verificar propagação do RBAC em $scope"; exit 1; }
+    [[ -n "$rbac_id" && "$rbac_id" != "null" ]] && { info "RBAC Tag Contributor confirmado em $scope"; return; }
+    warn "RBAC criado, aguardando propagação (tentativa $attempt/$RETRY_ATTEMPTS)."; sleep "$RETRY_DELAY_SECONDS"; ((attempt++))
+  done
+  error "Tag Contributor não ficou visível após $RETRY_ATTEMPTS tentativa(s)."; exit 1
 }
 ensure_remediation() {
   local assignment="$1" scope="$2" name state subscription resource_group
