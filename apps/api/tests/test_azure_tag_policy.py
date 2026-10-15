@@ -474,7 +474,7 @@ def test_rg_assignment_does_not_embed_other_rg_exclusions():
     assert service._previous_overlap_reason(assigned, prisma) == "assignment_scope_disjoint"
     selector = service._selector(assigned["terms"], "resource_group", omit_rg_scope=True)
     effective = service._effective(selector, [])
-        assert effective == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
+    assert effective == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
     assert "PCCAGENTLESSSCANRESOURCEGROUP" not in json.dumps(effective)
 
 
