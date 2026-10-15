@@ -258,11 +258,11 @@ class AzureTagPolicyService:
             from app.services.azure_resource_graph_service import discover_subscriptions
             discovered = await discover_subscriptions(dict(conn.config_json or {}))
             for item in discovered:
-                sid = str(item.get("subscription_id") or "").strip()
-                name = str(item.get("subscription_name") or "").strip()
-                if sid:
-                    ids.append(sid)
-                    catalog[name.casefold()].append(sid)
+            sid = str(item.get("subscription_id") or "").strip()
+            name = str(item.get("subscription_name") or "").strip()
+            if sid:
+                ids.append(sid)
+                catalog[name].append(sid)
         except Exception as exc:  # ResourceId/RG exports remain useful.
             message = f"Não foi possível consultar Azure Resource Graph: {str(exc)[:180]}"
             logger.warning("Azure tag policy subscription discovery for %s: %s", conn.code, message)
@@ -549,7 +549,7 @@ class AzureTagPolicyService:
         selected_name = _subscription_name_key(subscription_name)
         for condition in normalize_rule_conditions(rule):
             field_name = str(condition.get("field") or "")
-            scope, _ = AzureTagPolicyService._field_scope(AzureTagPolicyService(db=None), field_name)
+            scope, _ = SEMANTIC_FIELD_MAP.get(_norm(field_name), (SCOPE_UNSUPPORTED, ""))
             if scope != SCOPE_SUBSCRIPTION:
                 continue
             operator = str(condition.get("operator") or "=")
@@ -575,7 +575,8 @@ class AzureTagPolicyService:
                     matches.append(actual != expected and ("\0" not in expected or actual not in expected.split("\0")))
                 else:
                     return False
-            if not matches or (any(matches) if operator in {"=", "~"} else not all(matches)):
+            condition_matches = all(matches) if operator == "!=" else any(matches)
+            if not matches or not condition_matches:
                 return False
         return True
 
@@ -922,7 +923,9 @@ class AzureTagPolicyService:
             return None
         departments = await self._load_departments()
         rules = await self._load_classification_rules(conn)
-        selected_department_ids = self._selected_department_ids(departments, department_id)
+        # A subscription selection means a complete policy map, including
+        # projects with higher-priority exceptions such as Prisma.
+        selected_department_ids = None if subscription_id else self._selected_department_ids(departments, department_id)
         mappings = await self._tag_mappings()
         home_tenants = await self._subscription_home_tenants(conn)
         billing_tenant = str((conn.config_json or {}).get("tenant_id") or "").strip()
@@ -951,12 +954,18 @@ class AzureTagPolicyService:
 
         azure_target_rows: list[dict] = []
         azure_catalog_ids: set[str] = set()
+        selected_subscription_name = ""
         if subscription_id:
             azure_catalog, discovered_ids, catalog_error = await self._subscription_catalog(conn)
             azure_catalog_ids = {sid.casefold() for sid in discovered_ids}
             for name, ids in azure_catalog.items():
                 catalog.setdefault(name, []).extend(ids)
             catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
+            selected_subscription_name = next(
+                (name for name, ids in azure_catalog.items()
+                 if subscription_id.casefold() in {sid.casefold() for sid in ids}),
+                "",
+            )
             if catalog_error:
                 diagnostics.append({"status": "blocked", "reason": catalog_error, "subscription_id": subscription_id})
                 raise RuntimeError(catalog_error)
@@ -974,7 +983,13 @@ class AzureTagPolicyService:
 
         compiled: list[dict] = []
         for rule in rules:
-            terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=False)
+            if subscription_id and not self._rule_matches_selected_subscription(
+                rule, catalog, subscription_id, selected_subscription_name,
+            ):
+                continue
+            terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=not bool(subscription_id))
+            if terms and subscription_id:
+                terms = self._pin_subscription(terms, subscription_id)
             department = departments.get(rule.department_id)
             if terms and department:
                 selected = selected_department_ids is None or rule.department_id in selected_department_ids
@@ -1001,6 +1016,8 @@ class AzureTagPolicyService:
                                              for row in azure_target_rows
                                              if str(row.get("subscription_id") or "").casefold() == subscription_id.casefold()
                                              and self._target_matches_terms(row, terms)]
+                        elif any(term["scope"] == SCOPE_SUBSCRIPTION for term in terms) and azure_target_rows:
+                            rule_evidence = [{"subscription_id": subscription_id, "evidence_count": 0}]
                 compiled.extend(self._concrete_items(
                     rule, terms, rule_evidence, self._hierarchy(department, departments), mappings, selected, diagnostics,
                 ))
@@ -1031,7 +1048,10 @@ class AzureTagPolicyService:
                         overlapping.append(entry)
                 exclusion_item = {**item, "target": target}
                 diagnostics_before_exclusions = len(diagnostics)
-                rule_exclusions = self._prior_rule_exclusions(exclusion_item, rules, departments, catalog, mappings, diagnostics)
+                rule_exclusions = self._prior_rule_exclusions(
+                    exclusion_item, rules, departments, catalog, mappings, diagnostics,
+                    selected_subscription_name,
+                )
                 unresolved_precedence = [entry for entry in diagnostics[diagnostics_before_exclusions:]
                                          if entry.get("status") == "blocked"]
                 if unresolved_precedence:
