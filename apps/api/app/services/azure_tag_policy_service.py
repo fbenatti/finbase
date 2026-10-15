@@ -273,11 +273,39 @@ class AzureTagPolicyService:
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or conn.connector_type != "azure_blob":
             raise ValueError("Conexão Azure não encontrada")
-        catalog, ids, error = await self._subscription_catalog(conn)
-        if error:
-            raise RuntimeError(error)
-        name_by_id = {sid.casefold(): name for name, values in catalog.items() for sid in values}
-        return [{"subscription_id": sid, "name": name_by_id.get(sid.casefold(), sid)} for sid in ids]
+        safe_code = (conn.code or "").replace("'", "''")
+        try:
+            from app.services.trino_service import execute as trino_execute
+            rows = await trino_execute(f"""
+                SELECT
+                    trim(CAST(subaccountid AS varchar)) AS subscription_id,
+                    max_by(trim(CAST(subaccountname AS varchar)), _billing_period) AS subscription_name
+                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+                WHERE lower(trim(CAST(cloud_origem AS varchar))) = lower('{safe_code}')
+                  AND CAST(source_connection_id AS bigint) = {int(conn.id)}
+                  AND subaccountid IS NOT NULL
+                  AND trim(CAST(subaccountid AS varchar)) <> ''
+                GROUP BY 1
+                ORDER BY 2, 1
+            """, timeout_s=60)
+        except Exception as exc:
+            message = f"Não foi possível listar subscriptions faturadas na Silver: {str(exc)[:180]}"
+            logger.warning("Azure tag policy Silver subscriptions for %s: %s", conn.code, message)
+            raise RuntimeError(message) from exc
+
+        # Silver is the source for the selector. Ignore rows that cannot be used
+        # as Azure subscription scopes, and collapse case-only duplicates.
+        by_id: dict[str, dict[str, str]] = {}
+        for row in rows:
+            subscription_id = str(row.get("subscription_id") or "").strip()
+            if not UUID_RE.fullmatch(subscription_id):
+                continue
+            key = subscription_id.casefold()
+            name = str(row.get("subscription_name") or "").strip() or subscription_id
+            existing = by_id.get(key)
+            if not existing or (existing["name"] == existing["subscription_id"] and name != subscription_id):
+                by_id[key] = {"subscription_id": subscription_id, "name": name}
+        return sorted(by_id.values(), key=lambda item: (item["name"].casefold(), item["subscription_id"].casefold()))
 
     async def _silver_evidence(self, conn: SourceConnection, mappings: list[dict[str, str]]) -> tuple[list[dict], str | None]:
         """Return concrete Azure targets classified in the latest Silver period.
@@ -326,6 +354,33 @@ class AzureTagPolicyService:
             logger.warning("Azure tag policy Silver evidence for %s: %s", conn.code, message)
             return [], message
         return rows, None
+
+    async def _silver_billed_rule_ids(
+        self, conn: SourceConnection, subscription_id: str,
+    ) -> tuple[set[int], str | None]:
+        """Return rule IDs that won at least one billed Silver line in this subscription.
+
+        Scan every billing period. A rule with no recent costs is still relevant
+        if it classified this subscription historically; a rule that never won
+        a billed line must not expand the generated policy map.
+        """
+        safe_code = (conn.code or "").replace("'", "''")
+        try:
+            from app.services.trino_service import execute as trino_execute
+            rows = await trino_execute(f"""
+                SELECT DISTINCT
+                    CAST(json_extract_scalar(business_rule, '$.classification.id') AS integer) AS rule_id
+                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+                WHERE cloud_origem = '{safe_code}'
+                  AND CAST(source_connection_id AS bigint) = {int(conn.id)}
+                  AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'
+                  AND json_extract_scalar(business_rule, '$.classification.id') IS NOT NULL
+            """, timeout_s=120)
+            return {int(row["rule_id"]) for row in rows if row.get("rule_id") is not None}, None
+        except Exception as exc:
+            message = f"Não foi possível confirmar regras faturadas na Silver para a subscription: {str(exc)[:180]}"
+            logger.warning("Azure tag policy billed Silver rules for %s: %s", conn.code, message)
+            return set(), message
 
     @staticmethod
     def _selected_department_ids(departments: dict[int, Department], department_id: int | None) -> set[int] | None:
@@ -846,20 +901,21 @@ class AzureTagPolicyService:
         selected_subscription_name: str = "",
         eligible_rule_ids: set[int] | None = None,
     ) -> list[dict]:
-        """Build selector-only exceptions from active earlier rules, not billing rows."""
+        """Build selector-only exceptions from earlier rules proven by subscription billing."""
         current_rule = item["rule"]
         exclusions: list[dict] = []
         current_sid = item["scope_subscriptions"][0].casefold()
         for rule in rules:
             if (rule.priority, rule.id) >= (current_rule.priority, current_rule.id):
                 break
-            # In a subscription export, only rules that compiled against a
-            # current Azure target can compete for the selected policy region.
+            # In a subscription export, only rules that won at least one
+            # billed Silver line can compete for the selected policy region.
+            # A billed higher-priority rule may lack a current target or an
+            # organizational mapping, but its ARM selector must still be
+            # excluded from a broader lower-priority rule.
             if eligible_rule_ids is not None and rule.id not in eligible_rule_ids:
                 continue
             department = departments.get(rule.department_id)
-            if not department:
-                continue
             if not self._rule_matches_selected_subscription(
                 rule, catalog, current_sid, selected_subscription_name,
             ):
@@ -874,9 +930,11 @@ class AzureTagPolicyService:
             earlier_tags = _collapse_tag_keys({
                 mapping["tag_key"]: self._hierarchy(department, departments).get(mapping["focus_field"], "")
                 for mapping in mappings
+                if department and self._hierarchy(department, departments).get(mapping["focus_field"], "")
             })
             current_tags = {key.casefold(): value for key, value in _collapse_tag_keys(item["tags"]).items()}
-            if earlier_tags and all(current_tags.get(key.casefold()) == value for key, value in earlier_tags.items()):
+            if (department and len(earlier_tags) == len(mappings) and earlier_tags
+                    and all(current_tags.get(key.casefold()) == value for key, value in earlier_tags.items())):
                 continue
             selector = self._selector(terms, item["target"])
             if not selector:
@@ -890,7 +948,7 @@ class AzureTagPolicyService:
                 "observed": {},
                 "summary": {"rule_id": rule.id, "rule_name": rule.name,
                             "department_id": rule.department_id,
-                            "department_name": department.name, "observed": {}},
+                            "department_name": department.name if department else None, "observed": {}},
             }
             if self._previous_overlap_reason(item, entry) is None:
                 exclusions.append(entry)
@@ -940,6 +998,12 @@ class AzureTagPolicyService:
         silver_rows, silver_error = ([], None)
         if not subscription_id:
             silver_rows, silver_error = await self._silver_evidence(conn, mappings)
+        billed_rule_ids: set[int] | None = None
+        if subscription_id:
+            billed_rule_ids, billed_error = await self._silver_billed_rule_ids(conn, subscription_id)
+            if billed_error:
+                diagnostics = [{"status": "blocked", "reason": billed_error, "subscription_id": subscription_id}]
+                raise RuntimeError(billed_error)
         diagnostics: list[dict] = []
         if silver_error:
             diagnostics.append({"status": "warning", "reason": silver_error})
@@ -959,6 +1023,7 @@ class AzureTagPolicyService:
 
         azure_target_rows: list[dict] = []
         azure_catalog_ids: set[str] = set()
+        azure_catalog: dict[str, list[str]] = {}
         selected_subscription_name = ""
         if subscription_id:
             azure_catalog, discovered_ids, catalog_error = await self._subscription_catalog(conn)
@@ -988,6 +1053,8 @@ class AzureTagPolicyService:
 
         compiled: list[dict] = []
         for rule in rules:
+            if billed_rule_ids is not None and rule.id not in billed_rule_ids:
+                continue
             if subscription_id and not self._rule_matches_selected_subscription(
                 rule, catalog, subscription_id, selected_subscription_name,
             ):
@@ -1028,7 +1095,7 @@ class AzureTagPolicyService:
                 ))
 
         layers = {"resource_groups": [], "resources": []}
-        eligible_rule_ids = {item["rule"].id for item in compiled} if subscription_id else None
+        eligible_rule_ids = billed_rule_ids if subscription_id else None
         # Policies are decision regions per subscription.  A resource exception
         # in terra-connectivity must not leak into another Terra subscription.
         previous: dict[tuple[str, str], list[dict]] = defaultdict(list)
@@ -1130,6 +1197,11 @@ class AzureTagPolicyService:
                 "connection_name": conn.name, "rule_count": len(rules), "department_id": department_id,
                 "department_name": selected.name if selected else None,
                 "selected_subscription_id": requested_subscription_id,
+                "subscription_name_by_id": {
+                    sid: name
+                    for name, ids in azure_catalog.items()
+                    for sid in ids
+                },
                 "deployment_subscriptions": emitted_scopes,
                 "subscription_tenants": {
                     subscription: tenant

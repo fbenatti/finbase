@@ -383,8 +383,7 @@ def _apply_forecast_business_rules(
         if not getattr(rule, "active", True):
             continue
         if str(getattr(rule, "behavior", "") or "") in {
-            "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX",
-            "SOURCE_MAX_PREVIOUS_MONTH_PREFIX", "SOURCE_VALIDITY",
+            "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_VALIDITY",
         }:
             continue
         mask = output["tipo"].eq("forecast")
@@ -1340,11 +1339,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     metadata = getattr(config, "gold_metadata", None) or {}
     source_exclusion, source_rule_names = _source_exclusion_filter(
         business_rules or [], metadata, period,
-        behaviors={"SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX"},
+        behaviors={"SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX"},
     )
     mean_30d_source_filter, mean_30d_rule_names = _source_exclusion_filter(
         business_rules or [], metadata, period,
-        behaviors={"SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX"},
+        behaviors={"SOURCE_MEAN_30D_PREFIX"},
     )
     cloud_col, id_col = _resolve_connection_columns(metadata)
     allocation_rules = _merge_allocation_rules(
@@ -1411,7 +1410,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     needs_closed_month_anchor = any(
         getattr(rule, "active", True)
         and str(getattr(rule, "behavior", "") or "")
-        in {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX"}
+        in {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END"}
         for rule in (business_rules or [])
     )
     daily_history_start = _forecast_history_start(
@@ -1524,8 +1523,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         excluded_frame = pd.DataFrame(excluded_records)
         if not excluded_frame.empty:
             frames.append(excluded_frame)
-    # Overages configurados são separados da série-base e projetados como um
-    # componente independente, sem contaminar a janela curta do custo recorrente.
+    # Overage mensal é um evento que reinicia a cada ciclo de créditos. Ele é
+    # removido da série-base acima e entra como um componente independente
+    # calculado pela média diária dos últimos 30 dias (incluindo dias sem
+    # overage), em vez de contaminar a janela curta do custo recorrente.
     if mean_30d_source_filter:
         overage_records = await _fetch_period_records(
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
@@ -1537,16 +1538,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         )
         overage_frame = pd.DataFrame(overage_records)
         if not overage_frame.empty:
-            active_source_behaviors = {
-                str(getattr(rule, "behavior", "") or "")
-                for rule in (business_rules or [])
-                if getattr(rule, "active", True)
-            }
-            overage_frame["__forecast_component"] = (
-                "MAX_PREVIOUS_MONTH_SOURCE"
-                if "SOURCE_MAX_PREVIOUS_MONTH_PREFIX" in active_source_behaviors
-                else "MEAN_30D_SOURCE"
-            )
+            overage_frame["__forecast_component"] = "MEAN_30D_SOURCE"
             frames.append(overage_frame)
     if not frames:
         raise ValueError("A Gold não possui dados realizados para a configuração")
@@ -1581,11 +1573,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         if history.empty:
             continue
         series_last_date = history.index.max().date()
-        series_cutoff = (
-            cloud_effective_cutoff
-            if component == "MAX_PREVIOUS_MONTH_SOURCE"
-            else min(cloud_effective_cutoff, series_last_date)
-        )
+        series_cutoff = min(cloud_effective_cutoff, series_last_date)
         history = history[history.index.date <= series_cutoff]
         if history.empty:
             continue
@@ -1682,16 +1670,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 method, baseline = selected
             else:
                 method, baseline = candidates[0]
-        if component == "MAX_PREVIOUS_MONTH_SOURCE":
-            previous_period = pd.Timestamp(cloud_effective_cutoff.replace(day=1) - timedelta(days=1)).to_period("M")
-            previous_month = daily[daily.index.to_period("M") == previous_period]
-            previous_month_baseline = (
-                float(previous_month.sum()) / calendar.monthrange(previous_period.year, previous_period.month)[1]
-                if not previous_month.empty else 0.0
-            )
-            baseline = max(float(baseline), previous_month_baseline)
-            method = "MAX_PREVIOUS_MONTH_AND_CURRENT"
-        if component != "MAX_PREVIOUS_MONTH_SOURCE" and series_last_date < cloud_effective_cutoff.replace(day=1):
+        if series_last_date < cloud_effective_cutoff.replace(day=1):
             # A lump that ended in a prior month must not be treated as a
             # daily run-rate for the open month (one purchase day × 30).
             method, baseline = "ENDED_SERIES", 0.0
@@ -1722,8 +1701,9 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             month = series_anchor.month - 1 + month_offset
             year = series_anchor.year + month // 12
             month = month % 12 + 1
-            # A regra comparativa escolhe uma taxa diária e depois segue o
-            # crescimento configurado para os meses futuros.
+            # O componente de overage é deliberadamente uma média estável de
+            # 30 dias: não herda nem o modelo de curto prazo nem a tendência
+            # global do forecast para os próximos meses.
             growth_rate = 0.0 if component == "MEAN_30D_SOURCE" else float(config.growth_rate)
             value = baseline * ((1.0 + growth_rate) ** month_offset) * calendar.monthrange(year, month)[1]
             results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})

@@ -394,7 +394,7 @@ export default function ExpectedViewV2({
     if (index < forecastAnchorIndex) return null;
     return filteredRows
       .slice(0, index + 1)
-      .reduce((sum, item) => sum + expectedOf(item) - forecastManualOf(item), 0);
+      .reduce((sum, item) => sum + expectedOf(item), 0);
   });
   const forecastStart = forecastAnchorIndex >= 0
     ? forecastAnchorIndex
@@ -432,9 +432,7 @@ export default function ExpectedViewV2({
   );
   // Forecast manual is its own stacked layer on top of the Gold forecast.
   const forecastManualBars = filteredRows.map((row) =>
-    row.actual_value == null || isForecastAnchor(row)
-      ? Math.max(0, forecastManualOf(row))
-      : 0,
+    row.actual_value == null ? Math.max(0, forecastManualOf(row)) : 0,
   );
   const forecastManualCumulative = filteredRows.map((_, index) => {
     if (index < forecastStart) return null;
@@ -442,7 +440,7 @@ export default function ExpectedViewV2({
       .slice(0, index + 1)
       .reduce(
         (sum, item) =>
-          sum + (item.actual_value == null || isForecastAnchor(item) ? forecastManualOf(item) : 0),
+          sum + (item.actual_value == null ? forecastManualOf(item) : 0),
         0,
       );
   });

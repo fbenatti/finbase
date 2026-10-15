@@ -22,7 +22,6 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   { prefix: "/visoes-consumo-ia", targets: [{ module: "azure_ptu" }] },
   { prefix: "/azure-ptu-ops", targets: [{ module: "azure_ptu" }] },
   { prefix: "/forecast-accuracy", targets: [{ module: "forecast" }] },
-  { prefix: "/anomalies", targets: [{ module: "anomalies" }] },
   { prefix: "/forecast", targets: [{ module: "forecast" }] },
   { prefix: "/financial-planning", targets: [{ module: "planning" }] },
   { prefix: "/budgets", targets: [{ module: "planning" }] },

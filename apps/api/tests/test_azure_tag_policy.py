@@ -50,6 +50,71 @@ def test_subscription_discovery_uses_lightweight_arm_list(monkeypatch):
     }]
 
 
+def test_tag_policy_subscription_selector_reads_azure_subscriptions_from_silver(monkeypatch):
+    connection = SimpleNamespace(
+        id=2, code="azure-ti", connector_type="azure_blob",
+    )
+    calls = []
+
+    class FakeDB:
+        async def get(self, *_args):
+            return connection
+
+    async def fake_execute(query, timeout_s=0):
+        calls.append((query, timeout_s))
+        return [
+            {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "subscription_name": "Fundação Telefônica"},
+            {"subscription_id": "63DBC6FC-93D8-4AC1-9745-253F6B502240", "subscription_name": "Fundação Telefônica"},
+            {"subscription_id": "not-a-subscription", "subscription_name": "Linha inválida"},
+            {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "subscription_name": "Terra Dev"},
+        ]
+
+    from app.services import trino_service
+    monkeypatch.setattr(trino_service, "execute", fake_execute)
+    result = asyncio.run(AzureTagPolicyService(FakeDB()).list_subscriptions(2))
+
+    assert result == [
+        {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "name": "Fundação Telefônica"},
+        {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "name": "Terra Dev"},
+    ]
+    query, timeout_s = calls[0]
+    assert "cloud_provider" not in query
+    assert "cloud_origem" in query and "'azure-ti'" in query
+    assert "source_connection_id" in query and "= 2" in query
+    assert "max_by" in query
+    assert timeout_s == 60
+
+
+def test_dashboard_refresh_queues_resource_graph_collection_for_selected_connection(monkeypatch):
+    import app.services.worker_runtime as worker_runtime
+    import app.services.task_runner as task_runner
+    connection = SimpleNamespace(id=2, connector_type="azure_blob", cloud_scope="azure", code="azure-ti")
+    selection = SimpleNamespace(subscription_ids="63dbc6fc-93d8-4ac1-9745-253f6b502240")
+
+    class FakeResult:
+        def scalar_one_or_none(self): return selection
+        def scalars(self): return self
+        def all(self): return []
+
+    class FakeDB:
+        def __init__(self): self.task = None
+        async def get(self, *_args): return connection
+        async def execute(self, *_args): return FakeResult()
+        def add(self, task): self.task = task
+        async def flush(self): self.task.id = 987
+        async def commit(self): pass
+
+    db = FakeDB()
+    monkeypatch.setattr(worker_runtime, "any_worker_healthy", lambda: True)
+    monkeypatch.setattr(task_runner, "_inmemory_tasks", {})
+    result = asyncio.run(azure_tag_policy_router.refresh_executive_tag_dashboard(2, db))
+
+    assert result["task_id"] == 987
+    assert result["status"] == "QUEUED"
+    assert db.task.result_json["source_key"] == "resource_graph"
+    assert db.task.result_json["subscription_ids"] == ["63dbc6fc-93d8-4ac1-9745-253f6b502240"]
+
+
 def test_export_returns_explanation_instead_of_400_when_subscription_has_no_policy_targets(monkeypatch):
     subscription = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
 
@@ -113,6 +178,9 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
     async def silver_evidence_must_not_run(_conn, _mappings):
         raise AssertionError("subscription export should use current ARM inventory, not billing-period evidence")
 
+    async def billed_rules(_conn, _subscription):
+        return ({52}, None)
+
     async def subscription_catalog(_conn):
         return ({"fundacao": [selected], "production": [other]}, [selected, other], None)
 
@@ -130,6 +198,7 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
     monkeypatch.setattr(service, "_tag_mappings", tag_mappings)
     monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
     monkeypatch.setattr(service, "_silver_evidence", silver_evidence_must_not_run)
+    monkeypatch.setattr(service, "_silver_billed_rule_ids", billed_rules)
     monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
     monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
     monkeypatch.setattr(service, "_translate_conditions", lambda *_args, **_kwargs: [
@@ -199,6 +268,7 @@ def test_selected_subscription_map_includes_foundation_and_prisma_exception(monk
     async def subscription_catalog(_conn):
         return ({"Fundação Telefônica": [selected]}, [selected], None)
     async def azure_targets(_conn, _subscription): return (targets, None)
+    async def billed_rules(_conn, _subscription): return ({52, 78}, None)
 
     monkeypatch.setattr(service, "_load_departments", load_departments)
     monkeypatch.setattr(service, "_load_classification_rules", load_rules)
@@ -206,6 +276,7 @@ def test_selected_subscription_map_includes_foundation_and_prisma_exception(monk
     monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
     monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
     monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
+    monkeypatch.setattr(service, "_silver_billed_rule_ids", billed_rules)
 
     result = asyncio.run(service.generate_tenant_policy(2, subscription_id=selected))
 
@@ -504,6 +575,7 @@ def test_tag_mapping_uses_global_key_and_focus_field_value():
 def test_deployment_script_uses_identity_rbac_and_stable_names():
     script = build_script([{
         "tenant_id": "11111111-1111-1111-1111-111111111111", "connection_code": "azure-ti", "connection_name": "Azure TI", "department_name": "Terra Brasil",
+        "subscription_name_by_id": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "Terra-Mexico-Test"},
         "deployment_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
         "layers": {"resource_groups": [{"rule_id": 1, "rule_name": "Terra Brasil", "tags": {"centro_custo": "CC"},
                                              "condition": {"field": "name", "equals": "rg-terra"},
@@ -520,6 +592,7 @@ def test_deployment_script_uses_identity_rbac_and_stable_names():
     assert "--query tenantId" not in script
     assert 'az policy remediation create --name "$name" --subscription "$subscription"' in script
     assert 'az policy remediation show --name "$name" --subscription "$subscription"' in script
+    assert "# Subscription alvo: Terra-Mexico-Test (aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa)" in script
 
 
 def test_deployment_script_uses_resource_home_tenant_not_billing_tenant():
@@ -739,6 +812,33 @@ def test_prior_rule_exclusion_uses_active_rule_without_recent_billing_evidence()
     assert exclusions[0]["selector"]["allOf"][1]["anyOf"][0] == {
         "field": "name", "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
     }
+
+
+def test_billed_higher_priority_rule_without_department_still_excludes_broad_policy():
+    service = AzureTagPolicyService(db=None)
+    terra = _rule(id=45, priority=90, department_id=73, name="Classifica → Terra Brasil",
+                  conditions=[{"field": "SubAccountName", "operator": "=", "values": ["Terra-Brasil-Dev"]}])
+    security = _rule(id=3605, priority=10, department_id=157, name="Segurança_class",
+                     conditions=[{"field": "source_resource_group_name", "operator": "~",
+                                  "values": ["trendmicro"]}])
+    departments = {73: Department(id=73, name="Terra Brasil", parent_id=None)}
+    item = {
+        "rule": terra, "target": "resource_group",
+        "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+        "terms": [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=",
+                   "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
+        "tags": {"projeto": "Terra Brasil"}, "observed": {},
+    }
+
+    exclusions = service._prior_rule_exclusions(
+        item, [security, terra], departments,
+        {"Terra-Brasil-Dev": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
+        [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"}], [],
+        "Terra-Brasil-Dev", {3605},
+    )
+
+    assert [entry["rule_id"] for entry in exclusions] == [3605]
+    assert {"field": "name", "contains": "trendmicro"} in exclusions[0]["selector"]["allOf"]
 
 
 def test_prior_rule_exclusion_drops_proven_disjoint_subscription():

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +34,7 @@ ARG_API_VERSION = "2022-10-01"
 HTTP_TIMEOUT = 60.0
 PAGE_SIZE = 1000
 MAX_ROWS_PER_QUERY = 10_000  # limite ARG sem particionar (particionamos por subscription)
+PROVIDERS_API_VERSION = "2021-04-01"
 
 # ── Queries KQL padrão ──────────────────────────────────────────────────────
 # Cada query projeta colunas com os nomes do destino Gold (normalizados), então
@@ -47,6 +49,14 @@ resources
           tags = tags,
           power_state = tostring(properties.extended.instanceView.powerState.code),
           created_at = tostring(properties.timeCreated)
+| union (
+    resourcecontainers
+    | where type =~ "microsoft.resources/subscriptions/resourcegroups"
+    | project resource_id = id, resource_name = name, resource_type = type,
+              subscription_id = subscriptionId, resource_group = name,
+              location = location, sku = "", sku_capacity = tolong(""),
+              tags = tags, power_state = "", created_at = tostring(properties.createdTime)
+)
 """
 
 ORPHAN_RULES: dict[str, str] = {
@@ -149,8 +159,8 @@ resources
 """
 
 
-def _resolve_subscriptions(config: dict[str, Any]) -> list[str]:
-    subs = config.get("subscription_ids") or []
+def _resolve_subscriptions(config: dict[str, Any], override: list[str] | None = None) -> list[str]:
+    subs = override if override else (config.get("subscription_ids") or [])
     return [s.strip() for s in subs if s and str(s).strip()]
 
 
@@ -235,7 +245,9 @@ async def run_query_all(
     return all_rows, total
 
 
-async def collect_snapshot(config: dict[str, Any]) -> dict[str, pd.DataFrame]:
+async def collect_snapshot(
+    config: dict[str, Any], subscription_ids: list[str] | None = None,
+) -> dict[str, pd.DataFrame]:
     """Coleta inventário + cada regra de órfão em um DataFrame por query.
 
     `collect_inventory=false` pula o inventário completo (mais pesado, ~8s e
@@ -244,7 +256,7 @@ async def collect_snapshot(config: dict[str, Any]) -> dict[str, pd.DataFrame]:
     configurado (evita o teto de 10.000 linhas por query do ARG).
     """
     cfg = resolve_config(config)
-    subs = _resolve_subscriptions(config)
+    subs = _resolve_subscriptions(config, subscription_ids)
     headers = await arm_headers(config)
 
     async with httpx.AsyncClient() as client:
@@ -261,6 +273,7 @@ async def collect_snapshot(config: dict[str, Any]) -> dict[str, pd.DataFrame]:
                 rows, _ = await run_query_all(client, headers, INVENTORY_QUERY, None)
                 inventory_rows.extend(rows)
             frames["inventory"] = _frame_from_rows(inventory_rows)
+            await _annotate_tag_support(client, headers, frames["inventory"])
             logger.info("ARG inventory: %d linhas coletadas", len(inventory_rows))
         else:
             logger.info("ARG inventory: coletado (collect_inventory=false)")
@@ -278,6 +291,79 @@ async def collect_snapshot(config: dict[str, Any]) -> dict[str, pd.DataFrame]:
             logger.info("ARG orphan rule '%s': %d linhas", rule_name, len(rows))
 
     return frames
+
+
+async def _annotate_tag_support(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    inventory: pd.DataFrame,
+) -> None:
+    """Store Azure Provider SupportsTags metadata alongside the ARG snapshot.
+
+    The executive dashboard then reads tag eligibility from Bronze and does not
+    need to call Azure when a user opens or filters the dashboard.
+    """
+    if inventory.empty:
+        inventory["taggable"] = pd.Series(dtype="object")
+        inventory["tag_support_reason"] = pd.Series(dtype="object")
+        return
+
+    requests = sorted({
+        (str(row.get("subscription_id") or "").strip(),
+         str(row.get("resource_type") or "").split("/", 1)[0])
+        for row in inventory.to_dict(orient="records")
+        if "/" in str(row.get("resource_type") or "") and row.get("subscription_id")
+    })
+    type_support: dict[tuple[str, str], bool] = {}
+    semaphore = asyncio.Semaphore(8)
+
+    async def load_provider(subscription_id: str, namespace: str) -> None:
+        if not namespace.replace(".", "").isalnum():
+            return
+        url = (f"https://management.azure.com/subscriptions/{subscription_id}/providers/"
+               f"{namespace}?api-version={PROVIDERS_API_VERSION}")
+        async with semaphore:
+            try:
+                response = await client.get(url, headers=headers, timeout=HTTP_TIMEOUT)
+                if response.status_code >= 400:
+                    return
+                for resource_type in response.json().get("resourceTypes") or []:
+                    full_type = f"{namespace}/{resource_type.get('resourceType') or ''}".casefold()
+                    capabilities = {
+                        value.strip().casefold()
+                        for value in str(resource_type.get("capabilities") or "").split(",")
+                    }
+                    type_support[(subscription_id.casefold(), full_type)] = "supportstags" in capabilities
+            except Exception as exc:  # unknown is explicit and does not fail inventory collection
+                logger.warning("Provider SupportsTags unavailable for %s/%s: %s", subscription_id, namespace, str(exc)[:120])
+
+    await asyncio.gather(*(load_provider(subscription_id, namespace) for subscription_id, namespace in requests))
+
+    taggable: list[bool | None] = []
+    reasons: list[str | None] = []
+    for row in inventory.to_dict(orient="records"):
+        resource_type = str(row.get("resource_type") or "").casefold()
+        name = str(row.get("resource_name") or "")
+        subscription_id = str(row.get("subscription_id") or "").casefold()
+        if resource_type == "microsoft.resources/subscriptions/resourcegroups":
+            taggable.append(True)
+            reasons.append(None)
+        elif resource_type == "microsoft.sql/servers/databases" and (
+            name.casefold() == "master" or name.casefold().endswith("/master")
+        ):
+            taggable.append(False)
+            reasons.append("Banco SQL master não aceita tags no Azure.")
+        elif (subscription_id, resource_type) not in type_support:
+            taggable.append(None)
+            reasons.append("Metadados SupportsTags não disponíveis nesta coleta.")
+        elif type_support[(subscription_id, resource_type)]:
+            taggable.append(True)
+            reasons.append(None)
+        else:
+            taggable.append(False)
+            reasons.append("O tipo de recurso não declara SupportsTags nos metadados do Azure.")
+    inventory["taggable"] = taggable
+    inventory["tag_support_reason"] = reasons
 
 
 def _with_orphan_meta(df: pd.DataFrame, rule_name: str) -> pd.DataFrame:
@@ -393,6 +479,7 @@ def run_resource_graph_collection(
     snapshot_date: str | None = None,
     task_id: int | None = None,
     source_code: str | None = None,
+    subscription_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Coleta inventário + órfãos via ARG e persiste na Bronze (por período)."""
     from app.database import SyncSession as _Sync
@@ -409,7 +496,31 @@ def run_resource_graph_collection(
         snapshot_date = snapshot_date or datetime.now(timezone.utc).date().isoformat()
         period = _snapshot_period(snapshot_date)
 
-        frames = asyncio_run(collect_snapshot(config))
+        configured_subscriptions = [
+            str(value).strip()
+            for value in (subscription_ids or config.get("subscription_ids") or [])
+            if str(value).strip()
+        ]
+        accessible = asyncio_run(discover_subscriptions(config))
+        subscription_names = {
+            str(item.get("subscription_id") or "").strip().casefold():
+                str(item.get("subscription_name") or "").strip()
+            for item in accessible
+            if str(item.get("subscription_id") or "").strip()
+        }
+        effective_subscriptions = configured_subscriptions or list(subscription_names)
+        if not effective_subscriptions:
+            raise RuntimeError("Azure Resource Graph não encontrou subscriptions acessíveis para coletar")
+
+        # Always query inventory per subscription. An unscoped ARG query is
+        # capped at 10,000 rows and silently truncates large Azure tenants.
+        frames = asyncio_run(collect_snapshot(config, subscription_ids=effective_subscriptions))
+        inventory = frames.get("inventory")
+        if inventory is not None and not inventory.empty and "subscription_id" in inventory.columns:
+            inventory["subscription_name"] = inventory["subscription_id"].map(
+                lambda value: subscription_names.get(str(value or "").strip().casefold())
+                or str(value or "").strip()
+            )
 
         # snapshot_date é contrato dos destinos Gold (inventário e órfãos).
         for name, df in frames.items():

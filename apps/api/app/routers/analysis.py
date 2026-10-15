@@ -21,7 +21,6 @@ import re
 import os
 import time
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 import pandas as pd
 from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -51,11 +50,6 @@ from app.services.gold_materialization import GOLD
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
-
-
-def _current_business_period() -> str:
-    """Return the current YYYYMM period in the business timezone."""
-    return datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y%m")
 
 
 class _ClientCancelScope:
@@ -1414,8 +1408,8 @@ async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
 async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Serve the forecast-manual pseudo-destination from the operational DB.
 
-    Future periods and the current business month are exposed. Older periods
-    with realized data in Gold are considered consumed and disappear.
+    Only future periods are exposed: once a month has realized data in Gold,
+    the manual forecast for that month is considered consumed and disappears.
     """
     schema = dict(_FORECAST_MANUAL_SCHEMA)
     _canonicalize_request(req, schema)
@@ -1466,7 +1460,6 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
 
     year_by_version = {version.id: int(version.year or 0) for version in versions}
     realized = await _fetch_realized_periods(trino_kwargs)
-    current_period = _current_business_period()
     grouped: dict[tuple[Any, ...], list[float]] = {}
     for entry in entries:
         month = int(entry.month or 0)
@@ -1477,7 +1470,7 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
             continue
         period = f"{entry_year:04d}{month:02d}"
         # Manual forecast is only meaningful for months that have not realized yet.
-        if period in realized and period != current_period:
+        if period in realized:
             continue
         value = float(entry.value or 0)
         if abs(value) < 1e-12:
@@ -1503,7 +1496,7 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
         records.append(record)
 
     result = _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
-    result["period_auto_applied"] = "Períodos futuros sem realizado na Gold e mês corrente"
+    result["period_auto_applied"] = "Somente períodos futuros (sem realizado na Gold)"
     return result
 
 
@@ -1575,73 +1568,6 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         raise HTTPException(status_code=422, detail="Informe ao menos uma tabela para união")
     if len(req.destination_table_ids) < 2:
         raise HTTPException(status_code=422, detail="A união exige ao menos duas tabelas")
-
-    # The manual forecast pseudo-destination is stored in PostgreSQL, while
-    # regular Gold destinations are queried from Trino. Do not send that
-    # pseudo-table through the Iceberg UNION below: aggregate each side through
-    # its native reader, then merge the already-aggregated cells.
-    if FORECAST_MANUAL_PIVOT_ID in req.destination_table_ids:
-        origin_name = req.origin_column
-        dimensions = [*req.rows, *req.columns]
-        other_ids = [table_id for table_id in req.destination_table_ids if table_id != FORECAST_MANUAL_PIVOT_ID]
-        if not other_ids:
-            raise HTTPException(status_code=422, detail="A união exige ao menos uma tabela Gold além do forecast manual")
-        regular_rows = [name for name in req.rows if name != origin_name]
-        regular_columns = [name for name in req.columns if name != origin_name]
-        common = dict(rows=regular_rows, columns=regular_columns, measures=req.measures,
-                      filters=req.filters, row_limit=req.row_limit, column_limit=req.column_limit,
-                      include_totals=False, sort_rows=req.sort_rows, sort_columns=req.sort_columns)
-        if len(other_ids) == 1:
-            regular_result = await _run_pivot_core(PivotRequest(destination_table_id=other_ids[0], **common), db, trino_kwargs)
-            regular_origin = "forecast" if other_ids[0] < 0 else "realizado"
-        else:
-            regular_result = await _run_pivot_union_core(PivotUnionRequest(destination_table_ids=other_ids, **common), db, trino_kwargs)
-            regular_origin = None
-
-        manual_dimensions = [name for name in dimensions if name != origin_name and
-                             (name in _FORECAST_MANUAL_SCHEMA or name.lower() in _PERIOD_NAMES_LOWER)]
-        manual_axis = lambda name: "period" if name.lower() in _PERIOD_NAMES_LOWER else name
-        manual_filters = [item.model_copy(update={"column": manual_axis(item.column)}) for item in req.filters
-                          if item.column in _FORECAST_MANUAL_SCHEMA or item.column.lower() in _PERIOD_NAMES_LOWER]
-        manual_measures = [PivotMeasure(column="value", aggregation="SUM", label="SUM value")]
-        manual_req = PivotRequest(destination_table_id=FORECAST_MANUAL_PIVOT_ID,
-                                  rows=[manual_axis(name) for name in regular_rows if name in manual_dimensions],
-                                  columns=[manual_axis(name) for name in regular_columns if name in manual_dimensions],
-                                  measures=manual_measures, filters=manual_filters,
-                                  include_totals=False, row_limit=req.row_limit, column_limit=req.column_limit)
-        manual_result = await _run_forecast_manual_pivot_core(manual_req, db, trino_kwargs)
-
-        # Convert each PivotResult cell back to a keyed aggregate record, adding
-        # null for dimensions unavailable to the manual source and an origin.
-        merged: dict[tuple[Any, ...], list[float]] = {}
-        def add_result(result: dict[str, Any], source_rows: list[str], source_columns: list[str], origin: str | None) -> None:
-            for cell in result.get("cells", []):
-                source_values = dict(zip([*source_rows, *source_columns], [*cell["row"], *cell["column"]]))
-                if "period" in source_values:
-                    for name in dimensions:
-                        if name.lower() in _PERIOD_NAMES_LOWER:
-                            source_values.setdefault(name, source_values["period"])
-                key = tuple((origin if name == origin_name and origin is not None else source_values.get(name)) for name in dimensions)
-                values = merged.setdefault(key, [0.0] * len(req.measures))
-                for index, value in enumerate(cell.get("values", [])):
-                    if index < len(values) and req.measures[index].aggregation in {"SUM", "COUNT"}:
-                        values[index] += float(value or 0)
-        add_result(regular_result, regular_result["rows"], regular_result["columns"], regular_origin)
-        add_result(manual_result, manual_result["rows"], manual_result["columns"], "forecast")
-        records = [{**{f"d{i}": key[i] for i in range(len(dimensions))},
-                    **{f"m{i}": value for i, value in enumerate(values)}} for key, values in merged.items()]
-        result = _build_pivot_result(records, req.rows, req.columns, req.measures, req.include_totals,
-                                     req.rows, req.sort_rows, req.sort_columns)
-        result["origin_column"] = origin_name
-        result["origin_values"] = ["realizado" if item >= 0 else "forecast" for item in other_ids] + ["forecast"]
-        result["tables"] = [{
-            "id": item,
-            "physical_name": _FORECAST_MANUAL_PIVOT_NAME if item == FORECAST_MANUAL_PIVOT_ID
-            else await _analysis_physical_name(db, item),
-            "origin": "forecast" if item < 0 else "realizado",
-        } for item in req.destination_table_ids]
-        result["period_auto_applied"] = "Períodos futuros sem realizado na Gold e mês corrente"
-        return result
 
     # Resolve each side's physical name + schema (planning value column is
     # read dynamically via DESCRIBE, never hardcoded as `value`).
@@ -2686,8 +2612,8 @@ async def _expected_view_core(
 
     # Forecast manual is composed on top of the realized/forecast series using
     # the exact same aggregation rules as the orçamento (per department and its
-    # descendants). Older periods with realized data in Gold drop the manual
-    # forecast; the current month remains visible while it is still in progress.
+    # descendants). Only future months surface here: periods that already have
+    # realized data in Gold drop their manual forecast.
     forecast_manual_rows = (await db.execute(
         select(PlanningEntry, PlanningVersion.year).join(PlanningVersion).join(FinancialType).where(
             FinancialType.code == "forecast-manual",
@@ -2697,7 +2623,6 @@ async def _expected_view_core(
         )
     )).all() if not body.dimension_filters else []
     realized_periods = await _fetch_realized_periods({})
-    current_period = _current_business_period()
     forecast_manual_by_period: dict[str, float] = {}
     forecast_manual_by_driver: dict[str, float] = {}
     for entry, entry_year in forecast_manual_rows:
@@ -2706,7 +2631,7 @@ async def _expected_view_core(
             period = f"{entry_year:04d}{entry.month:02d}"
             if (body.month_from and period < body.month_from) or (body.month_to and period > body.month_to):
                 continue
-            if period in realized_periods and period != current_period:
+            if period in realized_periods:
                 continue
             value = float(entry.value or 0)
             if abs(value) < 1e-12:

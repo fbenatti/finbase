@@ -222,11 +222,6 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
             O campo será separado diretamente na Gold usando “começa com” e projetado pela média diária dos últimos 30 dias. Ele não precisa estar nas dimensões do forecast.
           </Alert>
         )}
-        {rule.behavior === "SOURCE_MAX_PREVIOUS_MONTH_PREFIX" && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Separa as cobranças identificadas na Gold e compara o ritmo diário do modelo atual com a média diária do mês fechado anterior (incluindo dias sem cobrança). Usa o maior valor para projetar o mês corrente e os próximos.
-          </Alert>
-        )}
         {rule.behavior === "SOURCE_VALIDITY" && (
           <Alert severity="info" sx={{ mb: 2 }}>
             Suspende as projeções do escopo quando a última data de realizado usada pelo forecast estiver além da validade. A simulação usa a própria data simulada.

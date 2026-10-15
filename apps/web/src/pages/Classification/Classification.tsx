@@ -20,6 +20,7 @@ import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
 import PolicyFlow from "./PolicyFlow";
+import AzureTagExecutiveDashboard from "./AzureTagExecutiveDashboard";
 import { ORG } from "../../constants/orgLabels";
 
 interface CondEntry { field: string; operator: string; values: string; logic: string }
@@ -865,7 +866,7 @@ export function TagsTab() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [viewTab, setViewTab] = useState<"script" | "json">("script");
-  const [tagSubTab, setTagSubTab] = useState<"policies" | "mapping">("policies");
+  const [tagSubTab, setTagSubTab] = useState<"policies" | "executive" | "mapping">("policies");
   const [flowDialogOpen, setFlowDialogOpen] = useState(false);
   const [selectedJsonTenantIndex, setSelectedJsonTenantIndex] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
@@ -966,10 +967,12 @@ export function TagsTab() {
 
   const tagTabs = <Tabs value={tagSubTab} onChange={(_, value) => setTagSubTab(value)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
     <Tab value="policies" label="Policies Azure" />
+    <Tab value="executive" label="Dashboard Executivo" />
     <Tab value="mapping" label="Mapeamento de Tags" />
   </Tabs>;
 
   if (tagSubTab === "mapping") return <Box>{tagTabs}<TagMappingsTab /></Box>;
+  if (tagSubTab === "executive") return <Box>{tagTabs}<AzureTagExecutiveDashboard /></Box>;
 
   return (
     <Box>
@@ -1008,7 +1011,7 @@ export function TagsTab() {
             }}
           >
             <MenuItem value="">{subscriptionsLoading ? "Carregando subscriptions…" : "Selecione uma subscription"}</MenuItem>
-            {policySubscriptions.map((subscription) => (
+            {[...policySubscriptions].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }) || a.subscription_id.localeCompare(b.subscription_id)).map((subscription) => (
               <MenuItem key={subscription.subscription_id} value={subscription.subscription_id}>
                 {subscription.name} ({subscription.subscription_id})
               </MenuItem>

@@ -12,6 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from app.models.azure_connection_source import AzureConnectionSource
+from app.models.etl_task import EtlTask
+from app.models.source_connection import SourceConnection
 
 from app.database import get_db
 from app.models.azure_tag_mapping import AzureTagMapping
@@ -19,6 +22,7 @@ from app.models.destination import DestinationColumn, DestinationTable
 from app.services.azure_tag_policy_service import (
     AzureTagPolicyService, TAG_CONTRIBUTOR_ROLE, slugify, _collapse_tag_keys,
 )
+from app.services.azure_tag_dashboard_service import AzureTagDashboardService
 
 router = APIRouter(prefix="/azure-tag-policy", tags=["azure-tag-policy"])
 FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -105,6 +109,103 @@ async def list_subscriptions(connection_id: int = Query(...), db: AsyncSession =
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/executive-dashboard")
+async def executive_tag_dashboard(connection_id: int = Query(...), db: AsyncSession = Depends(get_db)):
+    try:
+        return await AzureTagDashboardService(db).executive_summary(connection_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (PermissionError, RuntimeError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/executive-dashboard/refresh", status_code=202)
+async def refresh_executive_tag_dashboard(
+    connection_id: int = Query(...), db: AsyncSession = Depends(get_db),
+):
+    """Queue the existing Azure Resource Graph Bronze collector for one tenant."""
+    connection = await db.get(SourceConnection, connection_id)
+    if not connection or connection.connector_type != "azure_blob" or connection.cloud_scope != "azure":
+        raise HTTPException(status_code=404, detail="Conexão Azure não encontrada")
+    selection = (await db.execute(select(AzureConnectionSource).where(
+        AzureConnectionSource.connection_id == connection_id,
+        AzureConnectionSource.source_key == "resource_graph",
+        AzureConnectionSource.enabled.is_(True),
+    ))).scalar_one_or_none()
+    if selection is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A fonte Resource Graph está desativada para esta conexão. Ative-a nas fontes Azure antes de atualizar o dashboard.",
+        )
+
+    from app.services.worker_runtime import any_worker_healthy
+    if not any_worker_healthy():
+        raise HTTPException(status_code=503, detail="Worker ETL indisponível; a coleta não foi enfileirada")
+
+    active_tasks = (await db.execute(select(EtlTask).where(
+        EtlTask.connection_id == connection_id,
+        EtlTask.task_type == "extraction",
+        EtlTask.status.in_(["QUEUED", "RUNNING"]),
+    ).order_by(EtlTask.id.desc()).limit(30))).scalars().all()
+    for task in active_tasks:
+        if (task.result_json or {}).get("source_key") == "resource_graph":
+            return {"task_id": task.id, "status": task.status, "message": "A coleta do Resource Graph já está em andamento."}
+
+    raw_subscriptions = [value.strip() for value in (selection.subscription_ids or "").split(",") if value.strip()]
+    invalid = [value for value in raw_subscriptions if not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}", value,
+    )]
+    if invalid:
+        raise HTTPException(status_code=422, detail="A configuração da fonte Resource Graph contém subscription_id inválido")
+    from app.services.azure_source_registry import source_code
+    task = EtlTask(
+        task_type="extraction", status="QUEUED", connection_id=connection.id,
+        connection_ids=[connection.id], billing_periods=[], selected_blobs=[],
+        total_blobs=0, processed_blobs=0, rows_raw=0, rows_normalized=0,
+        rows_destination=0, errors=[],
+        phase="Na fila: atualizar inventário de tags Azure na Bronze",
+        result_json={
+            "source_key": "resource_graph",
+            "source_code": source_code(connection.code, "resource_graph"),
+            "subscription_ids": raw_subscriptions or None,
+            "user_triggered": True,
+            "requested_from": "azure_tag_executive_dashboard",
+        },
+    )
+    db.add(task)
+    await db.flush()
+    from app.services.task_runner import _inmemory_tasks
+    _inmemory_tasks[task.id] = {
+        "id": task.id, "connection_id": connection.id, "status": "QUEUED",
+        "task_type": "extraction", "total_blobs": 0, "processed_blobs": 0,
+        "rows_raw": 0, "rows_normalized": 0, "rows_destination": 0,
+        "current_blob": None, "current_blob_size": 0, "download_bytes": 0,
+        "downloaded_bytes_total": 0, "total_download_bytes": 0,
+        "active_downloads": 0, "errors": [],
+    }
+    await db.commit()
+    return {"task_id": task.id, "status": "QUEUED", "message": "Coleta Resource Graph enfileirada para atualizar a Bronze."}
+
+
+@router.get("/executive-dashboard/resources")
+async def executive_tag_dashboard_resources(
+    connection_id: int = Query(...),
+    subscription_id: str = Query(...),
+    page_token: str | None = Query(None, max_length=8192),
+    db: AsyncSession = Depends(get_db),
+):
+    if not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}", subscription_id):
+        raise HTTPException(status_code=422, detail="subscription_id deve ser um GUID válido")
+    try:
+        return await AzureTagDashboardService(db).subscription_resources(
+            connection_id, subscription_id, page_token,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (PermissionError, RuntimeError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -370,6 +471,11 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
     for tenant in policies:
         code = slugify(tenant.get("connection_code", "azure"))
         test_suffix = f"-test-{slugify(tenant['department_name'])}" if tenant.get("department_name") else ""
+        subscription_names = {
+            str(subscription_id).casefold(): str(name).strip()
+            for subscription_id, name in (tenant.get("subscription_name_by_id") or {}).items()
+            if str(name).strip()
+        }
         lines += [
             f"# Billing connection {tenant.get('connection_name')} ({tenant.get('connection_code')})",
             "# Assignments are grouped by RESOURCE tenant (subscription home), not billing tenant.",
@@ -484,6 +590,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 metadata_cli_args = job["metadata_args"]
                 assignment = f"of-asg-{tenant.get('connection_id') or 0}-{job['source_rule'].split(' ', 1)[0].lstrip('#')}-{job['kind']}-{job['identity_key']}"
                 lines += [
+                    f"# Subscription alvo: {subscription_names.get(subscription_id.casefold(), 'nome não informado')} ({subscription_id})",
                     f"EXPECTED_SUBSCRIPTION={q(subscription_id)}",
                     'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
                     'if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then',

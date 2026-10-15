@@ -14,10 +14,6 @@ ALL_MODULES = [
     "finops",
     # módulos de administração
     "auth", "users", "groups", "roles", "audit", "ideas",
-    # Gestão de anomalias de custo cloud: casos, investigação, decisão, ações,
-    # verificação e retrospectiva. Módulo próprio porque acompanhar um caso
-    # operacional não é a mesma permissão de ler custo agregado.
-    "anomalies",
 ]
 
 ALL_ACTIONS = ("read", "create", "update", "delete")

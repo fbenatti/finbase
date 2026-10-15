@@ -121,16 +121,6 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
                 session.commit()
                 logger.info("Scheduled reclassification [%s] queued tasks %s", schedule_name, queued)
                 return queued
-            if sched.schedule_type == "anomaly_detection":
-                from app.services.anomaly_scheduler import queue_detection_tasks
-                queued = queue_detection_tasks(sched, session)
-                session.commit()
-                return queued
-            if sched.schedule_type == "anomaly_sla":
-                from app.services.anomaly_scheduler import run_sla_job
-                session.commit()
-                run_sla_job(sched, session)
-                return []
         session.commit()
 
         from app.models.etl_task import EtlTask
@@ -278,6 +268,75 @@ def _azure_ptu_hourly_job() -> None:
 
 def _azure_ptu_daily_job() -> None:
     _queue_ptu_collections(hours=168, lookback_note="Azure PTU daily re-read 7d")
+
+
+def _azure_resource_graph_daily_job() -> None:
+    """Queue one daily Resource Graph snapshot for each enabled Azure connection."""
+    from sqlalchemy import select
+    from app.database import SyncSession
+    from app.models.azure_connection_source import AzureConnectionSource
+    from app.models.etl_task import EtlTask
+    from app.models.ingested_blob import IngestedBlob
+    from app.models.source_connection import SourceConnection
+    from app.services.azure_source_registry import source_code
+
+    today = datetime.now().astimezone().date().isoformat()
+    snapshot_path = f"arg/inventory/{today}.csv"
+    session = SyncSession()
+    try:
+        sources = session.execute(
+            select(SourceConnection, AzureConnectionSource)
+            .join(AzureConnectionSource, AzureConnectionSource.connection_id == SourceConnection.id)
+            .where(
+                SourceConnection.cloud_scope == "azure",
+                SourceConnection.connector_type == "azure_blob",
+                AzureConnectionSource.source_key == "resource_graph",
+                AzureConnectionSource.enabled.is_(True),
+            )
+        ).all()
+        queued = 0
+        for connection, selection in sources:
+            has_today_snapshot = session.execute(
+                select(IngestedBlob.id).where(
+                    IngestedBlob.connection_id == connection.id,
+                    IngestedBlob.blob_path == snapshot_path,
+                    IngestedBlob.status == "INGESTED",
+                ).limit(1)
+            ).scalar_one_or_none()
+            if has_today_snapshot:
+                continue
+            active = session.execute(
+                select(EtlTask.id).where(
+                    EtlTask.connection_id == connection.id,
+                    EtlTask.task_type == "extraction",
+                    EtlTask.status.in_(["QUEUED", "RUNNING"]),
+                    EtlTask.result_json.op("->>")("source_key") == "resource_graph",
+                ).limit(1)
+            ).scalar_one_or_none()
+            if active:
+                continue
+            subscription_ids = [
+                value.strip() for value in (selection.subscription_ids or "").split(",") if value.strip()
+            ]
+            _queue_extraction_sync(
+                connection.id,
+                session,
+                phase=f"Agendado: snapshot diário Resource Graph {today}",
+                result_json={
+                    "source_key": "resource_graph",
+                    "source_code": source_code(connection.code, "resource_graph"),
+                    "subscription_ids": subscription_ids or None,
+                    "daily_inventory": True,
+                },
+            )
+            queued += 1
+        session.commit()
+        logger.info("Queued daily Azure Resource Graph snapshots for %d/%d enabled connections", queued, len(sources))
+    except Exception:
+        session.rollback()
+        logger.exception("Daily Azure Resource Graph collection scheduling failed")
+    finally:
+        session.close()
 
 
 def _azure_ptu_gold_daily_job() -> None:
@@ -585,6 +644,15 @@ async def start_scheduler():
                 count += 1
 
         _scheduler.start()
+        _scheduler.add_job(
+            _azure_resource_graph_daily_job,
+            CronTrigger(hour=4, minute=15, timezone="America/Sao_Paulo"),
+            id="azure_resource_graph_daily",
+            name="Azure Resource Graph Bronze snapshot diário",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
         # API replicas are intentionally stateless, so edits made through any
         # replica are reconciled from PostgreSQL by this singleton scheduler.
         _scheduler.add_job(_sync_schedules_job, "interval", seconds=15,

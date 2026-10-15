@@ -1661,6 +1661,61 @@ export interface AzurePolicySubscription {
   name: string;
 }
 
+export interface AzureTagExecutiveSubscription extends AzurePolicySubscription {
+  total_resources: number;
+  resource_groups: number;
+  taggable_resources: number;
+  non_taggable_resources: number;
+  unclassified_resources: number;
+  taggable_resource_groups: number;
+  non_taggable_resource_groups: number;
+  unclassified_resource_groups: number;
+  taggable_items: number;
+  fully_tagged: number;
+  partially_tagged: number;
+  without_managed_tags: number;
+  adherence_percent: number | null;
+  inventory_error: string | null;
+  capability_warnings: string[];
+  snapshot_date?: string | null;
+}
+
+export interface AzureTagExecutiveDashboard {
+  connection_id: number;
+  connection_name: string;
+  connection_code: string;
+  generated_at: string | null;
+  snapshot_date: string | null;
+  tag_keys: string[];
+  adherence_definition: string;
+  subscriptions: AzureTagExecutiveSubscription[];
+}
+
+export interface AzureTagExecutiveResource {
+  subscription_id: string;
+  resource_id: string;
+  resource_name: string;
+  resource_type: string;
+  resource_group: string;
+  location?: string;
+  tags: Record<string, string>;
+  is_resource_group: boolean;
+  taggable: boolean | null;
+  tag_support_reason: string | null;
+  tag_status: "complete" | "partial" | "none" | "not_assessed";
+  missing_tags: string[];
+}
+
+export interface AzureTagExecutiveResourcePage {
+  subscription_id: string;
+  subscription_name: string;
+  tag_keys: string[];
+  resources: AzureTagExecutiveResource[];
+  next_page_token: string | null;
+  capability_warnings: string[];
+  snapshot_date: string | null;
+}
+
 export interface AzureTagMapping {
   id: number;
   tag_key: string;
@@ -1753,6 +1808,33 @@ export async function getAzureTenants(): Promise<AzureTenant[]> {
 export async function getAzurePolicySubscriptions(connectionId: number): Promise<AzurePolicySubscription[]> {
   const { data } = await api.get("/azure-tag-policy/subscriptions", { params: { connection_id: connectionId } });
   return data.subscriptions;
+}
+
+export async function getAzureTagExecutiveDashboard(connectionId: number): Promise<AzureTagExecutiveDashboard> {
+  const { data } = await api.get("/azure-tag-policy/executive-dashboard", {
+    params: { connection_id: connectionId },
+  });
+  return data;
+}
+
+export async function getAzureTagExecutiveResources(
+  connectionId: number,
+  subscriptionId: string,
+  pageToken?: string | null,
+): Promise<AzureTagExecutiveResourcePage> {
+  const { data } = await api.get("/azure-tag-policy/executive-dashboard/resources", {
+    params: { connection_id: connectionId, subscription_id: subscriptionId, page_token: pageToken || undefined },
+  });
+  return data;
+}
+
+export async function queueAzureTagExecutiveRefresh(
+  connectionId: number,
+): Promise<{ task_id: number; status: string; message: string }> {
+  const { data } = await api.post("/azure-tag-policy/executive-dashboard/refresh", null, {
+    params: { connection_id: connectionId },
+  });
+  return data;
 }
 
 export async function getAzureTagMappings(): Promise<{
