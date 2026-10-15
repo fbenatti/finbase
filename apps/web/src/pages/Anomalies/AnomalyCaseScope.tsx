@@ -34,6 +34,10 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
     : sourceBranches.groups.map(group => ({ ...group, delta: null, expected: null, sourceOnly: true }));
   const paths = (all.length ? all : [{ dimensions: kase.series_dimensions }]).map(member => orgPath(member.dimensions));
   const common = paths[0]?.filter((_, index) => paths.every(parts => parts.slice(0, index + 1).join("\0") === paths[0].slice(0, index + 1).join("\0"))) ?? [];
+  const lineageNodes = hierarchy.flatMap(item => {
+    const values = [...new Set(members.map(member => member.dimensions[item.field]).filter((value): value is string => Boolean(value)))];
+    return values.length === 1 ? [{ ...item, value: values[0] }] : [];
+  });
   const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Escopo do caso";
   const excessDays = timeline.filter(point => point.event_date <= kase.event_date && point.above_band);
   const latest = [...timeline].reverse().find(point => point.observed_cloud != null && point.event_date <= (series.analysis_data_end ?? kase.event_date));
@@ -85,7 +89,18 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         <Chip size="small" label="Total do caso" color={filters.length ? "default" : "primary"} onClick={() => setFilters([])} />
         {filters.map((filter, index) => <Box key={filter.field} sx={{ display: "flex", alignItems: "center", gap: .75 }}><Typography color="text.secondary">›</Typography><Chip size="small" label={`${hierarchy.find(item => item.field === filter.field)?.label ?? filter.field}: ${filter.value}`} color={index === filters.length - 1 ? "primary" : "default"} onClick={() => setFilters(filters.slice(0, index + 1))} /></Box>)}
       </Stack>
-      {common.length > 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>{common.join(" › ")}</Typography>}
+      {lineageNodes.length > 0 && <Box sx={{ mb: 1.5 }}>
+        <Typography variant="caption" fontWeight={700} color="text.secondary">CAMINHO DO GASTO · ORGANOGRAMA ATÉ O GRÃO DISPONÍVEL</Typography>
+        <Stack direction="row" alignItems="stretch" gap={.75} sx={{ mt: .75, overflowX: "auto", pb: .5 }}>
+          {lineageNodes.map((node, index) => <Box key={node.field} sx={{ display: "flex", alignItems: "center", gap: .75, flexShrink: 0 }}>
+            {index > 0 && <ArrowForwardIcon sx={{ fontSize: 15, color: "#99a9bf" }} />}
+            <Box sx={{ minWidth: 110, maxWidth: 220, px: 1.1, py: .75, border: "1px solid #dce5ef", borderRadius: 1.5, bgcolor: index >= lineageNodes.length - 2 ? "#f3efff" : "#f7f9fc" }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.2 }}>{node.label}</Typography>
+              <Typography variant="body2" fontWeight={750} sx={{ mt: .25, overflowWrap: "anywhere" }}>{node.value}</Typography>
+            </Box>
+          </Box>)}
+        </Stack>
+      </Box>}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(160px,.7fr) 2fr" }, gap: { xs: 1.5, md: 3 }, alignItems: "center" }}>
         <Box sx={{ p: 2, bgcolor: "#f1f5fb", border: "1px solid #d6e2f1", borderRadius: 2 }}>
           <Typography variant="caption" color="text.secondary">{filters.length ? "Ramo selecionado" : "Desvio total"}</Typography>
