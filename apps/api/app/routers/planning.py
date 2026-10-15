@@ -633,11 +633,10 @@ async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[s
     next_version = max((v.version for v in current), default=0)
     all_versions = (await db.execute(select(func.max(PlanningVersion.version)).where(PlanningVersion.financial_type_id == fin_type.id, PlanningVersion.year == year))).scalar_one()
     version = int(all_versions or 0) + 1
-    # Orçamento é um livro de lançamentos obrigatório: cada importação é uma
-    # carga complementar (inclusive quando negativa, para cortes) e deve
-    # continuar vigente para compor o saldo. Os demais tipos preservam o
-    # comportamento de snapshot, no qual uma publicação substitui a anterior.
-    if fin_type.code != "orcamento":
+    # Orçamento e Forecast Manual são livros de lançamentos: publicações
+    # acrescentam deltas ao saldo vigente em vez de substituir o histórico.
+    # Os demais tipos mantêm o comportamento de snapshot.
+    if fin_type.code not in {"orcamento", "forecast-manual"}:
         for old in current:
             old.is_current = False
     snapshot = PlanningVersion(financial_type_id=fin_type.id, year=year, version=version, is_current=True, source=source, source_filename=filename, restored_from_id=restored_from, classification_version_id=None, title=title, description=description, event_type=event_type, effective_date=effective_date, scope_id_orcamento=scope_id_orcamento, scope_cloud=scope_cloud, defense_request_id=defense_request_id)
@@ -900,10 +899,9 @@ async def _timeline(fin_type: FinancialType, year: int, db: AsyncSession) -> lis
     cumulative_total = 0.0
     for version in versions:
         total = float((await db.execute(select(func.coalesce(func.sum(PlanningEntry.value), 0)).where(PlanningEntry.planning_version_id == version.id))).scalar_one())
-        if fin_type.code == "orcamento":
-            # Budget imports are additive ledger entries, not replacement
-            # snapshots. Show the accumulated balance and the amount of this
-            # specific load as the delta (negative loads are cuts).
+        if fin_type.code in {"orcamento", "forecast-manual"}:
+            # Ledger entries are additive rather than replacement snapshots.
+            # Show the accumulated balance and this publication's delta.
             delta = total
             cumulative_total += total
             annual_total = cumulative_total
@@ -1019,7 +1017,7 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
             if event_budget_id and scoped_department_ids is not None and event_budget_id not in scoped_budget_ids:
                 continue
             event_amount = await scoped_total(event["id"])
-            if code == "orcamento":
+            if code in {"orcamento", "forecast-manual"}:
                 cumulative_event_total += event_amount
                 event_total = cumulative_event_total
                 event_delta = event_amount
@@ -1761,15 +1759,14 @@ async def planning_grid(type_code: str, year: int, version_id: int | None = None
         payload["defense_request"] = _defense_request_out(defense_request, departments) if defense_request is not None else None
     if not versions:
         return payload
-    # Orçamento/defesa podem ter uma versão vigente por ID de orçamento. Sem
-    # filtro de ID, a grade deve compor todas elas; selecionar apenas a primeira
-    # fazia os demais projetos parecerem zerados.
+    # Componha todas as versões vigentes antes de aplicar o recorte: orçamento
+    # e forecast manual podem ter múltiplos lançamentos ativos por ano.
     version = versions[0]
     entries = (await db.execute(select(PlanningEntry).where(PlanningEntry.planning_version_id.in_([item.id for item in versions]), PlanningEntry.entity_type == "department").order_by(PlanningEntry.department_id, PlanningEntry.month))).scalars().all()
     grouped: dict[tuple[str, int, int | None], dict[str, Any]] = {}
     for entry in entries:
         key = (entry.entity_type, entry.department_id, None)
-        # Multiple current budget loads are additive; compose them instead of
+        # Multiple current ledger loads are additive; compose them instead of
         # letting the last version overwrite the previous value in the grid.
         grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] += float(entry.value or 0)
     scoped_rows = await _scope_rows(list(grouped.values()), scope_id_orcamento, scope_cloud, db, allow or None)
@@ -1812,15 +1809,23 @@ async def save_planning(type_code: str, year: int, body: PlanningSaveIn, db: Asy
         allow = set(individual.keys())
     prepared = await _scope_rows(prepared, scope_id_orcamento, scope_cloud, db, allow or None)
     if not prepared: raise HTTPException(422, "A grade não possui departamentos no escopo selecionado")
-    if type_code == "orcamento":
-        # The grid submits the current accumulated state. Since budget imports
-        # are additive, an edit must publish only the difference from the
-        # current ledger; otherwise the entire grid would be added again.
+    if type_code in {"orcamento", "forecast-manual"}:
+        # A grade envia o estado acumulado no escopo atual. Como os dois tipos
+        # são aditivos, publique apenas a diferença em relação ao livro vigente;
+        # repetir o estado inteiro duplicaria os valores no saldo.
         current_version_ids = list((await db.execute(
             select(PlanningVersion.id).where(
                 PlanningVersion.financial_type_id == fin_type.id,
                 PlanningVersion.year == year,
                 PlanningVersion.is_current == True,
+                *(
+                    [PlanningVersion.scope_id_orcamento == scope_id_orcamento]
+                    if scope_id_orcamento else []
+                ),
+                *(
+                    [PlanningVersion.scope_cloud == scope_cloud]
+                    if scope_cloud else []
+                ),
             )
         )).scalars().all())
         current_values: dict[int, list[float]] = {}
