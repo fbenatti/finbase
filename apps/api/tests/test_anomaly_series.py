@@ -291,3 +291,41 @@ def test_procedencia_do_caso_preserva_membros_sem_copiar_valores_financeiros():
         {"series_id": "a", "dimensions": {"account": "A"}},
         {"series_id": "b", "dimensions": {"account": "B"}},
     ]
+
+
+def test_contribuintes_preservam_organograma_e_reconciliam_desvio(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    import app.services.anomaly_series as service
+    members = [
+        {"series_id": "a", "dimensions": {"subaccountname": "Production", "organograma_nivel_5": "Projeto A"}},
+        {"series_id": "b", "dimensions": {"subaccountname": "Development", "organograma_nivel_5": "Sem projeto"}},
+    ]
+    refs = [reference(series_id=member["series_id"], reference_id=member["series_id"], forecast_run_id=397,
+                      data_cutoff="2026-10-11", coverage_start="2026-10-12", covered_days=20,
+                      weekday_weights=None, predicted_cloud=2000, target_end="2026-10-26") for member in members]
+
+    async def query(sql, **_kwargs):
+        if "SELECT reference_month" in sql:
+            return refs
+        return [
+            {"event_date": "2026-10-12", "observed_cloud": 500, **members[0]["dimensions"]},
+            {"event_date": "2026-10-12", "observed_cloud": 300, **members[1]["dimensions"]},
+            {"event_date": "2026-10-13", "observed_cloud": 999, **members[1]["dimensions"]},
+        ]
+
+    monkeypatch.setattr(service, "trino_execute", query)
+    result = asyncio.run(service.read_case_series(
+        case=SimpleNamespace(series_id="a", period="202610", event_date="2026-10-12", current_reference_id="a",
+                             evaluation_grain="DAILY", series_dimensions=members[0]["dimensions"]),
+        publication=SimpleNamespace(data_cutoff="2026-10-11", reference_table="ref"),
+        reference_namespace="silver", source_namespace="silver", source_table="focus", date_column="chargeperiodstart",
+        period_column="_billing_period", type_column="tipo", measure_column="realizado_cloud",
+        dimensions=["subaccountname", "organograma_nivel_5"], analysis_data_end=date(2026, 10, 12), contributor_series=members,
+    ))
+    rows = result["contributor_breakdown"]
+    event = next(point for point in result["items"] if point["event_date"] == "2026-10-12")
+    assert [row["observed_cloud"] for row in rows] == [500, 300]
+    for key in ("observed_cloud", "expected_cloud", "delta_cloud"):
+        assert sum(row[key] for row in rows) == pytest.approx(event[key])
+    assert rows[1]["dimensions"]["organograma_nivel_5"] == "Sem projeto"
