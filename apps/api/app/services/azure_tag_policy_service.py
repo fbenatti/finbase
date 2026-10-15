@@ -864,10 +864,10 @@ class AzureTagPolicyService:
                 evidence_by_rule[int(row.get("rule_id"))].append(row)
             except (TypeError, ValueError):
                 continue
-            subscription_id = self._gold_subscription_id(row)
+            gold_subscription_id = self._gold_subscription_id(row)
             subscription_name = str(row.get("subscription_name") or "").strip().casefold()
-            if subscription_id and subscription_name:
-                catalog[subscription_name].append(subscription_id)
+            if gold_subscription_id and subscription_name:
+                catalog[subscription_name].append(gold_subscription_id)
         catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
 
         azure_target_rows: list[dict] = []
@@ -938,10 +938,10 @@ class AzureTagPolicyService:
                 selector = self._selector(item["terms"], target, omit_rg_scope=omit_rg_scope)
                 if not selector:
                     continue
-                if subscription_id and item["scope_subscriptions"][0].casefold() != subscription_id.casefold():
+                item_subscription_id = item["scope_subscriptions"][0]
+                if subscription_id and item_subscription_id.casefold() != subscription_id.casefold():
                     continue
-                subscription_id = item["scope_subscriptions"][0]
-                bucket = previous[(target, subscription_id)]
+                bucket = previous[(target, item_subscription_id)]
                 overlapping = []
                 pruned = []
                 for entry in bucket:
@@ -973,7 +973,7 @@ class AzureTagPolicyService:
                     "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
                     "layer": layer,
                     "tags": item["tags"],
-                    "condition": effective, "scope_subscriptions": [subscription_id],
+                    "condition": effective, "scope_subscriptions": [item_subscription_id],
                     "base_selector": selector,
                     "evidence_count": item["evidence_count"], "observed": item["observed"],
                     "assignment_scope_kind": item.get("assignment_scope_kind", "subscription"),
@@ -982,7 +982,7 @@ class AzureTagPolicyService:
                     "excludes_rule_ids": [entry["rule_id"] for entry in overlapping],
                     "exclusions": [entry["summary"] for entry in overlapping],
                     "pruned_exclusions": pruned,
-                    "scope_tenant_id": home_tenants.get(subscription_id.casefold()) or None,
+                    "scope_tenant_id": home_tenants.get(item_subscription_id.casefold()) or None,
                 }
                 bucket.append({
                     "selector": selector, "terms": item["terms"],
