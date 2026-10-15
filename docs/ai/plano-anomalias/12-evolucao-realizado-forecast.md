@@ -116,3 +116,43 @@ A classificação organizacional não é usada para afirmar causalidade automát
 Validação: 95 testes de séries, referências, publicação e consultas aprovados;
 build TypeScript/Vite aprovado; leitura real do caso 17, teste do atalho e
 verificação visual nas larguras normal e 1.066 px, sem sobreposição.
+
+## Investigação por decomposição hierárquica
+
+A evolução anterior ainda exigia que o usuário interpretasse listas independentes.
+O detalhe agora liga a contribuição financeira ao caminho de investigação, seguindo
+o padrão interativo de `GoldDashboard/HierarchicalDecompTree.tsx`:
+
+1. Resumo do evento: diferença para o forecast, previsto/observado e data avaliada.
+2. Contexto temporal: primeiro excesso acima da faixa e quantidade de dias na janela
+   até a avaliação; último observado posterior é identificado separadamente.
+3. Árvore: desvio líquido do nó → projetos/contas contribuintes ordenados por impacto.
+4. Selecionar um ramo filtra o resumo e o mesmo gráfico de evolução. Breadcrumbs
+   permitem voltar ao total. Ancestrais compartilhados são preservados no caminho;
+   níveis sem divisão são pulados, e a folha mostra conta, SKU/categoria e centro de custo.
+5. Acesso explícito à investigação, sem executar transição automática.
+
+As barras de participação representam os aumentos positivos do nível. Reduções
+aparecem com sinal negativo e reduzem o desvio líquido; não recebem uma participação
+positiva artificial. Valores indisponíveis não viram zero. Para compor um gráfico
+filtrado, todos os membros precisam ter a referência/observado da data; faltas
+permanecem lacunas. Os dados de cada membro usam o forecast congelado e o cutoff
+já aplicados na API, sem nova consulta Trino por clique e sem persistência financeira
+no PostgreSQL. A API retorna `items` dentro de `contributor_breakdown` para esse fim.
+
+O indicador do último dia só afirma se ultrapassa o limite superior de alerta;
+não confirma recuperação, não valida causa e não altera o workflow. A interface
+não atribui o desvio a mudança de preço/quantidade/recurso sem evidência disponível.
+
+Referências consultadas (a organização da tela é uma adaptação do OpenFinops):
+
+- [FinOps Foundation — Managing Cloud Cost Anomalies](https://www.finops.org/wg/managing-cloud-cost-anomalies/): comparar expectativa e custo, identificar contexto e investigar antes de decidir.
+- [AWS — Getting started with Cost Anomaly Detection](https://docs.aws.amazon.com/cost-management/latest/userguide/getting-started-ad.html): contribuintes ordenados por impacto e evolução filtrada pelo contribuinte selecionado.
+- [Microsoft — Identify anomalies and unexpected changes in cost](https://learn.microsoft.com/en-us/azure/cost-management-billing/understand/analyze-unexpected-charges): investigar detalhes e mudanças no contexto afetado.
+
+Validação: 95 testes backend e quatro testes Vitest do modelo de decomposição
+(reconciliação com reduções, seleção de projeto, encadeamento por conta e referências
+parciais); build frontend aprovado. No navegador, o caso 17 abre em 427,78 de desvio;
+selecionar SEM PROJETO DEFINIDO filtra para 186,64, previsto 313,28 e observado 499,92,
+inclusive no gráfico. Retornar ao total restaura a comparação agregada. Layout
+validado nas larguras normal e 1.066 px.
