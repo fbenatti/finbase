@@ -425,7 +425,7 @@ async def read_case_series(
     requested_end = data_end + timedelta(days=max(1, int(horizon_days)))
     months = _months_for(context_start, max(1, (requested_end - context_start).days))
     members = list(contributor_series) or [{"series_id": str(case.series_id), "dimensions": dict(getattr(case, "series_dimensions", None) or {})}]
-    rows = await trino_execute(
+    reference_task = asyncio.create_task(trino_execute(
         reference_series_sql(
             namespace=reference_namespace,
             reference_table=publication.reference_table,
@@ -433,7 +433,30 @@ async def read_case_series(
             months=months,
             series_ids=[str(member["series_id"]) for member in members],
         ), timeout_s=180,
-    )
+    ))
+    member_filters = [_dimension_filter(member["dimensions"]) for member in members]
+    member_filters = [value for value in member_filters if value]
+    observed_task = asyncio.create_task(asyncio.sleep(0, result=[]))
+    if context_start <= data_end:
+        observed_sql = observed_daily_sql(
+            source_namespace=source_namespace, table=source_table,
+            date_column=date_column, period_column=period_column,
+            type_column=type_column, measure_column=measure_column,
+            dimensions=list(dimensions), start=context_start, end=data_end,
+            series_filters=member_filters,
+        )
+        observed_task = asyncio.create_task(trino_execute(observed_sql, timeout_s=600))
+    schema_task = asyncio.create_task(asyncio.sleep(0, result=[]))
+    if event_day <= data_end and contributor_series:
+        schema_task = asyncio.create_task(_read_detail_schema(source_namespace, source_table))
+    query_results = await asyncio.gather(reference_task, observed_task, schema_task, return_exceptions=True)
+    for result in query_results[:2]:
+        if isinstance(result, BaseException):
+            raise result
+    rows, observed_rows, schema_rows = query_results
+    if isinstance(schema_rows, BaseException):
+        logger.warning("[anomaly] schema das dimensões não disponível para o caso %s: %s", getattr(case, "id", None), schema_rows)
+        schema_rows = []
     frozen_id = getattr(case, "current_reference_id", None)
     frozen = next((row for row in rows if row.get("reference_id") == frozen_id), None)
     warnings: list[str] = []
@@ -455,17 +478,7 @@ async def read_case_series(
     observed_by_day: dict[date, float] = {}
     observed_by_member: list[dict[date, float]] = [{} for _ in members]
     if context_start <= data_end:
-        sql = observed_daily_sql(
-            source_namespace=source_namespace, table=source_table,
-            date_column=date_column, period_column=period_column,
-            type_column=type_column, measure_column=measure_column,
-            dimensions=list(dimensions), start=context_start, end=data_end,
-        )
-        filters = [_dimension_filter(member["dimensions"]) for member in members]
-        filters = [f"({value})" for value in filters if value]
-        if filters:
-            sql = f"SELECT * FROM ({sql}) AS series WHERE " + " OR ".join(filters)
-        for row in await trino_execute(sql, timeout_s=600):
+        for row in observed_rows:
             try:
                 day = date.fromisoformat(str(row.get("event_date"))[:10])
             except (ValueError, TypeError):
@@ -500,22 +513,18 @@ async def read_case_series(
     detail_items: list[dict[str, Any]] = []
     # O custo real pode ter granularidade mais fina que o forecast. Isso localiza
     # o recurso no dia do evento, mas não inventa forecast/desvio nesse nível.
-    if event_day <= data_end and contributor_series:
+    if event_day <= data_end and contributor_series and schema_rows:
         try:
-            schema_rows = await trino_execute(
-                f"DESCRIBE iceberg.{source_namespace}.{_quote(source_table)}", timeout_s=30
-            )
             source_columns = [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
                               for row in schema_rows]
             detail_dimensions = resolve_detail_dimensions(source_columns, dimensions)
             if detail_dimensions:
-                filters = [_dimension_filter(member["dimensions"]) for member in members]
                 detail_rows = await trino_execute(
                     detailed_event_sql(
                         source_namespace=source_namespace, source_table=source_table,
                         date_column=date_column, period_column=period_column, type_column=type_column,
                         measure_column=measure_column, dimensions=dimensions,
-                        detail_dimensions=detail_dimensions, member_filters=filters, event_day=event_day,
+                        detail_dimensions=detail_dimensions, member_filters=member_filters, event_day=event_day,
                     ), timeout_s=180,
                 )
                 detail_items = [{
