@@ -495,6 +495,7 @@ async def read_case_series(
                             or point.get("forecast_run_id") == frozen.get("forecast_run_id")]
     items = compose_case_timeline(reference_points, observed_by_day, start=context_start,
                                  end=display_end, data_end=data_end, monthly=monthly)
+    used_case_snapshot = apply_case_evaluation_snapshot(items, case)
     detail_dimensions: list[dict[str, str]] = []
     detail_items: list[dict[str, Any]] = []
     # O custo real pode ter granularidade mais fina que o forecast. Isso localiza
@@ -536,7 +537,10 @@ async def read_case_series(
                                       **{key: event_point.get(key) for key in
                                          ("observed_cloud", "expected_cloud", "delta_cloud")}})
     if monthly and frozen and frozen.get("coverage_kind") != "FULL_MONTH":
-        warnings.append("Este forecast contém o saldo restante do mês, não a expectativa mensal congelada antes da compra. A comparação desta compra está indisponível; o saldo não foi distribuído como consumo diário nem usado como zero esperado.")
+        if used_case_snapshot:
+            warnings.append("Comparação do evento restaurada da avaliação original do caso. A referência publicada contém apenas o saldo restante do mês (não a expectativa mensal completa); o gráfico usa o forecast e observado congelados na detecção para esta data.")
+        else:
+            warnings.append("Este forecast contém o saldo restante do mês, não a expectativa mensal congelada antes da compra. A comparação desta compra está indisponível; o saldo não foi distribuído como consumo diário nem usado como zero esperado.")
     if event_day > data_end:
         warnings.append(f"O evento é posterior ao cutoff de dados ({data_end.isoformat()}).")
     if not rows and not warnings:
@@ -547,7 +551,7 @@ async def read_case_series(
     reference = None if not frozen else {
         "reference_id": frozen.get("reference_id"), "forecast_run_id": frozen.get("forecast_run_id"),
         "data_cutoff": frozen.get("data_cutoff"), "generated_at": frozen.get("generated_at"),
-        "reference_kind": frozen.get("reference_kind"), "coverage_kind": frozen.get("coverage_kind"),
+        "reference_kind": "CASE_EVALUATION_SNAPSHOT" if used_case_snapshot else frozen.get("reference_kind"), "coverage_kind": frozen.get("coverage_kind"),
         "monthly_forecast_cloud": sum(float(row.get("predicted_cloud") or 0) for row in forecast_rows if str(row.get("reference_month")) == event_day.strftime("%Y%m")),
     }
     return {
