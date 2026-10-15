@@ -62,6 +62,7 @@ SEMANTIC_FIELD_MAP: dict[str, tuple[str, str]] = {
 }
 
 TAG_CONTRIBUTOR_ROLE = "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
+AZURE_POLICY_RESOURCE_GROUP_TYPE = "Microsoft.Resources/subscriptions/resourceGroups"
 SAFE_FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 UUID_ANY_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.I)
@@ -511,9 +512,9 @@ class AzureTagPolicyService:
         resource_only = {SCOPE_RESOURCE, SCOPE_TYPE, SCOPE_SKU, SCOPE_LOCATION}
         if target == "resource_group" and any(term["scope"] in resource_only for term in terms):
             return None
-        clauses: list[dict] = [{"field": "type", "equals": "Microsoft.Resources/resourceGroups"}
+        clauses: list[dict] = [{"field": "type", "equals": AZURE_POLICY_RESOURCE_GROUP_TYPE}
                                if target == "resource_group" else
-                               {"field": "type", "notEquals": "Microsoft.Resources/resourceGroups"}]
+                               {"field": "type", "notEquals": AZURE_POLICY_RESOURCE_GROUP_TYPE}]
         for term in terms:
             if term["scope"] == SCOPE_SUBSCRIPTION:
                 # Assignment is already /subscriptions/{guid}. Mode All (RG) rejects
