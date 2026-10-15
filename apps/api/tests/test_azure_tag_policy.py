@@ -582,16 +582,18 @@ def test_deployment_identity_is_stable_across_item_order_and_short_enough():
               "scope_subscriptions": [subscription]}]
     tenant = {"connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
               "layers": {"resource_groups": items, "resources": []}}
-    first = build_script([tenant])
+    build_script([tenant])
     second = build_script([{**tenant, "layers": {"resource_groups": [{"rule_id": 999, "rule_name": "Other",
                  "tags": {"x": "y"}, "condition": {}, "scope_subscriptions": [subscription]}, *items], "resources": []}}])
     expected = build_script([{**tenant, "layers": {"resource_groups": [items[0]], "resources": []}}])
     identity = next(line for line in expected.splitlines() if line.startswith("ensure_definition \"$ACTIVE_POLICY_NAME\""))
-    name = next(line.split()[2].strip('"') for line in expected.splitlines() if line.startswith('ACTIVE_POLICY_NAME='))
-    assignment = next(line.split('${RESOLVED_ASSIGNMENT_NAME:-')[1].split('}')[0] for line in expected.splitlines()
-                     if line.startswith("ACTIVE_ASSIGNMENT_NAME="))
+    name_line = next(line for line in expected.splitlines() if line.startswith('ACTIVE_POLICY_NAME='))
+    assignment_line = next(line for line in expected.splitlines() if line.startswith("ACTIVE_ASSIGNMENT_NAME="))
+    name = name_line.split(":-", 1)[1].removesuffix('}"')
+    assignment = assignment_line.split(":-", 1)[1].removesuffix('}"')
     assert len(name) <= 64
     assert len(assignment) <= 64
-    assert identity in expected
-    assert 'name="ofp-rg-52-' in expected
-    assert 'name="ofp-rg-52-' not in first or 'name="ofp-rg-52-' in second
+    assert identity in second
+    assert name_line in second
+    assert assignment_line in second
+    assert name.startswith("ofp-rg-52-")
