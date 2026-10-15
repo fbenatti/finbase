@@ -368,6 +368,7 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     assert "Há $matches assignments OpenFinops candidatos" in script
     assert 'az rest --method get' in script
     assert "contains(properties.policyDefinitionId" in script
+    assert "contains(properties.policyDefinitionId, `of-def-`)" in script
     assert "az policy definition delete" not in script
     assert "az policy assignment delete" not in script
     assert "az policy remediation delete" not in script
