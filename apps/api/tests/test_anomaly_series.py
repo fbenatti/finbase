@@ -354,3 +354,24 @@ def test_drilldown_resolve_apenas_dimensoes_disponiveis_e_nao_duplica_grao_forec
     assert '"SkuMeter" AS "sku"' in sql
     assert '"ResourceId"' not in sql
     assert "DATE '2026-10-12'" in sql and "realizado_cloud" in sql
+
+
+def test_restores_monthly_event_comparison_from_persisted_case_evaluation():
+    from types import SimpleNamespace
+    from app.services.anomaly_series import apply_case_evaluation_snapshot
+
+    items = [{"event_date": "2026-10-10", "observed_cloud": 2158.59,
+              "expected_cloud": None, "upper_cloud": None,
+              "comparison_supported": False, "phase": "HISTORY"}]
+    case = SimpleNamespace(event_date="2026-10-10", observed_cloud=2447.53,
+                           expected_cloud=1326.84, lower_cloud=1200.0,
+                           upper_cloud=1382.54, delta_cloud=1120.69,
+                           anomalous_cost_cloud=1064.99)
+
+    assert apply_case_evaluation_snapshot(items, case)
+    assert items[0]["observed_cloud"] == pytest.approx(2447.53)
+    assert items[0]["expected_cloud"] == pytest.approx(1326.84)
+    assert items[0]["delta_cloud"] == pytest.approx(1120.69)
+    assert items[0]["anomalous_cost_cloud"] == pytest.approx(1064.99)
+    assert items[0]["reference_kind"] == "CASE_EVALUATION_SNAPSHOT"
+    assert items[0]["comparison_supported"] is True
