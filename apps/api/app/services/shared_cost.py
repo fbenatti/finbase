@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.models.rules import Department, DepartmentSharedCost
@@ -74,16 +74,7 @@ def leaf_ids(root_id: int, child_ids: dict[int | None, list[int]]) -> list[int]:
 
 
 def cloud_prefix_for(department: Department | None, path: list[str], departments: dict[int, Department]) -> str:
-    current = department
-    seen: set[int] = set()
-    while current and current.id not in seen:
-        seen.add(current.id)
-        prefix = (current.cloud_filter or "").strip().lower()
-        if prefix:
-            if "mongo" in prefix or "atlas" in prefix:
-                return "mongodb"
-            return prefix
-        current = departments.get(current.parent_id) if current.parent_id else None
+    """Use the provider branch to find source facts; department filters are unrelated."""
     if len(path) >= 3 and path[1] in CLOUD_BRANCHES and path[2] in CLOUD_PROVIDERS:
         return PROVIDER_CLOUD_PREFIX.get(path[2], path[2].lower())
     if any("mongo" in part.lower() for part in path):
@@ -92,21 +83,10 @@ def cloud_prefix_for(department: Department | None, path: list[str], departments
 
 
 def cloud_root_path_for(donor: Department | None, path: list[str], departments: dict[int, Department]) -> list[str]:
-    """Subtree that defines the donor's origin cloud.
-
-    Uses the nearest ancestor carrying a ``cloud_filter`` (same rule as
-    ``cloud_prefix_for``) or the ``Branch > Provider`` prefix of the donor
-    path. Departments inside this subtree belong to the donor's origin cloud
-    even when their own ``cloud_filter`` is stale or absent.
-    """
-    current = donor
-    seen: set[int] = set()
-    while current and current.id not in seen:
-        seen.add(current.id)
-        if (current.cloud_filter or "").strip():
-            return department_path(current.id, departments)
-        current = departments.get(current.parent_id) if current.parent_id else None
+    """The provider branch bounds consumption targets without a saved filter."""
     if len(path) >= 3 and path[1] in CLOUD_BRANCHES and path[2] in CLOUD_PROVIDERS:
+        return path[:3]
+    if len(path) >= 3 and path[0] == "Marketplace" and any("mongo" in part.lower() for part in path):
         return path[:3]
     return []
 
@@ -191,11 +171,7 @@ def same_cloud_leaf_ids(
     shallower structures like ``Marketplace > Azure - MongoDB > MongoDB - X``
     (donor at depth 3), which a fixed depth-4 floor silently excluded.
 
-    Eligibility is by origin cloud: a department qualifies when its resolved
-    prefix relates to the donor's OR when it lives inside the donor's cloud
-    root subtree (``donor_root``). The subtree rule keeps projects with a
-    stale ``cloud_filter`` (e.g. ``Atlas-MongoDB`` under a ``mongodb`` parent)
-    eligible, since the rateio follows the origin cloud, not per-node filters.
+    Eligibility is by provider branch or by the matching provider prefix.
     """
     targets: list[int] = []
     root = [part for part in (donor_root or []) if part]
