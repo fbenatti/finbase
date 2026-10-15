@@ -33,7 +33,7 @@ describe("decomposição de desvio", () => {
     const selected = [member("A", 500, 100, "Prod"), member("A", 300, 200, "Dev")];
     expect(scopeBranches(selected, [{ field: "organograma_nivel_5", value: "A" }]).dimension?.field).toBe("subaccountname");
   });
-  it("usa a cadeia executiva completa e continua de serviço até SKU", () => {
+  it("prioriza assinatura e resource group antes de produto e SKU", () => {
     const chain = detailScopeChain();
     const members = [
       { ...member("A", 500, 100, "Prod"), dimensions: { ...member("A", 500, 100, "Prod").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D4" } },
@@ -43,6 +43,8 @@ describe("decomposição de desvio", () => {
     const project = [{ field: "organograma_nivel_5", value: "A" }];
     expect(scopeBranches(members, project, chain).dimension?.field).toBe("subaccountname");
     expect(scopeBranches(members, [...project, { field: "subaccountname", value: "Prod" }], chain).dimension?.field).toBe("skumeter");
+    expect(chain.some(item => item.field === "centro_custo" || item.field === "servicename")).toBe(false);
+    expect(chain.findIndex(item => item.field === "resourcegroupname")).toBeGreaterThan(chain.findIndex(item => item.field === "subaccountname"));
   });
   it("inclui resource group da origem na trilha mesmo quando forecast não tem esse grão", () => {
     const dimensions = [{ key: "resource_group", label: "Resource group" }, { key: "resource_id", label: "ID do recurso" }];

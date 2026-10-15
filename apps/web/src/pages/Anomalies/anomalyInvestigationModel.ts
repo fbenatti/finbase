@@ -5,26 +5,26 @@ export type ScopeFilter = { field: string; value: string };
 export const dimensionValue = (member: Member, field: string) => member.dimensions[field] || "Não informado";
 export const scopeChain = [
   ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: index === 4 ? "Projeto / nível 5" : `Organograma · nível ${index + 1}` })),
-  { field: "subaccountname", label: "Conta" },
-  { field: "centro_custo", label: "Centro de custo" },
-  { field: "servicesubcategory", label: "SKU / categoria do serviço" },
+  { field: "subaccountname", label: "Assinatura / subconta" },
+  { field: "resourcegroupname", label: "Resource group" }, { field: "resource_group", label: "Resource group" },
+  { field: "servicesubcategory", label: "Produto / família" }, { field: "skumeter", label: "SKU / medidor" },
 ];
 export const detailScopeChain = (details: Array<{ key: string; label: string }> = []) => {
   const base = [
-    { field: "cloud_origem", label: "Cloud / conexão" },
     ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: `Organograma · nível ${index + 1}` })),
     { field: "subaccountname", label: "Assinatura / subconta" },
-    { field: "resourcegroupname", label: "Resource group" }, { field: "resource_id", label: "ID do recurso" },
-    { field: "resource_name", label: "Recurso" }, { field: "centro_custo", label: "Centro de custo" },
-    { field: "servicename", label: "Serviço" }, { field: "servicesubcategory", label: "Produto / família" },
-    { field: "skumeter", label: "SKU / medidor" }, { field: "pricingcategory", label: "Categoria de preço" },
-    { field: "commitmentdiscounttype", label: "Modalidade" },
+    { field: "subscription", label: "ID da assinatura" }, { field: "subscription_id", label: "ID da assinatura" },
+    { field: "resourcegroupname", label: "Resource group" }, { field: "resource_group", label: "Resource group" },
+    { field: "resource_name", label: "Recurso" }, { field: "resource_id", label: "ID do recurso" },
+    { field: "region", label: "Região" }, { field: "gcp_project", label: "Projeto GCP" },
+    { field: "servicesubcategory", label: "Produto / família" }, { field: "skumeter", label: "SKU / medidor" },
   ];
   const custom = details.map(item => ({ field: item.key, label: item.label }));
-  const unseen = custom.filter(item => !base.some(candidate => candidate.field === item.field));
+  const noise = /^(centro.?custo|cost.?center|servicename|service.?name|pricingcategory|commitmentdiscounttype)$/i;
+  const unseen = custom.filter(item => !base.some(candidate => candidate.field === item.field) && !noise.test(item.field) && !noise.test(item.label.replace(/\s/g, "")));
   const infrastructure = unseen.filter(item => ["subscription", "subscription_id", "resource_group", "gcp_project", "region"].includes(item.field));
-  const serviceDetails = unseen.filter(item => !infrastructure.includes(item));
-  const all = [...base.slice(0, 9), ...infrastructure, ...base.slice(9, 14), ...serviceDetails, ...base.slice(14)];
+  const resourceDetails = unseen.filter(item => !infrastructure.includes(item));
+  const all = [...base.slice(0, 8), ...infrastructure, ...base.slice(8), ...resourceDetails];
   return all.filter((item, index) => all.findIndex(candidate => candidate.field === item.field) === index);
 };
 export function caseLineageNodes(

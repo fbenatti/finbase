@@ -82,7 +82,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
 
     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>
       <Typography sx={{ fontWeight: 750, fontSize: 17 }}>De onde veio o desvio?</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Siga o caminho até o serviço e SKU que concentram o consumo.</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Localize o salto pelo organograma, assinatura, Resource Group e recurso.</Typography>
       <Stack direction="row" gap={.75} flexWrap="wrap" alignItems="center" sx={{ my: 1.5 }}>
         <Chip size="small" label="Total do caso" color={filters.length ? "default" : "primary"} onClick={() => setFilters([])} />
         {filters.map((filter, index) => <Box key={filter.field} sx={{ display: "flex", alignItems: "center", gap: .75 }}><Typography color="text.secondary">›</Typography><Chip size="small" label={`${hierarchy.find(item => item.field === filter.field)?.label ?? filter.field}: ${filter.value}`} color={index === filters.length - 1 ? "primary" : "default"} onClick={() => setFilters(filters.slice(0, index + 1))} /></Box>)}
