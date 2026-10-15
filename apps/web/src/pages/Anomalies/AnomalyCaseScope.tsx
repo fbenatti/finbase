@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { Box, Button, ButtonBase, Chip, Paper, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, ButtonBase, Chip, Paper, Stack, Typography } from "@mui/material";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import AnomalyEvolutionChart from "./AnomalyEvolutionChart";
 import type { AnomalyCase, AnomalySeries } from "../../services/anomaliesApi";
-import { detailScopeChain, dimensionValue, filterMembers, observedScopeBranches, scopeBranches, scopeTimeline, type ScopeFilter } from "./anomalyInvestigationModel";
+import { caseLineageNodes, detailScopeChain, dimensionValue, filterMembers, observedScopeBranches, scopeBranches, scopeTimeline, type ScopeFilter } from "./anomalyInvestigationModel";
 
 const money = (value: number | null | undefined, currency: string) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency });
 const pct = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
@@ -25,8 +25,9 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const delta = actual != null && expected != null ? actual - expected : null;
   const relative = delta != null && expected != null && expected > 0 ? delta / expected * 100 : null;
   const hierarchy = detailScopeChain(series.detail_dimensions);
+  const detailItems = series.detail_items ?? [];
   const forecastBranches = scopeBranches(members, forecastFilters, hierarchy);
-  const sourceBranches = observedScopeBranches(series.detail_items ?? [], filters, hierarchy);
+  const sourceBranches = observedScopeBranches(detailItems, filters, hierarchy);
   const sourceOnly = forecastBranches.groups.length === 0 && sourceBranches.groups.length > 0;
   const dimension = forecastBranches.groups.length ? forecastBranches.dimension : sourceBranches.dimension;
   const groups = forecastBranches.groups.length
@@ -34,10 +35,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
     : sourceBranches.groups.map(group => ({ ...group, delta: null, expected: null, sourceOnly: true }));
   const paths = (all.length ? all : [{ dimensions: kase.series_dimensions }]).map(member => orgPath(member.dimensions));
   const common = paths[0]?.filter((_, index) => paths.every(parts => parts.slice(0, index + 1).join("\0") === paths[0].slice(0, index + 1).join("\0"))) ?? [];
-  const lineageNodes = hierarchy.flatMap(item => {
-    const values = [...new Set(members.map(member => member.dimensions[item.field]).filter((value): value is string => Boolean(value)))];
-    return values.length === 1 ? [{ ...item, value: values[0] }] : [];
-  });
+  const lineageNodes = caseLineageNodes(members, series.detail_dimensions, series.detail_items, hierarchy);
   const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Escopo do caso";
   const excessDays = timeline.filter(point => point.event_date <= kase.event_date && point.above_band);
   const latest = [...timeline].reverse().find(point => point.observed_cloud != null && point.event_date <= (series.analysis_data_end ?? kase.event_date));
@@ -101,6 +99,13 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
           </Box>)}
         </Stack>
       </Box>}
+      {detailItems.length > 0 && actual != null && (() => {
+        const detailTotal = detailItems.reduce((sum, item) => sum + (item.observed_cloud ?? 0), 0);
+        const coverage = Math.abs(actual) > 0 ? Math.min(100, Math.abs(detailTotal / actual) * 100) : 100;
+        return <Alert severity={coverage >= 99 ? "info" : "warning"} sx={{ mb: 1.5, py: 0 }}>
+          Detalhamento disponível: <strong>{money(detailTotal, currency)}</strong> de <strong>{money(actual, currency)}</strong> observados ({pct(coverage)}).{coverage < 99 && " O restante ainda não está atribuído a recursos; os valores abaixo não representam o total do caso."}
+        </Alert>;
+      })()}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(160px,.7fr) 2fr" }, gap: { xs: 1.5, md: 3 }, alignItems: "center" }}>
         <Box sx={{ p: 2, bgcolor: "#f1f5fb", border: "1px solid #d6e2f1", borderRadius: 2 }}>
           <Typography variant="caption" color="text.secondary">{filters.length ? "Ramo selecionado" : "Desvio total"}</Typography>
@@ -123,9 +128,19 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
           {!groups.length && rawDetailSelected && selectedDetailItems.length > 0 && <Stack spacing={.75} sx={{ mt: 1 }}>
             {selectedDetailItems.slice(0, 20).map((item, index) => {
               const namedDetails = (series.detail_dimensions ?? []).map(dimension => ({ label: dimension.label, value: item.dimensions[dimension.key] })).filter(detail => Boolean(detail.value));
-              const title = namedDetails.find(detail => /resource|sku|medidor|serviço/i.test(detail.label))?.value ?? namedDetails[0]?.value ?? "Consumo sem dimensão descritiva";
+              const title = namedDetails.find(detail => /^recurso$/i.test(detail.label))?.value
+                ?? namedDetails.find(detail => /sku|medidor|serviço/i.test(detail.label))?.value
+                ?? namedDetails.find(detail => /resource group/i.test(detail.label))?.value
+                ?? namedDetails[0]?.value ?? "Consumo sem dimensão descritiva";
+              const supportingDetails = namedDetails.map(detail => {
+                if (detail.label === "ID do recurso") {
+                  const parts = String(detail.value).split("/").filter(Boolean);
+                  return `ID: ${parts[parts.length - 1] ?? detail.value}`;
+                }
+                return `${detail.label}: ${detail.value}`;
+              }).join(" · ");
               return <Box key={`${index}-${String(title)}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
-              <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{title}</Typography><Typography variant="caption" color="text.secondary">{namedDetails.map(detail => `${detail.label}: ${detail.value}`).join(" · ")}</Typography></Box>
+              <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{title}</Typography><Typography variant="caption" color="text.secondary">{supportingDetails}</Typography></Box>
               <Typography variant="body2" fontWeight={750} sx={{ whiteSpace: "nowrap" }}>{money(item.observed_cloud, currency)}</Typography>
             </Box>;
             })}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detailScopeChain, filterMembers, scopeBranches, scopeTimeline, type Member } from "./anomalyInvestigationModel";
+import { caseLineageNodes, detailScopeChain, filterMembers, scopeBranches, scopeTimeline, type Member } from "./anomalyInvestigationModel";
 import type { AnomalySeriesPoint } from "../../services/anomaliesApi";
 
 const point = (day: string, actual: number | null, expected: number | null): AnomalySeriesPoint => ({
@@ -43,6 +43,16 @@ describe("decomposição de desvio", () => {
     const project = [{ field: "organograma_nivel_5", value: "A" }];
     expect(scopeBranches(members, project, chain).dimension?.field).toBe("subaccountname");
     expect(scopeBranches(members, [...project, { field: "subaccountname", value: "Prod" }], chain).dimension?.field).toBe("skumeter");
+  });
+  it("inclui resource group da origem na trilha mesmo quando forecast não tem esse grão", () => {
+    const dimensions = [{ key: "resource_group", label: "Resource group" }, { key: "resource_id", label: "ID do recurso" }];
+    const items = [
+      { dimensions: { resource_group: "rg-prod", resource_id: "/subscriptions/x/resourceGroups/rg-prod/db/one" } },
+      { dimensions: { resource_group: "rg-prod", resource_id: "/subscriptions/x/resourceGroups/rg-prod/db/two" } },
+    ];
+    const nodes = caseLineageNodes([member("Projeto A", 500, 100, "Prod")], dimensions, items);
+    expect(nodes.find(node => node.field === "resource_group")).toMatchObject({ value: "rg-prod", label: "Resource group" });
+    expect(nodes.some(node => node.field === "resource_id")).toBe(false);
   });
   it("não publica forecast ou observado parcial como se fosse o total", () => {
     const left = member("A", 500, 100, "Prod"), right = member("B", 300, 200, "Dev");

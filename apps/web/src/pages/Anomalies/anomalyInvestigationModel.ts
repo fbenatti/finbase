@@ -27,6 +27,21 @@ export const detailScopeChain = (details: Array<{ key: string; label: string }> 
   const all = [...base.slice(0, 9), ...infrastructure, ...base.slice(9, 14), ...serviceDetails, ...base.slice(14)];
   return all.filter((item, index) => all.findIndex(candidate => candidate.field === item.field) === index);
 };
+export function caseLineageNodes(
+  members: Member[],
+  detailDimensions: Array<{ key: string; label: string }> = [],
+  detailItems: Array<{ dimensions: Record<string, string | null> }> = [],
+  chain = detailScopeChain(detailDimensions),
+) {
+  const detailFields = new Set(detailDimensions.map(item => item.key));
+  return chain.flatMap(item => {
+    const values = detailFields.has(item.field)
+      ? detailItems.map(row => row.dimensions[item.field])
+      : members.map(member => member.dimensions[item.field]);
+    const unique = [...new Set(values.filter((value): value is string => Boolean(value)))];
+    return unique.length === 1 ? [{ ...item, value: unique[0] }] : [];
+  });
+}
 export const filterMembers = (members: Member[], filters: ScopeFilter[]) => members.filter(member => filters.every(filter => dimensionValue(member, filter.field) === filter.value));
 export function totalMetric(members: Member[], key: "observed_cloud" | "expected_cloud" | "delta_cloud") {
   return members.length && members.every(member => member[key] != null) ? members.reduce((sum, member) => sum + member[key]!, 0) : null;
