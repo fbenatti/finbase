@@ -468,9 +468,6 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                 scope = job["scope"]
                 assignment = f"of-asg-{tenant.get('connection_id') or 0}-{job['source_rule'].split(' ', 1)[0].lstrip('#')}-{job['kind']}-{job['identity_key']}"
                 lines += [
-                    f"resolve_existing_target {q(scope)} {q(job['source_rule'])} {q(job['mode'])}",
-                    f"ACTIVE_ASSIGNMENT_NAME=\"${{RESOLVED_ASSIGNMENT_NAME:-{assignment}}}\"",
-                    f"ACTIVE_POLICY_NAME=\"${{RESOLVED_POLICY_NAME:-{name}}}\"",
                     f"EXPECTED_SUBSCRIPTION={q(subscription_id)}",
                     'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
                     'if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then',
@@ -479,6 +476,9 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     'fi',
                     'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
                     '[[ "$CURRENT_SUBSCRIPTION" == "$EXPECTED_SUBSCRIPTION" ]] || { error "Subscription ativa inesperada: $CURRENT_SUBSCRIPTION (esperada: $EXPECTED_SUBSCRIPTION)"; exit 1; }',
+                    f"resolve_existing_target {q(scope)} {q(job['source_rule'])} {q(job['mode'])}",
+                    f"ACTIVE_ASSIGNMENT_NAME=\"${{RESOLVED_ASSIGNMENT_NAME:-{assignment}}}\"",
+                    f"ACTIVE_POLICY_NAME=\"${{RESOLVED_POLICY_NAME:-{name}}}\"",
                 ]
                 lines += [
                     f"ensure_definition \"$ACTIVE_POLICY_NAME\" {q(job['mode'])} \"$POLICIES_DIR/{job['rules_filename']}\" \"$POLICIES_DIR/{job['metadata_filename']}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])}",
