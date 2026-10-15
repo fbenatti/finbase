@@ -44,7 +44,7 @@ DETAIL_DIMENSIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("resource_name", "Recurso", ("resourcename", "resource_name", "source_resource_name")),
     ("gcp_project", "Projeto GCP", ("projectid", "projectname", "project_id", "project_name", "projectnumber")),
     ("service", "Serviço", ("servicename", "service_name")),
-    ("service_category", "Categoria do serviço", ("servicesubcategory", "servicecategory", "service_category", "service_subcategory")),
+    ("service_category", "Categoria FOCUS", ("servicesubcategory", "servicecategory", "service_category", "service_subcategory")),
     ("sku", "SKU / medidor", ("skumeter", "metername", "resource_sku", "sku_name", "skuid", "meterid")),
     ("region", "Região", ("regionname", "region_id", "location", "region")),
 )

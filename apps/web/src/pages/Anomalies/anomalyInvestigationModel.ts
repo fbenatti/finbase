@@ -16,7 +16,7 @@ export const detailScopeChain = (details: Array<{ key: string; label: string }> 
     { field: "subaccountname", label: "Assinatura / subconta" },
     { field: "resourcegroupname", label: "Resource group" }, { field: "resource_id", label: "ID do recurso" },
     { field: "resource_name", label: "Recurso" }, { field: "centro_custo", label: "Centro de custo" },
-    { field: "servicename", label: "Serviço" }, { field: "servicesubcategory", label: "Categoria do serviço" },
+    { field: "servicename", label: "Serviço" }, { field: "servicesubcategory", label: "Produto / família" },
     { field: "skumeter", label: "SKU / medidor" }, { field: "pricingcategory", label: "Categoria de preço" },
     { field: "commitmentdiscounttype", label: "Modalidade" },
   ];
