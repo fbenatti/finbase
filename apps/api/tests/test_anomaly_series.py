@@ -343,7 +343,8 @@ def test_drilldown_resolve_apenas_dimensoes_disponiveis_e_nao_duplica_grao_forec
         ["servicename"],
     )
     assert [(item["key"], item["column"]) for item in dims] == [
-        ("subscription", "SubscriptionName"), ("resource_group", "ResourceGroupName"), ("sku", "SkuMeter")
+        ("subscription", "SubscriptionName"), ("resource_group", "ResourceGroupName"),
+        ("resource_id", "ResourceId"), ("sku", "SkuMeter")
     ]
     sql = detailed_event_sql(source_namespace="silver", source_table="dest_modelo_focus",
         date_column="chargeperiodstart", period_column="_billing_period", type_column="tipo",
@@ -352,8 +353,21 @@ def test_drilldown_resolve_apenas_dimensoes_disponiveis_e_nao_duplica_grao_forec
     assert '"SubscriptionName" AS "subscription"' in sql
     assert '"ResourceGroupName" AS "resource_group"' in sql
     assert '"SkuMeter" AS "sku"' in sql
-    assert '"ResourceId"' not in sql
+    assert '"ResourceId" AS "resource_id"' in sql
     assert "DATE '2026-10-12'" in sql and "realizado_cloud" in sql
+
+
+def test_resource_group_pode_ser_extraido_de_azure_resource_id():
+    from app.services.anomaly_series import resolve_detail_dimensions, detailed_event_sql
+    dimensions = resolve_detail_dimensions(["ResourceId"], ["servicename"])
+    group = next(item for item in dimensions if item["key"] == "resource_group")
+    assert "ResourceId" in group["expression"]
+    assert "resourceGroups/" in group["expression"]
+    sql = detailed_event_sql(source_namespace="silver", source_table="focus", date_column="ChargePeriodStart",
+        period_column=None, type_column=None, measure_column="realizado_cloud", dimensions=["servicename"],
+        detail_dimensions=dimensions, member_filters=["\"servicename\" = 'DB'"], event_day=date(2026, 10, 10))
+    assert 'AS "resource_group"' in sql
+    assert "regexp_extract" in sql
 
 
 def test_restores_monthly_event_comparison_from_persisted_case_evaluation():
