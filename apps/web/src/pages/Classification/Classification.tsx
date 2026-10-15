@@ -854,9 +854,7 @@ function TagMappingsTab() {
 
 export function TagsTab() {
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
-  const [selectedDepartment, setSelectedDepartment] = useState<number | "">("");
   const [selectedSubscription, setSelectedSubscription] = useState("");
   const [policySubscriptions, setPolicySubscriptions] = useState<AzurePolicySubscription[]>([]);
   const [planOnly, setPlanOnly] = useState(false);
@@ -874,39 +872,42 @@ export function TagsTab() {
 
   useEffect(() => {
     getAzureTenants().then(setTenants).catch(() => setTenants([]));
-    getDepartments(false).then(setDepartments).catch(() => setDepartments([]));
   }, []);
 
   useEffect(() => {
     setSelectedSubscription("");
     setPolicySubscriptions([]);
+    setRows([]);
+    setScript("");
+    setSuccess("");
     if (selectedTenant === "") return;
     getAzurePolicySubscriptions(selectedTenant as number)
       .then(setPolicySubscriptions)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível listar as subscriptions Azure"));
   }, [selectedTenant]);
 
-  const projectOptions = useMemo(
-    () => [...flattenDepartments(departments)].sort((left, right) =>
-      left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" }),
-    ),
-    [departments],
-  );
-
   const generate = async () => {
+    if (!selectedSubscription) {
+      setError("Selecione uma subscription Azure para montar o mapa completo de projetos e policies.");
+      return;
+    }
     try {
       setLoading(true);
       setError("");
       setSuccess("");
       const connId = selectedTenant === "" ? undefined : (selectedTenant as number);
-      const departmentId = selectedDepartment === "" ? undefined : (selectedDepartment as number);
-      const result = await exportAzureTagPolicy(connId, "both", departmentId, planOnly,
-        selectedSubscription || undefined);
+      const result = await exportAzureTagPolicy(connId, "both", undefined, planOnly, selectedSubscription);
       setRows(result.tenants);
       setScript(result.deployment_script);
       setSelectedJsonTenantIndex(0);
       setIsEditing(false);
-      setSuccess(`${departmentId ? "Teste por projeto" : "Políticas"} gerado com sucesso para ${result.tenants.length} tenant(s).`);
+      const selectedName = policySubscriptions.find((item) => item.subscription_id === selectedSubscription)?.name || selectedSubscription;
+      const mapItems = result.tenants.flatMap((tenant) => [
+        ...(tenant.layers?.resource_groups || []),
+        ...(tenant.layers?.resources || []),
+      ]);
+      const projectCount = new Set(mapItems.map((item) => item.department_name || item.tags.projeto).filter(Boolean)).size;
+      setSuccess(`Mapa completo gerado para ${selectedName}: ${projectCount} projeto(s), ${mapItems.length} policy(s).`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao gerar políticas");
     } finally {
@@ -950,6 +951,10 @@ export function TagsTab() {
   };
 
   const currentJsonString = JSON.stringify(rows[selectedJsonTenantIndex] || {}, null, 2);
+  const policyMap = rows.flatMap((tenant) => [
+    ...(tenant.layers?.resource_groups || []).map((item) => ({ ...item, connection_code: tenant.connection_code })),
+    ...(tenant.layers?.resources || []).map((item) => ({ ...item, connection_code: tenant.connection_code })),
+  ]);
 
   const tagTabs = <Tabs value={tagSubTab} onChange={(_, value) => setTagSubTab(value)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
     <Tab value="policies" label="Policies Azure" />
@@ -981,14 +986,20 @@ export function TagsTab() {
           </Select>
         </FormControl>
 
-        <FormControl sx={{ minWidth: 340 }} size="small" disabled={selectedTenant === "" || policySubscriptions.length === 0}>
-          <InputLabel>Limitar a subscription</InputLabel>
+        <FormControl sx={{ minWidth: 400 }} size="small" disabled={selectedTenant === "" || policySubscriptions.length === 0}>
+          <InputLabel>Subscription Azure *</InputLabel>
           <Select
             value={selectedSubscription}
-            label="Limitar a subscription"
-            onChange={(e) => setSelectedSubscription(String(e.target.value))}
+            label="Subscription Azure *"
+            onChange={(e) => {
+              setSelectedSubscription(String(e.target.value));
+              setRows([]);
+              setScript("");
+              setError("");
+              setSuccess("");
+            }}
           >
-            <MenuItem value="">Subscriptions comprovadas pelas regras</MenuItem>
+            <MenuItem value="">Selecione uma subscription</MenuItem>
             {policySubscriptions.map((subscription) => (
               <MenuItem key={subscription.subscription_id} value={subscription.subscription_id}>
                 {subscription.name} ({subscription.subscription_id})
@@ -997,23 +1008,7 @@ export function TagsTab() {
           </Select>
         </FormControl>
 
-        <FormControl sx={{ minWidth: 300 }} size="small">
-          <InputLabel>Projeto para teste</InputLabel>
-          <Select
-            value={selectedDepartment}
-            label="Projeto para teste"
-            onChange={(e) => setSelectedDepartment(e.target.value as number | "")}
-          >
-            <MenuItem value="">Geração completa do tenant</MenuItem>
-            {projectOptions.map((department) => (
-              <MenuItem key={department.id} value={department.id}>
-                {department.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <Button variant="contained" onClick={generate} disabled={loading}>
+        <Button variant="contained" onClick={generate} disabled={loading || !selectedSubscription}>
           {loading ? "Gerando..." : "Gerar políticas"}
         </Button>
         <FormControlLabel
@@ -1033,10 +1028,35 @@ export function TagsTab() {
 
       {rows.length === 0 && !loading ? (
         <Alert severity="info">
-          Selecione um tenant ou um projeto para teste e clique em <strong>"Gerar políticas"</strong>. O teste inclui as exceções de prioridade superior na condição da policy.
+          Selecione o tenant da conexão e uma subscription. A geração mostrará todas as regras de projeto aplicáveis, suas exceções por prioridade e as policies de Resource Groups e recursos.
         </Alert>
       ) : (
         <Box>
+          <Box sx={{ mb: 3, p: 2, border: "1px solid #d0d7de", borderRadius: 2, bgcolor: "#fff" }}>
+            <Typography variant="h6" fontWeight={700} sx={{ mb: 0.5 }}>Mapa de projetos e policies da subscription</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Este mapa reúne todos os projetos cujas regras ARM podem atingir a subscription selecionada. As exceções mostram qual regra de maior prioridade impede sobreposição.
+            </Typography>
+            {policyMap.length === 0 ? (
+              <Alert severity="warning">Nenhuma policy ARM elegível foi encontrada para esta subscription. Consulte os diagnósticos no JSON.</Alert>
+            ) : (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {policyMap.map((item) => (
+                  <Box key={`${item.connection_code}-${item.layer}-${item.rule_id}`} sx={{ p: 1.5, border: "1px solid #e6e8eb", borderRadius: 1.5 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 0.5 }}>
+                      <Typography variant="subtitle2" fontWeight={700}>{item.department_name || item.tags.projeto || "Projeto sem nome"}</Typography>
+                      <Chip size="small" label={item.layer === "resource_groups" ? "Resource Groups" : "Recursos"} />
+                      <Chip size="small" variant="outlined" label={`Prioridade ${item.priority}`} />
+                      <Typography variant="caption" color="text.secondary">Regra #{item.rule_id}: {item.rule_name}</Typography>
+                    </Box>
+                    <Typography variant="body2"><strong>Alvo:</strong> {item.observed?.resource_group_name || item.observed?.resource_id || "Subscription conforme seletor da regra"}</Typography>
+                    <Typography variant="body2"><strong>Tags:</strong> {Object.entries(item.tags).map(([key, value]) => `${key}=${value}`).join(" · ")}</Typography>
+                    <Typography variant="body2"><strong>Exceções:</strong> {item.exclusions.length ? item.exclusions.map((exclusion) => `${exclusion.department_name || exclusion.rule_name} (#${exclusion.rule_id})`).join(" · ") : "Nenhuma"}</Typography>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Box>
           {/* Tenant Summary Cards */}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(auto-fit, minmax(320px, 1fr))" }, gap: 2, mb: 3 }}>
             {rows.map((t) => (
