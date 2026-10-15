@@ -871,7 +871,7 @@ class AzureTagPolicyService:
             catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
             if catalog_error:
                 diagnostics.append({"status": "blocked", "reason": catalog_error, "subscription_id": subscription_id})
-                return None
+                raise RuntimeError(catalog_error)
             if subscription_id.casefold() not in azure_catalog_ids:
                 diagnostics.append({"status": "blocked", "reason": "Subscription não encontrada no catálogo acessível da conexão",
                                     "subscription_id": subscription_id})
@@ -882,7 +882,7 @@ class AzureTagPolicyService:
                 inventory_error = str(exc)
             if inventory_error:
                 diagnostics.append({"status": "blocked", "reason": inventory_error, "subscription_id": subscription_id})
-                return None
+                raise RuntimeError(inventory_error)
 
         compiled: list[dict] = []
         for rule in rules:
