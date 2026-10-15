@@ -423,6 +423,13 @@ class AzureTagPolicyService:
             tags = {mapping["tag_key"]: (hierarchy.get(mapping["focus_field"]) or key[value_offset + index])
                     for index, mapping in enumerate(mappings)}
             tags = _collapse_tag_keys({key: value for key, value in tags.items() if value})
+            missing_tags = [mapping["tag_key"] for mapping in mappings
+                            if mapping["tag_key"].casefold() not in {key.casefold() for key in tags}]
+            if missing_tags:
+                diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                    "reason": "Sem valor na hierarquia organizacional nem evidência Silver para as tags: "
+                                              + ", ".join(missing_tags)})
+                continue
             assignment_scope_kind = "subscription"
             assignment_resource_group = None
             if level == SCOPE_RESOURCE:
