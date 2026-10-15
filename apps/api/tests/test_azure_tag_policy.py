@@ -387,6 +387,8 @@ def test_deployment_script_can_default_to_plan_only():
     }], plan_only=True)
     assert 'PLAN_ONLY="true"' in script
     assert 'WAIT_FOR_REMEDIATION="${WAIT_FOR_REMEDIATION:-false}"' in script
+    assert 'SKIP_REMEDIATION="${SKIP_REMEDIATION:-false}"' in script
+    assert 'if [[ "$SKIP_REMEDIATION" == "true" ]]; then' in script
     assert 'action ABORT "Subscription ativa' in script
     assert 'action UNCHANGED "Definition $name"' in script
     assert 'action UPDATE "Definition OpenFinops $name"' in script
