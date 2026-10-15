@@ -74,9 +74,8 @@ export default function AzureTagExecutiveDashboard() {
     acc.taggable += item.taggable_resources + item.taggable_resource_groups;
     acc.complete += item.fully_tagged;
     acc.nonTaggable += item.non_taggable_resources + item.non_taggable_resource_groups;
-    acc.unknown += item.unclassified_resources + item.unclassified_resource_groups;
     return acc;
-  }, { resources: 0, groups: 0, taggable: 0, complete: 0, nonTaggable: 0, unknown: 0 }), [data]);
+  }, { resources: 0, groups: 0, taggable: 0, complete: 0, nonTaggable: 0 }), [data]);
 
   const fetchResources = async (subscriptionId: string, next = false) => {
     if (connectionId === "") return;
@@ -154,15 +153,24 @@ export default function AzureTagExecutiveDashboard() {
       {data.snapshot_date ? `Snapshot de inventário: ${data.snapshot_date}.` : "Ainda não existe snapshot do Resource Graph na Bronze para esta conexão. Use “Atualizar inventário Azure” para coletar."}
     </Alert>}
     {data && <Alert severity="info" sx={{ mb: 2 }}>
-      Aderência = percentual dos itens tageáveis com todas as chaves {data.tag_keys.map((key) => <Chip key={key} label={key} size="small" sx={{ mx: 0.3 }} />)} gerenciadas preenchidas. Este indicador verifica presença, não valida os valores esperados pela regra de negócio. {data.generated_at ? `Bronze gravada em ${new Date(data.generated_at).toLocaleString("pt-BR")}.` : "Sem coleta registrada."}
+      Aderência = percentual dos itens tageáveis com todas as chaves {data.tag_keys.map((key) => <Chip key={key} label={key} size="small" sx={{ mx: 0.3 }} />)} gerenciadas preenchidas. Este indicador verifica presença; a comparação dos valores esperados aparece nos detalhes de cada recurso. {data.generated_at ? `Bronze gravada em ${new Date(data.generated_at).toLocaleString("pt-BR")}.` : "Sem coleta registrada."}
+    </Alert>}
+    {data && <Alert severity="info" icon={false} sx={{ mb: 2 }}>
+      <Typography variant="body2" fontWeight={700}>Tags esperadas cadastradas</Typography>
+      <Typography variant="body2">
+        {data.tag_mappings?.length
+          ? data.tag_mappings.map((mapping) => `${mapping.tag_key} ← ${mapping.focus_field}`).join(" · ")
+          : "Nenhum mapeamento de tag ativo."}
+        {" · Os valores esperados por recurso vêm da classificação mais recente na Silver."}
+      </Typography>
     </Alert>}
 
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,1fr)", md: "repeat(6,1fr)" }, gap: 1.5, mb: 3 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,1fr)", md: "repeat(5,1fr)" }, gap: 1.5, mb: 3 }}>
         {[
           ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Resource Groups", totals.groups],
-          ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable], ["Não classificados", totals.unknown],
+          ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable],
         ].map(([label, value]) => <Card key={String(label)} variant="outlined"><CardContent sx={{ p: "14px !important" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="h5" fontWeight={700}>{fmt(Number(value))}</Typography></CardContent></Card>)}
       </Box>
       <Stack spacing={1.5}>
@@ -180,7 +188,6 @@ export default function AzureTagExecutiveDashboard() {
                 <Chip size="small" label={`${fmt(item.resource_groups)} RGs`} />
                 <Chip size="small" color="success" variant="outlined" label={`${fmt(item.taggable_resources + item.taggable_resource_groups)} tageáveis`} />
                 <Chip size="small" color="warning" variant="outlined" label={`${fmt(item.non_taggable_resources + item.non_taggable_resource_groups)} não tageáveis`} />
-                <Chip size="small" variant="outlined" label={`${fmt(item.unclassified_resources + item.unclassified_resource_groups)} sem classificação`} />
               </Stack>
               <IconButton size="small" aria-label={isOpen ? "Recolher recursos" : "Ver recursos"}>{isOpen ? <ExpandLess /> : <ExpandMore />}</IconButton>
             </Box>
@@ -189,8 +196,37 @@ export default function AzureTagExecutiveDashboard() {
             <Collapse in={isOpen}>
               <CardContent sx={{ pt: 0 }}>
                 {resourceLoading === item.subscription_id && <LinearProgress sx={{ mb: 1 }} />}
-                <Box sx={{ overflowX: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Recurso / Resource Group</TableCell><TableCell>Tipo</TableCell><TableCell>Grupo</TableCell><TableCell>Status</TableCell><TableCell>Tags ausentes</TableCell></TableRow></TableHead><TableBody>
-                  {(resources[item.subscription_id] ?? []).map((resource) => <TableRow key={resource.resource_id} hover><TableCell sx={{ maxWidth: 380 }}><Typography variant="body2" noWrap title={resource.resource_name}>{resource.resource_name}</Typography></TableCell><TableCell>{resource.is_resource_group ? "Resource Group" : resource.resource_type}</TableCell><TableCell>{resource.is_resource_group ? "—" : resource.resource_group || "—"}</TableCell><TableCell><Chip size="small" label={statusLabel(resource)} color={resource.taggable === false ? "default" : resource.taggable === null ? "warning" : resource.tag_status === "complete" ? "success" : "error"} />{resource.tag_support_reason && <Typography variant="caption" display="block" color="text.secondary">{resource.tag_support_reason}</Typography>}</TableCell><TableCell>{resource.missing_tags.length ? resource.missing_tags.join(", ") : "—"}</TableCell></TableRow>)}
+                <Box sx={{ overflowX: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Recurso / Resource Group</TableCell><TableCell>Tipo</TableCell><TableCell>Grupo</TableCell><TableCell>Status</TableCell><TableCell>Tags presentes no recurso</TableCell></TableRow></TableHead><TableBody>
+                  {(resources[item.subscription_id] ?? []).map((resource) => {
+                    const actualTags = resource.tags && typeof resource.tags === "object" ? resource.tags : {};
+                    const matching = new Set((resource.matching_tags ?? []).map((key) => key.toLocaleLowerCase()));
+                    const expected = resource.expected_tags ?? {};
+                    const expectedKeys = new Set(Object.keys(expected).map((key) => key.toLocaleLowerCase()));
+                    return <TableRow key={resource.resource_id} hover>
+                      <TableCell sx={{ maxWidth: 380 }}><Typography variant="body2" noWrap title={resource.resource_name}>{resource.resource_name}</Typography></TableCell>
+                      <TableCell>{resource.is_resource_group ? "Resource Group" : resource.resource_type}</TableCell>
+                      <TableCell>{resource.is_resource_group ? "—" : resource.resource_group || "—"}</TableCell>
+                      <TableCell><Chip size="small" label={statusLabel(resource)} color={resource.taggable === false ? "default" : resource.taggable === null ? "warning" : resource.tag_status === "complete" ? "success" : "error"} />{resource.tag_support_reason && <Typography variant="caption" display="block" color="text.secondary">{resource.tag_support_reason}</Typography>}</TableCell>
+                      <TableCell sx={{ minWidth: 300 }}>
+                        {Object.keys(actualTags).length ? <Stack direction="row" gap={0.5} flexWrap="wrap">
+                          {Object.entries(actualTags).map(([key, value]) => {
+                            const folded = key.toLocaleLowerCase();
+                            const matched = matching.has(folded);
+                            return <Chip key={key} size="small" variant={matched ? "filled" : "outlined"}
+                              color={matched ? "success" : expectedKeys.has(folded) ? "warning" : "default"}
+                              label={`${key}=${String(value)}`} title={expected[key] ? `Esperado: ${expected[key]}` : undefined} />;
+                          })}
+                        </Stack> : <Typography variant="caption" color="text.secondary">Nenhuma tag presente</Typography>}
+                        {Object.keys(expected).length > 0
+                          ? <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                              Esperado{resource.expected_tags_source === "resource_group" ? " pelo Resource Group" : " pela classificação"}: {Object.entries(expected).map(([key, value]) => `${key}=${value}`).join(" · ")}
+                            </Typography>
+                          : <Typography variant="caption" display="block" color={resource.expected_tags_ambiguous ? "warning.main" : "text.secondary"} sx={{ mt: 0.5 }}>
+                              {resource.expected_tags_ambiguous ? "Mais de uma classificação possível na Silver para este Resource Group." : "Expectativa não encontrada na Silver mais recente."}
+                            </Typography>}
+                      </TableCell>
+                    </TableRow>;
+                  })}
                 </TableBody></Table></Box>
                 {tokens[item.subscription_id] && <Button size="small" sx={{ mt: 1 }} onClick={() => void fetchResources(item.subscription_id, true)} disabled={resourceLoading === item.subscription_id}>Carregar mais</Button>}
                 {resources[item.subscription_id]?.length === 0 && resourceLoading !== item.subscription_id && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhum recurso retornado nesta subscription.</Typography>}

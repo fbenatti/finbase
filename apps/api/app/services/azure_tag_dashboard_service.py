@@ -156,6 +156,136 @@ class AzureTagDashboardService:
                 seen.add(key.casefold())
         return keys
 
+    async def _tag_mappings(self) -> list[dict[str, str]]:
+        result = await self.db.execute(select(AzureTagMapping).where(
+            AzureTagMapping.active == True,
+        ).order_by(AzureTagMapping.id))
+        return [{"tag_key": str(row.tag_key), "focus_field": str(row.focus_field)}
+                for row in result.scalars().all()]
+
+    async def _silver_expected_tags(
+        self, connection: SourceConnection, subscription_id: str,
+        rows: list[dict[str, Any]], mappings: list[dict[str, str]],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve each inventory item to its latest Silver classification values.
+
+        Exact resource billing evidence wins. If a resource has no direct evidence,
+        Resource Group evidence is used only when it resolves to one unambiguous tag set.
+        """
+        if not rows or not mappings:
+            return {}
+        from app.services.azure_tag_policy_service import SAFE_FOCUS_FIELD_RE
+        from app.services.trino_service import execute as trino_execute
+
+        fields = [mapping["focus_field"] for mapping in mappings]
+        if any(not SAFE_FOCUS_FIELD_RE.fullmatch(field) for field in fields):
+            logger.warning("Invalid Azure tag field mapping for connection %s", connection.id)
+            return {}
+
+        resource_ids = sorted({str(row.get("resource_id") or "").strip().casefold()
+                               for row in rows if str(row.get("resource_id") or "").strip()})
+        resource_groups = sorted({str(row.get("resource_group") or "").strip().casefold()
+                                 for row in rows if str(row.get("resource_group") or "").strip()})
+        # ARG rows represent a Resource Group by its name, while child resources
+        # carry resource_group separately.
+        resource_groups.extend(
+            str(row.get("resource_name") or "").strip().casefold()
+            for row in rows
+            if str(row.get("resource_type") or "").casefold() == RESOURCE_GROUP_TYPE
+            and str(row.get("resource_name") or "").strip()
+        )
+        resource_groups = sorted(set(resource_groups))
+        if not resource_ids and not resource_groups:
+            return {}
+
+        def literals(values: list[str]) -> str:
+            return ", ".join("'" + value.replace("'", "''") + "'" for value in values)
+
+        predicates = []
+        if resource_ids:
+            predicates.append(f"lower(trim(CAST(resourceid AS varchar))) IN ({literals(resource_ids)})")
+        if resource_groups:
+            predicates.append(
+                "lower(trim(CAST(source_resource_group_name AS varchar))) "
+                f"IN ({literals(resource_groups)})"
+            )
+        safe_code = (connection.code or "").replace("'", "''")
+        dynamic_fields = ", ".join(
+            f'trim(CAST("{field}" AS varchar)) AS tag_value_{index}'
+            for index, field in enumerate(fields)
+        )
+        group_columns = ", ".join(str(index) for index in range(3, 3 + len(fields)))
+        try:
+            evidence = await trino_execute(f"""
+                WITH latest AS (
+                    SELECT max(_billing_period) AS period
+                    FROM iceberg.silver.dest_modelo_focus
+                    WHERE cloud_origem = '{safe_code}'
+                      AND CAST(source_connection_id AS bigint) = {int(connection.id)}
+                      AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'
+                )
+                SELECT
+                    lower(trim(CAST(resourceid AS varchar))) AS resource_id,
+                    lower(trim(CAST(source_resource_group_name AS varchar))) AS resource_group,
+                    {dynamic_fields}, count(*) AS evidence_count
+                FROM iceberg.silver.dest_modelo_focus
+                WHERE cloud_origem = '{safe_code}'
+                  AND CAST(source_connection_id AS bigint) = {int(connection.id)}
+                  AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'
+                  AND _billing_period = (SELECT period FROM latest)
+                  AND json_extract_scalar(business_rule, '$.classification.id') IS NOT NULL
+                  AND ({' OR '.join(predicates)})
+                GROUP BY 1, 2, {group_columns}
+            """, timeout_s=60)
+        except Exception as exc:
+            logger.warning("Azure tag dashboard Silver expectations unavailable for %s: %s",
+                           connection.code, str(exc)[:180])
+            return {}
+
+        by_resource: dict[str, list[dict[str, Any]]] = {}
+        by_group: dict[str, list[dict[str, Any]]] = {}
+        for item in evidence:
+            expected = {
+                mapping["tag_key"]: str(item.get(f"tag_value_{index}") or "").strip()
+                for index, mapping in enumerate(mappings)
+                if str(item.get(f"tag_value_{index}") or "").strip()
+            }
+            if not expected:
+                continue
+            candidate = {"tags": expected, "evidence_count": int(item.get("evidence_count") or 0)}
+            resource_id = str(item.get("resource_id") or "").casefold()
+            resource_group = str(item.get("resource_group") or "").casefold()
+            if resource_id:
+                by_resource.setdefault(resource_id, []).append(candidate)
+            if resource_group:
+                by_group.setdefault(resource_group, []).append(candidate)
+
+        resolved: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            resource_id = str(row.get("resource_id") or "").strip().casefold()
+            resource_group = str(row.get("resource_group") or "").strip().casefold()
+            is_rg = str(row.get("resource_type") or "").casefold() == RESOURCE_GROUP_TYPE
+            if is_rg:
+                resource_group = str(row.get("resource_name") or "").strip().casefold()
+            candidates = by_resource.get(resource_id, []) if resource_id else []
+            source = "resource" if candidates else None
+            if not candidates and resource_group:
+                candidates = by_group.get(resource_group, [])
+                source = "resource_group" if candidates else None
+            unique: dict[tuple[tuple[str, str], ...], dict[str, Any]] = {}
+            for candidate in candidates:
+                signature = tuple(sorted((key.casefold(), value) for key, value in candidate["tags"].items()))
+                existing = unique.get(signature)
+                if existing is None or candidate["evidence_count"] > existing["evidence_count"]:
+                    unique[signature] = candidate
+            key = resource_id or str(row.get("resource_name") or "").strip().casefold()
+            if len(unique) == 1:
+                resolved[key] = {"tags": next(iter(unique.values()))["tags"], "source": source,
+                                 "ambiguous": False}
+            elif len(unique) > 1:
+                resolved[key] = {"tags": {}, "source": source, "ambiguous": True}
+        return resolved
+
     @staticmethod
     def _subscription_summary(subscription: dict[str, Any], rows: list[dict[str, Any]],
                              capabilities: dict[str, bool], tag_keys: list[str],
@@ -215,6 +345,7 @@ class AzureTagDashboardService:
     async def executive_summary(self, connection_id: int) -> dict[str, Any]:
         connection = await self._connection(connection_id)
         tag_keys = await self._tag_keys()
+        tag_mappings = await self._tag_mappings()
         rows, blob = await self._latest_inventory(connection)
         aggregates = self._inventory_aggregates(rows, tag_keys)
         subscription_ids = set(aggregates)
@@ -240,6 +371,7 @@ class AzureTagDashboardService:
             "generated_at": generated_at,
             "snapshot_date": latest_snapshot,
             "tag_keys": tag_keys,
+            "tag_mappings": tag_mappings,
             "adherence_definition": "Percentual de recursos tagueáveis com todas as chaves gerenciadas preenchidas; não compara valores esperados pela regra de negócio.",
             "subscriptions": [
                 ({**self._subscription_summary(
@@ -255,6 +387,7 @@ class AzureTagDashboardService:
                                      page_token: str | None = None) -> dict[str, Any]:
         connection = await self._connection(connection_id)
         tag_keys = await self._tag_keys()
+        mappings = await self._tag_mappings()
         all_rows, blob = await self._latest_inventory(connection, subscription_id=subscription_id)
         rows = sorted(
             all_rows,
@@ -270,6 +403,9 @@ class AzureTagDashboardService:
         page_rows = rows[offset:offset + page_size]
         next_token = (base64.urlsafe_b64encode(str(offset + page_size).encode()).decode()
                       if offset + page_size < len(rows) else None)
+        expected_by_resource = await self._silver_expected_tags(
+            connection, subscription_id, page_rows, mappings,
+        )
         resources: list[dict[str, Any]] = []
         for row in page_rows:
             resource_type = str(row.get("resource_type") or "")
@@ -283,19 +419,39 @@ class AzureTagDashboardService:
                 reason = str(row.get("tag_support_reason") or "") or None
             tag_status, missing = _managed_tag_status(row.get("tags"), tag_keys)
             is_rg = resource_type.casefold() == RESOURCE_GROUP_TYPE
+            resource_key = str(row.get("resource_id") or "").strip().casefold()
+            if not resource_key:
+                resource_key = name.strip().casefold()
+            expected = expected_by_resource.get(resource_key, {"tags": {}, "source": None, "ambiguous": False})
+            actual_tags = row.get("tags")
+            if isinstance(actual_tags, str):
+                try:
+                    actual_tags = json.loads(actual_tags)
+                except (TypeError, ValueError):
+                    actual_tags = {}
+            actual_tags = actual_tags if isinstance(actual_tags, dict) else {}
+            actual_normalized = {str(key).casefold(): str(value).strip() for key, value in actual_tags.items()}
+            matching_tags = [key for key, value in expected["tags"].items()
+                             if actual_normalized.get(key.casefold()) == value]
             resources.append({
                 **row,
+                "tags": actual_tags,
                 "is_resource_group": is_rg,
                 "taggable": supported,
                 "tag_support_reason": reason,
                 "tag_status": tag_status,
                 "missing_tags": missing,
+                "expected_tags": expected["tags"],
+                "expected_tags_source": expected["source"],
+                "expected_tags_ambiguous": expected["ambiguous"],
+                "matching_tags": matching_tags,
             })
         return {
             "subscription_id": subscription_id,
             "subscription_name": next((str(row.get("subscription_name") or "").strip()
                                         for row in rows if row.get("subscription_name")), subscription_id),
             "tag_keys": tag_keys,
+            "tag_mappings": mappings,
             "resources": resources,
             "next_page_token": next_token,
             "snapshot_date": str(blob.blob_path).rsplit("/", 1)[-1].removesuffix(".csv") if blob else None,

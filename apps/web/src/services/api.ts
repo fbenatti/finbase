@@ -1687,6 +1687,7 @@ export interface AzureTagExecutiveDashboard {
   generated_at: string | null;
   snapshot_date: string | null;
   tag_keys: string[];
+  tag_mappings: AzureTagExpectedMapping[];
   adherence_definition: string;
   subscriptions: AzureTagExecutiveSubscription[];
 }
@@ -1704,12 +1705,22 @@ export interface AzureTagExecutiveResource {
   tag_support_reason: string | null;
   tag_status: "complete" | "partial" | "none" | "not_assessed";
   missing_tags: string[];
+  expected_tags: Record<string, string>;
+  expected_tags_source: "resource" | "resource_group" | null;
+  expected_tags_ambiguous: boolean;
+  matching_tags: string[];
+}
+
+export interface AzureTagExpectedMapping {
+  tag_key: string;
+  focus_field: string;
 }
 
 export interface AzureTagExecutiveResourcePage {
   subscription_id: string;
   subscription_name: string;
   tag_keys: string[];
+  tag_mappings: AzureTagExpectedMapping[];
   resources: AzureTagExecutiveResource[];
   next_page_token: string | null;
   capability_warnings: string[];
