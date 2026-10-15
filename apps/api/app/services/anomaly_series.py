@@ -29,6 +29,63 @@ from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
+# Drilldown adicional, apenas quando a coluna existe na fonte configurada.
+# O forecast continua sendo comparável somente no grão de suas séries.
+DETAIL_DIMENSIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("subscription", "Assinatura / subconta", ("subscriptionname", "subaccountname", "subscription_name")),
+    ("subscription_id", "ID da assinatura", ("subscriptionid", "subaccountid", "subscription_id", "sub_account_id")),
+    ("resource_group", "Resource group", ("source_resource_group_name", "resourcegroupname", "resource_group_name", "resource_group_id", "resourcegroup")),
+    ("gcp_project", "Projeto GCP", ("projectid", "projectname", "project_id", "project_name", "projectnumber")),
+    ("service", "Serviço", ("servicename", "service_name")),
+    ("service_category", "Categoria do serviço", ("servicesubcategory", "servicecategory", "service_category", "service_subcategory")),
+    ("sku", "SKU / medidor", ("skumeter", "metername", "resource_sku", "sku_name", "skuid", "meterid")),
+    ("region", "Região", ("regionname", "region_id", "location", "region")),
+)
+
+
+def resolve_detail_dimensions(columns: Sequence[str], existing: Sequence[str]) -> list[dict[str, str]]:
+    """Resolve nomes existentes sem exigir que um provedor tenha todos os campos."""
+    available = {str(column).lower(): str(column) for column in columns}
+    used = {str(column).lower() for column in existing}
+    resolved: list[dict[str, str]] = []
+    for key, label, candidates in DETAIL_DIMENSIONS:
+        physical = next((available[name] for name in candidates if name in available and name not in used), None)
+        if physical:
+            resolved.append({"key": key, "label": label, "column": physical})
+            used.add(physical.lower())
+    return resolved
+
+
+def detailed_event_sql(*, source_namespace: str, source_table: str, date_column: str,
+                       period_column: str | None, type_column: str | None,
+                       measure_column: str, dimensions: Sequence[str],
+                       detail_dimensions: Sequence[Mapping[str, str]],
+                       member_filters: Sequence[str], event_day: date) -> str:
+    selected = list(dict.fromkeys([*dimensions, *(str(item["column"]) for item in detail_dimensions)]))
+    dim_select = ", ".join(_quote(name) for name in selected)
+    dim_aliases = ", ".join(f"{_quote(item['column'])} AS {_quote(item['key'])}" for item in detail_dimensions)
+    # Present only hierarchy fields whose source columns exist.
+    projection = ", ".join([dim_select, dim_aliases] if dim_select else [dim_aliases])
+    group_columns = ", ".join(str(index + 1) for index in range(len(selected) + len(detail_dimensions)))
+    date_expr = gold_date_expr(date_column, period_column)
+    type_filter = f"({_quote(type_column)} = 'realizado' OR {_quote(type_column)} IS NULL)" if type_column else "TRUE"
+    filters = [value for value in member_filters if value]
+    scope = "(" + " OR ".join(f"({value})" for value in filters) + ")" if filters else "FALSE"
+    return f"""
+        WITH parsed AS (
+            SELECT {projection}, {date_expr} AS day,
+                   COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS value
+              FROM iceberg.{source_namespace}.{_quote(source_table)}
+             WHERE {type_filter}
+        )
+        SELECT {projection}, SUM(value) AS observed_cloud
+          FROM parsed
+         WHERE day = DATE {_lit(event_day.isoformat())} AND {scope}
+         GROUP BY {group_columns}
+         ORDER BY ABS(SUM(value)) DESC
+         LIMIT 500
+    """
+
 #: Horizonte usado quando o caso não tem publicação com corte conhecido.
 DEFAULT_HORIZON_DAYS = 15
 
