@@ -113,10 +113,22 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
             {selectedDetailItems.length > 20 && <Typography variant="caption" color="text.secondary">Exibindo os 20 maiores detalhes de {selectedDetailItems.length} itens.</Typography>}
           </Stack>}
           {!groups.length && !rawDetailSelected && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
-            <Typography variant="body2" fontWeight={700}>{dimensionValue(member, "subaccountname")}</Typography>
-            <Typography variant="body2" color="text.secondary">{member.dimensions.servicesubcategory ?? member.dimensions.servicename ?? "Serviço não informado"}</Typography>
-            <Typography variant="caption" color="text.secondary">Centro de custo: {member.dimensions.centro_custo ?? "não informado"} · {member.dimensions.commitmentdiscounttype || "Modalidade não informada"}</Typography>
+            <Stack direction="row" flexWrap="wrap" gap={.75} alignItems="center">
+              {[
+                ["Assinatura", member.dimensions.subaccountname],
+                ["Resource group", member.dimensions.resource_group ?? member.dimensions.resourcegroupname],
+                ["Serviço", member.dimensions.servicename],
+                ["SKU / categoria", member.dimensions.sku ?? member.dimensions.skumeter ?? member.dimensions.servicesubcategory],
+                ["Centro de custo", member.dimensions.centro_custo],
+              ].filter((entry): entry is [string, string] => Boolean(entry[1])).map(([name, value], index) => <Box key={`${name}-${value}`} sx={{ display: "flex", alignItems: "center", gap: .75 }}>
+                {index > 0 && <Typography color="text.disabled">›</Typography>}
+                <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}><Typography component="span" variant="caption" color="text.secondary">{name}: </Typography><strong>{value}</strong></Typography>
+              </Box>)}
+              {!member.dimensions.subaccountname && !member.dimensions.servicename && !member.dimensions.servicesubcategory && <Typography variant="body2" color="text.secondary">Detalhes de assinatura, serviço e SKU não disponíveis neste grão.</Typography>}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .5 }}>{member.dimensions.commitmentdiscounttype || "Modalidade não informada"} · desvio calculado no grão do forecast deste ramo.</Typography>
           </Box>)}
+          {!groups.length && !rawDetailSelected && series.detail_dimensions?.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1 }}>A origem desta avaliação não disponibilizou dimensões abaixo do forecast. O drilldown termina aqui para não atribuir um desvio fictício a resource groups ou SKUs.</Typography>}
           {!all.length && <Typography variant="body2" color="text.secondary">A decomposição exige as séries contribuintes desta avaliação. O total continua disponível abaixo.</Typography>}
         </Box>
       </Box>
