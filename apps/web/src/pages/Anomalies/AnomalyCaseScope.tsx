@@ -43,6 +43,8 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const positiveTotal = groups.reduce((sum, group) => sum + Math.max(0, group.delta ?? 0), 0);
   const share = (value: number) => positiveTotal > 0 ? Math.max(0, value) / positiveTotal * 100 : 0;
   const forecastScopeLabel = forecastFilters.length ? forecastFilters[forecastFilters.length - 1].value : common[common.length - 1] ?? "total do caso";
+  const rawDetailSelected = filters.some(filter => !memberFields.has(filter.field));
+  const selectedDetailItems = (series.detail_items ?? []).filter(item => filters.every(filter => dimensionValue({ dimensions: item.dimensions } as typeof all[number], filter.field) === filter.value));
   const selectedSeries: AnomalySeries = { ...series, items: timeline,
     contributor_series: members.map(member => ({ series_id: member.series_id, dimensions: member.dimensions })),
     contributor_series_count: members.length || series.contributor_series_count };
@@ -89,6 +91,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
           <Typography variant="caption" color="text.secondary">{filters.length ? "Ramo selecionado" : "Desvio total"}</Typography>
           <Typography fontWeight={750} sx={{ mt: .5, overflowWrap: "anywhere" }}>{label}</Typography>
           <Typography sx={{ mt: 1, fontSize: 24, fontWeight: 800, color: "#c53d4b" }}>{delta != null && delta > 0 ? "+" : ""}{money(delta, currency)}</Typography>
+          {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .5 }}>Desvio calculado em {forecastScopeLabel}; detalhe abaixo é custo observado no dia do evento.</Typography>}
           {filters.length > 0 && rootDelta != null && rootDelta > 0 && delta != null && <Typography variant="caption" color="text.secondary">{pct(delta / rootDelta * 100)} do desvio líquido do caso</Typography>}
         </Box>
         <Box sx={{ pl: { xs: 1.5, md: 2.5 }, borderLeft: "2px solid #dce5ef", minWidth: 0 }}>
@@ -102,7 +105,14 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
             <Box sx={{ height: 5, bgcolor: "#edf1f6", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${group.sourceOnly ? Math.min(100, Math.abs(group.actual ?? 0) / Math.max(1, Math.abs(actual ?? 0)) * 100) : share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
             <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
           </ButtonBase>)}
-          {!groups.length && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
+          {!groups.length && rawDetailSelected && selectedDetailItems.length > 0 && <Stack spacing={.75} sx={{ mt: 1 }}>
+            {selectedDetailItems.slice(0, 20).map((item, index) => <Box key={`${item.series_id}-${index}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{[item.dimensions.subscriptionname, item.dimensions.source_resource_group_name, item.dimensions.resourcegroupname, item.dimensions.servicename, item.dimensions.servicesubcategory, item.dimensions.sku_name, item.dimensions.sku].find(Boolean) ?? "Consumo sem dimensão descritiva"}</Typography><Typography variant="caption" color="text.secondary">{[item.dimensions.subscriptionname, item.dimensions.resourcegroupname ?? item.dimensions.source_resource_group_name, item.dimensions.servicename, item.dimensions.sku_name ?? item.dimensions.sku].filter(Boolean).join(" · ")}</Typography></Box>
+              <Typography variant="body2" fontWeight={750} sx={{ whiteSpace: "nowrap" }}>{money(item.observed_cloud, currency)}</Typography>
+            </Box>)}
+            {selectedDetailItems.length > 20 && <Typography variant="caption" color="text.secondary">Exibindo os 20 maiores detalhes de {selectedDetailItems.length} itens.</Typography>}
+          </Stack>}
+          {!groups.length && !rawDetailSelected && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
             <Typography variant="body2" fontWeight={700}>{dimensionValue(member, "subaccountname")}</Typography>
             <Typography variant="body2" color="text.secondary">{member.dimensions.servicesubcategory ?? member.dimensions.servicename ?? "Serviço não informado"}</Typography>
             <Typography variant="caption" color="text.secondary">Centro de custo: {member.dimensions.centro_custo ?? "não informado"} · {member.dimensions.commitmentdiscounttype || "Modalidade não informada"}</Typography>
@@ -111,7 +121,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Box>
       </Box>
     </Paper>
-    {filters.some(filter => !memberFields.has(filter.field)) && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>O custo detalhado é observado na data do evento. Forecast e linha do tempo continuam no nível {forecastScopeLabel}, a granularidade que a previsão sustenta.</Typography>}
+    {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>O custo detalhado é observado na data do evento. Forecast e linha do tempo continuam no nível {forecastScopeLabel}, a granularidade que a previsão sustenta.</Typography>}
     <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Evolução · {forecastScopeLabel}</Typography>
     <AnomalyEvolutionChart key={`${kase.id}-${JSON.stringify(filters)}`} series={selectedSeries} kase={kase} currency={currency} />
   </Box>;
