@@ -106,10 +106,14 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
             <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
           </ButtonBase>)}
           {!groups.length && rawDetailSelected && selectedDetailItems.length > 0 && <Stack spacing={.75} sx={{ mt: 1 }}>
-            {selectedDetailItems.slice(0, 20).map((item, index) => <Box key={`${index}-${item.dimensions.sku_name ?? item.dimensions.sku ?? "detail"}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
-              <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{[item.dimensions.subscriptionname, item.dimensions.source_resource_group_name, item.dimensions.resourcegroupname, item.dimensions.servicename, item.dimensions.servicesubcategory, item.dimensions.sku_name, item.dimensions.sku].find(Boolean) ?? "Consumo sem dimensão descritiva"}</Typography><Typography variant="caption" color="text.secondary">{[item.dimensions.subscriptionname, item.dimensions.resourcegroupname ?? item.dimensions.source_resource_group_name, item.dimensions.servicename, item.dimensions.sku_name ?? item.dimensions.sku].filter(Boolean).join(" · ")}</Typography></Box>
+            {selectedDetailItems.slice(0, 20).map((item, index) => {
+              const namedDetails = (series.detail_dimensions ?? []).map(dimension => ({ label: dimension.label, value: item.dimensions[dimension.key] })).filter(detail => Boolean(detail.value));
+              const title = namedDetails.find(detail => /resource|sku|medidor|serviço/i.test(detail.label))?.value ?? namedDetails[0]?.value ?? "Consumo sem dimensão descritiva";
+              return <Box key={`${index}-${String(title)}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{title}</Typography><Typography variant="caption" color="text.secondary">{namedDetails.map(detail => `${detail.label}: ${detail.value}`).join(" · ")}</Typography></Box>
               <Typography variant="body2" fontWeight={750} sx={{ whiteSpace: "nowrap" }}>{money(item.observed_cloud, currency)}</Typography>
-            </Box>)}
+            </Box>;
+            })}
             {selectedDetailItems.length > 20 && <Typography variant="caption" color="text.secondary">Exibindo os 20 maiores detalhes de {selectedDetailItems.length} itens.</Typography>}
           </Stack>}
           {!groups.length && !rawDetailSelected && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
