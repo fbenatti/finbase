@@ -591,6 +591,7 @@ def test_deployment_script_uses_identity_rbac_and_stable_names():
     assert "ensure_tenant" not in script
     assert "--query tenantId" not in script
     assert 'az policy remediation create --name "$name" --subscription "$subscription"' in script
+    assert script.count("--resource-count 50000") == 2
     assert 'az policy remediation show --name "$name" --subscription "$subscription"' in script
     assert "# Subscription alvo: Terra-Mexico-Test (aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa)" in script
 
