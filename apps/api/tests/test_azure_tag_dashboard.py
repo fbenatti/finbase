@@ -99,6 +99,10 @@ def test_executive_summary_reads_snapshot_and_does_not_call_resource_graph(monke
     async def forbidden(*_args, **_kwargs): raise AssertionError("dashboard load must not query Azure Resource Graph")
     service._connection = get_connection
     service._tag_keys = tag_keys
+    async def tag_mappings():
+        return [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
+                {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"}]
+    service._tag_mappings = tag_mappings
     service._latest_inventory = inventory
     service._silver_subscription_names = forbidden_names
     monkeypatch.setattr(dashboard_module, "discover_subscriptions", forbidden, raising=False)
@@ -137,10 +141,26 @@ def test_subscription_resources_filters_in_bronze_and_uses_snapshot_name():
         raise AssertionError("resource details should use the Bronze subscription name")
     service._connection = get_connection
     service._tag_keys = tag_keys
+    async def tag_mappings():
+        return [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
+                {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+                {"tag_key": "centro-de-custos", "focus_field": "centro_custo"}]
+    async def expected_tags(_connection, _subscription_id, rows, _mappings):
+        return {rows[0]["resource_id"].casefold(): {
+            "tags": {"projeto": "Terra", "diretoria": "TI", "centro-de-custos": "CC1"},
+            "source": "resource_group", "ambiguous": False,
+        }}
+    service._tag_mappings = tag_mappings
+    service._silver_expected_tags = expected_tags
     service._latest_inventory = inventory
     service._silver_subscription_names = forbidden_names
 
     result = asyncio.run(service.subscription_resources(2, subscription_id))
     assert result["subscription_name"] == "Terra Brasil Dev"
+    assert result["tag_mappings"][0] == {"tag_key": "projeto", "focus_field": "organograma_nivel_5"}
     assert len(result["resources"]) == 1
     assert result["resources"][0]["tag_status"] == "complete"
+    assert result["resources"][0]["expected_tags"] == {
+        "projeto": "Terra", "diretoria": "TI", "centro-de-custos": "CC1",
+    }
+    assert result["resources"][0]["matching_tags"] == ["projeto", "diretoria", "centro-de-custos"]
