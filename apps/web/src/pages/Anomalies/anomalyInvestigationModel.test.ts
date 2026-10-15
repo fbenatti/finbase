@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterMembers, scopeBranches, scopeTimeline, type Member } from "./anomalyInvestigationModel";
+import { detailScopeChain, filterMembers, scopeBranches, scopeTimeline, type Member } from "./anomalyInvestigationModel";
 import type { AnomalySeriesPoint } from "../../services/anomaliesApi";
 
 const point = (day: string, actual: number | null, expected: number | null): AnomalySeriesPoint => ({
@@ -32,6 +32,16 @@ describe("decomposição de desvio", () => {
   it("mantém a decomposição encadeada até contas distintas de um projeto", () => {
     const selected = [member("A", 500, 100, "Prod"), member("A", 300, 200, "Dev")];
     expect(scopeBranches(selected, [{ field: "organograma_nivel_5", value: "A" }]).dimension?.field).toBe("subaccountname");
+  });
+  it("usa a cadeia executiva completa e continua de serviço até SKU", () => {
+    const chain = detailScopeChain();
+    const members = [
+      { ...member("A", 500, 100, "Prod"), dimensions: { ...member("A", 500, 100, "Prod").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D4" } },
+      { ...member("A", 300, 200, "Dev"), dimensions: { ...member("A", 300, 200, "Dev").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D8" } },
+    ];
+    const project = [{ field: "organograma_nivel_5", value: "A" }];
+    expect(scopeBranches(members, project, chain).dimension?.field).toBe("subaccountname");
+    expect(scopeBranches(members, [...project, { field: "subaccountname", value: "Prod" }], chain).dimension?.field).toBe("skumeter");
   });
   it("não publica forecast ou observado parcial como se fosse o total", () => {
     const left = member("A", 500, 100, "Prod"), right = member("B", 300, 200, "Dev");
