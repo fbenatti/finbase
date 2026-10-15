@@ -21,6 +21,7 @@ import re
 import os
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import pandas as pd
 from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -50,6 +51,11 @@ from app.services.gold_materialization import GOLD
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+
+
+def _current_business_period() -> str:
+    """Return the current YYYYMM period in the business timezone."""
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y%m")
 
 
 class _ClientCancelScope:
@@ -1408,8 +1414,8 @@ async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
 async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Serve the forecast-manual pseudo-destination from the operational DB.
 
-    Only future periods are exposed: once a month has realized data in Gold,
-    the manual forecast for that month is considered consumed and disappears.
+    Future periods and the current business month are exposed. Older periods
+    with realized data in Gold are considered consumed and disappear.
     """
     schema = dict(_FORECAST_MANUAL_SCHEMA)
     _canonicalize_request(req, schema)
@@ -1460,6 +1466,7 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
 
     year_by_version = {version.id: int(version.year or 0) for version in versions}
     realized = await _fetch_realized_periods(trino_kwargs)
+    current_period = _current_business_period()
     grouped: dict[tuple[Any, ...], list[float]] = {}
     for entry in entries:
         month = int(entry.month or 0)
@@ -1470,7 +1477,7 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
             continue
         period = f"{entry_year:04d}{month:02d}"
         # Manual forecast is only meaningful for months that have not realized yet.
-        if period in realized:
+        if period in realized and period != current_period:
             continue
         value = float(entry.value or 0)
         if abs(value) < 1e-12:
@@ -1496,7 +1503,7 @@ async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, t
         records.append(record)
 
     result = _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
-    result["period_auto_applied"] = "Somente períodos futuros (sem realizado na Gold)"
+    result["period_auto_applied"] = "Períodos futuros sem realizado na Gold e mês corrente"
     return result
 
 
@@ -2616,8 +2623,8 @@ async def _expected_view_core(
 
     # Forecast manual is composed on top of the realized/forecast series using
     # the exact same aggregation rules as the orçamento (per department and its
-    # descendants). Only future months surface here: periods that already have
-    # realized data in Gold drop their manual forecast.
+    # descendants). Older periods with realized data in Gold drop the manual
+    # forecast; the current month remains visible while it is still in progress.
     forecast_manual_rows = (await db.execute(
         select(PlanningEntry, PlanningVersion.year).join(PlanningVersion).join(FinancialType).where(
             FinancialType.code == "forecast-manual",
@@ -2627,6 +2634,7 @@ async def _expected_view_core(
         )
     )).all() if not body.dimension_filters else []
     realized_periods = await _fetch_realized_periods({})
+    current_period = _current_business_period()
     forecast_manual_by_period: dict[str, float] = {}
     forecast_manual_by_driver: dict[str, float] = {}
     for entry, entry_year in forecast_manual_rows:
@@ -2635,7 +2643,7 @@ async def _expected_view_core(
             period = f"{entry_year:04d}{entry.month:02d}"
             if (body.month_from and period < body.month_from) or (body.month_to and period > body.month_to):
                 continue
-            if period in realized_periods:
+            if period in realized_periods and period != current_period:
                 continue
             value = float(entry.value or 0)
             if abs(value) < 1e-12:
