@@ -968,7 +968,10 @@ class AzureTagPolicyService:
                 effective = self._effective(selector, [entry["selector"] for entry in overlapping])
                 output = {
                     "rule_id": rule.id, "rule_name": rule.name, "priority": rule.priority,
-                    "department_id": rule.department_id, "tags": item["tags"],
+                    "department_id": rule.department_id,
+                    "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
+                    "layer": layer,
+                    "tags": item["tags"],
                     "condition": effective, "scope_subscriptions": [subscription_id],
                     "base_selector": selector,
                     "evidence_count": item["evidence_count"], "observed": item["observed"],
