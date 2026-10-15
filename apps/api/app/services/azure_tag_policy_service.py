@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from collections import defaultdict
 
 from sqlalchemy import select
@@ -73,6 +74,12 @@ MAX_CONDITION_BYTES = 64_000
 
 def _norm(value: str) -> str:
     return str(value or "").lower().replace("_", "").replace("-", "").strip()
+
+
+def _subscription_name_key(value: str) -> str:
+    """Use the same accent-insensitive comparison as the cost classifier."""
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return re.sub(r"[^a-z0-9]", "", normalized.encode("ascii", "ignore").decode().lower())
 
 
 def _keeps_contains(terms: list[dict], scope: str) -> bool:
@@ -506,7 +513,9 @@ class AzureTagPolicyService:
                     if UUID_RE.match(value):
                         resolved.append(value)
                     elif operator == "=":
-                        matches = catalog.get(value.casefold(), [])
+                        matches = sorted({sid for name, ids in catalog.items()
+                                          if _subscription_name_key(name) == _subscription_name_key(value)
+                                          for sid in ids})
                         if len(matches) == 1:
                             resolved.append(matches[0])
                         else:
@@ -524,6 +533,58 @@ class AzureTagPolicyService:
                                 "reason": "Regra sem condições ARM válidas"})
             return None
         return translated
+
+    @staticmethod
+    def _rule_matches_selected_subscription(
+        rule: ClassificationRule, catalog: dict[str, list[str]], subscription_id: str,
+        subscription_name: str,
+    ) -> bool:
+        """Check subscription conditions using the classifier's name normalization.
+
+        This also proves that exact/contains rules for another subscription are
+        disjoint without requiring that other subscription to be accessible to
+        the selected connection.
+        """
+        selected_id = subscription_id.casefold()
+        selected_name = _subscription_name_key(subscription_name)
+        for condition in normalize_rule_conditions(rule):
+            field_name = str(condition.get("field") or "")
+            scope, _ = AzureTagPolicyService._field_scope(AzureTagPolicyService(db=None), field_name)
+            if scope != SCOPE_SUBSCRIPTION:
+                continue
+            operator = str(condition.get("operator") or "=")
+            values = [str(value).strip() for value in condition.get("values", []) if str(value).strip()]
+            matches: list[bool] = []
+            for value in values:
+                if UUID_RE.fullmatch(value):
+                    actual = selected_id
+                    expected = value.casefold()
+                else:
+                    known_ids = {sid.casefold() for name, ids in catalog.items()
+                                 if _subscription_name_key(name) == _subscription_name_key(value)
+                                 for sid in ids}
+                    if known_ids:
+                        actual, expected = selected_id, "\0".join(sorted(known_ids))
+                    else:
+                        actual, expected = selected_name, _subscription_name_key(value)
+                if operator == "=":
+                    matches.append(actual == expected or ("\0" in expected and actual in expected.split("\0")))
+                elif operator == "~":
+                    matches.append(expected in actual if "\0" not in expected else actual in expected.split("\0"))
+                elif operator == "!=":
+                    matches.append(actual != expected and ("\0" not in expected or actual not in expected.split("\0")))
+                else:
+                    return False
+            if not matches or (any(matches) if operator in {"=", "~"} else not all(matches)):
+                return False
+        return True
+
+    @staticmethod
+    def _pin_subscription(terms: list[dict], subscription_id: str) -> list[dict]:
+        """Replace rule-level subscription names with the validated selected GUID."""
+        return [term for term in terms if term["scope"] != SCOPE_SUBSCRIPTION] + [{
+            "scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id],
+        }]
 
     def _selector(self, terms: list[dict], target: str, *, omit_rg_scope: bool = False) -> dict | None:
         resource_only = {SCOPE_RESOURCE, SCOPE_TYPE, SCOPE_SKU, SCOPE_LOCATION}
@@ -781,6 +842,7 @@ class AzureTagPolicyService:
     def _prior_rule_exclusions(
         self, item: dict, rules: list[ClassificationRule], departments: dict[int, Department],
         catalog: dict[str, list[str]], mappings: list[dict[str, str]], diagnostics: list[dict],
+        selected_subscription_name: str = "",
     ) -> list[dict]:
         """Build selector-only exceptions from active earlier rules, not billing rows."""
         current_rule = item["rule"]
@@ -792,9 +854,14 @@ class AzureTagPolicyService:
             department = departments.get(rule.department_id)
             if not department:
                 continue
-            terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=True)
+            if not self._rule_matches_selected_subscription(
+                rule, catalog, current_sid, selected_subscription_name,
+            ):
+                continue
+            terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=False)
             if not terms:
                 continue
+            terms = self._pin_subscription(terms, current_sid)
             explicit = self._explicit_scope_subscriptions(terms)
             if explicit and current_sid not in {sid.casefold() for sid in explicit}:
                 continue
