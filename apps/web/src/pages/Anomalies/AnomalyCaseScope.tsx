@@ -14,12 +14,12 @@ export default function AnomalyCaseScope({ kase, series, currency, breakdown = f
   const lead = rows.find(row => row.delta_cloud != null && row.delta_cloud > 0);
   if (!breakdown) return <Box sx={{ my: 2 }}>
     <Typography variant="overline" color="text.secondary">Área afetada</Typography>
-    <Typography sx={{ fontWeight: 700, fontSize: 17 }}>{common.at(-1) ?? "Organograma não informado"}</Typography>
+    <Typography sx={{ fontWeight: 700, fontSize: 17 }}>{common[common.length - 1] ?? "Organograma não informado"}</Typography>
     {common.length > 1 && <Typography variant="caption" color="text.secondary">{common.slice(0, -1).join(" › ")}</Typography>}
     <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ mt: 1.5, p: 1.5, bgcolor: "#f1f6fc", borderRadius: 2 }}>
       <Box>
         <Typography variant="body2" fontWeight={700}>{lead ? `Maior desvio: ${lead.dimensions.subaccountname ?? "Conta não informada"} · +${money(lead.delta_cloud, currency)}` : "Identifique a origem e confirme se o aumento era esperado"}</Typography>
-        <Typography variant="body2" color="text.secondary">{lead ? path(lead.dimensions).at(-1) ?? "Organograma não informado" : "Consulte o consumo e a referência de forecast abaixo."}</Typography>
+        <Typography variant="body2" color="text.secondary">{lead ? path(lead.dimensions).slice(-1)[0] ?? "Organograma não informado" : "Consulte o consumo e a referência de forecast abaixo."}</Typography>
       </Box>
       <Button variant="contained" size="small" onClick={() => document.getElementById("anomaly-investigation")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Tratar caso</Button>
     </Stack>
@@ -32,7 +32,7 @@ export default function AnomalyCaseScope({ kase, series, currency, breakdown = f
     {(rows.length ? rows : members.map(member => ({ ...member, observed_cloud: null, expected_cloud: null, delta_cloud: null }))).map(row => <Box key={row.series_id} sx={{ py: 1.5, borderTop: "1px solid #e8edf3" }}>
       <Stack direction="row" justifyContent="space-between" spacing={2}>
         <Box>
-          <Typography variant="body2" fontWeight={700}>{row.dimensions.subaccountname ?? "Conta não informada"} · {path(row.dimensions).at(-1) ?? "Organograma não informado"}</Typography>
+          <Typography variant="body2" fontWeight={700}>{row.dimensions.subaccountname ?? "Conta não informada"} · {path(row.dimensions).slice(-1)[0] ?? "Organograma não informado"}</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>{path(row.dimensions).slice(0, -1).join(" › ") || "Sem caminho organizacional"}</Typography>
           <Typography variant="caption" color="text.secondary">Centro de custo: {row.dimensions.centro_custo ?? "não informado"}</Typography>
         </Box>
