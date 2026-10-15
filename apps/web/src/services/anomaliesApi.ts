@@ -213,6 +213,14 @@ export type AnomalySeries = {
   evaluation_grain?: string;
   contributor_series_count?: number;
   contributor_series?: Array<{ series_id: string; dimensions: Record<string, string | null> }>;
+  contributor_breakdown?: Array<{
+    series_id: string;
+    dimensions: Record<string, string | null>;
+    event_date: string;
+    observed_cloud: number | null;
+    expected_cloud: number | null;
+    delta_cloud: number | null;
+  }>;
   scope_verified?: boolean;
   warnings?: string[];
   reference?: {
