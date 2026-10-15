@@ -457,7 +457,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     f"ensure_assignment \"$ACTIVE_ASSIGNMENT_NAME\" {q(scope)} \"$ACTIVE_POLICY_NAME\"",
                     f"if az policy assignment show --name \"$ACTIVE_ASSIGNMENT_NAME\" --scope {q(scope)} --only-show-errors >/dev/null 2>&1 || plan; then",
                     '  PRINCIPAL_ID=""',
-                    f"  if az policy assignment show --name {q(assignment)} --scope {q(scope)} --only-show-errors >/dev/null 2>&1; then",
+                    f"  if az policy assignment show --name \"$ACTIVE_ASSIGNMENT_NAME\" --scope {q(scope)} --only-show-errors >/dev/null; then",
                     f"    if PRINCIPAL_ID=$(resolve_assignment_principal \"$ACTIVE_ASSIGNMENT_NAME\" {q(scope)}); then :; else PRINCIPAL_ID=\"\"; fi",
                     '  fi',
                     f"  ensure_tag_contributor \"$PRINCIPAL_ID\" {q(scope)}",
