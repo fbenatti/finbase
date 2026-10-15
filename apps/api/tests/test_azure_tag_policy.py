@@ -359,7 +359,8 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     assert 'PLAN_ONLY="false"' in script
     assert "openfinopsContentHash" in script
     assert '--rules "@$rules"' in script
-    assert '--metadata "@$metadata"' in script
+    assert '--metadata "${metadata_args[@]}"' in script
+    assert "openfinopsSourceRule='#3028 FinOps'" in script
     assert "az policy state trigger-scan --no-wait" in script
     assert "trigger-scan --resource" not in script
     assert "grep -q" not in script
