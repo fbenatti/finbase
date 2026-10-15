@@ -481,5 +481,8 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     'fi',
                     "",
                 ]
-    lines.append('echo "[INFO] OpenFinops tag policy deployment submitted; confira o estado de cada remediation."')
+    lines += [
+        'if plan; then echo "[INFO] PLAN_ONLY concluído; nenhuma alteração Azure foi submetida."',
+        'else echo "[INFO] OpenFinops tag policy deployment submitted; confira o estado de cada remediation."; fi',
+    ]
     return "\n".join(lines) + "\n"
