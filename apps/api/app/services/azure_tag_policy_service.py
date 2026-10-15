@@ -674,6 +674,32 @@ class AzureTagPolicyService:
             return set()
         return {part.strip().casefold() for part in raw.split("·") if part.strip()}
 
+    @staticmethod
+    def _target_matches_terms(target: dict, terms: list[dict]) -> bool:
+        """Match an Azure Resource Graph row to the ARM dimensions of a rule."""
+        values_by_field = {
+            "name": str(target.get("resource_group_name") or ""),
+            "id": str(target.get("resource_id") or ""),
+            "type": str(target.get("resource_type") or ""),
+            "location": str(target.get("location") or ""),
+        }
+        for term in terms:
+            if term.get("scope") == SCOPE_SUBSCRIPTION:
+                continue
+            actual = values_by_field.get(str(term.get("field") or ""), "")
+            if not actual:
+                return False
+            operator = term.get("operator")
+            candidates = [str(value) for value in term.get("values") or []]
+            folded = actual.casefold()
+            if operator == "=" and folded not in {value.casefold() for value in candidates}:
+                return False
+            if operator == "!=" and folded in {value.casefold() for value in candidates}:
+                return False
+            if operator == "~" and not any(value.casefold() in folded for value in candidates):
+                return False
+        return True
+
     @classmethod
     def _rg_terms_match_name(cls, terms: list[dict], assigned_rg: str) -> bool:
         """True if the previous RG-name terms could match this assigned RG."""
@@ -722,7 +748,77 @@ class AzureTagPolicyService:
             return "arm_terms_disjoint"
         return None
 
-    async def generate_tenant_policy(self, connection_id: int, department_id: int | None = None) -> dict | None:
+    def _prior_rule_exclusions(
+        self, item: dict, rules: list[ClassificationRule], departments: dict[int, Department],
+        catalog: dict[str, list[str]], mappings: list[dict[str, str]], diagnostics: list[dict],
+    ) -> list[dict]:
+        """Build selector-only exceptions from active earlier rules, not billing rows."""
+        current_rule = item["rule"]
+        exclusions: list[dict] = []
+        current_sid = item["scope_subscriptions"][0].casefold()
+        for rule in rules:
+            if (rule.priority, rule.id) >= (current_rule.priority, current_rule.id):
+                break
+            department = departments.get(rule.department_id)
+            if not department:
+                continue
+            terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=True)
+            if not terms:
+                continue
+            explicit = self._explicit_scope_subscriptions(terms)
+            if explicit and current_sid not in {sid.casefold() for sid in explicit}:
+                continue
+            earlier_tags = _collapse_tag_keys({
+                mapping["tag_key"]: self._hierarchy(department, departments).get(mapping["focus_field"], "")
+                for mapping in mappings
+            })
+            current_tags = _collapse_tag_keys(item["tags"])
+            if earlier_tags and all(current_tags.get(key.casefold()) == value for key, value in earlier_tags.items()):
+                continue
+            selector = self._selector(terms, item["target"])
+            if not selector:
+                continue
+            entry = {
+                "rule_id": rule.id,
+                "rule_name": rule.name,
+                "terms": terms,
+                "selector": selector,
+                "tags": earlier_tags,
+                "observed": {},
+                "summary": {"rule_id": rule.id, "rule_name": rule.name,
+                            "department_id": rule.department_id,
+                            "department_name": department.name, "observed": {}},
+            }
+            if self._previous_overlap_reason(item, entry) is None:
+                exclusions.append(entry)
+        return exclusions
+
+    async def _azure_rule_targets(self, conn: SourceConnection, subscription_id: str) -> tuple[list[dict], str | None]:
+        """Read current Azure Resource Groups/resources for explicit no-cost exports."""
+        try:
+            from app.services.azure_identity import arm_headers
+            from app.services.azure_resource_graph_service import _post_query
+            import httpx
+
+            headers = await arm_headers(dict(conn.config_json or {}))
+            query = """resourcecontainers
+| where type =~ 'microsoft.resources/subscriptions/resourcegroups'
+| project subscription_id = subscriptionId, resource_group_name = name, resource_id = id, resource_type = type
+| union (resources | project subscription_id = subscriptionId, resource_group_name = resourceGroup, resource_id = id, resource_type = type)"""
+            rows: list[dict] = []
+            token = None
+            async with httpx.AsyncClient() as client:
+                while True:
+                    page, token, _ = await _post_query(client, headers, query, [subscription_id], token)
+                    rows.extend(page)
+                    if not token:
+                        break
+            return rows, None
+        except Exception as exc:
+            return [], f"Não foi possível ler os alvos atuais do Azure: {str(exc)[:180]}"
+
+    async def generate_tenant_policy(self, connection_id: int, department_id: int | None = None,
+                                     subscription_id: str | None = None) -> dict | None:
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or resolve_connection_scope(conn.cloud_scope, conn.cloud_name) != "azure":
             return None
@@ -750,14 +846,55 @@ class AzureTagPolicyService:
                 catalog[subscription_name].append(subscription_id)
         catalog = {name: sorted(set(ids)) for name, ids in catalog.items()}
 
+        azure_target_rows: list[dict] = []
+        if subscription_id:
+            configured_ids = {str(sid).strip().casefold()
+                              for sid in ((conn.config_json or {}).get("subscription_ids") or [])
+                              if UUID_RE.match(str(sid).strip())}
+            allowed_ids = {sid.casefold() for ids in catalog.values() for sid in ids} | configured_ids
+            allowed_ids.update(self._gold_subscription_id(row).casefold() for row in gold_rows)
+            if subscription_id.casefold() not in allowed_ids:
+                diagnostics.append({"status": "blocked", "reason": "Subscription não encontrada no catálogo acessível da conexão",
+                                    "subscription_id": subscription_id})
+                return None
+            try:
+                azure_target_rows, inventory_error = await self._azure_rule_targets(conn, subscription_id)
+            except Exception as exc:
+                inventory_error = str(exc)
+            if inventory_error:
+                diagnostics.append({"status": "blocked", "reason": inventory_error, "subscription_id": subscription_id})
+
         compiled: list[dict] = []
         for rule in rules:
             terms = self._translate_conditions(rule, catalog, diagnostics, resolve_subscriptions=False)
             department = departments.get(rule.department_id)
             if terms and department:
                 selected = selected_department_ids is None or rule.department_id in selected_department_ids
+                rule_evidence = evidence_by_rule.get(rule.id, [])
+                if subscription_id:
+                    rule_evidence = [row for row in rule_evidence
+                                     if self._gold_subscription_id(row).casefold() == subscription_id.casefold()]
+                    if not rule_evidence and not any(d.get("status") == "blocked" and d.get("subscription_id") == subscription_id
+                                                     for d in diagnostics):
+                        scope = next((term["scope"] for term in terms if term["scope"] in {SCOPE_RESOURCE, SCOPE_RG}), None)
+                        if scope == SCOPE_RG:
+                            rule_evidence = [{"subscription_id": subscription_id,
+                                              "resource_group_name": str(row.get("resource_group_name") or ""),
+                                              "evidence_count": 0}
+                                             for row in azure_target_rows
+                                             if str(row.get("subscription_id") or "").casefold() == subscription_id.casefold()
+                                             and str(row.get("resource_type") or "").casefold() == AZURE_POLICY_RESOURCE_GROUP_TYPE.casefold()
+                                             and self._target_matches_terms(row, terms)]
+                        elif scope == SCOPE_RESOURCE:
+                            rule_evidence = [{"subscription_id": subscription_id,
+                                              "resource_id": row.get("resource_id"),
+                                              "resource_group_name": row.get("resource_group_name"),
+                                              "evidence_count": 0}
+                                             for row in azure_target_rows
+                                             if str(row.get("subscription_id") or "").casefold() == subscription_id.casefold()
+                                             and self._target_matches_terms(row, terms)]
                 compiled.extend(self._concrete_items(
-                    rule, terms, evidence_by_rule.get(rule.id, []), self._hierarchy(department, departments), mappings, selected, diagnostics,
+                    rule, terms, rule_evidence, self._hierarchy(department, departments), mappings, selected, diagnostics,
                 ))
 
         layers = {"resource_groups": [], "resources": []}
@@ -772,6 +909,8 @@ class AzureTagPolicyService:
                 selector = self._selector(item["terms"], target, omit_rg_scope=omit_rg_scope)
                 if not selector:
                     continue
+                if subscription_id and item["scope_subscriptions"][0].casefold() != subscription_id.casefold():
+                    continue
                 subscription_id = item["scope_subscriptions"][0]
                 bucket = previous[(target, subscription_id)]
                 overlapping = []
@@ -782,6 +921,11 @@ class AzureTagPolicyService:
                         pruned.append({**entry["summary"], "prune_reason": reason})
                     else:
                         overlapping.append(entry)
+                exclusion_item = {**item, "target": target}
+                rule_exclusions = self._prior_rule_exclusions(exclusion_item, rules, departments, catalog, mappings, diagnostics)
+                known_ids = {entry["rule_id"] for entry in overlapping}
+                rule_exclusions = [entry for entry in rule_exclusions if entry["rule_id"] not in known_ids]
+                overlapping.extend(rule_exclusions)
                 effective = self._effective(selector, [entry["selector"] for entry in overlapping])
                 output = {
                     "rule_id": rule.id, "rule_name": rule.name, "priority": rule.priority,
