@@ -86,8 +86,8 @@ def cloud_root_path_for(donor: Department | None, path: list[str], departments: 
     """The provider branch bounds consumption targets without a saved filter."""
     if len(path) >= 3 and path[1] in CLOUD_BRANCHES and path[2] in CLOUD_PROVIDERS:
         return path[:3]
-    if len(path) >= 3 and path[0] == "Marketplace" and any("mongo" in part.lower() for part in path):
-        return path[:3]
+    if len(path) >= 2 and path[0] == "Marketplace" and "mongo" in path[1].lower():
+        return path[:2]
     return []
 
 
