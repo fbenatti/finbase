@@ -1,0 +1,1811 @@
+{
+  "captured_at_utc": "2026-10-15T14:18:24.673088+00:00",
+  "subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240",
+  "snapshot_stage": "before direct tag application; policy definitions and assignments have already been updated/created",
+  "resource_groups": [
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New",
+      "name": "FundacaoBR_New",
+      "tags": {
+        "Date": "Agosto 2021",
+        "Environment": "Prod",
+        "Partner": "Keyrus"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/AzureBackupRG_brazilsouth_1",
+      "name": "AzureBackupRG_brazilsouth_1",
+      "tags": {}
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao",
+      "name": "DW_Fundacao",
+      "tags": {}
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DefaultResourceGroup-CQ",
+      "name": "DefaultResourceGroup-CQ",
+      "tags": {}
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/NetworkWatcherRG",
+      "name": "NetworkWatcherRG",
+      "tags": {}
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dig-security-rg-o2rkefvpoqj4g-1162383220130775040-use1",
+      "name": "dig-security-rg-o2rkefvpoqj4g-1162383220130775040-use1",
+      "tags": {
+        "Budget": "PrismaCloud",
+        "dig-security": "true",
+        "dig-security-version": "68",
+        "dig-security:deployment-method": "Bicep",
+        "diretoria demandante": "Segurança para o Negocio",
+        "idOrcamento": "ID000260",
+        "owner": "Arq. e Cloud Security",
+        "projeto": "PrismaCloud",
+        "trilha": "Prod"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/cortex-m-o-67805-cbfea5df4d",
+      "name": "cortex-m-o-67805-cbfea5df4d",
+      "tags": {
+        "managed_by": "paloaltonetworks",
+        "versionHash": "us7GwJi41Fh0Ni2AzyeMHMl0zrQWOQ97v1tEm1llnzc="
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação",
+      "name": "rg-security-fundação",
+      "tags": {}
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/PCCAgentlessScanResourceGroup",
+      "name": "PCCAgentlessScanResourceGroup",
+      "tags": {
+        "created-by": "prismacloud-agentless-scan",
+        "prismacloud-agentless-unique-id": "c0eb4436-a661-be84-e137-b8ee4dc1fa35"
+      }
+    },
+    {
+      "id": "/subscriptions/63DBC6FC-93D8-4AC1-9745-253F6B502240/resourceGroups/DEFAULT-EVENTGRID",
+      "name": "DEFAULT-EVENTGRID",
+      "tags": {}
+    }
+  ],
+  "resources": [
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Compute/virtualMachines/FundacaoVM",
+      "name": "FundacaoVM",
+      "type": "Microsoft.Compute/virtualMachines",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Operacao": "Windows (Windows Server 2016 Datacenter)",
+        "Operating system": "Windows (Windows Server 2016 Datacenter)",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "VM Size": "Standard B2s (2 vcpus, 4 GiB memory)",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Compute/disks/FundacaoVM_OsDisk_1_dc46642ad1c340879ac4e829b6a1cce4",
+      "name": "FundacaoVM_OsDisk_1_dc46642ad1c340879ac4e829b6a1cce4",
+      "type": "Microsoft.Compute/disks",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Disk Tier": "S20",
+        "Disk sku": "Standard HDD LRS",
+        "Objeto de Custo": "29TN10A",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "customer": "Vivo"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Storage/storageAccounts/fundacaofiles",
+      "name": "fundacaofiles",
+      "type": "Microsoft.Storage/storageAccounts",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto De Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.RecoveryServices/vaults/FUNDACAOBRBKPVAULT",
+      "name": "FUNDACAOBRBKPVAULT",
+      "type": "Microsoft.RecoveryServices/vaults",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/azurebackuprg_brazilsouth_1/providers/Microsoft.Compute/restorePointCollections/AzureBackup_fundacaovm_4283398234707383332",
+      "name": "AzureBackup_fundacaovm_4283398234707383332",
+      "type": "Microsoft.Compute/restorePointCollections",
+      "resourceGroup": "azurebackuprg_brazilsouth_1",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/serverFarms/BrazilSouthPlan",
+      "name": "BrazilSouthPlan",
+      "type": "Microsoft.Web/serverFarms",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Web/connections/azureblob",
+      "name": "azureblob",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Network/virtualNetworks/FundacaoBR-vnet",
+      "name": "FundacaoBR-vnet",
+      "type": "Microsoft.Network/virtualNetworks",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Network/privateDnsZones/privatelink.database.windows.net",
+      "name": "privatelink.database.windows.net",
+      "type": "Microsoft.Network/privateDnsZones",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Storage/storageAccounts/sqlvaelzshmxovavu4",
+      "name": "sqlvaelzshmxovavu4",
+      "type": "Microsoft.Storage/storageAccounts",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Centro De Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/networkInterfaces/pe-sql-fundacaodw-dev.nic.c680ef61-09aa-43e8-8594-39bf5e378fa7",
+      "name": "pe-sql-fundacaodw-dev.nic.c680ef61-09aa-43e8-8594-39bf5e378fa7",
+      "type": "Microsoft.Network/networkInterfaces",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Compute/virtualMachines/FundacaoVM/extensions/WindowsAgent.AzureSecurityCenter",
+      "name": "FundacaoVM/WindowsAgent.AzureSecurityCenter",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Web/sites/AcessoGoogleAnalitycsDwFundacao",
+      "name": "AcessoGoogleAnalitycsDwFundacao",
+      "type": "Microsoft.Web/sites",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Objeto de Custo": "29TN10A",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/privateEndpoints/pe-sql-fundacaodw-dev",
+      "name": "pe-sql-fundacaodw-dev",
+      "type": "Microsoft.Network/privateEndpoints",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Compute/virtualMachines/FundacaoVM/extensions/enablevmaccess",
+      "name": "FundacaoVM/enablevmaccess",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/microsoft.compute/virtualMachines/fundacaovm/extensions/AzureMonitorWindowsAgent",
+      "name": "fundacaovm/AzureMonitorWindowsAgent",
+      "type": "microsoft.compute/virtualMachines/extensions",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Web/sites/FuncGetMetadados",
+      "name": "FuncGetMetadados",
+      "type": "Microsoft.Web/sites",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Conta Contabil": "31031338.0",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.KeyVault/vaults/DwFundacao",
+      "name": "DwFundacao",
+      "type": "Microsoft.KeyVault/vaults",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Conta Contabil": "31031338.0",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "dw_fundacao": "Key_Vault"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Network/networkSecurityGroups/FundacaoVM-nsg",
+      "name": "FundacaoVM-nsg",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Storage/storageAccounts/dwfundacao",
+      "name": "dwfundacao",
+      "type": "Microsoft.Storage/storageAccounts",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Fundacao_DW": "Conta de Armazenamento",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/networkSecurityGroups/nsg-denyall-fundacao-brsouth",
+      "name": "nsg-denyall-fundacao-brsouth",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/NetworkWatcherRG/providers/Microsoft.Network/networkWatchers/NetworkWatcher_brazilsouth",
+      "name": "NetworkWatcher_brazilsouth",
+      "type": "Microsoft.Network/networkWatchers",
+      "resourceGroup": "NetworkWatcherRG",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/applicationSecurityGroups/asg-sql-fundacaodw-dev",
+      "name": "asg-sql-fundacaodw-dev",
+      "type": "Microsoft.Network/applicationSecurityGroups",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/routeTables/udr-fundacao-brsouth",
+      "name": "udr-fundacao-brsouth",
+      "type": "Microsoft.Network/routeTables",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Storage/storageAccounts/sqlvaxqooifeoii6hk",
+      "name": "sqlvaxqooifeoii6hk",
+      "type": "Microsoft.Storage/storageAccounts",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "Centro De Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.Compute/virtualMachines/FundacaoVM/extensions/MicrosoftMonitoringAgent",
+      "name": "FundacaoVM/MicrosoftMonitoringAgent",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Network/networkInterfaces/fundacaovm961",
+      "name": "fundacaovm961",
+      "type": "Microsoft.Network/networkInterfaces",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/virtualNetworks/vnet-fundacao-brsouth",
+      "name": "vnet-fundacao-brsouth",
+      "type": "Microsoft.Network/virtualNetworks",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/azureblob-3",
+      "name": "azureblob-3",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/sharepointonline-1",
+      "name": "sharepointonline-1",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/sharepointonline-2",
+      "name": "sharepointonline-2",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/sql",
+      "name": "sql",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.EventGrid/systemTopics/dwfundacao-608e7823-0d6b-4ada-87b0-92850c8b1e85",
+      "name": "dwfundacao-608e7823-0d6b-4ada-87b0-92850c8b1e85",
+      "type": "Microsoft.EventGrid/systemTopics",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/azureblob-1",
+      "name": "azureblob-1",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/azureblob-4",
+      "name": "azureblob-4",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/azureblob",
+      "name": "azureblob",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/azureblob-2",
+      "name": "azureblob-2",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Logic/workflows/read-sharepoint-dw",
+      "name": "read-sharepoint-dw",
+      "type": "Microsoft.Logic/workflows",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Fundacao_DW": "FTV",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/sharepointonline",
+      "name": "sharepointonline",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Network/privateDnsZones/privatelink.datafactory.azure.net",
+      "name": "privatelink.datafactory.azure.net",
+      "type": "Microsoft.Network/privateDnsZones",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Network/privateDnsZones/privatelink.datafactory.azure.net/virtualNetworkLinks/5wqvarehrohdg",
+      "name": "privatelink.datafactory.azure.net/5wqvarehrohdg",
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/privateEndpoints/pe-adf-fundacaodw-dev",
+      "name": "pe-adf-fundacaodw-dev",
+      "type": "Microsoft.Network/privateEndpoints",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/sql-1",
+      "name": "sql-1",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/dw_fundacao",
+      "name": "fundacaodw/dw_fundacao",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/networkInterfaces/pe-adf-fundacaodw-dev-nic",
+      "name": "pe-adf-fundacaodw-dev-nic",
+      "type": "Microsoft.Network/networkInterfaces",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/connections/sql-2",
+      "name": "sql-2",
+      "type": "Microsoft.Web/connections",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/stage",
+      "name": "fundacaodw/stage",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Fundacao_DW": "Banco de Dados",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/fundacao",
+      "name": "fundacaodw/fundacao",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Origem": "TI",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/work",
+      "name": "fundacaodw/work",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Fundacao_DW": "Banco de Dados",
+        "centro-de-custos": "29TN161700",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/dbFTVAp",
+      "name": "fundacaodw/dbFTVAp",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/acesso",
+      "name": "fundacaodw/acesso",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "centro-de-custos": "29TN161700",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/intranet",
+      "name": "fundacaodw/intranet",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/master",
+      "name": "fundacaodw/master",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {}
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/hardfun",
+      "name": "fundacaodw/hardfun",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw",
+      "name": "fundacaodw",
+      "type": "Microsoft.Sql/servers",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "DW_PRJ": "1",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/FTVApp",
+      "name": "fundacaodw/FTVApp",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/controle",
+      "name": "fundacaodw/controle",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "DW_PRJ": "1",
+        "Origem": "TI",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.DataFactory/factories/dffundacao",
+      "name": "dffundacao",
+      "type": "Microsoft.DataFactory/factories",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "centro-de-custos": "29TN161700",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.EventGrid/systemTopics/sqlvaelzshmxovavu4-ede8f96c-05ee-42e5-8f31-9c299bff9ae9",
+      "name": "sqlvaelzshmxovavu4-ede8f96c-05ee-42e5-8f31-9c299bff9ae9",
+      "type": "Microsoft.EventGrid/systemTopics",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/fundacaobr_new/providers/Microsoft.EventGrid/systemTopics/sqlvaxqooifeoii6hk-f9812790-2592-42db-b65b-ce123b9665d1",
+      "name": "sqlvaxqooifeoii6hk-f9812790-2592-42db-b65b-ce123b9665d1",
+      "type": "Microsoft.EventGrid/systemTopics",
+      "resourceGroup": "fundacaobr_new",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/serverFarms/ASP-DWFundacao-9950",
+      "name": "ASP-DWFundacao-9950",
+      "type": "Microsoft.Web/serverFarms",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "dw_fundacao": "Key_Vault",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/serverFarms/ASP-DWFundacao-b5cb",
+      "name": "ASP-DWFundacao-b5cb",
+      "type": "Microsoft.Web/serverFarms",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Web/sites/fnGetRFBEstabelecimento",
+      "name": "fnGetRFBEstabelecimento",
+      "type": "Microsoft.Web/sites",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "centro-de-custos": "29TN161700",
+        "dw_fundacao": "Key_Vault",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/localNetworkGateways/lng-fundacao-brsouth",
+      "name": "lng-fundacao-brsouth",
+      "type": "Microsoft.Network/localNetworkGateways",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Network/localNetworkGateways/lng-fundacao-brsouth2",
+      "name": "lng-fundacao-brsouth2",
+      "type": "Microsoft.Network/localNetworkGateways",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Insights/scheduledqueryrules/Backup finalizado com falha - FUNDACAOBRBKPVAULT",
+      "name": "Backup finalizado com falha - FUNDACAOBRBKPVAULT",
+      "type": "Microsoft.Insights/scheduledqueryrules",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Insights/scheduledqueryrules/Registro de item de infraestrutura excluído - FUNDACAOBRBKPVAULT",
+      "name": "Registro de item de infraestrutura excluído - FUNDACAOBRBKPVAULT",
+      "type": "Microsoft.Insights/scheduledqueryrules",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Insights/scheduledqueryrules/Item de backup excluído - FUNDACAOBRBKPVAULT",
+      "name": "Item de backup excluído - FUNDACAOBRBKPVAULT",
+      "type": "Microsoft.Insights/scheduledqueryrules",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto de Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Insights/scheduledqueryrules/Item de backup desabilitado - FUNDACAOBRBKPVAULT",
+      "name": "Item de backup desabilitado - FUNDACAOBRBKPVAULT",
+      "type": "Microsoft.Insights/scheduledqueryrules",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/serverFarms/ASP-DWFundacao-a243",
+      "name": "ASP-DWFundacao-a243",
+      "type": "Microsoft.Web/serverFarms",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Web/sites/appfundacao",
+      "name": "appfundacao",
+      "type": "Microsoft.Web/sites",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Conta Contabil": "31031338.0",
+        "Objeto de Custo": "29TN10A",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "dw_fundacao": "Key_Vault",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net",
+      "name": "privatelink.blob.core.windows.net",
+      "type": "Microsoft.Network/privateDnsZones",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net/virtualNetworkLinks/5wqvarehrohdg",
+      "name": "privatelink.blob.core.windows.net/5wqvarehrohdg",
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Storage/storageAccounts/backupdwftv",
+      "name": "backupdwftv",
+      "type": "Microsoft.Storage/storageAccounts",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "Diretoria": "DIR FUNDACAO TELEFONICA",
+        "Objeto De Custo": "29TN10A",
+        "Origem": "TI",
+        "Projeto": "fundacao telefonica",
+        "centro-de-custos": "29TN161700"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Sql/servers/fundacaodw/databases/sandbox",
+      "name": "fundacaodw/sandbox",
+      "type": "Microsoft.Sql/servers/databases",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "Centro de Custo": "29TN161700",
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/FundacaoBR_New/providers/Microsoft.Network/bastionHosts/FundacaoBR-vnet-bastion",
+      "name": "FundacaoBR-vnet-bastion",
+      "type": "Microsoft.Network/bastionHosts",
+      "resourceGroup": "FundacaoBR_New",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DefaultResourceGroup-CQ/providers/Microsoft.OperationalInsights/workspaces/DefaultWorkspace-63dbc6fc-93d8-4ac1-9745-253f6b502240-CQ",
+      "name": "DefaultWorkspace-63dbc6fc-93d8-4ac1-9745-253f6b502240-CQ",
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "resourceGroup": "DefaultResourceGroup-CQ",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/Microsoft.Web/serverFarms/ASP-DWFundacao-be00",
+      "name": "ASP-DWFundacao-be00",
+      "type": "Microsoft.Web/serverFarms",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/DW_Fundacao/providers/microsoft.insights/components/FuncExtractAvamec",
+      "name": "FuncExtractAvamec",
+      "type": "microsoft.insights/components",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63DBC6FC-93D8-4AC1-9745-253F6B502240/resourceGroups/DW_Fundacao/providers/microsoft.insights/actiongroups/Application Insights Smart Detection",
+      "name": "Application Insights Smart Detection",
+      "type": "microsoft.insights/actiongroups",
+      "resourceGroup": "DW_Fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/dw_fundacao/providers/microsoft.alertsmanagement/smartDetectorAlertRules/Failure Anomalies - FuncExtractAvamec",
+      "name": "Failure Anomalies - FuncExtractAvamec",
+      "type": "microsoft.alertsmanagement/smartDetectorAlertRules",
+      "resourceGroup": "dw_fundacao",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/cortex-m-o-67805-cbfea5df4d/providers/Microsoft.Compute/galleries/cortex_ads_m_o_67805_cbfea5df4d_63dbc6fc",
+      "name": "cortex_ads_m_o_67805_cbfea5df4d_63dbc6fc",
+      "type": "Microsoft.Compute/galleries",
+      "resourceGroup": "cortex-m-o-67805-cbfea5df4d",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "managed_by": "paloaltonetworks",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.4 Ensure that Activity Log Alert exists for Delete Network Security Group",
+      "name": "5.2.4 Ensure that Activity Log Alert exists for Delete Network Security Group",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.9 Ensure that Activity Log Alert exists for Create or Update or Delete SQL Server Firewall Rule",
+      "name": "5.2.9 Ensure that Activity Log Alert exists for Create or Update or Delete SQL Server Firewall Rule",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.7 Ensure that Activity Log Alert exists for Create or Update Security  Solution",
+      "name": "5.2.7 Ensure that Activity Log Alert exists for Create or Update Security  Solution",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.5 Ensure that Activity Log Alert exists for Create or Update Network Security Group",
+      "name": "5.2.5 Ensure that Activity Log Alert exists for Create or Update Network Security Group",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.3 Ensure that Activity Log Alert exists for Create or Update Network Security Group",
+      "name": "5.2.3 Ensure that Activity Log Alert exists for Create or Update Network Security Group",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.8 Ensure that Activity Log Alert exists for Delete Security Solution",
+      "name": "5.2.8 Ensure that Activity Log Alert exists for Delete Security Solution",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.2 Ensure that Activity Log Alert exists for Delete Policy Assignment",
+      "name": "5.2.2 Ensure that Activity Log Alert exists for Delete Policy Assignment",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.1 Ensure that Activity Log Alert exists for Create Policy Assignment",
+      "name": "5.2.1 Ensure that Activity Log Alert exists for Create Policy Assignment",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/SD-Create policy exemption",
+      "name": "SD-Create policy exemption",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63DBC6FC-93D8-4AC1-9745-253F6B502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/actiongroups/AG-SECURITY",
+      "name": "AG-SECURITY",
+      "type": "microsoft.insights/actiongroups",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/microsoft.insights/activityLogAlerts/5.2.6 Ensure that activity log alert exists for the Delete Network Security Group Rule",
+      "name": "5.2.6 Ensure that activity log alert exists for the Delete Network Security Group Rule",
+      "type": "microsoft.insights/activityLogAlerts",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/rg-security-fundação/providers/Microsoft.Security/automations/ExportToWorkspace",
+      "name": "ExportToWorkspace",
+      "type": "Microsoft.Security/automations",
+      "resourceGroup": "rg-security-fundação",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/resourceGroups/Default-EventGrid/providers/Microsoft.EventGrid/systemTopics/63dbc6fc-93d8-4ac1-9745-253f6b502240-5406c169-a574-4b7c-833e-9e8cedb4017d",
+      "name": "63dbc6fc-93d8-4ac1-9745-253f6b502240-5406c169-a574-4b7c-833e-9e8cedb4017d",
+      "type": "Microsoft.EventGrid/systemTopics",
+      "resourceGroup": "Default-EventGrid",
+      "tags": {
+        "centro-de-custos": "29TN161700",
+        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "fundacao telefonica"
+      }
+    }
+  ],
+  "assignments": [
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyAssignments/openfinops-rg-azure-ti-test-fundacao-telefonica-1-63dbc6fc",
+      "name": "openfinops-rg-azure-ti-test-fundacao-telefonica-1-63dbc6fc",
+      "scope": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "policyDefinitionId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/openfinops-rg-azure-ti-test-fundacao-telefonica-1",
+      "identity": {
+        "principalId": "05fff4cf-224a-41ed-a933-414a82db9b5b",
+        "tenantId": "78879b00-f0e9-486c-836f-56f314e47e7f",
+        "type": "SystemAssigned",
+        "userAssignedIdentities": null
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyAssignments/openfinops-resource-azure-ti-test-fundacao-telefonica-2-63dbc6fc",
+      "name": "openfinops-resource-azure-ti-test-fundacao-telefonica-2-63dbc6fc",
+      "scope": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "policyDefinitionId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/openfinops-resource-azure-ti-test-fundacao-telefonica-2",
+      "identity": {
+        "principalId": "5c32b23b-3c37-42d7-b116-0b0d25fdbda8",
+        "tenantId": "78879b00-f0e9-486c-836f-56f314e47e7f",
+        "type": "SystemAssigned",
+        "userAssignedIdentities": null
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyAssignments/of-asg-2-78-rg-7750aa7cbe85",
+      "name": "of-asg-2-78-rg-7750aa7cbe85",
+      "scope": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "policyDefinitionId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-rg-7750aa7cbe85",
+      "identity": {
+        "principalId": "4e21b433-54b8-4886-ae4f-aeb8b707690c",
+        "tenantId": "78879b00-f0e9-486c-836f-56f314e47e7f",
+        "type": "SystemAssigned",
+        "userAssignedIdentities": null
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyAssignments/of-asg-2-78-resource-f85c8ff0874e",
+      "name": "of-asg-2-78-resource-f85c8ff0874e",
+      "scope": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "policyDefinitionId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-resource-f85c8ff0874e",
+      "identity": {
+        "principalId": "483e845e-a4c3-4ce0-9531-cf3a9db91747",
+        "tenantId": "78879b00-f0e9-486c-836f-56f314e47e7f",
+        "type": "SystemAssigned",
+        "userAssignedIdentities": null
+      }
+    }
+  ],
+  "definitions": [
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/openfinops-rg-azure-ti-test-fundacao-telefonica-1",
+      "name": "openfinops-rg-azure-ti-test-fundacao-telefonica-1",
+      "mode": "All",
+      "metadata": {
+        "category": "OpenFinops",
+        "createdBy": "cbefae66-00cf-4086-84c6-ec37345bc241",
+        "createdOn": "2026-09-08T18:49:15.6536538Z",
+        "openfinopsContentHash": "0b79e49909a4ec3f363308860e08fef357b28c004d30c106c29dd7d54fd2c684",
+        "openfinopsExclusions": "#78 Classifica → Prisma → Prisma",
+        "openfinopsIdentityKey": "4ae7870f6635",
+        "openfinopsLayer": "rg",
+        "openfinopsRuleId": "52",
+        "openfinopsSourceRule": "#52 Classifica → fundacao telefonica",
+        "updatedBy": "cbefae66-00cf-4086-84c6-ec37345bc241",
+        "updatedOn": "2026-10-15T14:01:58.1917566Z",
+        "version": "2.0"
+      },
+      "policyRule": {
+        "if": {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "equals": "Microsoft.Resources/subscriptions/resourceGroups",
+                  "field": "type"
+                },
+                {
+                  "not": {
+                    "allOf": [
+                      {
+                        "equals": "Microsoft.Resources/subscriptions/resourceGroups",
+                        "field": "type"
+                      },
+                      {
+                        "anyOf": [
+                          {
+                            "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
+                            "field": "name"
+                          },
+                          {
+                            "contains": "dig-security-rg",
+                            "field": "name"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['projeto']"
+                    },
+                    {
+                      "notMatch": "ZnVuZGFjYW8gdGVsZWZvbmljYQ==",
+                      "value": "[base64(string(field('tags[''projeto'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['diretoria']"
+                    },
+                    {
+                      "notMatch": "RElSIEZVTkRBQ0FPIFRFTEVGT05JQ0E=",
+                      "value": "[base64(string(field('tags[''diretoria'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['centro-de-custos']"
+                    },
+                    {
+                      "notMatch": "MjlUTjE2MTcwMA==",
+                      "value": "[base64(string(field('tags[''centro-de-custos'']')))]"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "then": {
+          "details": {
+            "conflictEffect": "audit",
+            "operations": [
+              {
+                "field": "tags['projeto']",
+                "operation": "addOrReplace",
+                "value": "fundacao telefonica"
+              },
+              {
+                "field": "tags['diretoria']",
+                "operation": "addOrReplace",
+                "value": "DIR FUNDACAO TELEFONICA"
+              },
+              {
+                "field": "tags['centro-de-custos']",
+                "operation": "addOrReplace",
+                "value": "29TN161700"
+              }
+            ],
+            "roleDefinitionIds": [
+              "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
+            ]
+          },
+          "effect": "modify"
+        }
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/openfinops-resource-azure-ti-test-fundacao-telefonica-2",
+      "name": "openfinops-resource-azure-ti-test-fundacao-telefonica-2",
+      "mode": "Indexed",
+      "metadata": {
+        "category": "OpenFinops",
+        "createdBy": "cbefae66-00cf-4086-84c6-ec37345bc241",
+        "createdOn": "2026-09-08T18:49:31.9809224Z",
+        "openfinopsContentHash": "15fbd776ae570109ccb7e0ba8ae4f1b930529e2fb55bdcc0b63bb997ba782da3",
+        "openfinopsExclusions": "#78 Classifica → Prisma → Prisma",
+        "openfinopsIdentityKey": "0b1846c1728f",
+        "openfinopsLayer": "resource",
+        "openfinopsRuleId": "52",
+        "openfinopsSourceRule": "#52 Classifica → fundacao telefonica",
+        "updatedBy": "cbefae66-00cf-4086-84c6-ec37345bc241",
+        "updatedOn": "2026-10-15T14:15:21.9746768Z",
+        "version": "2.0"
+      },
+      "policyRule": {
+        "if": {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "allOf": [
+                    {
+                      "field": "type",
+                      "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                    },
+                    {
+                      "not": {
+                        "allOf": [
+                          {
+                            "equals": "Microsoft.Sql/servers/databases",
+                            "field": "type"
+                          },
+                          {
+                            "equals": "master",
+                            "field": "name"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "not": {
+                    "allOf": [
+                      {
+                        "field": "type",
+                        "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                      },
+                      {
+                        "not": {
+                          "allOf": [
+                            {
+                              "equals": "Microsoft.Sql/servers/databases",
+                              "field": "type"
+                            },
+                            {
+                              "equals": "master",
+                              "field": "name"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "anyOf": [
+                          {
+                            "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
+                            "value": "[resourceGroup().name]"
+                          },
+                          {
+                            "contains": "dig-security-rg",
+                            "value": "[resourceGroup().name]"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['projeto']"
+                    },
+                    {
+                      "notMatch": "ZnVuZGFjYW8gdGVsZWZvbmljYQ==",
+                      "value": "[base64(string(field('tags[''projeto'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['diretoria']"
+                    },
+                    {
+                      "notMatch": "RElSIEZVTkRBQ0FPIFRFTEVGT05JQ0E=",
+                      "value": "[base64(string(field('tags[''diretoria'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['centro-de-custos']"
+                    },
+                    {
+                      "notMatch": "MjlUTjE2MTcwMA==",
+                      "value": "[base64(string(field('tags[''centro-de-custos'']')))]"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "then": {
+          "details": {
+            "conflictEffect": "audit",
+            "operations": [
+              {
+                "field": "tags['projeto']",
+                "operation": "addOrReplace",
+                "value": "fundacao telefonica"
+              },
+              {
+                "field": "tags['diretoria']",
+                "operation": "addOrReplace",
+                "value": "DIR FUNDACAO TELEFONICA"
+              },
+              {
+                "field": "tags['centro-de-custos']",
+                "operation": "addOrReplace",
+                "value": "29TN161700"
+              }
+            ],
+            "roleDefinitionIds": [
+              "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
+            ]
+          },
+          "effect": "modify"
+        }
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-rg-7750aa7cbe85",
+      "name": "of-def-2-78-rg-7750aa7cbe85",
+      "mode": "All",
+      "metadata": {
+        "category": "OpenFinops",
+        "createdBy": "cbefae66-00cf-4086-84c6-ec37345bc241",
+        "createdOn": "2026-10-15T14:15:49.1421448Z",
+        "openfinopsContentHash": "1fbe15eb73d061052ffa6e490db381bd9111a330bf3748d3dcc510a6c85637bf",
+        "openfinopsExclusions": "Nenhuma",
+        "openfinopsIdentityKey": "7750aa7cbe85",
+        "openfinopsLayer": "rg",
+        "openfinopsRuleId": "78",
+        "openfinopsSourceRule": "#78 Classifica → Prisma",
+        "updatedBy": null,
+        "updatedOn": null,
+        "version": "2.0"
+      },
+      "policyRule": {
+        "if": {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "equals": "Microsoft.Resources/subscriptions/resourceGroups",
+                  "field": "type"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
+                      "field": "name"
+                    },
+                    {
+                      "contains": "dig-security-rg",
+                      "field": "name"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['projeto']"
+                    },
+                    {
+                      "notMatch": "UHJpc21h",
+                      "value": "[base64(string(field('tags[''projeto'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['diretoria']"
+                    },
+                    {
+                      "notMatch": "RElSIFNFR1VSQU5DQSBESUdJVEFM",
+                      "value": "[base64(string(field('tags[''diretoria'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['centro-de-custos']"
+                    },
+                    {
+                      "notMatch": "MjlUTjE2MTcwMA==",
+                      "value": "[base64(string(field('tags[''centro-de-custos'']')))]"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "then": {
+          "details": {
+            "conflictEffect": "audit",
+            "operations": [
+              {
+                "field": "tags['projeto']",
+                "operation": "addOrReplace",
+                "value": "Prisma"
+              },
+              {
+                "field": "tags['diretoria']",
+                "operation": "addOrReplace",
+                "value": "DIR SEGURANCA DIGITAL"
+              },
+              {
+                "field": "tags['centro-de-custos']",
+                "operation": "addOrReplace",
+                "value": "29TN161700"
+              }
+            ],
+            "roleDefinitionIds": [
+              "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
+            ]
+          },
+          "effect": "modify"
+        }
+      }
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-resource-f85c8ff0874e",
+      "name": "of-def-2-78-resource-f85c8ff0874e",
+      "mode": "Indexed",
+      "metadata": {
+        "category": "OpenFinops",
+        "createdBy": "cbefae66-00cf-4086-84c6-ec37345bc241",
+        "createdOn": "2026-10-15T14:16:18.9615818Z",
+        "openfinopsContentHash": "69951975673171eea1635475dc0d91c6136feacfb4b65e5c8cb03d158a5b3cf1",
+        "openfinopsExclusions": "Nenhuma",
+        "openfinopsIdentityKey": "f85c8ff0874e",
+        "openfinopsLayer": "resource",
+        "openfinopsRuleId": "78",
+        "openfinopsSourceRule": "#78 Classifica → Prisma",
+        "updatedBy": null,
+        "updatedOn": null,
+        "version": "2.0"
+      },
+      "policyRule": {
+        "if": {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "field": "type",
+                  "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"
+                },
+                {
+                  "not": {
+                    "allOf": [
+                      {
+                        "equals": "Microsoft.Sql/servers/databases",
+                        "field": "type"
+                      },
+                      {
+                        "equals": "master",
+                        "field": "name"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "anyOf": [
+                    {
+                      "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
+                      "value": "[resourceGroup().name]"
+                    },
+                    {
+                      "contains": "dig-security-rg",
+                      "value": "[resourceGroup().name]"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['projeto']"
+                    },
+                    {
+                      "notMatch": "UHJpc21h",
+                      "value": "[base64(string(field('tags[''projeto'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['diretoria']"
+                    },
+                    {
+                      "notMatch": "RElSIFNFR1VSQU5DQSBESUdJVEFM",
+                      "value": "[base64(string(field('tags[''diretoria'']')))]"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "exists": "false",
+                      "field": "tags['centro-de-custos']"
+                    },
+                    {
+                      "notMatch": "MjlUTjE2MTcwMA==",
+                      "value": "[base64(string(field('tags[''centro-de-custos'']')))]"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "then": {
+          "details": {
+            "conflictEffect": "audit",
+            "operations": [
+              {
+                "field": "tags['projeto']",
+                "operation": "addOrReplace",
+                "value": "Prisma"
+              },
+              {
+                "field": "tags['diretoria']",
+                "operation": "addOrReplace",
+                "value": "DIR SEGURANCA DIGITAL"
+              },
+              {
+                "field": "tags['centro-de-custos']",
+                "operation": "addOrReplace",
+                "value": "29TN161700"
+              }
+            ],
+            "roleDefinitionIds": [
+              "/providers/microsoft.authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
+            ]
+          },
+          "effect": "modify"
+        }
+      }
+    }
+  ],
+  "remediations": [
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.policyinsights/remediations/of-rem-20261015140206-1",
+      "name": "of-rem-20261015140206-1",
+      "provisioningState": "Evaluating",
+      "deploymentStatus": {
+        "failedDeployments": 0,
+        "successfulDeployments": 0,
+        "totalDeployments": 0
+      },
+      "policyAssignmentId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.authorization/policyassignments/openfinops-rg-azure-ti-test-fundacao-telefonica-1-63dbc6fc"
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.policyinsights/remediations/of-rem-20261015141530-1",
+      "name": "of-rem-20261015141530-1",
+      "provisioningState": "Evaluating",
+      "deploymentStatus": {
+        "failedDeployments": 0,
+        "successfulDeployments": 0,
+        "totalDeployments": 0
+      },
+      "policyAssignmentId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.authorization/policyassignments/openfinops-resource-azure-ti-test-fundacao-telefonica-2-63dbc6fc"
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.policyinsights/remediations/of-rem-20261015141605-1",
+      "name": "of-rem-20261015141605-1",
+      "provisioningState": "Evaluating",
+      "deploymentStatus": {
+        "failedDeployments": 0,
+        "successfulDeployments": 0,
+        "totalDeployments": 0
+      },
+      "policyAssignmentId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.authorization/policyassignments/of-asg-2-78-rg-7750aa7cbe85"
+    },
+    {
+      "id": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.policyinsights/remediations/of-rem-20261015141632-2",
+      "name": "of-rem-20261015141632-2",
+      "provisioningState": "Evaluating",
+      "deploymentStatus": {
+        "failedDeployments": 0,
+        "successfulDeployments": 0,
+        "totalDeployments": 0
+      },
+      "policyAssignmentId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/microsoft.authorization/policyassignments/of-asg-2-78-resource-f85c8ff0874e"
+    }
+  ]
+}
