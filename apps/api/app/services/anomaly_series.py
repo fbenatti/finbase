@@ -540,6 +540,8 @@ async def read_case_series(
     for index, member in enumerate(members):
         timeline = compose_case_timeline(points_by_series[index], observed_by_member[index],
                                          start=context_start, end=display_end, data_end=data_end, monthly=monthly)
+        if len(members) == 1:
+            apply_case_evaluation_snapshot(timeline, case)
         event_point = next((point for point in timeline if point["event_date"] == event_day.isoformat()), {})
         contributor_breakdown.append({**member, "event_date": event_day.isoformat(),
                                       "items": timeline,
