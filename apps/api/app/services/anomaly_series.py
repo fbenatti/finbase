@@ -527,8 +527,11 @@ async def read_case_series(
     if event_day <= data_end and contributor_series and schema_rows:
         detail_started = time.monotonic()
         try:
-            source_columns = [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
-                              for row in schema_rows]
+            source_columns = [
+                str(row.get("Column") or row.get("column_name") or row.get("column") or "")
+                if isinstance(row, Mapping) else str(row)
+                for row in schema_rows
+            ]
             detail_dimensions = resolve_detail_dimensions(source_columns, dimensions)
             if detail_dimensions:
                 detail_rows = await trino_execute(
