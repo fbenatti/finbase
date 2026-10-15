@@ -180,7 +180,8 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
 
     async def billed_rg_evidence(_conn, _subscription, _mappings):
         return ([{"rule_id": 52, "subscription_id": selected,
-                  "resource_group_name": "rg-selected", "evidence_count": 3}], None)
+                  "resource_group_name": name, "evidence_count": 3}
+                 for name in ("rg-selected-a", "rg-selected-b")], None)
 
     async def subscription_catalog(_conn):
         return ({"fundacao": [selected], "production": [other]}, [selected, other], None)
@@ -188,11 +189,11 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
     async def azure_targets(_conn, subscription):
         return ([{
             "subscription_id": subscription,
-            "resource_group_name": "rg-selected",
-            "resource_name": "rg-selected",
+            "resource_group_name": name,
+            "resource_name": name,
             "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
-            "resource_id": f"/subscriptions/{subscription}/resourceGroups/rg-selected",
-        }], None)
+            "resource_id": f"/subscriptions/{subscription}/resourceGroups/{name}",
+        } for name in ("rg-selected-a", "rg-selected-b")], None)
 
     monkeypatch.setattr(service, "_load_departments", load_departments)
     monkeypatch.setattr(service, "_load_classification_rules", load_rules)
@@ -211,17 +212,20 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
     assert result["selected_subscription_id"] == selected
     assert result["deployment_subscriptions"] == [selected]
     script = build_script([result])
-    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/' in script
-    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"' not in script
+    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"' in script
+    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/' not in script
     assert all(
         item["scope_subscriptions"] == [selected]
-        and item["assignment_scope_kind"] == "resource_group"
-        and item["assignment_resource_group"] == "rg-selected"
+        and item["assignment_scope_kind"] == "subscription"
+        and item["assignment_resource_group"] is None
+        and item["observed"]["resource_group_name"] == "rg-"
+        and len(item["condition"]["allOf"]) > 1
         for layer in result["layers"].values() for item in layer
     )
+    assert all(len(items) == 1 for items in result["layers"].values())
 
 
-def test_selected_subscription_map_scopes_foundation_and_prisma_to_billed_resource_groups(monkeypatch):
+def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_resource_group(monkeypatch):
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     connection = SimpleNamespace(
         id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
@@ -297,10 +301,15 @@ def test_selected_subscription_map_scopes_foundation_and_prisma_to_billed_resour
         policies = result["layers"][layer]
         assert {policy["rule_id"] for policy in policies} == {52, 78}
         foundation_policy = next(policy for policy in policies if policy["rule_id"] == 52)
+        prisma_policy = next(policy for policy in policies if policy["rule_id"] == 78)
         assert foundation_policy["assignment_scope_kind"] == "resource_group"
         assert foundation_policy["assignment_resource_group"] == "rg-common"
         assert foundation_policy["excludes_rule_ids"] == []
+        assert prisma_policy["assignment_scope_kind"] == "subscription"
+        assert prisma_policy["assignment_resource_group"] is None
+        assert prisma_policy["observed"]["resource_group_name"] == "PCCAGENTLESSSCANRESOURCEGROUP · dig-security-rg"
         assert all(policy["excludes_rule_ids"] == [] for policy in policies)
+        assert len(policies) == 2
         assert foundation_policy["tags"] == {
             "projeto": "fundacao telefonica",
             "diretoria": "DIR FUNDACAO TELEFONICA",
