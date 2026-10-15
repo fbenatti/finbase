@@ -86,3 +86,33 @@ humana ou encerramento desse caso.
 - Validação visual em largura de 1.066 px e na largura normal do navegador:
   gráfico único, sem sobreposição com workflow/rodapé, forecast futuro visível.
   A altura do contêiner é explícita para preservar o fluxo após redimensionamento.
+
+## Clareza operacional e organograma — caso 17
+
+O detalhe apresenta primeiro a área comum às séries contribuintes, com o caminho
+organizacional. Cada ramo mantém sua conta, centro de custo e todos os níveis
+preenchidos do organograma; a conta representativa não é usada como se descrevesse
+todo o episódio. O maior desvio positivo indica por onde iniciar a investigação.
+
+`contributor_breakdown` na API de série deriva os valores da mesma consulta Trino
+já usada pelo gráfico, sem copiar dinheiro para PostgreSQL nem adicionar consulta
+por contribuinte. A comparação usa a data da avaliação do caso e a mesma referência
+individual que compõe o total. Ausência de coleta permanece nula. A API conserva
+os valores sem arredondamento; o formato monetário da interface arredonda por linha.
+
+Conferência real em 12/out/2026:
+
+- Production / kcli - estruturante excedente / CC 29TN161700: previsto 412,59,
+  realizado 653,74, desvio +241,15.
+- Development / SEM PROJETO DEFINIDO - AZURE / CC ausente: previsto 313,28,
+  realizado 499,92, desvio +186,64.
+
+A informação principal é a comparação textual e o gráfico único. Cartões
+repetidos foram removidos. Cálculo, critérios técnicos, etapas, ações corretivas
+e auditoria ficam em seções expansíveis. O botão “Tratar caso” leva ao formulário
+existente, com nomes de ações em português; clicar no atalho não altera o workflow.
+A classificação organizacional não é usada para afirmar causalidade automática.
+
+Validação: 95 testes de séries, referências, publicação e consultas aprovados;
+build TypeScript/Vite aprovado; leitura real do caso 17, teste do atalho e
+verificação visual nas larguras normal e 1.066 px, sem sobreposição.
