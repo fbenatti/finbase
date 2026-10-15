@@ -5,6 +5,7 @@ import os
 import subprocess
 
 from app.models.rules import ClassificationRule, Department
+from app.routers import azure_tag_policy as azure_tag_policy_router
 from app.routers.azure_tag_policy import _definition, _tag_drift_condition, build_script
 from app.services.azure_tag_policy_service import (
     AzureTagPolicyService,
@@ -46,6 +47,37 @@ def test_subscription_discovery_uses_lightweight_arm_list(monkeypatch):
         "subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "subscription_name": "Fundação",
     }]
+
+
+def test_export_returns_explanation_instead_of_400_when_subscription_has_no_policy_targets(monkeypatch):
+    subscription = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def list_azure_tenants(self):
+            return [{"connection_id": 2, "name": "Azure TI", "code": "azure-ti"}]
+
+        async def generate_tenant_policy(self, *_args):
+            return {
+                "connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
+                "selected_subscription_id": subscription, "deployment_subscriptions": [],
+                "layers": {"resource_groups": [], "resources": []},
+                "coverage": {"diagnostics": [{"status": "warning", "reason": "Sem alvos ARM atuais"}]},
+            }
+
+    monkeypatch.setattr(azure_tag_policy_router, "AzureTagPolicyService", FakeService)
+    response = asyncio.run(azure_tag_policy_router.export_policy(
+        connection_id=2, department_id=None, subscription_id=subscription,
+        plan_only=False, fmt="both", db=object(),
+    ))
+
+    payload = json.loads(response.body)
+    assert response.status_code == 200
+    assert payload["tenants"][0]["selected_subscription_id"] == subscription
+    assert payload["deployment_script"] == ""
+    assert "Sem alvos ARM atuais" in payload["tenants"][0]["coverage"]["diagnostics"][0]["reason"]
 
 
 def _rule(**values):
