@@ -1656,6 +1656,11 @@ export interface AzureTenant {
   tenant_id: string;
 }
 
+export interface AzurePolicySubscription {
+  subscription_id: string;
+  name: string;
+}
+
 export interface AzureTagMapping {
   id: number;
   tag_key: string;
