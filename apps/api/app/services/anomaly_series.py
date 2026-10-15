@@ -40,6 +40,8 @@ DETAIL_DIMENSIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("subscription", "Assinatura / subconta", ("subscriptionname", "subaccountname", "subscription_name")),
     ("subscription_id", "ID da assinatura", ("subscriptionid", "subaccountid", "subscription_id", "sub_account_id")),
     ("resource_group", "Resource group", ("source_resource_group_name", "resourcegroupname", "resource_group_name", "resource_group_id", "resourcegroup")),
+    ("resource_id", "ID do recurso", ("resourceid", "resource_id", "source_resource_id")),
+    ("resource_name", "Recurso", ("resourcename", "resource_name", "source_resource_name")),
     ("gcp_project", "Projeto GCP", ("projectid", "projectname", "project_id", "project_name", "projectnumber")),
     ("service", "Serviço", ("servicename", "service_name")),
     ("service_category", "Categoria do serviço", ("servicesubcategory", "servicecategory", "service_category", "service_subcategory")),
@@ -58,6 +60,13 @@ def resolve_detail_dimensions(columns: Sequence[str], existing: Sequence[str]) -
         if physical:
             resolved.append({"key": key, "label": label, "column": physical})
             used.add(physical.lower())
+    resource_id = next((item for item in resolved if item["key"] == "resource_id"), None)
+    if resource_id and not any(item["key"] == "resource_group" for item in resolved):
+        resolved.insert(
+            next(index for index, item in enumerate(resolved) if item["key"] == "resource_id"),
+            {"key": "resource_group", "label": "Resource group (do ResourceId Azure)",
+             "expression": f"regexp_extract(CAST({_quote(resource_id['column'])} AS VARCHAR), '(?i)/resourceGroups/([^/]+)', 1)"},
+        )
     return resolved
 
 
@@ -66,12 +75,11 @@ def detailed_event_sql(*, source_namespace: str, source_table: str, date_column:
                        measure_column: str, dimensions: Sequence[str],
                        detail_dimensions: Sequence[Mapping[str, str]],
                        member_filters: Sequence[str], event_day: date) -> str:
-    selected = list(dict.fromkeys([*dimensions, *(str(item["column"]) for item in detail_dimensions)]))
-    dim_select = ", ".join(_quote(name) for name in selected)
-    dim_aliases = ", ".join(f"{_quote(item['column'])} AS {_quote(item['key'])}" for item in detail_dimensions)
+    dim_select = [_quote(name) for name in dimensions]
+    dim_aliases = [f"{item.get('expression') or _quote(str(item['column']))} AS {_quote(item['key'])}" for item in detail_dimensions]
     # Present only hierarchy fields whose source columns exist.
-    projection = ", ".join([dim_select, dim_aliases] if dim_select else [dim_aliases])
-    group_columns = ", ".join(str(index + 1) for index in range(len(selected) + len(detail_dimensions)))
+    projection = ", ".join([*dim_select, *dim_aliases])
+    group_columns = ", ".join(str(index + 1) for index in range(len(dim_select) + len(dim_aliases)))
     date_expr = gold_date_expr(date_column, period_column)
     type_filter = f"({_quote(type_column)} = 'realizado' OR {_quote(type_column)} IS NULL)" if type_column else "TRUE"
     filters = [value for value in member_filters if value]
