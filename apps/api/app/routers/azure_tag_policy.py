@@ -137,10 +137,19 @@ async def export_policy(
                 policies.append(doc)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    if subscription_id and not any(subscription_id.casefold() in {sid.casefold() for sid in doc.get("deployment_subscriptions", [])}
-                                   for doc in policies):
-        raise HTTPException(status_code=400, detail="Subscription não encontrada ou sem políticas Azure exportáveis para esta conexão")
-    script = build_script(policies, plan_only=plan_only) if fmt in {"script", "both"} else ""
+    if subscription_id and not any(
+        str(doc.get("selected_subscription_id") or "").casefold() == subscription_id.casefold()
+        for doc in policies
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="A subscription selecionada não está acessível por nenhuma conexão Azure escolhida. Confira a conexão e o catálogo de subscriptions.",
+        )
+    has_policies = any(
+        doc.get("layers", {}).get("resource_groups") or doc.get("layers", {}).get("resources")
+        for doc in policies
+    )
+    script = build_script(policies, plan_only=plan_only) if has_policies and fmt in {"script", "both"} else ""
     if fmt == "script":
         return PlainTextResponse(script, media_type="text/x-shellscript")
     return JSONResponse({"tenants": policies, "deployment_script": script})
