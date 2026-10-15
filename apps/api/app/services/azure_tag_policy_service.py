@@ -842,6 +842,7 @@ class AzureTagPolicyService:
 
     async def generate_tenant_policy(self, connection_id: int, department_id: int | None = None,
                                      subscription_id: str | None = None) -> dict | None:
+        requested_subscription_id = subscription_id
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or resolve_connection_scope(conn.cloud_scope, conn.cloud_name) != "azure":
             return None
@@ -1012,10 +1013,18 @@ class AzureTagPolicyService:
         selected = departments.get(department_id) if department_id else None
         emitted_scopes = sorted({subscription for values in layers.values() for item in values
                                  for subscription in item["scope_subscriptions"]})
+        if requested_subscription_id and requested_subscription_id.casefold() not in {
+            value.casefold() for value in emitted_scopes
+        }:
+            diagnostics.append({
+                "status": "warning", "subscription_id": requested_subscription_id,
+                "reason": "Subscription acessível, mas nenhuma regra ARM possui alvo atual elegível para gerar policy.",
+            })
         return {"tenant_id": billing_tenant, "connection_code": conn.code,
                 "connection_id": conn.id,
                 "connection_name": conn.name, "rule_count": len(rules), "department_id": department_id,
                 "department_name": selected.name if selected else None,
+                "selected_subscription_id": requested_subscription_id,
                 "deployment_subscriptions": emitted_scopes,
                 "subscription_tenants": {
                     subscription: tenant
