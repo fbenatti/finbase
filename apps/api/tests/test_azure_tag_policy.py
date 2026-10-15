@@ -146,7 +146,7 @@ def test_export_returns_explanation_instead_of_400_when_subscription_has_no_poli
     assert "Sem alvos ARM atuais" in payload["tenants"][0]["coverage"]["diagnostics"][0]["reason"]
 
 
-def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkeypatch):
+def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(monkeypatch):
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     other = "71cc41f4-8e37-4c60-abbb-b9003b91c554"
     connection = SimpleNamespace(
@@ -176,10 +176,11 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
         return {selected: connection.config_json["tenant_id"], other: connection.config_json["tenant_id"]}
 
     async def silver_evidence_must_not_run(_conn, _mappings):
-        raise AssertionError("subscription export should use current ARM inventory, not billing-period evidence")
+        raise AssertionError("selected subscription must use all-period RG evidence, not latest-period evidence")
 
-    async def billed_rules(_conn, _subscription):
-        return ({52}, None)
+    async def billed_rg_evidence(_conn, _subscription, _mappings):
+        return ([{"rule_id": 52, "subscription_id": selected,
+                  "resource_group_name": "rg-selected", "evidence_count": 3}], None)
 
     async def subscription_catalog(_conn):
         return ({"fundacao": [selected], "production": [other]}, [selected, other], None)
@@ -198,7 +199,7 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
     monkeypatch.setattr(service, "_tag_mappings", tag_mappings)
     monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
     monkeypatch.setattr(service, "_silver_evidence", silver_evidence_must_not_run)
-    monkeypatch.setattr(service, "_silver_billed_rule_ids", billed_rules)
+    monkeypatch.setattr(service, "_silver_billed_rg_evidence", billed_rg_evidence)
     monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
     monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
     monkeypatch.setattr(service, "_translate_conditions", lambda *_args, **_kwargs: [
@@ -209,13 +210,18 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
 
     assert result["selected_subscription_id"] == selected
     assert result["deployment_subscriptions"] == [selected]
+    script = build_script([result])
+    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/' in script
+    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"' not in script
     assert all(
         item["scope_subscriptions"] == [selected]
+        and item["assignment_scope_kind"] == "resource_group"
+        and item["assignment_resource_group"] == "rg-selected"
         for layer in result["layers"].values() for item in layer
     )
 
 
-def test_selected_subscription_map_includes_foundation_and_prisma_exception(monkeypatch):
+def test_selected_subscription_map_scopes_foundation_and_prisma_to_billed_resource_groups(monkeypatch):
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     connection = SimpleNamespace(
         id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
@@ -268,7 +274,14 @@ def test_selected_subscription_map_includes_foundation_and_prisma_exception(monk
     async def subscription_catalog(_conn):
         return ({"Fundação Telefônica": [selected]}, [selected], None)
     async def azure_targets(_conn, _subscription): return (targets, None)
-    async def billed_rules(_conn, _subscription): return ({52, 78}, None)
+    async def billed_rg_evidence(_conn, _subscription, _mappings):
+        return ([
+            {"rule_id": 52, "subscription_id": selected, "resource_group_name": "rg-common", "evidence_count": 4},
+            {"rule_id": 78, "subscription_id": selected,
+             "resource_group_name": "PCCAgentlessScanResourceGroup", "evidence_count": 2},
+            {"rule_id": 78, "subscription_id": selected,
+             "resource_group_name": "dig-security-rg", "evidence_count": 1},
+        ], None)
 
     monkeypatch.setattr(service, "_load_departments", load_departments)
     monkeypatch.setattr(service, "_load_classification_rules", load_rules)
@@ -276,7 +289,7 @@ def test_selected_subscription_map_includes_foundation_and_prisma_exception(monk
     monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
     monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
     monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
-    monkeypatch.setattr(service, "_silver_billed_rule_ids", billed_rules)
+    monkeypatch.setattr(service, "_silver_billed_rg_evidence", billed_rg_evidence)
 
     result = asyncio.run(service.generate_tenant_policy(2, subscription_id=selected))
 
@@ -284,13 +297,35 @@ def test_selected_subscription_map_includes_foundation_and_prisma_exception(monk
         policies = result["layers"][layer]
         assert {policy["rule_id"] for policy in policies} == {52, 78}
         foundation_policy = next(policy for policy in policies if policy["rule_id"] == 52)
-        assert 78 in foundation_policy["excludes_rule_ids"]
+        assert foundation_policy["assignment_scope_kind"] == "resource_group"
+        assert foundation_policy["assignment_resource_group"] == "rg-common"
+        assert foundation_policy["excludes_rule_ids"] == []
+        assert all(policy["excludes_rule_ids"] == [] for policy in policies)
         assert foundation_policy["tags"] == {
             "projeto": "fundacao telefonica",
             "diretoria": "DIR FUNDACAO TELEFONICA",
             "centro-de-custos": "29TN161700",
         }
     assert result["deployment_subscriptions"] == [selected]
+
+
+def test_subscription_only_policy_requires_billed_current_resource_group():
+    service = AzureTagPolicyService(db=None)
+    rule = _rule(id=52, priority=90, department_id=10)
+    diagnostics = []
+    items = service._concrete_items(
+        rule,
+        [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=",
+          "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
+        [{"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "evidence_count": 1}],
+        {"organograma": "Fundação"},
+        [{"tag_key": "projeto", "focus_field": "organograma"}],
+        True,
+        diagnostics,
+        force_resource_group_scope=True,
+    )
+    assert items == []
+    assert diagnostics[0]["status"] == "blocked"
 
 
 def _rule(**values):
