@@ -24,7 +24,7 @@ import httpx
 import pandas as pd
 
 from app.models.ingested_blob import IngestedBlob
-from app.services.azure_identity import arm_headers, credential, resolve_config
+from app.services.azure_identity import arm_headers, credential, get_json, resolve_config
 
 logger = logging.getLogger(__name__)
 
