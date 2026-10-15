@@ -81,7 +81,7 @@ def test_export_returns_explanation_instead_of_400_when_subscription_has_no_poli
     assert "Sem alvos ARM atuais" in payload["tenants"][0]["coverage"]["diagnostics"][0]["reason"]
 
 
-def test_explicit_subscription_filter_is_not_overwritten_by_gold_rows(monkeypatch):
+def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkeypatch):
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     other = "71cc41f4-8e37-4c60-abbb-b9003b91c554"
     connection = SimpleNamespace(
@@ -109,11 +109,8 @@ def test_explicit_subscription_filter_is_not_overwritten_by_gold_rows(monkeypatc
     async def home_tenants(_conn):
         return {selected: connection.config_json["tenant_id"], other: connection.config_json["tenant_id"]}
 
-    async def gold_evidence(_conn, _mappings):
-        return ([{
-            "rule_id": 52, "subscription_id": other, "subscription_name": "other",
-            "resource_group_name": "rg-other", "evidence_count": 7,
-        }], None)
+    async def silver_evidence_must_not_run(_conn, _mappings):
+        raise AssertionError("subscription export should use current ARM inventory, not billing-period evidence")
 
     async def subscription_catalog(_conn):
         return ({"fundacao": [selected], "production": [other]}, [selected, other], None)
@@ -131,7 +128,7 @@ def test_explicit_subscription_filter_is_not_overwritten_by_gold_rows(monkeypatc
     monkeypatch.setattr(service, "_load_classification_rules", load_rules)
     monkeypatch.setattr(service, "_tag_mappings", tag_mappings)
     monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
-    monkeypatch.setattr(service, "_gold_evidence", gold_evidence)
+    monkeypatch.setattr(service, "_silver_evidence", silver_evidence_must_not_run)
     monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
     monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
     monkeypatch.setattr(service, "_translate_conditions", lambda *_args, **_kwargs: [
