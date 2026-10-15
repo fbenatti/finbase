@@ -9,6 +9,17 @@ export const scopeChain = [
   { field: "centro_custo", label: "Centro de custo" },
   { field: "servicesubcategory", label: "SKU / categoria do serviço" },
 ];
+export const detailScopeChain = (details: Array<{ key: string; label: string }> = []) => {
+  const base = [
+    ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: `Organograma · nível ${index + 1}` })),
+    { field: "subaccountname", label: "Assinatura / subconta" }, { field: "centro_custo", label: "Centro de custo" },
+    { field: "servicename", label: "Serviço" }, { field: "servicesubcategory", label: "Categoria do serviço" },
+    { field: "pricingcategory", label: "Categoria de preço" }, { field: "commitmentdiscounttype", label: "Modalidade" },
+  ];
+  const custom = details.map(item => ({ field: item.key, label: item.label }));
+  const all = [...base.slice(0, 7), ...custom.filter(item => !base.some(candidate => candidate.field === item.field)), ...base.slice(7)];
+  return all.filter((item, index) => all.findIndex(candidate => candidate.field === item.field) === index);
+};
 export const filterMembers = (members: Member[], filters: ScopeFilter[]) => members.filter(member => filters.every(filter => dimensionValue(member, filter.field) === filter.value));
 export function totalMetric(members: Member[], key: "observed_cloud" | "expected_cloud" | "delta_cloud") {
   return members.length && members.every(member => member[key] != null) ? members.reduce((sum, member) => sum + member[key]!, 0) : null;
@@ -22,6 +33,17 @@ export function scopeBranches(members: Member[], filters: ScopeFilter[]) {
     const children = members.filter(member => dimensionValue(member, dimension.field) === value);
     return { value, members: children, delta: totalMetric(children, "delta_cloud"), expected: totalMetric(children, "expected_cloud"), actual: totalMetric(children, "observed_cloud") };
   }).sort((a, b) => (b.delta ?? -Infinity) - (a.delta ?? -Infinity));
+  return { dimension, groups };
+}
+export function observedScopeBranches(items: NonNullable<AnomalySeries["detail_items"]>, filters: ScopeFilter[], chain: Array<{ field: string; label: string }>) {
+  const rows = items.filter(item => filters.every(filter => dimensionValue({ dimensions: item.dimensions } as Member, filter.field) === filter.value));
+  const start = filters.length ? chain.findIndex(item => item.field === filters[filters.length - 1].field) + 1 : 0;
+  const dimension = chain.slice(start).find(item => new Set(rows.map(row => String(row.dimensions[item.field] || "Não informado"))).size > 1);
+  if (!dimension) return { dimension: null, groups: [] };
+  const groups = [...new Set(rows.map(row => String(row.dimensions[dimension.field] || "Não informado")))].map(value => {
+    const selected = rows.filter(row => String(row.dimensions[dimension.field] || "Não informado") === value);
+    return { value, members: selected, actual: selected.every(row => row.observed_cloud != null) ? selected.reduce((sum, row) => sum + row.observed_cloud!, 0) : null };
+  }).sort((a, b) => Math.abs(b.actual ?? 0) - Math.abs(a.actual ?? 0));
   return { dimension, groups };
 }
 export function scopeTimeline(members: Member[]): AnomalySeriesPoint[] {
