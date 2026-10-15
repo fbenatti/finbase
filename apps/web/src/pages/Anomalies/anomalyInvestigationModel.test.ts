@@ -38,6 +38,7 @@ describe("decomposição de desvio", () => {
     const members = [
       { ...member("A", 500, 100, "Prod"), dimensions: { ...member("A", 500, 100, "Prod").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D4" } },
       { ...member("A", 300, 200, "Dev"), dimensions: { ...member("A", 300, 200, "Dev").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D8" } },
+      { ...member("A", 200, 100, "Prod"), dimensions: { ...member("A", 200, 100, "Prod").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D8" } },
     ];
     const project = [{ field: "organograma_nivel_5", value: "A" }];
     expect(scopeBranches(members, project, chain).dimension?.field).toBe("subaccountname");
