@@ -247,8 +247,9 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         '  if (( matches == 1 )); then info "Reutilizando assignment $RESOLVED_ASSIGNMENT_NAME e definition $RESOLVED_POLICY_NAME"; fi',
         '}',
         'ensure_definition() {',
-        '  local name="$1" mode="$2" rules="$3" metadata="$4" display="$5" description="$6" expected_hash="$7"',
+        '  local name="$1" mode="$2" rules="$3" metadata_file="$4" display="$5" description="$6" expected_hash="$7"',
         '  local category current_hash lookup_output lookup_status definition_exists=0',
+        '  shift 7; local -a metadata_args=("$@")',
         '  if lookup_output=$(az policy definition show --name "$name" --only-show-errors 2>&1); then definition_exists=1; else lookup_status=$?; [[ "$lookup_output" =~ (ResourceNotFound|NotFound|not\\ found|does\\ not\\ exist) ]] || { error "Falha consultando definition $name (az exit $lookup_status): $lookup_output"; exit 1; }; fi',
         '  if (( definition_exists )); then',
         '    category=$(az policy definition show --name "$name" --query "metadata.category" -o tsv --only-show-errors)',
@@ -256,10 +257,10 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         '    current_hash=$(az policy definition show --name "$name" --query "metadata.openfinopsContentHash" -o tsv --only-show-errors)',
         '    if [[ "$current_hash" == "$expected_hash" ]]; then action UNCHANGED "Definition $name"; return; fi',
         '    action UPDATE "Definition OpenFinops $name"',
-        '    plan || run_mutation az policy definition update --name "$name" --mode "$mode" --rules "@$rules" --metadata "@$metadata" --display-name "$display" --description "$description" --only-show-errors',
+        '    plan || run_mutation az policy definition update --name "$name" --mode "$mode" --rules "@$rules" --metadata "${metadata_args[@]}" --display-name "$display" --description "$description" --only-show-errors',
         '  else',
         '    action CREATE "Definition OpenFinops $name"',
-        '    plan || run_mutation az policy definition create --name "$name" --mode "$mode" --rules "@$rules" --metadata "@$metadata" --display-name "$display" --description "$description" --only-show-errors',
+        '    plan || run_mutation az policy definition create --name "$name" --mode "$mode" --rules "@$rules" --metadata "${metadata_args[@]}" --display-name "$display" --description "$description" --only-show-errors',
         '  fi',
         '}',
         'ensure_assignment() {',
@@ -422,6 +423,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
             )
             rules_filename = f"{name}-rules.json"
             metadata_filename = f"{name}-metadata.json"
+            metadata_cli_args = " ".join(shlex.quote(f"{key}={value}") for key, value in policy["metadata"].items())
             lines += [
                 f"cat > \"$POLICIES_DIR/{rules_filename}\" <<'POLICYEOF'",
                 json.dumps(policy["policyRule"], indent=2, ensure_ascii=False), "POLICYEOF",
@@ -481,7 +483,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
                     f"ACTIVE_POLICY_NAME=\"${{RESOLVED_POLICY_NAME:-{name}}}\"",
                 ]
                 lines += [
-                    f"ensure_definition \"$ACTIVE_POLICY_NAME\" {q(job['mode'])} \"$POLICIES_DIR/{job['rules_filename']}\" \"$POLICIES_DIR/{job['metadata_filename']}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])}",
+                    f"ensure_definition \"$ACTIVE_POLICY_NAME\" {q(job['mode'])} \"$POLICIES_DIR/{job['rules_filename']}\" \"$POLICIES_DIR/{job['metadata_filename']}\" {q(policy['displayName'])} {q(policy['description'])} {q(policy['metadata']['openfinopsContentHash'])} {metadata_cli_args}",
                     f"ensure_assignment \"$ACTIVE_ASSIGNMENT_NAME\" {q(scope)} \"$ACTIVE_POLICY_NAME\"",
                     f"if az policy assignment show --name \"$ACTIVE_ASSIGNMENT_NAME\" --scope {q(scope)} --only-show-errors >/dev/null 2>&1 || plan; then",
                     '  PRINCIPAL_ID=""',
