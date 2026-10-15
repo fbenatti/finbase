@@ -857,6 +857,7 @@ export function TagsTab() {
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
   const [selectedSubscription, setSelectedSubscription] = useState("");
   const [policySubscriptions, setPolicySubscriptions] = useState<AzurePolicySubscription[]>([]);
+  const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
   const [planOnly, setPlanOnly] = useState(false);
   const [rows, setRows] = useState<AzureTenantPolicy[]>([]);
   const [script, setScript] = useState("");
@@ -880,10 +881,16 @@ export function TagsTab() {
     setRows([]);
     setScript("");
     setSuccess("");
+    setError("");
     if (selectedTenant === "") return;
+    setSubscriptionsLoading(true);
     getAzurePolicySubscriptions(selectedTenant as number)
       .then(setPolicySubscriptions)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível listar as subscriptions Azure"));
+      .catch((e: unknown) => {
+        const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+        setError(typeof detail === "string" ? detail : "Não foi possível listar as subscriptions Azure");
+      })
+      .finally(() => setSubscriptionsLoading(false));
   }, [selectedTenant]);
 
   const generate = async () => {
@@ -909,7 +916,8 @@ export function TagsTab() {
       const projectCount = new Set(mapItems.map((item) => item.department_name || item.tags.projeto).filter(Boolean)).size;
       setSuccess(`Mapa completo gerado para ${selectedName}: ${projectCount} projeto(s), ${mapItems.length} policy(s).`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao gerar políticas");
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : (e instanceof Error ? e.message : "Falha ao gerar políticas"));
     } finally {
       setLoading(false);
     }
@@ -986,7 +994,7 @@ export function TagsTab() {
           </Select>
         </FormControl>
 
-        <FormControl sx={{ minWidth: 400 }} size="small" disabled={selectedTenant === "" || policySubscriptions.length === 0}>
+        <FormControl sx={{ minWidth: 400 }} size="small" disabled={selectedTenant === "" || subscriptionsLoading || policySubscriptions.length === 0}>
           <InputLabel>Subscription Azure *</InputLabel>
           <Select
             value={selectedSubscription}
@@ -999,7 +1007,7 @@ export function TagsTab() {
               setSuccess("");
             }}
           >
-            <MenuItem value="">Selecione uma subscription</MenuItem>
+            <MenuItem value="">{subscriptionsLoading ? "Carregando subscriptions…" : "Selecione uma subscription"}</MenuItem>
             {policySubscriptions.map((subscription) => (
               <MenuItem key={subscription.subscription_id} value={subscription.subscription_id}>
                 {subscription.name} ({subscription.subscription_id})
