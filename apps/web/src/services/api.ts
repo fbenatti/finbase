@@ -1709,6 +1709,7 @@ export interface AzureTagExecutiveResource {
   expected_tags_source: "resource" | "resource_group" | null;
   expected_tags_ambiguous: boolean;
   matching_tags: string[];
+  managed_tag_keys: string[];
 }
 
 export interface AzureTagExpectedMapping {
