@@ -145,6 +145,82 @@ def test_explicit_subscription_uses_arm_inventory_without_silver_evidence(monkey
     )
 
 
+def test_selected_subscription_map_includes_foundation_and_prisma_exception(monkeypatch):
+    selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
+    connection = SimpleNamespace(
+        id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
+        config_json={"tenant_id": "tenant"},
+    )
+
+    class FakeDB:
+        async def get(self, *_args):
+            return connection
+
+    service = AzureTagPolicyService(db=FakeDB())
+    prisma = _rule(id=78, priority=9, department_id=234, name="Classifica → Prisma",
+                   conditions=[{"field": "source_resource_group_name", "operator": "~",
+                                "values": ["PCCAGENTLESSSCANRESOURCEGROUP", "dig-security-rg"]}])
+    foundation = _rule(id=52, priority=90, department_id=73, name="Classifica → Fundação Telefônica",
+                       conditions=[{"field": "SubAccountName", "operator": "=",
+                                    "values": ["Fundação Telefonica"]}])
+    other_subscription = _rule(
+        id=5460, priority=0, department_id=216, name="Framework Brasil - outras subscriptions",
+        conditions=[
+            {"field": "source_resource_group_name", "operator": "=", "values": ["PCCAGENTLESSSCANRESOURCEGROUP"]},
+            {"field": "SubAccountName", "operator": "=", "values": [
+                "Microsoft Azure 28 - EA - FRAMEWORK BRASIL - PRO",
+                "Microsoft Azure 38 - EA - FRAMEWORK BRASIL - PRE",
+            ]},
+        ],
+    )
+    departments = {
+        1: Department(id=1, name="DIR FUNDACAO TELEFONICA", parent_id=None),
+        73: Department(id=73, name="fundacao telefonica", parent_id=1, centro_custo="29TN161700"),
+        234: Department(id=234, name="Prisma", parent_id=1, centro_custo="29TN161700"),
+        216: Department(id=216, name="Framework Brasil", parent_id=1, centro_custo="29TN161700"),
+    }
+    targets = [
+        {"subscription_id": selected, "resource_group_name": name, "resource_name": name,
+         "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
+         "resource_id": f"/subscriptions/{selected}/resourceGroups/{name}"}
+        for name in ["PCCAgentlessScanResourceGroup", "dig-security-rg", "rg-common"]
+    ]
+
+    async def load_departments(): return departments
+    async def load_rules(_conn): return [other_subscription, prisma, foundation]
+    async def tag_mappings():
+        return [
+            {"tag_key": "projeto", "focus_field": "organograma_nivel_2"},
+            {"tag_key": "diretoria", "focus_field": "organograma_nivel_1"},
+            {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
+        ]
+    async def home_tenants(_conn): return {selected: "tenant"}
+    async def subscription_catalog(_conn):
+        return ({"Fundação Telefônica": [selected]}, [selected], None)
+    async def azure_targets(_conn, _subscription): return (targets, None)
+
+    monkeypatch.setattr(service, "_load_departments", load_departments)
+    monkeypatch.setattr(service, "_load_classification_rules", load_rules)
+    monkeypatch.setattr(service, "_tag_mappings", tag_mappings)
+    monkeypatch.setattr(service, "_subscription_home_tenants", home_tenants)
+    monkeypatch.setattr(service, "_subscription_catalog", subscription_catalog)
+    monkeypatch.setattr(service, "_azure_rule_targets", azure_targets)
+
+    result = asyncio.run(service.generate_tenant_policy(2, subscription_id=selected))
+
+    for layer in ("resource_groups", "resources"):
+        policies = result["layers"][layer]
+        assert {policy["rule_id"] for policy in policies} == {52, 78}
+        foundation_policy = next(policy for policy in policies if policy["rule_id"] == 52)
+        assert 78 in foundation_policy["excludes_rule_ids"]
+        assert foundation_policy["tags"] == {
+            "projeto": "fundacao telefonica",
+            "diretoria": "DIR FUNDACAO TELEFONICA",
+            "centro-de-custos": "29TN161700",
+        }
+    assert result["deployment_subscriptions"] == [selected]
+
+
 def _rule(**values):
     data = {
         "id": 1, "name": "Regra", "department_id": 10, "priority": 10,
