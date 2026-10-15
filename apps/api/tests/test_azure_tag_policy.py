@@ -1,5 +1,7 @@
 import base64
 import json
+import os
+import subprocess
 
 from app.models.rules import ClassificationRule, Department
 from app.routers.azure_tag_policy import _definition, _tag_drift_condition, build_script
@@ -543,6 +545,59 @@ def test_current_arg_target_matches_contains_case_insensitively():
     target = {"resource_group_name": "PCCAgentlessScanResourceGroup", "resource_id": "/subscriptions/a/resourceGroups/PCCAgentlessScanResourceGroup/providers/Microsoft.Web/sites/test", "resource_type": "Microsoft.Web/sites"}
     terms = [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["pccagentlessscanresourcegroup"]}]
     assert AzureTagPolicyService._target_matches_terms(target, terms)
+
+
+def test_current_arg_matches_resource_name_separately_from_resource_group_name():
+    service = AzureTagPolicyService(db=None)
+    target = {"resource_group_name": "rg-voice", "resource_name": "voice-api",
+              "resource_id": "/subscriptions/a/resourceGroups/rg-voice/providers/Microsoft.Web/sites/voice-api",
+              "resource_type": "Microsoft.Web/sites"}
+    assert service._target_matches_terms(target, [
+        {"scope": SCOPE_RESOURCE, "field": "name", "operator": "=", "values": ["voice-api"]},
+        {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-voice"]},
+    ])
+    assert not service._target_matches_terms(target, [
+        {"scope": SCOPE_RESOURCE, "field": "name", "operator": "=", "values": ["rg-voice"]},
+    ])
+
+
+def test_plan_only_shell_calls_no_azure_mutations(tmp_path):
+    subscription = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    script = build_script([{
+        "connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "layers": {"resource_groups": [{
+            "rule_id": 52, "rule_name": "Fundacao", "tags": {"projeto": "Fundacao"},
+            "condition": {"field": "name", "equals": "rg-fundacao"},
+            "base_selector": {"field": "name", "equals": "rg-fundacao"},
+            "scope_subscriptions": [subscription],
+        }], "resources": []},
+    }], plan_only=True)
+    fake_az = tmp_path / "az"
+    fake_az.write_text("""#!/usr/bin/env bash
+set -u
+printf '%s\\n' "$*" >> "$AZ_LOG"
+if [[ "$1 $2" == "account show" ]]; then
+  [[ "$*" == *"--query id"* ]] && printf '%s\\n' "$EXPECTED_SUBSCRIPTION"
+  exit 0
+fi
+if [[ "$1 $2" == "policy assignment list" ]]; then exit 0; fi
+if [[ "$1 $2" == "policy definition show" || "$1 $2" == "policy assignment show" ]]; then
+  echo 'ResourceNotFound' >&2
+  exit 1
+fi
+echo "unexpected Azure CLI call: $*" >&2
+exit 91
+""")
+    fake_az.chmod(0o755)
+    log = tmp_path / "az.log"
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
+           "AZ_LOG": str(log), "EXPECTED_SUBSCRIPTION": subscription}
+    result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, env=env, check=False)
+    assert result.returncode == 0, result.stderr + result.stdout
+    calls = log.read_text().splitlines()
+    assert calls
+    forbidden = ("create", "update", "assign", "trigger-scan", "remediation")
+    assert not [call for call in calls if any(token in call.split() for token in forbidden)]
 
 
 def test_rg_assignment_scope_omits_rg_name_from_selector():
