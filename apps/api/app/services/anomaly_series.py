@@ -439,6 +439,37 @@ async def read_case_series(
                             or point.get("forecast_run_id") == frozen.get("forecast_run_id")]
     items = compose_case_timeline(reference_points, observed_by_day, start=context_start,
                                  end=display_end, data_end=data_end, monthly=monthly)
+    detail_dimensions: list[dict[str, str]] = []
+    detail_items: list[dict[str, Any]] = []
+    # O custo real pode ter granularidade mais fina que o forecast. Isso localiza
+    # o recurso no dia do evento, mas não inventa forecast/desvio nesse nível.
+    if event_day <= data_end and contributor_series:
+        try:
+            schema_rows = await trino_execute(
+                f"DESCRIBE iceberg.{source_namespace}.{_quote(source_table)}", timeout_s=30
+            )
+            source_columns = [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
+                              for row in schema_rows]
+            detail_dimensions = resolve_detail_dimensions(source_columns, dimensions)
+            if detail_dimensions:
+                filters = [_dimension_filter(member["dimensions"]) for member in members]
+                detail_rows = await trino_execute(
+                    detailed_event_sql(
+                        source_namespace=source_namespace, source_table=source_table,
+                        date_column=date_column, period_column=period_column, type_column=type_column,
+                        measure_column=measure_column, dimensions=dimensions,
+                        detail_dimensions=detail_dimensions, member_filters=filters, event_day=event_day,
+                    ), timeout_s=180,
+                )
+                detail_items = [{
+                    "dimensions": {
+                        **{str(name).lower(): row.get(str(name).lower(), row.get(str(name))) for name in dimensions},
+                        **{item["key"]: row.get(item["key"]) for item in detail_dimensions},
+                    },
+                    "observed_cloud": None if row.get("observed_cloud") is None else float(row["observed_cloud"]),
+                } for row in detail_rows]
+        except Exception as exc:
+            logger.warning("[anomaly] decomposição fina indisponível para o caso %s: %s", getattr(case, "id", None), exc)
     contributor_breakdown = []
     for index, member in enumerate(members):
         timeline = compose_case_timeline(points_by_series[index], observed_by_member[index],
@@ -477,6 +508,8 @@ async def read_case_series(
         "contributor_series_count": len(members), "scope_verified": bool(contributor_series),
         "contributor_series": members,
         "contributor_breakdown": contributor_breakdown,
+        "detail_dimensions": [{"key": item["key"], "label": item["label"]} for item in detail_dimensions],
+        "detail_items": detail_items,
         "reference_table": publication.reference_table, "series_dimensions": series_dimensions,
         "distribution_methods": sorted({str(point.get("distribution_method")) for point in comparable}),
         "band_methods": sorted({str(row.get("band_method") or "UNAVAILABLE") for row in forecast_rows}),
