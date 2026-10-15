@@ -80,12 +80,12 @@ def detailed_event_sql(*, source_namespace: str, source_table: str, date_column:
         WITH parsed AS (
             SELECT {projection}, {date_expr} AS day,
                    COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS value
-              FROM iceberg.{source_namespace}.{_quote(source_table)}
-             WHERE {type_filter}
+             FROM iceberg.{source_namespace}.{_quote(source_table)}
+             WHERE {type_filter} AND {scope}
         )
         SELECT {projection}, SUM(value) AS observed_cloud
           FROM parsed
-         WHERE day = DATE {_lit(event_day.isoformat())} AND {scope}
+         WHERE day = DATE {_lit(event_day.isoformat())}
          GROUP BY {group_columns}
          ORDER BY ABS(SUM(value)) DESC
          LIMIT 500
