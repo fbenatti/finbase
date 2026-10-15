@@ -258,11 +258,11 @@ class AzureTagPolicyService:
             from app.services.azure_resource_graph_service import discover_subscriptions
             discovered = await discover_subscriptions(dict(conn.config_json or {}))
             for item in discovered:
-            sid = str(item.get("subscription_id") or "").strip()
-            name = str(item.get("subscription_name") or "").strip()
-            if sid:
-                ids.append(sid)
-                catalog[name].append(sid)
+                sid = str(item.get("subscription_id") or "").strip()
+                name = str(item.get("subscription_name") or "").strip()
+                if sid:
+                    ids.append(sid)
+                    catalog[name].append(sid)
         except Exception as exc:  # ResourceId/RG exports remain useful.
             message = f"Não foi possível consultar Azure Resource Graph: {str(exc)[:180]}"
             logger.warning("Azure tag policy subscription discovery for %s: %s", conn.code, message)
