@@ -44,6 +44,7 @@ def observed_daily_sql(
     dimensions: Sequence[str],
     start: date,
     end: date,
+    series_filters: Sequence[str] = (),
 ) -> str:
     """SQL de leitura do observado diário por série.
 
@@ -57,6 +58,7 @@ def observed_daily_sql(
         if type_column
         else "TRUE"
     )
+    series_filter = " OR ".join(f"({item})" for item in series_filters if item) or "TRUE"
     period_select = (
         f"CAST({_quote(period_column)} AS VARCHAR) AS source_billing_period"
         if period_column
@@ -69,7 +71,7 @@ def observed_daily_sql(
                    COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS value,
                    {period_select}
               FROM iceberg.{source_namespace}.{_quote(table)}
-             WHERE {type_filter}
+             WHERE {type_filter} AND ({series_filter})
         )
         SELECT {dim_select}CAST(day AS VARCHAR) AS event_date,
                SUM(value) AS observed_cloud,
