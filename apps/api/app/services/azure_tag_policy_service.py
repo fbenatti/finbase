@@ -844,6 +844,7 @@ class AzureTagPolicyService:
         self, item: dict, rules: list[ClassificationRule], departments: dict[int, Department],
         catalog: dict[str, list[str]], mappings: list[dict[str, str]], diagnostics: list[dict],
         selected_subscription_name: str = "",
+        eligible_rule_ids: set[int] | None = None,
     ) -> list[dict]:
         """Build selector-only exceptions from active earlier rules, not billing rows."""
         current_rule = item["rule"]
@@ -852,6 +853,10 @@ class AzureTagPolicyService:
         for rule in rules:
             if (rule.priority, rule.id) >= (current_rule.priority, current_rule.id):
                 break
+            # In a subscription export, only rules that compiled against a
+            # current Azure target can compete for the selected policy region.
+            if eligible_rule_ids is not None and rule.id not in eligible_rule_ids:
+                continue
             department = departments.get(rule.department_id)
             if not department:
                 continue
@@ -1023,6 +1028,7 @@ class AzureTagPolicyService:
                 ))
 
         layers = {"resource_groups": [], "resources": []}
+        eligible_rule_ids = {item["rule"].id for item in compiled} if subscription_id else None
         # Policies are decision regions per subscription.  A resource exception
         # in terra-connectivity must not leak into another Terra subscription.
         previous: dict[tuple[str, str], list[dict]] = defaultdict(list)
@@ -1050,7 +1056,7 @@ class AzureTagPolicyService:
                 diagnostics_before_exclusions = len(diagnostics)
                 rule_exclusions = self._prior_rule_exclusions(
                     exclusion_item, rules, departments, catalog, mappings, diagnostics,
-                    selected_subscription_name,
+                    selected_subscription_name, eligible_rule_ids,
                 )
                 unresolved_precedence = [entry for entry in diagnostics[diagnostics_before_exclusions:]
                                          if entry.get("status") == "blocked"]
