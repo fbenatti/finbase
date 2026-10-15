@@ -525,6 +525,14 @@ class AzureTagPolicyService:
         clauses: list[dict] = [{"field": "type", "equals": AZURE_POLICY_RESOURCE_GROUP_TYPE}
                                if target == "resource_group" else
                                {"field": "type", "notEquals": AZURE_POLICY_RESOURCE_GROUP_TYPE}]
+        if target == "resource":
+            # Azure SQL's built-in master database does not support tags.
+            # Keep it outside every resource modify policy to avoid futile
+            # remediations and permanent NonCompliant records.
+            clauses.append({"not": {"allOf": [
+                {"field": "type", "equals": "Microsoft.Sql/servers/databases"},
+                {"field": "name", "equals": "master"},
+            ]}})
         for term in terms:
             if term["scope"] == SCOPE_SUBSCRIPTION:
                 # Assignment is already /subscriptions/{guid}. Mode All (RG) rejects
