@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import json
 import os
 import subprocess
@@ -12,6 +13,39 @@ from app.services.azure_tag_policy_service import (
     SCOPE_SKU,
     SCOPE_SUBSCRIPTION,
 )
+from app.services import azure_resource_graph_service
+
+
+def test_subscription_discovery_uses_lightweight_arm_list(monkeypatch):
+    calls = {}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    async def fake_headers(_config):
+        return {"Authorization": "Bearer test"}
+
+    async def fake_get_json(_client, url, headers, params=None):
+        calls.update(url=url, headers=headers, params=params)
+        return [
+            {"subscriptionId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "displayName": "Fundação", "state": "Enabled"},
+            {"subscriptionId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "displayName": "Desativada", "state": "Disabled"},
+        ]
+
+    monkeypatch.setattr(azure_resource_graph_service, "arm_headers", fake_headers)
+    monkeypatch.setattr(azure_resource_graph_service, "get_json", fake_get_json)
+    result = asyncio.run(azure_resource_graph_service.discover_subscriptions({"tenant_id": "tenant"}))
+
+    assert calls["url"] == "https://management.azure.com/subscriptions"
+    assert calls["params"] == {"api-version": "2022-12-01"}
+    assert result == [{
+        "subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "subscription_name": "Fundação",
+    }]
 
 
 def _rule(**values):
