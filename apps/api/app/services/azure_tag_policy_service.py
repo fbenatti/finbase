@@ -931,6 +931,7 @@ class AzureTagPolicyService:
                     "rule_id": rule.id, "rule_name": rule.name, "priority": rule.priority,
                     "department_id": rule.department_id, "tags": item["tags"],
                     "condition": effective, "scope_subscriptions": [subscription_id],
+                    "base_selector": selector,
                     "evidence_count": item["evidence_count"], "observed": item["observed"],
                     "assignment_scope_kind": item.get("assignment_scope_kind", "subscription"),
                     "assignment_resource_group": item.get("assignment_resource_group"),
@@ -970,6 +971,7 @@ class AzureTagPolicyService:
         emitted_scopes = sorted({subscription for values in layers.values() for item in values
                                  for subscription in item["scope_subscriptions"]})
         return {"tenant_id": billing_tenant, "connection_code": conn.code,
+                "connection_id": conn.id,
                 "connection_name": conn.name, "rule_count": len(rules), "department_id": department_id,
                 "department_name": selected.name if selected else None,
                 "deployment_subscriptions": emitted_scopes,
