@@ -36,10 +36,12 @@ export default function AnomalyCaseScope({ kase, series, currency, breakdown = f
           <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>{path(row.dimensions).slice(0, -1).join(" › ") || "Sem caminho organizacional"}</Typography>
           <Typography variant="caption" color="text.secondary">Centro de custo: {row.dimensions.centro_custo ?? "não informado"}</Typography>
         </Box>
-        <Typography sx={{ fontWeight: 750, color: (row.delta_cloud ?? 0) > 0 ? "#cf4141" : "text.primary", whiteSpace: "nowrap" }}>{row.delta_cloud != null && row.delta_cloud > 0 ? "+" : ""}{money(row.delta_cloud, currency)}</Typography>
+        <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary">Desvio</Typography>
+          <Typography sx={{ fontWeight: 750, color: (row.delta_cloud ?? 0) > 0 ? "#cf4141" : "text.primary", whiteSpace: "nowrap" }}>{row.delta_cloud != null && row.delta_cloud > 0 ? "+" : ""}{money(row.delta_cloud, currency)}</Typography>
+        </Box>
       </Stack>
       <Typography variant="body2" sx={{ mt: .75 }}>Previsto {money(row.expected_cloud, currency)} → realizado {money(row.observed_cloud, currency)}</Typography>
     </Box>)}
-    <Typography variant="caption" color="text.secondary">O organograma localiza o gasto; não comprova a causa do aumento nem identifica um recurso individual.</Typography>
   </Paper>;
 }
