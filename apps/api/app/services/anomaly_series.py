@@ -359,6 +359,43 @@ def compose_case_timeline(
     return items
 
 
+def apply_case_evaluation_snapshot(items: list[dict[str, Any]], case: Any) -> bool:
+    """Restore the exact event comparison captured by the detector.
+
+    Monthly remaining-balance forecasts cannot stand in for a full-month
+    expectation. When their original comparison is unavailable in the current
+    reference publication, the immutable case evaluation is the only honest
+    event-level baseline and must be labelled as such.
+    """
+    event_day = str(getattr(case, "event_date", ""))[:10]
+    point = next((item for item in items if item.get("event_date") == event_day), None)
+    expected = getattr(case, "expected_cloud", None)
+    upper = getattr(case, "upper_cloud", None)
+    if point is None or expected is None or upper is None or point.get("comparison_supported"):
+        return False
+    observed = getattr(case, "observed_cloud", None)
+    if observed is None:
+        observed = point.get("observed_cloud")
+    if observed is None:
+        return False
+    expected = float(expected)
+    observed = float(observed)
+    point.update({
+        "observed_cloud": observed,
+        "expected_cloud": expected,
+        "lower_cloud": getattr(case, "lower_cloud", None),
+        "upper_cloud": float(upper),
+        "delta_cloud": float(getattr(case, "delta_cloud", None) if getattr(case, "delta_cloud", None) is not None else observed - expected),
+        "anomalous_cost_cloud": float(getattr(case, "anomalous_cost_cloud", 0.0) or 0.0),
+        "above_band": observed > float(upper),
+        "comparison_supported": True,
+        "phase": "CASE_EVALUATION",
+        "reference_kind": "CASE_EVALUATION_SNAPSHOT",
+        "is_case_evaluation_snapshot": True,
+    })
+    return True
+
+
 async def read_case_series(
     *,
     case: Any,
