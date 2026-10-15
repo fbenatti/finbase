@@ -496,6 +496,55 @@ def test_subscription_policy_still_subtracts_prisma_contains():
     assert service._previous_overlap_reason(subscription_rule, prisma) is None
 
 
+def test_prior_rule_exclusion_uses_active_rule_without_recent_billing_evidence():
+    service = AzureTagPolicyService(db=None)
+    foundation = _rule(id=52, priority=90, department_id=73)
+    prisma = _rule(id=78, priority=9, department_id=234, name="Classifica → Prisma",
+                   conditions=[{"field": "source_resource_group_name", "operator": "~",
+                                "values": ["PCCAGENTLESSSCANRESOURCEGROUP", "dig-security-rg"]}])
+    departments = {
+        73: Department(id=73, name="fundacao telefonica", parent_id=None, centro_custo="29TN161700"),
+        234: Department(id=234, name="Prisma", parent_id=None, centro_custo="29TN161700"),
+    }
+    item = {
+        "rule": foundation, "target": "resource_group",
+        "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+        "terms": [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=",
+                   "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
+        "tags": {"projeto": "fundacao telefonica"}, "observed": {},
+    }
+    exclusions = service._prior_rule_exclusions(item, [prisma, foundation], departments, {},
+                                                 [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"}], [])
+    assert [entry["rule_id"] for entry in exclusions] == [78]
+    assert exclusions[0]["selector"]["allOf"][1]["anyOf"][0] == {
+        "field": "name", "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
+    }
+
+
+def test_prior_rule_exclusion_drops_proven_disjoint_subscription():
+    service = AzureTagPolicyService(db=None)
+    foundation = _rule(id=52, priority=90, department_id=73)
+    other = _rule(id=78, priority=9, department_id=234,
+                  conditions=[{"field": "SubAccountId", "operator": "=",
+                               "values": ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]}])
+    departments = {
+        73: Department(id=73, name="Fundacao", parent_id=None),
+        234: Department(id=234, name="Prisma", parent_id=None),
+    }
+    item = {"rule": foundation, "target": "resource", "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+            "terms": [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=",
+                       "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
+            "tags": {"projeto": "Fundacao"}, "observed": {}}
+    assert service._prior_rule_exclusions(item, [other, foundation], departments, {},
+                                          [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"}], []) == []
+
+
+def test_current_arg_target_matches_contains_case_insensitively():
+    target = {"resource_group_name": "PCCAgentlessScanResourceGroup", "resource_id": "/subscriptions/a/resourceGroups/PCCAgentlessScanResourceGroup/providers/Microsoft.Web/sites/test", "resource_type": "Microsoft.Web/sites"}
+    terms = [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["pccagentlessscanresourcegroup"]}]
+    assert AzureTagPolicyService._target_matches_terms(target, terms)
+
+
 def test_rg_assignment_scope_omits_rg_name_from_selector():
     service = AzureTagPolicyService(db=None)
     terms = [
@@ -524,3 +573,25 @@ def test_deployment_script_uses_resource_group_assignment_scope():
     assert f"/subscriptions/{subscription}/resourceGroups/rg-terra" in script
     assert "# Assignment: resource group rg-terra" in script
     assert 'az policy remediation create --name "$name" --resource-group "$resource_group"' in script
+
+
+def test_deployment_identity_is_stable_across_item_order_and_short_enough():
+    subscription = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    items = [{"rule_id": 52, "rule_name": "Fundacao", "tags": {"projeto": "Fundacao"},
+              "condition": {"field": "name", "contains": "fundacao"}, "base_selector": {"field": "name", "contains": "fundacao"},
+              "scope_subscriptions": [subscription]}]
+    tenant = {"connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
+              "layers": {"resource_groups": items, "resources": []}}
+    first = build_script([tenant])
+    second = build_script([{**tenant, "layers": {"resource_groups": [{"rule_id": 999, "rule_name": "Other",
+                 "tags": {"x": "y"}, "condition": {}, "scope_subscriptions": [subscription]}, *items], "resources": []}}])
+    expected = build_script([{**tenant, "layers": {"resource_groups": [items[0]], "resources": []}}])
+    identity = next(line for line in expected.splitlines() if line.startswith("ensure_definition \"$ACTIVE_POLICY_NAME\""))
+    name = next(line.split()[2].strip('"') for line in expected.splitlines() if line.startswith('ACTIVE_POLICY_NAME='))
+    assignment = next(line.split('${RESOLVED_ASSIGNMENT_NAME:-')[1].split('}')[0] for line in expected.splitlines()
+                     if line.startswith("ACTIVE_ASSIGNMENT_NAME="))
+    assert len(name) <= 64
+    assert len(assignment) <= 64
+    assert identity in expected
+    assert 'name="ofp-rg-52-' in expected
+    assert 'name="ofp-rg-52-' not in first or 'name="ofp-rg-52-' in second
