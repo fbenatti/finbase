@@ -16,6 +16,21 @@ def test_managed_tag_status_uses_case_insensitive_keys_and_nonempty_values():
     assert _managed_tag_status({"projeto": "Terra"}, []) == ("not_assessed", [])
 
 
+def test_managed_tag_status_recognizes_silver_field_aliases_in_azure_tag_keys():
+    keys = ["projeto", "diretoria", "centro-de-custos"]
+    mappings = [
+        {"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
+        {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+        {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
+    ]
+    tags = {
+        "Projeto": "Prisma Cloud",
+        "Diretoria": "DIR SEGURANCA DIGITAL",
+        "Centro_de_Custo": "29TN161700",
+    }
+    assert _managed_tag_status(tags, keys, mappings) == ("complete", [])
+
+
 def test_resource_tag_support_distinguishes_supported_unsupported_and_unknown_types():
     caps = {
         "microsoft.compute/virtualmachines": True,
@@ -164,6 +179,61 @@ def test_subscription_resources_filters_in_bronze_and_uses_snapshot_name():
         "projeto": "Terra", "diretoria": "TI", "centro-de-custos": "CC1",
     }
     assert result["resources"][0]["matching_tags"] == ["projeto", "diretoria", "centro-de-custos"]
+
+
+def test_resource_details_mark_alias_keys_as_managed_when_silver_expectation_is_missing():
+    import asyncio
+    from types import SimpleNamespace
+
+    subscription_id = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
+    resource_id = f"/subscriptions/{subscription_id}/resourceGroups/PCCAgentlessScanResourceGroup"
+    service = AzureTagDashboardService(db=object())
+
+    async def get_connection(_connection_id):
+        return SimpleNamespace(id=2, name="Azure TI", code="azure-ti")
+
+    async def tag_keys():
+        return ["projeto", "diretoria", "centro-de-custos"]
+
+    async def tag_mappings():
+        return [
+            {"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
+            {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+            {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
+        ]
+
+    async def inventory(_connection, subscription_id=None):
+        return ([{
+            "subscription_id": subscription_id,
+            "subscription_name": "Fundação Telefônica",
+            "resource_id": resource_id,
+            "resource_name": "PCCAgentlessScanResourceGroup",
+            "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
+            "tags": {
+                "Projeto": "Prisma Cloud",
+                "Objeto_de_Custo": "29TN10A",
+                "Diretoria": "DIR SEGURANCA DIGITAL",
+                "Conta_Contabil": "31031338.0",
+                "Centro_de_Custo": "29TN161700",
+            },
+            "taggable": True,
+        }], SimpleNamespace(blob_path="arg/inventory/2026-10-15.csv"))
+
+    async def no_expectation(_connection, _subscription_id, _rows, _mappings):
+        return {resource_id.casefold(): {"tags": {}, "source": None, "ambiguous": False}}
+
+    service._connection = get_connection
+    service._tag_keys = tag_keys
+    service._tag_mappings = tag_mappings
+    service._latest_inventory = inventory
+    service._silver_expected_tags = no_expectation
+    result = asyncio.run(service.subscription_resources(2, subscription_id))
+
+    resource = result["resources"][0]
+    assert resource["tag_status"] == "complete"
+    assert resource["missing_tags"] == []
+    assert resource["matching_tags"] == []  # no Silver values, so value compliance is unknown
+    assert resource["managed_tag_keys"] == ["Projeto", "Diretoria", "Centro_de_Custo"]
 
 
 def test_silver_expectations_prefer_resource_evidence_and_use_unique_group_fallback(monkeypatch):
