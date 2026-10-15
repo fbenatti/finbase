@@ -29,7 +29,9 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const sourceBranches = observedScopeBranches(series.detail_items ?? [], filters, hierarchy);
   const sourceOnly = forecastBranches.groups.length === 0 && sourceBranches.groups.length > 0;
   const dimension = forecastBranches.groups.length ? forecastBranches.dimension : sourceBranches.dimension;
-  const groups = forecastBranches.groups.length ? forecastBranches.groups : sourceBranches.groups;
+  const groups = forecastBranches.groups.length
+    ? forecastBranches.groups.map(group => ({ ...group, sourceOnly: false }))
+    : sourceBranches.groups.map(group => ({ ...group, delta: null, expected: null, sourceOnly: true }));
   const paths = (all.length ? all : [{ dimensions: kase.series_dimensions }]).map(member => orgPath(member.dimensions));
   const common = paths[0]?.filter((_, index) => paths.every(parts => parts.slice(0, index + 1).join("\0") === paths[0].slice(0, index + 1).join("\0"))) ?? [];
   const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Escopo do caso";
@@ -94,11 +96,11 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
           {groups.map((group, index) => <ButtonBase key={group.value} disabled={sourceOnly ? !(series.detail_items?.length) : !safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #dce5ef", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#dce5ef", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#f5f8fd", borderColor: "#8caee1" } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="start" spacing={1}>
               <Typography variant="body2" fontWeight={750}>{group.value}</Typography>
-              <Typography fontWeight={800} sx={{ color: sourceOnly ? "#315e91" : group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{sourceOnly ? money(group.actual, currency) : <>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</>}</Typography>
+              <Typography fontWeight={800} sx={{ color: group.sourceOnly ? "#315e91" : group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{group.sourceOnly ? money(group.actual, currency) : <>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</>}</Typography>
             </Stack>
-            <Typography variant="caption" color="text.secondary">{sourceOnly ? "Custo observado na data do evento" : <>Previsto {money(group.expected, currency)} → realizado {money(group.actual, currency)}</>}</Typography>
-            <Box sx={{ height: 5, bgcolor: "#edf1f6", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${sourceOnly ? Math.min(100, Math.abs(group.actual ?? 0) / Math.max(1, Math.abs(actual ?? 0)) * 100) : share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
-            <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
+            <Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Custo observado na data do evento" : <>Previsto {money(group.expected, currency)} → realizado {money(group.actual, currency)}</>}</Typography>
+            <Box sx={{ height: 5, bgcolor: "#edf1f6", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${group.sourceOnly ? Math.min(100, Math.abs(group.actual ?? 0) / Math.max(1, Math.abs(actual ?? 0)) * 100) : share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
+            <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
           </ButtonBase>)}
           {!groups.length && members.map(member => <Box key={member.series_id} sx={{ py: 1 }}>
             <Typography variant="body2" fontWeight={700}>{dimensionValue(member, "subaccountname")}</Typography>
