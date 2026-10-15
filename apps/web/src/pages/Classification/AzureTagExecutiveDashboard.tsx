@@ -200,8 +200,8 @@ export default function AzureTagExecutiveDashboard() {
                   {(resources[item.subscription_id] ?? []).map((resource) => {
                     const actualTags = resource.tags && typeof resource.tags === "object" ? resource.tags : {};
                     const matching = new Set((resource.matching_tags ?? []).map((key) => key.toLocaleLowerCase()));
+                    const managed = new Set((resource.managed_tag_keys ?? []).map((key) => key.toLocaleLowerCase()));
                     const expected = resource.expected_tags ?? {};
-                    const expectedKeys = new Set(Object.keys(expected).map((key) => key.toLocaleLowerCase()));
                     return <TableRow key={resource.resource_id} hover>
                       <TableCell sx={{ maxWidth: 380 }}><Typography variant="body2" noWrap title={resource.resource_name}>{resource.resource_name}</Typography></TableCell>
                       <TableCell>{resource.is_resource_group ? "Resource Group" : resource.resource_type}</TableCell>
@@ -212,8 +212,9 @@ export default function AzureTagExecutiveDashboard() {
                           {Object.entries(actualTags).map(([key, value]) => {
                             const folded = key.toLocaleLowerCase();
                             const matched = matching.has(folded);
+                            const managedKey = managed.has(folded);
                             return <Chip key={key} size="small" variant={matched ? "filled" : "outlined"}
-                              color={matched ? "success" : expectedKeys.has(folded) ? "warning" : "default"}
+                              color={matched ? "success" : managedKey ? "info" : "default"}
                               label={`${key}=${String(value)}`} title={expected[key] ? `Esperado: ${expected[key]}` : undefined} />;
                           })}
                         </Stack> : <Typography variant="caption" color="text.secondary">Nenhuma tag presente</Typography>}
