@@ -233,7 +233,7 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
         'resolve_existing_target() {',
         '  local scope="$1" source_rule="$2" mode="$3" rows assignment definition definition_name category existing_rule existing_mode matches=0',
         '  RESOLVED_ASSIGNMENT_NAME=""; RESOLVED_POLICY_NAME=""',
-        '  rows=$(az rest --method get --url "https://management.azure.com${scope}/providers/Microsoft.Authorization/policyAssignments?api-version=2022-06-01" --query "value[?contains(properties.policyDefinitionId, \`openfinops\`)].[name,properties.policyDefinitionId]" -o tsv --only-show-errors) || { error "Falha ARM REST ao listar assignments em $scope"; exit 1; }',
+        '  rows=$(az rest --method get --url "https://management.azure.com${scope}/providers/Microsoft.Authorization/policyAssignments?api-version=2022-06-01" --query "value[?contains(properties.policyDefinitionId, \`openfinops\`) || contains(properties.policyDefinitionId, \`of-def-\`)].[name,properties.policyDefinitionId]" -o tsv --only-show-errors) || { error "Falha ARM REST ao listar assignments em $scope"; exit 1; }',
         '  while IFS=$\'\\t\' read -r assignment definition; do',
         '    [[ -n "$assignment" && -n "$definition" ]] || continue',
         '    definition_name="${definition##*/}"',
