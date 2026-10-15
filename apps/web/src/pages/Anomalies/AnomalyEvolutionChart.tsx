@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Alert, Box, Button, Chip, Paper, Stack, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import Plot from "@/components/Plot";
@@ -81,18 +81,6 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
             </>}
       </Typography>
     </Box>
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", md: "repeat(4,minmax(0,1fr))" }, gap: 1.5, mt: 1.5 }}>
-      {[
-        { label: "Forecast", value: expected, color: colors.forecast },
-        { label: monthly ? "Realizado acumulado" : "Realizado cloud", value: actual, color: colors.actual },
-        { label: "Desvio sobre o forecast", value: delta, color: delta != null && delta > 0 ? colors.excess : colors.actual },
-        { label: "Custo acima da faixa", value: focus?.anomalous_cost_cloud, color: colors.excess },
-      ].map((item) => <Box key={item.label} sx={{ px: 1.75, py: 1.5, bgcolor: "#f8fafc", borderRadius: 2, minWidth: 0 }}>
-        <Typography variant="caption" color="text.secondary">{item.label}</Typography>
-        <Typography sx={{ mt: .5, fontSize: { xs: 18, sm: 22 }, fontWeight: 750, color: item.color, overflowWrap: "anywhere", fontVariantNumeric: "tabular-nums" }}>{money(item.value, currency)}</Typography>
-      </Box>)}
-    </Box>
-
     {points.length > 0 ? <Box sx={{ mt: 1, width: "100%", height: 410, minHeight: 410, minWidth: 0 }} aria-label="Gráfico único de realizado e forecast com desvio empilhado">
       <Plot
         data={[
@@ -132,10 +120,13 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       />
     </Box> : <Alert severity="info" sx={{ mt: 2 }}>Não há dados disponíveis para desenhar esta série.</Alert>}
 
+    <Typography variant="caption" color="text.secondary">Realizado até {dateLabel(dataEnd)}{future.length > 0 && ` · Forecast até ${dateLabel(future[future.length - 1].event_date)}`} · Clique em uma data para comparar.</Typography>
+    <Accordion elevation={0} disableGutters sx={{ mt: 1, "&:before": { display: "none" } }}>
+    <AccordionSummary sx={{ px: 0, minHeight: 32 }}>
+      <Typography variant="caption" color="text.secondary">Como esta comparação foi calculada</Typography>
+    </AccordionSummary><AccordionDetails sx={{ px: 0 }}>
+    <Typography variant="body2" sx={{ mb: 1 }}>Acima do limite tolerado nesta data: {money(focus?.anomalous_cost_cloud, currency)}. O vermelho compara com o forecast central; apenas a parcela acima do limite é custo anômalo.</Typography>
     <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1} alignItems="center" sx={{ mt: .5 }}>
-      {(series.contributor_series_count ?? 1) > 1 && <Tooltip title={<Box sx={{ whiteSpace: "pre-line" }}>{(series.contributor_series ?? []).map((member) => [member.dimensions.subaccountname, member.dimensions.centro_custo, member.dimensions.organograma_nivel_5].filter(Boolean).join(" · ")).join("\n")}</Box>}>
-        <Chip size="small" variant="outlined" label={`${series.contributor_series_count} séries contribuintes`} />
-      </Tooltip>}
       <Chip size="small" variant="outlined" label={`Realizado até ${dateLabel(dataEnd)}`} />
       {future.length > 0 && <Chip size="small" variant="outlined" sx={{ color: colors.forecast, borderColor: "#c7d7fa" }} label={`Forecast até ${dateLabel(future[future.length - 1].event_date)}`} />}
       {firstExcess && <Chip size="small" variant="outlined" label={`Primeiro excesso na janela: ${dateLabel(firstExcess.event_date)}`} />}
@@ -148,5 +139,6 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       {(series.contributor_series_count ?? 1) > 1 && " Realizado e forecast somam o mesmo conjunto de séries do caso."}
       {reference && <> Referência congelada com corte em {dateLabel(reference.data_cutoff)}.</>}
     </Typography>
+    </AccordionDetails></Accordion>
   </Paper>;
 }
