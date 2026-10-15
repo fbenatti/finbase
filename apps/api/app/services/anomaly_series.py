@@ -388,6 +388,7 @@ async def read_case_series(
                                          start=context_start, end=display_end, data_end=data_end, monthly=monthly)
         event_point = next((point for point in timeline if point["event_date"] == event_day.isoformat()), {})
         contributor_breakdown.append({**member, "event_date": event_day.isoformat(),
+                                      "items": timeline,
                                       **{key: event_point.get(key) for key in
                                          ("observed_cloud", "expected_cloud", "delta_cloud")}})
     if monthly and frozen and frozen.get("coverage_kind") != "FULL_MONTH":
