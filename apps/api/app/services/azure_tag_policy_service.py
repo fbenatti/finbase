@@ -180,8 +180,8 @@ class AzureTagPolicyService:
             for raw in (conn.config_json or {}).get("subscription_ids") or []:
                 remember(str(raw), tenant)
             try:
-                from app.services.azure_resource_graph_service import discover_scope
-                for item in await discover_scope(dict(conn.config_json or {})):
+                from app.services.azure_resource_graph_service import discover_subscriptions
+                for item in await discover_subscriptions(dict(conn.config_json or {})):
                     remember(str(item.get("subscription_id") or ""), tenant)
             except Exception as exc:
                 logger.warning("Azure tag policy home-tenant discovery for %s: %s", conn.code, str(exc)[:180])
@@ -248,8 +248,8 @@ class AzureTagPolicyService:
         catalog: dict[str, list[str]] = defaultdict(list)
         ids = [value for value in configured if UUID_RE.match(value)]
         try:
-            from app.services.azure_resource_graph_service import discover_scope
-            discovered = await discover_scope(dict(conn.config_json or {}))
+            from app.services.azure_resource_graph_service import discover_subscriptions
+            discovered = await discover_subscriptions(dict(conn.config_json or {}))
             for item in discovered:
                 sid = str(item.get("subscription_id") or "").strip()
                 name = str(item.get("subscription_name") or "").strip()
