@@ -98,6 +98,16 @@ async def list_tenants(db: AsyncSession = Depends(get_db)):
     return await AzureTagPolicyService(db).list_azure_tenants()
 
 
+@router.get("/subscriptions")
+async def list_subscriptions(connection_id: int = Query(...), db: AsyncSession = Depends(get_db)):
+    try:
+        return {"subscriptions": await AzureTagPolicyService(db).list_subscriptions(connection_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.get("/export")
 async def export_policy(
     connection_id: int | None = Query(None, description="Optional: a single Azure connection/tenant"),
