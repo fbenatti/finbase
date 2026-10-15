@@ -361,6 +361,8 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     assert "grep -q" not in script
     assert "|| true" not in script
     assert "Há $matches assignments OpenFinops candidatos" in script
+    assert "contains(policyDefinitionId" in script
+    assert "contains(properties.policyDefinitionId" not in script
     assert "az policy definition delete" not in script
     assert "az policy assignment delete" not in script
     assert "az policy remediation delete" not in script
