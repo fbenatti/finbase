@@ -596,4 +596,5 @@ def test_deployment_identity_is_stable_across_item_order_and_short_enough():
     assert identity in second
     assert name_line in second
     assert assignment_line in second
-    assert name.startswith("ofp-rg-52-")
+    assert name.startswith("of-def-2-52-rg-")
+    assert assignment.startswith("of-asg-2-52-rg-")
