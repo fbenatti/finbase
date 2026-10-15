@@ -39,7 +39,11 @@ def test_resource_group_selector_applies_to_rg_and_children():
     resource = service._selector(terms, "resource")
     assert rg["allOf"][0] == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
     assert rg["allOf"][1] == {"field": "name", "equals": "rg-terra"}
-    assert resource["allOf"][1] == {"value": "[resourceGroup().name]", "equals": "rg-terra"}
+    assert resource["allOf"][1]["not"]["allOf"] == [
+        {"field": "type", "equals": "Microsoft.Sql/servers/databases"},
+        {"field": "name", "equals": "master"},
+    ]
+    assert resource["allOf"][2] == {"value": "[resourceGroup().name]", "equals": "rg-terra"}
 
 
 def test_rg_selector_omits_subscription_id_field():
@@ -59,7 +63,7 @@ def test_multiple_resource_groups_create_valid_value_alternatives():
     service = AzureTagPolicyService(db=None)
     terms = [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["rg-a", "rg-b"]}]
     resource = service._selector(terms, "resource")
-    alternatives = resource["allOf"][1]["anyOf"]
+    alternatives = resource["allOf"][2]["anyOf"]
     assert alternatives == [
         {"value": "[resourceGroup().name]", "contains": "rg-a"},
         {"value": "[resourceGroup().name]", "contains": "rg-b"},
@@ -71,7 +75,7 @@ def test_resource_id_never_tags_the_resource_group():
     terms = [{"scope": SCOPE_RESOURCE, "field": "id", "operator": "~", "values": ["vhub-tcn-mx"]}]
     assert service._selector(terms, "resource_group") is None
     selector = service._selector(terms, "resource")
-    assert selector["allOf"][1] == {"field": "id", "contains": "vhub-tcn-mx"}
+    assert selector["allOf"][2] == {"field": "id", "contains": "vhub-tcn-mx"}
 
 
 def test_lower_priority_rule_contains_explicit_exception():
@@ -611,7 +615,8 @@ def test_rg_assignment_scope_omits_rg_name_from_selector():
     rg = service._selector(terms, "resource_group", omit_rg_scope=True)
     resource = service._selector(terms, "resource", omit_rg_scope=True)
     assert rg == {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"}
-    assert resource == {"field": "type", "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"}
+    assert resource["allOf"][0] == {"field": "type", "notEquals": "Microsoft.Resources/subscriptions/resourceGroups"}
+    assert resource["allOf"][1]["not"]["allOf"][1] == {"field": "name", "equals": "master"}
 
 
 def test_deployment_script_uses_resource_group_assignment_scope():
