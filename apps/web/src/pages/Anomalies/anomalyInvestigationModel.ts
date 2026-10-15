@@ -13,7 +13,9 @@ export const detailScopeChain = (details: Array<{ key: string; label: string }> 
   const base = [
     { field: "cloud_origem", label: "Cloud / conexão" },
     ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: `Organograma · nível ${index + 1}` })),
-    { field: "subaccountname", label: "Assinatura / subconta" }, { field: "centro_custo", label: "Centro de custo" },
+    { field: "subaccountname", label: "Assinatura / subconta" },
+    { field: "resourcegroupname", label: "Resource group" }, { field: "resource_id", label: "ID do recurso" },
+    { field: "resource_name", label: "Recurso" }, { field: "centro_custo", label: "Centro de custo" },
     { field: "servicename", label: "Serviço" }, { field: "servicesubcategory", label: "Categoria do serviço" },
     { field: "skumeter", label: "SKU / medidor" }, { field: "pricingcategory", label: "Categoria de preço" },
     { field: "commitmentdiscounttype", label: "Modalidade" },
@@ -22,7 +24,7 @@ export const detailScopeChain = (details: Array<{ key: string; label: string }> 
   const unseen = custom.filter(item => !base.some(candidate => candidate.field === item.field));
   const infrastructure = unseen.filter(item => ["subscription", "subscription_id", "resource_group", "gcp_project", "region"].includes(item.field));
   const serviceDetails = unseen.filter(item => !infrastructure.includes(item));
-  const all = [...base.slice(0, 10), ...infrastructure, ...base.slice(10, 13), ...serviceDetails, ...base.slice(13)];
+  const all = [...base.slice(0, 9), ...infrastructure, ...base.slice(9, 14), ...serviceDetails, ...base.slice(14)];
   return all.filter((item, index) => all.findIndex(candidate => candidate.field === item.field) === index);
 };
 export const filterMembers = (members: Member[], filters: ScopeFilter[]) => members.filter(member => filters.every(filter => dimensionValue(member, filter.field) === filter.value));
