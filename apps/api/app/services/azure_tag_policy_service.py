@@ -81,7 +81,7 @@ def _keeps_contains(terms: list[dict], scope: str) -> bool:
 
 
 def _canonical_arm_spelling(spellings: dict[str, int]) -> str:
-    """Pick the GOLD-observed ARM spelling with the most evidence.
+    """Pick the Silver-observed ARM spelling with the most evidence.
 
     Resource and resource group names are case-insensitive in ARM; Azure Policy
     ``equals``/``like``/``contains`` are also case-insensitive. Duplicate casings
@@ -272,11 +272,11 @@ class AzureTagPolicyService:
         name_by_id = {sid.casefold(): name for name, values in catalog.items() for sid in values}
         return [{"subscription_id": sid, "name": name_by_id.get(sid.casefold(), sid)} for sid in ids]
 
-    async def _gold_evidence(self, conn: SourceConnection, mappings: list[dict[str, str]]) -> tuple[list[dict], str | None]:
-        """Return the concrete Azure targets classified in the latest Gold period.
+    async def _silver_evidence(self, conn: SourceConnection, mappings: list[dict[str, str]]) -> tuple[list[dict], str | None]:
+        """Return concrete Azure targets classified in the latest Silver period.
 
         ``business_rule.classification.id`` is written by the classifier at the
-        moment a rule wins.  It is the only safe link between a Gold line and a
+        moment a rule wins. It is the safe link between a Silver cost line and a
         classification rule: department names are neither unique nor enough to
         distinguish a broad rule from a resource exception.
         """
@@ -315,8 +315,8 @@ class AzureTagPolicyService:
                 GROUP BY 1, 2, 3, 4, 5{dynamic_group}
             """, timeout_s=60)
         except Exception as exc:
-            message = f"Não foi possível consultar evidências no GOLD: {str(exc)[:180]}"
-            logger.warning("Azure tag policy Gold evidence for %s: %s", conn.code, message)
+            message = f"Não foi possível consultar evidências na Silver: {str(exc)[:180]}"
+            logger.warning("Azure tag policy Silver evidence for %s: %s", conn.code, message)
             return [], message
         return rows, None
 
@@ -342,7 +342,7 @@ class AzureTagPolicyService:
 
     @staticmethod
     def _replace_terms(terms: list[dict], scope: str, replacement: dict, *, remove_all: bool = False) -> list[dict]:
-        """Replace an ARM dimension with a concrete target observed in Gold."""
+        """Replace an ARM dimension with a concrete target observed in Silver."""
         out: list[dict] = []
         replaced = False
         for term in terms:
@@ -358,10 +358,10 @@ class AzureTagPolicyService:
 
     def _concrete_items(self, rule: ClassificationRule, terms: list[dict], evidence: list[dict], hierarchy: dict[str, str], mappings: list[dict[str, str]] | bool, selected: bool | list[dict],
                         diagnostics: list[dict] | None = None) -> list[dict]:
-        """Turn Gold rows into subscription-scoped policy targets.
+        """Turn Silver evidence or current Azure inventory into scoped targets.
 
         Classification ``~`` (contains) is kept for RG name, resource id/name,
-        type, SKU and location. Gold still decides which subscription GUIDs get
+        type, SKU and location. Silver evidence helps select subscriptions when
         an assignment. SubAccountName stays a GUID list with ``equals``; contains
         is never used for subscriptions. Exact ``=`` RG or Resource ID rules
         still pin the observed ARM literal.
@@ -413,7 +413,7 @@ class AzureTagPolicyService:
 
         if not grouped:
             diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
-                                "reason": "Sem alvo Azure tagueável no último período GOLD"})
+                                "reason": "Sem alvo Azure tagueável na evidência Silver ou no inventário atual do Azure"})
             return []
         items: list[dict] = []
         for key, entry in sorted(grouped.items()):
@@ -572,7 +572,7 @@ class AzureTagPolicyService:
     def _scopes_disjoint(scope_a: list[str], scope_b: list[str]) -> bool:
         """Retorna True se ambos os escopos são não-vazios e não se intersectam.
 
-        Se algum escopo estiver vazio (regra sem dados Gold / escopo desconhecido),
+        Se algum escopo estiver vazio (regra sem evidência Silver / escopo desconhecido),
         não podemos provar disjunção — retorna False (conservador).
         """
         if not scope_a or not scope_b:
@@ -665,10 +665,10 @@ class AzureTagPolicyService:
 
     @classmethod
     def _observed_targets_disjoint(cls, current: dict, previous: dict) -> bool:
-        """Use concrete GOLD targets before falling back to conservative rules.
+        """Use concrete Silver targets before falling back to conservative rules.
 
         An exact ResourceId in ``rg-network`` cannot overlap a Prisma policy
-        whose concrete GOLD RG is ``pccagentlessscanresourcegroup`` merely
+        whose concrete Silver RG is ``pccagentlessscanresourcegroup`` merely
         because both occur in the same subscription.
         """
         current_id = str(current.get("resource_id") or "").casefold()
@@ -852,14 +852,19 @@ class AzureTagPolicyService:
         mappings = await self._tag_mappings()
         home_tenants = await self._subscription_home_tenants(conn)
         billing_tenant = str((conn.config_json or {}).get("tenant_id") or "").strip()
-        gold_rows, gold_error = await self._gold_evidence(conn, mappings)
+        # When a subscription is selected, current ARM inventory is the source
+        # of target existence. Do not wait on the latest billing period in
+        # Silver: resources without recent cost lines must still be included.
+        silver_rows, silver_error = ([], None)
+        if not subscription_id:
+            silver_rows, silver_error = await self._silver_evidence(conn, mappings)
         diagnostics: list[dict] = []
-        if gold_error:
-            diagnostics.append({"status": "warning", "reason": gold_error})
+        if silver_error:
+            diagnostics.append({"status": "warning", "reason": silver_error})
 
         evidence_by_rule: dict[int, list[dict]] = defaultdict(list)
         catalog: dict[str, list[str]] = defaultdict(list)
-        for row in gold_rows:
+        for row in silver_rows:
             try:
                 evidence_by_rule[int(row.get("rule_id"))].append(row)
             except (TypeError, ValueError):
