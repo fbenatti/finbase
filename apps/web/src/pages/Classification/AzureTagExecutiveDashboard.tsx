@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse,
   FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Select,
   Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { ExpandLess, ExpandMore, Refresh } from "@mui/icons-material";
+import { ExpandLess, ExpandMore, PictureAsPdfOutlined, Refresh } from "@mui/icons-material";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import {
   AzureTagExecutiveDashboard as DashboardData,
   AzureTagExecutiveResource,
@@ -37,6 +39,8 @@ export default function AzureTagExecutiveDashboard() {
   const [resourceLoading, setResourceLoading] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const exportRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getAzureTenants().then((items) => {
@@ -79,6 +83,49 @@ export default function AzureTagExecutiveDashboard() {
   const globalAdherence = totals.taggable > 0 && data?.tag_keys.length
     ? Math.round((totals.complete / totals.taggable) * 1000) / 10
     : null;
+
+  const exportPdf = async () => {
+    if (!exportRootRef.current || exporting) return;
+    setExporting(true);
+    try {
+      const canvas = await html2canvas(exportRootRef.current, {
+        scale: 1.5,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        onclone: (documentClone) => {
+          documentClone.querySelectorAll<HTMLElement>("[data-pdf-hide]").forEach((element) => { element.style.display = "none"; });
+          documentClone.querySelectorAll<HTMLElement>(".MuiCollapse-root").forEach((element) => { element.style.height = "auto"; element.style.visibility = "visible"; });
+          documentClone.querySelectorAll<HTMLElement>(".MuiCollapse-hidden").forEach((element) => { element.style.display = "none"; });
+          documentClone.querySelectorAll<HTMLElement>("table").forEach((element) => { element.style.width = "100%"; });
+        },
+      });
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 5;
+      const imageWidth = pageWidth - margin * 2;
+      const imageHeight = canvas.height * imageWidth / canvas.width;
+      const pageCanvas = document.createElement("canvas");
+      const pageContext = pageCanvas.getContext("2d");
+      if (!pageContext) throw new Error("Não foi possível preparar as páginas do PDF.");
+      const pagePixelHeight = Math.floor(canvas.width * (pageHeight - margin * 2) / imageWidth);
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = pagePixelHeight;
+      let offset = 0;
+      while (offset < canvas.height) {
+        const sliceHeight = Math.min(pagePixelHeight, canvas.height - offset);
+        pageContext.clearRect(0, 0, pageCanvas.width, pageCanvas.height);
+        pageContext.drawImage(canvas, 0, offset, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+        if (offset > 0) pdf.addPage();
+        pdf.addImage(pageCanvas.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, imageWidth, sliceHeight * imageWidth / canvas.width);
+        offset += sliceHeight;
+      }
+      void imageHeight;
+      pdf.save(`dashboard-executivo-tags-${data?.connection_code || "azure"}.pdf`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const fetchResources = async (subscriptionId: string, next = false) => {
     if (connectionId === "") return;
@@ -131,20 +178,21 @@ export default function AzureTagExecutiveDashboard() {
     }
   };
 
-  return <Box>
+  return <Box ref={exportRootRef}>
     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={2} sx={{ mb: 2 }}>
       <Box>
         <Typography variant="h5" fontWeight={700}>Dashboard Executivo de Tags</Typography>
         <Typography variant="body2" color="text.secondary">Aderência calculada pelas tags do último snapshot Resource Graph armazenado na Bronze.</Typography>
       </Box>
       <Stack direction="row" spacing={1}>
-        <FormControl size="small" sx={{ minWidth: 250 }}>
+        <FormControl data-pdf-hide size="small" sx={{ minWidth: 250 }}>
           <InputLabel>Conexão Azure</InputLabel>
           <Select label="Conexão Azure" value={connectionId} onChange={(event) => setConnectionId(event.target.value as number)}>
             {tenants.map((tenant) => <MenuItem key={tenant.connection_id} value={tenant.connection_id}>{tenant.name} ({tenant.code})</MenuItem>)}
           </Select>
         </FormControl>
-        <Button variant="contained" startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <Refresh />} onClick={() => void refreshInventory()} disabled={loading || refreshing || connectionId === ""}>
+        <Button data-pdf-hide variant="outlined" startIcon={<PictureAsPdfOutlined />} onClick={() => void exportPdf()} disabled={exporting || loading || !data}>{exporting ? "Gerando PDF…" : "Exportar PDF"}</Button>
+        <Button data-pdf-hide variant="contained" startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <Refresh />} onClick={() => void refreshInventory()} disabled={loading || refreshing || connectionId === ""}>
           {refreshing ? "Coletando…" : "Atualizar inventário Azure"}
         </Button>
       </Stack>
@@ -177,7 +225,7 @@ export default function AzureTagExecutiveDashboard() {
                 <Chip size="small" color="success" variant="outlined" label={`${fmt(item.taggable_resources + item.taggable_resource_groups)} tageáveis`} />
                 <Chip size="small" color="warning" variant="outlined" label={`${fmt(item.non_taggable_resources + item.non_taggable_resource_groups)} não tageáveis`} />
               </Stack>
-              <IconButton size="small" aria-label={isOpen ? "Recolher recursos" : "Ver recursos"}>{isOpen ? <ExpandLess /> : <ExpandMore />}</IconButton>
+              <IconButton data-pdf-hide size="small" aria-label={isOpen ? "Recolher recursos" : "Ver recursos"}>{isOpen ? <ExpandLess /> : <ExpandMore />}</IconButton>
             </Box>
             {item.inventory_error && <Alert severity="error" sx={{ mx: 2, mb: 2 }}>{item.inventory_error}</Alert>}
             {item.capability_warnings.length > 0 && <Alert severity="warning" sx={{ mx: 2, mb: 2 }}>Classificação de suporte a tags incompleta: {item.capability_warnings.join("; ")}</Alert>}
@@ -217,7 +265,7 @@ export default function AzureTagExecutiveDashboard() {
                     </TableRow>;
                   })}
                 </TableBody></Table></Box>
-                {tokens[item.subscription_id] && <Button size="small" sx={{ mt: 1 }} onClick={() => void fetchResources(item.subscription_id, true)} disabled={resourceLoading === item.subscription_id}>Carregar mais</Button>}
+                {tokens[item.subscription_id] && <Button data-pdf-hide size="small" sx={{ mt: 1 }} onClick={() => void fetchResources(item.subscription_id, true)} disabled={resourceLoading === item.subscription_id}>Carregar mais</Button>}
                 {resources[item.subscription_id]?.length === 0 && resourceLoading !== item.subscription_id && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhum recurso retornado nesta subscription.</Typography>}
               </CardContent>
             </Collapse>
