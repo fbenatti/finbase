@@ -323,7 +323,9 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
         assert other_rg_policy["excludes_rule_ids"] == []
         assert "contains" not in json.dumps(other_rg_policy["condition"], ensure_ascii=False)
         assert other_contains_policy["assignment_scope_kind"] == "subscription"
-        assert other_contains_policy["excludes_rule_ids"] == []
+        # Two contains patterns can match the same future RG; billing samples
+        # alone cannot prove those subscription-scoped regions disjoint.
+        assert other_contains_policy["excludes_rule_ids"] == [78]
         assert "contains" in json.dumps(other_contains_policy["base_selector"], ensure_ascii=False)
         assert prisma_policy["assignment_scope_kind"] == "subscription"
         assert prisma_policy["assignment_resource_group"] is None
