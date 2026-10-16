@@ -122,9 +122,12 @@ def test_script_json_is_compact_and_preserves_future_name_patterns():
     script = build_script([tenant], plan_only=True)
     import json
     import re
-    bodies = re.findall(r"<<'POLICYEOF'\n(.*?)\nPOLICYEOF", script, re.S)
+    bodies = re.findall(r"<<'DEFINITIONSEOF'\n(.*?)\nDEFINITIONSEOF", script, re.S)
     assert len(bodies) == 1 and len(bodies[0].splitlines()) == 1
-    assert json.loads(bodies[0]) == bundle['definitions'][0]['definition']['policyRule']
+    name, content_hash, payload = bodies[0].split('\t', 2)
+    assert json.loads(payload)['properties'] == bundle['definitions'][0]['definition']
+    assert name == bundle['definitions'][0]['name']
+    assert content_hash == bundle['definitions'][0]['definition']['metadata']['openfinopsContentHash']
 
 
 def test_missing_rg_or_oversized_expression_budget_blocks_export():
@@ -181,15 +184,15 @@ exit 99
     assert 'ensure_remediation()' not in script
     assert '/resourceGroups/rg-a' in script and '/resourceGroups/rg-b' in script
 
-    # A full quota must block APPLY before definitions or assignments change.
-    for plan in (True, False):
-        blocked = build_script([tenant], plan_only=plan)
-        env = {**os.environ,'IDENTITY_MODE':'system','AZ_LOG':str(log),'SUB':SUB,
-               'FULL_QUOTA':'1','PATH':f'{tmp_path}:'+os.environ['PATH']}
-        result = subprocess.run(['bash','-c',blocked],env=env,text=True,capture_output=True)
-        assert result.returncode == 3, result.stderr
-        assert 'Quota RBAC esgotada' in result.stderr
-        assert 'PLAN concluído' not in result.stdout
+    # Raw RBAC counts cannot assert whether Azure will accept one new grant.
+    # Policy capacity is checked independently; PLAN must never mutate Azure.
+    env = {**os.environ,'IDENTITY_MODE':'system','AZ_LOG':str(log),'SUB':SUB,
+           'FULL_QUOTA':'1','PATH':f'{tmp_path}:'+os.environ['PATH']}
+    result = subprocess.run(['bash','-c',script],env=env,text=True,capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert 'PLAN de carga concluído' in result.stdout
+    assert 'role assignment list --all' not in log.read_text()
+    assert 'check_initiative_quota' not in script
     assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
 
 

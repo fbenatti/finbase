@@ -440,7 +440,7 @@ def _build_individual_script(policies: list[dict], plan_only: bool = False) -> s
         '}',
         'ensure_tag_contributor() {',
         '  local principal_id="$1" scope="$2" attempt=1',
-        '  local rbac_id create_succeeded=0',
+        '  local rbac_id create_succeeded=0 grant_output',
         '  if [[ -n "$SHARED_PRINCIPAL_ID" && "$principal_id" == "$SHARED_PRINCIPAL_ID" ]]; then action UNCHANGED "RBAC compartilhado validado na subscription"; return; fi',
         '  [[ -n "$principal_id" && "$principal_id" != "null" ]] || { plan && { action CREATE "RBAC Tag Contributor em $scope (managed identity pendente)"; return; }; error "Managed identity não foi criada para o assignment."; exit 1; }',
         '  rbac_id=$(az role assignment list --assignee-object-id "$principal_id" --role "Tag Contributor" --scope "$scope" --query "[0].id" -o tsv --only-show-errors) || { error "Falha ao consultar RBAC Tag Contributor em $scope"; exit 1; }',
@@ -448,7 +448,9 @@ def _build_individual_script(policies: list[dict], plan_only: bool = False) -> s
         '  action CREATE "RBAC Tag Contributor em $scope"',
         '  plan && return',
         '  while (( attempt <= RETRY_ATTEMPTS )); do',
-        '    if az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role "Tag Contributor" --scope "$scope" --only-show-errors; then create_succeeded=1; break; fi',
+        '    if grant_output=$(run_mutation az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --role "Tag Contributor" --scope "$scope" --only-show-errors 2>&1); then create_succeeded=1; break; fi',
+        '    if [[ "$grant_output" =~ (RoleAssignmentLimitExceeded|AuthorizationFailed|Forbidden|InvalidAuthenticationToken) ]]; then error "Azure recusou Tag Contributor; remediação não iniciada: $grant_output"; exit 1; fi',
+        '    warn "$grant_output"',
         '    warn "RBAC ainda não disponível (tentativa $attempt/$RETRY_ATTEMPTS); aguardando propagação da identidade."; sleep "$RETRY_DELAY_SECONDS"; ((attempt++))',
         '  done',
         '  (( create_succeeded )) || { error "Não foi possível conceder Tag Contributor após $RETRY_ATTEMPTS tentativa(s)."; exit 1; }',
@@ -682,6 +684,6 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
     from app.services.azure_tag_initiative import compile_initiatives, render_initiative_script
     bundles = compile_initiatives(policies, _definition)
     preamble = _build_individual_script([], plan_only).split("\nrequire_az\n", 1)[0]
-    for obsolete in ("resolve_existing_target", "ensure_assignment", "ensure_remediation"):
+    for obsolete in ("resolve_existing_target", "ensure_assignment", "ensure_definition", "ensure_remediation"):
         preamble = re.sub(r"(?ms)^" + obsolete + r"\(\) \{\n.*?^\}\n?", "", preamble)
     return render_initiative_script(bundles, preamble, plan_only)

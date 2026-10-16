@@ -160,7 +160,6 @@ def render_initiative_script(bundles, preamble, plan_only=False):
     q = shlex.quote
     # An initiative has only one identity/grant. Shared UAMI remains optional.
     lines = [preamble.replace('IDENTITY_MODE="${IDENTITY_MODE:-shared}"', 'IDENTITY_MODE="${IDENTITY_MODE:-system}"'), r'''
-QUOTA_BLOCKED=false
 check_object_capacity() {
   local label="$1" maximum="$2" existing="$3" planned="$4" current=0 additional=0 name
   while IFS= read -r name; do [[ -z "$name" ]] || current=$((current + 1)); done <<< "$existing"
@@ -184,24 +183,18 @@ check_policy_capacity() {
   check_object_capacity initiatives 200 "$initiatives" "$initiative"
   check_object_capacity assignments 200 "$assignments" "$assignment"
 }
-check_initiative_quota() {
-  local subscription="$1" assignment="$2" scope="/subscriptions/$1" output principal="" role="" scopes entry count=0
-  [[ "$IDENTITY_MODE" != "shared" ]] || return 0
-  if output=$(az policy assignment show --name "$assignment" --scope "$scope" --only-show-errors 2>&1); then
-    principal=$(resolve_assignment_principal "$assignment" "$scope") || exit 1
-    role=$(az role assignment list --assignee-object-id "$principal" --role "Tag Contributor" --scope "$scope" --subscription "$subscription" --query "[0].id" -o tsv --only-show-errors) || exit 1
-    [[ -z "$role" || "$role" == "null" ]] || return 0
-  else [[ "$output" =~ (ResourceNotFound|NotFound|not\ found|does\ not\ exist) ]] || { error "$output"; exit 1; }; fi
-  scopes=$(az role assignment list --all --subscription "$subscription" --query "[].scope" -o tsv --only-show-errors) || { error "Falha na leitura da quota RBAC"; exit 1; }
-  while IFS= read -r entry; do
-    if [[ "${entry,,}" == "${scope,,}" || "${entry,,}" == "${scope,,}/"* ]]; then count=$((count + 1)); fi
-  done <<< "$scopes"
-  info "RBAC na subscription: $count; nova concessão necessária: 1"
-  if (( count >= 5000 )); then
-    error "Quota RBAC esgotada em $subscription; compactação não libera permissões já existentes"
-    QUOTA_BLOCKED=true
-    plan || exit 3
-  fi
+ensure_definition_json() {
+  local name="$1" expected_hash="$2" file="$3" output exists=0 category current_hash
+  if output=$(az policy definition show --name "$name" --only-show-errors 2>&1); then exists=1
+  else [[ "$output" =~ (ResourceNotFound|NotFound|not\ found|does\ not\ exist) ]] || { error "Falha consultando definition $name: $output"; exit 1; }; fi
+  if (( exists )); then
+    category=$(az policy definition show --name "$name" --query metadata.category -o tsv --only-show-errors) || exit 1
+    [[ "$category" == "OpenFinops" ]] || { error "Definition $name pertence a outra categoria ($category)"; exit 1; }
+    current_hash=$(az policy definition show --name "$name" --query metadata.openfinopsContentHash -o tsv --only-show-errors) || exit 1
+    if [[ "$current_hash" == "$expected_hash" ]]; then action UNCHANGED "Definition $name"; return; fi
+    action UPDATE "Definition OpenFinops $name"
+  else action CREATE "Definition OpenFinops $name"; fi
+  plan || run_mutation az rest --method put --url "https://management.azure.com/subscriptions/$EXPECTED_SUBSCRIPTION/providers/Microsoft.Authorization/policyDefinitions/$name?api-version=2023-04-01" --body "@$file" --only-show-errors -o none
 }
 ensure_initiative() {
   local name="$1" file="$2" content_hash="$3" output exists=0
@@ -271,25 +264,25 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
 ''']
     for bundle in bundles:
         sub = bundle['subscription_id']; scope = '/subscriptions/' + sub
+        records = ['\t'.join([d['name'], d['definition']['metadata']['openfinopsContentHash'],
+                             canonical({'properties': d['definition']})]) for d in bundle['definitions']]
         lines += [f"# Subscription alvo: {bundle['subscription_name']} ({sub})",
                   f'EXPECTED_SUBSCRIPTION={q(sub)}',
                   'CURRENT_SUBSCRIPTION=$(az account show --query id -o tsv --only-show-errors)',
                   'if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then',
                   '  if plan; then error "Selecione a subscription alvo antes do PLAN"; exit 1; fi',
                   '  az account set --subscription "$EXPECTED_SUBSCRIPTION" --only-show-errors', 'fi',
-                  f'check_policy_capacity {q(sub)} {q(chr(10).join(d["name"] for d in bundle["definitions"]))} {q(bundle["name"])} {q(bundle["assignment_name"])}',
+                  'cat > "$POLICIES_DIR/definitions.tsv" <<\'DEFINITIONSEOF\'', *records, 'DEFINITIONSEOF',
+                  'DEFINITION_NAMES=$(cut -f1 "$POLICIES_DIR/definitions.tsv")',
+                  f'check_policy_capacity {q(sub)} "$DEFINITION_NAMES" {q(bundle["name"])} {q(bundle["assignment_name"])}',
                   f'check_shared_identity {q(sub)}',
-                  f'check_initiative_quota {q(sub)} {q(bundle["assignment_name"])}',
                   f"info '{bundle['original_assignments']} assignments originais -> {len(bundle['definitions'])} definitions / 1 iniciativa / 1 assignment / 1 identidade'",
-                  '# PLAN não comprova quota livre para a nova permissão RBAC.',
-                  '# Assignments legados não são removidos por este script. Migrar após equivalência validada.']
-        for d in bundle['definitions']:
-            name = d['name']; definition = d['definition']
-            lines += [f'cat > "$POLICIES_DIR/{name}.json" <<\'POLICYEOF\'',
-                      canonical(definition['policyRule']), 'POLICYEOF',
-                      f"# {definition['metadata']['openfinopsSourceRule']}; exceções: {definition['metadata']['openfinopsExclusions']}"]
-            metadata = ' '.join(q(f'{k}={v}') for k,v in definition['metadata'].items())
-            lines += [f'ensure_definition {q(name)} {q(definition["mode"])} "$POLICIES_DIR/{name}.json" unused {q(definition["displayName"])} {q(definition["description"])} {q(definition["metadata"]["openfinopsContentHash"])} {metadata}']
+                  '# PLAN verifica a carga; autorização e quota RBAC da concessão são confirmadas pela API no APPLY.',
+                  '# Assignments legados não são removidos por este script. Migrar após equivalência validada.',
+                  'while IFS=$\'\t\' read -r POLICY_NAME CONTENT_HASH DEFINITION_JSON; do',
+                  '  printf \'%s\' "$DEFINITION_JSON" > "$POLICIES_DIR/definition.json"',
+                  '  ensure_definition_json "$POLICY_NAME" "$CONTENT_HASH" "$POLICIES_DIR/definition.json"',
+                  'done < "$POLICIES_DIR/definitions.tsv"']
         lines += ['cat > "$POLICIES_DIR/initiative.json" <<\'INITIATIVEEOF\'', canonical(bundle['members']), 'INITIATIVEEOF',
                   f'ensure_initiative {q(bundle["name"])} "$POLICIES_DIR/initiative.json" {q(bundle["content_hash"])}',
                   f'ensure_initiative_assignment {q(bundle["assignment_name"])} {q(scope)} {q(bundle["name"])}',
@@ -297,11 +290,11 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
                   f'if [[ "$ASSIGNMENT_ALREADY_EXISTS" == "1" ]] || ! plan; then PRINCIPAL_ID=$(resolve_assignment_principal {q(bundle["assignment_name"])} {q(scope)}) || exit 1; fi',
                   f'ensure_tag_contributor "$PRINCIPAL_ID" {q(scope)}',
                   'if [[ "$SKIP_REMEDIATION" != "true" ]]; then']
-        for d in bundle['definitions']:
-            assignment_id=scope+'/providers/Microsoft.Authorization/policyAssignments/'+bundle['assignment_name']
-            lines += [f'  remediate_reference {q(assignment_id)} {q(d["reference_id"])} {q(sub)}']
-        lines += ['fi', 'if ! plan; then run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi']
-    lines += ['if [[ "$QUOTA_BLOCKED" == "true" ]]; then error "PLAN BLOQUEADO pela quota RBAC; nenhuma mutação foi executada"; exit 3; fi',
-              'if plan; then info "PLAN concluído sem mutações. Verifique migração dos legados antes do APPLY.";',
+        assignment_id=scope+'/providers/Microsoft.Authorization/policyAssignments/'+bundle['assignment_name']
+        lines += ['  while IFS=$\'\t\' read -r REFERENCE_ID _; do',
+                  f'    remediate_reference {q(assignment_id)} "$REFERENCE_ID" {q(sub)}',
+                  '  done < "$POLICIES_DIR/definitions.tsv"',
+                  'fi', 'if ! plan; then run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi']
+    lines += ['if plan; then info "PLAN de carga concluído sem mutações. RBAC da remediação será confirmado no APPLY.";',
               'else info "Deploy submetido. Conclusão depende das remediações e da verificação direta das tags."; fi']
     return '\n'.join(lines)+'\n'
