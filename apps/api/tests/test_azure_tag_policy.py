@@ -659,7 +659,7 @@ def test_deployment_script_uses_identity_rbac_and_stable_names():
     assert "ensure_tenant" not in script
     assert "--query tenantId" not in script
     assert 'az policy remediation create --name "$name" --subscription "$subscription"' in script
-    assert script.count("--resource-count 50000") == 2
+    assert "--resource-count" not in script
     assert 'az policy remediation show --name "$name" --subscription "$subscription"' in script
     assert "# Subscription alvo: Terra-Mexico-Test (aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa)" in script
 
@@ -967,6 +967,8 @@ if [[ "$1 $2" == "account show" ]]; then
   [[ "$*" == *"--query id"* ]] && printf '%s\\n' "$EXPECTED_SUBSCRIPTION"
   exit 0
 fi
+if [[ "$1 $2" == "identity show" ]]; then echo shared-principal; exit 0; fi
+if [[ "$1 $2 $3" == "role assignment list" ]]; then echo shared-role; exit 0; fi
 if [[ "$1" == "rest" ]]; then exit 0; fi
 if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy assignment show" ]]; then
   echo 'ResourceNotFound' >&2
@@ -978,7 +980,8 @@ exit 91
     fake_az.chmod(0o755)
     log = tmp_path / "az.log"
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
-           "AZ_LOG": str(log), "EXPECTED_SUBSCRIPTION": subscription}
+           "AZ_LOG": str(log), "EXPECTED_SUBSCRIPTION": subscription,
+           "SHARED_IDENTITY_ID": "/subscriptions/" + subscription + "/resourceGroups/finops/providers/Microsoft.ManagedIdentity/userAssignedIdentities/tags"}
     result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, env=env, check=False)
     assert result.returncode == 0, result.stderr + result.stdout
     calls = log.read_text().splitlines()
@@ -1041,3 +1044,48 @@ def test_deployment_identity_is_stable_across_item_order_and_short_enough():
     assert assignment_line in second
     assert name.startswith("of-def-2-52-rg-")
     assert assignment.startswith("of-asg-2-52-rg-")
+
+
+def test_shared_identity_authorization_blocks_before_mutations(tmp_path):
+    preamble = build_script([]).split("\nrequire_az\n", 1)[0]
+    az = tmp_path / "az"
+    az.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$AZ_LOG\"\n"
+                  'if [[ "$1 $2" == "identity show" ]]; then echo shared-principal; exit 0; fi\n'
+                  'if [[ "$1 $2 $3" == "role assignment list" ]]; then exit 0; fi\n'
+                  'exit 91\n')
+    az.chmod(0o755)
+    log = tmp_path / "calls"
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
+           "AZ_LOG": str(log), "SHARED_IDENTITY_ID": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/tags"}
+    result = subprocess.run(["bash", "-c", preamble + '\ncheck_shared_identity sub\n'], env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "precisa de Tag Contributor" in result.stderr
+    assert not any(word in log.read_text().split() for word in ("create", "update", "assign", "delete"))
+
+
+def test_new_assignments_share_identity_without_new_rbac(tmp_path):
+    preamble = build_script([]).split("\nrequire_az\n", 1)[0]
+    az = tmp_path / "az"
+    az.write_text("""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$AZ_LOG"
+case "$1 $2 $3" in
+  'identity show --ids') echo shared-principal ;;
+  'role assignment list') echo shared-role ;;
+  'policy definition show') echo /subscriptions/sub/providers/Microsoft.Authorization/policyDefinitions/def ;;
+  'policy assignment show') echo ResourceNotFound >&2; exit 1 ;;
+  'policy assignment create') exit 0 ;;
+  *) exit 91 ;;
+esac
+""")
+    az.chmod(0o755)
+    log = tmp_path / "calls"
+    identity = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/tags"
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "AZ_LOG": str(log), "SHARED_IDENTITY_ID": identity}
+    commands = '\ncheck_shared_identity sub\nensure_assignment first /subscriptions/sub def\nensure_assignment second /subscriptions/sub def\nensure_tag_contributor shared-principal /subscriptions/sub\n'
+    result = subprocess.run(["bash", "-c", preamble + commands], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines()
+    creates = [call for call in calls if call.startswith("policy assignment create")]
+    assert len(creates) == 2
+    assert all("--mi-user-assigned " + identity in call for call in creates)
+    assert not any(call.startswith("role assignment create") for call in calls)
