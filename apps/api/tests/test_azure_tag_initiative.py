@@ -169,7 +169,9 @@ exit 99
 
     # Capacity checks must fail before any policy mutation, even in APPLY.
     result = subprocess.run(['bash', '-c', build_script([tenant], plan_only=False)],
-        env={**env, 'FULL_QUOTA': '0', 'FULL_POLICY_QUOTA': '1'}, text=True, capture_output=True)
+        env={**os.environ, 'IDENTITY_MODE': 'system', 'AZ_LOG': str(log), 'SUB': SUB,
+             'PATH': f'{tmp_path}:' + os.environ['PATH'], 'FULL_QUOTA': '0', 'FULL_POLICY_QUOTA': '1'},
+        text=True, capture_output=True)
     assert result.returncode == 3
     assert 'Capacidade insuficiente de definitions' in result.stderr
     assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
