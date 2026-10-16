@@ -1089,3 +1089,30 @@ esac
     assert len(creates) == 2
     assert all("--mi-user-assigned " + identity in call for call in creates)
     assert not any(call.startswith("role assignment create") for call in calls)
+
+
+def test_shared_mode_preserves_existing_assignment_identity(tmp_path):
+    preamble = build_script([]).split("\nrequire_az\n", 1)[0]
+    az = tmp_path / "az"
+    az.write_text('''#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$AZ_LOG"
+if [[ "$1 $2 $3" == "policy definition show" || "$*" == *"--query policyDefinitionId"* ]]; then
+  echo /subscriptions/sub/providers/Microsoft.Authorization/policyDefinitions/def
+elif [[ "$*" == *"--query identity.type"* ]]; then
+  echo "$EXISTING_TYPE"
+elif [[ "$1 $2 $3" == "policy assignment show" ]]; then
+  echo '{}'
+else
+  exit 91
+fi
+''')
+    az.chmod(0o755)
+    for identity_type in ("SystemAssigned", "UserAssigned"):
+        log = tmp_path / identity_type
+        env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
+               "AZ_LOG": str(log), "EXISTING_TYPE": identity_type,
+               "SHARED_IDENTITY_ID": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/tags"}
+        result = subprocess.run(["bash", "-c", preamble + '\nensure_assignment existing /subscriptions/sub def\n'], env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert 'managed identity preservada' in result.stdout
+        assert not any(word in log.read_text().split() for word in ("create", "update", "assign", "delete"))
