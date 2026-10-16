@@ -1869,7 +1869,13 @@ async def _enrich_planning_snapshot(
     if "tipo" not in forecast_output.columns:
         forecast_output["tipo"] = "forecast"
     if "value" not in forecast_output.columns:
-        forecast_output["value"] = forecast_output[value_column]
+        value_positions = [index for index, name in enumerate(forecast_output.columns) if name == value_column]
+        if not value_positions:
+            raise ValueError(f"Forecast output does not contain measure column {value_column!r}")
+        # Some legacy financial outputs contain duplicate measure labels; use
+        # the configured measure's first physical column instead of selecting
+        # by label, which would return a DataFrame and break scalar assignment.
+        forecast_output["value"] = forecast_output.iloc[:, value_positions[0]]
     dimensions = [
         column for column in forecast_output.columns
         if column not in {
