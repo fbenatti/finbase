@@ -1420,12 +1420,25 @@ def write_destination_staged(
 
 
 def _align_staged_batch_to_target(batch, target) -> pa.Table:
-    """Align column order and Iceberg field IDs before appending staged data."""
-    target_column_names = [field.name for field in target.schema().fields]
-    staged_table = pa.Table.from_batches([batch]).select(target_column_names)
+    """Align staged columns to the target, filling legacy target-only fields.
+
+    Gold tables can retain columns from older materialization schemas. When a
+    refreshed staging table no longer emits one of those columns, preserve the
+    target schema and append a typed NULL for that field instead of failing
+    while selecting it from the staging batch.
+    """
+    target_schema = target.schema().as_arrow()
+    staged_table = pa.Table.from_batches([batch])
+    staged_names = set(staged_table.schema.names)
+    arrays = [
+        staged_table[field.name]
+        if field.name in staged_names
+        else pa.nulls(batch.num_rows, type=field.type)
+        for field in target_schema
+    ]
     return pa.Table.from_arrays(
-        [staged_table.column(name) for name in target_column_names],
-        schema=target.schema().as_arrow(),
+        arrays,
+        schema=target_schema,
     )
 
 
