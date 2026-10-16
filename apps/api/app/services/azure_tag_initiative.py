@@ -104,6 +104,9 @@ ensure_initiative() {
     local category
     category=$(az policy set-definition show --name "$name" --query metadata.category -o tsv --only-show-errors)
     [[ "$category" == "OpenFinops" ]] || { error "Iniciativa pertence a outra categoria"; exit 1; }
+    local current_hash
+    current_hash=$(az policy set-definition show --name "$name" --query metadata.openfinopsContentHash -o tsv --only-show-errors)
+    if [[ "$current_hash" == "$content_hash" ]]; then action UNCHANGED "Initiative $name"; return; fi
     action UPDATE "Initiative $name"
     plan || run_mutation az policy set-definition update --name "$name" --definitions "@$file" --metadata category=OpenFinops "openfinopsContentHash=$content_hash" --only-show-errors -o none
   else
@@ -118,6 +121,7 @@ ensure_initiative_assignment() {
   [[ "$IDENTITY_MODE" != "shared" ]] || identity_args=(--mi-user-assigned "$SHARED_IDENTITY_ID")
   if output=$(az policy assignment show --name "$name" --scope "$scope" --only-show-errors 2>&1); then exists=1
   else [[ "$output" =~ (ResourceNotFound|NotFound|not\ found|does\ not\ exist) ]] || { error "$output"; exit 1; }; fi
+  ASSIGNMENT_ALREADY_EXISTS="$exists"
   if (( exists )); then
     actual=$(az policy assignment show --name "$name" --scope "$scope" --query policyDefinitionId -o tsv --only-show-errors)
     [[ "${actual,,}" == "${expected,,}" ]] || { error "Assignment aponta para outra iniciativa"; exit 1; }
@@ -177,7 +181,7 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
                   f'ensure_initiative {q(bundle["name"])} "$POLICIES_DIR/initiative.json" {q(bundle["content_hash"])}',
                   f'ensure_initiative_assignment {q(bundle["assignment_name"])} {q(scope)} {q(bundle["name"])}',
                   'PRINCIPAL_ID=""',
-                  f'if ! plan; then PRINCIPAL_ID=$(resolve_assignment_principal {q(bundle["assignment_name"])} {q(scope)}) || exit 1; fi',
+                  f'if [[ "$ASSIGNMENT_ALREADY_EXISTS" == "1" ]] || ! plan; then PRINCIPAL_ID=$(resolve_assignment_principal {q(bundle["assignment_name"])} {q(scope)}) || exit 1; fi',
                   f'ensure_tag_contributor "$PRINCIPAL_ID" {q(scope)}',
                   'if [[ "$SKIP_REMEDIATION" != "true" ]]; then']
         for d in bundle['definitions']:
