@@ -1112,7 +1112,7 @@ fi
         env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
                "AZ_LOG": str(log), "EXISTING_TYPE": identity_type,
                "SHARED_IDENTITY_ID": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/tags"}
-        result = subprocess.run(["bash", "-c", preamble + '\nensure_assignment existing /subscriptions/sub def\n'], env=env, capture_output=True, text=True)
+        result = subprocess.run(["bash", "-c", preamble + '\nPLAN_ONLY=true\nensure_assignment existing /subscriptions/sub/resourceGroups/rg def\n'], env=env, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         assert 'managed identity preservada' in result.stdout
         assert not any(word in log.read_text().split() for word in ("create", "update", "assign", "delete"))
