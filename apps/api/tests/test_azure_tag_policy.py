@@ -302,20 +302,25 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
         assert {policy["rule_id"] for policy in policies} == {52, 78}
         foundation_policy = next(policy for policy in policies if policy["rule_id"] == 52)
         prisma_policy = next(policy for policy in policies if policy["rule_id"] == 78)
-        assert foundation_policy["assignment_scope_kind"] == "resource_group"
-        assert foundation_policy["assignment_resource_group"] == "rg-common"
-        assert foundation_policy["excludes_rule_ids"] == []
+        assert foundation_policy["assignment_scope_kind"] == "subscription"
+        assert foundation_policy["assignment_resource_group"] is None
+        assert foundation_policy["observed"] == {}
+        assert foundation_policy["excludes_rule_ids"] == [78]
         assert prisma_policy["assignment_scope_kind"] == "subscription"
         assert prisma_policy["assignment_resource_group"] is None
         assert prisma_policy["observed"]["resource_group_name"] == "PCCAGENTLESSSCANRESOURCEGROUP · dig-security-rg"
-        assert all(policy["excludes_rule_ids"] == [] for policy in policies)
         assert len(policies) == 2
         assert foundation_policy["tags"] == {
             "projeto": "fundacao telefonica",
             "diretoria": "DIR FUNDACAO TELEFONICA",
             "centro-de-custos": "29TN161700",
         }
+        assert "contains" in json.dumps(prisma_policy["base_selector"], ensure_ascii=False)
+        assert "not" in json.dumps(foundation_policy["condition"], ensure_ascii=False)
     assert result["deployment_subscriptions"] == [selected]
+    script = build_script([result])
+    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"') == 4
+    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/' not in script
 
 
 def test_subscription_only_policy_requires_billed_current_resource_group():

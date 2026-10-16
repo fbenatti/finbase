@@ -485,9 +485,11 @@ class AzureTagPolicyService:
             return []
         level = (SCOPE_RESOURCE if SCOPE_RESOURCE in scopes else
                  SCOPE_RG if SCOPE_RG in scopes else SCOPE_SUBSCRIPTION)
-        # A selected-subscription ``contains`` rule can share one assignment
-        # across its matching Resource Groups. The policy selector remains
-        # restricted to that name pattern; exact RG rules stay RG-scoped.
+        # Preserve the rule's actual decision level. Subscription rules remain
+        # subscription-scoped; a Resource Group ``contains`` rule can share one
+        # subscription assignment with its selector limited to matching RGs.
+        # Exact RG rules remain assigned to each concrete Resource Group.
+        subscription_scope_assignment = force_resource_group_scope and level == SCOPE_SUBSCRIPTION
         rg_contains = level == SCOPE_RG and _keeps_contains(terms, SCOPE_RG)
         rg_contains_subscription_assignment = force_resource_group_scope and rg_contains
         resource_contains = level == SCOPE_RESOURCE and _keeps_contains(terms, SCOPE_RESOURCE) and not force_resource_group_scope
@@ -526,9 +528,9 @@ class AzureTagPolicyService:
                 entry["count"] += count
                 entry["spellings"][resource_group] = entry["spellings"].get(resource_group, 0) + count
             else:
-                key = (subscription_id, resource_group.casefold(), *tag_values) if force_resource_group_scope else (
-                    (subscription_id, *tag_values)
-                )
+                key = ((subscription_id, *tag_values)
+                       if subscription_scope_assignment or not force_resource_group_scope else
+                       (subscription_id, resource_group.casefold(), *tag_values))
                 entry = grouped.setdefault(key, {"count": 0, "spellings": {}})
                 entry["count"] += count
                 if resource_group:
@@ -542,7 +544,9 @@ class AzureTagPolicyService:
         for key, entry in sorted(grouped.items()):
             evidence_count = entry["count"]
             subscription_id = key[0]
-            value_offset = 2 if force_resource_group_scope and not rg_contains_subscription_assignment or (
+            value_offset = 2 if force_resource_group_scope and not (
+                rg_contains_subscription_assignment or subscription_scope_assignment
+            ) or (
                 (level == SCOPE_RESOURCE and not resource_contains) or (level == SCOPE_RG and not rg_contains)
             ) else 1
             tags = {mapping["tag_key"]: (hierarchy.get(mapping["focus_field"]) or key[value_offset + index])
@@ -560,7 +564,10 @@ class AzureTagPolicyService:
             if force_resource_group_scope:
                 item_terms = self._replace_terms(terms, SCOPE_SUBSCRIPTION,
                                                  {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}, remove_all=True)
-                if rg_contains_subscription_assignment:
+                if subscription_scope_assignment:
+                    observed = {}
+                    targets = ("resource_group", "resource")
+                elif rg_contains_subscription_assignment:
                     patterns = [value for term in terms if term["scope"] == SCOPE_RG for value in term["values"]]
                     observed = {"resource_group_name": " · ".join(patterns)}
                     targets = ("resource_group", "resource")
@@ -1082,11 +1089,10 @@ class AzureTagPolicyService:
         mappings = await self._tag_mappings()
         home_tenants = await self._subscription_home_tenants(conn)
         billing_tenant = str((conn.config_json or {}).get("tenant_id") or "").strip()
-        # An explicit subscription is only a filter for the policy map. Silver's
-        # historical winning rule and RG are required to keep every assignment
-        # at Resource Group scope; current ARG inventory confirms the RG still
-        # exists. This includes old billing periods without widening to the
-        # whole subscription.
+        # An explicit subscription filters the policy map and is validated
+        # against Azure. Silver evidence proves which rules have classified
+        # billing there; resource-group rules are pinned to current billed RGs,
+        # while subscription-level business rules retain subscription scope.
         silver_rows, silver_error = ([], None)
         if not subscription_id:
             silver_rows, silver_error = await self._silver_evidence(conn, mappings)
@@ -1212,9 +1218,9 @@ class AzureTagPolicyService:
                 ))
 
         if subscription_id:
-            # Exact RG assignments are isolated naturally. A contains policy is
-            # assigned once at subscription scope, so check it against every
-            # other selected-subscription policy and block ambiguous overlaps.
+            # Different source rules have deterministic priority and are made
+            # mutually exclusive by selector exclusions below. Multiple
+            # conflicting tag mappings for the same source rule are ambiguous.
             blocked_items: dict[tuple[int, str], set[int]] = defaultdict(set)
 
             def _scope_identity(candidate: dict) -> str:
@@ -1224,6 +1230,8 @@ class AzureTagPolicyService:
             for index, item in enumerate(compiled):
                 item_scope = _scope_identity(item)
                 for prior in compiled[:index]:
+                    if int(item["rule"].id) != int(prior["rule"].id):
+                        continue
                     if (item["scope_subscriptions"][0].casefold()
                             != prior["scope_subscriptions"][0].casefold()
                             or _collapse_tag_keys(prior.get("tags") or {})
@@ -1273,32 +1281,31 @@ class AzureTagPolicyService:
                 bucket = previous[(target, item_subscription_id)]
                 overlapping = []
                 pruned = []
-                if not subscription_id:
-                    for entry in bucket:
-                        reason = self._previous_overlap_reason(item, entry)
-                        if reason:
-                            pruned.append({**entry["summary"], "prune_reason": reason})
-                        else:
-                            overlapping.append(entry)
-                    exclusion_item = {**item, "target": target}
-                    diagnostics_before_exclusions = len(diagnostics)
-                    rule_exclusions = self._prior_rule_exclusions(
-                        exclusion_item, rules, departments, catalog, mappings, diagnostics,
-                        selected_subscription_name, eligible_rule_ids,
-                    )
-                    unresolved_precedence = [entry for entry in diagnostics[diagnostics_before_exclusions:]
-                                             if entry.get("status") == "blocked"]
-                    if unresolved_precedence:
-                        diagnostics.append({
-                            "rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
-                            "reason": "Policy não exportada: não foi possível resolver com segurança uma restrição de precedência",
-                            "blocked_by_rule_ids": sorted({entry.get("rule_id") for entry in unresolved_precedence
-                                                            if entry.get("rule_id") is not None}),
-                        })
-                        continue
-                    known_ids = {entry["rule_id"] for entry in overlapping}
-                    rule_exclusions = [entry for entry in rule_exclusions if entry["rule_id"] not in known_ids]
-                    overlapping.extend(rule_exclusions)
+                for entry in bucket:
+                    reason = self._previous_overlap_reason(item, entry)
+                    if reason:
+                        pruned.append({**entry["summary"], "prune_reason": reason})
+                    else:
+                        overlapping.append(entry)
+                exclusion_item = {**item, "target": target}
+                diagnostics_before_exclusions = len(diagnostics)
+                rule_exclusions = self._prior_rule_exclusions(
+                    exclusion_item, rules, departments, catalog, mappings, diagnostics,
+                    selected_subscription_name, eligible_rule_ids,
+                )
+                unresolved_precedence = [entry for entry in diagnostics[diagnostics_before_exclusions:]
+                                         if entry.get("status") == "blocked"]
+                if unresolved_precedence:
+                    diagnostics.append({
+                        "rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                        "reason": "Policy não exportada: não foi possível resolver com segurança uma restrição de precedência",
+                        "blocked_by_rule_ids": sorted({entry.get("rule_id") for entry in unresolved_precedence
+                                                        if entry.get("rule_id") is not None}),
+                    })
+                    continue
+                known_ids = {entry["rule_id"] for entry in overlapping}
+                rule_exclusions = [entry for entry in rule_exclusions if entry["rule_id"] not in known_ids]
+                overlapping.extend(rule_exclusions)
                 effective = self._effective(selector, [entry["selector"] for entry in overlapping])
                 output = {
                     "rule_id": rule.id, "rule_name": rule.name, "priority": rule.priority,
