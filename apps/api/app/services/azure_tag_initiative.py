@@ -213,7 +213,7 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
             assignment_id=scope+'/providers/Microsoft.Authorization/policyAssignments/'+bundle['assignment_name']
             lines += [f'  remediate_reference {q(assignment_id)} {q(d["reference_id"])} {q(sub)}']
         lines += ['fi', 'if ! plan; then run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi']
-    lines += ['if plan; then info "PLAN concluído sem mutações. Verifique quota e migração dos legados antes do APPLY.";',
-              'else info "Deploy submetido. Conclusão depende das remediações e da verificação direta das tags."; fi',
-              '[[ "$QUOTA_BLOCKED" != "true" ]] || exit 3']
+    lines += ['if [[ "$QUOTA_BLOCKED" == "true" ]]; then error "PLAN BLOQUEADO pela quota RBAC; nenhuma mutação foi executada"; exit 3; fi',
+              'if plan; then info "PLAN concluído sem mutações. Verifique migração dos legados antes do APPLY.";',
+              'else info "Deploy submetido. Conclusão depende das remediações e da verificação direta das tags."; fi']
     return '\n'.join(lines)+'\n'

@@ -117,6 +117,7 @@ exit 99
         result = subprocess.run(['bash','-c',blocked],env=env,text=True,capture_output=True)
         assert result.returncode == 3, result.stderr
         assert 'Quota RBAC esgotada' in result.stderr
+        assert 'PLAN concluído' not in result.stdout
     assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
 
 
