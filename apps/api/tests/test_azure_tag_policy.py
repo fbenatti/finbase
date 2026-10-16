@@ -1116,3 +1116,17 @@ fi
         assert result.returncode == 0, result.stderr
         assert 'managed identity preservada' in result.stdout
         assert not any(word in log.read_text().split() for word in ("create", "update", "assign", "delete"))
+
+
+def test_billing_observations_do_not_prune_overlapping_rg_patterns():
+    service = AzureTagPolicyService(db=None)
+    pdv = {"tags": {"projeto": "PDV"}, "observed": {"resource_group_name": "rg-pdv"},
+           "terms": [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["pdv"]}]}
+    vivo = {"tags": {"projeto": "Vivo+"}, "observed": {"resource_group_name": "rg-channels-pdv-app"},
+            "terms": [{"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-channels-pdv-app"]}]}
+    assert service._observed_targets_disjoint(pdv["observed"], vivo["observed"])
+    assert service._previous_overlap_reason(pdv, vivo) is None
+    # Full selectors, including the previous assignment's RG boundary, must
+    # be used as exclusions from a policy evaluated at subscription scope.
+    selector = service._selector(vivo["terms"], "resource_group")
+    assert {"field": "name", "equals": "rg-channels-pdv-app"} in selector["allOf"]

@@ -986,8 +986,8 @@ class AzureTagPolicyService:
             return "same_classification"
         if self._exclusion_outside_assigned_rg(item, entry):
             return "assignment_scope_disjoint"
-        if self._observed_targets_disjoint(item["observed"], entry["observed"]):
-            return "gold_targets_disjoint"
+        # Billing observations do not bound a contains/subscription selector.
+        # A different observed RG cannot prove that a wildcard rule is disjoint.
         if self._is_disjoint_by_arm_terms(item["terms"], entry["terms"]):
             return "arm_terms_disjoint"
         return None
@@ -1328,7 +1328,10 @@ class AzureTagPolicyService:
                     "scope_tenant_id": home_tenants.get(item_subscription_id.casefold()) or None,
                 }
                 bucket.append({
-                    "selector": selector, "terms": item["terms"],
+                    # Exceptions are evaluated in the consumer's assignment scope;
+                    # retain the previous rule's RG selector even when its own
+                    # assignment omitted that selector as redundant.
+                    "selector": self._selector(item["terms"], target), "terms": item["terms"],
                     "rule_id": rule.id, "rule_name": rule.name,
                     "department_id": rule.department_id,
                     "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
