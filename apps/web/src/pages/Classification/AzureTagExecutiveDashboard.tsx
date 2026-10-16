@@ -76,6 +76,9 @@ export default function AzureTagExecutiveDashboard() {
     acc.nonTaggable += item.non_taggable_resources + item.non_taggable_resource_groups;
     return acc;
   }, { resources: 0, groups: 0, taggable: 0, complete: 0, nonTaggable: 0 }), [data]);
+  const globalAdherence = totals.taggable > 0 && data?.tag_keys.length
+    ? Math.round((totals.complete / totals.taggable) * 1000) / 10
+    : null;
 
   const fetchResources = async (subscriptionId: string, next = false) => {
     if (connectionId === "") return;
@@ -167,6 +170,23 @@ export default function AzureTagExecutiveDashboard() {
 
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
+      <Card variant="outlined" sx={{ mb: 2, borderLeft: "4px solid", borderLeftColor: globalAdherence === null ? "grey.400" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" }}>
+        <CardContent sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap", p: "16px !important" }}>
+          <Box>
+            <Typography variant="overline" color="text.secondary" fontWeight={700}>Aderência global às tags</Typography>
+            <Typography variant="body2" color="text.secondary">{data.connection_name} · Todas as subscriptions no snapshot atual</Typography>
+          </Box>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Typography variant="h4" fontWeight={800} color={globalAdherence === null ? "text.secondary" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main"}>
+              {globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
+            </Typography>
+            <Box>
+              <Typography variant="body2" fontWeight={700}>{fmt(totals.complete)} / {fmt(totals.taggable)}</Typography>
+              <Typography variant="caption" color="text.secondary">recursos tageáveis com todas as tags</Typography>
+            </Box>
+          </Stack>
+        </CardContent>
+      </Card>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,1fr)", md: "repeat(5,1fr)" }, gap: 1.5, mb: 3 }}>
         {[
           ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Resource Groups", totals.groups],
