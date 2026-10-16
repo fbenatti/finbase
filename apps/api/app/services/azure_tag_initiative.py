@@ -96,6 +96,26 @@ def render_initiative_script(bundles, preamble, plan_only=False):
     q = shlex.quote
     # An initiative has only one identity/grant. Shared UAMI remains optional.
     lines = [preamble.replace('IDENTITY_MODE="${IDENTITY_MODE:-shared}"', 'IDENTITY_MODE="${IDENTITY_MODE:-system}"'), r'''
+QUOTA_BLOCKED=false
+check_initiative_quota() {
+  local subscription="$1" assignment="$2" scope="/subscriptions/$1" output principal="" role="" scopes entry count=0
+  [[ "$IDENTITY_MODE" != "shared" ]] || return 0
+  if output=$(az policy assignment show --name "$assignment" --scope "$scope" --only-show-errors 2>&1); then
+    principal=$(resolve_assignment_principal "$assignment" "$scope") || exit 1
+    role=$(az role assignment list --assignee-object-id "$principal" --role "Tag Contributor" --scope "$scope" --subscription "$subscription" --query "[0].id" -o tsv --only-show-errors) || exit 1
+    [[ -z "$role" || "$role" == "null" ]] || return 0
+  else [[ "$output" =~ (ResourceNotFound|NotFound|not\ found|does\ not\ exist) ]] || { error "$output"; exit 1; }; fi
+  scopes=$(az role assignment list --all --subscription "$subscription" --query "[].scope" -o tsv --only-show-errors) || { error "Falha na leitura da quota RBAC"; exit 1; }
+  while IFS= read -r entry; do
+    if [[ "${entry,,}" == "${scope,,}" || "${entry,,}" == "${scope,,}/"* ]]; then count=$((count + 1)); fi
+  done <<< "$scopes"
+  info "RBAC na subscription: $count; nova concessão necessária: 1"
+  if (( count >= 5000 )); then
+    error "Quota RBAC esgotada em $subscription; compactação não libera permissões já existentes"
+    QUOTA_BLOCKED=true
+    plan || exit 3
+  fi
+}
 ensure_initiative() {
   local name="$1" file="$2" content_hash="$3" output exists=0
   if output=$(az policy set-definition show --name "$name" --only-show-errors 2>&1); then exists=1
@@ -146,7 +166,11 @@ remediate_reference() {
     while (( SECONDS < deadline )); do
       state=$(az policy remediation show --name "$name" --subscription "$subscription" --query provisioningState -o tsv --only-show-errors) || exit 1
       case "$state" in
-        Succeeded) info "Remediação concluída; verificar tags e conformidade: $name"; return;;
+        Succeeded)
+          local total
+          total=$(az policy remediation show --name "$name" --subscription "$subscription" --query deploymentStatus.totalDeployments -o tsv --only-show-errors) || exit 1
+          if [[ "${total:-0}" == "0" ]]; then warn "Remediação $name sem deployments; reconciliar seletor e tags atuais"; else info "Remediação $name concluída com $total deployments; verificar tags e conformidade"; fi
+          return;;
         Failed|Canceled|Cancelled) error "Remediação $name: $state"; exit 1;;
         Accepted|Running|Evaluating|InProgress) sleep 10;;
         *) error "Estado inesperado $state"; exit 1;;
@@ -167,6 +191,7 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
                   '  if plan; then error "Selecione a subscription alvo antes do PLAN"; exit 1; fi',
                   '  az account set --subscription "$EXPECTED_SUBSCRIPTION" --only-show-errors', 'fi',
                   f'check_shared_identity {q(sub)}',
+                  f'check_initiative_quota {q(sub)} {q(bundle["assignment_name"])}',
                   f"info '{bundle['original_assignments']} assignments originais -> {len(bundle['definitions'])} definitions / 1 iniciativa / 1 assignment / 1 identidade'",
                   '# PLAN não comprova quota livre para a nova permissão RBAC.',
                   '# Assignments legados não são removidos por este script. Migrar após equivalência validada.']
@@ -189,5 +214,6 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
             lines += [f'  remediate_reference {q(assignment_id)} {q(d["reference_id"])} {q(sub)}']
         lines += ['fi', 'if ! plan; then run_mutation az policy state trigger-scan --no-wait --only-show-errors; fi']
     lines += ['if plan; then info "PLAN concluído sem mutações. Verifique quota e migração dos legados antes do APPLY.";',
-              'else info "Deploy submetido. Conclusão depende das remediações e da verificação direta das tags."; fi']
+              'else info "Deploy submetido. Conclusão depende das remediações e da verificação direta das tags."; fi',
+              '[[ "$QUOTA_BLOCKED" != "true" ]] || exit 3']
     return '\n'.join(lines)+'\n'

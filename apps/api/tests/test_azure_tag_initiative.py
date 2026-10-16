@@ -93,6 +93,7 @@ def test_initiative_plan_executes_no_mutations_and_has_one_assignment(tmp_path):
     az.write_text('''#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$AZ_LOG"
 if [[ "$1 $2" == "account show" ]]; then echo "$SUB"; exit 0; fi
+if [[ "$1 $2 $3" == "role assignment list" ]]; then exit 0; fi
 if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy set-definition show" || "$1 $2 $3" == "policy assignment show" ]]; then echo ResourceNotFound >&2; exit 1; fi
 exit 99
 '''); az.chmod(0o755)
