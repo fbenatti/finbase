@@ -1864,14 +1864,13 @@ async def _enrich_planning_snapshot(
     forecast_output = forecast_rows.copy()
     if "forecast_month" in forecast_output.columns:
         forecast_output = forecast_output.rename(columns={"forecast_month": "period"})
-    if "forecast_value" in forecast_output.columns:
-        forecast_output = forecast_output.rename(columns={"forecast_value": value_column})
     if "tipo" not in forecast_output.columns:
         forecast_output["tipo"] = "forecast"
     if "value" not in forecast_output.columns:
-        value_positions = [index for index, name in enumerate(forecast_output.columns) if name == value_column]
+        source_column = "forecast_value" if "forecast_value" in forecast_output.columns else value_column
+        value_positions = [index for index, name in enumerate(forecast_output.columns) if name == source_column]
         if not value_positions:
-            raise ValueError(f"Forecast output does not contain measure column {value_column!r}")
+            raise ValueError(f"Forecast output does not contain measure column {source_column!r}")
         # Some legacy financial outputs contain duplicate measure labels; use
         # the configured measure's first physical column instead of selecting
         # by label, which would return a DataFrame and break scalar assignment.
@@ -1974,8 +1973,10 @@ async def _enrich_planning_snapshot(
     # null, so a filtered consumer cannot multiply global planning totals.
     if value_column != "value":
         manual[value_column] = manual["value"]
-    if value_column != "value" and "realizado" in planning.columns and value_column == "realizado":
+    if "realizado" in planning.columns:
         manual["realizado"] = manual["value"]
+    if "realizado_cloud" in planning.columns:
+        manual["realizado_cloud"] = manual["value"]
     for column in planning.columns:
         if column not in manual.columns:
             manual[column] = None
