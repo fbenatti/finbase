@@ -251,12 +251,22 @@ async def export_policy(
         for doc in policies
     )
     try:
+        from app.services.azure_tag_initiative import compile_initiatives
+        initiative_docs = compile_initiatives(policies, _definition) if has_policies else []
         script = build_script(policies, plan_only=plan_only) if has_policies and fmt in {"script", "both"} else ""
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if fmt == "script":
         return PlainTextResponse(script, media_type="text/x-shellscript")
-    return JSONResponse({"tenants": policies, "deployment_script": script})
+    return JSONResponse({"tenants": policies, "deployment_script": script,
+                         "deployment_model": "initiative", "initiatives": [{
+                             "subscription_id": bundle["subscription_id"],
+                             "initiative_name": bundle["name"],
+                             "assignment_name": bundle["assignment_name"],
+                             "definition_count": len(bundle["definitions"]),
+                             "original_assignment_count": bundle["original_assignments"],
+                             "assignment_count": 1,
+                         } for bundle in initiative_docs]})
 
 
 def _definition(

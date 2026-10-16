@@ -104,3 +104,25 @@ exit 99
     assert '"policyDefinitionReferenceId"' in script
     assert '--resource-count' not in script
     assert '/resourceGroups/rg-a' in script and '/resourceGroups/rg-b' in script
+
+
+def test_export_reports_compacted_assignment_counts(monkeypatch):
+    import asyncio
+    import json
+    from app.routers import azure_tag_policy as router
+    tenant = {'connection_id': 2, 'selected_subscription_id': SUB, 'layers': {'resource_groups': [
+        item(1, {'field':'type','equals':RG_TYPE}, {'projeto':'A'}, 'rg-a'),
+        item(1, {'field':'type','equals':RG_TYPE}, {'projeto':'A'}, 'rg-b')], 'resources': []}}
+    class Service:
+        def __init__(self, db): pass
+        async def list_azure_tenants(self): return [{'connection_id':2}]
+        async def generate_tenant_policy(self, *_): return tenant
+    monkeypatch.setattr(router,'AzureTagPolicyService',Service)
+    response=asyncio.run(router.export_policy(connection_id=2, department_id=None, subscription_id=SUB,
+                                               plan_only=True, fmt='both', db=object()))
+    payload=json.loads(response.body)
+    assert payload['deployment_model']=='initiative'
+    summary=payload['initiatives'][0]
+    assert summary['assignment_count']==1
+    assert summary['definition_count']==1
+    assert summary['original_assignment_count']==2
