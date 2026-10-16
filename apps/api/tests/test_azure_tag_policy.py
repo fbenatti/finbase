@@ -1132,3 +1132,38 @@ def test_billing_observations_do_not_prune_overlapping_rg_patterns():
     # be used as exclusions from a policy evaluated at subscription scope.
     selector = service._selector(vivo["terms"], "resource_group")
     assert {"field": "name", "equals": "rg-channels-pdv-app"} in selector["allOf"]
+
+
+def test_subscription_pattern_excludes_higher_priority_rg_with_its_full_selector(monkeypatch):
+    subscription = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    connection = SimpleNamespace(id=2, code='azure-ti', name='TI', cloud_scope='azure', cloud_name='Azure', config_json={})
+    class DB:
+        async def get(self, *_): return connection
+    service = AzureTagPolicyService(DB())
+    vivo = _rule(id=5217, priority=100, department_id=10, conditions=[
+        {'field': 'source_resource_group_name', 'operator': '=', 'values': ['rg-channels-pdv']}])
+    pdv = _rule(id=3629, priority=350, department_id=20, conditions=[
+        {'field': 'source_resource_group_name', 'operator': '~', 'values': ['pdv']}])
+    targets = [{'subscription_id': subscription, 'resource_group_name': rg, 'resource_name': rg,
+                'resource_type': 'Microsoft.Resources/subscriptions/resourceGroups',
+                'resource_id': f'/subscriptions/{subscription}/resourceGroups/{rg}'}
+               for rg in ['rg-channels-pdv', 'rg-pdv']]
+    evidence = [{'rule_id': rule_id, 'subscription_id': subscription,
+                 'resource_group_name': rg, 'evidence_count': 1}
+                for rule_id,rg in [(5217,'rg-channels-pdv'),(3629,'rg-pdv')]]
+    def returning(value):
+        async def run(*_): return value
+        return run
+    for name,value in {
+        '_load_departments': {10: Department(id=10,name='Vivo+',parent_id=None),20: Department(id=20,name='PDV',parent_id=None)},
+        '_load_classification_rules': [vivo,pdv],
+        '_tag_mappings': [{'tag_key':'projeto','focus_field':'organograma_nivel_1'}],
+        '_subscription_home_tenants': {subscription:'tenant'},
+        '_subscription_catalog': ({'Test':[subscription]},[subscription],None),
+        '_azure_rule_targets': (targets,None), '_silver_billed_rg_evidence': (evidence,None),
+    }.items(): monkeypatch.setattr(service,name,returning(value))
+    result = asyncio.run(service.generate_tenant_policy(2, subscription_id=subscription))
+    for layer in ('resource_groups','resources'):
+        lower = next(i for i in result['layers'][layer] if i['rule_id']==3629)
+        assert lower['excludes_rule_ids'] == [5217]
+        assert 'rg-channels-pdv' in json.dumps(lower['condition'])
