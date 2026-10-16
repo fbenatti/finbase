@@ -225,7 +225,7 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
     assert all(len(items) == 1 for items in result["layers"].values())
 
 
-def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_resource_group(monkeypatch):
+def test_selected_subscription_preserves_contains_exact_and_subscription_predicates(monkeypatch):
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     connection = SimpleNamespace(
         id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
@@ -318,8 +318,9 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
         assert foundation_policy["assignment_resource_group"] is None
         assert foundation_policy["observed"] == {}
         assert foundation_policy["excludes_rule_ids"] == [78, 67, 66]
-        assert other_rg_policy["assignment_scope_kind"] == "resource_group"
-        assert other_rg_policy["assignment_resource_group"] == "rg-common"
+        assert other_rg_policy["assignment_scope_kind"] == "subscription"
+        assert other_rg_policy["assignment_resource_group"] is None
+        assert {"field": "name", "equals": "rg-common"} in other_rg_policy["base_selector"]["allOf"] if layer == "resource_groups" else {"value": "[resourceGroup().name]", "equals": "rg-common"} in other_rg_policy["base_selector"]["allOf"]
         assert other_rg_policy["excludes_rule_ids"] == []
         assert "contains" not in json.dumps(other_rg_policy["condition"], ensure_ascii=False)
         assert other_contains_policy["assignment_scope_kind"] == "subscription"
@@ -340,8 +341,8 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
         assert "not" in json.dumps(foundation_policy["condition"], ensure_ascii=False)
     assert result["deployment_subscriptions"] == [selected]
     script = build_script([result])
-    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"') == 6
-    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/rg-common "$ACTIVE_POLICY_NAME"') == 2
+    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"') == 8
+    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/' not in script
 
 
 def test_subscription_only_policy_requires_billed_current_resource_group():
@@ -730,7 +731,7 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     assert "metadata.category" in script
     assert "RETRY_ATTEMPTS" in script
     assert "PLAN_ONLY" in script
-    assert 'PLAN_ONLY="false"' in script
+    assert 'PLAN_ONLY="${PLAN_ONLY:-false}"' in script
     assert "openfinopsContentHash" in script
     assert '--rules "@$rules"' in script
     assert '--metadata "${metadata_args[@]}"' in script
@@ -760,7 +761,7 @@ def test_deployment_script_can_default_to_plan_only():
                                              "condition": {"field": "name", "equals": "rg"},
                                              "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}], "resources": []},
     }], plan_only=True)
-    assert 'PLAN_ONLY="true"' in script
+    assert 'PLAN_ONLY="${PLAN_ONLY:-true}"' in script
     assert 'WAIT_FOR_REMEDIATION="${WAIT_FOR_REMEDIATION:-false}"' in script
     assert 'SKIP_REMEDIATION="${SKIP_REMEDIATION:-false}"' in script
     assert 'if [[ "$SKIP_REMEDIATION" == "true" ]]; then' in script
