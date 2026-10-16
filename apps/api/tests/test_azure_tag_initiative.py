@@ -166,7 +166,9 @@ fi
 if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy set-definition show" || "$1 $2 $3" == "policy assignment show" ]]; then echo ResourceNotFound >&2; exit 1; fi
 exit 99
 '''); az.chmod(0o755)
-    result = subprocess.run(['bash','-c',script],env={**os.environ,'IDENTITY_MODE':'system','AZ_LOG':str(log),'SUB':SUB,'PATH':f'{tmp_path}:'+os.environ['PATH']},text=True,capture_output=True)
+    env = {**os.environ, 'IDENTITY_MODE': 'system', 'AZ_LOG': str(log), 'SUB': SUB,
+           'PATH': f'{tmp_path}:' + os.environ['PATH']}
+    result = subprocess.run(['bash','-c',script],env=env,text=True,capture_output=True)
     assert result.returncode == 0, result.stderr+result.stdout
     assert result.stdout.count('Assignment único') == 1
     assert result.stdout.count('Remediation ') == 1
