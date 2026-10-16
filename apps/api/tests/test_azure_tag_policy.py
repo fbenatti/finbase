@@ -50,39 +50,35 @@ def test_subscription_discovery_uses_lightweight_arm_list(monkeypatch):
     }]
 
 
-def test_tag_policy_subscription_selector_reads_azure_subscriptions_from_silver(monkeypatch):
+def test_tag_policy_subscription_selector_reads_tenant_subscriptions_from_arm(monkeypatch):
     connection = SimpleNamespace(
         id=2, code="azure-ti", connector_type="azure_blob",
+        config_json={"tenant_id": "tenant"},
     )
-    calls = []
 
     class FakeDB:
         async def get(self, *_args):
             return connection
 
-    async def fake_execute(query, timeout_s=0):
-        calls.append((query, timeout_s))
+    calls = []
+
+    async def fake_discover(config):
+        calls.append(config)
         return [
             {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "subscription_name": "Fundação Telefônica"},
-            {"subscription_id": "63DBC6FC-93D8-4AC1-9745-253F6B502240", "subscription_name": "Fundação Telefônica"},
+            {"subscription_id": "63DBC6FC-93D8-4AC1-9745-253F6B502240", "subscription_name": "Fundação Telefônica duplicada"},
             {"subscription_id": "not-a-subscription", "subscription_name": "Linha inválida"},
             {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "subscription_name": "Terra Dev"},
         ]
 
-    from app.services import trino_service
-    monkeypatch.setattr(trino_service, "execute", fake_execute)
+    monkeypatch.setattr(azure_resource_graph_service, "discover_subscriptions", fake_discover)
     result = asyncio.run(AzureTagPolicyService(FakeDB()).list_subscriptions(2))
 
     assert result == [
         {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "name": "Fundação Telefônica"},
         {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "name": "Terra Dev"},
     ]
-    query, timeout_s = calls[0]
-    assert "cloud_provider" not in query
-    assert "cloud_origem" in query and "'azure-ti'" in query
-    assert "source_connection_id" in query and "= 2" in query
-    assert "max_by" in query
-    assert timeout_s == 60
+    assert calls == [{"tenant_id": "tenant"}]
 
 
 def test_dashboard_refresh_queues_resource_graph_collection_for_selected_connection(monkeypatch):

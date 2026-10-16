@@ -247,61 +247,42 @@ class AzureTagPolicyService:
         return tags
 
     async def _subscription_catalog(self, conn: SourceConnection) -> tuple[dict[str, list[str]], list[str], str | None]:
-        """Resolve name -> subscription GUID, without making an unsafe guess."""
-        configured = [str(v).strip() for v in ((conn.config_json or {}).get("subscription_ids") or []) if str(v).strip()]
+        """Resolve tenant-visible subscription names to GUIDs from ARM."""
         catalog: dict[str, list[str]] = defaultdict(list)
-        ids = [value for value in configured if UUID_RE.match(value)]
         try:
             from app.services.azure_resource_graph_service import discover_subscriptions
             discovered = await discover_subscriptions(dict(conn.config_json or {}))
             for item in discovered:
                 sid = str(item.get("subscription_id") or "").strip()
                 name = str(item.get("subscription_name") or "").strip()
-                if sid:
-                    ids.append(sid)
+                if UUID_RE.fullmatch(sid):
                     catalog[name].append(sid)
         except Exception as exc:  # ResourceId/RG exports remain useful.
             message = f"Não foi possível consultar Azure Resource Graph: {str(exc)[:180]}"
             logger.warning("Azure tag policy subscription discovery for %s: %s", conn.code, message)
-            return catalog, sorted(set(ids)), message
-        return catalog, sorted(set(ids)), None
+            return catalog, [], message
+        return catalog, sorted({sid for ids in catalog.values() for sid in ids}, key=str.casefold), None
 
     async def list_subscriptions(self, connection_id: int) -> list[dict[str, str]]:
         conn = await self.db.get(SourceConnection, connection_id)
         if not conn or conn.connector_type != "azure_blob":
             raise ValueError("Conexão Azure não encontrada")
-        safe_code = (conn.code or "").replace("'", "''")
         try:
-            from app.services.trino_service import execute as trino_execute
-            rows = await trino_execute(f"""
-                SELECT
-                    trim(CAST(subaccountid AS varchar)) AS subscription_id,
-                    max_by(trim(CAST(subaccountname AS varchar)), _billing_period) AS subscription_name
-                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
-                WHERE lower(trim(CAST(cloud_origem AS varchar))) = lower('{safe_code}')
-                  AND CAST(source_connection_id AS bigint) = {int(conn.id)}
-                  AND subaccountid IS NOT NULL
-                  AND trim(CAST(subaccountid AS varchar)) <> ''
-                GROUP BY 1
-                ORDER BY 2, 1
-            """, timeout_s=60)
+            catalog, _, error = await self._subscription_catalog(conn)
+            if error:
+                raise RuntimeError(error)
         except Exception as exc:
-            message = f"Não foi possível listar subscriptions faturadas na Silver: {str(exc)[:180]}"
-            logger.warning("Azure tag policy Silver subscriptions for %s: %s", conn.code, message)
+            message = f"Não foi possível listar subscriptions do tenant Azure: {str(exc)[:180]}"
+            logger.warning("Azure tag policy tenant subscriptions for %s: %s", conn.code, message)
             raise RuntimeError(message) from exc
 
-        # Silver is the source for the selector. Ignore rows that cannot be used
-        # as Azure subscription scopes, and collapse case-only duplicates.
+        # Resource Graph/ARM is authoritative for policy scope. Collapse duplicate
+        # IDs case-insensitively while preserving the tenant's subscription name.
         by_id: dict[str, dict[str, str]] = {}
-        for row in rows:
-            subscription_id = str(row.get("subscription_id") or "").strip()
-            if not UUID_RE.fullmatch(subscription_id):
-                continue
-            key = subscription_id.casefold()
-            name = str(row.get("subscription_name") or "").strip() or subscription_id
-            existing = by_id.get(key)
-            if not existing or (existing["name"] == existing["subscription_id"] and name != subscription_id):
-                by_id[key] = {"subscription_id": subscription_id, "name": name}
+        for name, ids in catalog.items():
+            for subscription_id in ids:
+                key = subscription_id.casefold()
+                by_id.setdefault(key, {"subscription_id": subscription_id, "name": name or subscription_id})
         return sorted(by_id.values(), key=lambda item: (item["name"].casefold(), item["subscription_id"].casefold()))
 
     async def _silver_evidence(self, conn: SourceConnection, mappings: list[dict[str, str]]) -> tuple[list[dict], str | None]:
