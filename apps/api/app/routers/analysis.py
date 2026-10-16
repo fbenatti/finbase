@@ -605,17 +605,9 @@ def shared_cost_base_destination_id(destination_id: int) -> int:
 
 _FORECAST_MANUAL_PIVOT_NAME = "forecast_manual_planning"
 _FORECAST_MANUAL_SCHEMA = {
-    "period": "varchar",
-    "tipo": "varchar",
-    "organograma": "varchar",
-    "organograma_nivel_1": "varchar",
-    "organograma_nivel_2": "varchar",
-    "organograma_nivel_3": "varchar",
-    "organograma_nivel_4": "varchar",
-    "organograma_nivel_5": "varchar",
-    "organograma_nivel_6": "varchar",
-    "organograma_nivel_7": "varchar",
-    "value": "double",
+    "period": "varchar", "tipo": "varchar", "organograma": "varchar",
+    **{f"organograma_nivel_{level}": "varchar" for level in range(1, 8)},
+    "id_orcamento": "varchar", "cloud_origem": "varchar", "value": "double",
 }
 
 
@@ -638,7 +630,7 @@ def _shared_cost_pivot_filters(
 
 async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_retries: int | None = None) -> tuple[str, dict[str, str]]:
     if destination_table_id == FORECAST_MANUAL_PIVOT_ID:
-        return _FORECAST_MANUAL_PIVOT_NAME, dict(_FORECAST_MANUAL_SCHEMA)
+        raise HTTPException(status_code=422, detail="Forecast manual agora é publicado junto à origem Forecast / Planning após reprocessar o forecast")
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
@@ -1406,99 +1398,11 @@ async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
 
 
 async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Serve the forecast-manual pseudo-destination from the operational DB.
-
-    Only future periods are exposed: once a month has realized data in Gold,
-    the manual forecast for that month is considered consumed and disappears.
-    """
-    schema = dict(_FORECAST_MANUAL_SCHEMA)
-    _canonicalize_request(req, schema)
-    rows, columns, measures = _validate_pivot_request(req, schema)
-    dimensions = [*rows, *columns]
-    for measure in measures:
-        if measure.column != "value":
-            raise HTTPException(422, "O pivot de forecast manual usa apenas a medida value")
-
-    versions = (
-        await db.execute(
-            select(PlanningVersion)
-            .join(FinancialType, FinancialType.id == PlanningVersion.financial_type_id)
-            .where(
-                FinancialType.code == "forecast-manual",
-                PlanningVersion.is_current == True,
-            )
-            .order_by(PlanningVersion.year.desc())
-        )
-    ).scalars().all()
-    if not versions:
-        return _build_pivot_result([], rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
-
-    version_ids = [version.id for version in versions]
-    entries = (
-        await db.execute(
-            select(PlanningEntry).where(
-                PlanningEntry.planning_version_id.in_(version_ids),
-                PlanningEntry.entity_type == "department",
-            )
-        )
-    ).scalars().all()
-    if not entries:
-        return _build_pivot_result([], rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
-
-    departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
-    department_map = {department.id: department for department in departments}
-
-    def levels_of(dept_id: int | None) -> list[str]:
-        chain: list[str] = []
-        current = department_map.get(dept_id) if dept_id else None
-        seen: set[int] = set()
-        while current and current.id not in seen:
-            seen.add(current.id)
-            chain.append(current.name or "")
-            current = department_map.get(current.parent_id) if current.parent_id else None
-        return list(reversed(chain))
-
-    year_by_version = {version.id: int(version.year or 0) for version in versions}
-    realized = await _fetch_realized_periods(trino_kwargs)
-    grouped: dict[tuple[Any, ...], list[float]] = {}
-    for entry in entries:
-        month = int(entry.month or 0)
-        if month < 1 or month > 12:
-            continue
-        entry_year = year_by_version.get(entry.planning_version_id, 0)
-        if not entry_year:
-            continue
-        period = f"{entry_year:04d}{month:02d}"
-        # Manual forecast is only meaningful for months that have not realized yet.
-        if period in realized:
-            continue
-        value = float(entry.value or 0)
-        if abs(value) < 1e-12:
-            continue
-        levels = levels_of(entry.department_id)
-        record: dict[str, Any] = {
-            "period": period,
-            "tipo": "forecast-manual",
-            "organograma": levels[-1] if levels else "",
-        }
-        for index, name in enumerate(levels, 1):
-            record[f"organograma_nivel_{index}"] = name
-        key = tuple(record.get(name) for name in dimensions)
-        bucket = grouped.setdefault(key, [0.0] * len(measures))
-        for measure_index, measure in enumerate(measures):
-            bucket[measure_index] += value
-
-    records: list[dict[str, Any]] = []
-    for key, values in grouped.items():
-        record: dict[str, Any] = {f"d{i}": key[i] for i in range(len(dimensions))}
-        for measure_index, value in enumerate(values):
-            record[f"m{measure_index}"] = value
-        records.append(record)
-
-    result = _build_pivot_result(records, rows, columns, measures, req.include_totals, req.rows, req.sort_rows, req.sort_columns)
-    result["period_auto_applied"] = "Somente períodos futuros (sem realizado na Gold)"
-    return result
-
+    """Explain that saved manual-only sources moved to each table's planning Silver."""
+    raise HTTPException(
+        status_code=422,
+        detail="Forecast manual agora é publicado na origem Forecast / Planning da tabela correspondente após reprocessar o forecast",
+    )
 
 async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     if req.destination_table_id == FORECAST_MANUAL_PIVOT_ID:
@@ -2183,17 +2087,36 @@ async def _expected_view_period_detail_core(
     tipo = str(body.tipo or "realizado").lower()
     if tipo not in ("realizado", "forecast"):
         raise HTTPException(status_code=422, detail="tipo deve ser realizado ou forecast")
+    source_layer = GOLD
+    source_table = table
+    if tipo == "forecast":
+        planning_base = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}.get(table, table)
+        planning_name = f"{planning_base}_planning"
+        try:
+            planning_schema = await _describe_layer_schema(
+                planning_name, max_retries=2, namespace=layers.detail_layer(),
+            )
+            planning_columns = {name.lower(): name for name in planning_schema}
+            if {"period", "tipo", "organograma_nivel_1"}.issubset(planning_columns):
+                columns = planning_columns
+                period_col = _quote_ident(columns["period"])
+                value_col = _quote_ident(columns.get("value") or columns.get("realizado") or "value")
+                type_col = _quote_ident(columns["tipo"])
+                source_layer = layers.detail_layer()
+                source_table = planning_name
+        except HTTPException:
+            pass
     if tipo == "realizado":
         tipo_sql = f"({type_col} IS NULL OR lower(CAST({type_col} AS VARCHAR)) IN ('realizado', ''))"
     else:
-        tipo_sql = f"lower(CAST({type_col} AS VARCHAR)) = 'forecast'"
+        tipo_sql = f"lower(CAST({type_col} AS VARCHAR)) IN ('forecast', 'forecast-manual')"
 
     level_cols = [f"organograma_nivel_{level}" for level in range(1, 8)]
     group_cols = [_quote_ident(columns[col]) for col in level_cols if col in columns]
     cloud_filter = _expected_view_cloud_filter(scope_path, selected, columns)
     sql = f"""
       SELECT {', '.join(group_cols)}, SUM(COALESCE(TRY_CAST({value_col} AS DOUBLE), 0)) AS value
-      FROM iceberg.{GOLD}.{table}
+      FROM iceberg.{source_layer}.{source_table}
       WHERE {scope_filter()}{cloud_filter}
         AND {period_col} = {_quote_literal(body.period)}
         AND {tipo_sql}
@@ -2251,20 +2174,32 @@ async def _expected_view_core(
         await wait_until_ready(timeout_s=20)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Trino está reiniciando: {exc}")
-    # A Visão Esperada lê a Gold pré-agregada (dest_dm_cost_*): realizado,
-    # forecast e rateio na mesma granularidade de departamento. Uma única
-    # tabela pré-agregada substitui a varredura da Gold (31M linhas) e da planning.
-    actual_name = forecast_name = body.gold_table.strip().replace('"', "")
+    # Realizado remains sourced from the executive Gold cube; forecast,
+    # budget, and manual forecast use the Silver planning snapshot.
+    actual_name = body.gold_table.strip().replace('"', "")
     gold_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace=GOLD)
-    actual_schema = forecast_schema = gold_schema
+    planning_base = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}.get(actual_name, actual_name)
+    planning_name = planning_base + "_planning"
+    forecast_name = actual_name
+    try:
+        forecast_schema = await _describe_layer_schema(
+            planning_name, max_retries=2, namespace=layers.detail_layer(),
+        )
+        forecast_name = planning_name
+    except HTTPException:
+        # Backward compatibility for cubes whose forecast is still embedded.
+        forecast_schema = gold_schema
+    actual_schema = gold_schema
     actual_columns = {name.lower(): name for name in actual_schema}
-    forecast_columns = actual_columns
+    forecast_columns = {name.lower(): name for name in forecast_schema}
     measure_column = body.measure_column if body.measure_column in {"realizado", "realizado_cloud"} else "realizado"
     required_actual = {"_billing_period", measure_column, "organograma_nivel_1"}
     # Forecast planning publishes both measures for financial contracts. Use
     # the same measure selected for actuals; this keeps the dashboard switch
     # aligned across realized and forecast rows.
-    required_forecast = {"period", measure_column, "tipo", "organograma_nivel_1", "rateio_medida"}
+    required_forecast = {"period", "tipo", "organograma_nivel_1"}
+    if measure_column not in forecast_columns and "value" not in forecast_columns:
+        required_forecast.add(measure_column)
     missing_actual = sorted(required_actual - set(actual_columns))
     missing_forecast = sorted(required_forecast - set(forecast_columns))
     if missing_actual or missing_forecast:
@@ -2287,8 +2222,10 @@ async def _expected_view_core(
     # can make a director's displayed realized spend negative.
     actual_value = _quote_ident(actual_columns[measure_column])
     forecast_period = _quote_ident(forecast_columns.get("period") or forecast_columns["_billing_period"])
-    forecast_value = _quote_ident(forecast_columns[measure_column])
+    forecast_value = _quote_ident(forecast_columns.get(measure_column) or forecast_columns.get("value"))
     forecast_type = _quote_ident(forecast_columns["tipo"])
+    forecast_namespace = layers.detail_layer() if forecast_name.endswith("_planning") else GOLD
+    forecast_period = _quote_ident(forecast_columns.get("period") or forecast_columns.get("_billing_period"))
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
     department_map = {department.id: department for department in departments}
     requested_department_ids = list(dict.fromkeys(body.department_ids or ([] if body.department_id is None else [body.department_id])))
@@ -2394,7 +2331,7 @@ async def _expected_view_core(
         cutoff_rows = await trino_execute(
             f"""
             SELECT MIN({forecast_period}) AS period
-            FROM iceberg.{GOLD}.{forecast_name}
+            FROM iceberg.{forecast_namespace}.{forecast_name}
             WHERE ({forecast_scope_filter}){dimension_filter}
               {forecast_year_clause}
               AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
@@ -2447,20 +2384,53 @@ async def _expected_view_core(
       SELECT {forecast_period} AS period,
              COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
              SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS forecast_value
-      FROM iceberg.{GOLD}.{forecast_name}
+      FROM iceberg.{forecast_namespace}.{forecast_name}
       WHERE ({forecast_scope_filter}){dimension_filter}
         {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
         {forecast_from}
       GROUP BY 1, 2
     """
+    planning_sql = None
+    planning_value_column = forecast_columns.get("value") or forecast_columns.get(measure_column)
+    if forecast_name != actual_name and planning_value_column:
+        planning_filters = [f"({forecast_scope_filter})"]
+        # Planning rows have no service/resource/account grain. Only apply a
+        # requested dimension filter when the planning snapshot carries it.
+        for requested_column, values in (body.dimension_filters or {}).items():
+            physical = forecast_columns.get(requested_column.lower())
+            if physical and values:
+                literals = ", ".join(_quote_literal(str(value).lower()) for value in values)
+                planning_filters.append(f"lower(CAST({_quote_ident(physical)} AS VARCHAR)) IN ({literals})")
+        planning_filters.append(f"lower(CAST({forecast_type} AS VARCHAR)) IN ('orcamento', 'forecast-manual')")
+        if not all_periods:
+            planning_filters.append(f"{forecast_period} >= {year_start} AND {forecast_period} < {year_end}")
+        if body.month_from:
+            planning_filters.append(f"{forecast_period} >= {_quote_literal(body.month_from)}")
+        if body.month_to:
+            planning_filters.append(f"{forecast_period} <= {_quote_literal(body.month_to)}")
+        planning_driver = forecast_driver_column
+        planning_sql = f"""
+          SELECT {forecast_period} AS period,
+                 COALESCE(NULLIF(TRIM(CAST({planning_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver,
+                 lower(CAST({forecast_type} AS VARCHAR)) AS tipo,
+                 SUM(COALESCE(TRY_CAST({_quote_ident(planning_value_column)} AS DOUBLE), 0)) AS value
+          FROM iceberg.{forecast_namespace}.{forecast_name}
+          WHERE {' AND '.join(planning_filters)}
+          GROUP BY 1, 2, 3
+        """
     try:
         # These scans are independent after the cutoff query. Running them in
         # parallel removes one full Trino round-trip from the dashboard path.
-        actual_fact_rows, forecast_fact_rows = await asyncio.gather(
+        tasks = [
             trino_execute(actual_sql, **interactive),
             trino_execute(forecast_sql, **interactive),
-        )
+        ]
+        if planning_sql:
+            tasks.append(trino_execute(planning_sql, **interactive))
+        results = await asyncio.gather(*tasks)
+        actual_fact_rows, forecast_fact_rows = results[:2]
+        planning_fact_rows = results[2] if len(results) > 2 else []
     except TrinoCancelled:
         raise
     except Exception as exc:
@@ -2469,6 +2439,20 @@ async def _expected_view_core(
     actual_by_driver: dict[str, float] = {}
     forecast_by_driver: dict[str, float] = {}
     shared_by_driver: dict[str, float] = {}
+    budget_by_period: dict[str, float] = {}
+    budget_by_driver: dict[str, float] = {}
+    forecast_manual_by_period: dict[str, float] = {}
+    forecast_manual_by_driver: dict[str, float] = {}
+    for row in planning_fact_rows:
+        period = str(row.get("period") or "")
+        driver = str(row.get("driver") or "Sem departamento filho")
+        value = float(row.get("value") or 0)
+        if row.get("tipo") == "orcamento":
+            budget_by_period[period] = budget_by_period.get(period, 0.0) + value
+            budget_by_driver[driver] = budget_by_driver.get(driver, 0.0) + value
+        elif row.get("tipo") == "forecast-manual":
+            forecast_manual_by_period[period] = forecast_manual_by_period.get(period, 0.0) + value
+            forecast_manual_by_driver[driver] = forecast_manual_by_driver.get(driver, 0.0) + value
     for row in actual_fact_rows:
         period = str(row.get("period") or "")
         driver = str(row.get("driver") or "Sem departamento filho")
@@ -2502,17 +2486,22 @@ async def _expected_view_core(
             forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
     if body.include_shared_cost:
         medida_col = forecast_columns.get("rateio_medida")
-        medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
+        if forecast_name.endswith("_planning") and not medida_col:
+            medida_sql = ", 'forecast' AS rateio_medida"
+            group_rateio = ""
+        else:
+            medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
+            group_rateio = f", 3" if medida_col else ""
         rateio_sql = f"""
           SELECT {forecast_period} AS period,
                  COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
                  {medida_sql},
                  SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
-          FROM iceberg.{GOLD}.{forecast_name}
+          FROM iceberg.{forecast_namespace}.{forecast_name}
           WHERE ({forecast_scope_filter}){dimension_filter}
             {forecast_year_clause}
             AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
-          GROUP BY 1, 2{', 3' if medida_col else ''}
+          GROUP BY 1, 2{group_rateio}
         """
         try:
             rateio_rows = await trino_execute(rateio_sql, **interactive)
@@ -2560,9 +2549,10 @@ async def _expected_view_core(
             PlanningVersion.is_current == True,
             PlanningEntry.entity_type == "department",
         )
-    )).all() if not body.dimension_filters else []
-    budget_by_period: dict[str, float] = {}
-    budget_by_driver: dict[str, float] = {}
+    )).all() if not body.dimension_filters and forecast_name == actual_name else []
+    if forecast_name == actual_name:
+        budget_by_period: dict[str, float] = {}
+        budget_by_driver: dict[str, float] = {}
     children_by_parent: dict[int | None, list[Department]] = {}
     for department in departments:
         children_by_parent.setdefault(department.parent_id, []).append(department)
@@ -2621,10 +2611,11 @@ async def _expected_view_core(
             PlanningVersion.is_current == True,
             PlanningEntry.entity_type == "department",
         )
-    )).all() if not body.dimension_filters else []
-    realized_periods = await _fetch_realized_periods({})
-    forecast_manual_by_period: dict[str, float] = {}
-    forecast_manual_by_driver: dict[str, float] = {}
+    )).all() if not body.dimension_filters and forecast_name == actual_name else []
+    realized_periods = await _fetch_realized_periods({}) if forecast_name == actual_name else set()
+    if forecast_name == actual_name:
+        forecast_manual_by_period: dict[str, float] = {}
+        forecast_manual_by_driver: dict[str, float] = {}
     for entry, entry_year in forecast_manual_rows:
         legacy_match = planning_scope_match(entry.department_levels)
         if (selected_departments and entry.department_id in selected_ids) or (not selected_departments and legacy_match):

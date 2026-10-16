@@ -2539,13 +2539,14 @@ def _publish_planning_dataframe(
 
 
 def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: str | None = None) -> str:
-    """Publish the compact monthly planning table in Gold.
+    """Publish the compact monthly planning table in the detail layer.
 
     This is intentionally separate from the detailed Gold fact table. It only
     contains configured series dimensions, month, type and forecast measures.
     ``value_column`` names the forecast measure (e.g. the configured measure
     column) in the published table; when empty it falls back to ``value``.
-    Forecast publish replaces the table; shared-cost rateio is rewritten afterwards.
+    Forecast, budget, and manual forecast share one ``tipo``-tagged snapshot;
+    shared-cost rateio is merged afterwards.
     """
     safe_name = planning_table_name(physical_name)
     if df.empty:
@@ -2563,7 +2564,12 @@ def write_forecast_planning(physical_name: str, df: pd.DataFrame, value_column: 
             safe_name, planning, ["realizado", "realizado_cloud"],
         )
     planning = planning.rename(columns={"forecast_value": measure_name})
-    return _publish_planning_dataframe(safe_name, planning, measure_name)
+    if measure_name != "value" and "value" not in planning.columns:
+        planning["value"] = planning[measure_name]
+    numeric_columns = [measure_name]
+    if "value" in planning.columns:
+        numeric_columns.append("value")
+    return _publish_planning_dataframe(safe_name, planning, numeric_columns)
 
 
 def merge_planning_rateio(
@@ -2571,7 +2577,7 @@ def merge_planning_rateio(
     rateio_df: pd.DataFrame,
     value_column: str = "realizado",
     *,
-    preserve_types: tuple[str, ...] = ("realizado", "forecast"),
+    preserve_types: tuple[str, ...] = ("realizado", "forecast", "orcamento", "forecast-manual"),
     replace_types: tuple[str, ...] = ("rateio", "shared_cost"),
 ) -> int:
     """Substitui linhas de alocação preservando realizado e forecast.

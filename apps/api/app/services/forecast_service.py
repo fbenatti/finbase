@@ -1828,7 +1828,8 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     # are audit/backtest artifacts used only by the accuracy dashboard.
     planning_table = None
     if simulated_as_of is None:
-        planning_table = iceberg.write_forecast_planning(table, output, value_column=measure)
+        planning_rows = await _enrich_planning_snapshot(output, table, measure)
+        planning_table = iceberg.write_forecast_planning(table, planning_rows, value_column=measure)
     return {
         "rows": len(output),
         "table": result_table,
@@ -1841,3 +1842,138 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         "cloud_cutoffs": {cloud: cutoff.isoformat() for cloud, cutoff in sorted(cloud_cutoffs.items())},
         "simulated_as_of": simulated_as_of.isoformat() if simulated_as_of else None,
     }
+
+
+async def _enrich_planning_snapshot(
+    forecast_rows: pd.DataFrame, physical_name: str, value_column: str,
+) -> pd.DataFrame:
+    """Append current budget and manual forecast rows to the published snapshot.
+
+    Planning remains operational in PostgreSQL; this materializes its current
+    versions into the same monthly Silver table whenever a real forecast runs.
+    """
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
+
+    from app.services.iceberg_service import planning_table_name
+    import re
+
+    safe_name = planning_table_name(physical_name)
+    forecast_output = forecast_rows.copy()
+    if "forecast_month" in forecast_output.columns:
+        forecast_output = forecast_output.rename(columns={"forecast_month": "period"})
+    if "forecast_value" in forecast_output.columns:
+        forecast_output = forecast_output.rename(columns={"forecast_value": value_column})
+    if "tipo" not in forecast_output.columns:
+        forecast_output["tipo"] = "forecast"
+    if "value" not in forecast_output.columns:
+        forecast_output["value"] = forecast_output[value_column]
+    dimensions = [
+        column for column in forecast_output.columns
+        if column not in {
+            "forecast_month", "forecast_value", "tipo", "selected_method",
+            "fallback_level", "history_points", "backtest_wape",
+            "realizado", "realizado_cloud",
+        }
+    ]
+    dimensions = [column for column in dimensions if column not in {"value", "period"}]
+    # Match a planning destination to the Gold physical name recorded by the
+    # forecast output; unrelated destination runs must not receive planning.
+    async with async_session() as db:
+        types = (await db.execute(
+            select(FinancialType).where(FinancialType.code.in_(["orcamento", "forecast-manual"]))
+        )).scalars().all()
+        type_ids = {item.id: item.code for item in types}
+        if not type_ids:
+            return forecast_rows
+        years = sorted({int(str(period)[:4]) for period in forecast_rows.get("forecast_month", []) if str(period)[:4].isdigit()})
+        if not years:
+            return forecast_rows
+        versions = (await db.execute(
+            select(PlanningVersion).where(
+                PlanningVersion.financial_type_id.in_(list(type_ids)),
+                PlanningVersion.year.in_(years),
+                PlanningVersion.is_current.is_(True),
+            )
+        )).scalars().all()
+        if not versions:
+            return forecast_rows
+        version_map = {version.id: version for version in versions}
+        entries = (await db.execute(
+            select(PlanningEntry).where(
+                PlanningEntry.planning_version_id.in_(list(version_map)),
+                PlanningEntry.entity_type == "department",
+            )
+        )).scalars().all()
+
+    records: list[dict[str, Any]] = []
+    dimension_aliases = {
+        "organograma": "organograma", "department": "organograma",
+        "id_orcamento": "id_orcamento", "budgetid": "id_orcamento",
+        "cloud_origem": "cloud_origem", "cloud": "cloud_origem",
+    }
+    normalized_dimensions = {
+        re.sub(r"[^a-z0-9]", "", str(column).lower()): column
+        for column in dimensions
+    }
+    for entry in entries:
+        version = version_map[entry.planning_version_id]
+        if not 1 <= int(entry.month or 0) <= 12:
+            continue
+        period = f"{version.year:04d}{int(entry.month):02d}"
+        path = [str(level or "") for level in (entry.department_levels or [])]
+        record: dict[str, Any] = {
+            "period": period,
+            "tipo": type_ids[version.financial_type_id],
+            "value": float(entry.value or 0),
+            "organograma": path[-1] if path else "",
+            "id_orcamento": version.scope_id_orcamento,
+            "cloud_origem": version.scope_cloud,
+        }
+        for index, name in enumerate(path, 1):
+            record[f"organograma_nivel_{index}"] = name
+        # Preserve any forecast dimensions that the organization snapshot can
+        # represent by matching conventional dimension names.
+        for normalized_name, column in normalized_dimensions.items():
+            source = dimension_aliases.get(normalized_name)
+            if source and record.get(source) is not None:
+                record[column] = record[source]
+            elif normalized_name.startswith("organogramanivel"):
+                try:
+                    level = int(normalized_name.removeprefix("organogramanivel"))
+                    record[column] = path[level - 1] if level <= len(path) else None
+                except ValueError:
+                    pass
+        normalized_available = {re.sub(r"[^a-z0-9]", "", key.lower()) for key in forecast_output.columns}
+        for target, source in (("id_orcamento", "id_orcamento"), ("cloud_origem", "cloud_origem")):
+            normalized = re.sub(r"[^a-z0-9]", "", target)
+            if normalized in normalized_available:
+                record[target] = record[source]
+        for level in range(1, 8):
+            target = f"organograma_nivel_{level}"
+            if re.sub(r"[^a-z0-9]", "", target) in normalized_available:
+                record[target] = path[level - 1] if level <= len(path) else None
+        records.append(record)
+
+    if not records:
+        return forecast_output
+    planning = forecast_output
+    manual = pd.DataFrame(records)
+    # Both types use a common numeric value for pivots/dashboard consumers;
+    # retain the configured measure column too where the forecast uses one.
+    # PlanningEntry carries department hierarchy only. For cost dimensions
+    # absent from planning (service, account, resource, etc.) these rows remain
+    # null, so a filtered consumer cannot multiply global planning totals.
+    if value_column != "value":
+        manual[value_column] = manual["value"]
+    if value_column != "value" and "realizado" in planning.columns and value_column == "realizado":
+        manual["realizado"] = manual["value"]
+    for column in planning.columns:
+        if column not in manual.columns:
+            manual[column] = None
+    for column in manual.columns:
+        if column not in planning.columns:
+            planning[column] = None
+    return pd.concat([planning, manual[planning.columns]], ignore_index=True, sort=False)
