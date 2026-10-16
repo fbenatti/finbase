@@ -432,7 +432,9 @@ export default function ExpectedViewV2({
   );
   // Forecast manual is its own stacked layer on top of the Gold forecast.
   const forecastManualBars = filteredRows.map((row) =>
-    row.actual_value == null ? Math.max(0, forecastManualOf(row)) : 0,
+    row.actual_value == null || isForecastAnchor(row)
+      ? Math.max(0, forecastManualOf(row))
+      : 0,
   );
   const forecastManualCumulative = filteredRows.map((_, index) => {
     if (index < forecastStart) return null;
