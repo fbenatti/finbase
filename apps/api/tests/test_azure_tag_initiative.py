@@ -216,3 +216,44 @@ def test_export_reports_compacted_assignment_counts(monkeypatch):
     assert summary['assignment_count']==1
     assert summary['definition_count']==1
     assert summary['original_assignment_count']==2
+
+
+@pytest.mark.parametrize('azure_error', ['RoleAssignmentLimitExceeded', 'AuthorizationFailed'])
+def test_apply_preserves_manifest_and_stops_on_real_rbac_failure(tmp_path, azure_error):
+    import json
+    tags = {'projeto': 'Prisma "quoted"\n$(touch NEVER_RUN)'}
+    tenant = {'connection_id': 2, 'layers': {'resource_groups': [
+        item(78, {'field': 'name', 'contains': 'prisma'}, tags)]}}
+    script = build_script([tenant], plan_only=False)
+    az = tmp_path / 'az'
+    log, created, payload = [tmp_path / name for name in ['calls', 'created', 'payload.json']]
+    az.write_text('''#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$AZ_LOG"
+if [[ "$1 $2" == "account show" ]]; then echo "$SUB"; exit 0; fi
+if [[ "$1 $2 $3" == "policy definition list" || "$1 $2 $3" == "policy set-definition list" || "$1 $2 $3" == "policy assignment list" || "$1 $2 $3" == "role assignment list" ]]; then exit 0; fi
+if [[ "$1 $2 $3" == "policy assignment show" && -e "$AZ_CREATED" ]]; then
+  if [[ "$*" == *"--query identity.type"* ]]; then echo SystemAssigned; else echo 11111111-1111-4111-8111-111111111111; fi
+  exit 0
+fi
+if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy set-definition show" || "$1 $2 $3" == "policy assignment show" ]]; then echo ResourceNotFound >&2; exit 1; fi
+if [[ "$1 $2 $3" == "policy set-definition create" ]]; then exit 0; fi
+if [[ "$1 $2 $3" == "policy assignment create" ]]; then touch "$AZ_CREATED"; exit 0; fi
+if [[ "$1 $2 $3" == "role assignment create" ]]; then echo "$AZURE_ERROR" >&2; exit 1; fi
+if [[ "$1" == rest && "$*" == *"/policyDefinitions/"* ]]; then
+  while (($#)); do if [[ "$1" == --body ]]; then cp "${2#@}" "$AZ_PAYLOAD"; exit 0; fi; shift; done
+fi
+exit 99
+''')
+    az.chmod(0o755)
+    result = subprocess.run(['bash', '-c', script], cwd=tmp_path, env={**os.environ,
+        'SUB': SUB, 'AZ_LOG': str(log), 'AZ_CREATED': str(created), 'AZ_PAYLOAD': str(payload),
+        'AZURE_ERROR': azure_error, 'IDENTITY_MODE': 'system', 'PATH': f'{tmp_path}:' + os.environ['PATH']},
+        text=True, capture_output=True)
+    assert result.returncode == 1
+    assert azure_error in result.stderr
+    assert 'remediação não iniciada' in result.stderr
+    assert log.read_text().count('role assignment create') == 1
+    assert '/remediations/' not in log.read_text()
+    expected = compile_initiatives([tenant], _definition)[0]['definitions'][0]['definition']
+    assert json.loads(payload.read_text()) == {'properties': expected}
+    assert not (tmp_path / 'NEVER_RUN').exists()
