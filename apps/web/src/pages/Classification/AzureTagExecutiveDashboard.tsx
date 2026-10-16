@@ -170,28 +170,12 @@ export default function AzureTagExecutiveDashboard() {
 
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
-      <Card variant="outlined" sx={{ mb: 2, borderLeft: "4px solid", borderLeftColor: globalAdherence === null ? "grey.400" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" }}>
-        <CardContent sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap", p: "16px !important" }}>
-          <Box>
-            <Typography variant="overline" color="text.secondary" fontWeight={700}>Aderência global às tags</Typography>
-            <Typography variant="body2" color="text.secondary">{data.connection_name} · Todas as subscriptions no snapshot atual</Typography>
-          </Box>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Typography variant="h4" fontWeight={800} color={globalAdherence === null ? "text.secondary" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main"}>
-              {globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
-            </Typography>
-            <Box>
-              <Typography variant="body2" fontWeight={700}>{fmt(totals.complete)} / {fmt(totals.taggable)}</Typography>
-              <Typography variant="caption" color="text.secondary">recursos tageáveis com todas as tags</Typography>
-            </Box>
-          </Stack>
-        </CardContent>
-      </Card>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,1fr)", md: "repeat(5,1fr)" }, gap: 1.5, mb: 3 }}>
         {[
           ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Resource Groups", totals.groups],
           ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable],
-        ].map(([label, value]) => <Card key={String(label)} variant="outlined"><CardContent sx={{ p: "14px !important" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="h5" fontWeight={700}>{fmt(Number(value))}</Typography></CardContent></Card>)}
+          ["Aderência global", globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`],
+        ].map(([label, value]) => <Card key={String(label)} variant="outlined" sx={label === "Aderência global" ? { borderLeft: "4px solid", borderLeftColor: globalAdherence === null ? "grey.400" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" } : undefined}><CardContent sx={{ p: "14px !important" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="h5" fontWeight={700} color={label === "Aderência global" && globalAdherence !== null ? globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" : undefined}>{label === "Aderência global" ? <>{value}<Typography component="span" variant="caption" display="block" color="text.secondary">{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis</Typography></> : fmt(Number(value))}</Typography></CardContent></Card>)}
       </Box>
       <Stack spacing={1.5}>
         {data.subscriptions.map((item) => {
