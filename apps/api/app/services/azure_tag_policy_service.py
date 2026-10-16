@@ -772,7 +772,7 @@ class AzureTagPolicyService:
             # remediations and permanent NonCompliant records.
             clauses.append({"not": {"allOf": [
                 {"field": "type", "equals": "Microsoft.Sql/servers/databases"},
-                {"field": "name", "like": "*/master"},
+                {"field": "fullName", "like": "*/master"},
             ]}})
         for term in terms:
             if term["scope"] == SCOPE_SUBSCRIPTION:
