@@ -93,7 +93,10 @@ def test_initiative_plan_executes_no_mutations_and_has_one_assignment(tmp_path):
     az.write_text('''#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$AZ_LOG"
 if [[ "$1 $2" == "account show" ]]; then echo "$SUB"; exit 0; fi
-if [[ "$1 $2 $3" == "role assignment list" ]]; then exit 0; fi
+if [[ "$1 $2 $3" == "role assignment list" ]]; then
+  if [[ "${FULL_QUOTA:-0}" == "1" ]]; then for ((i=0;i<5000;i++)); do echo "/subscriptions/$SUB"; done; fi
+  exit 0
+fi
 if [[ "$1 $2 $3" == "policy definition show" || "$1 $2 $3" == "policy set-definition show" || "$1 $2 $3" == "policy assignment show" ]]; then echo ResourceNotFound >&2; exit 1; fi
 exit 99
 '''); az.chmod(0o755)
@@ -105,6 +108,16 @@ exit 99
     assert '"policyDefinitionReferenceId"' in script
     assert '--resource-count' not in script
     assert '/resourceGroups/rg-a' in script and '/resourceGroups/rg-b' in script
+
+    # A full quota must block APPLY before definitions or assignments change.
+    for plan in (True, False):
+        blocked = build_script([tenant], plan_only=plan)
+        env = {**os.environ,'IDENTITY_MODE':'system','AZ_LOG':str(log),'SUB':SUB,
+               'FULL_QUOTA':'1','PATH':f'{tmp_path}:'+os.environ['PATH']}
+        result = subprocess.run(['bash','-c',blocked],env=env,text=True,capture_output=True)
+        assert result.returncode == 3, result.stderr
+        assert 'Quota RBAC esgotada' in result.stderr
+    assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
 
 
 def test_export_reports_compacted_assignment_counts(monkeypatch):
