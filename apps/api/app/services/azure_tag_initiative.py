@@ -18,6 +18,61 @@ def digest(value):
     return sha256(canonical(value).encode()).hexdigest()[:12]
 
 
+def compact_region(node):
+    """Factor Boolean predicates without broadening their decision regions.
+
+    (A AND B) OR (A AND C) becomes A AND (B OR C). Exact scalar
+    alternatives become ``in``; contains/like patterns are never inferred.
+    """
+    if set(node) == {'not'}:
+        return {'not': compact_region(node['not'])}
+    op = next((key for key in ('allOf', 'anyOf') if set(node) == {key}), None)
+    if not op:
+        return node
+    children = []
+    for child in node[op]:
+        child = compact_region(child)
+        children.extend(child[op] if set(child) == {op} else [child])
+    unique = {canonical(child): child for child in children}
+    children = [unique[key] for key in sorted(unique)]
+    if op == 'anyOf':
+        scalar_fields = {'id', 'name', 'type', 'location', 'subscriptionId'}
+        alternatives, rest = defaultdict(list), []
+        for child in children:
+            comparator = 'equals' if 'equals' in child else 'in'
+            if (len(child) == 2 and child.get('field') in scalar_fields
+                    and comparator in child):
+                alternatives[child['field']].extend(
+                    child[comparator] if comparator == 'in' else [child[comparator]])
+            else:
+                rest.append(child)
+        for field, values in sorted(alternatives.items()):
+            values = {canonical(value): value for value in values}
+            values = [values[key] for key in sorted(values)]
+            rest.append({'field': field, **({'equals': values[0]} if len(values) == 1 else {'in': values})})
+        children = sorted(rest, key=canonical)
+        # Factor shared terms, also when only a subset of branches shares them.
+        rows = [{canonical(term): term for term in (child['allOf'] if set(child) == {'allOf'} else [child])}
+                for child in children]
+        frequencies = defaultdict(int)
+        for row in rows:
+            for key in row:
+                frequencies[key] += 1
+        candidates = [key for key, count in frequencies.items() if count > 1]
+        if candidates:
+            key = max(candidates, key=lambda k: (frequencies[k] * len(k), k))
+            selected = [row for row in rows if key in row]
+            common = set.intersection(*(set(row) for row in selected))
+            shared = [selected[0][key] for key in sorted(common)]
+            remainders = [[row[key] for key in sorted(set(row) - common)] for row in selected]
+            if all(remainders):
+                shared.append(compact_region({'anyOf': [compact_region({'allOf': row}) for row in remainders]}))
+            combined = compact_region({'allOf': shared})
+            others = [child for child, row in zip(children, rows) if key not in row]
+            return compact_region({'anyOf': [combined, *others]}) if others else combined
+    return children[0] if len(children) == 1 else {op: children}
+
+
 def bound_region(item, layer, subscription, *, base=False):
     region = item.get('base_selector', item['condition']) if base else item['condition']
     if item.get('assignment_scope_kind') == 'resource_group':
@@ -42,6 +97,9 @@ def compile_initiatives(policies, definition_factory):
                     # Distinct tag outputs stay distinct, even for the same source rule.
                     groups[(connection, subscription.casefold(), str(item['rule_id']), layer,
                             canonical(item.get('tags', {})))].append(item)
+    outputs = defaultdict(set)
+    for connection, subscription, rule_id, layer, tags in groups:
+        outputs[(connection, subscription, rule_id, layer)].add(tags)
     bundles = {}
     for (connection, subscription, rule_id, layer, _), items in sorted(groups.items()):
         bundle = bundles.setdefault((connection, subscription), {
@@ -50,10 +108,16 @@ def compile_initiatives(policies, definition_factory):
         })
         regions = {canonical(bound_region(i, layer, subscription)): bound_region(i, layer, subscription) for i in items}
         base = sorted({canonical(bound_region(i, layer, subscription, base=True)) for i in items})
+        # Inventory changes must update an existing definition rather than
+        # allocate a fresh one. Use the source predicate, not observed RGs.
+        # Evidence-dependent tag variants retain separate scope identities.
+        if (len(outputs[(connection, subscription, rule_id, layer)]) == 1
+                and all(i.get('identity_selector') for i in items)):
+            base = sorted({canonical(i['identity_selector']) for i in items})
         identity = digest([connection, subscription, rule_id, layer, base])
         name = f'of-def-{connection}-{rule_id}-{layer}-{identity}'
         conditions = [regions[k] for k in sorted(regions)]
-        region = conditions[0] if len(conditions) == 1 else {'anyOf': conditions}
+        region = compact_region(conditions[0] if len(conditions) == 1 else {'anyOf': conditions})
         first = items[0]
         exclusions = {canonical(e): e for i in items for e in i.get('exclusions', [])}
         definition = definition_factory(
@@ -198,11 +262,11 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
         for d in bundle['definitions']:
             name = d['name']; definition = d['definition']
             lines += [f'cat > "$POLICIES_DIR/{name}.json" <<\'POLICYEOF\'',
-                      json.dumps(definition['policyRule'], ensure_ascii=False, indent=2), 'POLICYEOF',
+                      canonical(definition['policyRule']), 'POLICYEOF',
                       f"# {definition['metadata']['openfinopsSourceRule']}; exceções: {definition['metadata']['openfinopsExclusions']}"]
             metadata = ' '.join(q(f'{k}={v}') for k,v in definition['metadata'].items())
             lines += [f'ensure_definition {q(name)} {q(definition["mode"])} "$POLICIES_DIR/{name}.json" unused {q(definition["displayName"])} {q(definition["description"])} {q(definition["metadata"]["openfinopsContentHash"])} {metadata}']
-        lines += ['cat > "$POLICIES_DIR/initiative.json" <<\'INITIATIVEEOF\'', json.dumps(bundle['members'], indent=2), 'INITIATIVEEOF',
+        lines += ['cat > "$POLICIES_DIR/initiative.json" <<\'INITIATIVEEOF\'', canonical(bundle['members']), 'INITIATIVEEOF',
                   f'ensure_initiative {q(bundle["name"])} "$POLICIES_DIR/initiative.json" {q(bundle["content_hash"])}',
                   f'ensure_initiative_assignment {q(bundle["assignment_name"])} {q(scope)} {q(bundle["name"])}',
                   'PRINCIPAL_ID=""',

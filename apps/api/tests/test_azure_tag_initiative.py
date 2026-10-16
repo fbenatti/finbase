@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from app.routers.azure_tag_policy import _definition, build_script
-from app.services.azure_tag_initiative import compile_initiatives, bound_region, RG_TYPE
+from app.services.azure_tag_initiative import compile_initiatives, bound_region, compact_region, canonical, RG_TYPE
 
 SUB = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
@@ -22,6 +22,7 @@ def evaluate(region, obj):
     value = obj.get(region.get('field'), '')
     if 'equals' in region: return value.casefold() == region['equals'].casefold()
     if 'contains' in region: return region['contains'].casefold() in value.casefold()
+    if 'in' in region: return value.casefold() in [v.casefold() for v in region['in']]
     if 'like' in region: return fnmatch.fnmatchcase(value.casefold(), region['like'].casefold())
     raise AssertionError(region)
 
@@ -72,6 +73,58 @@ def test_initiative_names_stable_across_output_order():
     b = item(2, {'field': 'name', 'equals': 'rg-b'}, {'projeto': 'B'})
     def compile(rows): return compile_initiatives([{'layers': {'resource_groups': rows}}], _definition)
     assert compile([a,b]) == compile([b,a])
+
+
+def test_repeated_rg_selectors_factor_without_losing_exceptions_or_scope():
+    source = []
+    for index in range(100):
+        condition = {'allOf': [{'field': 'type', 'equals': RG_TYPE},
+                              {'not': {'field': 'name', 'contains': 'prisma'}}]}
+        source.append(bound_region(item(1, condition, {}, f'rg-{index}'), 'rg', SUB))
+    original = {'anyOf': source}
+    compacted = compact_region(original)
+    assert len(canonical(compacted)) < len(canonical(original)) / 3
+    for rg in ['rg-0', 'rg-99', 'rg-100', 'rg-prisma', 'rg-0-child']:
+        for sid in [SUB, 'other']:
+            obj = {'id': f'/subscriptions/{sid}/resourceGroups/{rg}', 'name': rg, 'type': RG_TYPE}
+            assert evaluate(original, obj) == evaluate(compacted, obj)
+    assert compact_region(compacted) == compacted
+    assert compact_region({'anyOf': source[::-1]}) == compacted
+
+
+def test_inventory_growth_updates_same_definition_and_assignment():
+    def compile(rgs):
+        rows = [item(1, {'field': 'type', 'equals': RG_TYPE}, {'projeto': 'A'}, rg) for rg in rgs]
+        for row in rows:
+            row['identity_selector'] = {'field': 'name', 'in': ['rg-a', 'rg-b']}
+        return compile_initiatives([{'connection_id': 2, 'layers': {'resource_groups': rows}}], _definition)[0]
+    before, after = compile(['rg-a']), compile(['rg-a', 'rg-b'])
+    assert before['assignment_name'] == after['assignment_name']
+    assert before['name'] == after['name']
+    assert before['definitions'][0]['name'] == after['definitions'][0]['name']
+    assert before['definitions'][0]['definition']['policyRule'] != after['definitions'][0]['definition']['policyRule']
+    assert before['members'] == after['members']
+
+
+def test_exact_rules_are_never_generalized_to_contains():
+    original = {'anyOf': [{'field': 'name', 'equals': n} for n in ['rg-prod-a', 'rg-prod-b']]}
+    compacted = compact_region(original)
+    assert compacted == {'field': 'name', 'in': ['rg-prod-a', 'rg-prod-b']}
+    assert not evaluate(compacted, {'name': 'rg-prod-new'})
+
+
+def test_script_json_is_compact_and_preserves_future_name_patterns():
+    source = item(78, {'field': 'name', 'contains': 'dig-security-rg'}, {'projeto': 'Prisma'})
+    tenant = {'connection_id': 2, 'layers': {'resource_groups': [source]}}
+    bundle = compile_initiatives([tenant], _definition)[0]
+    assert evaluate(bundle['definitions'][0]['definition']['policyRule']['if']['allOf'][0],
+                    {'name': 'dig-security-rg-future-123'})
+    script = build_script([tenant], plan_only=True)
+    import json
+    import re
+    bodies = re.findall(r"<<'POLICYEOF'\n(.*?)\nPOLICYEOF", script, re.S)
+    assert len(bodies) == 1 and len(bodies[0].splitlines()) == 1
+    assert json.loads(bodies[0]) == bundle['definitions'][0]['definition']['policyRule']
 
 
 def test_missing_rg_or_oversized_expression_budget_blocks_export():
