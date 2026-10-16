@@ -67,9 +67,6 @@ AZURE_POLICY_RESOURCE_GROUP_TYPE = "Microsoft.Resources/subscriptions/resourceGr
 SAFE_FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 UUID_ANY_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.I)
-# Keep generated definitions comfortably below Azure Policy payload limits. A
-# blocked rule is safer than emitting a definition Azure will reject or truncate.
-MAX_CONDITION_BYTES = 64_000
 
 
 def _norm(value: str) -> str:
@@ -461,7 +458,8 @@ class AzureTagPolicyService:
         return out
 
     def _concrete_items(self, rule: ClassificationRule, terms: list[dict], evidence: list[dict], hierarchy: dict[str, str], mappings: list[dict[str, str]] | bool, selected: bool | list[dict],
-                        diagnostics: list[dict] | None = None, *, force_resource_group_scope: bool = False) -> list[dict]:
+                        diagnostics: list[dict] | None = None, *, force_resource_group_scope: bool = False,
+                        preserve_source_selectors: bool = False) -> list[dict]:
         """Turn Silver evidence or current Azure inventory into scoped targets.
 
         Classification ``~`` (contains) is kept for RG name, resource id/name,
@@ -490,19 +488,20 @@ class AzureTagPolicyService:
         # subscription assignment with its selector limited to matching RGs.
         # Exact RG rules remain assigned to each concrete Resource Group.
         subscription_scope_assignment = force_resource_group_scope and level == SCOPE_SUBSCRIPTION
-        rg_contains = level == SCOPE_RG and _keeps_contains(terms, SCOPE_RG)
+        rg_contains = level == SCOPE_RG and (preserve_source_selectors or _keeps_contains(terms, SCOPE_RG))
         rg_contains_subscription_assignment = force_resource_group_scope and rg_contains
-        resource_contains = level == SCOPE_RESOURCE and _keeps_contains(terms, SCOPE_RESOURCE)
+        resource_contains = level == SCOPE_RESOURCE and (preserve_source_selectors or _keeps_contains(terms, SCOPE_RESOURCE))
         resource_contains_subscription_assignment = force_resource_group_scope and resource_contains
         grouped: dict[tuple, dict] = {}
         for row in evidence:
             subscription_id = self._evidence_subscription_id(row)
             if not subscription_id:
                 continue
-            tag_values = tuple(str(row.get(f"tag_value_{i}") or "") for i in range(len(mappings)))
+            tag_values = tuple(str(hierarchy.get(mapping["focus_field"]) or row.get(f"tag_value_{i}") or "")
+                               for i, mapping in enumerate(mappings))
             count = int(row.get("evidence_count") or 0)
             resource_group = str(row.get("resource_group_name") or "").strip()
-            if force_resource_group_scope and not resource_group:
+            if force_resource_group_scope and not resource_group and not preserve_source_selectors:
                 continue
             if level == SCOPE_RESOURCE:
                 resource_id = str(row.get("resource_id") or "").strip()
@@ -554,12 +553,26 @@ class AzureTagPolicyService:
             tags = {mapping["tag_key"]: (hierarchy.get(mapping["focus_field"]) or key[value_offset + index])
                     for index, mapping in enumerate(mappings)}
             tags = _collapse_tag_keys({key: value for key, value in tags.items() if value})
-            missing_tags = [mapping["tag_key"] for mapping in mappings
-                            if mapping["tag_key"].casefold() not in {key.casefold() for key in tags}]
+            missing_mappings = [mapping for mapping in mappings
+                                if mapping["tag_key"].casefold() not in {key.casefold() for key in tags}]
+            # An uncatalogued cost centre must never be guessed. Preserve the
+            # classification and leave this key unmanaged until it is supplied.
+            optional_missing = [mapping["tag_key"] for mapping in missing_mappings
+                                if mapping["focus_field"] == "centro_custo"]
+            if optional_missing:
+                diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "warning",
+                                    "omitted_tags": optional_missing,
+                                    "reason": "Centro de custo ausente na regra, em todos os ancestrais e na Silver; chave omitida sem remover a classificação"})
+            missing_tags = [mapping["tag_key"] for mapping in missing_mappings
+                            if mapping["focus_field"] != "centro_custo"]
             if missing_tags:
                 diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
                                     "reason": "Sem valor na hierarquia organizacional nem evidência Silver para as tags: "
                                               + ", ".join(missing_tags)})
+                continue
+            if not tags:
+                diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
+                                    "reason": "Nenhuma tag possui valor comprovado para esta regra"})
                 continue
             assignment_scope_kind = "subscription"
             assignment_resource_group = None
@@ -1073,15 +1086,25 @@ class AzureTagPolicyService:
             query = """resourcecontainers
 | where type =~ 'microsoft.resources/subscriptions/resourcegroups'
 | project subscription_id = subscriptionId, resource_group_name = name, resource_name = name, resource_id = id, resource_type = type, location = tostring(location)
-| union (resources | project subscription_id = subscriptionId, resource_group_name = resourceGroup, resource_name = name, resource_id = id, resource_type = type, location = tostring(location))"""
+| union (resources | project subscription_id = subscriptionId, resource_group_name = resourceGroup, resource_name = name, resource_id = id, resource_type = type, location = tostring(location))
+| order by resource_id asc"""
             rows: list[dict] = []
             token = None
+            seen_tokens: set[str] = set()
+            seen_ids: set[str] = set()
             async with httpx.AsyncClient() as client:
                 while True:
                     page, token, _ = await _post_query(client, headers, query, [subscription_id], token)
+                    page_ids = [str(row.get("resource_id") or "").casefold() for row in page]
+                    if any(not value or value in seen_ids for value in page_ids) or len(set(page_ids)) != len(page_ids):
+                        raise RuntimeError("Inventário Azure inconsistente entre páginas; repita a leitura")
+                    seen_ids.update(page_ids)
                     rows.extend(page)
                     if not token:
                         break
+                    if token in seen_tokens:
+                        raise RuntimeError("Azure repetiu o token de paginação; leitura incompleta")
+                    seen_tokens.add(token)
             return rows, None
         except Exception as exc:
             return [], f"Não foi possível ler os alvos atuais do Azure: {str(exc)[:180]}"
@@ -1146,7 +1169,6 @@ class AzureTagPolicyService:
                     continue
                 evidence_by_rule[rule_id].append(row)
 
-        azure_target_rows: list[dict] = []
         azure_catalog_ids: set[str] = set()
         azure_catalog: dict[str, list[str]] = {}
         selected_subscription_name = ""
@@ -1168,21 +1190,6 @@ class AzureTagPolicyService:
                 diagnostics.append({"status": "blocked", "reason": "Subscription não encontrada no catálogo acessível da conexão",
                                     "subscription_id": subscription_id})
                 return None
-            try:
-                azure_target_rows, inventory_error = await self._azure_rule_targets(conn, subscription_id)
-            except Exception as exc:
-                inventory_error = str(exc)
-            if inventory_error:
-                diagnostics.append({"status": "blocked", "reason": inventory_error, "subscription_id": subscription_id})
-                raise RuntimeError(inventory_error)
-
-        current_rg_by_name = {
-            str(row.get("resource_group_name") or row.get("resource_name") or "").strip().casefold():
-            str(row.get("resource_group_name") or row.get("resource_name") or "").strip()
-            for row in azure_target_rows
-            if str(row.get("resource_type") or "").casefold() == AZURE_POLICY_RESOURCE_GROUP_TYPE.casefold()
-            and str(row.get("resource_group_name") or row.get("resource_name") or "").strip()
-        }
 
         compiled: list[dict] = []
         for rule in rules:
@@ -1199,33 +1206,16 @@ class AzureTagPolicyService:
             if terms and department:
                 selected = selected_department_ids is None or rule.department_id in selected_department_ids
                 rule_evidence = evidence_by_rule.get(rule.id, [])
-                if subscription_id:
-                    rg_terms = [term for term in terms if term["scope"] == SCOPE_RG]
-                    current_evidence: list[dict] = []
-                    for row in rule_evidence:
-                        if self._evidence_subscription_id(row).casefold() != subscription_id.casefold():
-                            continue
-                        billed_rg = str(row.get("resource_group_name") or "").strip()
-                        current_rg = current_rg_by_name.get(billed_rg.casefold())
-                        if not current_rg:
-                            continue
-                        rg_target = {"resource_group_name": current_rg,
-                                     "resource_name": current_rg,
-                                     "resource_type": AZURE_POLICY_RESOURCE_GROUP_TYPE}
-                        if rg_terms and not self._target_matches_terms(rg_target, rg_terms):
-                            continue
-                        current_evidence.append({**row, "resource_group_name": current_rg})
-                    rule_evidence = current_evidence
-                    if not rule_evidence:
-                        diagnostics.append({
-                            "rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
-                            "reason": "A regra faturou nesta subscription, mas não há Resource Group faturado ainda existente no Azure; nenhum assignment amplo será criado.",
-                            "subscription_id": subscription_id,
-                        })
-                        continue
+                hierarchy = self._hierarchy(department, departments)
+                variants = {tuple(str(hierarchy.get(mapping["focus_field"]) or row.get(f"tag_value_{i}") or "")
+                                  for i, mapping in enumerate(mappings)) for row in rule_evidence}
+                # Billing proves membership; the original ARM predicate proves
+                # scope. Inventory pagination or absence of current objects must
+                # not erase rules or their coverage of future matching objects.
                 compiled.extend(self._concrete_items(
-                    rule, terms, rule_evidence, self._hierarchy(department, departments), mappings, selected, diagnostics,
+                    rule, terms, rule_evidence, hierarchy, mappings, selected, diagnostics,
                     force_resource_group_scope=bool(subscription_id),
+                    preserve_source_selectors=bool(subscription_id) and len(variants) == 1,
                 ))
 
         if subscription_id:
@@ -1353,12 +1343,6 @@ class AzureTagPolicyService:
                                 "department_name": departments.get(rule.department_id).name if departments.get(rule.department_id) else "",
                                 "observed": item["observed"]},
                 })
-                condition_bytes = len(json.dumps(effective, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-                if condition_bytes > MAX_CONDITION_BYTES:
-                    diagnostics.append({"rule_id": rule.id, "rule_name": rule.name, "status": "blocked",
-                                        "reason": f"Condição efetiva excede {MAX_CONDITION_BYTES} bytes; reduza exceções sobrepostas",
-                                        "condition_bytes": condition_bytes})
-                    continue
                 layers[layer].append(output)
 
         # The loop sees all rules to calculate the selected project's exact
@@ -1369,6 +1353,25 @@ class AzureTagPolicyService:
                 layers[layer] = [item for item in values if item["selected"]]
 
         selected = departments.get(department_id) if department_id else None
+        # Every billed classification must be accounted for before a script can
+        # claim to represent the subscription. Never export a silent subset.
+        diagnostics = list({json.dumps(entry, sort_keys=True, ensure_ascii=False): entry
+                            for entry in diagnostics}.values())
+        reconciliation = []
+        for rule_id in sorted(billed_rule_ids or []):
+            emitted = [item for values in layers.values() for item in values if item["rule_id"] == rule_id]
+            entries = [entry for entry in diagnostics if entry.get("rule_id") == rule_id]
+            blocked = any(entry.get("status") == "blocked" for entry in entries)
+            status = ("blocked" if blocked else "emitted" if emitted else "not_deployable"
+                      if any(entry.get("status") == "not_deployable" for entry in entries) else "blocked")
+            if status == "blocked" and not entries:
+                entries = [{"rule_id": rule_id, "status": "blocked",
+                            "reason": "Regra faturada sem definição emitida ou exclusão justificada; confira o cadastro e o escopo da regra"}]
+                diagnostics.extend(entries)
+            reconciliation.append({"rule_id": rule_id, "status": status,
+                                   "emitted_layers": sorted({item["layer"] for item in emitted}),
+                                   "diagnostics": entries})
+        blocked_rule_ids = [entry["rule_id"] for entry in reconciliation if entry["status"] == "blocked"]
         emitted_scopes = sorted({subscription for values in layers.values() for item in values
                                  for subscription in item["scope_subscriptions"]})
         if requested_subscription_id and requested_subscription_id.casefold() not in {
@@ -1403,6 +1406,9 @@ class AzureTagPolicyService:
                 ],
                 "layers": layers,
                 "coverage": {"eligible_rules": len(compiled),
+                             "complete": not blocked_rule_ids,
+                             "blocked_rule_ids": blocked_rule_ids,
+                             "reconciliation": reconciliation,
                              "emitted_policies": sum(len(values) for values in layers.values()),
                              "diagnostics": diagnostics}}
 
