@@ -363,6 +363,28 @@ def test_subscription_only_policy_requires_billed_current_resource_group():
     assert diagnostics[0]["status"] == "blocked"
 
 
+def test_resource_contains_keeps_future_rg_coverage_in_selected_subscription():
+    service = AzureTagPolicyService(db=None)
+    sid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    terms = [{"scope": SCOPE_RESOURCE, "field": "name", "operator": "~", "values": ["datamesh"]},
+             {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [sid]}]
+    evidence = [{"subscription_id": sid, "resource_group_name": rg,
+                 "resource_id": f"/subscriptions/{sid}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/datamesh-1",
+                 "evidence_count": 1} for rg in ("rg-old", "rg-second")]
+    def compile(source_terms):
+        return service._concrete_items(_rule(), source_terms, evidence, {"organograma": "Datamesh"},
+            [{"tag_key": "projeto", "focus_field": "organograma"}], True, [], force_resource_group_scope=True)
+    rows = compile(terms)
+    assert len(rows) == 1
+    assert rows[0]["assignment_scope_kind"] == "subscription"
+    assert rows[0]["targets"] == ("resource",)
+    assert rows[0]["terms"] == terms
+    assert rows[0]["source_terms"] == terms
+    # An explicit RG restriction is still retained; no implicit widening.
+    restricted = terms + [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["rg-prod"]}]
+    assert compile(restricted)[0]["terms"] == restricted
+
+
 def _rule(**values):
     data = {
         "id": 1, "name": "Regra", "department_id": 10, "priority": 10,

@@ -492,7 +492,8 @@ class AzureTagPolicyService:
         subscription_scope_assignment = force_resource_group_scope and level == SCOPE_SUBSCRIPTION
         rg_contains = level == SCOPE_RG and _keeps_contains(terms, SCOPE_RG)
         rg_contains_subscription_assignment = force_resource_group_scope and rg_contains
-        resource_contains = level == SCOPE_RESOURCE and _keeps_contains(terms, SCOPE_RESOURCE) and not force_resource_group_scope
+        resource_contains = level == SCOPE_RESOURCE and _keeps_contains(terms, SCOPE_RESOURCE)
+        resource_contains_subscription_assignment = force_resource_group_scope and resource_contains
         grouped: dict[tuple, dict] = {}
         for row in evidence:
             subscription_id = self._evidence_subscription_id(row)
@@ -507,7 +508,8 @@ class AzureTagPolicyService:
                 resource_id = str(row.get("resource_id") or "").strip()
                 if not force_resource_group_scope and (not resource_id or "/providers/" not in resource_id.lower()):
                     continue
-                key = ((subscription_id, resource_group.casefold(), *tag_values) if force_resource_group_scope else
+                key = ((subscription_id, *tag_values) if resource_contains else
+                       (subscription_id, resource_group.casefold(), *tag_values) if force_resource_group_scope else
                        (subscription_id, *tag_values) if resource_contains else
                        (subscription_id, resource_id.casefold(), *tag_values))
                 entry = grouped.setdefault(key, {"count": 0, "spellings": {}})
@@ -545,7 +547,7 @@ class AzureTagPolicyService:
             evidence_count = entry["count"]
             subscription_id = key[0]
             value_offset = 2 if force_resource_group_scope and not (
-                rg_contains_subscription_assignment or subscription_scope_assignment
+                rg_contains_subscription_assignment or resource_contains_subscription_assignment or subscription_scope_assignment
             ) or (
                 (level == SCOPE_RESOURCE and not resource_contains) or (level == SCOPE_RG and not rg_contains)
             ) else 1
@@ -571,6 +573,13 @@ class AzureTagPolicyService:
                     patterns = [value for term in terms if term["scope"] == SCOPE_RG for value in term["values"]]
                     observed = {"resource_group_name": " · ".join(patterns)}
                     targets = ("resource_group", "resource")
+                elif resource_contains_subscription_assignment:
+                    # Billing proves this rule belongs in this subscription;
+                    # its ARM predicate must also cover future matching resources
+                    # in RGs that have not billed yet. Explicit RG terms remain.
+                    patterns = [value for term in terms if term["scope"] == SCOPE_RESOURCE for value in term["values"]]
+                    observed = {"resource_id": " · ".join(patterns)}
+                    targets = ("resource",)
                 else:
                     # Resource-level evidence stores resource IDs in ``spellings``;
                     # assignments are grouped by the separate Resource Group map.
@@ -622,7 +631,7 @@ class AzureTagPolicyService:
                 item_terms = [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [subscription_id]}]
                 targets = ("resource_group", "resource")
                 observed = {}
-            items.append({"rule": rule, "terms": item_terms, "tags": tags,
+            items.append({"rule": rule, "terms": item_terms, "source_terms": terms, "tags": tags,
                           "scope_subscriptions": [subscription_id], "targets": targets,
                           "evidence_count": evidence_count, "observed": observed,
                           "assignment_scope_kind": assignment_scope_kind,
@@ -1320,6 +1329,7 @@ class AzureTagPolicyService:
                     "tags": item["tags"],
                     "condition": effective, "scope_subscriptions": [item_subscription_id],
                     "base_selector": selector,
+                    "identity_selector": self._selector(item.get("source_terms", item["terms"]), target),
                     "evidence_count": item["evidence_count"], "observed": item["observed"],
                     "assignment_scope_kind": item.get("assignment_scope_kind", "subscription"),
                     "assignment_resource_group": item.get("assignment_resource_group"),
