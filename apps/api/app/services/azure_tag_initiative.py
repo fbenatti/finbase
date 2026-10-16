@@ -89,6 +89,14 @@ def compile_initiatives(policies, definition_factory):
     groups = defaultdict(list)
     names = {}
     for tenant in policies:
+        coverage = tenant.get('coverage') or {}
+        if coverage.get('complete') is False:
+            failures = [entry for entry in coverage.get('reconciliation', []) if entry.get('status') == 'blocked']
+            details = '; '.join(
+                f"#{entry['rule_id']}: " + ', '.join(sorted({d.get('reason', 'sem diagnóstico')
+                                                             for d in entry.get('diagnostics', [])}))
+                for entry in failures)
+            raise ValueError('Exportação incompleta bloqueada; nenhuma regra será descartada: ' + details)
         connection = str(tenant.get('connection_id') or 0)
         names.update({k.casefold(): v for k, v in tenant.get('subscription_name_by_id', {}).items()})
         for layer, key in [('rg', 'resource_groups'), ('res', 'resources')]:
@@ -127,17 +135,18 @@ def compile_initiatives(policies, definition_factory):
             f"#{rule_id} {first.get('rule_name', rule_id)}", list(exclusions.values()),
             rule_id=int(rule_id), layer='rg' if layer == 'rg' else 'resource', identity_key=identity,
         )
-        if len(canonical(definition).encode()) >= ARM_REQUEST_LIMIT:
+        if len(canonical({'properties': definition}).encode()) >= ARM_REQUEST_LIMIT:
             raise ValueError(f'Regra #{rule_id} excede 1 MiB; exportação bloqueada antes de alterações Azure')
-        # Keep a conservative expression budget after factoring predicates.
+        # Enforce the Azure authoring limit after lossless factoring. A shell
+        # line count or arbitrary smaller budget must not remove real rules.
         def expression_count(node):
             if isinstance(node, dict):
                 return int('field' in node or 'value' in node) + sum(expression_count(v) for v in node.values())
             if isinstance(node, list):
                 return sum(expression_count(v) for v in node)
             return 0
-        if expression_count(definition['policyRule']) > 512:
-            raise ValueError(f'Regra #{rule_id} excede orçamento de 512 expressões; dividir esta regra preservando as regiões')
+        if expression_count(definition['policyRule']['if']) > 4096:
+            raise ValueError(f'Regra #{rule_id} excede limite Azure de 4096 expressões; dividir esta regra preservando as regiões')
         if any(d['name'] == name for d in bundle['definitions']):
             raise ValueError(f'Regra #{rule_id} tem classificações incompatíveis na mesma região')
         bundle['definitions'].append({'name': name, 'reference_id': name, 'definition': definition,
@@ -153,6 +162,12 @@ def compile_initiatives(policies, definition_factory):
         if len(bundle['members']) > 1000 or len(canonical(bundle['members']).encode()) > ARM_REQUEST_LIMIT - 4096:
             raise ValueError('Iniciativa excede limite ARM; exportação bloqueada')
         bundle['content_hash'] = digest(bundle['members'])
+        expected = {(rule, layer) for connection, subscription, rule, layer, _ in groups
+                    if connection == bundle['connection_id'] and subscription == bundle['subscription_id']}
+        actual = {(str(d['definition']['metadata']['openfinopsRuleId']),
+                   'rg' if d['definition']['mode'] == 'All' else 'res') for d in bundle['definitions']}
+        if expected != actual:
+            raise ValueError('Reconciliação da iniciativa falhou; regras de origem e definições não correspondem')
     return list(bundles.values())
 
 
