@@ -695,29 +695,12 @@ def consumer_main(worker_id: int):
                                 task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
                                 s.commit()
                         gold_rule_ids = [int(x) for x in (task_json.get("gold_rule_ids") or []) if x]
-                        if not task_json.get("accuracy"):
-                            gold_source = None
-                            if task_json.get("scheduled_pipeline"):
-                                gold_source = "scheduled_pipeline"
-                            else:
-                                # A manual forecast also updates the executive
-                                # Gold view (realized + forecast + allocation).
-                                # Keep this scoped to that cube; rebuilding every
-                                # Gold mart here can take several minutes.
-                                from app.models.gold_mart_rule import GoldMartRule
-
-                                executive_rule_id = s.query(GoldMartRule.id).filter(
-                                    GoldMartRule.active == True,  # noqa: E712
-                                    GoldMartRule.code == "visao-completa",
-                                ).scalar()
-                                gold_rule_ids = [int(executive_rule_id)] if executive_rule_id else []
-                                gold_source = "manual_forecast"
-                        if gold_source and (gold_rule_ids or task_json.get("scheduled_pipeline")):
+                        if task_json.get("scheduled_pipeline") and not task_json.get("accuracy"):
                             from app.services.gold_materialization import enqueue_rule_materialization
                             gold_task = enqueue_rule_materialization(
                                 s,
                                 rule_ids=gold_rule_ids,
-                                source=gold_source,
+                                source="scheduled_pipeline",
                             )
                             if gold_task and task_row:
                                 task_row.phase = f"Forecast publicado · Gold na fila (task #{gold_task.id})"[:200]
