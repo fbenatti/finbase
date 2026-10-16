@@ -1874,7 +1874,8 @@ async def _enrich_planning_snapshot(
         # Some legacy financial outputs contain duplicate measure labels; use
         # the configured measure's first physical column instead of selecting
         # by label, which would return a DataFrame and break scalar assignment.
-        forecast_output["value"] = forecast_output.iloc[:, value_positions[0]]
+        measure_values = forecast_output.iloc[:, value_positions[0]].to_numpy(copy=True)
+        forecast_output.insert(len(forecast_output.columns), "value", measure_values)
     dimensions = [
         column for column in forecast_output.columns
         if column not in {
