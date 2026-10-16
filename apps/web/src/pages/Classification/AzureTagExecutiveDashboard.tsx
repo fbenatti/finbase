@@ -76,6 +76,9 @@ export default function AzureTagExecutiveDashboard() {
     acc.nonTaggable += item.non_taggable_resources + item.non_taggable_resource_groups;
     return acc;
   }, { resources: 0, groups: 0, taggable: 0, complete: 0, nonTaggable: 0 }), [data]);
+  const globalAdherence = totals.taggable > 0 && data?.tag_keys.length
+    ? Math.round((totals.complete / totals.taggable) * 1000) / 10
+    : null;
 
   const fetchResources = async (subscriptionId: string, next = false) => {
     if (connectionId === "") return;
@@ -149,29 +152,14 @@ export default function AzureTagExecutiveDashboard() {
 
     {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
     {refreshMessage && <Alert severity={refreshing ? "info" : "success"} sx={{ mb: 2 }}>{refreshMessage}</Alert>}
-    {data && <Alert severity={data.snapshot_date ? "info" : "warning"} sx={{ mb: 2 }}>
-      {data.snapshot_date ? `Snapshot de inventário: ${data.snapshot_date}.` : "Ainda não existe snapshot do Resource Graph na Bronze para esta conexão. Use “Atualizar inventário Azure” para coletar."}
-    </Alert>}
-    {data && <Alert severity="info" sx={{ mb: 2 }}>
-      Aderência = percentual dos itens tageáveis com todas as chaves {data.tag_keys.map((key) => <Chip key={key} label={key} size="small" sx={{ mx: 0.3 }} />)} gerenciadas preenchidas. Este indicador verifica presença; a comparação dos valores esperados aparece nos detalhes de cada recurso. {data.generated_at ? `Bronze gravada em ${new Date(data.generated_at).toLocaleString("pt-BR")}.` : "Sem coleta registrada."}
-    </Alert>}
-    {data && <Alert severity="info" icon={false} sx={{ mb: 2 }}>
-      <Typography variant="body2" fontWeight={700}>Tags esperadas cadastradas</Typography>
-      <Typography variant="body2">
-        {data.tag_mappings?.length
-          ? data.tag_mappings.map((mapping) => `${mapping.tag_key} ← ${mapping.focus_field}`).join(" · ")
-          : "Nenhum mapeamento de tag ativo."}
-        {" · Os valores esperados por recurso vêm da classificação mais recente na Silver."}
-      </Typography>
-    </Alert>}
-
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,1fr)", md: "repeat(5,1fr)" }, gap: 1.5, mb: 3 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(6,minmax(0,1fr))" }, gap: 1.5, mb: 3 }}>
         {[
+          ["Aderência global", globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`],
           ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Resource Groups", totals.groups],
           ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable],
-        ].map(([label, value]) => <Card key={String(label)} variant="outlined"><CardContent sx={{ p: "14px !important" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="h5" fontWeight={700}>{fmt(Number(value))}</Typography></CardContent></Card>)}
+        ].map(([label, value]) => <Card key={String(label)} variant="outlined" sx={{ minWidth: 0, ...(label === "Aderência global" ? { borderLeft: "4px solid", borderLeftColor: globalAdherence === null ? "grey.400" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" } : {}) }}><CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}><Typography variant="caption" color="text.secondary" noWrap display="block">{label}</Typography><Typography variant="h5" fontWeight={700} noWrap color={label === "Aderência global" && globalAdherence !== null ? globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" : undefined}>{label === "Aderência global" ? <>{value}<Typography component="span" variant="caption" display="block" color="text.secondary" noWrap>{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis</Typography></> : fmt(Number(value))}</Typography></CardContent></Card>)}
       </Box>
       <Stack spacing={1.5}>
         {data.subscriptions.map((item) => {
