@@ -384,7 +384,8 @@ def _apply_forecast_business_rules(
             continue
         if str(getattr(rule, "behavior", "") or "") in {
             "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX",
-            "SOURCE_MAX_PREVIOUS_MONTH_PREFIX", "SOURCE_VALIDITY",
+            "SOURCE_MAX_PREVIOUS_MONTH_PREFIX", "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE",
+            "SOURCE_VALIDITY",
         }:
             continue
         mask = output["tipo"].eq("forecast")
@@ -1340,11 +1341,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     metadata = getattr(config, "gold_metadata", None) or {}
     source_exclusion, source_rule_names = _source_exclusion_filter(
         business_rules or [], metadata, period,
-        behaviors={"SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX"},
+        behaviors={"SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX", "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE"},
     )
     mean_30d_source_filter, mean_30d_rule_names = _source_exclusion_filter(
         business_rules or [], metadata, period,
-        behaviors={"SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX"},
+        behaviors={"SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX", "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE"},
     )
     cloud_col, id_col = _resolve_connection_columns(metadata)
     allocation_rules = _merge_allocation_rules(
@@ -1403,7 +1404,14 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             )
     # The daily model uses its configured trailing windows. Recurring monthly
     # business rules also need the complete prior closed month as an anchor.
+    has_github_overage_rule = any(
+        getattr(rule, "active", True)
+        and str(getattr(rule, "behavior", "") or "") == "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE"
+        for rule in (business_rules or [])
+    )
     max_window = max([int(w) for w in config.enabled_windows or [7, 14, 28]])
+    if has_github_overage_rule:
+        max_window = max(max_window, 30)
     minimum_monthly = max(1, int(getattr(config, "minimum_monthly_points", 3) or 3))
     interval_history_start = effective_cutoff.replace(day=1)
     for _ in range(minimum_monthly - 1):
@@ -1542,11 +1550,13 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 for rule in (business_rules or [])
                 if getattr(rule, "active", True)
             }
-            overage_frame["__forecast_component"] = (
-                "MAX_PREVIOUS_MONTH_SOURCE"
-                if "SOURCE_MAX_PREVIOUS_MONTH_PREFIX" in source_behaviors
-                else "MEAN_30D_SOURCE"
-            )
+            if "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE" in source_behaviors:
+                overage_component = "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE"
+            elif "SOURCE_MAX_PREVIOUS_MONTH_PREFIX" in source_behaviors:
+                overage_component = "MAX_PREVIOUS_MONTH_SOURCE"
+            else:
+                overage_component = "MEAN_30D_SOURCE"
+            overage_frame["__forecast_component"] = overage_component
             frames.append(overage_frame)
     if not frames:
         raise ValueError("A Gold não possui dados realizados para a configuração")
@@ -1637,7 +1647,27 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             extended_mean = float(daily.tail(extended_window).mean())
             weight = max(0.0, min(1.0, float(config.recent_weight or 0.7)))
             candidates.append((f"WEIGHTED_{recent_window}D_{extended_window}D", recent_mean * weight + extended_mean * (1.0 - weight)))
-        if component == "MEAN_30D_SOURCE":
+        if component == "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE":
+            # GitHub Copilot AI Credit GAC is billed only after included credits
+            # are exhausted. Before the first positive charge of the month, use
+            # the positive daily run-rate from the trailing 30 days. Once an
+            # overage charge appears in the current month, use the stronger of
+            # that baseline and the current month's positive daily average.
+            # Zero-charge days represent included credits, not a zero burn rate.
+            trailing_30 = daily.tail(30)
+            trailing_positive = trailing_30[trailing_30 > 0]
+            trailing_positive_mean = (
+                float(trailing_positive.mean()) if not trailing_positive.empty else 0.0
+            )
+            month_to_date = daily[daily.index.to_period("M") == pd.Period(series_cutoff, freq="M")]
+            month_positive = month_to_date[month_to_date > 0]
+            if month_positive.empty:
+                method = "GITHUB_OVERAGE_PRE_CROSSING_POSITIVE_30D"
+                baseline = trailing_positive_mean
+            else:
+                method = "GITHUB_OVERAGE_POST_CROSSING_MAX_POSITIVE_30D_MTD"
+                baseline = max(trailing_positive_mean, float(month_positive.mean()))
+        elif component == "MEAN_30D_SOURCE":
             method, baseline = "MEAN_30D_RULE", float(daily.tail(30).mean())
         elif lump_daily_rate is not None:
             # A lump monthly bill is not a daily run-rate: force the monthly
@@ -1727,7 +1757,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             month = month % 12 + 1
             # A regra comparativa seleciona a taxa diária e aplica o
             # crescimento configurado nos meses futuros.
-            growth_rate = 0.0 if component == "MEAN_30D_SOURCE" else float(config.growth_rate)
+            growth_rate = 0.0 if component in {"MEAN_30D_SOURCE", "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE"} else float(config.growth_rate)
             value = baseline * ((1.0 + growth_rate) ** month_offset) * calendar.monthrange(year, month)[1]
             results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
     output = pd.DataFrame(results)
