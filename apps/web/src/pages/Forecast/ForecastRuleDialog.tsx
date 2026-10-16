@@ -227,6 +227,11 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
             Separa as cobranças identificadas na Gold e compara o ritmo diário do modelo atual com a média diária do mês fechado anterior (incluindo dias sem cobrança). Usa o maior valor para projetar o mês corrente e os próximos.
           </Alert>
         )}
+        {rule.behavior === "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE" && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Separa a fonte identificada na Gold. Antes da primeira cobrança positiva no mês, projeta pela média dos dias positivos dos últimos 30 dias. Depois da primeira cobrança, usa a maior entre essa média e a média positiva do mês corrente. Dias sem cobrança não entram nas médias.
+          </Alert>
+        )}
         {rule.behavior === "SOURCE_VALIDITY" && (
           <Alert severity="info" sx={{ mb: 2 }}>
             Suspende as projeções do escopo quando a última data de realizado usada pelo forecast estiver além da validade. A simulação usa a própria data simulada.
