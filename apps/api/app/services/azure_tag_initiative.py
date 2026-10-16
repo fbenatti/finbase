@@ -153,6 +153,10 @@ def compile_initiatives(policies, definition_factory):
                                       'original_regions': conditions})
         bundle['original_assignments'] += len(items)
     for bundle in bundles.values():
+        source = next(tenant for tenant in policies
+                      if str(tenant.get('connection_id') or 0) == bundle['connection_id'])
+        bundle['omitted_tags'] = [entry for entry in source.get('coverage', {}).get('diagnostics', [])
+                                  if entry.get('omitted_tags')]
         key = digest([bundle['connection_id'], bundle['subscription_id']])
         bundle['name'] = f"of-set-{bundle['connection_id']}-{key}"
         bundle['assignment_name'] = f"of-asg-set-{bundle['connection_id']}-{key}"
@@ -291,7 +295,9 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
                   'DEFINITION_NAMES=$(cut -f1 "$POLICIES_DIR/definitions.tsv")',
                   f'check_policy_capacity {q(sub)} "$DEFINITION_NAMES" {q(bundle["name"])} {q(bundle["assignment_name"])}',
                   f'check_shared_identity {q(sub)}',
-                  f"info '{bundle['original_assignments']} assignments originais -> {len(bundle['definitions'])} definitions / 1 iniciativa / 1 assignment / 1 identidade'",
+                  f"info '{len({d['definition']['metadata']['openfinopsRuleId'] for d in bundle['definitions']})} regras / {len(bundle['definitions'])} definitions / 1 iniciativa / 1 assignment / 1 identidade'",
+                  *[f"warn {q('Regra #' + str(entry['rule_id']) + ': chave(s) sem valor omitida(s): ' + ', '.join(entry['omitted_tags']))}"
+                    for entry in bundle.get('omitted_tags', [])],
                   '# PLAN verifica a carga; autorização e quota RBAC da concessão são confirmadas pela API no APPLY.',
                   '# Assignments legados não são removidos por este script. Migrar após equivalência validada.',
                   'while IFS=$\'\t\' read -r POLICY_NAME CONTENT_HASH DEFINITION_JSON; do',

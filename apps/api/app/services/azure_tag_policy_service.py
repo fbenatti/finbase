@@ -382,12 +382,10 @@ class AzureTagPolicyService:
     async def _silver_billed_rg_evidence(
         self, conn: SourceConnection, subscription_id: str, mappings: list[dict[str, str]],
     ) -> tuple[list[dict], str | None]:
-        """Return historical rule-to-RG billing evidence for RG-scoped exports.
+        """Return historical membership and proven tag values from Silver.
 
-        A subscription export must not turn a subscription-only business rule into
-        a subscription-wide Azure Policy assignment. Silver's persisted winning
-        classification identifies the Resource Groups that rule actually billed;
-        the caller intersects those names with the current Azure inventory.
+        Classification IDs select the billed business rules. Original ARM
+        predicates define their scope, including future matching resources.
         """
         safe_code = (conn.code or "").replace("'", "''")
         unsafe = [mapping["focus_field"] for mapping in mappings
@@ -1123,10 +1121,9 @@ class AzureTagPolicyService:
         mappings = await self._tag_mappings()
         home_tenants = await self._subscription_home_tenants(conn)
         billing_tenant = str((conn.config_json or {}).get("tenant_id") or "").strip()
-        # An explicit subscription filters the policy map and is validated
-        # against Azure. Silver evidence proves which rules have classified
-        # billing there; resource-group rules are pinned to current billed RGs,
-        # while subscription-level business rules retain subscription scope.
+        # An explicit subscription is validated against Azure's catalog.
+        # Historical Silver classifications prove rule membership; each rule's
+        # original predicate bounds its current and future tagging scope.
         silver_rows, silver_error = ([], None)
         if not subscription_id:
             silver_rows, silver_error = await self._silver_evidence(conn, mappings)
