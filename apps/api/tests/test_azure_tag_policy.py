@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from app.models.rules import ClassificationRule, Department
 from app.routers import azure_tag_policy as azure_tag_policy_router
-from app.routers.azure_tag_policy import _definition, _tag_drift_condition, build_script
+from app.routers.azure_tag_policy import _definition, _tag_drift_condition, _build_individual_script as build_script
 from app.services.azure_tag_policy_service import (
     AzureTagPolicyService,
     SCOPE_RESOURCE,

@@ -250,7 +250,10 @@ async def export_policy(
         doc.get("layers", {}).get("resource_groups") or doc.get("layers", {}).get("resources")
         for doc in policies
     )
-    script = build_script(policies, plan_only=plan_only) if has_policies and fmt in {"script", "both"} else ""
+    try:
+        script = build_script(policies, plan_only=plan_only) if has_policies and fmt in {"script", "both"} else ""
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if fmt == "script":
         return PlainTextResponse(script, media_type="text/x-shellscript")
     return JSONResponse({"tenants": policies, "deployment_script": script})
@@ -317,7 +320,7 @@ def _assignment_scope(subscription_id: str, item: dict) -> str:
     return f"/subscriptions/{subscription_id}"
 
 
-def build_script(policies: list[dict], plan_only: bool = False) -> str:
+def _build_individual_script(policies: list[dict], plan_only: bool = False) -> str:
     """Build idempotent per-subscription assignments with their required identity."""
     lines = [
         "#!/usr/bin/env bash",
@@ -663,3 +666,10 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
     insertion = lines.index("require_az") + 1
     lines[insertion:insertion] = preflight
     return "\n".join(lines) + "\n"
+
+
+def build_script(policies: list[dict], plan_only: bool = False) -> str:
+    from app.services.azure_tag_initiative import compile_initiatives, render_initiative_script
+    bundles = compile_initiatives(policies, _definition)
+    preamble = _build_individual_script([], plan_only).split("\nrequire_az\n", 1)[0]
+    return render_initiative_script(bundles, preamble, plan_only)
