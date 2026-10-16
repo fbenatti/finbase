@@ -915,7 +915,10 @@ export function TagsTab() {
         ...(tenant.layers?.resources || []),
       ]);
       const projectCount = new Set(mapItems.map((item) => item.department_name || item.tags.projeto).filter(Boolean)).size;
-      setSuccess(`Mapa completo gerado para ${selectedName}: ${projectCount} projeto(s), ${mapItems.length} policy(s).`);
+      const ruleCount = new Set(mapItems.map((item) => item.rule_id)).size;
+      const definitionCount = result.initiatives?.reduce((total, bundle) => total + bundle.definition_count, 0) ?? mapItems.length;
+      const assignmentCount = result.initiatives?.reduce((total, bundle) => total + bundle.assignment_count, 0) ?? 0;
+      setSuccess(`Mapa gerado para ${selectedName}: ${projectCount} projeto(s), ${ruleCount} regra(s), ${definitionCount} definição(ões) e ${assignmentCount} assignment(s). Consulte os avisos de tags sem valor abaixo.`);
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       setError(typeof detail === "string" ? detail : (e instanceof Error ? e.message : "Falha ao gerar políticas"));
@@ -1092,7 +1095,7 @@ export function TagsTab() {
                     count={Array.isArray(t.layers?.resources) ? (t.layers.resources as unknown[]).length : 0}
                   />
                   <LayerSummary
-                    label="Subscriptions GOLD cobertas"
+                    label="Subscriptions cobertas pela Silver"
                     count={t.subscriptions?.length ?? 0}
                   />
                   <LayerSummary
@@ -1102,7 +1105,7 @@ export function TagsTab() {
                 </Box>
                 {(t.coverage?.diagnostics?.length ?? 0) > 0 && (
                   <Alert severity="warning" sx={{ mt: 1.5, py: 0 }}>
-                    {t.coverage?.diagnostics.slice(0, 2).map((d, idx) => (
+                    {t.coverage?.diagnostics.map((d, idx) => (
                       <Typography key={`${d.rule_id ?? "diag"}-${idx}`} variant="caption" display="block">
                         {d.rule_name ? `${d.rule_name}: ` : ""}{d.reason}
                       </Typography>
@@ -1111,7 +1114,7 @@ export function TagsTab() {
                 )}
                 {(t.subscriptions?.length ?? 0) > 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-                    Escopo GOLD: {t.subscriptions!.map((s) => `${s.subscription_id.slice(0, 8)}… (${s.policies.length})`).join(" · ")}
+                    Escopo Silver: {t.subscriptions!.map((s) => `${s.subscription_id.slice(0, 8)}… (${s.policies.length})`).join(" · ")}
                   </Typography>
                 )}
               </Box>

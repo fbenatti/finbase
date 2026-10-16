@@ -1772,6 +1772,9 @@ export interface AzureTenantPolicy {
   coverage?: {
     eligible_rules: number;
     emitted_policies: number;
+    complete?: boolean;
+    blocked_rule_ids?: number[];
+    reconciliation?: Array<{ rule_id: number; status: string; emitted_layers: string[] }>;
     diagnostics: Array<{
       status: string;
       reason: string;
@@ -1779,6 +1782,7 @@ export interface AzureTenantPolicy {
       rule_name?: string;
       value?: string;
       subscription_id?: string;
+      omitted_tags?: string[];
     }>;
   };
   subscriptions?: Array<{
@@ -1810,6 +1814,8 @@ export interface AzureTenantPolicy {
 export interface AzureTagPolicyExport {
   tenants: AzureTenantPolicy[];
   deployment_script: string;
+  export_ready?: boolean;
+  initiatives?: Array<{ subscription_id: string; definition_count: number; assignment_count: number }>;
 }
 
 export async function getAzureTenants(): Promise<AzureTenant[]> {
