@@ -1593,7 +1593,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         series_last_date = history.index.max().date()
         series_cutoff = (
             cloud_effective_cutoff
-            if component == "MAX_PREVIOUS_MONTH_SOURCE"
+            if component in {
+                "MAX_PREVIOUS_MONTH_SOURCE",
+                "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE",
+            }
             else min(cloud_effective_cutoff, series_last_date)
         )
         history = history[history.index.date <= series_cutoff]
@@ -1724,7 +1727,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             )
             baseline = max(float(baseline), previous_month_baseline)
             method = "MAX_PREVIOUS_MONTH_AND_CURRENT"
-        if component != "MAX_PREVIOUS_MONTH_SOURCE" and series_last_date < cloud_effective_cutoff.replace(day=1):
+        if component not in {
+            "MAX_PREVIOUS_MONTH_SOURCE",
+            "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE",
+        } and series_last_date < cloud_effective_cutoff.replace(day=1):
             # A lump that ended in a prior month must not be treated as a
             # daily run-rate for the open month (one purchase day × 30).
             method, baseline = "ENDED_SERIES", 0.0
