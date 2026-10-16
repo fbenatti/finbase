@@ -33,7 +33,6 @@ from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
 from app.models.pivot_view import PivotView
 from app.models.dashboard import Dashboard, DashboardWidget
-from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.rules import Department
 from app.services.iceberg_service import (
     list_tables,
@@ -1379,24 +1378,6 @@ async def run_pivot(req: PivotRequest, request: Request, db: AsyncSession = Depe
             raise _cancelled_http()
 
 
-async def _fetch_realized_periods(trino_kwargs: dict[str, Any]) -> set[str]:
-    """Return billing periods that already hold realized data.
-
-    Reads the pre-aggregated Gold cube (dest_dm_cost_*) instead of scanning the
-    31M-row Gold: the Gold carries tipo='realizado' with the same period
-    grain, so DISTINCT on it is orders of magnitude cheaper.
-    """
-    try:
-        rows = await trino_execute(
-            "SELECT DISTINCT _billing_period FROM iceberg.{GOLD}.dest_dm_cost_visao_completa "
-            "WHERE tipo = 'realizado'",
-            **trino_kwargs,
-        )
-        return {str(row.get("_billing_period") or "") for row in rows if row.get("_billing_period")}
-    except Exception:
-        return set()
-
-
 async def _run_forecast_manual_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Explain that saved manual-only sources moved to each table's planning Silver."""
     raise HTTPException(
@@ -2180,15 +2161,16 @@ async def _expected_view_core(
     gold_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace=GOLD)
     planning_base = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}.get(actual_name, actual_name)
     planning_name = planning_base + "_planning"
-    forecast_name = actual_name
     try:
         forecast_schema = await _describe_layer_schema(
             planning_name, max_retries=2, namespace=layers.detail_layer(),
         )
-        forecast_name = planning_name
-    except HTTPException:
-        # Backward compatibility for cubes whose forecast is still embedded.
-        forecast_schema = gold_schema
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Silver de planejamento indisponível ({planning_name}); reprocese o forecast antes de abrir a Visão Esperada.",
+        ) from exc
+    forecast_name = planning_name
     actual_schema = gold_schema
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = {name.lower(): name for name in forecast_schema}
@@ -2291,7 +2273,10 @@ async def _expected_view_core(
         for path, department in selected_paths
     ]
     forecast_scope_options = [
-        f"({scope_filter(forecast_columns, path) or '1=1'}{_expected_view_cloud_filter(path, department, forecast_columns)})"
+        # Planning entries inherit provider scope from the organizational path.
+        # Their legacy snapshots can have cloud_origem=NULL, so the additional
+        # provider predicate would silently discard budget and manual forecast.
+        f"({scope_filter(forecast_columns, path) or '1=1'})"
         for path, department in selected_paths
     ]
     actual_scope_filter = " OR ".join(actual_scope_options)
@@ -2533,112 +2518,6 @@ async def _expected_view_core(
         apply_rateio_facts(actual_rateio, by_period_facts, shared_by_driver, "shared_actual_value")
         apply_rateio_facts(forecast_rateio, by_period_facts, shared_by_driver, "shared_forecast_value")
     fact_rows = [by_period_facts[period] for period in sorted(by_period_facts)]
-    budget_year = body.year if body.year > 0 else datetime.now().year
-    if body.month_from and body.month_to:
-        budget_years = list(range(int(body.month_from[:4]), int(body.month_to[:4]) + 1))
-    elif body.month_from:
-        budget_years = [int(body.month_from[:4])]
-    elif body.month_to:
-        budget_years = [int(body.month_to[:4])]
-    else:
-        budget_years = [budget_year]
-    budget_rows = (await db.execute(
-        select(PlanningEntry, PlanningVersion.year).join(PlanningVersion).join(FinancialType).where(
-            FinancialType.code == "orcamento",
-            PlanningVersion.year.in_(budget_years),
-            PlanningVersion.is_current == True,
-            PlanningEntry.entity_type == "department",
-        )
-    )).all() if not body.dimension_filters and forecast_name == actual_name else []
-    if forecast_name == actual_name:
-        budget_by_period: dict[str, float] = {}
-        budget_by_driver: dict[str, float] = {}
-    children_by_parent: dict[int | None, list[Department]] = {}
-    for department in departments:
-        children_by_parent.setdefault(department.parent_id, []).append(department)
-    selected_ids: set[int] = set()
-    if selected_departments:
-        pending = [department.id for department in selected_departments]
-        while pending:
-            current_id = pending.pop()
-            if current_id in selected_ids:
-                continue
-            selected_ids.add(current_id)
-            pending.extend(child.id for child in children_by_parent.get(current_id, []))
-
-    def planning_scope_match(levels: list[str] | None) -> bool:
-        if not levels:
-            return False
-        return all(
-            level <= len(levels) and str(levels[level - 1]).strip() == name.strip()
-            for level, name in zip(scope_level_order, scope_path)
-        )
-
-    def planning_driver(path: list[str]) -> str:
-        if body.director_view and len(scope_path) < len(scope_level_order):
-            next_level = scope_level_order[len(scope_path)]
-            if next_level <= len(path):
-                return str(path[next_level - 1])
-        return str(path[len(scope_path)] if len(path) > len(scope_path) else (path[-1] if path else "Sem departamento filho"))
-
-    for entry, entry_year in budget_rows:
-        legacy_match = planning_scope_match(entry.department_levels)
-        if (selected_departments and entry.department_id in selected_ids) or (not selected_departments and legacy_match):
-            period = f"{entry_year:04d}{entry.month:02d}"
-            if (body.month_from and period < body.month_from) or (body.month_to and period > body.month_to):
-                continue
-            budget_by_period[period] = budget_by_period.get(period, 0.0) + float(entry.value or 0)
-            if selected_departments and entry.department_id:
-                path = []
-                cursor = department_map.get(entry.department_id)
-                while cursor:
-                    path.append(cursor.name)
-                    cursor = department_map.get(cursor.parent_id) if cursor.parent_id else None
-                path.reverse()
-            else:
-                path = entry.department_levels or []
-            driver = planning_driver(path)
-            budget_by_driver[driver] = budget_by_driver.get(driver, 0.0) + float(entry.value or 0)
-
-    # Forecast manual is composed on top of the realized/forecast series using
-    # the exact same aggregation rules as the orçamento (per department and its
-    # descendants). Only future months surface here: periods that already have
-    # realized data in Gold drop their manual forecast.
-    forecast_manual_rows = (await db.execute(
-        select(PlanningEntry, PlanningVersion.year).join(PlanningVersion).join(FinancialType).where(
-            FinancialType.code == "forecast-manual",
-            PlanningVersion.year.in_(budget_years),
-            PlanningVersion.is_current == True,
-            PlanningEntry.entity_type == "department",
-        )
-    )).all() if not body.dimension_filters and forecast_name == actual_name else []
-    realized_periods = await _fetch_realized_periods({}) if forecast_name == actual_name else set()
-    if forecast_name == actual_name:
-        forecast_manual_by_period: dict[str, float] = {}
-        forecast_manual_by_driver: dict[str, float] = {}
-    for entry, entry_year in forecast_manual_rows:
-        legacy_match = planning_scope_match(entry.department_levels)
-        if (selected_departments and entry.department_id in selected_ids) or (not selected_departments and legacy_match):
-            period = f"{entry_year:04d}{entry.month:02d}"
-            if (body.month_from and period < body.month_from) or (body.month_to and period > body.month_to):
-                continue
-            if period in realized_periods:
-                continue
-            value = float(entry.value or 0)
-            if abs(value) < 1e-12:
-                continue
-            forecast_manual_by_period[period] = forecast_manual_by_period.get(period, 0.0) + value
-            if selected_departments and entry.department_id:
-                path = []
-                cursor = department_map.get(entry.department_id)
-                while cursor:
-                    path.append(cursor.name)
-                    cursor = department_map.get(cursor.parent_id) if cursor.parent_id else None
-                path.reverse()
-            else:
-                path = entry.department_levels or []
-            driver = planning_driver(path)
-            forecast_manual_by_driver[driver] = forecast_manual_by_driver.get(driver, 0.0) + value
     by_period = {str(row["period"]): dict(row) for row in fact_rows}
     for period in budget_by_period:
         by_period.setdefault(period, {"period": period, "actual_value": None, "forecast_value": None})
