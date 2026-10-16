@@ -2388,12 +2388,11 @@ async def _expected_view_core(
                 literals = ", ".join(_quote_literal(str(value).lower()) for value in values)
                 planning_filters.append(f"lower(CAST({_quote_ident(physical)} AS VARCHAR)) IN ({literals})")
         planning_filters.append(f"lower(CAST({forecast_type} AS VARCHAR)) IN ('orcamento', 'forecast-manual')")
-        if not all_periods:
-            planning_filters.append(f"{forecast_period} >= {year_start} AND {forecast_period} < {year_end}")
-        if body.month_from:
-            planning_filters.append(f"{forecast_period} >= {_quote_literal(body.month_from)}")
-        if body.month_to:
-            planning_filters.append(f"{forecast_period} <= {_quote_literal(body.month_to)}")
+        if forecast_year_clause:
+            # Embedded dashboard requests use year=0 and an explicit month
+            # range. Reuse the resolved predicate; year_start/year_end would
+            # otherwise become 0001/0002 and eliminate every planning row.
+            planning_filters.append(f"({forecast_year_clause.removeprefix(' AND ')})")
         planning_driver = forecast_driver_column
         planning_sql = f"""
           SELECT {forecast_period} AS period,
