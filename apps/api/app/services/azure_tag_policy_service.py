@@ -517,7 +517,7 @@ class AzureTagPolicyService:
                     entry["resource_groups"] = entry.setdefault("resource_groups", {})
                     entry["resource_groups"][resource_group] = entry["resource_groups"].get(resource_group, 0) + count
             elif level == SCOPE_RG:
-                if not resource_group:
+                if not resource_group and not preserve_source_selectors:
                     continue
                 key = ((subscription_id, *tag_values) if rg_contains_subscription_assignment else
                        (subscription_id, resource_group.casefold(), *tag_values) if force_resource_group_scope else
