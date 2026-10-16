@@ -695,8 +695,8 @@ def consumer_main(worker_id: int):
                                 task_row.phase = f"Forecast publicado · rateio pendente: {rateio_exc}"
                                 s.commit()
                         gold_rule_ids = [int(x) for x in (task_json.get("gold_rule_ids") or []) if x]
-                        gold_source = None
                         if not task_json.get("accuracy"):
+                            gold_source = None
                             if task_json.get("scheduled_pipeline"):
                                 gold_source = "scheduled_pipeline"
                             else:
