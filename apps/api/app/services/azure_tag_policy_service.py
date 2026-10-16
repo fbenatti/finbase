@@ -501,6 +501,12 @@ class AzureTagPolicyService:
             resource_group = str(row.get("resource_group_name") or "").strip()
             if force_resource_group_scope and not resource_group and not preserve_source_selectors:
                 continue
+            if (force_resource_group_scope and not preserve_source_selectors
+                    and not self._rg_terms_match_name(terms, resource_group)):
+                # Evidence-dependent tag variants may require concrete RG
+                # boundaries, but cannot replace the business rule's predicate
+                # with a historical RG that no longer matches it.
+                continue
             if level == SCOPE_RESOURCE:
                 resource_id = str(row.get("resource_id") or "").strip()
                 if not force_resource_group_scope and (not resource_id or "/providers/" not in resource_id.lower()):

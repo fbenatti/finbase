@@ -253,7 +253,7 @@ async def export_policy(
     export_ready = all(doc.get("coverage", {}).get("complete", True) for doc in policies)
     try:
         from app.services.azure_tag_initiative import compile_initiatives
-        initiative_docs = compile_initiatives(policies, _definition) if has_policies and (export_ready or fmt != "json") else []
+        initiative_docs = compile_initiatives(policies, _definition) if export_ready or fmt != "json" else []
         script = build_script(policies, plan_only=plan_only) if has_policies and fmt in {"script", "both"} else ""
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
