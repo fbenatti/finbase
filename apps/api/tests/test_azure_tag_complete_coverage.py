@@ -106,6 +106,46 @@ def test_unaccounted_billing_rule_blocks_entire_script_instead_of_partial_succes
         build_script([doc])
 
 
+@pytest.mark.parametrize('partial', [False, True])
+def test_export_endpoint_refuses_incomplete_scripts_but_returns_json_diagnostics(monkeypatch, partial):
+    from fastapi import HTTPException
+    from app.routers import azure_tag_policy as router
+    doc = {'connection_id': 2, 'selected_subscription_id': SUB,
+           'coverage': {'complete': False, 'blocked_rule_ids': [9999], 'reconciliation': [
+               {'rule_id': 9999, 'status': 'blocked', 'diagnostics': [{'reason': 'missing rule'}]}]},
+           'layers': {'resource_groups': [], 'resources': []}}
+    if partial:
+        doc['layers']['resource_groups'] = [{'rule_id': 1, 'tags': {'projeto': 'A'},
+            'scope_subscriptions': [SUB], 'condition': {'field': 'name', 'equals': 'rg-a'}}]
+
+    class Service:
+        def __init__(self, _db): pass
+        async def list_azure_tenants(self): return [{'connection_id': 2}]
+        async def generate_tenant_policy(self, *_): return doc
+
+    monkeypatch.setattr(router, 'AzureTagPolicyService', Service)
+    for fmt in ['both', 'script']:
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(router.export_policy(connection_id=2, department_id=None, subscription_id=SUB,
+                                              plan_only=True, fmt=fmt, db=None))
+        assert error.value.status_code == 422 and '#9999' in error.value.detail
+    response = asyncio.run(router.export_policy(connection_id=2, department_id=None, subscription_id=SUB,
+                                               plan_only=True, fmt='json', db=None))
+    body = json.loads(response.body)
+    assert body['export_ready'] is False and body['deployment_script'] == ''
+
+
+def test_evidence_dependent_tags_cannot_replace_exact_scope_with_an_unrelated_old_rg():
+    service = AzureTagPolicyService(None)
+    rule = ClassificationRule(id=1, name='Exact')
+    result = service._concrete_items(
+        rule, [{'scope': SCOPE_RG, 'field': 'name', 'operator': '=', 'values': ['rg-current']}],
+        [{'subscription_id': SUB, 'resource_group_name': 'rg-old', 'evidence_count': 1}],
+        {'organograma_nivel_1': 'A'}, [{'tag_key': 'projeto', 'focus_field': 'organograma_nivel_1'}],
+        True, [], force_resource_group_scope=True)
+    assert not result
+
+
 def test_empty_billed_rg_does_not_erase_native_rule_for_future_resources():
     service = AzureTagPolicyService(None)
     rule = ClassificationRule(id=78, name='Prisma')
