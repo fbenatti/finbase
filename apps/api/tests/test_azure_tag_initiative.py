@@ -107,6 +107,8 @@ exit 99
     assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
     assert '"policyDefinitionReferenceId"' in script
     assert '--resource-count' not in script
+    assert 'ensure_assignment()' not in script
+    assert 'ensure_remediation()' not in script
     assert '/resourceGroups/rg-a' in script and '/resourceGroups/rg-b' in script
 
     # A full quota must block APPLY before definitions or assignments change.

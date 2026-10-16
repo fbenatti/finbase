@@ -682,4 +682,6 @@ def build_script(policies: list[dict], plan_only: bool = False) -> str:
     from app.services.azure_tag_initiative import compile_initiatives, render_initiative_script
     bundles = compile_initiatives(policies, _definition)
     preamble = _build_individual_script([], plan_only).split("\nrequire_az\n", 1)[0]
+    for obsolete in ("resolve_existing_target", "ensure_assignment", "ensure_remediation"):
+        preamble = re.sub(r"(?ms)^" + obsolete + r"\(\) \{\n.*?^\}\n?", "", preamble)
     return render_initiative_script(bundles, preamble, plan_only)
