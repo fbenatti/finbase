@@ -132,7 +132,10 @@ def test_missing_rg_or_oversized_expression_budget_blocks_export():
     source['assignment_resource_group'] = ''
     with pytest.raises(ValueError, match='sem nome'):
         compile_initiatives([{'layers': {'resource_groups': [source]}}], _definition)
-    source = item(1, {'anyOf': [{'field': 'name', 'equals': str(i)} for i in range(513)]}, {'projeto': 'A'})
+    exact = item(1, {'anyOf': [{'field': 'name', 'equals': str(i)} for i in range(513)]}, {'projeto': 'A'})
+    # Hundreds of scalar alternatives now need just one ``in`` expression.
+    assert len(compile_initiatives([{'layers': {'resource_groups': [exact]}}], _definition)) == 1
+    source = item(1, {'anyOf': [{'field': 'name', 'contains': str(i)} for i in range(513)]}, {'projeto': 'A'})
     with pytest.raises(ValueError, match='512'):
         compile_initiatives([{'layers': {'resource_groups': [source]}}], _definition)
 
@@ -146,6 +149,11 @@ def test_initiative_plan_executes_no_mutations_and_has_one_assignment(tmp_path):
     az.write_text('''#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$AZ_LOG"
 if [[ "$1 $2" == "account show" ]]; then echo "$SUB"; exit 0; fi
+if [[ "$1 $2 $3" == "policy definition list" ]]; then
+  if [[ "${FULL_POLICY_QUOTA:-0}" == "1" ]]; then for ((i=0;i<500;i++)); do echo "existing-$i"; done; fi
+  exit 0
+fi
+if [[ "$1 $2 $3" == "policy set-definition list" || "$1 $2 $3" == "policy assignment list" ]]; then exit 0; fi
 if [[ "$1 $2 $3" == "role assignment list" ]]; then
   if [[ "${FULL_QUOTA:-0}" == "1" ]]; then for ((i=0;i<5000;i++)); do echo "/subscriptions/$SUB"; done; fi
   exit 0
@@ -157,6 +165,13 @@ exit 99
     assert result.returncode == 0, result.stderr+result.stdout
     assert result.stdout.count('Assignment único') == 1
     assert result.stdout.count('Remediation ') == 1
+    assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
+
+    # Capacity checks must fail before any policy mutation, even in APPLY.
+    result = subprocess.run(['bash', '-c', build_script([tenant], plan_only=False)],
+        env={**env, 'FULL_QUOTA': '0', 'FULL_POLICY_QUOTA': '1'}, text=True, capture_output=True)
+    assert result.returncode == 3
+    assert 'Capacidade insuficiente de definitions' in result.stderr
     assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
     assert '"policyDefinitionReferenceId"' in script
     assert '--resource-count' not in script

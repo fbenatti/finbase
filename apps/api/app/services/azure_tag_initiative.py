@@ -129,7 +129,7 @@ def compile_initiatives(policies, definition_factory):
         )
         if len(canonical(definition).encode()) >= ARM_REQUEST_LIMIT:
             raise ValueError(f'Regra #{rule_id} excede 1 MiB; exportação bloqueada antes de alterações Azure')
-        # Azure Policy allows 512 condition expressions per definition.
+        # Keep a conservative expression budget after factoring predicates.
         def expression_count(node):
             if isinstance(node, dict):
                 return int('field' in node or 'value' in node) + sum(expression_count(v) for v in node.values())
@@ -161,6 +161,29 @@ def render_initiative_script(bundles, preamble, plan_only=False):
     # An initiative has only one identity/grant. Shared UAMI remains optional.
     lines = [preamble.replace('IDENTITY_MODE="${IDENTITY_MODE:-shared}"', 'IDENTITY_MODE="${IDENTITY_MODE:-system}"'), r'''
 QUOTA_BLOCKED=false
+check_object_capacity() {
+  local label="$1" maximum="$2" existing="$3" planned="$4" current=0 additional=0 name
+  while IFS= read -r name; do [[ -z "$name" ]] || current=$((current + 1)); done <<< "$existing"
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    [[ $'\n'"$existing"$'\n' == *$'\n'"$name"$'\n'* ]] || additional=$((additional + 1))
+  done <<< "$planned"
+  info "$label: $current existentes + $additional novos / limite $maximum"
+  if (( current + additional > maximum )); then
+    error "Capacidade insuficiente de $label; nenhuma policy foi alterada. Revise as regras ou migre definições antigas."
+    exit 3
+  fi
+}
+check_policy_capacity() {
+  local subscription="$1" definitions_planned="$2" initiative="$3" assignment="$4"
+  local scope="/subscriptions/$1" definitions initiatives assignments
+  definitions=$(az policy definition list --subscription "$subscription" --query "[?policyType=='Custom' && starts_with(id, '$scope/providers/Microsoft.Authorization/policyDefinitions/')].name" -o tsv --only-show-errors) || { error "Falha ao consultar capacidade de definitions"; exit 1; }
+  initiatives=$(az policy set-definition list --subscription "$subscription" --query "[?policyType=='Custom' && starts_with(id, '$scope/providers/Microsoft.Authorization/policySetDefinitions/')].name" -o tsv --only-show-errors) || { error "Falha ao consultar capacidade de initiatives"; exit 1; }
+  assignments=$(az policy assignment list --scope "$scope" --query "[?scope=='$scope'].name" -o tsv --only-show-errors) || { error "Falha ao consultar capacidade de assignments"; exit 1; }
+  check_object_capacity definitions 500 "$definitions" "$definitions_planned"
+  check_object_capacity initiatives 200 "$initiatives" "$initiative"
+  check_object_capacity assignments 200 "$assignments" "$assignment"
+}
 check_initiative_quota() {
   local subscription="$1" assignment="$2" scope="/subscriptions/$1" output principal="" role="" scopes entry count=0
   [[ "$IDENTITY_MODE" != "shared" ]] || return 0
@@ -254,6 +277,7 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-${RANDOM}"
                   'if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then',
                   '  if plan; then error "Selecione a subscription alvo antes do PLAN"; exit 1; fi',
                   '  az account set --subscription "$EXPECTED_SUBSCRIPTION" --only-show-errors', 'fi',
+                  f'check_policy_capacity {q(sub)} {q(chr(10).join(d["name"] for d in bundle["definitions"]))} {q(bundle["name"])} {q(bundle["assignment_name"])}',
                   f'check_shared_identity {q(sub)}',
                   f'check_initiative_quota {q(sub)} {q(bundle["assignment_name"])}',
                   f"info '{bundle['original_assignments']} assignments originais -> {len(bundle['definitions'])} definitions / 1 iniciativa / 1 assignment / 1 identidade'",
