@@ -502,6 +502,8 @@ class AzureTagPolicyService:
             if force_resource_group_scope and not resource_group and not preserve_source_selectors:
                 continue
             if (force_resource_group_scope and not preserve_source_selectors
+                    and not (subscription_scope_assignment or rg_contains_subscription_assignment
+                             or resource_contains_subscription_assignment)
                     and not self._rg_terms_match_name(terms, resource_group)):
                 # Evidence-dependent tag variants may require concrete RG
                 # boundaries, but cannot replace the business rule's predicate
