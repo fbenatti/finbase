@@ -1658,12 +1658,16 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             # that baseline and the current month's positive daily average.
             # Zero-charge days represent included credits, not a zero burn rate.
             trailing_30 = daily.tail(30)
-            trailing_positive = trailing_30[trailing_30 > 0]
+            # Trino/FX conversions can leave tiny floating-point residues
+            # (for example 2e-9 BRL) on otherwise uncharged days. Treat any
+            # amount below one cent as zero so it cannot trigger the overage
+            # phase or bias a positive-day average.
+            trailing_positive = trailing_30[trailing_30 > 0.01]
             trailing_positive_mean = (
                 float(trailing_positive.mean()) if not trailing_positive.empty else 0.0
             )
             month_to_date = daily[daily.index.to_period("M") == pd.Period(series_cutoff, freq="M")]
-            month_positive = month_to_date[month_to_date > 0]
+            month_positive = month_to_date[month_to_date > 0.01]
             if month_positive.empty:
                 method = "GITHUB_OVERAGE_PRE_CROSSING_POSITIVE_30D"
                 baseline = trailing_positive_mean
