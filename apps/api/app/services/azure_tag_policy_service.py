@@ -1303,7 +1303,10 @@ class AzureTagPolicyService:
                                                         if entry.get("rule_id") is not None}),
                     })
                     continue
-                known_ids = {entry["rule_id"] for entry in overlapping}
+                # A rule already examined through its compiled selector must
+                # not be reintroduced from its unscoped source conditions when
+                # that selector was pruned as disjoint from this assignment.
+                known_ids = {entry["rule_id"] for entry in [*overlapping, *pruned]}
                 rule_exclusions = [entry for entry in rule_exclusions if entry["rule_id"] not in known_ids]
                 overlapping.extend(rule_exclusions)
                 effective = self._effective(selector, [entry["selector"] for entry in overlapping])

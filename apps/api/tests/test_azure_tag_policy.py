@@ -253,6 +253,14 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
             ]},
         ],
     )
+    other_rg_rule = _rule(
+        id=66, priority=20, department_id=216, name="Classifica → RG comum",
+        conditions=[{"field": "source_resource_group_name", "operator": "=", "values": ["rg-common"]}],
+    )
+    other_contains_rule = _rule(
+        id=67, priority=15, department_id=216, name="Classifica → Datamesh CB2C",
+        conditions=[{"field": "source_resource_group_name", "operator": "~", "values": ["CB2C"]}],
+    )
     departments = {
         1: Department(id=1, name="DIR FUNDACAO TELEFONICA", parent_id=None),
         73: Department(id=73, name="fundacao telefonica", parent_id=1, centro_custo="29TN161700"),
@@ -263,11 +271,11 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
         {"subscription_id": selected, "resource_group_name": name, "resource_name": name,
          "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
          "resource_id": f"/subscriptions/{selected}/resourceGroups/{name}"}
-        for name in ["PCCAgentlessScanResourceGroup", "dig-security-rg", "rg-common"]
+        for name in ["PCCAgentlessScanResourceGroup", "dig-security-rg", "rg-common", "rg-datamesh-CB2C"]
     ]
 
     async def load_departments(): return departments
-    async def load_rules(_conn): return [other_subscription, prisma, foundation]
+    async def load_rules(_conn): return [other_subscription, prisma, other_contains_rule, other_rg_rule, foundation]
     async def tag_mappings():
         return [
             {"tag_key": "projeto", "focus_field": "organograma_nivel_2"},
@@ -281,6 +289,8 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
     async def billed_rg_evidence(_conn, _subscription, _mappings):
         return ([
             {"rule_id": 52, "subscription_id": selected, "resource_group_name": "rg-common", "evidence_count": 4},
+            {"rule_id": 66, "subscription_id": selected, "resource_group_name": "rg-common", "evidence_count": 1},
+            {"rule_id": 67, "subscription_id": selected, "resource_group_name": "rg-datamesh-CB2C", "evidence_count": 1},
             {"rule_id": 78, "subscription_id": selected,
              "resource_group_name": "PCCAgentlessScanResourceGroup", "evidence_count": 2},
             {"rule_id": 78, "subscription_id": selected,
@@ -299,17 +309,26 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
 
     for layer in ("resource_groups", "resources"):
         policies = result["layers"][layer]
-        assert {policy["rule_id"] for policy in policies} == {52, 78}
+        assert {policy["rule_id"] for policy in policies} == {52, 66, 67, 78}
         foundation_policy = next(policy for policy in policies if policy["rule_id"] == 52)
         prisma_policy = next(policy for policy in policies if policy["rule_id"] == 78)
+        other_rg_policy = next(policy for policy in policies if policy["rule_id"] == 66)
+        other_contains_policy = next(policy for policy in policies if policy["rule_id"] == 67)
         assert foundation_policy["assignment_scope_kind"] == "subscription"
         assert foundation_policy["assignment_resource_group"] is None
         assert foundation_policy["observed"] == {}
-        assert foundation_policy["excludes_rule_ids"] == [78]
+        assert foundation_policy["excludes_rule_ids"] == [78, 67, 66]
+        assert other_rg_policy["assignment_scope_kind"] == "resource_group"
+        assert other_rg_policy["assignment_resource_group"] == "rg-common"
+        assert other_rg_policy["excludes_rule_ids"] == []
+        assert "contains" not in json.dumps(other_rg_policy["condition"], ensure_ascii=False)
+        assert other_contains_policy["assignment_scope_kind"] == "subscription"
+        assert other_contains_policy["excludes_rule_ids"] == []
+        assert "contains" in json.dumps(other_contains_policy["base_selector"], ensure_ascii=False)
         assert prisma_policy["assignment_scope_kind"] == "subscription"
         assert prisma_policy["assignment_resource_group"] is None
         assert prisma_policy["observed"]["resource_group_name"] == "PCCAGENTLESSSCANRESOURCEGROUP · dig-security-rg"
-        assert len(policies) == 2
+        assert len(policies) == 4
         assert foundation_policy["tags"] == {
             "projeto": "fundacao telefonica",
             "diretoria": "DIR FUNDACAO TELEFONICA",
@@ -319,8 +338,8 @@ def test_selected_subscription_groups_contains_rules_but_keeps_exact_rules_at_re
         assert "not" in json.dumps(foundation_policy["condition"], ensure_ascii=False)
     assert result["deployment_subscriptions"] == [selected]
     script = build_script([result])
-    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"') == 4
-    assert f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/' not in script
+    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected} "$ACTIVE_POLICY_NAME"') == 6
+    assert script.count(f'ensure_assignment "$ACTIVE_ASSIGNMENT_NAME" /subscriptions/{selected}/resourceGroups/rg-common "$ACTIVE_POLICY_NAME"') == 2
 
 
 def test_subscription_only_policy_requires_billed_current_resource_group():
