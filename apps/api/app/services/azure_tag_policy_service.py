@@ -976,9 +976,11 @@ class AzureTagPolicyService:
         assigned = str(item.get("assignment_resource_group") or "").strip()
         if not assigned:
             return False
-        previous_rg = cls._resource_group_from_id(str((entry.get("observed") or {}).get("resource_id") or ""))
-        if previous_rg and previous_rg != assigned.casefold():
-            return True
+        for term in entry.get("terms") or []:
+            if term.get("scope") == SCOPE_RESOURCE and term.get("field") == "id" and term.get("operator") == "=":
+                exact_rgs = [cls._resource_group_from_id(value) for value in term.get("values", [])]
+                if exact_rgs and all(rg and rg != assigned.casefold() for rg in exact_rgs):
+                    return True
         return not cls._rg_terms_match_name(entry.get("terms") or [], assigned)
 
     def _previous_overlap_reason(self, item: dict, entry: dict) -> str | None:
