@@ -152,22 +152,6 @@ export default function AzureTagExecutiveDashboard() {
 
     {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
     {refreshMessage && <Alert severity={refreshing ? "info" : "success"} sx={{ mb: 2 }}>{refreshMessage}</Alert>}
-    {data && <Alert severity={data.snapshot_date ? "info" : "warning"} sx={{ mb: 2 }}>
-      {data.snapshot_date ? `Snapshot de inventário: ${data.snapshot_date}.` : "Ainda não existe snapshot do Resource Graph na Bronze para esta conexão. Use “Atualizar inventário Azure” para coletar."}
-    </Alert>}
-    {data && <Alert severity="info" sx={{ mb: 2 }}>
-      Aderência = percentual dos itens tageáveis com todas as chaves {data.tag_keys.map((key) => <Chip key={key} label={key} size="small" sx={{ mx: 0.3 }} />)} gerenciadas preenchidas. Este indicador verifica presença; a comparação dos valores esperados aparece nos detalhes de cada recurso. {data.generated_at ? `Bronze gravada em ${new Date(data.generated_at).toLocaleString("pt-BR")}.` : "Sem coleta registrada."}
-    </Alert>}
-    {data && <Alert severity="info" icon={false} sx={{ mb: 2 }}>
-      <Typography variant="body2" fontWeight={700}>Tags esperadas cadastradas</Typography>
-      <Typography variant="body2">
-        {data.tag_mappings?.length
-          ? data.tag_mappings.map((mapping) => `${mapping.tag_key} ← ${mapping.focus_field}`).join(" · ")
-          : "Nenhum mapeamento de tag ativo."}
-        {" · Os valores esperados por recurso vêm da classificação mais recente na Silver."}
-      </Typography>
-    </Alert>}
-
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(6,minmax(0,1fr))" }, gap: 1.5, mb: 3 }}>
