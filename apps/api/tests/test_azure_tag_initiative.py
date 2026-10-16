@@ -139,7 +139,9 @@ def test_missing_rg_or_oversized_expression_budget_blocks_export():
     # Hundreds of scalar alternatives now need just one ``in`` expression.
     assert len(compile_initiatives([{'layers': {'resource_groups': [exact]}}], _definition)) == 1
     source = item(1, {'anyOf': [{'field': 'name', 'contains': str(i)} for i in range(513)]}, {'projeto': 'A'})
-    with pytest.raises(ValueError, match='512'):
+    assert len(compile_initiatives([{'layers': {'resource_groups': [source]}}], _definition)) == 1
+    source = item(1, {'anyOf': [{'field': 'name', 'contains': str(i)} for i in range(4097)]}, {'projeto': 'A'})
+    with pytest.raises(ValueError, match='4096'):
         compile_initiatives([{'layers': {'resource_groups': [source]}}], _definition)
 
 
@@ -168,6 +170,13 @@ exit 99
     assert result.returncode == 0, result.stderr+result.stdout
     assert result.stdout.count('Assignment único') == 1
     assert result.stdout.count('Remediation ') == 1
+    assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
+
+    # A script downloaded in APPLY mode must honor an external PLAN override.
+    result = subprocess.run(['bash', '-c', build_script([tenant], plan_only=False)],
+        env={**env, 'PLAN_ONLY': 'true'}, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert 'PLAN de carga concluído' in result.stdout
     assert not any(word in log.read_text().split() for word in ['create','update','assign','delete','put','trigger-scan'])
 
     # Capacity checks must fail before any policy mutation, even in APPLY.
