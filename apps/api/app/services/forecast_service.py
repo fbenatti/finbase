@@ -1130,6 +1130,7 @@ async def _fetch_period_records(
     period_col: str | None,
     connection_filter: str | None,
     exclusion_filter: str | None = None,
+    exclude_source_filter: str | None = None,
     only_exclusions: bool = False,
     exclusion_sign: int = -1,
     minimum_monthly_points: int = 3,
@@ -1147,6 +1148,7 @@ async def _fetch_period_records(
         excluded_select_sql = f"SELECT {group_prefix}{date_expr} AS forecast_day, {exclusion_sign} * SUM(TRY_CAST({_q(measure)} AS DOUBLE)) AS value FROM {source}"
         group_sql = f" GROUP BY {group_prefix}{date_expr} ORDER BY forecast_day"
     extra = f" AND {connection_filter}" if connection_filter else ""
+    source_exclusion = f" AND NOT ({exclude_source_filter})" if exclude_source_filter else ""
     records: list[dict[str, Any]] = []
     if period_col:
         # Daily facts still need the exact history boundary after partition
@@ -1159,7 +1161,7 @@ async def _fetch_period_records(
             # ChargePeriodStart or July 1 IBM rows disappear from the window.
             sql = (
                 f"{select_sql} WHERE {type_filter} AND CAST({_q(period_col)} AS VARCHAR) = {_lit(billing_period)}"
-                f"{daily_date_scope}{extra}{group_sql}"
+                f"{daily_date_scope}{extra}{source_exclusion}{group_sql}"
             )
             if not only_exclusions:
                 records.extend(await trino_execute(sql, timeout_s=300))
@@ -1170,7 +1172,7 @@ async def _fetch_period_records(
                 )
                 records.extend(await trino_execute(excluded_sql, timeout_s=300))
     else:
-        sql = f"{select_sql} WHERE {type_filter} AND {date_filter}{extra}{group_sql}"
+        sql = f"{select_sql} WHERE {type_filter} AND {date_filter}{extra}{source_exclusion}{group_sql}"
         records = [] if only_exclusions else await trino_execute(sql, timeout_s=300)
         if exclusion_filter:
             excluded_sql = (
@@ -1488,10 +1490,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
             # Components such as GitHub Copilot overage are forecast separately
-            # below. Remove their source rows from the base series first, or the
-            # same spend is projected once by the base model and again by the
-            # component-specific model.
-            connection_filter=daily_filter, exclusion_filter=mean_30d_source_filter,
+            # below. Filter their source rows out of the base query to prevent
+            # projecting the same spend in both models. This must be a predicate
+            # rather than negative adjustment rows because this query is sharded.
+            connection_filter=daily_filter, exclude_source_filter=mean_30d_source_filter,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=1,
         )
@@ -1518,7 +1520,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
-            connection_filter=None, exclusion_filter=mean_30d_source_filter,
+            connection_filter=None, exclude_source_filter=mean_30d_source_filter,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=1,
         )
