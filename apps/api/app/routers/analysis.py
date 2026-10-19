@@ -1391,12 +1391,10 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
     table_name, schema = await _pivot_table_context(db, req.destination_table_id)
     req.filters = _shared_cost_pivot_filters(req.destination_table_id, schema, req.filters)
     _canonicalize_request(req, schema)
-    # Planning pseudo-destinations hold the monthly forecast snapshot (tipo
-    # forecast/realizado/rateio). A single-table pivot over them should behave
-    # like the union's forecast side: only the forecast rows, unless the user
-    # already constrained tipo themselves.
+    # Expose all financial planning types in both single-source and union
+    # pivots. Shared-cost rows have their own source to avoid double counting.
     if req.destination_table_id < 0 and not is_shared_cost_pivot_id(req.destination_table_id) and "tipo" in schema and not any(f.column == "tipo" for f in req.filters):
-        req.filters.append(PivotFilter(column="tipo", values=["forecast"], operator="IN"))
+        req.filters.append(PivotFilter(column="tipo", values=["forecast", "forecast-manual", "orcamento"], operator="IN"))
     rows, columns, measures = _validate_pivot_request(req, schema)
     req.filters, auto_period = await _inject_latest_period_filter(
         layers.detail_layer(), table_name, schema, req.filters, trino_kwargs=trino_kwargs,
@@ -1563,7 +1561,7 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
         exprs = aligned_projection(schema, origin)
         extra_filters = list(side_filters(schema))
         if origin == "forecast" and "tipo" in schema:
-            extra_filters.append(PivotFilter(column="tipo", values=["forecast", "forecast-manual"], operator="IN"))
+            extra_filters.append(PivotFilter(column="tipo", values=["forecast", "forecast-manual", "orcamento"], operator="IN"))
         elif origin == "Custo compartilhado":
             extra_filters = _shared_cost_pivot_filters(_table_id, schema, extra_filters)
         filter_sql = _where_clause(extra_filters)
