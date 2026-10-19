@@ -1783,6 +1783,7 @@ export interface AzureTenantPolicy {
       value?: string;
       subscription_id?: string;
       omitted_tags?: string[];
+      missing_tag_keys?: string[];
     }>;
   };
   subscriptions?: Array<{
