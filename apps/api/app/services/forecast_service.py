@@ -1660,9 +1660,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             # GitHub Copilot AI Credit GAC is billed only after included credits
             # are exhausted. Before the first positive charge of the month, use
             # the positive daily run-rate from the trailing 30 days. Once an
-            # overage charge appears in the current month, use the stronger of
-            # that baseline and the current month's positive daily average.
-            # Zero-charge days represent included credits, not a zero burn rate.
+            # overage charge appears in the current month, anchor the open-month
+            # remainder to this month's positive daily average. The historical
+            # run-rate remains the baseline for future months, where no current
+            # month pace is available. Zero-charge days represent included
+            # credits, not a zero burn rate.
             trailing_30 = daily.tail(30)
             # Trino/FX conversions can leave tiny floating-point residues
             # (for example 2e-9 BRL) on otherwise uncharged days. Treat any
@@ -1678,8 +1680,8 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
                 method = "GITHUB_OVERAGE_PRE_CROSSING_POSITIVE_30D"
                 baseline = trailing_positive_mean
             else:
-                method = "GITHUB_OVERAGE_POST_CROSSING_MAX_POSITIVE_30D_MTD"
-                baseline = max(trailing_positive_mean, float(month_positive.mean()))
+                method = "GITHUB_OVERAGE_POST_CROSSING_MTD_POSITIVE"
+                baseline = float(month_positive.mean())
         elif component == "MEAN_30D_SOURCE":
             method, baseline = "MEAN_30D_RULE", float(daily.tail(30).mean())
         elif lump_daily_rate is not None:
