@@ -63,13 +63,13 @@ export function isEmptyOrgLevel(field: string, children: Array<{ key: string; __
 
 type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean };
 
-function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean): Map<string, { cost: number; byMonth: Map<string, number> }> {
+function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean, measureColumn: "realizado" | "realizado_cloud"): Map<string, { cost: number; byMonth: Map<string, number> }> {
   const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
   for (const r of rows) {
     const k = String(r[field] ?? EMPTY_DIMENSION_LABEL);
     if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
     const o = map.get(k)!;
-    const v = Number(r.realizado || 0);
+    const v = Number(r[measureColumn] || 0);
     // No diálogo de consumo o filtro SQL já selecionou somente realizado.
     // Não dependa do nome retornado da coluna ``tipo`` (que pode preservar a
     // capitalização física da Gold), pois isso descartava todas as linhas.
@@ -182,6 +182,7 @@ export default function HierarchicalDecompTree({
   onApplyContext,
   shareCaption = "participação no contexto atual",
   filterRowTypes = true,
+  measureColumn = "realizado",
 }: {
   table: string;
   baseFilters: GoldQueryFilter[];
@@ -192,6 +193,8 @@ export default function HierarchicalDecompTree({
   shareCaption?: string;
   /** False quando baseFilters já restringe o tipo no servidor. */
   filterRowTypes?: boolean;
+  /** Medida financeira usada pelos demais widgets no mesmo contexto. */
+  measureColumn?: "realizado" | "realizado_cloud";
 }) {
   const svgId = useId().replace(/:/g, "");
   const [treePath, setTreePath] = useState<DecompPathStep[]>([]);
@@ -242,7 +245,7 @@ export default function HierarchicalDecompTree({
         defs.map(d => queryDimonTable({
           table,
           rows: d.rows ?? [],
-          measures: [{ column: "realizado", aggregation: "SUM" }],
+          measures: [{ column: measureColumn, aggregation: "SUM" }],
           filters: d.filters,
           filter_groups: filterGroups.length ? filterGroups : undefined,
           row_limit: d.row_limit,
@@ -265,13 +268,13 @@ export default function HierarchicalDecompTree({
           const treeResult = await queryDimonTable({
             table,
             rows: [field, "_billing_period", "tipo"],
-            measures: [{ column: "realizado", aggregation: "SUM" }],
+            measures: [{ column: measureColumn, aggregation: "SUM" }],
             filters: [...baseFilters, ...pathFilters(treeStart)],
             filter_groups: filterGroups.length ? filterGroups : undefined,
             row_limit: 10000,
           });
           if (!alive) return;
-          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes), field);
+          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn), field);
           m[`tree${treeStart}`] = treeResult;
           if (!isEmptyOrgLevel(field, children)) {
             setEmptyLevelSkip(skip);
@@ -289,15 +292,15 @@ export default function HierarchicalDecompTree({
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table, queryKey, treePathKey, chainKey]);
+  }, [table, queryKey, treePathKey, chainKey, measureColumn]);
 
   const spineCosts = useMemo(() => {
     const arr: number[] = [];
     for (let i = 0; i <= treeStart; i++) {
-      arr.push(rowsOf(results[`spine${i}`]).reduce((s, r) => s + Number(r.realizado || 0), 0));
+      arr.push(rowsOf(results[`spine${i}`]).reduce((s, r) => s + Number(r[measureColumn] || 0), 0));
     }
     return arr;
-  }, [results, treeStart]);
+  }, [results, treeStart, measureColumn]);
   const totalAll = spineCosts[0] || 0;
   const nodeTotal = spineCosts[treeStart] || 0;
   const pathNodes = useMemo(() => {
@@ -311,8 +314,8 @@ export default function HierarchicalDecompTree({
     if (nextDistinctIndex >= chain.length) return [];
     const rows = rowsOf(results[`tree${treeStart}`]);
     const field = chain[nextDistinctIndex].field;
-    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes), field);
-  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes]);
+    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn), field);
+  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes, measureColumn]);
   const nextField = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].field : null;
   const nextLabel = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].label : null;
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
