@@ -1357,6 +1357,25 @@ class AzureTagPolicyService:
             reconciliation.append({"rule_id": rule_id, "status": status,
                                    "emitted_layers": sorted({item["layer"] for item in emitted}),
                                    "diagnostics": entries})
+
+        # A successful rule reconciliation does not by itself guarantee that
+        # every dashboard-managed tag is populated. Surface that gap in the
+        # export diagnostics so an apparently complete policy map cannot hide
+        # missing managed keys.
+        covered_tag_keys = {
+            key.casefold()
+            for values in layers.values()
+            for item in values
+            for key in (item.get("tags") or {})
+        }
+        for mapping in mappings:
+            tag_key = str(mapping.get("tag_key") or "").strip()
+            if tag_key and tag_key.casefold() not in covered_tag_keys:
+                diagnostics.append({
+                    "status": "warning",
+                    "reason": f"A chave gerenciada '{tag_key}' não aparece nas policies geradas para esta subscription.",
+                    "missing_tag_keys": [tag_key],
+                })
         blocked_rule_ids = [entry["rule_id"] for entry in reconciliation if entry["status"] == "blocked"]
         emitted_scopes = sorted({subscription for values in layers.values() for item in values
                                  for subscription in item["scope_subscriptions"]})
