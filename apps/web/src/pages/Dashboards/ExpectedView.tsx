@@ -982,6 +982,8 @@ export default function ExpectedView({
   const onMainChartClick = (event: any) => {
     const x = event?.points?.[0]?.x;
     let period: string | undefined;
+    const point = event?.points?.[0];
+    const sourcePeriod = filteredRows[point?.pointIndex ?? point?.pointNumber]?.period;
     const isoMonth = String(x ?? "").match(/^(\d{4})-(\d{2})/);
     if (isoMonth) {
       // Não use new Date('YYYY-MM-DD'): a data é interpretada como UTC e,
@@ -989,6 +991,9 @@ export default function ExpectedView({
       // informa a competência em ISO, portanto basta preservar ano e mês.
       period = `${isoMonth[1]}${isoMonth[2]}`;
     }
+    if (!period && /^\d{6}$/.test(String(x ?? ""))) period = String(x);
+    if (!period && sourcePeriod) period = sourcePeriod;
+    if (!period) return;
     const traceName = String(
       event?.points?.[0]?.data?.name ||
         event?.points?.[0]?.fullData?.name ||
