@@ -52,6 +52,7 @@ export default function ConsumptionDrillDialog({
   period,
   tipo = "realizado",
   globalFilters = [],
+  measureColumn = "realizado",
 }: {
   open: boolean;
   onClose: () => void;
@@ -61,6 +62,7 @@ export default function ConsumptionDrillDialog({
   period?: string;
   tipo?: ConsumptionType;
   globalFilters?: GoldQueryFilter[];
+  measureColumn?: "realizado" | "realizado_cloud";
 }) {
   const [selectedTypes, setSelectedTypes] = useState(() => selectionFromType(tipo));
   useEffect(() => {
@@ -156,6 +158,7 @@ export default function ConsumptionDrillDialog({
             queryKey={queryKey}
             shareCaption="participação no contexto do diálogo"
             filterRowTypes={false}
+            measureColumn={measureColumn}
           />
         )}
       </DialogContent>

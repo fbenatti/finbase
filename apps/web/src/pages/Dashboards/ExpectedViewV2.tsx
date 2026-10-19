@@ -1311,6 +1311,7 @@ export default function ExpectedViewV2({
         directorView={directorView}
         period={drillPeriod}
         tipo={drillTipo}
+        globalFilters={chartFilters}
       />
     </>
   );
