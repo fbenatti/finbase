@@ -1487,7 +1487,11 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
-            connection_filter=daily_filter, exclusion_filter=None,
+            # Components such as GitHub Copilot overage are forecast separately
+            # below. Remove their source rows from the base series first, or the
+            # same spend is projected once by the base model and again by the
+            # component-specific model.
+            connection_filter=daily_filter, exclusion_filter=mean_30d_source_filter,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=1,
         )
@@ -1514,7 +1518,7 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             source=source, type_filter=type_filter, period=period, history_start=daily_history_start,
             effective_cutoff=effective_cutoff, dims=query_dims, measure=model_measure, date_expr=date_expr,
             mode="daily", charge_end_col=None, period_col=period,
-            connection_filter=None, exclusion_filter=None,
+            connection_filter=None, exclusion_filter=mean_30d_source_filter,
             cloud_col=cloud_col, clouds=cloud_cutoffs, shard_col=shard_col,
             minimum_monthly_points=1,
         )
