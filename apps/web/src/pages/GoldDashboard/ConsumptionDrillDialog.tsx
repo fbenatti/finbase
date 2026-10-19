@@ -101,7 +101,7 @@ export default function ConsumptionDrillDialog({
         ? { column: "tipo", operator: "IN", values: ["forecast", "forecast-manual"] }
         : selectedTipo === "ambos"
           ? { column: "tipo", operator: "NOT_IN", values: ["rateio"] }
-          : { column: "tipo", operator: "NOT_IN", values: ["forecast", "rateio"] },
+          : { column: "tipo", operator: "IS_REALIZED", values: [] },
       ...pathSegmentFilters(path, directorView),
       ...globalFilters,
     ];
@@ -118,7 +118,7 @@ export default function ConsumptionDrillDialog({
     }
     return filters;
   }, [path, directorView, period, selectedTipo, globalFilters]);
-  const queryKey = `${table}|${directorView}|${path.join(">")}|${period || ""}|${selectedTipo}`;
+  const queryKey = JSON.stringify([table, directorView, baseFilters, measureColumn]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
