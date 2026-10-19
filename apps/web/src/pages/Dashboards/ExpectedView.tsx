@@ -972,7 +972,7 @@ export default function ExpectedView({
   };
   const openConsumptionDetails = (tipo: "realizado" | "forecast" | "ambos") => {
     setDrillTipo(tipo);
-    setDrillPeriod(undefined);
+    setDrillPeriod(periodFilter === "all" || externalScope ? undefined : periodFilter === "current" ? String(new Date().getFullYear()) : periodFilter);
     setDrillOpen(true);
   };
   // Clique no gráfico: abre o diálogo de decomposição (estado próprio, sem
@@ -1575,7 +1575,10 @@ export default function ExpectedView({
         period={drillPeriod}
         tipo={drillTipo}
         measureColumn={measureColumn}
-        globalFilters={externalScope?.filters || []}
+        globalFilters={[
+          ...Object.entries(externalScope?.dimensionFilters || {}).map(([column, values]) => ({ column, operator: "IN" as const, values })),
+          { column: "_billing_period", operator: "IN", values: filteredRows.map(row => row.period) },
+        ]}
       />
     </>
   );
