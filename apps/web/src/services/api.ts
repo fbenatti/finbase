@@ -484,7 +484,8 @@ type ExpectedViewInflight = {
 };
 const expectedViewInflight = new Map<string, ExpectedViewInflight>();
 const expectedViewCache = new Map<string, { expiresAt: number; data: ExpectedViewResult }>();
-const EXPECTED_VIEW_CACHE_MS = 8 * 60 * 60 * 1000;
+const EXPECTED_VIEW_CACHE_MS = 60 * 1000;
+const ANALYTICS_CACHE_MS = 8 * 60 * 60 * 1000;
 const analyticsCache = new Map<string, { expiresAt: number; data: unknown }>();
 
 async function cachedAnalytics<T>(key: string, loader: () => Promise<T>): Promise<T> {
@@ -492,7 +493,7 @@ async function cachedAnalytics<T>(key: string, loader: () => Promise<T>): Promis
   if (cached && cached.expiresAt > Date.now()) return cached.data as T;
   if (cached) analyticsCache.delete(key);
   const data = await loader();
-  analyticsCache.set(key, { expiresAt: Date.now() + EXPECTED_VIEW_CACHE_MS, data });
+  analyticsCache.set(key, { expiresAt: Date.now() + ANALYTICS_CACHE_MS, data });
   return data;
 }
 
