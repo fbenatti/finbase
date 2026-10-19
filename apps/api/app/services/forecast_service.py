@@ -1764,15 +1764,26 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         # duplicava o valor (a Gold soma as duas fontes e o dashboard somava
         # o realizado duas vezes). realized_value continua usado acima apenas
         # para decidir se o mês está fechado (current_forecast_days).
+        github_copilot_rule = next((
+            rule for rule in (business_rules or [])
+            if getattr(rule, "active", True)
+            and str(getattr(rule, "behavior", "") or "") == "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE"
+            and all(str(key_values.get(column) or "") == str(value) for column, value in (getattr(rule, "scope", None) or {}).items())
+        ), None)
+        github_copilot_series = github_copilot_rule is not None
+        future_baseline = float(daily.tail(30).mean()) if github_copilot_series else baseline
         for month_offset in range(1, int(config.horizon_months) + 1):
             month = series_anchor.month - 1 + month_offset
             year = series_anchor.year + month // 12
             month = month % 12 + 1
-            # A regra comparativa seleciona a taxa diária e aplica o
-            # crescimento configurado nos meses futuros.
-            growth_rate = 0.0 if component in {"MEAN_30D_SOURCE", "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE"} else float(config.growth_rate)
-            value = baseline * ((1.0 + growth_rate) ** month_offset) * calendar.monthrange(year, month)[1]
-            results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
+            # GitHub Copilot future months use the calendar-day average from
+            # the last 30 days, including days without overage charges. This
+            # prevents a positive-charge-only run rate from being multiplied
+            # across every day of a fresh monthly credit cycle.
+            growth_rate = 0.0 if github_copilot_series or component in {"MEAN_30D_SOURCE", "GITHUB_COPILOT_OVERAGE_2_PHASE_SOURCE"} else float(config.growth_rate)
+            value = future_baseline * ((1.0 + growth_rate) ** month_offset) * calendar.monthrange(year, month)[1]
+            future_method = "GITHUB_COPILOT_MEAN_30D" if github_copilot_series else method
+            results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": future_method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
     output = pd.DataFrame(results)
     if output.empty: raise ValueError("Nenhuma série pôde ser projetada")
     applied_rules = _apply_forecast_business_rules(
