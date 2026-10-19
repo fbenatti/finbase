@@ -918,7 +918,13 @@ export function TagsTab() {
       const ruleCount = new Set(mapItems.map((item) => item.rule_id)).size;
       const definitionCount = result.initiatives?.reduce((total, bundle) => total + bundle.definition_count, 0) ?? mapItems.length;
       const assignmentCount = result.initiatives?.reduce((total, bundle) => total + bundle.assignment_count, 0) ?? 0;
-      setSuccess(`Mapa gerado para ${selectedName}: ${projectCount} projeto(s), ${ruleCount} regra(s), ${definitionCount} definição(ões) e ${assignmentCount} assignment(s). Consulte os avisos de tags sem valor abaixo.`);
+      const missingKeys = [...new Set(result.tenants.flatMap((tenant) =>
+        tenant.coverage?.diagnostics.flatMap((diagnostic) => diagnostic.missing_tag_keys ?? []) ?? [],
+      ))];
+      setSuccess(`Mapa gerado para ${selectedName}: ${projectCount} projeto(s), ${ruleCount} regra(s), ${definitionCount} definição(ões) e ${assignmentCount} assignment(s).`);
+      if (missingKeys.length > 0) {
+        setError(`Atenção: as policies geradas não cobrem todas as tags gerenciadas. Sem cobertura: ${missingKeys.join(", ")}. Ajuste as regras de classificação antes de aplicar.`);
+      }
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       setError(typeof detail === "string" ? detail : (e instanceof Error ? e.message : "Falha ao gerar políticas"));
@@ -1107,7 +1113,7 @@ export function TagsTab() {
                   <Alert severity="warning" sx={{ mt: 1.5, py: 0 }}>
                     {t.coverage?.diagnostics.map((d, idx) => (
                       <Typography key={`${d.rule_id ?? "diag"}-${idx}`} variant="caption" display="block">
-                        {d.rule_name ? `${d.rule_name}: ` : ""}{d.reason}
+                        {d.missing_tag_keys?.length ? `Tags sem cobertura (${d.missing_tag_keys.join(", ")}): ` : ""}{d.rule_name ? `${d.rule_name}: ` : ""}{d.reason}
                       </Typography>
                     ))}
                   </Alert>
