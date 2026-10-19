@@ -94,14 +94,13 @@ export default function ConsumptionDrillDialog({
   );
   const baseFilters = useMemo<GoldQueryFilter[]>(() => {
     const filters: GoldQueryFilter[] = [
-      // Realizado é tudo o que não é projeção/rateio; forecast precisa usar
-      // sua fatia própria. Antes o diálogo sempre fixava realizado, mesmo ao
-      // clicar na série de forecast, o que produzia uma árvore zerada.
-      selectedTipo === "forecast"
-        ? { column: "tipo", operator: "IN", values: ["forecast", "forecast-manual"] }
-        : selectedTipo === "ambos"
-          ? { column: "tipo", operator: "NOT_IN", values: ["rateio"] }
-          : { column: "tipo", operator: "IS_REALIZED", values: [] },
+      // O modo combinado usa grupos OR explícitos abaixo. Excluir apenas
+      // rateio também incluía orçamento na soma do consumo projetado.
+      ...(selectedTipo === "forecast"
+        ? [{ column: "tipo", operator: "IN" as const, values: ["forecast", "forecast-manual"] }]
+        : selectedTipo === "realizado"
+          ? [{ column: "tipo", operator: "IS_REALIZED" as const, values: [] }]
+          : []),
       ...pathSegmentFilters(path, directorView),
       ...globalFilters,
     ];
@@ -118,7 +117,11 @@ export default function ConsumptionDrillDialog({
     }
     return filters;
   }, [path, directorView, period, selectedTipo, globalFilters]);
-  const queryKey = JSON.stringify([table, directorView, baseFilters, measureColumn]);
+  const filterGroups = useMemo<GoldQueryFilter[][]>(() => selectedTipo === "ambos" ? [
+    [{ column: "tipo", operator: "IS_REALIZED", values: [] }],
+    [{ column: "tipo", operator: "IN", values: ["forecast", "forecast-manual"] }],
+  ] : [], [selectedTipo]);
+  const queryKey = JSON.stringify([table, directorView, baseFilters, filterGroups, measureColumn]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
@@ -154,6 +157,7 @@ export default function ConsumptionDrillDialog({
           <HierarchicalDecompTree
             table={table}
             baseFilters={baseFilters}
+            filterGroups={filterGroups}
             chain={chain}
             queryKey={queryKey}
             shareCaption="participação no contexto do diálogo"
