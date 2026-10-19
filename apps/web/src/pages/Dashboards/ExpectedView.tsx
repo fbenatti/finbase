@@ -1574,6 +1574,8 @@ export default function ExpectedView({
         directorView={directorView}
         period={drillPeriod}
         tipo={drillTipo}
+        measureColumn={measureColumn}
+        globalFilters={externalScope?.filters || []}
       />
     </>
   );

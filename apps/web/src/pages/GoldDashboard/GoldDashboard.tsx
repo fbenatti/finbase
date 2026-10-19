@@ -850,6 +850,7 @@ export default function GoldDashboard() {
         directorView={filters.visaoDiretoria}
         period={consumptionDrill.period}
         tipo={consumptionDrill.tipo}
+        measureColumn={measureFor(filters)}
         key={JSON.stringify([filters, consumptionDrill.tipo, consumptionDrill.period])}
         globalFilters={filtersOf(filters).filter(filter => filter.column !== "_billing_period")}
       />
