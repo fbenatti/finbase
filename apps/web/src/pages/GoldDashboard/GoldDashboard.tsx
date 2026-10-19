@@ -2289,6 +2289,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
             baseFilters={filtersOf(filters)}
             chain={decompChain}
             queryKey={"decisao-tree-" + filterKey}
+            measureColumn={measureFor(filters)}
             onApplyContext={applyTreeContext}
             shareCaption="participação no contexto global"
           />
