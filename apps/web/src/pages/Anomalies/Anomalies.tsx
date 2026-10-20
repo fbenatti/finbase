@@ -654,16 +654,15 @@ export default function Anomalies() {
               <Paper key={item.id} variant="outlined" onClick={() => void openCase(item.id)}
                      sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-                  <Typography variant="subtitle2" fontWeight={700}>Caso #{item.id} · nota {item.score.toFixed(0)}</Typography>
+                  <Typography variant="subtitle2" fontWeight={700}>{item.event_date} · {STATE_LABEL[item.state] ?? item.state}</Typography>
                   <Chip size="small" color={SEVERITY_COLOR[item.severity] ?? "default"} label={item.severity} />
                 </Stack>
                 <Typography variant="body2" sx={{ mt: 0.75, overflowWrap: "anywhere" }}>{item.event_family}</Typography>
-                <Typography variant="caption" color="text.secondary">{item.event_date} · {STATE_LABEL[item.state] ?? item.state}</Typography>
                 <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 1, mt: 1.25 }}>
                   <Box><Typography variant="caption" color="text.secondary">Observado</Typography><Typography variant="body2" fontWeight={650}>{money(item.observed_cloud, currency)}</Typography></Box>
                   <Box><Typography variant="caption" color="text.secondary">Esperado</Typography><Typography variant="body2" fontWeight={650}>{money(item.expected_cloud, currency)}</Typography></Box>
                   <Box><Typography variant="caption" color="text.secondary">Custo anômalo</Typography><Typography variant="body2" fontWeight={700} color="error.main">{money(item.anomalous_cost_cloud, currency)}</Typography></Box>
-                  <Box><Typography variant="caption" color="text.secondary">Responsável / prazo</Typography><Typography variant="body2">{item.assignee_user_id ?? "Fila FinOps"} · {dt(item.due_at)}</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Projeção mensal</Typography><Typography variant="body2" fontWeight={650}>{money(item.projected_month_impact, currency)}</Typography></Box>
                 </Box>
               </Paper>
             ))}
