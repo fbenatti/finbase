@@ -13,6 +13,7 @@ DEFAULT_DETECTOR_SETTINGS: dict[str, int | float] = {
     "baseline_variability_days": 56,
     "classification_window_days": 56,
     "new_spend_min_history_days": 14,
+    "high_confidence_history_days": 28,
     "intermittent_zero_ratio": 0.40,
     "recovery_confirmation_days": 3,
     "relapse_watch_days": 14,
@@ -42,10 +43,10 @@ DEFAULT_DETECTOR_SETTINGS: dict[str, int | float] = {
     "score_confidence_low_factor": 0.60,
     "projection_days_month": 30.4,
     "projection_days_year": 365.0,
+    "impact_run_rate_lookback_days": 7,
     "severity_medium_min": 2_000.0,
     "severity_high_min": 10_000.0,
     "severity_critical_min": 50_000.0,
-    "hierarchy_explain_threshold": 0.70,
 }
 
 DETECTOR_SETTING_RANGES: dict[str, tuple[float, float, bool]] = {
@@ -54,6 +55,7 @@ DETECTOR_SETTING_RANGES: dict[str, tuple[float, float, bool]] = {
     "baseline_variability_days": (7, 365, True),
     "classification_window_days": (7, 365, True),
     "new_spend_min_history_days": (1, 180, True),
+    "high_confidence_history_days": (1, 365, True),
     "intermittent_zero_ratio": (0.0, 0.95, False),
     "recovery_confirmation_days": (1, 30, True),
     "relapse_watch_days": (0, 180, True),
@@ -83,10 +85,10 @@ DETECTOR_SETTING_RANGES: dict[str, tuple[float, float, bool]] = {
     "score_confidence_low_factor": (0.0, 1.0, False),
     "projection_days_month": (1.0, 31.0, False),
     "projection_days_year": (1.0, 366.0, False),
+    "impact_run_rate_lookback_days": (1, 90, True),
     "severity_medium_min": (0.0, 1_000_000_000.0, False),
     "severity_high_min": (0.0, 1_000_000_000.0, False),
     "severity_critical_min": (0.0, 1_000_000_000.0, False),
-    "hierarchy_explain_threshold": (0.0, 1.0, False),
 }
 
 
