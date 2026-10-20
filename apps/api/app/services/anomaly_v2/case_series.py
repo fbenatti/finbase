@@ -13,7 +13,6 @@ from sqlalchemy import text
 
 from app.database import async_session
 from app.services.anomaly_v2.baseline import expected_for_day
-from app.services.anomaly_v2.daily_build import table_column_types
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
@@ -102,28 +101,81 @@ def _lit(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _scope_sql_filter(dimensions: Mapping[str, Any]) -> str:
+def _scope_sql_filter(dimensions: Mapping[str, Any], exact_values: Mapping[str, list[str]] | None = None) -> str:
     clauses = ["TRUE"]
-    for key in _DIRECT_FILTERS:
+    columns = [(key, key) for key in _DIRECT_FILTERS] + [
+        ("resource_group", "source_resource_group_name"), ("region", "regionname"),
+    ]
+    for key, column in columns:
         raw = dimensions.get(key)
         if raw in (None, ""):
             continue
+        if exact_values is not None and key in exact_values:
+            values = exact_values[key]
+            clauses.append(f"{_quote(column)} IN ({', '.join(_lit(value) for value in values)})" if values else "FALSE")
+            continue
         clauses.append(
-            f"lower(trim(CAST({_quote(key)} AS VARCHAR))) = {_lit(str(raw).strip().lower())}"
-        )
-    resource_group = dimensions.get("resource_group")
-    if resource_group:
-        clauses.append(
-            "lower(trim(CAST(\"source_resource_group_name\" AS VARCHAR))) = "
-            + _lit(str(resource_group).strip().lower())
-        )
-    region = dimensions.get("region")
-    if region:
-        clauses.append(
-            "lower(trim(COALESCE(CAST(\"regionname\" AS VARCHAR), ''))) = "
-            + _lit(str(region).strip().lower())
+            f"lower(trim(CAST({_quote(column)} AS VARCHAR))) = {_lit(str(raw).strip().lower())}"
         )
     return " AND ".join(clauses)
+
+
+def _table_ref(namespace: str, table: str, snapshot_id: int | None = None) -> str:
+    ref = f"iceberg.{_quote(namespace)}.{_quote(table)}"
+    return ref + (f" FOR VERSION AS OF {int(snapshot_id)}" if snapshot_id is not None else "")
+
+
+async def source_read_metadata(namespace: str, table: str) -> tuple[dict[str, str], int | None]:
+    """Read schema/snapshot from catalog metadata, without a Trino query."""
+    from app.services.iceberg_service import get_catalog
+
+    def read():
+        source = get_catalog().load_table((namespace, table))
+        snapshot = source.current_snapshot()
+        return ({field.name.lower(): str(field.field_type).lower() for field in source.schema().fields},
+                snapshot.snapshot_id if snapshot else None)
+
+    return await asyncio.to_thread(read)
+
+
+def build_scope_lookup_sql(*, namespace: str, table: str, column: str, value: str,
+                           period_filter: str, connection_filter: str, snapshot_id: int | None = None) -> str:
+    # Resolve the complete raw spelling domain using only ONE dictionary column.
+    # The expensive measure/detail scans can then push an exact IN predicate
+    # into Parquet, instead of normalizing every input row before filtering.
+    quoted = _quote(column)
+    return f"""SELECT DISTINCT {quoted} AS scope_value
+        FROM {_table_ref(namespace, table, snapshot_id)}
+        WHERE {period_filter} AND {connection_filter}
+          AND lower(trim(CAST({quoted} AS VARCHAR))) = {_lit(value.strip().lower())}
+        LIMIT 257"""
+
+
+def raw_date_range_predicate(column: str, start: date, end: date, data_type: str | None = None) -> str:
+    """Native column ranges, including slash dates with optional time suffixes.
+
+    These are conservative candidates. The existing date normalizer still
+    resolves MM/DD vs DD/MM using the billing period after aggregation.
+    """
+    quoted = _quote(column)
+    next_day = end + timedelta(days=1)
+    kind = str(data_type or "").lower()
+    if kind == "date":
+        return f"{quoted} BETWEEN DATE {_lit(start.isoformat())} AND DATE {_lit(end.isoformat())}"
+    if kind.startswith("timestamp"):
+        return (f"({quoted} >= TIMESTAMP {_lit(start.isoformat() + ' 00:00:00')} "
+                f"AND {quoted} < TIMESTAMP {_lit(next_day.isoformat() + ' 00:00:00')})")
+    clauses = [f"({quoted} >= {_lit(start.isoformat())} AND {quoted} < {_lit(next_day.isoformat())})"]
+    values: set[str] = set()
+    cursor = start
+    while cursor <= end:
+        values.update((cursor.strftime("%m/%d/%Y"), cursor.strftime("%d/%m/%Y")))
+        cursor += timedelta(days=1)
+    for value in sorted(values):
+        # The next lexical prefix includes both the bare date and its suffixes.
+        upper = value[:-1] + chr(ord(value[-1]) + 1)
+        clauses.append(f"({quoted} >= {_lit(value)} AND {quoted} < {_lit(upper)})")
+    return "(" + " OR ".join(clauses) + ")"
 
 
 def periods_overlapping(start: date, end: date) -> list[str]:
@@ -239,6 +291,10 @@ def build_case_daily_sql(
     measure: str,
     scope_filter: str,
     periods: list[str],
+    start: date | None = None,
+    end: date | None = None,
+    date_type: str | None = None,
+    snapshot_id: int | None = None,
 ) -> str:
     """Uma agregação diária. Sem regexp de data e sem colunas de recurso."""
     period_filter = period_predicate(period_column, periods, period_type)
@@ -251,11 +307,12 @@ def build_case_daily_sql(
         SELECT CAST({_quote(date_column)} AS VARCHAR) AS day_raw,
                {period_select} AS period,
                SUM(COALESCE(TRY_CAST({_quote(measure)} AS DOUBLE), 0)) AS cost_cloud
-          FROM iceberg.{namespace}.{_quote(table)}
+          FROM {_table_ref(namespace, table, snapshot_id)}
          WHERE {type_filter}
            AND {period_filter}
            AND {connection_predicate(connection_column, connection_ids)}
            AND {scope_filter}
+           AND {raw_date_range_predicate(date_column, start, end, date_type) if start and end else 'TRUE'}
          GROUP BY 1, 2
     """
 
@@ -274,6 +331,8 @@ def build_case_detail_sql(
     scope_filter: str,
     event_day: date,
     specs: list[tuple[str, str, str]],
+    date_type: str | None = None,
+    snapshot_id: int | None = None,
 ) -> str:
     """Caminho do desvio só no dia do evento, na partição daquele mês."""
     period_filter = period_predicate(period_column, [event_day.strftime("%Y%m")], period_type)
@@ -297,11 +356,11 @@ def build_case_detail_sql(
     group_by = ", ".join(str(index) for index in range(1, 3 + len(specs)))
     return f"""
         SELECT {select_list}
-          FROM iceberg.{namespace}.{_quote(table)}
+          FROM {_table_ref(namespace, table, snapshot_id)}
          WHERE {type_filter}
            AND {period_filter}
            AND {connection_predicate(connection_column, connection_ids)}
-           AND {raw_day_predicate(date_column, event_day)}
+           AND {raw_date_range_predicate(date_column, event_day, event_day, date_type)}
            AND {scope_filter}
          GROUP BY {group_by}
     """
@@ -381,9 +440,8 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         else "TRUE"
     )
     measure = str(config.measure_column or "realizado_cloud")
-    scope_filter = _scope_sql_filter(dimensions)
-    column_types, connection_ids = await asyncio.gather(
-        table_column_types(namespace, table),
+    (column_types, snapshot_id), connection_ids = await asyncio.gather(
+        source_read_metadata(namespace, table),
         connection_ids_for_cloud(dimensions.get("cloud_origem")),
     )
     specs = [item for item in _BREAKDOWN_COLUMNS if item[0] in column_types]
@@ -393,6 +451,19 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         connection_column = None
         connection_ids = []
     period_type = column_types.get(str(period_column or "").lower())
+    exact_values: dict[str, list[str]] = {}
+    for key, column in [("resource_group", "source_resource_group_name"),
+                        ("subaccountname", "subaccountname"), ("servicename", "servicename")]:
+        if dimensions.get(key) and column in column_types:
+            lookup = build_scope_lookup_sql(namespace=namespace, table=table, column=column,
+                value=str(dimensions[key]), period_filter=period_predicate(period_column, periods, period_type),
+                connection_filter=connection_predicate(connection_column, connection_ids), snapshot_id=snapshot_id)
+            raw_values = await trino_execute(lookup, timeout_s=20, max_retries=1)
+            if len(raw_values) <= 256:
+                exact_values[key] = [str(row["scope_value"]) for row in raw_values if row.get("scope_value") is not None]
+            break
+    scope_filter = _scope_sql_filter(dimensions, exact_values)
+    date_type = column_types.get(date_column.lower())
     daily_sql = build_case_daily_sql(
         namespace=namespace,
         table=table,
@@ -405,6 +476,10 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         measure=measure,
         scope_filter=scope_filter,
         periods=periods,
+        start=start,
+        end=end,
+        date_type=date_type,
+        snapshot_id=snapshot_id,
     )
     detail_sql = build_case_detail_sql(
         namespace=namespace,
@@ -419,6 +494,8 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         scope_filter=scope_filter,
         event_day=event_day,
         specs=specs,
+        date_type=date_type,
+        snapshot_id=snapshot_id,
     ) if specs else None
 
     detail_failed = False
@@ -428,7 +505,7 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         if not detail_sql:
             return []
         try:
-            return list(await trino_execute(detail_sql, timeout_s=90))
+            return list(await trino_execute(detail_sql, timeout_s=20, max_retries=1))
         except Exception as exc:
             detail_failed = True
             logger.warning("decomposição do caso %s indisponível: %s", getattr(case, "id", None), exc)
@@ -436,7 +513,7 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
 
     started = time.perf_counter()
     rows, raw_detail = await asyncio.gather(
-        trino_execute(daily_sql, timeout_s=90),
+        trino_execute(daily_sql, timeout_s=20, max_retries=1),
         _detail_rows(),
     )
     logger.info(
