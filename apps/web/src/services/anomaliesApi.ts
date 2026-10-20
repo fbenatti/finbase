@@ -13,6 +13,9 @@ export type AnomalyConfig = {
   investigate_score: number;
   monthly_tolerance_pct: number;
   materiality_by_currency: Record<string, number>;
+  materiality_monthly?: number | null;
+  severity_tiers?: Record<string, number> | null;
+  detector_settings: Record<string, number>;
   history_days: number;
   calibration_days: number;
   horizon_days: number;
@@ -26,7 +29,6 @@ export type AnomalyConfig = {
   source_namespace: string;
   destination_physical_name: string;
   detection_engine?: string;
-  materiality_monthly?: number | null;
 };
 
 export type ImpactSummary = {
