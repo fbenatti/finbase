@@ -84,7 +84,7 @@ function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, f
   return map;
 }
 
-function rankTreeChildren(map: Map<string, { cost: number; byMonth: Map<string, number> }>, field: string): TreeChildAgg[] {
+function rankTreeChildren(map: Map<string, { cost: number; byMonth: Map<string, number> }>, field: string, includeAllChildren = false): TreeChildAgg[] {
   const items: TreeChildAgg[] = [...map.entries()]
     .map(([key, o]) => {
       const months = [...o.byMonth.keys()].sort();
@@ -278,7 +278,7 @@ export default function HierarchicalDecompTree({
             row_limit: showOtherChildren ? OTHER_CHILD_PAGE_SIZE : 10000,
           });
           if (!alive) return;
-          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn, showOtherChildren), field);
+          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn, showOtherChildren), field, showOtherChildren);
           m[`tree${treeStart}`] = treeResult;
           if (!isEmptyOrgLevel(field, children)) {
             setEmptyLevelSkip(skip);
@@ -318,7 +318,7 @@ export default function HierarchicalDecompTree({
     if (nextDistinctIndex >= chain.length) return [];
     const rows = rowsOf(results[`tree${treeStart}`]);
     const field = chain[nextDistinctIndex].field;
-    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn, showOtherChildren), field);
+    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn, showOtherChildren), field, showOtherChildren);
   }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes, measureColumn, showOtherChildren]);
   const nextField = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].field : null;
   const nextLabel = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].label : null;
