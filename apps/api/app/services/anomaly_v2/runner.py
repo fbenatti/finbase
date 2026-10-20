@@ -280,6 +280,10 @@ async def execute_detection_v2(
             sid = str(incident["leader"]["scope_id"])
             row = scope_meta.get(sid, {})
             incident["leader"] = {**row, **incident["leader"]}
+            incident["contributors"] = [
+                {**scope_meta.get(str(item["scope_id"]), {}), **item}
+                for item in incident["contributors"]
+            ]
 
         report(7, 8, "Publicando sinais")
         await _ensure_tables()
@@ -308,7 +312,7 @@ async def execute_detection_v2(
         written = await _publish_signals(run_id or 0, pub_rows)
 
         report(8, 8, "Persistindo casos")
-        cases_created = await _sync_cases(
+        case_counts = await _sync_cases(
             session,
             config_id=config_id,
             incidents=incidents,
@@ -331,7 +335,7 @@ async def execute_detection_v2(
             "watches": len(watches),
             "incidents": len(incidents),
             "rows_written": written,
-            "cases_created": cases_created,
+            **case_counts,
             "returns_updated": returns_updated,
             "daily_build_rows": daily_build.get("row_count"),
             "ledger_entries": len(ledger),
@@ -432,29 +436,65 @@ async def _sync_cases(
     as_of: date,
     detected_at: datetime,
     config_row: Any,
-) -> int:
+) -> dict[str, int]:
     """Cria casos a partir de incidentes v2 (sem atribuição automática)."""
     from sqlalchemy import select
 
-    from app.models.anomaly import AnomalyCase
+    from app.models.anomaly import AnomalyCase, AnomalyCaseEvent
     from app.services.anomaly_detector import case_key_for
     from app.services.anomaly_v2.explanation import explain_signal
     from app.services.anomaly_workflow import enqueue_case, resolve_routing
 
     mat_daily, _ = _materiality(_config_from_row(config_row))
     created = 0
-    for incident in incidents:
-        leader = incident["leader"]
+    updated = ignored = 0
+    # Every alerted leaf remains accessible; a parent grouping must not hide
+    # all contributors except its largest one.
+    leaves = [leaf for incident in incidents for leaf in (incident.get("contributors") or [incident["leader"]])]
+    for leader in leaves:
         sid = str(leader["scope_id"])
         meta = {k: v for k, v in leader.items() if k != "tier"}
         disp = display_scope(meta)
         family = "|".join(f"{k}={v}" for k, v in disp.items() if v) or sid
         event_type = str(leader.get("detector") or "SPIKE")
-        case_key = case_key_for(sid, family, event_type, period=as_of.strftime("%Y%m"))
+        event_day = str(leader.get("day") or as_of.isoformat())[:10]
+        event_period = event_day[:7].replace("-", "")
+        episode_start = str(leader.get("episode_start") or event_day)[:10]
+        identity = f"config={config_id}|{family}|episode={episode_start}" if event_type != "MONTHLY_ACCUMULATED" else f"config={config_id}|{family}"
+        case_key = case_key_for(sid, identity, event_type, period=event_period)
         existing = (
-            await session.execute(select(AnomalyCase).where(AnomalyCase.case_key == case_key))
+            await session.execute(select(AnomalyCase).where(
+                AnomalyCase.anomaly_config_id == config_id,
+                AnomalyCase.series_id == sid,
+                AnomalyCase.detector == event_type,
+                (AnomalyCase.period == event_period) if event_type == "MONTHLY_ACCUMULATED"
+                else (AnomalyCase.episode_start == episode_start),
+            ).order_by(AnomalyCase.id).limit(1))
         ).scalar_one_or_none()
         if existing is not None:
+            if existing.state == "CLOSED":
+                ignored += 1
+                continue
+            fields = {
+                "observed_cloud": float(leader.get("observed") or 0),
+                "delta_cloud": float(leader.get("delta") or 0),
+                "score": float(leader.get("score") or 0),
+                "severity": str(leader.get("severity") or "MEDIUM"),
+                "projected_month_impact": float(leader.get("projected_month_impact") or 0),
+                "deviation_status": str(leader.get("deviation_status") or "EM_DESVIO"),
+                "episode_end": leader.get("episode_end"),
+            }
+            changed = {field: value for field, value in fields.items() if getattr(existing, field) != value}
+            if changed:
+                before = {field: getattr(existing, field) for field in changed}
+                for field, value in changed.items():
+                    setattr(existing, field, value)
+                existing.case_version = int(existing.case_version or 1) + 1
+                session.add(AnomalyCaseEvent(case_id=existing.id, event_type="DETECTION_UPDATED",
+                    from_state=existing.state, to_state=existing.state, case_version=existing.case_version,
+                    payload={"before": before, "after": changed, "model_version": MODEL_VERSION},
+                    note="Reavaliação do desvio; referência e workflow preservados"))
+                updated += 1
             continue
         routing = resolve_routing(config_row.routing_rules or [], meta)
         reason_raw = leader.get("reason_codes") or ""
@@ -468,7 +508,7 @@ async def _sync_cases(
             event_family=family,
             event_type=event_type,
             event_date=str(leader.get("day") or as_of.isoformat())[:10],
-            period=as_of.strftime("%Y%m"),
+            period=event_period,
             state="CLOSED" if returned else "NEW",
             severity=str(leader.get("severity") or "MEDIUM"),
             score=float(leader.get("score") or 0),
@@ -479,7 +519,7 @@ async def _sync_cases(
             upper_cloud=float(leader.get("upper") or 0),
             delta_cloud=float(leader.get("delta") or 0),
             anomalous_cost_cloud=max(0.0, float(leader.get("delta") or 0)),
-            evaluation_grain="DAY",
+            evaluation_grain="MONTHLY_EVENT" if event_type == "MONTHLY_ACCUMULATED" else "DAY",
             reference_kind="V2_BASELINE",
             reason_codes=reasons,
             cloud=disp.get("cloud"),
@@ -504,7 +544,12 @@ async def _sync_cases(
         )
         session.add(case)
         await session.flush()
+        session.add(AnomalyCaseEvent(case_id=case.id, event_type="CASE_CREATED", to_state=case.state,
+            case_version=1, payload={"model_version": MODEL_VERSION, "scope_id": sid,
+                                   "incident_parent": next((incident["parent_key"] for incident in incidents
+                                       if any(str(item["scope_id"]) == sid for item in incident.get("contributors", []))), None)},
+            note="Detecção v2 com referência anterior ao evento"))
         if not returned:
             await enqueue_case(session, case=case, reason="Novo desvio v2")
         created += 1
-    return created
+    return {"cases_created": created, "cases_updated": updated, "closed_cases_preserved": ignored}
