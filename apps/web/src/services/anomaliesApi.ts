@@ -59,6 +59,9 @@ export type AnomalyCase = {
   upper_cloud: number | null;
   delta_cloud: number | null;
   anomalous_cost_cloud: number;
+  confirmed_anomalous_cost_cloud?: number;
+  event_period_start?: string | null;
+  event_period_end?: string | null;
   evaluation_grain: string;
   current_reference_id: string | null;
   current_assessment_id: string | null;
