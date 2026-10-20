@@ -168,6 +168,7 @@ async def _execute_detection_v2(
         if not bool(config_row.enabled):
             raise AnomalyV2RunError("configuração desabilitada")
         config = _config_from_row(config_row)
+        engine_settings = config["detector_settings"]
         # Não segurar transação/lock de linha durante minutos de Trino: isso
         # trava o cancelamento, o progresso do worker e as migrações da API.
         await session.commit()
@@ -227,7 +228,9 @@ async def _execute_detection_v2(
         daily_build = await build_daily_aggregate(config, as_of=as_of, lookback_days=history_days)
 
         report(3, 8, "Livro de compromissos")
-        ledger_payload = await refresh_commitment_ledger(config, as_of=as_of)
+        ledger_payload = await refresh_commitment_ledger(
+            config, as_of=as_of, history_days=int(engine_settings["commitment_history_days"])
+        )
         ledger = ledger_payload["entries"]
         commitment_scope_ids = {str(e["scope_id"]) for e in ledger}
 
@@ -238,7 +241,8 @@ async def _execute_detection_v2(
         profiles = {}
         for cloud, rows in history_by_cloud.items():
             profiles.update(classify_scopes(rows, as_of=date.fromisoformat(current_max[cloud]),
-                                           commitment_scope_ids=commitment_scope_ids))
+                                           commitment_scope_ids=commitment_scope_ids,
+                                           settings=engine_settings))
         scope_meta: dict[str, dict[str, Any]] = {}
         for row in history:
             sid = str(row["scope_id"])
@@ -248,7 +252,7 @@ async def _execute_detection_v2(
         min_pct = float(config.get("min_relative_deviation") or 0.2)
         investigate = int(config.get("investigate_score") or 55)
         quality_by_day: dict[str, dict[str, float]] = {}
-        valid_days = valid_days_by_cloud(history)
+        valid_days = valid_days_by_cloud(history, settings=engine_settings)
 
         report(5, 8, "Detectando desvios")
         all_signals: list[dict[str, Any]] = []
@@ -272,18 +276,19 @@ async def _execute_detection_v2(
                 as_of=scope_end,
                 materiality=mat_daily,
                 min_pct=min_pct,
-                investigate_score=investigate,
                 ledger_entries=scope_ledger,
                 valid_days=valid_days.get(cloud, set()),
+                settings=engine_settings,
             )
             conf = "HIGH" if int(profile.get("history_days") or 0) >= 28 else "LOW"
             for sig in raw:
                 event_day = str(sig["day"])[:10]
                 if event_day not in quality_by_day:
                     day = date.fromisoformat(event_day)
+                    quality_days = int(engine_settings["load_quality_lookback_days"])
                     quality_by_day[event_day] = cloud_load_quality(history, day=event_day, baseline_days=[
-                        (day - timedelta(days=offset)).isoformat() for offset in range(1, 15)
-                    ])
+                        (day - timedelta(days=offset)).isoformat() for offset in range(1, quality_days + 1)
+                    ], settings=engine_settings)
                 ratio = quality_by_day[event_day].get(cloud, 1.0)
                 gated = apply_gates(
                     sig,
@@ -293,13 +298,18 @@ async def _execute_detection_v2(
                     cloud_ratio=ratio,
                     confidence=conf,
                     persistence_days=int(sig.get("persistence_days") or 1),
+                    settings=engine_settings,
                 )
                 scored = score_signal(
                     gated,
                     materiality=mat_daily,
                     severity_tiers=config.get("severity_tiers"),
                     confidence=conf,
+                    settings=engine_settings,
                 )
+                if float(scored["score"]) < int(config.get("investigate_score") or 0) and gated.get("tier") == TIER_ALERT:
+                    gated["tier"] = TIER_WATCH
+                    gated["reason_codes"] = list(gated.get("reason_codes") or []) + ["BELOW_INVESTIGATION_SCORE"]
                 gated.update(scored)
                 gated["cost_nature"] = profile.get("cost_nature")
                 gated["confidence"] = conf
@@ -363,7 +373,8 @@ async def _execute_detection_v2(
             config_row=config_row,
         )
         returns_updated = await _apply_return_engine(session, config_id=config_id, history=history,
-                                                     as_of=as_of, valid_days=valid_days)
+                                                     as_of=as_of, valid_days=valid_days,
+                                                     settings=engine_settings)
 
         result = {
             "status": "COMPLETED",
@@ -424,7 +435,7 @@ async def _finish_cancelled(session, run_id: int | None) -> dict[str, Any]:
 
 
 async def _apply_return_engine(session, *, config_id: int, history: list[dict[str, Any]], as_of: date,
-                               valid_days: dict[str, set[str]]) -> int:
+                               valid_days: dict[str, set[str]], settings: Mapping[str, Any]) -> int:
     from sqlalchemy import select
 
     from app.models.anomaly import AnomalyAction, AnomalyCase, AnomalyCaseEvent
@@ -465,6 +476,7 @@ async def _apply_return_engine(session, *, config_id: int, history: list[dict[st
             as_of=as_of,
             treated=treated,
             valid_days=valid_days.get(str(case.cloud or (case.series_dimensions or {}).get("cloud_origem") or ""), set()),
+            settings=settings,
         )
         if ret.get("deviation_status") != DEVIATION_ACTIVE:
             previous_status = case.deviation_status
@@ -534,7 +546,8 @@ async def _sync_cases(
             revised = {**leader, "delta": delta,
                        "pct_delta": delta / max(float(existing.expected_cloud or 0), 1)}
             prioritization = score_signal(revised, materiality=mat_daily,
-                severity_tiers=getattr(config_row, "severity_tiers", None), confidence=existing.confidence)
+                severity_tiers=getattr(config_row, "severity_tiers", None), confidence=existing.confidence,
+                settings=_config_from_row(config_row)["detector_settings"])
             fields = {
                 "event_date": event_day,
                 "observed_cloud": observed,
