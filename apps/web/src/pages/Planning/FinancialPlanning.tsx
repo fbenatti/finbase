@@ -6,6 +6,8 @@ import Planning from "./Planning";
 import VisaoContabil, { EMPTY_FILTERS } from "../GoldDashboard/VisaoContabil";
 import FinancialContractsDashboard from "../FinancialContracts/FinancialContractsDashboard";
 import ContractStoryDashboard from "./ContractStoryDashboard";
+import DollarEvolution from "./DollarEvolution";
+import { Alert } from "@mui/material";
 
 const TABS = [
   { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
@@ -17,6 +19,8 @@ const TABS = [
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
   { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
+  { code: "pedidos-sap", label: "Pedidos SAP", title: "Pedidos SAP", help: "Acompanhamento de pedidos SAP." },
+  { code: "evolucao-dolar", label: "Evolução do Dólar", title: "Evolução do Dólar", help: "Evolução mensal do dólar e do consumo Azure." },
 ] as const;
 
 export default function FinancialPlanning() {
@@ -70,6 +74,10 @@ export default function FinancialPlanning() {
           <BudgetAccuracy />
         ) : active.code === "visao-contabil" ? (
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
+        ) : active.code === "evolucao-dolar" ? (
+          <DollarEvolution />
+        ) : active.code === "pedidos-sap" ? (
+          <Alert severity="info">A aba está pronta, mas ainda não há uma fonte de pedidos SAP conectada para exibir os dados.</Alert>
         ) : active.code === "dashboard" ? (
           <>
             <Tabs value={executiveSubtab} onChange={changeExecutiveSubtab} aria-label="Visões do Dashboard Executivo" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
