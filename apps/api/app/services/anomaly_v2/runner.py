@@ -157,6 +157,9 @@ async def execute_detection_v2(
         current_run = await session.get(AnomalyRun, run_id) if run_id else None
         force = force or bool(current_run and current_run.trigger_type == "MANUAL")
         fingerprint = readiness_fingerprint(current_max, int(config_row.version), source_snapshot_id)
+        # The readiness reads must not retain PostgreSQL table locks while
+        # aggregation, commitment queries and model evaluation run in Trino.
+        await session.commit()
         if not force and prev_fp == fingerprint:
             skipped = {
                 "status": "SKIPPED_NO_NEW_DATA",
