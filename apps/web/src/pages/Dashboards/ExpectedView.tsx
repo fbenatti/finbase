@@ -146,6 +146,7 @@ export default function ExpectedView({
   const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast" | "ambos">(
     "realizado",
   );
+  const [drillLabelsManualForecast, setDrillLabelsManualForecast] = useState(false);
   useEffect(() => {
     window.localStorage.setItem(CUMULATIVE_STORAGE_KEY, cumulative ? "1" : "0");
   }, [cumulative]);
@@ -974,8 +975,9 @@ export default function ExpectedView({
     const found = departmentOptions.find((item) => item.path === path);
     if (found) chooseDepartment(found);
   };
-  const openConsumptionDetails = (tipo: "realizado" | "forecast" | "ambos") => {
+  const openConsumptionDetails = (tipo: "realizado" | "forecast" | "ambos", labelManualForecast = false) => {
     setDrillTipo(tipo);
+    setDrillLabelsManualForecast(labelManualForecast);
     setDrillPeriod(periodFilter === "all" || externalScope ? undefined : periodFilter === "current" ? String(new Date().getFullYear()) : periodFilter);
     setDrillOpen(true);
   };
@@ -1010,6 +1012,7 @@ export default function ExpectedView({
           ? "forecast"
           : "realizado",
     );
+    setDrillLabelsManualForecast(false);
     setDrillPeriod(cumulative && period ? period.slice(0, 4) : period);
     setDrillOpen(true);
   };
@@ -1350,7 +1353,7 @@ export default function ExpectedView({
               "Total projetado",
               forecast,
               "#16A34A",
-              () => openConsumptionDetails("ambos"),
+              () => openConsumptionDetails("ambos", true),
               "Total projetado",
             )}
             {card("Orçamento", budget, "#64748B")}
@@ -1592,6 +1595,7 @@ export default function ExpectedView({
         directorView={directorView}
         period={drillPeriod}
         tipo={drillTipo}
+        labelManualForecast={drillLabelsManualForecast}
         measureColumn={measureColumn}
         globalFilters={[
           ...Object.entries(externalScope?.dimensionFilters || {}).map(([column, values]) => ({ column, operator: "IN" as const, values })),

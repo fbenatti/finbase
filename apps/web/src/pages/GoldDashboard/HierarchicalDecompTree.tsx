@@ -64,16 +64,20 @@ export function isEmptyOrgLevel(field: string, children: Array<{ key: string; __
 
 type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean; __manualForecast?: boolean };
 
-function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean, measureColumn: "realizado" | "realizado_cloud", includeAllChildren = false): Map<string, { cost: number; byMonth: Map<string, number> }> {
-  const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
+type TreeChildTotal = { cost: number; byMonth: Map<string, number>; manualForecast: boolean };
+
+function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean, measureColumn: "realizado" | "realizado_cloud", includeAllChildren = false, labelManualForecast = false): Map<string, TreeChildTotal> {
+  const map = new Map<string, TreeChildTotal>();
   for (const r of rows) {
     const tipo = String(r.tipo ?? r.Tipo ?? "").trim().toLowerCase();
-    const rawKey = String(r[field] ?? "").trim();
-    const isManualForecast = tipo === "forecast-manual" && isOrgField(field) &&
-      (!rawKey || rawKey.toLowerCase() === EMPTY_DIMENSION_LABEL.toLowerCase());
-    const k = isManualForecast ? "Forecast Manual" : rawKey || EMPTY_DIMENSION_LABEL;
-    if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
+    const rawValue = r[field];
+    const rawKey = String(rawValue ?? EMPTY_DIMENSION_LABEL);
+    const isManualForecast = labelManualForecast && tipo === "forecast-manual" && isOrgField(field) &&
+      (rawValue == null || rawKey.trim() === "" || rawKey.trim().toLowerCase() === EMPTY_DIMENSION_LABEL.toLowerCase());
+    const k = isManualForecast ? "Forecast Manual" : rawKey;
+    if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map(), manualForecast: false });
     const o = map.get(k)!;
+    o.manualForecast ||= isManualForecast;
     const v = Number(r[measureColumn] || 0);
     // No diálogo de consumo o filtro SQL já selecionou somente realizado.
     // Não dependa do nome retornado da coluna ``tipo`` (que pode preservar a
@@ -88,13 +92,13 @@ function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, f
   return map;
 }
 
-function rankTreeChildren(map: Map<string, { cost: number; byMonth: Map<string, number> }>, field: string, includeAllChildren = false): TreeChildAgg[] {
+function rankTreeChildren(map: Map<string, TreeChildTotal>, field: string, includeAllChildren = false): TreeChildAgg[] {
   const items: TreeChildAgg[] = [...map.entries()]
     .map(([key, o]) => {
       const months = [...o.byMonth.keys()].sort();
       const cur = months.length ? o.byMonth.get(months[months.length - 1]) || 0 : 0;
       const prev = months.length > 1 ? o.byMonth.get(months[months.length - 2]) || 0 : 0;
-      return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null, __manualForecast: key === "Forecast Manual" };
+      return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null, __manualForecast: o.manualForecast };
     });
   // Toda a decomposição é uma visão de consumo: a ordem precisa ser
   // materialidade (maior → menor), inclusive para Serviço e SKU.
@@ -188,6 +192,7 @@ export default function HierarchicalDecompTree({
   shareCaption = "participação no contexto atual",
   filterRowTypes = true,
   measureColumn = "realizado",
+  labelManualForecast = false,
 }: {
   table: string;
   baseFilters: GoldQueryFilter[];
@@ -200,6 +205,8 @@ export default function HierarchicalDecompTree({
   filterRowTypes?: boolean;
   /** Medida financeira usada pelos demais widgets no mesmo contexto. */
   measureColumn?: "realizado" | "realizado_cloud";
+  /** Marca como Forecast Manual as linhas forecast-manual sem nível organizacional. */
+  labelManualForecast?: boolean;
 }) {
   const svgId = useId().replace(/:/g, "");
   const [treePath, setTreePath] = useState<DecompPathStep[]>([]);
@@ -282,7 +289,7 @@ export default function HierarchicalDecompTree({
             row_limit: showOtherChildren ? OTHER_CHILD_PAGE_SIZE : 10000,
           });
           if (!alive) return;
-          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn, showOtherChildren), field, showOtherChildren);
+          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn, showOtherChildren, labelManualForecast), field, showOtherChildren);
           m[`tree${treeStart}`] = treeResult;
           if (!isEmptyOrgLevel(field, children)) {
             setEmptyLevelSkip(skip);
@@ -300,7 +307,7 @@ export default function HierarchicalDecompTree({
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table, queryKey, treePathKey, chainKey, measureColumn, showOtherChildren]);
+  }, [table, queryKey, treePathKey, chainKey, measureColumn, showOtherChildren, labelManualForecast]);
 
   const spineCosts = useMemo(() => {
     const arr: number[] = [];
@@ -322,8 +329,8 @@ export default function HierarchicalDecompTree({
     if (nextDistinctIndex >= chain.length) return [];
     const rows = rowsOf(results[`tree${treeStart}`]);
     const field = chain[nextDistinctIndex].field;
-    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn, showOtherChildren), field, showOtherChildren);
-  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes, measureColumn, showOtherChildren]);
+    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn, showOtherChildren, labelManualForecast), field, showOtherChildren);
+  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes, measureColumn, showOtherChildren, labelManualForecast]);
   const nextField = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].field : null;
   const nextLabel = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].label : null;
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;

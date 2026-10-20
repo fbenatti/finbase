@@ -155,6 +155,7 @@ export default function ExpectedViewV2({
   const [drillTipo, setDrillTipo] = useState<"realizado" | "forecast" | "ambos">(
     "realizado",
   );
+  const [drillLabelsManualForecast, setDrillLabelsManualForecast] = useState(false);
   const rangeDays = useMemo(() => {
     if (!periodFrom || !periodTo) return 0;
     const start = new Date(Number(periodFrom.slice(0, 4)), Number(periodFrom.slice(4, 6)) - 1, 1);
@@ -967,6 +968,7 @@ export default function ExpectedViewV2({
         "",
     ).toLowerCase();
     setDrillTipo(traceName.includes("forecast") ? "forecast" : "realizado");
+    setDrillLabelsManualForecast(false);
     setDrillPeriod(period);
     setDrillOpen(true);
   };
@@ -1191,15 +1193,15 @@ export default function ExpectedViewV2({
         <>
           {!budgetAvailable && <Alert severity="info" sx={{ mb: 2 }}>Orçamento e forecast manual indisponíveis para filtros dimensionais: o planejamento não tem granularidade nessa coluna. A tela omite esses valores em vez de reutilizar totais globais.</Alert>}
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-            {card("Realizado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillPeriod(undefined); setDrillOpen(true); })}
-            {card("Forecast", forecastOnly, "#7C3AED", () => { setDrillTipo("forecast"); setDrillPeriod(undefined); setDrillOpen(true); }, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
+            {card("Realizado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); })}
+            {card("Forecast", forecastOnly, "#7C3AED", () => { setDrillTipo("forecast"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); }, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
             {card("Forecast Manual", budgetAvailable ? forecastManual : "Sem forecast manual para este filtro", "#0EA5E9", undefined, "Planejamento manual consolidado")}
             {card("Orçamento", budgetAvailable ? budget : "Sem orçamento para este filtro", "#64748B")}
             {card(
               "Total projetado",
               forecast,
               "#16A34A",
-              () => { setDrillTipo("ambos"); setDrillPeriod(undefined); setDrillOpen(true); },
+              () => { setDrillTipo("ambos"); setDrillLabelsManualForecast(true); setDrillPeriod(undefined); setDrillOpen(true); },
               "Realizado + Forecast + Forecast Manual",
             )}
             {card("Variação", budgetAvailable ? variance : "Sem base", variance >= 0 ? "#16A34A" : "#EF4444")}
@@ -1317,6 +1319,7 @@ export default function ExpectedViewV2({
         directorView={directorView}
         period={drillPeriod}
         tipo={drillTipo}
+        labelManualForecast={drillLabelsManualForecast}
         globalFilters={chartFilters}
       />
     </>
