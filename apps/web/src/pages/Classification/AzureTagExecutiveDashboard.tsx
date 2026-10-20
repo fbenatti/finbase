@@ -107,9 +107,9 @@ export default function AzureTagExecutiveDashboard() {
       : null;
     return {
       date: snapshot.snapshot_date,
-      label: new Date(`${snapshot.snapshot_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }),
+      label: new Date(`${snapshot.snapshot_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }),
       global: snapshot.global.adherence_percent,
-      selected: selected?.adherence_percent ?? null,
+      value: timelineSubscription ? selected?.adherence_percent ?? null : snapshot.global.adherence_percent,
     };
   }), [timeline, timelineSubscription]);
 
@@ -125,10 +125,14 @@ export default function AzureTagExecutiveDashboard() {
     ? Math.round((totals.complete / totals.taggable) * 1000) / 10
     : null;
   const globalCardColor = globalAdherence === null ? "grey.500" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main";
-  const firstTimelineValue = timelinePoints.find((point) => point.global !== null)?.global ?? null;
-  const lastTimelineValue = [...timelinePoints].reverse().find((point) => point.global !== null)?.global ?? null;
+  const validTimelinePoints = timelinePoints.filter((point) => point.value !== null);
+  const firstTimelinePoint = validTimelinePoints[0] ?? null;
+  const lastTimelinePoint = validTimelinePoints[validTimelinePoints.length - 1] ?? null;
+  const firstTimelineValue = firstTimelinePoint?.value ?? null;
+  const lastTimelineValue = lastTimelinePoint?.value ?? null;
   const timelineDelta = firstTimelineValue !== null && lastTimelineValue !== null ? lastTimelineValue - firstTimelineValue : null;
   const timelineSubscriptionName = timeline?.subscriptions.find((item) => item.subscription_id === timelineSubscription)?.name;
+  const timelineMetricLabel = timelineSubscriptionName ? `Aderência mais recente · ${timelineSubscriptionName}` : "Aderência mais recente · global";
 
   const exportPdf = async () => {
     if (!exportRootRef.current || exporting) return;
@@ -298,19 +302,19 @@ export default function AzureTagExecutiveDashboard() {
             {timeline && timelinePoints.length > 0 && <>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0,1fr))" }, gap: 1.25, mb: 2.5 }}>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="caption" color="text.secondary">ADERÊNCIA MAIS RECENTE</Typography>
-                  <Typography variant="h4" fontWeight={800} color={globalCardColor}>{lastTimelineValue === null ? "—" : `${lastTimelineValue.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
-                  <Typography variant="caption" color="text.secondary">{timelinePoints.at(-1)?.label}</Typography>
+                  <Typography variant="caption" color="text.secondary">{timelineMetricLabel.toLocaleUpperCase("pt-BR")}</Typography>
+                  <Typography variant="h4" fontWeight={800} color={lastTimelineValue === null ? "text.secondary" : lastTimelineValue >= 90 ? "success.main" : lastTimelineValue >= 60 ? "warning.main" : "error.main"}>{lastTimelineValue === null ? "—" : `${lastTimelineValue.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
+                  <Typography variant="caption" color="text.secondary">{lastTimelinePoint?.label ?? "Sem medição"}</Typography>
                 </Box>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
                   <Typography variant="caption" color="text.secondary">VARIAÇÃO NO PERÍODO</Typography>
                   <Typography variant="h4" fontWeight={800} color={timelineDelta === null ? "text.primary" : timelineDelta >= 0 ? "success.main" : "error.main"}>{timelineDelta === null ? "—" : `${timelineDelta >= 0 ? "+" : ""}${timelineDelta.toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}</Typography>
-                  <Typography variant="caption" color="text.secondary">desde {timelinePoints[0]?.label}</Typography>
+                  <Typography variant="caption" color="text.secondary">desde {firstTimelinePoint?.label ?? "Sem medição"}</Typography>
                 </Box>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
                   <Typography variant="caption" color="text.secondary">MEDIÇÕES DE INVENTÁRIO</Typography>
-                  <Typography variant="h4" fontWeight={800}>{fmt(timelinePoints.length)}</Typography>
-                  <Typography variant="caption" color="text.secondary">{timelinePoints[0]?.label} – {timelinePoints.at(-1)?.label}</Typography>
+                  <Typography variant="h4" fontWeight={800}>{fmt(validTimelinePoints.length)}</Typography>
+                  <Typography variant="caption" color="text.secondary">{firstTimelinePoint?.label ?? "—"} – {lastTimelinePoint?.label ?? "—"}</Typography>
                 </Box>
               </Box>
               <Box sx={{ position: "relative", px: { xs: 0.5, sm: 2 }, py: 2.5, overflowX: "auto" }}>
@@ -319,24 +323,25 @@ export default function AzureTagExecutiveDashboard() {
                   <Box sx={{ position: "absolute", left: 24, width: timelinePoints.length > 1 ? `calc((100% - 48px) * ${(timelinePoints.length - 1) / timelinePoints.length})` : 0, top: 18, height: 6, borderRadius: 4, background: "linear-gradient(90deg, #2563eb, #06b6d4)" }} />
                   <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${timelinePoints.length}, minmax(130px, 1fr))`, position: "relative" }}>
                     {timelinePoints.map((point, index) => {
-                      const delta = index > 0 && point.global !== null && timelinePoints[index - 1].global !== null
-                        ? point.global - (timelinePoints[index - 1].global as number) : null;
+                      const previousPoint = timelinePoints.slice(0, index).reverse().find((candidate) => candidate.value !== null);
+                      const delta = point.value !== null && previousPoint?.value !== null && previousPoint
+                        ? point.value - previousPoint.value : null;
                       return <Box key={point.date} sx={{ textAlign: "center", px: 0.75 }}>
                         <Box sx={{ mx: "auto", width: 42, height: 42, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: "background.paper", border: "4px solid", borderColor: index === timelinePoints.length - 1 ? "#0891b2" : "#2563eb", boxShadow: "0 4px 14px rgba(37,99,235,.2)", position: "relative", zIndex: 1 }}>
                           <Box sx={{ width: 12, height: 12, borderRadius: "50%", bgcolor: index === timelinePoints.length - 1 ? "#0891b2" : "#2563eb" }} />
                         </Box>
                         <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1.2 }}>{point.label}</Typography>
-                        <Typography variant="h6" fontWeight={800} color="primary.dark">{point.global === null ? "—" : `${point.global.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
+                        <Typography variant="h6" fontWeight={800} color={point.value === null ? "text.disabled" : timelineSubscription ? "#0e7490" : "primary.dark"}>{point.value === null ? "—" : `${point.value.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
                         <Typography variant="caption" display="block" color={delta === null ? "text.secondary" : delta >= 0 ? "success.main" : "error.main"} fontWeight={700}>
                           {index === 0 ? "primeiro snapshot" : delta === null ? "sem comparação" : `${delta >= 0 ? "↑" : "↓"} ${Math.abs(delta).toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}
                         </Typography>
-                        {timelineSubscription && point.selected !== null && <Chip size="small" label={`${point.selected.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`} sx={{ mt: 1, bgcolor: "#cffafe", color: "#155e75", fontWeight: 700 }} />}
+                        {timelineSubscription && point.value !== null && point.global !== null && <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.4 }}>global {point.global.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%</Typography>}
                       </Box>;
                     })}
                   </Box>
                 </Box>
               </Box>
-              {timelineSubscriptionName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}><Box component="span" sx={{ color: "#0891b2", fontWeight: 800 }}>●</Box> {timelineSubscriptionName} · valores por snapshot</Typography>}
+              {timelineSubscriptionName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}><Box component="span" sx={{ color: "#0891b2", fontWeight: 800 }}>●</Box> {timelineSubscriptionName} · todos os indicadores e marcos mostram esta subscription; aderência global aparece abaixo de cada marco.</Typography>}
               {timeline?.missing_inventory_dates.length ? <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
                 Sem inventário nos dias {timeline.missing_inventory_dates.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR")).join(", ")}; o histórico mostra apenas medições disponíveis.
               </Alert> : null}
