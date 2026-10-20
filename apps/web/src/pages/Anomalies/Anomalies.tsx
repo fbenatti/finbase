@@ -81,6 +81,13 @@ const money = (value: number | null | undefined, currency = "BRL") =>
 const dt = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString("pt-BR") : "—";
 
+const daysBetween = (start: string | null | undefined, end: string | null | undefined) => {
+  if (!start) return "—";
+  const from = new Date(`${start.slice(0, 10)}T00:00:00Z`).getTime();
+  const to = end ? new Date(`${end.slice(0, 10)}T00:00:00Z`).getTime() : Date.now();
+  return `${Math.max(1, Math.floor((to - from) / 86_400_000) + 1)} dia(s)`;
+};
+
 function StepPanel({ kase }: { kase: AnomalyCase }) {
   const steps = (kase.steps ?? []).filter((step) => "etapa" in step);
   const next = (kase.steps ?? []).find((step) => "proxima_acao" in step);
@@ -556,6 +563,7 @@ export default function Anomalies() {
                   else if (item.label === "Sem responsável") openCasesFilter("unassigned");
                   else if (item.label === "Famílias reincidentes") openCasesFilter("recurrence");
                   else if (item.label === "Classificados") openCasesFilter("confirmed");
+                  else setCasesView("");
                 }}
               >
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
@@ -759,7 +767,12 @@ export default function Anomalies() {
             <TableHead>
               <TableRow>
                 <TableCell>#</TableCell>
+                <TableCell>Período</TableCell>
                 <TableCell>Situação</TableCell>
+                <TableCell>Duração</TableCell>
+                <TableCell>Custo da anomalia</TableCell>
+                <TableCell>Saving / mês</TableCell>
+                <TableCell>Saving / ano</TableCell>
                 <TableCell>Causa</TableCell>
                 <TableCell>Decisão</TableCell>
                 <TableCell>Aprendizado</TableCell>
@@ -770,13 +783,21 @@ export default function Anomalies() {
               {retrospectiveCases.map((item) => (
                 <TableRow key={item.id}>
                   <TableCell>#{item.id}</TableCell>
+                  <TableCell>{item.episode_start ?? item.event_date} → {item.episode_end ?? "em andamento"}</TableCell>
                   <TableCell>{item.deviation_status === "AUTOCORRIGIDO" ? "Voltou ao normal" : item.deviation_status === "CORRIGIDO_COM_ACAO" ? "Corrigido com ação" : STATE_LABEL[item.state] ?? item.state}</TableCell>
+                  <TableCell>{daysBetween(item.episode_start, item.episode_end)}</TableCell>
+                  <TableCell>{money(item.impact_to_date ?? item.anomalous_cost_cloud, currency)}</TableCell>
+                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO" ? money(item.projected_month_impact, currency) : "—"}</TableCell>
+                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO" ? money((item.projected_month_impact ?? 0) * 12, currency) : "—"}</TableCell>
                   <TableCell>{item.cause_category ? CAUSE_LABEL[item.cause_category] ?? item.cause_category : "—"}</TableCell>
                   <TableCell>{item.decision ? DECISION_LABEL[item.decision] ?? item.decision : "—"}</TableCell>
                   <TableCell>{item.learning ?? "—"}</TableCell>
                   <TableCell>{item.preventive_measure ?? item.no_preventive_measure_reason ?? "—"}</TableCell>
                 </TableRow>
               ))}
+              {retrospectiveCases.length === 0 && <TableRow><TableCell colSpan={11}>
+                <Typography variant="body2" color="text.secondary">Nenhuma anomalia corrigida ou autocorrigida encontrada no histórico carregado.</Typography>
+              </TableCell></TableRow>}
             </TableBody>
           </Table>
         </Paper>
