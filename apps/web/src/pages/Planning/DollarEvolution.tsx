@@ -84,13 +84,13 @@ export default function DollarEvolution() {
       </Grid>
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} mb={2}>Taxa mensal BRL/USD</Typography>
-        <Stack spacing={1}>{rows.slice(-18).map(row => <Stack key={row.period} direction="row" alignItems="center" gap={1.5}>
+        <Stack spacing={1}>{rows.slice(-18).reverse().map(row => <Stack key={row.period} direction="row" alignItems="center" gap={1.5}>
           <Typography variant="caption" sx={{ width: 92, flexShrink: 0 }}>{monthName(row.period)}</Typography>
           <Box sx={{ height: 18, width: `${Math.max(2, (row.rate - minRate) / span * 100)}%`, bgcolor: "primary.main", borderRadius: 1 }} />
           <Typography variant="caption" sx={{ whiteSpace: "nowrap", fontWeight: 650 }}>{rateLabel(row.rate)}</Typography>
         </Stack>)}</Stack>
       </Paper>
-      <Paper variant="outlined" sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Mês</TableCell><TableCell align="right">Dólar (BRL/USD)</TableCell><TableCell align="right">Variação mensal</TableCell></TableRow></TableHead><TableBody>{rows.map(row => <TableRow key={row.period} hover><TableCell>{monthName(row.period)}</TableCell><TableCell align="right">{rateLabel(row.rate)}</TableCell><TableCell align="right">{row.deltaPct === null ? "—" : pct.format(row.deltaPct)}</TableCell></TableRow>)}</TableBody></Table></Paper>
+      <Paper variant="outlined" sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Mês</TableCell><TableCell align="right">Dólar (BRL/USD)</TableCell><TableCell align="right">Variação mensal</TableCell></TableRow></TableHead><TableBody>{[...rows].reverse().map(row => <TableRow key={row.period} hover><TableCell>{monthName(row.period)}</TableCell><TableCell align="right">{rateLabel(row.rate)}</TableCell><TableCell align="right">{row.deltaPct === null ? "—" : pct.format(row.deltaPct)}</TableCell></TableRow>)}</TableBody></Table></Paper>
     </>}
   </Box>;
 }
