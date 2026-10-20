@@ -215,7 +215,10 @@ def _build_series_context(daily: pd.Series, effective_cutoff: date) -> dict[str,
     previous_period = current_period - 1
     current_key = f"{effective_cutoff.year:04d}{effective_cutoff.month:02d}"
     last_closed_month_total = 0.0
-    cursor = previous_period
+    # At month-end the cutoff month itself is fully known. A simulation on
+    # September 2 (D-2) must replicate August purchases, not July purchases.
+    month_closed = effective_cutoff.day == calendar.monthrange(effective_cutoff.year, effective_cutoff.month)[1]
+    cursor = current_period if month_closed else previous_period
     min_period = monthly.index.min() if len(monthly) else cursor
     while cursor >= min_period:
         total = float(monthly.get(cursor, 0.0))
@@ -1597,11 +1600,13 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         if history.empty:
             continue
         series_last_date = history.index.max().date()
-        series_cutoff = (
-            cloud_effective_cutoff
-            if component == "MAX_PREVIOUS_MONTH_SOURCE"
-            else min(cloud_effective_cutoff, series_last_date)
-        )
+        # A missing dimension tuple does not mean collection stopped for the
+        # entire origin. In particular, zero-valued synthetic Returns are not
+        # emitted by the clone engine, while the matching Usage keeps its zero
+        # rows. Give both sides the same observed calendar, including absent
+        # days, so a stale negative average cannot outlive its positive side.
+        # Keep series_last_date separately for source-validity/ended checks.
+        series_cutoff = cloud_effective_cutoff
         history = history[history.index.date <= series_cutoff]
         if history.empty:
             continue
@@ -1742,8 +1747,8 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             # daily run-rate for the open month (one purchase day × 30).
             method, baseline = "ENDED_SERIES", 0.0
         methods[method] = methods.get(method, 0) + 1
-        # Each series projects from its own last collected date, not the global
-        # Gold max date (which may belong to another cloud/month).
+        # Anchor at this origin's collection boundary, not the last occurrence
+        # of a dimension tuple or a later date collected by another origin.
         series_anchor = series_cutoff
         anchor_period = pd.Timestamp(series_anchor).to_period("M")
         last_day = calendar.monthrange(series_anchor.year, series_anchor.month)[1]
