@@ -996,7 +996,7 @@ async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession
       SELECT {', '.join(selected)},
         SUM(forecast_value) AS forecast_value, SUM(actual_value) AS actual_value,
         SUM(actual_value) - SUM(forecast_value) AS variance,
-        CASE WHEN SUM(forecast_value) = 0 THEN NULL ELSE (SUM(actual_value) - SUM(forecast_value)) / SUM(forecast_value) END AS variance_pct,
+        CASE WHEN SUM(forecast_value) = 0 THEN NULL ELSE (SUM(actual_value) - SUM(forecast_value)) / ABS(SUM(forecast_value)) END AS variance_pct,
         CASE WHEN MAX(\"forecast_month\") < date_format(current_date, '%Y%m') THEN TRUE ELSE FALSE END AS closed_period
       FROM combined{where}{group}{(f' ORDER BY {_qi(body.sort_field)} {body.sort_direction.upper()}' if body.sort_field in axes else (f' ORDER BY {_qi(body.sort_field)} {body.sort_direction.upper()}' if body.sort_field in {"forecast_value", "actual_value", "variance", "variance_pct"} else order))} OFFSET {body.offset} LIMIT {body.row_limit}
     """
@@ -1035,10 +1035,12 @@ def _accuracy_metrics(forecast_value: float | None, actual_value: float | None) 
     forecast_value = float(forecast_value or 0)
     actual_value = float(actual_value or 0)
     variance = actual_value - forecast_value
-    variance_pct = (variance / forecast_value) if forecast_value else None
-    wape = (abs(variance) / actual_value) if actual_value else None
+    # Credit/RI-return projects legitimately have negative bases. Magnitudes
+    # keep the delta direction consistent and error/accuracy well-defined.
+    variance_pct = (variance / abs(forecast_value)) if forecast_value else None
+    wape = (abs(variance) / abs(actual_value)) if actual_value else None
     accuracy = (1.0 - wape) if wape is not None else None
-    bias = ((forecast_value - actual_value) / actual_value) if actual_value else None
+    bias = ((forecast_value - actual_value) / abs(actual_value)) if actual_value else None
     return {
         "forecast_value": forecast_value,
         "actual_value": actual_value,
