@@ -131,3 +131,86 @@ reconcilia com a nova execução, mantendo a anterior consultável.
 Nenhum código de aplicação, regra, snapshot, dado financeiro ou configuração
 de produção foi alterado. Este documento registra o diagnóstico e a proposta
 para a etapa de implementação posterior ao mapeamento solicitado.
+
+## Revisão de RIs e implementação autorizada
+
+Após a solicitação de aplicar a correção, a revisão de outubro identificou um
+segundo caso: o projeto **Compra RIs - Retorno** concentra Returns sintéticos
+cujos Usages estão classificados em projetos consumidores diferentes. O vínculo
+por clone_source_record_id, source_connection_id e billing period confirmou,
+entre outros, TRR Plataforma Kubernetes, SIG, Vivo Ads, Aura Canais e Terra Brasil.
+Isso é diferente do FABRIC, onde os dois lados estão no mesmo projeto.
+
+Portanto, um valor negativo em Compra RIs - Retorno pode estar correto. Comprar
+uma RI e reconhecer o uso coberto por ela também são componentes distintos:
+Purchase continua sendo custo; Usage reprecificado e Return sintético formam
+a compensação. Não há motivo para forçar o delta mensal de Purchase a zero.
+
+Apenas corrigir o calendário não bastava para o retorno centralizado: uma média
+escolhida para o total não é necessariamente a soma das médias escolhidas pelo
+AUTO_BACKTEST para cada projeto. Na execução intermediária 511, a família
+Virtual Machines Dv3 Series tinha R$ 13.156,16 de Usage projetado contra
+R$ -14.194,50 de Return: diferença indevida de R$ -1.038,34. No realizado de
+setembro, os pares de reserva se anulavam, inclusive nesta família.
+
+### Alterações efetivas
+
+- As séries usam o início e o fim da janela observada da mesma origem, com
+  zeros nos dias sem ocorrência da dimensão. A data da última ocorrência
+  continua separada para regras de validade e término.
+- A referência de compra mensal, quando o corte é o último dia do mês, passa
+  a ser esse mês recém-fechado. O corte de setembro usa agosto, não julho.
+- O modelo de lançamentos mensais esparsos trata sinais positivos e negativos
+  de forma simétrica.
+- As projeções sintéticas de Return são derivadas dos forecasts de seus
+  registros Usage de origem. Os vínculos são agrupados pelas dimensões do uso
+  e do retorno, respeitando os projetos diferentes e as participações históricas
+  de compensação, inclusive quando apenas parte de um uso tem clone.
+- A origem e o destino do vínculo usam conexão e billing period além do ID
+  do registro. A consulta é limitada ao histórico disponível no cutoff; não usa
+  realizado do mês-alvo. Séries sintéticas e créditos reais são separadas por
+  is_synthetic, que também é preservado no snapshot de auditoria.
+- Regras e ajustes configurados continuam sendo aplicados após a derivação.
+  Os valores financeiros continuam podendo ser negativos.
+- Percentual de desvio usa delta / abs(projetado); WAPE usa
+  abs(delta) / abs(realizado); bias também usa a magnitude do realizado. Isso
+  mantém o sentido do delta e evita erro negativo/acurácia acima de 100% só
+  porque a base financeira é um crédito. Bases zero continuam indefinidas.
+  A comparação dinâmica de histórico segue a mesma convenção percentual.
+
+### Validação
+
+59 testes de forecast passaram. A cobertura adicionada verifica FABRIC,
+reservas contínuas, lançamentos esparsos, início de reserva no fim do mês,
+origens atrasadas, mês fechado, compras mensais, futuro excluído do cutoff,
+retorno centralizado, compensação parcial, crédito real e métricas negativas.
+
+No ensaio completo de outubro, com leitura dos dados de produção e publicação
+desabilitada, 948 séries mensais de offsets receberam o método
+LINKED_SOURCE_USAGE. A soma dos resíduos absolutos de Usage+Return reservado,
+por origem e família de serviço, foi R$ 0,00000000061: zero na precisão monetária.
+O projeto Compra RIs - Retorno continuou negativo, conforme sua classificação,
+com R$ -14.437,92 projetados. O ensaio confirmou que preservar a compensação
+não exige mover os lançamentos entre projetos.
+
+Na execução intermediária corrigida 510, o endpoint usado pelo dashboard
+reconciliou setembro do FABRIC em R$ 458.178,27 projetados e R$ 460.732,32
+realizados, delta de R$ 2.554,04 (+0,5574%) e acurácia de 99,4457%.
+O valor é diferente do contrafactual inicial porque o recálculo usa agosto
+como referência da compra e a configuração/histórico atuais. Não é uma edição
+da previsão publicada originalmente no snapshot 437.
+
+### Publicação e auditoria
+
+Código publicado na VM em commits 4b7949fb, c28022a3, 4051b764 e 57e2398d,
+preservando alterações de produção que não pertencem a esta correção.
+Os commits locais correspondentes estão registrados a partir de f7d044ba,
+incluindo 1d9b032c, 4ab7c44a, 027b79f5 e 1f79a3f4.
+API, scheduler e worker foram atualizados; os serviços foram reiniciados com
+a fila ociosa. Alterações locais de outras frentes não foram incluídas.
+
+Os snapshots originais são preservados. A tarefa final de reprocessamento é
+9123, para setembro e outubro de 2026, com a versão completa que vincula Returns
+aos usos. Os meses anteriores não são reescritos automaticamente. Estas são
+novas simulações com cutoff histórico, não uma alegação de que a previsão
+original foi produzida com este algoritmo ou com o histórico reprocessado atual.
