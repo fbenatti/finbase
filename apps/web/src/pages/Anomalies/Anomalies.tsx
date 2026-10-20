@@ -126,7 +126,7 @@ function StepPanel({ kase }: { kase: AnomalyCase }) {
           <strong>Próxima ação:</strong> {next ? String(next.proxima_acao) : "—"}
         </Typography>
         <Typography variant="body2">
-          <strong>Responsável:</strong> {kase.assignee_user_id ? `usuário ${kase.assignee_user_id}` : "fila FinOps"}
+          <strong>Responsável:</strong> {kase.assignee_user_id ? `usuário ${kase.assignee_user_id}` : "Não atribuído"}
         </Typography>
         <Typography variant="body2">
           <strong>Confiança:</strong> {kase.confidence}
