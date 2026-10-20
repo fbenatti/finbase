@@ -79,7 +79,7 @@ def _config_from_row(row: Any) -> dict[str, Any]:
         "investigate_score": row.investigate_score,
         "materiality_by_currency": row.materiality_by_currency,
         "materiality_monthly": getattr(row, "materiality_monthly", None),
-        "history_days": max(1, int(row.history_days or 90)),
+        "history_days": min(90, max(1, int(row.history_days or 90))),
         "calibration_days": row.calibration_days,
         "data_lag_days": row.data_lag_days,
         "source_namespace": row.source_namespace,
