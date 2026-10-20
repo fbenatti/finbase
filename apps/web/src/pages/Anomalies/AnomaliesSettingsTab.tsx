@@ -151,7 +151,7 @@ export default function AnomaliesSettingsTab({ config, onSaved, busy, setBusy }:
           setError(null);
           try {
             const daily = Number(dailyMateriality);
-            const monthly = monthlyMateriality.trim() ? Number(monthlyMateriality) : null;
+            const monthly = monthlyMateriality.trim() ? Number(monthlyMateriality) : daily * 6;
             await updateAnomalyConfig(config.id, {
               data_lag_days: Number(lag), history_days: Number(historyDays),
               min_relative_deviation: Number(minimumDeviation), investigate_score: Number(investigateScore),
