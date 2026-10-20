@@ -1,4 +1,19 @@
 from app.services.azure_price_fallback import load_azure_price_fallbacks, load_azure_observed_prices
+from app.services.azure_price_fallback import load_azure_observed_exchange_rates
+
+
+def test_exchange_rate_fallback_excludes_prior_invoice_dates_and_ambiguous_accounts():
+    def execute(sql, **kwargs):
+        assert "exchangeratedate" in sql
+        assert "'%Y%m') = '202608'" in sql
+        assert "lower(trim(chargetype)) = 'usage'" in sql
+        return [
+            dict(billingaccountid="one", pricingcurrency="USD", billingcurrency="BRL", rate=5.13, rate_count=1),
+            dict(billingaccountid="two", pricingcurrency="USD", billingcurrency="BRL", rate=5.20, rate_count=2),
+        ]
+    assert load_azure_observed_exchange_rates(execute, connection_code="azure-ti", billing_period="202608", blob_paths=["month.csv"]) == {
+        ("azure-ti", "one", "usd", "brl"): 5.13,
+    }
 
 
 def test_observed_prices_are_scoped_to_selected_month_and_blobs():

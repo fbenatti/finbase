@@ -27,6 +27,11 @@ def load_azure_observed_exchange_rates(
           FROM iceberg.bronze.raw_{connection_code.replace('-', '_')}
          WHERE _billing_period = {lit(billing_period)}
            AND _blob_path IN ({','.join(lit(path) for path in sorted(set(blob_paths)))})
+           AND lower(trim(chargetype)) = 'usage'
+           AND date_format(COALESCE(
+               TRY_CAST(substr(CAST(exchangeratedate AS VARCHAR), 1, 10) AS DATE),
+               CAST(TRY(date_parse(substr(CAST(exchangeratedate AS VARCHAR), 1, 10), '%m/%d/%Y')) AS DATE)
+           ), '%Y%m') = {lit(billing_period)}
            AND TRY_CAST(exchangeratepricingtobilling AS DOUBLE) > 0
            AND is_finite(TRY_CAST(exchangeratepricingtobilling AS DOUBLE))
          GROUP BY 1, 2, 3
