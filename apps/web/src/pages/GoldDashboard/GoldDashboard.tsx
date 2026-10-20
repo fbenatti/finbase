@@ -2294,7 +2294,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
             onApplyContext={applyTreeContext}
             shareCaption="participação no contexto global"
           />
-          <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 1 }}>“Outros” agrupa os filhos restantes além do top 7 (não clicável). “Aplicar contexto” transforma a trilha em filtros globais do cockpit.</Typography>
+          <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 1 }}>“Outros” abre a lista dos demais filhos; cada item pode ser selecionado para continuar a decomposição. “Aplicar contexto” transforma a trilha em filtros globais do cockpit.</Typography>
         </SectionPanel>
 
         </>
