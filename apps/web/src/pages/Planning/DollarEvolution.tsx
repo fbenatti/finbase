@@ -26,7 +26,7 @@ export default function DollarEvolution() {
       rows: ["billing_month"],
       measures: ["consumo_usd", "realizado_brl", "taxa_brl_usd"].map(column => ({ column, aggregation: "SUM" as const })),
       row_limit: 120,
-      sort_column: "_billing_period",
+      sort_column: "billing_month",
       sort_direction: "asc",
     }).then(result => {
       if (!alive) return;
@@ -50,7 +50,13 @@ export default function DollarEvolution() {
         };
       }));
       setError("");
-    }).catch(() => { if (alive) setError("Não foi possível consultar o cubo Gold de custos. Confirme se dest_dm_cost_visao_completa está materializado."); })
+    }).catch((cause: unknown) => {
+      if (!alive) return;
+      const status = (cause as { response?: { status?: number } })?.response?.status;
+      setError(status === 404
+        ? `O cubo ${TABLE} ainda não foi materializado. Reprocesse os cubos Gold em Governança → Geração de Cubos.`
+        : `Não foi possível consultar o cubo ${TABLE}${status ? ` (HTTP ${status})` : ""}. Verifique a disponibilidade da API Gold e do Trino.`);
+    })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, []);
