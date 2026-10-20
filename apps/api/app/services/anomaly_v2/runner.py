@@ -280,7 +280,7 @@ async def _execute_detection_v2(
                 valid_days=valid_days.get(cloud, set()),
                 settings=engine_settings,
             )
-            conf = "HIGH" if int(profile.get("history_days") or 0) >= 28 else "LOW"
+            conf = "HIGH" if int(profile.get("history_days") or 0) >= int(engine_settings["high_confidence_history_days"]) else "LOW"
             for sig in raw:
                 event_day = str(sig["day"])[:10]
                 if event_day not in quality_by_day:
