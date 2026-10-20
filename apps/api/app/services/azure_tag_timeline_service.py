@@ -351,7 +351,10 @@ class AzureTagTimelineService:
         }
 
     async def timeline(self, connection_id: int, since: date) -> dict[str, Any]:
-        await self._connection(connection_id)
+        connection = await self._connection(connection_id)
+        # Bronze is the durable daily source; import any newly ingested inventory
+        # before serving history so the timeline follows the existing collector.
+        await self._snapshot_inventory(connection, since)
         start_at = datetime.combine(since, time.min, tzinfo=timezone.utc)
         rows = (await self.db.execute(
             select(AzureTagPolicySnapshot).where(
