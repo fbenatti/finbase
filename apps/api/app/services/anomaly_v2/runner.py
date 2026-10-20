@@ -20,6 +20,7 @@ from app.services.anomaly_v2.readiness import max_day_by_cloud, readiness_finger
 from app.services.anomaly_v2.scoring import score_signal
 from app.services.anomaly_v2.schema import SIGNAL_COLUMNS, SIGNAL_TABLE, SILVER_NS, ddl_statements
 from app.services.anomaly_v2.scope import display_scope
+from app.services.anomaly_v2.settings import detector_settings
 from app.services.anomaly_v2.query_control import execute as trino_execute
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def _config_from_row(row: Any) -> dict[str, Any]:
         "investigate_score": row.investigate_score,
         "materiality_by_currency": row.materiality_by_currency,
         "materiality_monthly": getattr(row, "materiality_monthly", None),
-        "history_days": min(90, max(1, int(row.history_days or 90))),
+        "history_days": max(1, int(row.history_days or 90)),
         "calibration_days": row.calibration_days,
         "data_lag_days": row.data_lag_days,
         "source_namespace": row.source_namespace,
@@ -89,6 +90,7 @@ def _config_from_row(row: Any) -> dict[str, Any]:
         "type_column": row.type_column,
         "measure_column": row.measure_column,
         "severity_tiers": getattr(row, "severity_tiers", None),
+        "detector_settings": detector_settings(getattr(row, "detector_settings", None)),
     }
 
 
