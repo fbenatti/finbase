@@ -26,7 +26,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 git push origin "refs/heads/$branch:refs/heads/$branch"
-target="$(git rev-parse "$branch")"
+target="$(git rev-parse "refs/heads/$branch")"
 short_target="$(git rev-parse --short=8 "$target")"
 remote_bundle="$bundle_dir/openfinops-prod-release-$short_target.bundle"
 local_bundle="${TMPDIR:-/tmp}/openfinops-prod-release-$short_target-$$.bundle"
@@ -49,7 +49,7 @@ if ! git merge-base --is-ancestor "$base" "$target"; then
   exit 1
 fi
 
-git bundle create "$local_bundle" "$branch" "^$base"
+git bundle create "$local_bundle" "refs/heads/$branch" "^$base"
 git bundle verify "$local_bundle"
 scp "$local_bundle" "$remote_host:$remote_bundle"
 
