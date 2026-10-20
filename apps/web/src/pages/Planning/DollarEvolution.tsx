@@ -73,8 +73,8 @@ export default function DollarEvolution() {
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio · {periodRange}</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography></CardContent></Card></Grid>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Variação mensal média · {periodRange}</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Variação mensal média</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>
       </Grid>
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} mb={2}>Taxa mensal BRL/USD</Typography>
