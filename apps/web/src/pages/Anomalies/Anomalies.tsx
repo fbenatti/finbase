@@ -184,6 +184,7 @@ export default function Anomalies() {
   const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
   const [series, setSeries] = useState<AnomalySeries | null>(null);
   const caseRequest = useRef(0);
+  const listRequest = useRef(0);
   const [expectedEvents, setExpectedEvents] = useState<ExpectedEventFamiliesResult>({ items: [], total: 0 });
   const [quality, setQuality] = useState<QualityBucket[]>([]);
   const [qualityNote, setQualityNote] = useState<string | null>(null);
@@ -253,6 +254,7 @@ export default function Anomalies() {
   }, []);
 
   const loadCases = useCallback(async () => {
+    const request = ++listRequest.current;
     setBusy(true);
     try {
       const params: Record<string, unknown> = { limit: 50, order_by: "score" };
@@ -272,12 +274,16 @@ export default function Anomalies() {
       if (stateFilter === "__recurrence__") params.recurrence_only = true;
       if (["__confirmed__", "__recurrence__"].includes(stateFilter)) delete params.state;
       const page = await listAnomalyCases(params);
-      setCases(page.items);
+      if (request !== listRequest.current) return;
+      const visibleItems = stateFilter === "__open__"
+        ? page.items.filter((item) => item.state !== "CLOSED")
+        : page.items;
+      setCases(visibleItems);
       setTotal(page.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao listar casos");
+      if (request === listRequest.current) setError(err instanceof Error ? err.message : "Falha ao listar casos");
     } finally {
-      setBusy(false);
+      if (request === listRequest.current) setBusy(false);
     }
   }, [stateFilter, severityFilter, queueOnly]);
 
