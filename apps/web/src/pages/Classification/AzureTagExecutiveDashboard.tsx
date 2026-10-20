@@ -342,9 +342,6 @@ export default function AzureTagExecutiveDashboard() {
                 </Box>
               </Box>
               {timelineSubscriptionName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}><Box component="span" sx={{ color: "#0891b2", fontWeight: 800 }}>●</Box> {timelineSubscriptionName} · todos os indicadores e marcos mostram esta subscription; aderência global aparece abaixo de cada marco.</Typography>}
-              {timeline?.missing_inventory_dates.length ? <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
-                Sem inventário nos dias {timeline.missing_inventory_dates.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR")).join(", ")}; o histórico mostra apenas medições disponíveis.
-              </Alert> : null}
             </>}
             {timeline && timelinePoints.length === 0 && !timelineLoading && <Alert severity="info">Ainda não existem snapshots de inventário desde 12/10/2026.</Alert>}
             {!timeline && !timelineLoading && <Typography variant="body2" color="text.secondary">Abrindo histórico…</Typography>}
