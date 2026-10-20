@@ -557,7 +557,10 @@ def _gold_filter_clause(schema: dict[str, str], filters: list[GoldQueryFilter]) 
         if operator not in _GOLD_OPERATORS:
             raise HTTPException(status_code=422, detail=f"Operador inválido: {operator}")
         values = [str(v) for v in (item.values or []) if v is not None and str(v).strip() != ""]
-        col_sql = f"lower(CAST({_quote_ident(physical)} AS VARCHAR))"
+        # Gold imports may retain padding around hierarchy labels (for
+        # example, " Fábrica de Agente"). Match user-selected labels after
+        # trimming whitespace while preserving case-insensitive behavior.
+        col_sql = f"lower(TRIM(CAST({_quote_ident(physical)} AS VARCHAR)))"
         if operator == "IN" and values:
             literals = ", ".join(_quote_literal(v.lower()) for v in values)
             clauses.append(f"({col_sql} IN ({literals}))")
