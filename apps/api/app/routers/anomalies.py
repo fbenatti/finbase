@@ -1078,7 +1078,7 @@ async def impact_summary(
         status = getattr(case, "deviation_status", None) or case.state
         by_status[str(status)] = by_status.get(str(status), 0) + 1
         incurred += float(getattr(case, "impact_to_date", None) or case.anomalous_cost_cloud or 0)
-        settings = settings_by_id.get(case.anomaly_config_id, detector_settings())
+        settings = settings_by_id.get(case.anomaly_config_id, detector_settings(None))
         monthly = float(getattr(case, "projected_month_impact", 0) or 0)
         annual = monthly / float(settings["projection_days_month"]) * float(settings["projection_days_year"])
         if str(getattr(case, "deviation_status", "")) in ("AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"):
