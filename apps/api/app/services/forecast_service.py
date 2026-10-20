@@ -1631,10 +1631,12 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         # dias quando o grid termina no dia da cobrança. Documentado no
         # FORECAST.md como baseline MONTHLY_LUMP.
         lump_daily_rate: float | None = None
-        nonzero_days = int((daily > 0).sum())
+        nonzero_days = int((daily != 0).sum())
         if nonzero_days <= 3 and len(daily) > 0:
             monthly_lump = daily.groupby(daily.index.to_period("M")).sum()
-            charged_months = monthly_lump[monthly_lump > 0]
+            # A sparse synthetic credit must use the same monthly model as
+            # its positive reservation Usage, retaining the opposite sign.
+            charged_months = monthly_lump[monthly_lump != 0]
             if len(charged_months) >= 1:
                 last_period = charged_months.index[-1]
                 last_total = float(charged_months.iloc[-1])

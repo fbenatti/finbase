@@ -98,6 +98,16 @@ async def test_continuous_reservation_usage_and_returns_remain_balanced(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_sparse_monthly_reservation_usage_and_returns_use_symmetric_models(monkeypatch):
+    records = [record(day, category, sign * value)
+               for day, value in [("2026-07-01", 400), ("2026-08-01", 500)]
+               for category, sign in [("Usage", 1), ("Return", -1)]]
+    output = await simulate(monkeypatch, records)
+    assert set(output.selected_method) == {"MONTHLY_LUMP"}
+    assert output.groupby("forecast_month").forecast_value.sum().abs().max() < 1e-8
+
+
+@pytest.mark.asyncio
 async def test_origin_cutoff_is_kept_when_other_cloud_is_more_current(monkeypatch):
     records = [record(day, "Usage", 10, cloud="lagged")
                for day in pd.date_range("2026-08-01", "2026-08-12")]
