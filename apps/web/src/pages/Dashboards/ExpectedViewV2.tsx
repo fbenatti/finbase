@@ -365,7 +365,7 @@ export default function ExpectedViewV2({
     (sum, row) => sum + forecastManualOf(row),
     0,
   );
-  const forecastOnly = forecast - actual;
+  const forecastOnly = forecast - actual - forecastManual;
   const realizedBudgetPct = budgetAvailable && budget > 0 ? `${(actual / budget * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : "Sem orçamento";
   const actualEnd = filteredRows.reduce(
     (last, row, index) => (row.actual_value == null ? last : index),

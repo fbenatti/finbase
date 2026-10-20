@@ -374,7 +374,7 @@ export default function ExpectedView({
     (sum, row) => sum + forecastManualOf(row),
     0,
   );
-  const forecastOnly = forecast - actual;
+  const forecastOnly = forecast - actual - forecastManual;
   const actualEnd = filteredRows.reduce(
     (last, row, index) => (row.actual_value == null ? last : index),
     -1,
