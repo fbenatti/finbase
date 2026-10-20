@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Box, Paper, Typography, Stack, Alert, Button, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, CircularProgress,
+  TableContainer, TableHead, TableRow, CircularProgress, Tab, Tabs,
 } from "@mui/material";
 import { FileDownload } from "@mui/icons-material";
 import * as XLSX from "xlsx";
@@ -89,6 +89,7 @@ function LoadingBlock({ loading, children }: { loading: boolean; children: React
 
 // ── Visão Contábil: pares Realizado X → Provisão X+1 (Forecast Accuracy) ──
 export default function VisaoContabil({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
+  const [view, setView] = useState<"visao" | "pedidos-sap">("visao");
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [months, setMonths] = useState<ForecastAccuracyMonth[]>([]);
   const [monthsLoading, setMonthsLoading] = useState(true);
@@ -191,6 +192,26 @@ export default function VisaoContabil({ table, filters, filterKey }: { table: st
 
   return (
     <Box>
+      <Tabs value={view} onChange={(_, value: "visao" | "pedidos-sap") => setView(value)} aria-label="Visões contábeis" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
+        <Tab value="visao" label="Visão Contábil" />
+        <Tab value="pedidos-sap" label="Pedidos SAP" />
+      </Tabs>
+      {view === "pedidos-sap" ? (
+        <SectionPanel title="Pedido SAP — Realizado × Provisão" subtitle="Selecione um par de meses na subaba Visão Contábil para gerar a planilha detalhada por cloud e centro de custo.">
+          {selectedPair && det.clouds.length ? (
+            <Stack spacing={1.5}>
+              <Typography variant="body2" color="text.secondary">Par selecionado: Realizado {monthLabel(selectedPair[0])} → Provisão {monthLabel(selectedPair[1])}</Typography>
+              {det.clouds.map(cloud => <Paper key={cloud.cloud} variant="outlined" sx={{ p: 1.5 }}>
+                <Typography variant="subtitle2" fontWeight={900} mb={1}>{cloud.cloud}</Typography>
+                <TableContainer><Table size="small"><TableHead><TableRow>{["Centro de Custo", "Realizado", "Provisão", "Δ (Provisão − Realizado)"].map(label => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>
+                  <TableBody>{cloud.rows.map(row => <TableRow key={row.cc}><TableCell>{row.cc}</TableCell><TableCell>{money(row.real)}</TableCell><TableCell>{money(row.prov)}</TableCell><TableCell>{compact(row.prov - row.real)}</TableCell></TableRow>)}</TableBody>
+                </Table></TableContainer>
+              </Paper>)}
+              <Box><Button variant="contained" startIcon={<FileDownload />} onClick={exportPedidoSap}>Exportar Pedido SAP (.xlsx)</Button></Box>
+            </Stack>
+          ) : <Alert severity="info">Ainda não há um par carregado. Acesse a subaba Visão Contábil e selecione um par Realizado → Provisão; o pedido SAP será preparado aqui.</Alert>}
+        </SectionPanel>
+      ) : <>
       <SectionPanel title="Visão Contábil — Mês Realizado × Provisão"
         subtitle="Pares sequenciais do forecast accuracy (snapshot imutável): Realizado do mês X → Provisão do mês seguinte. Clique em um par para abrir o detalhe por cloud e centro de custo.">
         <LoadingBlock loading={monthsLoading}>
@@ -289,6 +310,7 @@ export default function VisaoContabil({ table, filters, filterKey }: { table: st
           </LoadingBlock>
         </SectionPanel>
       )}
+      </>}
     </Box>
   );
 }
