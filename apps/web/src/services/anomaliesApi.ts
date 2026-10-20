@@ -59,9 +59,8 @@ export type AnomalyCase = {
   upper_cloud: number | null;
   delta_cloud: number | null;
   anomalous_cost_cloud: number;
-  confirmed_anomalous_cost_cloud?: number;
-  event_period_start?: string | null;
-  event_period_end?: string | null;
+  episode_start?: string | null;
+  episode_end?: string | null;
   evaluation_grain: string;
   current_reference_id: string | null;
   current_assessment_id: string | null;
@@ -145,6 +144,9 @@ export type CaseSummary = {
   closed: number;
   unassigned: number;
   anomalous_cost_cloud: number;
+  confirmed_anomalous_cost_cloud?: number;
+  event_period_start?: string | null;
+  event_period_end?: string | null;
   median_acknowledgement_hours: number | null;
   median_resolution_hours: number | null;
   classified: number;
