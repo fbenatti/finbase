@@ -274,14 +274,22 @@ async def update_config(
         raise HTTPException(404, "Configuração não encontrada")
     before = {"enabled": config.enabled, "version": config.version, "profile": config.profile}
     data = body.model_dump(exclude_unset=True)
-    if "detector_settings" in data and data["detector_settings"] is not None:
+    if "detector_settings" in data or "history_days" in data:
+        current_settings = detector_settings(config.detector_settings)
+        legacy_tiers = dict(config.severity_tiers or {})
+        for legacy_key, setting_key in (("MEDIUM", "severity_medium_min"), ("HIGH", "severity_high_min"), ("CRITICAL", "severity_critical_min")):
+            if legacy_key in legacy_tiers:
+                current_settings[setting_key] = float(legacy_tiers[legacy_key])
+        incoming_settings = data.get("detector_settings") or {}
         try:
-            data["detector_settings"] = validate_detector_settings({
-                **detector_settings(config.detector_settings),
-                **data["detector_settings"],
-            })
+            validated_settings = validate_detector_settings(
+                {**current_settings, **incoming_settings},
+                history_days=int(data.get("history_days", config.history_days)),
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        if "detector_settings" in data:
+            data["detector_settings"] = validated_settings
     if "materiality_by_currency" in data and data["materiality_by_currency"] is not None:
         data["materiality_by_currency"] = {
             str(key).upper(): float(value) for key, value in data["materiality_by_currency"].items()
