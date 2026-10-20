@@ -801,6 +801,8 @@ async def case_summary(session: AsyncSession, *, config_id: int | None = None) -
         "unassigned": unassigned,
         "anomalous_cost_cloud": round(anomalous_total, 2),
         "confirmed_anomalous_cost_cloud": round(confirmed_anomalous_total, 2),
+        "event_period_start": min((case.event_date for case in rows), default=None),
+        "event_period_end": max((case.event_date for case in rows), default=None),
         "median_acknowledgement_hours": _median(acknowledgement_hours),
         "median_resolution_hours": _median(resolution_hours),
         "classified": classified,
