@@ -48,7 +48,7 @@ def compute_impact(
     config = detector_settings(settings)
     excesses = [float(p.get("excess") or 0) for p in daily_points]
     incurred = round(sum(excesses), 2)
-    if detector == "SPIKE" and len(excesses) <= 2:
+    if detector == "SPIKE" and len(excesses) <= int(config["one_off_spike_max_days"]):
         run_rate = 0.0
     else:
         tail = excesses[-min(int(config["impact_run_rate_lookback_days"]), len(excesses)) :] if excesses else [0.0]
