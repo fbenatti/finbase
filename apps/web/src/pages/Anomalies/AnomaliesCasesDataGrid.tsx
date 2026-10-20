@@ -22,6 +22,17 @@ const CLOUD_LABEL: Record<string, string> = {
   atlas: "MongoDB Atlas",
 };
 
+const STATE_LABEL: Record<string, string> = {
+  NEW: "Novo",
+  ASSIGNED: "Atribuído",
+  INVESTIGATING: "Em investigação",
+  DECIDED: "Decidido",
+  IN_REMEDIATION: "Em remediação",
+  VERIFYING: "Em verificação",
+  RETROSPECTIVE: "Retrospectiva",
+  CLOSED: "Encerrado",
+};
+
 type Props = {
   cases: AnomalyCase[];
   currency: string;
@@ -57,7 +68,12 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
         return <Chip size="small" color={SEVERITY_COLOR[severity.toUpperCase()] ?? "default"} label={severity} />;
       },
     },
-    { field: "state", headerName: "Estado", width: 120 },
+    {
+      field: "state",
+      headerName: "Estado",
+      width: 150,
+      valueFormatter: (value) => STATE_LABEL[String(value)] ?? String(value ?? "—"),
+    },
     {
       field: "event_family",
       headerName: "Anomalia",
