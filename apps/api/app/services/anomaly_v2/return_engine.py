@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_v2.baseline import expected_for_day
+from app.services.anomaly_v2.settings import detector_settings
 
 DEVIATION_ACTIVE = "EM_DESVIO"
 DEVIATION_AUTO_FIXED = "AUTOCORRIGIDO"
@@ -26,9 +27,12 @@ def evaluate_return(
     as_of: date,
     treated: bool,
     valid_days: set[str] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Verifica se o escopo voltou ao baseline."""
     scope_daily = [r for r in daily if str(r.get("scope_id")) == scope_id]
+    config = detector_settings(settings)
+    recovery_days = int(config["recovery_confirmation_days"])
     valid_streak = 0
     returned_at: date | None = None
     cursor = episode_start
@@ -39,11 +43,11 @@ def evaluate_return(
             cursor += timedelta(days=1)
             continue
         obs = sum(float(row.get("cost_cloud") or 0) for row in observations)
-        expected, _l, upper, _mad = expected_for_day(scope_daily, target=cursor, reference_day=episode_start)
+        expected, _l, upper, _mad = expected_for_day(scope_daily, target=cursor, reference_day=episode_start, settings=config)
         if obs <= upper:
             valid_streak += 1
-            if valid_streak >= RETURN_VALID_DAYS and returned_at is None:
-                returned_at = cursor - timedelta(days=RETURN_VALID_DAYS - 1)
+            if valid_streak >= recovery_days and returned_at is None:
+                returned_at = cursor - timedelta(days=recovery_days - 1)
         else:
             valid_streak = 0
             # A later relapse invalidates an earlier recovery in this window.
@@ -60,5 +64,5 @@ def evaluate_return(
     return {
         "deviation_status": status,
         "returned_at": returned_at.isoformat(),
-        "relapse_watch_until": (returned_at + timedelta(days=RELAPSE_WATCH_DAYS)).isoformat(),
+        "relapse_watch_until": (returned_at + timedelta(days=int(config["relapse_watch_days"]))).isoformat(),
     }
