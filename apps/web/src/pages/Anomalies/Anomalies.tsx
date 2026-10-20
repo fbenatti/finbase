@@ -657,7 +657,9 @@ export default function Anomalies() {
                   <Typography variant="subtitle2" fontWeight={700}>{item.event_date} · {STATE_LABEL[item.state] ?? item.state}</Typography>
                   <Chip size="small" color={SEVERITY_COLOR[item.severity] ?? "default"} label={item.severity} />
                 </Stack>
-                <Typography variant="body2" sx={{ mt: 0.75, overflowWrap: "anywhere" }}>{item.event_family}</Typography>
+                <Typography variant="body2" sx={{ mt: 0.75, overflowWrap: "anywhere" }}>
+                  {item.series_dimensions?.skuname || item.series_dimensions?.sku_name || item.series_dimensions?.sku || item.series_dimensions?.skumeter || item.series_dimensions?.servicesubcategory || item.series_dimensions?.servicename || "—"}
+                </Typography>
                 <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 1, mt: 1.25 }}>
                   <Box><Typography variant="caption" color="text.secondary">Observado</Typography><Typography variant="body2" fontWeight={650}>{money(item.observed_cloud, currency)}</Typography></Box>
                   <Box><Typography variant="caption" color="text.secondary">Esperado</Typography><Typography variant="body2" fontWeight={650}>{money(item.expected_cloud, currency)}</Typography></Box>
