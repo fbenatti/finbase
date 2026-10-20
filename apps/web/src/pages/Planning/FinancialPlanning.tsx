@@ -17,8 +17,7 @@ const TABS = [
   // { code: "base-line-contratual", label: "Base Line Contratual", title: "Base Line Contratual", help: "Referência financeira contratual por departamento." },
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
   { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
-  { code: "visao-contabil", label: "Visão Contábil", title: "Visão Contábil", help: "Conciliação entre realizado e provisão contábil." },
-  { code: "evolucao-dolar", label: "Evolução do Dólar", title: "Evolução do Dólar", help: "Evolução mensal do dólar e do consumo Azure." },
+  { code: "visao-contabil", label: "Pedidos SAP", title: "Pedidos SAP", help: "Pedidos SAP e evolução do consumo e câmbio." },
 ] as const;
 
 export default function FinancialPlanning() {
@@ -71,9 +70,7 @@ export default function FinancialPlanning() {
         {active.code === "acuracia-orcamento" ? (
           <BudgetAccuracy />
         ) : active.code === "visao-contabil" ? (
-          <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" />
-        ) : active.code === "evolucao-dolar" ? (
-          <DollarEvolution />
+          <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" dollarEvolution={<DollarEvolution />} />
         ) : active.code === "dashboard" ? (
           <>
             <Tabs value={executiveSubtab} onChange={changeExecutiveSubtab} aria-label="Visões do Dashboard Executivo" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>

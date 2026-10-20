@@ -43,6 +43,57 @@ _AI_AUXILIARY_GOLD_CUBES = {
     "copilot_user_period": "dest_dm_copilot_user_period",
 }
 
+
+async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int:
+    """Build monthly Azure BRL/USD totals and effective FX rate from FOCUS Silver."""
+    source = "dest_modelo_focus"
+    schema = await load_gold_schema(source)
+    period = schema.get("_billing_period") or schema.get("billingperiodstart")
+    if not period:
+        raise RuntimeError("Silver FOCUS sem período de faturamento para o cubo de câmbio")
+    cloud = schema.get("cloud_origem")
+    cost_brl = schema.get("costbrl") or schema.get("totalcostondemandbrl") or schema.get("vl_custo_final_brl") or schema.get("realizado")
+    cost_usd = schema.get("costinbillingcurrency") or schema.get("costinusd") or schema.get("billedcost")
+    currency = schema.get("billingcurrency")
+    if not cost_brl or not cost_usd or not currency:
+        raise RuntimeError("Silver FOCUS precisa expor realizado BRL, custo na moeda de faturamento e BillingCurrency")
+    period_text = f"CAST({_quote_ident(period)} AS VARCHAR)"
+    month_expr = (
+        f"CASE WHEN regexp_like({period_text}, '^[0-9]{{6}}') "
+        f"THEN substr({period_text}, 1, 6) "
+        f"ELSE date_format(try_cast({period_text} AS TIMESTAMP), '%Y%m') END"
+    )
+    azure_filter = f" AND lower(CAST({_quote_ident(cloud)} AS VARCHAR)) IN ('azure-ti', 'azure-4p', 'azure')" if cloud else ""
+    sql = f"""
+      SELECT {month_expr} AS billing_month,
+             SUM(CASE WHEN upper(CAST({_quote_ident(currency)} AS VARCHAR)) = 'USD'
+                      THEN COALESCE(TRY_CAST({_quote_ident(cost_usd)} AS DOUBLE), 0) ELSE 0 END) AS consumo_usd,
+             SUM(COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0)) AS realizado_brl,
+             CASE WHEN SUM(CASE WHEN upper(CAST({_quote_ident(currency)} AS VARCHAR)) = 'USD'
+                                THEN COALESCE(TRY_CAST({_quote_ident(cost_usd)} AS DOUBLE), 0) ELSE 0 END) <> 0
+                  THEN SUM(COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0)) /
+                       SUM(CASE WHEN upper(CAST({_quote_ident(currency)} AS VARCHAR)) = 'USD'
+                                THEN COALESCE(TRY_CAST({_quote_ident(cost_usd)} AS DOUBLE), 0) ELSE 0 END)
+                  ELSE NULL END AS taxa_brl_usd
+      FROM iceberg.silver.{source}
+      WHERE upper(CAST({_quote_ident(currency)} AS VARCHAR)) = 'USD'
+        AND COALESCE(TRY_CAST({_quote_ident(cost_usd)} AS DOUBLE), 0) <> 0{azure_filter}
+      GROUP BY 1 ORDER BY 1
+    """
+    rule = session.query(GoldMartRule).filter(GoldMartRule.code == "evolucao-dolar").first()
+    if rule is None:
+        rule = GoldMartRule(code="evolucao-dolar", name="Evolução do Dólar", active=True)
+        session.add(rule)
+    rule.name = "Evolução do Dólar Azure"
+    rule.description = "Cubo mensal de realizado BRL, consumo faturado USD e taxa efetiva BRL/USD para decompor a variação cambial versus consumo."
+    rule.active = True
+    rule.sql_template = sql.strip()
+    rule.dimensions = ["billing_month"]
+    rule.measure_columns = ["consumo_usd", "realizado_brl", "taxa_brl_usd"]
+    rule.materialization_table = "dest_dm_cost_evolucao_dolar"
+    session.flush()
+    return await _materialize_rule(rule, run_id=run_id)
+
 _FOCUS_FIELD_ALIASES = {
     "projectname": "x_Project",
     "project": "x_Project",
@@ -845,6 +896,28 @@ async def materialize_gold_cubes(
             details.append({"rule_id": rule.id, "code": rule.code, "rows": 0, "error": str(exc)})
         if progress:
             progress(index, len(rules), f"{rule.code} - {'publicada' if rule.materialization_status != 'ERROR' else 'com erro'}")
+    dollar_rule = next((rule for rule in rules if normalize_code(rule.code) == "evolucao-dolar"), None)
+    if dollar_rule:
+        rules = [rule for rule in rules if normalize_code(rule.code) != "evolucao-dolar"]
+    should_refresh_dollar_cube = not rule_ids or any(normalize_code(rule.code) == "visao-completa" for rule in rules) or bool(rule_ids and dollar_rule and dollar_rule.id in rule_ids)
+    if should_refresh_dollar_cube:
+        try:
+            cube_rows = await materialize_dollar_evolution_cube(session, run_id=run_id)
+            if dollar_rule:
+                dollar_rule.materialization_table = "dest_dm_cost_evolucao_dolar"
+                dollar_rule.materialization_rows = cube_rows
+                dollar_rule.materialization_status = "UPDATED" if cube_rows else "EMPTY"
+                dollar_rule.materialization_error = None
+                dollar_rule.materialization_run_id = run_id
+                dollar_rule.materialized_at = datetime.now(timezone.utc)
+            details.append({"code": "evolucao_dolar", "table": "dest_dm_cost_evolucao_dolar", "rows": cube_rows})
+        except Exception as exc:  # the core Gold materialization must remain reportable
+            if dollar_rule:
+                dollar_rule.materialization_status = "ERROR"
+                dollar_rule.materialization_error = str(exc)[:2000]
+                dollar_rule.materialization_run_id = run_id
+                dollar_rule.materialized_at = datetime.now(timezone.utc)
+            failed.append({"code": "evolucao_dolar", "error": str(exc)[:500]})
     session.commit()
     return {
         "rules": len(rules) + len(keyed),
