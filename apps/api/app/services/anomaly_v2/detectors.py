@@ -14,6 +14,7 @@ from app.services.anomaly_v2.classifier import (
     NATURE_INTERMITTENT,
     NATURE_NEW,
 )
+from app.services.anomaly_v2.settings import detector_settings
 
 TIER_NORMAL = "NORMAL"
 TIER_WATCH = "WATCH"
@@ -82,7 +83,9 @@ def run_detectors_for_scope(
     investigate_score: int,
     ledger_entries: Sequence[Mapping[str, Any]],
     valid_days: set[str] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    config = detector_settings(settings)
     nature = str(profile.get("cost_nature") or NATURE_CONTINUOUS)
     by_day = {str(r["day"])[:10]: float(r.get("cost_cloud") or 0) for r in daily if r.get("scope_id") == scope_id}
     signals: list[dict[str, Any]] = []
@@ -90,21 +93,24 @@ def run_detectors_for_scope(
     if nature == NATURE_COMMITMENT:
         for day_s, obs in sorted(by_day.items()):
             event_day = date.fromisoformat(day_s)
-            if not (as_of - timedelta(days=45) <= event_day <= as_of) or obs <= 0:
+            if not (as_of - timedelta(days=int(config["detection_lookback_days"])) <= event_day <= as_of) or obs <= 0:
                 continue
             hit = detect_commitment_day(
-                scope_id=scope_id, day=event_day, observed=obs, ledger_entries=ledger_entries
+                scope_id=scope_id, day=event_day, observed=obs, ledger_entries=ledger_entries,
+                date_tolerance=int(config["commitment_date_tolerance_days"]),
+                value_tolerance_pct=float(config["commitment_value_tolerance_pct"]),
             )
             if hit and hit.get("tier") == TIER_ALERT:
                 expected = float(hit.get("expected") or 0)
-                upper = expected * 1.15
+                tolerance = float(config["commitment_value_tolerance_pct"])
+                upper = expected * (1 + tolerance)
                 delta = obs - expected
                 if delta >= materiality and obs > upper:
                     hit.update({
                         "scope_id": scope_id,
                         "day": day_s,
                         "upper": upper,
-                        "lower": expected * 0.85,
+                        "lower": expected * (1 - tolerance),
                         "delta": delta,
                         "pct_delta": _pct_delta(obs, expected),
                         "deviation_status": DEVIATION_ACTIVE,
@@ -121,7 +127,7 @@ def run_detectors_for_scope(
                     "scope_id": scope_id,
                     "day": as_of.isoformat(),
                     "detector": DET_NEW_SPEND,
-                    "tier": TIER_WATCH if obs < materiality * 3 else TIER_ALERT,
+                    "tier": TIER_WATCH if obs < materiality * float(config["new_spend_alert_materiality_multiple"]) else TIER_ALERT,
                     "expected": 0.0,
                     "observed": obs,
                     "delta": obs,
@@ -136,7 +142,7 @@ def run_detectors_for_scope(
             v for d, v in by_day.items() if month_start.isoformat() <= d <= as_of.isoformat()
         )
         prev_months: list[float] = []
-        for m in range(1, 4):
+        for m in range(1, int(config["monthly_comparison_periods"]) + 1):
             ref = (month_start - timedelta(days=1)).replace(day=1)
             for _ in range(m - 1):
                 ref = (ref - timedelta(days=1)).replace(day=1)
@@ -154,7 +160,7 @@ def run_detectors_for_scope(
         expected_acc = sum(prev_months) / len(prev_months) if prev_months else 0.0
         delta = acc - expected_acc
         if expected_acc > 0 and delta >= materiality and _pct_delta(acc, expected_acc) >= min_pct:
-            tier = TIER_ALERT if delta >= materiality * 2 else TIER_WATCH
+            tier = TIER_ALERT if delta >= materiality * float(config["monthly_alert_materiality_multiple"]) else TIER_WATCH
             signals.append(
                 {
                     "scope_id": scope_id,
@@ -176,6 +182,7 @@ def run_detectors_for_scope(
         materiality=materiality,
         min_pct=min_pct,
         valid_days=valid_days,
+        settings=config,
     )
     if episode is None:
         return signals
@@ -190,6 +197,7 @@ def continuous_episode(
     materiality: float,
     min_pct: float,
     valid_days: set[str] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Um episódio por escopo: aberto se ainda desvia, fechado se voltou sozinho.
 
@@ -203,7 +211,9 @@ def continuous_episode(
         day_s = str(row.get("day") or "")[:10]
         by_day[day_s] = by_day.get(day_s, 0.0) + float(row.get("cost_cloud") or 0)
 
-    window_start = as_of - timedelta(days=45)
+    config = detector_settings(settings)
+    recovery_days = int(config["recovery_confirmation_days"])
+    window_start = as_of - timedelta(days=int(config["detection_lookback_days"]))
     active: dict[str, Any] | None = None
     quiet = 0
     active_days = 0
@@ -216,19 +226,19 @@ def continuous_episode(
             cursor += timedelta(days=1)
             continue
         obs = by_day[cursor.isoformat()]
-        if active is None and sum(day < cursor.isoformat() for day in by_day) < 14:
+        if active is None and sum(day < cursor.isoformat() for day in by_day) < int(config["new_spend_min_history_days"]):
             # A first observation has no baseline; it is not a historical spike.
             cursor += timedelta(days=1)
             continue
         reference_day = date.fromisoformat(active["episode_start"]) if active else cursor
-        expected, lower, upper, mad = expected_for_day(scope_daily, target=cursor, reference_day=reference_day)
+        expected, lower, upper, mad = expected_for_day(scope_daily, target=cursor, reference_day=reference_day, settings=config)
         pct = _pct_delta(obs, expected)
         hot = obs > upper and obs >= materiality and pct >= min_pct
         if hot:
             quiet = 0
             active_days = active_days + 1 if active is not None else 1
             delta = obs - expected
-            z = (obs - upper) / max(mad * 1.4826, 1e-6) if mad else 0.0
+            z = (obs - upper) / max(mad * float(config["robust_mad_scale"]), 1e-6) if mad else 0.0
             peak = {
                 "scope_id": scope_id,
                 "day": cursor.isoformat(),
@@ -245,7 +255,7 @@ def continuous_episode(
                 "deviation_status": DEVIATION_ACTIVE,
                 "persistence_days": active_days,
                 "baseline_reference": active["baseline_reference"] if active is not None
-                    else baseline_reference(scope_daily, reference_day=reference_day),
+                    else baseline_reference(scope_daily, reference_day=reference_day, settings=config),
             }
             if active is None or obs >= float(active.get("observed") or 0):
                 if active is not None:
@@ -254,9 +264,9 @@ def continuous_episode(
             active["persistence_days"] = active_days
         elif active is not None:
             quiet += 1
-            if quiet >= 3:
+            if quiet >= recovery_days:
                 active["deviation_status"] = DEVIATION_AUTO_FIXED
-                active["episode_end"] = (cursor - timedelta(days=2)).isoformat()
+                active["episode_end"] = (cursor - timedelta(days=recovery_days - 1)).isoformat()
                 latest_closed = active
                 active = None
                 quiet = 0
