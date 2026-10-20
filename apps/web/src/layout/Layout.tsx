@@ -100,6 +100,7 @@ const menuGroups = [
 ];
 
 const AUDIT_MODULES = ["audit"];
+const showAnomaliesMenu = import.meta.env.VITE_APP_ENV !== "production";
 
 export default function Layout() {
   const theme = useTheme();
@@ -112,6 +113,7 @@ export default function Layout() {
       if (g.label !== "Administração") {
         return { ...g, items: g.items.filter((item) => {
           const targets = permissionTargetsForPath(item.path);
+          if (item.path === "/anomalies" && !showAnomaliesMenu) return false;
           return !targets || targets.some((t) => hasPerm(t.module, "read", t.scope));
         }) };
       }

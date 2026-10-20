@@ -1,5 +1,8 @@
 FROM node:20-alpine AS build
 
+ARG VITE_APP_ENV=development
+ENV VITE_APP_ENV=$VITE_APP_ENV
+
 WORKDIR /app
 
 COPY apps/web/package.json apps/web/yarn.lock* ./
