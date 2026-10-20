@@ -271,7 +271,10 @@ async def update_config(
     data = body.model_dump(exclude_unset=True)
     if "detector_settings" in data and data["detector_settings"] is not None:
         try:
-            data["detector_settings"] = validate_detector_settings(data["detector_settings"])
+            data["detector_settings"] = validate_detector_settings({
+                **detector_settings(config.detector_settings),
+                **data["detector_settings"],
+            })
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     if "materiality_by_currency" in data and data["materiality_by_currency"] is not None:
