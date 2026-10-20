@@ -12,6 +12,16 @@ const SEVERITY_COLOR: Record<string, "default" | "info" | "warning" | "error"> =
   CRITICAL: "error",
 };
 
+const CLOUD_LABEL: Record<string, string> = {
+  azure: "Azure",
+  gcp: "GCP",
+  ibm: "IBM Cloud",
+  aws: "AWS",
+  oci: "Oracle Cloud",
+  mongodb: "MongoDB Atlas",
+  atlas: "MongoDB Atlas",
+};
+
 type Props = {
   cases: AnomalyCase[];
   currency: string;
@@ -59,7 +69,10 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
       field: "cloud",
       headerName: "Nuvem",
       width: 110,
-      valueGetter: (_, row) => row.cloud || row.series_dimensions?.cloud_origem || "",
+      valueGetter: (_, row) => {
+        const provider = String(row.cloud || row.series_dimensions?.cloud_origem || "");
+        return CLOUD_LABEL[provider.toLowerCase()] ?? provider;
+      },
     },
     { field: "subaccount_name", headerName: "Subaccount", flex: 1, minWidth: 140 },
     {
