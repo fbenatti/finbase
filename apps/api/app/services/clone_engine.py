@@ -84,6 +84,7 @@ class CloneEngine:
         reference_prices: dict[tuple[str, str], float] | None = None,
         price_sheet_prices: dict[tuple[str, ...], Any] | None = None,
         period_prices: dict[str, dict[tuple[str, ...], float]] | None = None,
+        period_exchange_rates: dict[str, dict[tuple[str, ...], float]] | None = None,
     ):
         self.rules = sorted(rules, key=lambda r: r.priority)
         self.destination_table_id = destination_table_id
@@ -91,6 +92,7 @@ class CloneEngine:
         self.reference_prices = reference_prices or {}
         self.price_sheet_prices = price_sheet_prices or {}
         self.period_prices = period_prices or {}
+        self.period_exchange_rates = period_exchange_rates or {}
         self.pendencies: list[dict[str, Any]] = []
 
     @staticmethod
@@ -252,7 +254,35 @@ class CloneEngine:
             prices = references.map(lambda value: value[1]).astype(float)
             reference_periods = references.map(lambda value: value[0])
             quantity = pd.to_numeric(eligible[qty], errors="coerce").fillna(0).abs()
-            exchange = pd.to_numeric(eligible[rate], errors="coerce").fillna(1) if rate and rate in eligible else 1.0
+            exchange = pd.to_numeric(eligible[rate], errors="coerce") if rate and rate in eligible else pd.Series(1.0, index=eligible.index)
+            exchange = exchange.where(exchange.gt(0) & exchange.lt(float("inf")))
+            for idx in exchange.index[exchange.isna()]:
+                row = eligible.loc[idx]
+                text = lambda name: "" if pd.isna(row.get(name)) else str(row.get(name)).strip().casefold()
+                pricing_currency = text("source_pricing_currency")
+                billing_currency = text("BillingCurrency") or text("billingcurrency")
+                if pricing_currency and pricing_currency == billing_currency:
+                    exchange.at[idx] = 1.0
+                else:
+                    key = (text("cloud_origem"), text("source_billing_account_id"), pricing_currency, billing_currency)
+                    exchange.at[idx] = self.period_exchange_rates.get(period, {}).get(key, float("nan"))
+            invalid_fx = exchange.isna() | exchange.le(0) | exchange.ge(float("inf"))
+            if invalid_fx.any():
+                for _, row in eligible.loc[invalid_fx].iterrows():
+                    self.pendencies.append({
+                        "clone_rule_id": rule.id, "destination_table_id": self.destination_table_id,
+                        "connection_id": row.get("source_connection_id"), "provider": row.get("cloud_origem"),
+                        "meter_id": str(row.get(meter, "")), "source_record_id": str(row.get("source_record_id", "")),
+                        "billing_period": period, "reason": "Câmbio inválido e sem taxa mensal inequívoca da mesma conta/moedas",
+                    })
+                eligible = eligible.loc[~invalid_fx].copy()
+                exchange = exchange.loc[eligible.index]
+                quantity = quantity.loc[eligible.index]
+                prices = prices.loc[eligible.index]
+                reference_periods = reference_periods.loc[eligible.index]
+            if eligible.empty: continue
+            if rate:
+                eligible[rate] = exchange
             amounts = (prices * quantity * exchange).abs()
             eligible = eligible.loc[amounts.gt(0)].copy()
             amounts = amounts.loc[eligible.index]; prices = prices.loc[eligible.index]; reference_periods = reference_periods.loc[eligible.index]
