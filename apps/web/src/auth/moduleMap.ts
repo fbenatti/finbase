@@ -6,6 +6,7 @@ type PermTarget = { module: string; scope?: string | null };
 
 const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   { prefix: "/ideas", targets: [{ module: "ideas" }] },
+  { prefix: "/anomalies", targets: [{ module: "anomalies" }] },
   { prefix: "/admin/audit", targets: [{ module: "audit" }] },
   { prefix: "/admin/sso", targets: [{ module: "auth" }] },
   { prefix: "/admin", targets: [{ module: "users" }] },

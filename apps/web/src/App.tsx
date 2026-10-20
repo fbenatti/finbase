@@ -34,6 +34,7 @@ const Admin = lazy(() => import("./pages/Admin/Admin"));
 const SsoProviders = lazy(() => import("./pages/Admin/SsoProviders"));
 const Audit = lazy(() => import("./pages/Admin/Audit"));
 const Ideas = lazy(() => import("./pages/Ideas/Ideas"));
+const Anomalies = lazy(() => import("./pages/Anomalies/Anomalies"));
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -108,6 +109,7 @@ function App() {
         <Route path="admin/sso" element={<SsoProviders />} />
         <Route path="admin/audit" element={<Audit />} />
         <Route path="ideas" element={<Ideas />} />
+        <Route path="anomalies" element={<Anomalies />} />
         </Route>
       </Routes>
       </Suspense>

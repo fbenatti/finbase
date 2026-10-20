@@ -121,6 +121,16 @@ def _run_etl_job(connection_ids, schedule_id: int, schedule_name: str) -> None:
                 session.commit()
                 logger.info("Scheduled reclassification [%s] queued tasks %s", schedule_name, queued)
                 return queued
+            if sched.schedule_type == "anomaly_detection":
+                from app.services.anomaly_scheduler import queue_detection_tasks
+                queued = queue_detection_tasks(sched, session)
+                session.commit()
+                return queued
+            if sched.schedule_type == "anomaly_sla":
+                from app.services.anomaly_scheduler import run_sla_job
+                session.commit()
+                run_sla_job(sched, session)
+                return []
         session.commit()
 
         from app.models.etl_task import EtlTask

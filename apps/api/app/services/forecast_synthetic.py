@@ -4,9 +4,13 @@ Classification may move offsets to a central RI department. Forecasting that
 aggregate independently is not additive when AUTO_BACKTEST chooses different
 windows for the individual consumer departments.
 """
+import logging
+import time
 from datetime import date
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def _key(row, columns):
@@ -72,30 +76,69 @@ async def align_synthetic_offsets(
     filters = [type_filter, f"{date_expr} BETWEEN DATE {lit(earliest)} AND DATE {lit(cutoff)}"]
     if period_column:
         filters.append(f"CAST({q(period_column)} AS VARCHAR) BETWEEN {lit(earliest.strftime('%Y%m'))} AND {lit(cutoff.strftime('%Y%m'))}")
-    # Link identity includes connection and billing period: source row IDs can
-    # repeat across invoices or connections. Both sides are partition-pruned.
-    joins = [f"r.{q(names['clone_source_record_id'])} = u.{q(names['source_record_id'])}"]
-    for name in (names.get("source_connection_id"), period_column):
-        if name:
-            joins.append(f"r.{q(name)} IS NOT DISTINCT FROM u.{q(name)}")
-    selected = []
-    for i, column in enumerate(columns):
-        selected += [f"u.{q(column)} AS source_{i}", f"r.{q(column)} AS target_{i}"]
-    selected += [f"r.{q('__offset_day')} AS offset_day", f"SUM(TRY_CAST(r.{q(measure)} AS DOUBLE)) AS offset_value"]
-    grouped = ", ".join(str(i) for i in range(1, 2 * len(columns) + 2))
-    sql = f"""
-        WITH scoped AS (
-            SELECT *, {date_expr} AS {q('__offset_day')} FROM {source}
-             WHERE {' AND '.join(filters)}
-        )
-        SELECT {', '.join(selected)}
-          FROM scoped r JOIN scoped u ON {' AND '.join(joins)}
-         WHERE COALESCE(TRY_CAST(r.{q(names['is_synthetic'])} AS BOOLEAN), false)
-           AND NOT COALESCE(TRY_CAST(u.{q(names['is_synthetic'])} AS BOOLEAN), false)
-           AND lower(CAST(r.{q(names['chargecategory'])} AS VARCHAR)) = 'return'
-         GROUP BY {grouped}
+    # No distributed JOIN: on the small local cluster (2G heap per worker) any
+    # self-join of the wide billing table took workers down (JVM OOM). Instead
+    # run two plain aggregations - the same shape as the history query - and
+    # link them in Python. Link identity includes connection and billing
+    # period because source row IDs can repeat across invoices/connections.
+    link_cols = [n for n in (names.get("source_connection_id"), period_column) if n]
+    link_sql = "".join(f", COALESCE(CAST({q(n)} AS VARCHAR), '') AS link_{i}" for i, n in enumerate(link_cols))
+    synth = names["is_synthetic"]
+    cols_sql = ", ".join(f"{q(c)} AS dim_{i}" for i, c in enumerate(columns))
+    where = " AND ".join(filters)
+    is_synth = f"COALESCE(TRY_CAST({q(synth)} AS BOOLEAN), false)"
+    clone_id = q(names["clone_source_record_id"])
+    source_id = q(names["source_record_id"])
+    n_keys = len(columns) + 1 + len(link_cols)
+    returns_sql = f"""
+        SELECT {cols_sql}, CAST({clone_id} AS VARCHAR) AS link_id{link_sql},
+               {date_expr} AS offset_day,
+               SUM(TRY_CAST({q(measure)} AS DOUBLE)) AS offset_value
+          FROM {source}
+         WHERE {where}
+           AND {clone_id} IS NOT NULL
+           AND {is_synth}
+           AND lower(CAST({q(names['chargecategory'])} AS VARCHAR)) = 'return'
+         GROUP BY {", ".join(str(i) for i in range(1, n_keys + 2))}
     """
-    rows = await execute(sql, timeout_s=300)
+    started = time.monotonic()
+    logger.info("[forecast_synthetic] consultando retornos RI sintéticos (%s a %s)", earliest, cutoff)
+    try:
+        returns = await execute(returns_sql, timeout_s=300)
+        logger.info("[forecast_synthetic] %d grupos de retorno em %.1fs", len(returns), time.monotonic() - started)
+        link_key = lambda row: (str(row["link_id"]), *(str(row[f"link_{i}"]) for i in range(len(link_cols))))
+        ids = sorted({str(row["link_id"]) for row in returns})
+        usages: dict[tuple, list[dict]] = {}
+        batch = 1000
+        for start in range(0, len(ids), batch):
+            chunk = ", ".join(lit(v) for v in ids[start:start + batch])
+            usage_sql = f"""
+                SELECT DISTINCT {cols_sql}, CAST({source_id} AS VARCHAR) AS link_id{link_sql}
+                  FROM {source}
+                 WHERE {where}
+                   AND NOT {is_synth}
+                   AND CAST({source_id} AS VARCHAR) IN ({chunk})
+            """
+            for row in await execute(usage_sql, timeout_s=300):
+                usages.setdefault(link_key(row), []).append(row)
+            logger.info("[forecast_synthetic] usos de origem: lote %d/%d", start // batch + 1, -(-len(ids) // batch))
+    except Exception:
+        logger.exception("[forecast_synthetic] falha na consulta de offsets após %.1fs", time.monotonic() - started)
+        raise
+    # Equivalent of the former JOIN + GROUP BY (source dims, target dims, day).
+    grouped: dict[tuple, float] = {}
+    for ret in returns:
+        for use in usages.get(link_key(ret), []):
+            key = (tuple(use[f"dim_{i}"] for i in range(len(columns))),
+                   tuple(ret[f"dim_{i}"] for i in range(len(columns))), ret["offset_day"])
+            grouped[key] = grouped.get(key, 0.0) + float(ret["offset_value"] or 0.0)
+    rows = []
+    for (src, tgt, day), value in grouped.items():
+        row = {f"source_{i}": v for i, v in enumerate(src)}
+        row.update({f"target_{i}": v for i, v in enumerate(tgt)})
+        row.update(offset_day=day, offset_value=value)
+        rows.append(row)
+    logger.info("[forecast_synthetic] %d vínculos retornados em %.1fs", len(rows), time.monotonic() - started)
     cloud_index = columns.index(cloud_column) if cloud_column in columns else None
     scoped_links = []
     for row in rows:

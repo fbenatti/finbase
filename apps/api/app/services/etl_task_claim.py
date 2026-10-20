@@ -30,6 +30,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "reservation_collection",
     "price_reference_collection",
     "azure_pricesheet_refresh",
+    "anomaly_detection",
 )
 
 # These task types write an Iceberg Gold, Silver or planning table. Bronze
@@ -37,7 +38,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
 _ANALYTIC_WRITER_TASK_TYPES = {
     "reprocess", "reclassification", "forecast", "forecast_accuracy",
     "shared_cost", "ai_cost_relationship_reprocess", "gold_reprocess",
-    "azure_pricesheet_refresh",
+    "azure_pricesheet_refresh", "anomaly_detection",
 }
 
 

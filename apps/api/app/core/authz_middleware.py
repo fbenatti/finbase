@@ -53,6 +53,7 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/groups", "groups"),
     ("/roles", "roles"),
     ("/ideas", "ideas"),
+    ("/anomalies", "anomalies"),
 ]
 
 PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health", "/etl/worker-health")

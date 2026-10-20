@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -167,6 +167,10 @@ async def lifespan(app: FastAPI):
         from app.models.audit_log import AuditLog  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         from app.models.gold_manifest import GoldManifest  # noqa: F401
+        from app.models.anomaly import (  # noqa: F401
+            AnomalyConfig, AnomalyRun, AnomalyPublication,
+            AnomalyCase, AnomalyCaseEvent, AnomalyAction, AnomalyNotification,
+        )
         await conn.run_sync(Base.metadata.create_all)
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
@@ -578,6 +582,24 @@ async def lifespan(app: FastAPI):
             INSERT INTO scheduled_task
               (name, connection_id, connection_ids, destination_reprocess,
                cron_expression, timezone, active, config_json, schedule_type)
+            SELECT 'Detecção de anomalias', NULL, '[]'::jsonb, FALSE,
+                   '0 6 * * *', 'America/Sao_Paulo', FALSE,
+                   json_build_object('anomaly_config_ids', '[]'::json), 'anomaly_detection'
+            WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'anomaly_detection')
+        """)
+        await _execute_migration(conn, """
+            INSERT INTO scheduled_task
+              (name, connection_id, connection_ids, destination_reprocess,
+               cron_expression, timezone, active, config_json, schedule_type)
+            SELECT 'Prazos de anomalias (SLA)', NULL, '[]'::jsonb, FALSE,
+                   '*/30 * * * *', 'America/Sao_Paulo', TRUE,
+                   json_build_object('due_soon_hours', 4), 'anomaly_sla'
+            WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'anomaly_sla')
+        """)
+        await _execute_migration(conn, """
+            INSERT INTO scheduled_task
+              (name, connection_id, connection_ids, destination_reprocess,
+               cron_expression, timezone, active, config_json, schedule_type)
             SELECT 'Reprocessamento', NULL, '[]'::jsonb, FALSE,
                    '0 2 * * 0', 'America/Sao_Paulo', FALSE,
                    json_build_object('period_mode', 'all', 'accuracy', TRUE, 'shared_cost', FALSE, 'forecast_config_ids', '[]'::json, 'gold_rule_ids', '[]'::json), 'reprocess'
@@ -917,6 +939,8 @@ async def lifespan(app: FastAPI):
             "DROP TABLE IF EXISTS project",
         ):
             await _execute_migration(conn, statement)
+        from app.services.anomaly_migrations import migrate_anomalies
+        await migrate_anomalies(conn)
         # Backfill the canonical provider slug for legacy rows that only have a
         # free-text cloud_name, so rule matching keeps working without a
         # re-import. Unknown/free-text names are left NULL (match only the
@@ -1032,6 +1056,7 @@ app.include_router(ai_provider_dashboards.router)
 app.include_router(destinations.router)
 app.include_router(schema.router)
 app.include_router(forecast.router)
+app.include_router(anomalies.router)
 app.include_router(clone_rules.router)
 app.include_router(planning.router)
 app.include_router(savings.router)

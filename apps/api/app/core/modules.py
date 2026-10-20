@@ -7,7 +7,7 @@ ALL_MODULES = [
     "reservations", "savings", "periods", "destinations", "schema", "fact",
     "csv_upload", "clone_rules", "gold", "ai_copilot", "ai_dashboards",
     "ai_provider_dashboards", "azure_ptu", "azure_resource_graph",
-    "azure_tag_policy", "oci_operational", "scheduled_shutdown",
+    "azure_tag_policy", "oci_operational", "scheduled_shutdown", "anomalies",
     # Centro de Decisão FinOps: resumo, custo, drivers, eficiência, AKS, PTU e
     # qualidade. Módulo próprio porque a permissão de leitura de custo agregado não
     # é a mesma de administrar a governança Gold.

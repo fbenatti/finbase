@@ -3256,6 +3256,33 @@ async def start_etl_task(
     return task_id
 
 
+def _cancel_linked_anomaly_run(db, row) -> None:
+    """O STOP da notificação cancela o etl_task. A fila de detecção é o anomaly_run."""
+    if getattr(row, "task_type", None) != "anomaly_detection":
+        return
+    from sqlalchemy import select
+
+    from app.models.anomaly import AnomalyRun
+
+    payload = row.result_json if isinstance(row.result_json, dict) else {}
+    run = None
+    run_id = payload.get("anomaly_run_id")
+    if run_id:
+        run = db.get(AnomalyRun, int(run_id))
+    if run is None:
+        run = db.execute(
+            select(AnomalyRun).where(
+                AnomalyRun.source_etl_task_id == row.id,
+                AnomalyRun.status.in_(("QUEUED", "RUNNING")),
+            )
+        ).scalars().first()
+    if run is not None and run.status in ("QUEUED", "RUNNING"):
+        run.status = "CANCELLED"
+        run.phase = "Cancelado pelo usuário"
+        run.finished_at = datetime.now(timezone.utc)
+        run.error = None
+
+
 def cancel_task(task_id: int) -> bool:
     """Cancel a running/queued ETL task. Uses DB as the shared signal between API and worker processes."""
     # 1. Set the in-process cancel flag (works when task runs in same process)
@@ -3271,8 +3298,13 @@ def cancel_task(task_id: int) -> bool:
             row.status = "CANCELLED"
             row.phase = "Cancelado pelo usuario"
             row.finished_at = datetime.now(timezone.utc)
+            _cancel_linked_anomaly_run(db, row)
             from app.services.processing_logs import sync_etl_task_log
             sync_etl_task_log(db, row)
+            db.commit()
+            cancelled = True
+        elif row and row.task_type == "anomaly_detection":
+            _cancel_linked_anomaly_run(db, row)
             db.commit()
             cancelled = True
         else:

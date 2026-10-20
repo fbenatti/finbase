@@ -42,6 +42,10 @@ if [[ "$LOCAL_HTTPS_PORT" =~ ^[0-9]+$ ]] && (( LOCAL_HTTPS_PORT < 1024 )); then
   echo "A porta HTTPS $LOCAL_HTTPS_PORT requer privilégio administrativo local."
   sudo -v
   SSH_PREFIX=(sudo)
+  # Renova o ticket do sudo em background; sem isso, após ~5 min o 'sudo ssh'
+  # roda sem TTY e falha com 'a password is required'.
+  ( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null || true; sleep 50; done ) &
+  SUDO_KEEPALIVE_PID=$!
 fi
 
 if ! az account show --subscription "$SUBSCRIPTION_ID" >/dev/null 2>&1; then
@@ -53,12 +57,42 @@ az account set --subscription "$SUBSCRIPTION_ID" >/dev/null
 
 cleanup() {
   trap - EXIT INT TERM
+  [[ -n "${SUDO_KEEPALIVE_PID:-}" ]] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
   [[ -n "${SSH_PID:-}" ]] && kill "$SSH_PID" 2>/dev/null || true
   [[ -n "${BASTION_PID:-}" ]] && kill "$BASTION_PID" 2>/dev/null || true
   wait 2>/dev/null || true
   rm -rf "$LOCK_DIR"
 }
 trap cleanup EXIT INT TERM
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+# Libera a porta do Bastion se outra sessão deixou um 'az network bastion tunnel'
+# órfão escutando nela. Processos que não sejam do az/bastion NÃO são mortos.
+free_bastion_port() {
+  local pids pid cmd
+  pids="$(lsof -nP -iTCP:"$BASTION_PORT" -sTCP:LISTEN -t 2>/dev/null || true)"
+  [[ -z "$pids" ]] && return 0
+  for pid in $pids; do
+    [[ "$pid" == "${BASTION_PID:-}" ]] && continue
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$cmd" == *bastion* || "$cmd" == *azure.cli* || "$cmd" == */az\ * || "$cmd" == *Python.app* ]]; then
+      log "Porta $BASTION_PORT ocupada pelo PID $pid (túnel de outra sessão); encerrando..."
+      kill "$pid" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+      if kill -0 "$pid" 2>/dev/null; then
+        log "PID $pid não encerrou; enviando SIGKILL."
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    else
+      echo "Porta $BASTION_PORT ocupada por processo não relacionado (PID $pid: $cmd). Abortando." >&2
+      exit 1
+    fi
+  done
+  # Mata também qualquer az bastion tunnel pendurado na mesma porta.
+  pkill -f "network bastion tunnel.*--port $BASTION_PORT" 2>/dev/null || true
+  sleep 1
+}
 
 SSH_FORWARDS=()
 add_forward_if_available() {
@@ -78,6 +112,7 @@ add_forward_if_available "$LOCAL_TRINO_PORT" 8080 "Trino"
 add_forward_if_available "$LOCAL_HTTPS_PORT" 443 "HTTPS"
 
 while :; do
+  free_bastion_port
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Abrindo túnel Bastion..."
   az network bastion tunnel \
     --subscription "$SUBSCRIPTION_ID" \
