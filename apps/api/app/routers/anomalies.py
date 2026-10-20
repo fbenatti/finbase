@@ -489,6 +489,8 @@ async def list_cases(
     queue_only: bool = False,
     overdue_only: bool = False,
     unassigned_only: bool = False,
+    decision: list[str] | None = Query(default=None),
+    recurrence_only: bool = False,
     period: str | None = None,
     config_id: int | None = None,
     order_by: Literal["score", "due"] = "score",
@@ -511,6 +513,8 @@ async def list_cases(
         period=period,
         config_id=config_id,
         unassigned_only=unassigned_only,
+        decisions=decision,
+        recurrence_only=recurrence_only,
     )
     return {"items": [_case_out(case) for case in rows], "total": total, "limit": size, "offset": skip}
 
