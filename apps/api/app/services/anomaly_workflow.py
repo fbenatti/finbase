@@ -673,6 +673,7 @@ def case_query(
     overdue_only: bool = False,
     unassigned_only: bool = False,
     decisions: Sequence[str] | None = None,
+    deviation_statuses: Sequence[str] | None = None,
     recurrence_only: bool = False,
 ) -> Select:
     query = select(AnomalyCase)
@@ -682,6 +683,8 @@ def case_query(
         query = query.where(AnomalyCase.severity.in_(tuple(severities)))
     if decisions:
         query = query.where(AnomalyCase.decision.in_(tuple(decisions)))
+    if deviation_statuses:
+        query = query.where(AnomalyCase.deviation_status.in_(tuple(deviation_statuses)))
     if recurrence_only:
         recurring = select(AnomalyCase.event_family).group_by(AnomalyCase.event_family).having(func.count() > 1)
         query = query.where(AnomalyCase.event_family.in_(recurring))
