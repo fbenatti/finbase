@@ -18,7 +18,7 @@ from app.models.rules import (
 )
 from app.models.financial_contract import FinancialContract
 from app.services.classification_field_values import refresh_destination_values
-from app.models.planning import PlanningEntry
+from app.models.planning import FinancialType, PlanningEntry, PlanningVersion
 from app.models.destination import DestinationColumn, DestinationTable, SourceDestinationMapping
 from app.services.classification_engine import map_legacy_field, normalize_rule_conditions
 from app.services.cloud_scope import connection_cloud_scope
@@ -1058,6 +1058,19 @@ async def delete_department(dept_id: int, db: AsyncSession = Depends(get_db)):
     for rule in (await db.execute(select(ClassificationRule).where(ClassificationRule.department_id == dept_id))).scalars().all():
         rule.department_id = None
         rule.active = False
+    budget_type_id = (await db.execute(
+        select(FinancialType.id).where(FinancialType.code == "orcamento")
+    )).scalar_one_or_none()
+    if budget_type_id is not None:
+        await db.execute(
+            delete(PlanningEntry).where(
+                PlanningEntry.department_id == dept_id,
+                PlanningEntry.planning_version_id.in_(
+                    select(PlanningVersion.id).where(PlanningVersion.financial_type_id == budget_type_id)
+                ),
+            )
+        )
+    # Preserve non-budget planning history while removing its link to the deleted node.
     for entry in (await db.execute(select(PlanningEntry).where(PlanningEntry.department_id == dept_id))).scalars().all():
         entry.department_id = None
     await db.flush()
