@@ -1451,6 +1451,10 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     )
     model_measure = "realizado_cloud" if dual_financial_measures else measure
     query_dims = list(dims)
+    # Keep actual credits separate from traceable synthetic offsets while
+    # modeling. This provenance column is also useful in the audit snapshot.
+    if {"is_synthetic", "clone_source_record_id", "source_record_id", "chargecategory"}.issubset(metadata_columns) and "is_synthetic" not in query_dims:
+        query_dims.append("is_synthetic")
     for extra_col in (cloud_col, id_col):
         if extra_col and extra_col not in query_dims:
             query_dims.append(extra_col)
@@ -1799,6 +1803,14 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
             results.append({**key_values, "forecast_month": f"{year:04d}{month:02d}", "tipo": "forecast", "forecast_value": value, "selected_method": future_method, "fallback_level": 0, "history_points": int(len(daily)), "backtest_wape": None})
     output = pd.DataFrame(results)
     if output.empty: raise ValueError("Nenhuma série pôde ser projetada")
+    from app.services.forecast_synthetic import align_synthetic_offsets
+    linked_offsets = await align_synthetic_offsets(
+        output, frame, columns=key_cols, metadata=metadata, source=source,
+        measure=model_measure, type_filter=type_filter, date_expr=date_expr,
+        period_column=period, history_start=daily_history_start,
+        cutoff=effective_cutoff, cloud_cutoffs=cloud_cutoffs,
+        cloud_column=cloud_col, execute=trino_execute,
+    )
     applied_rules = _apply_forecast_business_rules(
         output,
         business_rules or [],
@@ -1809,6 +1821,8 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
     applied_rules = list(dict.fromkeys([
         *source_rule_names, *mean_30d_rule_names, *interval_rule_names, *applied_rules,
     ]))
+    if linked_offsets:
+        applied_rules.append(f"Synthetic offsets linked to source Usage ({linked_offsets} monthly series)")
     for adjustment in sorted(adjustments, key=lambda a: a.priority):
         mask = pd.Series(True, index=output.index)
         for column, value in (adjustment.filters or {}).items():
