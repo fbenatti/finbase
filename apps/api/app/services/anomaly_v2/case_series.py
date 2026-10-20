@@ -166,15 +166,16 @@ def raw_date_range_predicate(column: str, start: date, end: date, data_type: str
         return (f"({quoted} >= TIMESTAMP {_lit(start.isoformat() + ' 00:00:00')} "
                 f"AND {quoted} < TIMESTAMP {_lit(next_day.isoformat() + ' 00:00:00')})")
     clauses = [f"({quoted} >= {_lit(start.isoformat())} AND {quoted} < {_lit(next_day.isoformat())})"]
-    values: set[str] = set()
+    values: dict[str, list[str]] = {"%m/%d/%Y": [], "%d/%m/%Y": []}
     cursor = start
     while cursor <= end:
-        values.update((cursor.strftime("%m/%d/%Y"), cursor.strftime("%d/%m/%Y")))
+        for fmt in values:
+            values[fmt].append(cursor.strftime(fmt))
         cursor += timedelta(days=1)
-    for value in sorted(values):
-        # The next lexical prefix includes both the bare date and its suffixes.
-        upper = value[:-1] + chr(ord(value[-1]) + 1)
-        clauses.append(f"({quoted} >= {_lit(value)} AND {quoted} < {_lit(upper)})")
+    for candidates in values.values():
+        lower, last = min(candidates), max(candidates)
+        upper = last[:-1] + chr(ord(last[-1]) + 1)
+        clauses.append(f"({quoted} >= {_lit(lower)} AND {quoted} < {_lit(upper)})")
     return "(" + " OR ".join(clauses) + ")"
 
 
