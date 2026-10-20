@@ -5,6 +5,13 @@ import type { AnomalyCase } from "../../services/anomaliesApi";
 const money = (value: number | null | undefined, currency = "BRL") =>
   value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency, maximumFractionDigits: 0 });
 
+const SEVERITY_COLOR: Record<string, "default" | "info" | "warning" | "error"> = {
+  LOW: "default",
+  MEDIUM: "info",
+  HIGH: "warning",
+  CRITICAL: "error",
+};
+
 type Props = {
   cases: AnomalyCase[];
   currency: string;
@@ -35,7 +42,10 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
       field: "severity",
       headerName: "Severidade",
       width: 110,
-      renderCell: ({ value }) => <Chip size="small" label={String(value)} />,
+      renderCell: ({ value }) => {
+        const severity = String(value);
+        return <Chip size="small" color={SEVERITY_COLOR[severity.toUpperCase()] ?? "default"} label={severity} />;
+      },
     },
     { field: "state", headerName: "Estado", width: 120 },
     {
