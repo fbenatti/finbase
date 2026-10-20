@@ -14,7 +14,7 @@ from app.services.anomaly_v2.classifier import classify_scopes
 from app.services.anomaly_v2.commitment_ledger import refresh_commitment_ledger
 from app.services.anomaly_v2.daily_build import build_daily_aggregate, load_daily_history
 from app.services.anomaly_v2.detectors import TIER_ALERT, TIER_WATCH, run_detectors_for_scope
-from app.services.anomaly_v2.gates import apply_gates, cloud_load_quality
+from app.services.anomaly_v2.gates import apply_gates, cloud_load_quality, valid_days_by_cloud
 from app.services.anomaly_v2.hierarchy import consolidate_alerts
 from app.services.anomaly_v2.readiness import clouds_advanced, max_day_by_cloud, readiness_fingerprint
 from app.services.anomaly_v2.scoring import score_signal
@@ -209,6 +209,7 @@ async def execute_detection_v2(
         min_pct = float(config.get("min_relative_deviation") or 0.2)
         investigate = int(config.get("investigate_score") or 55)
         quality_by_day: dict[str, dict[str, float]] = {}
+        valid_days = valid_days_by_cloud(history)
 
         report(5, 8, "Detectando desvios")
         all_signals: list[dict[str, Any]] = []
@@ -234,6 +235,7 @@ async def execute_detection_v2(
                 min_pct=min_pct,
                 investigate_score=investigate,
                 ledger_entries=scope_ledger,
+                valid_days=valid_days.get(cloud, set()),
             )
             conf = "HIGH" if int(profile.get("history_days") or 0) >= 28 else "LOW"
             for sig in raw:
@@ -315,7 +317,8 @@ async def execute_detection_v2(
             detected_at=detected_at,
             config_row=config_row,
         )
-        returns_updated = await _apply_return_engine(session, config_id=config_id, history=history, as_of=as_of)
+        returns_updated = await _apply_return_engine(session, config_id=config_id, history=history,
+                                                     as_of=as_of, valid_days=valid_days)
 
         result = {
             "status": "COMPLETED",
@@ -368,7 +371,8 @@ async def _finish_cancelled(session, run_id: int | None) -> dict[str, Any]:
     return {"status": "CANCELLED"}
 
 
-async def _apply_return_engine(session, *, config_id: int, history: list[dict[str, Any]], as_of: date) -> int:
+async def _apply_return_engine(session, *, config_id: int, history: list[dict[str, Any]], as_of: date,
+                               valid_days: dict[str, set[str]]) -> int:
     from sqlalchemy import select
 
     from app.models.anomaly import AnomalyAction, AnomalyCase
@@ -409,6 +413,7 @@ async def _apply_return_engine(session, *, config_id: int, history: list[dict[st
             episode_start=start,
             as_of=as_of,
             treated=treated,
+            valid_days=valid_days.get(str(case.cloud or (case.series_dimensions or {}).get("cloud_origem") or ""), set()),
         )
         if ret.get("deviation_status") != DEVIATION_ACTIVE:
             case.deviation_status = ret["deviation_status"]

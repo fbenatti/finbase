@@ -25,6 +25,7 @@ def evaluate_return(
     episode_start: date,
     as_of: date,
     treated: bool,
+    valid_days: set[str] | None = None,
 ) -> dict[str, Any]:
     """Verifica se o escopo voltou ao baseline."""
     scope_daily = [r for r in daily if str(r.get("scope_id")) == scope_id]
@@ -33,7 +34,7 @@ def evaluate_return(
     cursor = episode_start
     while cursor <= as_of:
         observations = [row for row in scope_daily if str(row.get("day") or "")[:10] == cursor.isoformat()]
-        if not observations:
+        if not observations or (valid_days is not None and cursor.isoformat() not in valid_days):
             valid_streak = 0
             cursor += timedelta(days=1)
             continue

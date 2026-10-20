@@ -81,6 +81,7 @@ def run_detectors_for_scope(
     min_pct: float,
     investigate_score: int,
     ledger_entries: Sequence[Mapping[str, Any]],
+    valid_days: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     nature = str(profile.get("cost_nature") or NATURE_CONTINUOUS)
     by_day = {str(r["day"])[:10]: float(r.get("cost_cloud") or 0) for r in daily if r.get("scope_id") == scope_id}
@@ -174,6 +175,7 @@ def run_detectors_for_scope(
         as_of=as_of,
         materiality=materiality,
         min_pct=min_pct,
+        valid_days=valid_days,
     )
     if episode is None:
         return signals
@@ -187,6 +189,7 @@ def continuous_episode(
     as_of: date,
     materiality: float,
     min_pct: float,
+    valid_days: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Um episódio por escopo: aberto se ainda desvia, fechado se voltou sozinho.
 
@@ -208,7 +211,7 @@ def continuous_episode(
 
     cursor = window_start
     while cursor <= as_of:
-        if cursor.isoformat() not in by_day:
+        if cursor.isoformat() not in by_day or (valid_days is not None and cursor.isoformat() not in valid_days):
             quiet = 0
             cursor += timedelta(days=1)
             continue
