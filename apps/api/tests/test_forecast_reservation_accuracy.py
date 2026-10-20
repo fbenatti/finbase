@@ -108,6 +108,18 @@ async def test_sparse_monthly_reservation_usage_and_returns_use_symmetric_models
 
 
 @pytest.mark.asyncio
+async def test_new_ri_credit_uses_same_lookback_as_usage_zero_rows(monkeypatch):
+    records = []
+    for day in pd.date_range("2026-08-01", "2026-08-31"):
+        value = 100.0 if day.day >= 27 else 0.0
+        records.append(record(day, "Usage", value))
+        if value:
+            records.append(record(day, "Return", -value))
+    output = await simulate(monkeypatch, records)
+    assert output.groupby("forecast_month").forecast_value.sum().abs().max() < 1e-8
+
+
+@pytest.mark.asyncio
 async def test_origin_cutoff_is_kept_when_other_cloud_is_more_current(monkeypatch):
     records = [record(day, "Usage", 10, cloud="lagged")
                for day in pd.date_range("2026-08-01", "2026-08-12")]
