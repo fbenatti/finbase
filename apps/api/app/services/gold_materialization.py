@@ -45,17 +45,16 @@ _AI_AUXILIARY_GOLD_CUBES = {
 
 
 async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int:
-    """Build monthly Azure BRL/USD totals and effective FX rate from FOCUS Silver."""
+    """Build monthly Azure FX rates from observed FOCUS exchange rates only."""
     source = "dest_modelo_focus"
     schema = await load_gold_schema(source)
     period = schema.get("_billing_period") or schema.get("billingperiodstart")
     if not period:
         raise RuntimeError("Silver FOCUS sem período de faturamento para o cubo de câmbio")
     cloud = schema.get("cloud_origem")
-    cost_brl = schema.get("realizado")
     exchange_rate = schema.get("source_exchange_rate")
-    if not cost_brl or not exchange_rate:
-        raise RuntimeError("Silver FOCUS precisa expor realizado BRL e source_exchange_rate para o cubo de câmbio")
+    if not exchange_rate:
+        raise RuntimeError("Silver FOCUS precisa expor source_exchange_rate para o cubo de câmbio")
     period_text = f"CAST({_quote_ident(period)} AS VARCHAR)"
     month_expr = (
         f"CASE WHEN regexp_like({period_text}, '^[0-9]{{6}}') "
@@ -65,25 +64,9 @@ async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int
     azure_filter = f" AND lower(CAST({_quote_ident(cloud)} AS VARCHAR)) IN ('azure-ti', 'azure-4p', 'azure', 'azure-marketplace')" if cloud else ""
     sql = f"""
       SELECT {month_expr} AS billing_month,
-             SUM(CASE WHEN TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) > 1
-                      THEN COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) /
-                           TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) ELSE 0 END) AS consumo_usd,
-             SUM(COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0)) AS realizado_brl,
-             SUM(CASE WHEN TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) > 1
-                      THEN COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) ELSE 0 END) AS realizado_fx_brl,
-             SUM(CASE WHEN TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) <= 1 OR {_quote_ident(exchange_rate)} IS NULL
-                      THEN COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) ELSE 0 END) AS realizado_local_brl,
-             CASE WHEN SUM(CASE WHEN TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) > 1
-                                THEN COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) /
-                                     TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) ELSE 0 END) <> 0
-                  THEN SUM(CASE WHEN TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) > 1
-                                THEN COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) ELSE 0 END) /
-                       SUM(CASE WHEN TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) > 1
-                                THEN COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) /
-                                     TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) ELSE 0 END)
-                  ELSE NULL END AS taxa_brl_usd
+             AVG(DISTINCT TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE)) AS taxa_brl_usd
       FROM iceberg.silver.{source}
-      WHERE COALESCE(TRY_CAST({_quote_ident(cost_brl)} AS DOUBLE), 0) <> 0{azure_filter}
+      WHERE TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE) > 1{azure_filter}
       GROUP BY 1 ORDER BY 1
     """
     rule = session.query(GoldMartRule).filter(GoldMartRule.code == "evolucao-dolar").first()
@@ -91,11 +74,11 @@ async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int
         rule = GoldMartRule(code="evolucao-dolar", name="Evolução do Dólar", active=True)
         session.add(rule)
     rule.name = "Evolução do Dólar Azure"
-    rule.description = "Cubo mensal Azure: realizado BRL, parcela convertida em USD equivalente pelo source_exchange_rate e parcela local sem exposição cambial."
+    rule.description = "Cubo mensal Azure com média das taxas source_exchange_rate observadas, sem medidas de fatura ou realizado."
     rule.active = True
     rule.sql_template = sql.strip()
     rule.dimensions = ["billing_month"]
-    rule.measure_columns = ["consumo_usd", "realizado_brl", "realizado_fx_brl", "realizado_local_brl", "taxa_brl_usd"]
+    rule.measure_columns = ["taxa_brl_usd"]
     rule.materialization_table = "dest_dm_cost_evolucao_dolar"
     session.flush()
     return await _materialize_rule(rule, run_id=run_id)
