@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Card, CardContent, CircularProgress, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import Button from "@mui/material/Button";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { queryDimonTable } from "../../services/api";
+import { exportDashboardPdf } from "../AzurePTU/azurePtuPdfExport";
 
 const TABLE = "dest_dm_cost_evolucao_dolar";
 const pct = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 2, signDisplay: "always" });
@@ -68,8 +71,11 @@ export default function DollarEvolution() {
   const maxRate = useMemo(() => Math.max(...rows.map(row => row.rate)), [rows]);
   const span = Math.max(maxRate - minRate, 0.01);
 
-  return <Box>
-    <Typography variant="h5" fontWeight={750} mb={0.5}>Evolução do dólar</Typography>
+  return <Box className="azure-ptu-export-root">
+    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+      <Typography variant="h5" fontWeight={750}>Evolução do dólar</Typography>
+      <Button data-print-hide size="small" variant="contained" startIcon={<PictureAsPdfIcon />} onClick={() => exportDashboardPdf("evolucao-dolar")}>Exportar PDF</Button>
+    </Stack>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
