@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import statistics
 from datetime import date, timedelta
 from typing import Any, Mapping, Sequence
 
@@ -41,6 +42,9 @@ def detect_commitment_day(
 ) -> dict[str, Any] | None:
     """Cobrança de compromisso no calendário vs fora."""
     dom = day.day
+    total_expected = 0.0
+    matched_scope = False
+    on_calendar = False
     for entry in ledger_entries:
         if str(entry.get("scope_id")) != scope_id:
             continue
@@ -48,26 +52,23 @@ def detect_commitment_day(
             [int(entry.get("anniversary_day") or 0)] if entry.get("anniversary_day") else []
         )
         expected_amount = float(entry.get("expected_amount") or 0)
-        tol = max(expected_amount * value_tolerance_pct, float(entry.get("amount_mad") or 0) * 3, 1.0)
-        on_calendar = any(abs(dom - int(a)) <= date_tolerance for a in anniversaries if a)
-        if on_calendar:
-            if abs(observed - expected_amount) <= tol:
-                return {
-                    "detector": DET_COMMITMENT,
-                    "tier": TIER_NORMAL,
-                    "subtype": "ON_CALENDAR",
-                    "expected": expected_amount,
-                    "observed": observed,
-                }
-            return {
-                "detector": DET_COMMITMENT,
-                "tier": TIER_ALERT,
-                "subtype": "VALUE_MISMATCH",
-                "expected": expected_amount,
-                "observed": observed,
-                "delta": observed - expected_amount,
-            }
-    return None
+        if "charges" in entry:
+            past = [charge for charge in entry["charges"] if str(charge["day"]) < day.isoformat()]
+            if not past:
+                continue
+            expected_amount = statistics.median(float(charge["amount"]) for charge in past)
+            anniversaries = [int(str(charge["day"])[8:10]) for charge in past]
+        matched_scope = True
+        if any(min(abs(dom - int(a)), 31 - abs(dom - int(a))) <= date_tolerance for a in anniversaries if a):
+            on_calendar = True
+            total_expected += expected_amount
+    if not matched_scope:
+        return None
+    tolerance = max(total_expected * value_tolerance_pct, 1.0)
+    normal = on_calendar and abs(observed - total_expected) <= tolerance
+    return {"detector": DET_COMMITMENT, "tier": TIER_NORMAL if normal else TIER_ALERT,
+            "subtype": "ON_CALENDAR" if normal else "VALUE_MISMATCH" if on_calendar else "OFF_CALENDAR",
+            "expected": total_expected, "observed": observed, "delta": observed - total_expected}
 
 
 def run_detectors_for_scope(
@@ -86,10 +87,12 @@ def run_detectors_for_scope(
     signals: list[dict[str, Any]] = []
 
     if nature == NATURE_COMMITMENT:
-        obs = by_day.get(as_of.isoformat(), 0.0)
-        if obs > 0:
+        for day_s, obs in sorted(by_day.items()):
+            event_day = date.fromisoformat(day_s)
+            if not (as_of - timedelta(days=45) <= event_day <= as_of) or obs <= 0:
+                continue
             hit = detect_commitment_day(
-                scope_id=scope_id, day=as_of, observed=obs, ledger_entries=ledger_entries
+                scope_id=scope_id, day=event_day, observed=obs, ledger_entries=ledger_entries
             )
             if hit and hit.get("tier") == TIER_ALERT:
                 expected = float(hit.get("expected") or 0)
@@ -98,7 +101,7 @@ def run_detectors_for_scope(
                 if delta >= materiality and obs > upper:
                     hit.update({
                         "scope_id": scope_id,
-                        "day": as_of.isoformat(),
+                        "day": day_s,
                         "upper": upper,
                         "lower": expected * 0.85,
                         "delta": delta,
@@ -106,8 +109,8 @@ def run_detectors_for_scope(
                         "deviation_status": DEVIATION_ACTIVE,
                     })
                     signals.append(hit)
-                    return signals
-        # Sem calendário de reserva, o mesmo dia segue a faixa do próprio histórico.
+        # Purchases require an event comparison, never a continuous daily spike.
+        return signals
 
     if nature == NATURE_NEW:
         obs = by_day.get(as_of.isoformat(), 0.0)
