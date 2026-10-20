@@ -6,7 +6,7 @@ import statistics
 from datetime import date, timedelta
 from typing import Any, Mapping, Sequence
 
-from app.services.anomaly_v2.baseline import expected_for_day
+from app.services.anomaly_v2.baseline import expected_for_day, baseline_reference
 from app.services.anomaly_v2.return_engine import DEVIATION_ACTIVE, DEVIATION_AUTO_FIXED
 from app.services.anomaly_v2.classifier import (
     NATURE_COMMITMENT,
@@ -244,6 +244,8 @@ def continuous_episode(
                 "episode_start": cursor.isoformat(),
                 "deviation_status": DEVIATION_ACTIVE,
                 "persistence_days": active_days,
+                "baseline_reference": active["baseline_reference"] if active is not None
+                    else baseline_reference(scope_daily, reference_day=reference_day),
             }
             if active is None or obs >= float(active.get("observed") or 0):
                 if active is not None:

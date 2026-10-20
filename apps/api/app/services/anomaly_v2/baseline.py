@@ -11,6 +11,7 @@ LEVEL_DAYS = 14
 MAD_DAYS = 56
 MAD_SCALE = 1.4826
 DEFAULT_Z = 3.0
+MIN_WEEKDAY_SAMPLES = 4
 
 
 def _mad(values: Sequence[float]) -> float:
@@ -33,13 +34,35 @@ def weekday_factors(daily: Sequence[Mapping[str, Any]], *, as_of: date) -> dict[
             continue
         cost = float(row.get("cost_cloud") or 0)
         by_wd[day.weekday()].append(cost)
-    medians = {wd: statistics.median(vals) for wd, vals in by_wd.items() if vals}
+    # One new weekend charge is not evidence of a weekly pattern. In sparse
+    # histories, default to a neutral factor until that weekday repeats.
+    medians = {wd: statistics.median(vals) for wd, vals in by_wd.items()
+               if len(vals) >= MIN_WEEKDAY_SAMPLES}
     if not medians:
         return {i: 1.0 for i in range(7)}
     overall = statistics.median(list(medians.values()))
     if overall <= 0:
         return {i: 1.0 for i in range(7)}
-    return {wd: max(0.1, medians.get(wd, overall) / overall) for wd in range(7)}
+    return {wd: max(0.1, medians[wd] / overall) if wd in medians else 1.0 for wd in range(7)}
+
+
+def baseline_reference(daily: Sequence[Mapping[str, Any]], *, reference_day: date) -> dict[str, Any]:
+    factors = weekday_factors(daily, as_of=reference_day - timedelta(days=1))
+    expected, _lower, _upper, mad = expected_for_day(daily, target=reference_day)
+    return {"reference_day": reference_day.isoformat(),
+            "level": expected / factors.get(reference_day.weekday(), 1.0),
+            "weekday_factors": {str(key): value for key, value in factors.items()},
+            "band": MAD_SCALE * mad * DEFAULT_Z, "mad": mad,
+            "method": "PRE_EPISODE_BASELINE"}
+
+
+def expected_from_reference(reference: Mapping[str, Any], *, target: date) -> tuple[float, float, float, float]:
+    factors = reference.get("weekday_factors") or {}
+    factor = float(factors.get(str(target.weekday()), 1.0))
+    expected = float(reference.get("level") or 0) * factor
+    band = float(reference.get("band") or 0)
+    lower_offset = float(reference.get("lower_offset", band))
+    return expected, max(0.0, expected - lower_offset), expected + band, float(reference.get("mad") or 0)
 
 
 def expected_for_day(

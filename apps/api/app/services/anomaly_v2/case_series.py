@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from sqlalchemy import text
 
 from app.database import async_session
-from app.services.anomaly_v2.baseline import expected_for_day
+from app.services.anomaly_v2.baseline import expected_for_day, expected_from_reference
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
@@ -395,6 +395,7 @@ def _chart_items(
     start: date,
     end: date,
     as_of: date,
+    frozen_reference: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     # Trino GROUP BY has no ordering guarantee. Baseline residuals accumulate
     # chronologically, so the same daily values must always enter in date order.
@@ -405,7 +406,10 @@ def _chart_items(
     while cursor <= end:
         iso = cursor.isoformat()
         obs = by_day.get(iso) if cursor <= as_of else None
-        expected, lower, upper, _mad = expected_for_day(scope_rows, target=cursor)
+        if frozen_reference and iso >= str(frozen_reference["reference_day"]):
+            expected, lower, upper, _mad = expected_from_reference(frozen_reference, target=cursor)
+        else:
+            expected, lower, upper, _mad = expected_for_day(scope_rows, target=cursor)
         has_history = first_positive is not None and first_positive < iso
         comparable = has_history and obs is not None
         items.append({
@@ -557,7 +561,21 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         for day, cost in by_day.items()
     ]
     monthly = str(getattr(case, "detector", "") or getattr(case, "event_type", "")) == "MONTHLY_ACCUMULATED"
-    items = _chart_items(by_day, scope_rows, start=start, end=end, as_of=as_of)
+    frozen_reference = dimensions.get("baseline_reference")
+    if not isinstance(frozen_reference, dict):
+        # Older cases saved scalar reference values but not their weekday model.
+        # Preserve those recorded values; do not retrain on the deviation or
+        # invent seasonal coefficients that were never persisted.
+        expected = float(getattr(case, "expected_cloud", None) or 0)
+        frozen_reference = {
+            "reference_day": str(getattr(case, "episode_start", None) or dimensions.get("episode_start") or event_iso)[:10],
+            "level": expected, "weekday_factors": {},
+            "band": max(0.0, float(getattr(case, "upper_cloud", None) or expected) - expected),
+            "lower_offset": max(0.0, expected - float(getattr(case, "lower_cloud", None) or 0)),
+            "method": "FROZEN_CASE_VALUES",
+        }
+    items = _chart_items(by_day, scope_rows, start=start, end=end, as_of=as_of,
+                         frozen_reference=frozen_reference if not monthly else None)
     detail_dimensions, detail_items, common = breakdown_from_rows(detail_rows, specs) if detail_rows else ([], [], {})
     member_dimensions = {**{key: value for key, value in dimensions.items() if value not in (None, "")}, **common}
     event_point = next((point for point in items if point["event_date"] == event_iso), {})
@@ -587,6 +605,7 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         "detail_dimensions": detail_dimensions,
         "detail_items": detail_items,
         "series_dimensions": dimensions,
-        "reference": {"reference_kind": "V2_BASELINE"},
+        "reference": {"reference_kind": "V2_BASELINE", "method": frozen_reference["method"],
+                      "data_cutoff": (date.fromisoformat(frozen_reference["reference_day"]) - timedelta(days=1)).isoformat()},
         "returned_to_baseline": False,
     }
