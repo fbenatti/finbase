@@ -7,7 +7,7 @@ import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import { Department, createForecastAck, getDepartments } from "../../services/api";
 
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
-const ACK_SEVERITIES = ["Informação", "Perigo", "Crítico", "Sucesso"];
+const ACK_SEVERITIES = ["Alto", "Médio", "Baixo", "Informação"];
 
 export default function AckRegisterDialog({
   open, onClose, onSaved, defaultDepartment,
