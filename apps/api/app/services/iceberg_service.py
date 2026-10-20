@@ -1333,6 +1333,12 @@ def publish_dataframe_atomic(
         table = cat.load_table(tid)
     except NoSuchTableError:
         table = None
+    if table is not None:
+        expected_columns = {field.name for field in table.schema().fields}
+        if set(df.columns) != expected_columns:
+            raise ValueError(f"Schema incompatível para publicação em {namespace}.{safe_name}: "
+                             f"ausentes={sorted(expected_columns - set(df.columns))}, "
+                             f"extras={sorted(set(df.columns) - expected_columns)}")
     arrow = _df_to_arrow(df, column_types=column_types,
                          target_schema=table.schema() if table is not None else None)
     if table is None:
