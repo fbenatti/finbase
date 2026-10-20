@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -77,6 +78,28 @@ def test_expected_commitments_do_not_fall_through_to_daily_spike():
     assert not signals
 
 
+def test_uncollected_months_do_not_reduce_monthly_expectation():
+    rows = [{"scope_id": "s", "day": "2026-09-05", "cost_cloud": 1000},
+            {"scope_id": "s", "day": "2026-10-05", "cost_cloud": 1000}]
+    assert not run_detectors_for_scope(scope_id="s", daily=rows,
+        profile={"cost_nature": "INTERMITTENT"}, as_of=date(2026, 10, 18), materiality=100,
+        min_pct=.2, investigate_score=55, ledger_entries=[])
+
+
+def test_annual_impact_is_twelve_times_monthly_total():
+    from app.routers.anomalies import impact_summary
+
+    rows = [SimpleNamespace(deviation_status=status, projected_month_impact=value, impact_to_date=10)
+            for status, value in [("AUTOCORRIGIDO", 100), ("CORRIGIDO_COM_ACAO", 200),
+                                  ("EM_DESVIO", 50), ("ACEITO", 70)]]
+    result_rows = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
+    result = asyncio.run(impact_summary(db=SimpleNamespace(execute=AsyncMock(return_value=result_rows)), user=None))
+    assert result["projected_saving_monthly"] == 300
+    assert result["projected_saving_annual"] == 3600
+    assert result["open_exposure_monthly"] == 120
+    assert result["open_exposure_annual"] == 1440
+
+
 class AsyncAdapter:
     def __init__(self, db):
         self.db = db
@@ -137,6 +160,15 @@ def test_runner_publishes_and_persists_cases_idempotently(monkeypatch, recovered
             assert cases[0].state == ("CLOSED" if recovered else "NEW")
             assert cases[0].projected_month_impact == 0
             assert db.execute(select(AnomalyCaseEvent)).scalars().all()
+            assert writer.await_count == 2
+            # Scheduled retries remain idempotent, including after another skip.
+            for _ in range(2):
+                run = AnomalyRun(anomaly_config_id=config.id, trigger_type="SCHEDULED", status="QUEUED")
+                db.add(run)
+                db.commit()
+                result = await runner.execute_detection_v2(config.id, run_id=run.id, detected_at=detected_at)
+                assert result["status"] == "SKIPPED_NO_NEW_DATA"
+                assert run.config_snapshot["v2_summary"]["model_version"] == runner.MODEL_VERSION
             assert writer.await_count == 2
 
         asyncio.run(scenario())
