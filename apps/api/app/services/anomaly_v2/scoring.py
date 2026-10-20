@@ -30,7 +30,9 @@ def score_signal(
     detector = str(signal.get("detector") or "")
     if detector == "MONTHLY_ACCUMULATED":
         projected = delta
-    elif detector in {"COMMITMENT", "NEW_SPEND"} or (detector == "SPIKE" and persistence_days <= 2):
+    elif detector in {"COMMITMENT", "NEW_SPEND"} or (
+        detector == "SPIKE" and persistence_days <= int(config["one_off_spike_max_days"])
+    ):
         # A one-off purchase/spike does not repeat every day of the month.
         projected = 0.0
     else:
@@ -44,7 +46,7 @@ def score_signal(
         "HIGH": float(config["score_confidence_high_factor"]),
         "MEDIUM": float(config["score_confidence_medium_factor"]),
         "LOW": float(config["score_confidence_low_factor"]),
-    }.get(confidence, float(config["score_confidence_medium_factor"]))
+    }.get(confidence, float(config["score_confidence_unknown_factor"]))
     weights = [float(config["score_impact_weight_pct"]), float(config["score_surprise_weight_pct"]), float(config["score_persistence_weight_pct"])]
     score = round((weights[0] * impact_norm + weights[1] * surprise + weights[2] * persistence) / sum(weights) * conf_factor)
     tiers = {
