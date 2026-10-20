@@ -31,6 +31,7 @@ from app.models.anomaly import (
 )
 from app.models.identity import User
 from app.services import anomaly_workflow as workflow
+from app.services.anomaly_v2.settings import detector_settings, validate_detector_settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class ConfigUpdate(BaseModel):
     detection_engine: Literal["v1", "v2"] | None = None
     materiality_monthly: float | None = Field(default=None, ge=0)
     severity_tiers: dict[str, float] | None = None
+    detector_settings: dict[str, Any] | None = None
 
 
 class TransitionRequest(BaseModel):
@@ -247,6 +249,8 @@ async def list_configs(
             "version": row.version,
             "source_namespace": row.source_namespace,
             "destination_physical_name": row.destination_physical_name,
+            "severity_tiers": row.severity_tiers,
+            "detector_settings": detector_settings(row.detector_settings),
         }
         for row in rows
     ]
@@ -265,6 +269,11 @@ async def update_config(
         raise HTTPException(404, "Configuração não encontrada")
     before = {"enabled": config.enabled, "version": config.version, "profile": config.profile}
     data = body.model_dump(exclude_unset=True)
+    if "detector_settings" in data and data["detector_settings"] is not None:
+        try:
+            data["detector_settings"] = validate_detector_settings(data["detector_settings"])
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     if "materiality_by_currency" in data and data["materiality_by_currency"] is not None:
         data["materiality_by_currency"] = {
             str(key).upper(): float(value) for key, value in data["materiality_by_currency"].items()
@@ -379,6 +388,8 @@ async def enqueue_run(
             "calibration_days": config.calibration_days,
             "history_days": config.history_days,
             "data_lag_days": config.data_lag_days,
+            "detector_settings": detector_settings(config.detector_settings),
+            "severity_tiers": config.severity_tiers,
         },
     )
     db.add(run)
