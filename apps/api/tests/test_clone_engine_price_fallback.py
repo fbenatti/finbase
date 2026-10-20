@@ -49,6 +49,36 @@ def _reservation_row():
     }
 
 
+def test_zero_fx_uses_observed_rate_from_same_month_account_and_currencies():
+    row = _reservation_row() | {"source_exchange_rate": 0, "source_billing_account_id": "account",
+                               "source_pricing_currency": "USD", "BillingCurrency": "BRL"}
+    engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0},
+                         period_exchange_rates={"202608": {("azure-ti", "account", "usd", "brl"): 5.17}})
+    output, count = engine.apply(pd.DataFrame([row]), "202608")
+    assert count == 1
+    assert output.BilledCost.tolist() == [103.4, -103.4]
+    assert output.source_exchange_rate.tolist() == [5.17, 5.17]
+
+
+def test_invalid_fx_does_not_use_other_account_or_future_month_or_silently_discard():
+    row = _reservation_row() | {"source_exchange_rate": 0, "source_billing_account_id": "account",
+                               "source_pricing_currency": "USD", "BillingCurrency": "BRL"}
+    engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0},
+                         period_exchange_rates={"202609": {("azure-ti", "account", "usd", "brl"): 5},
+                                                "202608": {("azure-ti", "other", "usd", "brl"): 5}})
+    _, count = engine.apply(pd.DataFrame([row]), "202608")
+    assert count == 0
+    assert len(engine.pendencies) == 1
+    assert "Câmbio inválido" in engine.pendencies[0]["reason"]
+
+
+def test_same_currency_can_resolve_invalid_fx_to_identity():
+    row = _reservation_row() | {"source_exchange_rate": 0, "source_pricing_currency": "BRL", "BillingCurrency": "BRL"}
+    output, count = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0}).apply(pd.DataFrame([row]), "202608")
+    assert count == 1
+    assert output.BilledCost.tolist() == [20, -20]
+
+
 def test_usage_before_ondemand_batch_uses_month_wide_reference():
     row = _reservation_row() | {"CommitmentDiscountType": "SavingsPlan", "source_pricing_model": "SavingsPlan"}
     rule = _rule()

@@ -11,6 +11,34 @@ def _text(value: Any) -> str:
     return "" if value is None else str(value).strip().casefold()
 
 
+def load_azure_observed_exchange_rates(
+    execute, *, connection_code: str, billing_period: str, blob_paths: list[str],
+) -> dict[tuple[str, ...], float]:
+    """Recover only unambiguous invoice FX from the selected immutable month."""
+    if not re.fullmatch(r"azure-[a-zA-Z0-9_-]+", connection_code):
+        raise ValueError(f"Conexão Azure inválida para câmbio: {connection_code}")
+    if not blob_paths:
+        return {}
+    lit = lambda value: "'" + str(value).replace("'", "''") + "'"
+    rows = execute(f"""
+        SELECT billingaccountid, pricingcurrency, billingcurrency,
+               MAX(TRY_CAST(exchangeratepricingtobilling AS DOUBLE)) AS rate,
+               COUNT(DISTINCT ROUND(TRY_CAST(exchangeratepricingtobilling AS DOUBLE), 10)) AS rate_count
+          FROM iceberg.bronze.raw_{connection_code.replace('-', '_')}
+         WHERE _billing_period = {lit(billing_period)}
+           AND _blob_path IN ({','.join(lit(path) for path in sorted(set(blob_paths)))})
+           AND TRY_CAST(exchangeratepricingtobilling AS DOUBLE) > 0
+           AND is_finite(TRY_CAST(exchangeratepricingtobilling AS DOUBLE))
+         GROUP BY 1, 2, 3
+    """, timeout_s=90)
+    return {
+        (connection_code.casefold(), *(_text(row.get(c)) for c in
+         ("billingaccountid", "pricingcurrency", "billingcurrency"))): float(row["rate"])
+        for row in rows if int(row.get("rate_count") or 0) == 1
+        and all(_text(row.get(c)) for c in ("billingaccountid", "pricingcurrency", "billingcurrency"))
+    }
+
+
 def load_azure_observed_prices(
     execute: Callable[..., list[dict[str, Any]]],
     *,
